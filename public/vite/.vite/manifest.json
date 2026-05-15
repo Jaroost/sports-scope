@@ -21,8 +21,8 @@
     "file": "assets/maplibre-gl-Twyd4PtP.css",
     "src": "../../node_modules/.pnpm/maplibre-gl@5.24.0/node_modules/maplibre-gl/dist/maplibre-gl.css"
   },
-  "_maplibre-gl-BBr2L53c.js": {
-    "file": "assets/maplibre-gl-BBr2L53c.js",
+  "_maplibre-gl-BWbR5u0J.js": {
+    "file": "assets/maplibre-gl-BWbR5u0J.js",
     "name": "maplibre-gl",
     "isDynamicEntry": true,
     "imports": [
@@ -30,7 +30,7 @@
     ]
   },
   "entrypoints/application.js": {
-    "file": "assets/application-Bu0V0Rt7.js",
+    "file": "assets/application-DBrJMD-R.js",
     "name": "entrypoints/application.js",
     "src": "entrypoints/application.js",
     "isEntry": true,
@@ -38,11 +38,11 @@
       "locales/%{locale}.json",
       "locales/en.json",
       "locales/fr.json",
-      "_maplibre-gl-BBr2L53c.js",
+      "_maplibre-gl-BWbR5u0J.js",
       "../../node_modules/.pnpm/chart.js@4.5.1/node_modules/chart.js/dist/chart.js"
     ],
     "css": [
-      "assets/application-BxrEXgiM.css"
+      "assets/application-D-TLu9fH.css"
     ],
     "assets": [
       "assets/fa-brands-400-BP5tdqmh.woff2",
@@ -51,19 +51,19 @@
     ]
   },
   "locales/%{locale}.json": {
-    "file": "assets/__locale_-CF8uifyr.js",
+    "file": "assets/__locale_-JPIEhTH-.js",
     "name": "__locale_",
     "src": "locales/%{locale}.json",
     "isDynamicEntry": true
   },
   "locales/en.json": {
-    "file": "assets/en-D0z6FT_S.js",
+    "file": "assets/en-CMzjlGva.js",
     "name": "en",
     "src": "locales/en.json",
     "isDynamicEntry": true
   },
   "locales/fr.json": {
-    "file": "assets/fr-DNgH-C-_.js",
+    "file": "assets/fr-Dm7U-php.js",
     "name": "fr",
     "src": "locales/fr.json",
     "isDynamicEntry": true

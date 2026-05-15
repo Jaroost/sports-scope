@@ -41,7 +41,16 @@
         "duration": "Durée",
         "distance": "Distance",
         "elev_gain": "D+",
-        "elev_loss": "D-"
+        "elev_loss": "D-",
+        "avg_grade": "Pente moy."
+      },
+      "layout": {
+        "title": "Configuration des graphiques",
+        "reset": "Réinitialiser",
+        "save": "Enregistrer",
+        "saved": "Enregistré",
+        "split": "Séparer",
+        "drag_hint": "Glisser pour déplacer, déposer sur un graphique pour fusionner"
       },
       "loading_streams": "Chargement des graphiques…",
       "no_stream_data": "Aucune donnée disponible pour cette activité.",

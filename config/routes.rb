@@ -16,10 +16,12 @@ Rails.application.routes.draw do
   get "/strava/activities/:id", to: "strava#show", as: :strava_activity, constraints: { id: /\d+/ }
   get "/strava/activities/:id/streams", to: "strava#streams", as: :strava_activity_streams, constraints: { id: /\d+/ }
 
-  # User preferences (JSON consumed by Vue components)
-  get "/preferences/chart_layout", to: "preferences#chart_layout"
-  patch "/preferences/chart_layout", to: "preferences#update_chart_layout"
-  delete "/preferences/chart_layout", to: "preferences#reset_chart_layout"
+  # User preferences (JSON consumed by Vue components) — named layout presets
+  get "/preferences/chart_layouts", to: "preferences#index"
+  post "/preferences/chart_layouts", to: "preferences#create"
+  post "/preferences/chart_layouts/last_used", to: "preferences#set_last_used"
+  patch "/preferences/chart_layouts/:id", to: "preferences#update", constraints: { id: /\d+/ }
+  delete "/preferences/chart_layouts/:id", to: "preferences#destroy", constraints: { id: /\d+/ }
 
   # Health
   get "up" => "rails/health#show", as: :rails_health_check

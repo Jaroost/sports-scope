@@ -136,8 +136,10 @@ function syncLayoutWithStreams() {
 
 const chartLayout = ref(defaultLayout())
 const layoutSaving = ref(false)
-const layoutSavedAt = ref(null)
 const layoutDirty = ref(false)
+const savedLayouts = ref([]) // [{ id, name, layout }]
+const selectedLayoutId = ref(null)
+const lastUsedId = ref(null) // persisted on the server
 const dragSourceId = ref(null)
 const dragOverGroupId = ref(null)
 const dragOverSlotIndex = ref(null)
@@ -1247,55 +1249,114 @@ function moveGroupToIndex(groupId, targetIndex) {
   layoutDirty.value = true
 }
 
-function resetLayoutLocal() {
+function resetLayout() {
   chartLayout.value = defaultLayout()
+  selectedLayoutId.value = null
   layoutDirty.value = true
+  syncLayoutWithStreams()
+  setLastUsed(null)
 }
 
-async function fetchSavedLayout() {
+async function fetchSavedLayouts() {
   try {
-    const res = await fetch('/preferences/chart_layout', {
+    const res = await fetch('/preferences/chart_layouts', {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })
     if (!res.ok) return
     const payload = await res.json()
-    const list = payload.chart_layout
-    if (Array.isArray(list) && list.length > 0) {
-      chartLayout.value = list.map((g) => ({
-        id: String(g.id),
-        streams: Array.isArray(g.streams) ? g.streams.map(String) : [],
-        collapsed: !!g.collapsed,
-      }))
-      layoutDirty.value = false
+    if (Array.isArray(payload.chart_layouts)) {
+      savedLayouts.value = payload.chart_layouts
     }
+    lastUsedId.value = payload.last_used_id ?? null
   } catch {
-    // ignore — keep default layout
+    // ignore
   }
+}
+
+// Apply a preset locally without persisting it as the new "last used" — used
+// on mount when we restore the previously selected preset from the server.
+function applyPresetById(id) {
+  if (id == null) return false
+  const preset = savedLayouts.value.find((p) => p.id === id)
+  if (!preset) return false
+  selectedLayoutId.value = id
+  chartLayout.value = (preset.layout || []).map((g) => ({
+    id: String(g.id),
+    streams: Array.isArray(g.streams) ? g.streams.map(String) : [],
+    collapsed: !!g.collapsed,
+  }))
+  layoutDirty.value = false
+  return true
+}
+
+function loadPreset(rawId) {
+  const id = typeof rawId === 'number' ? rawId : parseInt(rawId, 10)
+  if (Number.isNaN(id)) {
+    selectedLayoutId.value = null
+    setLastUsed(null)
+    return
+  }
+  if (!applyPresetById(id)) return
   syncLayoutWithStreams()
+  setLastUsed(id)
 }
 
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
-
-async function saveLayout() {
-  if (layoutSaving.value) return
-  layoutSaving.value = true
+async function setLastUsed(id) {
   try {
-    const res = await fetch('/preferences/chart_layout', {
-      method: 'PATCH',
+    await fetch('/preferences/chart_layouts/last_used', {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
         'X-CSRF-Token': csrfToken(),
       },
       credentials: 'same-origin',
-      body: JSON.stringify({ chart_layout: chartLayout.value }),
+      body: JSON.stringify({ id: id == null ? null : id }),
+    })
+    lastUsedId.value = id
+  } catch {
+    // fire-and-forget
+  }
+}
+
+function csrfToken() {
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+}
+
+async function savePresetAs() {
+  const current = selectedLayoutId.value
+    ? savedLayouts.value.find((p) => p.id === selectedLayoutId.value)
+    : null
+  const proposed = current?.name || ''
+  const name = window.prompt(t('strava.layout.save_as_prompt'), proposed)
+  if (name == null) return
+  const trimmed = name.trim()
+  if (!trimmed) return
+  layoutSaving.value = true
+  try {
+    const res = await fetch('/preferences/chart_layouts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken(),
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ name: trimmed, layout: chartLayout.value }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    layoutSavedAt.value = new Date()
-    layoutDirty.value = false
+    const payload = await res.json()
+    const saved = payload.chart_layout
+    if (saved) {
+      const existing = savedLayouts.value.findIndex((p) => p.id === saved.id)
+      if (existing >= 0) savedLayouts.value.splice(existing, 1, saved)
+      else savedLayouts.value.push(saved)
+      savedLayouts.value = [...savedLayouts.value].sort((a, b) => a.name.localeCompare(b.name))
+      selectedLayoutId.value = saved.id
+      layoutDirty.value = false
+      setLastUsed(saved.id)
+    }
   } catch (e) {
     error.value = e.message
   } finally {
@@ -1303,17 +1364,34 @@ async function saveLayout() {
   }
 }
 
-async function resetLayout() {
-  resetLayoutLocal()
+async function deletePreset() {
+  const id = selectedLayoutId.value
+  if (!id) return
+  const preset = savedLayouts.value.find((p) => p.id === id)
+  if (!preset) return
+  const confirmed = window.confirm(`${t('strava.layout.delete_confirm')} « ${preset.name} » ?`)
+  if (!confirmed) return
   try {
-    await fetch('/preferences/chart_layout', {
+    const res = await fetch(`/preferences/chart_layouts/${id}`, {
       method: 'DELETE',
       headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
       credentials: 'same-origin',
     })
-    layoutDirty.value = false
-  } catch {
-    // ignore
+    if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`)
+    savedLayouts.value = savedLayouts.value.filter((p) => p.id !== id)
+    selectedLayoutId.value = null
+    if (lastUsedId.value === id) lastUsedId.value = null
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+function onPresetChange(ev) {
+  const v = ev.target.value
+  if (v === '') {
+    selectedLayoutId.value = null
+  } else {
+    loadPreset(v)
   }
 }
 
@@ -1535,11 +1613,14 @@ watch(selection, (val) => {
 })
 
 onMounted(async () => {
-  const savedLayoutPromise = fetchSavedLayout()
+  const savedLayoutsPromise = fetchSavedLayouts()
   await fetchActivity()
   if (!activity.value) return
   await fetchStreams()
-  await savedLayoutPromise
+  await savedLayoutsPromise
+  // Auto-apply the user's last-used preset if any. applyPresetById is a no-op
+  // if the id no longer exists (e.g., was deleted from another tab).
+  if (lastUsedId.value != null) applyPresetById(lastUsedId.value)
   syncLayoutWithStreams()
   if (hasRoute.value) {
     await renderMap()
@@ -1642,25 +1723,44 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
                 <span>{{ t('strava.reset_zoom') }}</span>
               </button>
-              <div class="btn-group btn-group-sm" role="group" :title="t('strava.layout.title')">
-                <button
-                  type="button"
-                  class="btn btn-outline-secondary d-flex align-items-center gap-1"
-                  @click="resetLayout"
-                  :disabled="layoutSaving"
+              <div class="d-flex align-items-center gap-1" :title="t('strava.layout.title')">
+                <select
+                  class="form-select form-select-sm preset-select"
+                  :value="selectedLayoutId ?? ''"
+                  @change="onPresetChange"
+                  :title="t('strava.layout.select_preset')"
                 >
-                  <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-                  <span class="d-none d-md-inline">{{ t('strava.layout.reset') }}</span>
-                </button>
+                  <option value="">— {{ t('strava.layout.no_preset') }} —</option>
+                  <option v-for="p in savedLayouts" :key="p.id" :value="p.id">{{ p.name }}</option>
+                </select>
                 <button
                   type="button"
-                  class="btn btn-outline-primary d-flex align-items-center gap-1"
-                  @click="saveLayout"
-                  :disabled="layoutSaving || !layoutDirty"
+                  class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
+                  @click="savePresetAs"
+                  :disabled="layoutSaving"
+                  :title="t('strava.layout.save_as')"
                 >
                   <span v-if="layoutSaving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
                   <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
-                  <span class="d-none d-md-inline">{{ layoutDirty ? t('strava.layout.save') : t('strava.layout.saved') }}</span>
+                  <span class="d-none d-lg-inline">{{ t('strava.layout.save_as') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1"
+                  @click="deletePreset"
+                  :disabled="!selectedLayoutId || layoutSaving"
+                  :title="t('strava.layout.delete')"
+                >
+                  <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                  @click="resetLayout"
+                  :title="t('strava.layout.reset')"
+                >
+                  <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                  <span class="d-none d-lg-inline">{{ t('strava.layout.reset') }}</span>
                 </button>
               </div>
               <button
@@ -2198,6 +2298,12 @@ onBeforeUnmount(() => {
 .stream-stats-id i {
   color: inherit !important;
   font-size: 0.95rem !important;
+}
+
+.preset-select {
+  width: auto;
+  max-width: 220px;
+  min-width: 140px;
 }
 
 .range-chip-stream {

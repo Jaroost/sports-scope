@@ -17,7 +17,23 @@
       "elevation_gain": "Elevation gain",
       "avg_speed": "Average speed",
       "type": "Type",
-      "start_date": "Start"
+      "start_date": "Start",
+      "charts": "Charts",
+      "x_distance": "Distance",
+      "x_time": "Time",
+      "distance_km": "Distance (km)",
+      "time_label": "Time (s)",
+      "loading_streams": "Loading charts…",
+      "no_stream_data": "No data available for this activity.",
+      "stream": {
+        "altitude": "Elevation",
+        "heartrate": "Heart rate",
+        "velocity_smooth": "Speed",
+        "cadence": "Cadence",
+        "watts": "Power",
+        "temp": "Temperature",
+        "grade_smooth": "Grade"
+      }
     }
   }
 }

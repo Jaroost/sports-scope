@@ -280,19 +280,35 @@
       "activity_summary": "Activity summary",
       "avg_speed": "Average speed",
       "back_to_dashboard": "← Back to dashboard",
+      "charts": "Charts",
       "distance": "Distance",
+      "distance_km": "Distance (km)",
       "duration": "Moving time",
       "elapsed": "Elapsed time",
       "elevation_gain": "Elevation gain",
       "last_updated": "Updated at",
+      "loading_streams": "Loading charts…",
       "no_activities": "No activities yet.",
       "no_route_data": "No GPS data for this activity.",
+      "no_stream_data": "No data available for this activity.",
       "not_linked": "Connect your Strava account to see your activities.",
       "recent_activities": "Recent activities",
       "refresh": "Refresh",
       "refreshing": "Refreshing…",
       "start_date": "Start",
-      "type": "Type"
+      "stream": {
+        "altitude": "Elevation",
+        "cadence": "Cadence",
+        "grade_smooth": "Grade",
+        "heartrate": "Heart rate",
+        "temp": "Temperature",
+        "velocity_smooth": "Speed",
+        "watts": "Power"
+      },
+      "time_label": "Time (s)",
+      "type": "Type",
+      "x_distance": "Distance",
+      "x_time": "Time"
     },
     "support": {
       "array": {
@@ -342,19 +358,35 @@
       "activity_summary": "Résumé de l'activité",
       "avg_speed": "Vitesse moyenne",
       "back_to_dashboard": "← Retour au tableau de bord",
+      "charts": "Graphiques",
       "distance": "Distance",
+      "distance_km": "Distance (km)",
       "duration": "Temps en mouvement",
       "elapsed": "Temps total",
       "elevation_gain": "Dénivelé",
       "last_updated": "Mis à jour à",
+      "loading_streams": "Chargement des graphiques…",
       "no_activities": "Aucune activité pour l'instant.",
       "no_route_data": "Pas de données GPS pour cette activité.",
+      "no_stream_data": "Aucune donnée disponible pour cette activité.",
       "not_linked": "Liez votre compte Strava pour voir vos activités.",
       "recent_activities": "Activités récentes",
       "refresh": "Rafraîchir",
       "refreshing": "Rafraîchissement…",
       "start_date": "Début",
-      "type": "Type"
+      "stream": {
+        "altitude": "Altitude",
+        "cadence": "Cadence",
+        "grade_smooth": "Pente",
+        "heartrate": "Fréquence cardiaque",
+        "temp": "Température",
+        "velocity_smooth": "Vitesse",
+        "watts": "Puissance"
+      },
+      "time_label": "Temps (s)",
+      "type": "Type",
+      "x_distance": "Distance",
+      "x_time": "Temps"
     }
   }
 }

@@ -4,8 +4,17 @@ import 'bootstrap'
 import { setupI18n } from '../i18n'
 import { mountVueIslands } from '../mountVueIslands'
 
-setupI18n()
+const i18nReady = setupI18n()
 
-document.addEventListener('DOMContentLoaded', () => {
+function whenDomReady(fn) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fn, { once: true })
+  } else {
+    fn()
+  }
+}
+
+whenDomReady(async () => {
+  await i18nReady
   mountVueIslands()
 })

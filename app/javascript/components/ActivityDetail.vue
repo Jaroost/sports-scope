@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, useTemplateRef } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, useTemplateRef, watch } from 'vue'
 import { t } from '../i18n'
 
 const props = defineProps({
@@ -9,9 +9,14 @@ const props = defineProps({
 const loading = ref(true)
 const error = ref(null)
 const activity = ref(null)
+const streams = ref(null)
+const streamsLoading = ref(false)
+const streamsError = ref(null)
+const xAxis = ref('distance')
 const mapEl = useTemplateRef('mapEl')
 
 let mapInstance = null
+const chartInstances = new Map()
 
 const stats = computed(() => {
   if (!activity.value) return []
@@ -29,6 +34,21 @@ const stats = computed(() => {
 
 const polyline = computed(() => activity.value?.map?.summary_polyline || activity.value?.map?.polyline || '')
 const hasRoute = computed(() => polyline.value.length > 0)
+
+const chartDefs = [
+  { key: 'altitude', color: '#198754', unit: 'm', transform: (v) => v },
+  { key: 'heartrate', color: '#dc3545', unit: 'bpm', transform: (v) => v },
+  { key: 'velocity_smooth', color: '#0d6efd', unit: 'km/h', transform: (v) => v * 3.6 },
+  { key: 'cadence', color: '#6f42c1', unit: 'rpm', transform: (v) => v },
+  { key: 'watts', color: '#fd7e14', unit: 'W', transform: (v) => v },
+  { key: 'temp', color: '#20c997', unit: '°C', transform: (v) => v },
+  { key: 'grade_smooth', color: '#6c757d', unit: '%', transform: (v) => v },
+]
+
+const availableCharts = computed(() => {
+  if (!streams.value) return []
+  return chartDefs.filter((def) => Array.isArray(streams.value[def.key]?.data) && streams.value[def.key].data.length > 0)
+})
 
 function formatDuration(seconds) {
   if (!seconds) return '–'
@@ -91,6 +111,24 @@ async function fetchActivity() {
   }
 }
 
+async function fetchStreams() {
+  streamsLoading.value = true
+  streamsError.value = null
+  try {
+    const res = await fetch(`/strava/activities/${props.activityId}/streams`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const payload = await res.json()
+    streams.value = payload.streams || {}
+  } catch (e) {
+    streamsError.value = e.message
+  } finally {
+    streamsLoading.value = false
+  }
+}
+
 async function renderMap() {
   if (!hasRoute.value || !mapEl.value) return
 
@@ -133,10 +171,100 @@ async function renderMap() {
   })
 }
 
+// Downsample to keep charts responsive (Strava streams can be 5k+ points).
+function downsample(arr, maxPoints) {
+  if (arr.length <= maxPoints) return arr
+  const step = arr.length / maxPoints
+  const out = []
+  for (let i = 0; i < maxPoints; i++) {
+    out.push(arr[Math.floor(i * step)])
+  }
+  return out
+}
+
+async function renderCharts() {
+  const charts = availableCharts.value
+  if (charts.length === 0) return
+
+  const { Chart, registerables } = await import('chart.js')
+  Chart.register(...registerables)
+
+  destroyCharts()
+
+  const xStream = streams.value[xAxis.value]?.data || streams.value.time?.data || []
+  const maxPoints = 600
+  const xRaw = xStream
+  const xLabel = xAxis.value === 'distance' ? t('strava.distance_km') : t('strava.time_label')
+
+  charts.forEach((def) => {
+    const canvas = document.getElementById(`chart-${def.key}`)
+    if (!canvas) return
+    const yRaw = streams.value[def.key].data
+    const len = Math.min(xRaw.length, yRaw.length)
+    const pairs = []
+    for (let i = 0; i < len; i++) {
+      const x = xAxis.value === 'distance' ? xRaw[i] / 1000 : xRaw[i]
+      pairs.push({ x, y: def.transform(yRaw[i]) })
+    }
+    const data = downsample(pairs, maxPoints)
+
+    const chart = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: {
+        datasets: [{
+          label: `${t('strava.stream.' + def.key)} (${def.unit})`,
+          data,
+          borderColor: def.color,
+          backgroundColor: def.color + '22',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.2,
+          fill: true,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        parsing: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: {
+            type: 'linear',
+            title: { display: true, text: xLabel },
+            ticks: { maxTicksLimit: 8 },
+          },
+          y: {
+            title: { display: true, text: def.unit },
+            ticks: { maxTicksLimit: 6 },
+          },
+        },
+      },
+    })
+    chartInstances.set(def.key, chart)
+  })
+}
+
+function destroyCharts() {
+  chartInstances.forEach((c) => c.destroy())
+  chartInstances.clear()
+}
+
+watch(xAxis, () => {
+  if (streams.value) renderCharts()
+})
+
 onMounted(async () => {
   await fetchActivity()
-  if (activity.value && hasRoute.value) {
+  if (!activity.value) return
+  if (hasRoute.value) {
     await renderMap()
+  }
+  await fetchStreams()
+  if (streams.value && availableCharts.value.length > 0) {
+    // Wait for the DOM to render the canvas elements
+    await new Promise((r) => requestAnimationFrame(r))
+    await renderCharts()
   }
 })
 
@@ -145,6 +273,7 @@ onBeforeUnmount(() => {
     mapInstance.remove()
     mapInstance = null
   }
+  destroyCharts()
 })
 </script>
 
@@ -165,7 +294,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="card">
+      <div class="card mb-3">
         <div class="card-body">
           <dl class="row mb-0">
             <template v-for="(s, i) in stats" :key="i">
@@ -175,6 +304,53 @@ onBeforeUnmount(() => {
           </dl>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h3 class="h6 mb-0">{{ t('strava.charts') }}</h3>
+          <div v-if="availableCharts.length > 0" class="btn-group btn-group-sm" role="group">
+            <input
+              type="radio"
+              class="btn-check"
+              name="xAxis"
+              id="xAxis-distance"
+              autocomplete="off"
+              value="distance"
+              v-model="xAxis"
+              :disabled="!streams || !streams.distance"
+            />
+            <label class="btn btn-outline-secondary" for="xAxis-distance">{{ t('strava.x_distance') }}</label>
+            <input
+              type="radio"
+              class="btn-check"
+              name="xAxis"
+              id="xAxis-time"
+              autocomplete="off"
+              value="time"
+              v-model="xAxis"
+              :disabled="!streams || !streams.time"
+            />
+            <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
+          </div>
+        </div>
+        <div class="card-body">
+          <div v-if="streamsLoading" class="text-muted">{{ t('strava.loading_streams') }}</div>
+          <div v-else-if="streamsError" class="alert alert-danger mb-0">{{ streamsError }}</div>
+          <div v-else-if="availableCharts.length === 0" class="text-muted">{{ t('strava.no_stream_data') }}</div>
+          <div v-else>
+            <div
+              v-for="def in availableCharts"
+              :key="def.key"
+              class="chart-row mb-3"
+            >
+              <div class="text-muted small mb-1">{{ t('strava.stream.' + def.key) }} ({{ def.unit }})</div>
+              <div class="chart-canvas-wrap">
+                <canvas :id="`chart-${def.key}`"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -182,6 +358,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .activity-map {
   height: 420px;
+  width: 100%;
+}
+.chart-canvas-wrap {
+  position: relative;
+  height: 180px;
   width: 100%;
 }
 </style>

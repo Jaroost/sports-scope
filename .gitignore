@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+
+/log/*
+!/log/.keep
+/tmp/*
+!/tmp/.keep
+/storage/*
+!/storage/.keep
+
+*.log
+*.pid
+.DS_Store

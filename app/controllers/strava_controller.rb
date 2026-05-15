@@ -34,11 +34,11 @@ class StravaController < ApplicationController
     render json: { error: e.message }, status: status
   end
 
-  STREAM_KEYS = %w[time distance altitude velocity_smooth heartrate cadence watts temp moving grade_smooth].freeze
+  STREAM_KEYS = %w[time distance latlng altitude velocity_smooth heartrate cadence watts temp moving grade_smooth].freeze
 
   def streams
     id = params[:id]
-    cache_key = "strava:streams:#{current_user.id}:#{id}"
+    cache_key = "strava:streams:v2:#{current_user.id}:#{id}"
     Rails.cache.delete(cache_key) if params[:refresh].present?
 
     payload = Rails.cache.fetch(cache_key, expires_in: ACTIVITIES_TTL) do

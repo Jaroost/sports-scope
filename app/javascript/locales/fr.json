@@ -22,7 +22,21 @@
       "x_distance": "Distance",
       "x_time": "Temps",
       "distance_km": "Distance (km)",
-      "time_label": "Temps (s)",
+      "time_label_s": "Temps (s)",
+      "time_label_min": "Temps (min)",
+      "time_label_h": "Temps (h)",
+      "unit_s": "s",
+      "unit_min": "min",
+      "unit_h": "h",
+      "clear_selection": "Effacer",
+      "selection": "Sélection",
+      "whole_activity": "Activité complète",
+      "range_stats": {
+        "count": "Points",
+        "mean": "Moyenne",
+        "min": "Min",
+        "max": "Max"
+      },
       "loading_streams": "Chargement des graphiques…",
       "no_stream_data": "Aucune donnée disponible pour cette activité.",
       "stream": {

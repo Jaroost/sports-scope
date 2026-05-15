@@ -10,7 +10,7 @@ class SessionsController < ApplicationController
   def create
     auth = request.env["omniauth.auth"]
 
-    case auth.provider
+    case auth.provider.to_s
     when "keycloak", "openid_connect"
       user = User.from_keycloak(auth)
       session[:user_id] = user.id

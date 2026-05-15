@@ -22,17 +22,17 @@
       "publicClient": false,
       "secret": "${env.RAILS_KEYCLOAK_CLIENT_SECRET}",
       "redirectUris": [
-        "http://localhost:3000/*"
+        "${env.APP_HOST}/*"
       ],
       "webOrigins": [
-        "http://localhost:3000"
+        "${env.APP_HOST}"
       ],
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "protocol": "openid-connect",
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:3000/*"
+        "post.logout.redirect.uris": "${env.APP_HOST}/*"
       },
       "defaultClientScopes": [
         "web-origins",

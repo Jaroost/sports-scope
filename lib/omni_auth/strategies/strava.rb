@@ -8,7 +8,8 @@ module OmniAuth
       option :client_options,
              site: "https://www.strava.com",
              authorize_url: "https://www.strava.com/oauth/authorize",
-             token_url: "https://www.strava.com/oauth/token"
+             token_url: "https://www.strava.com/oauth/token",
+             auth_scheme: :request_body
 
       option :authorize_options, [:scope, :approval_prompt]
 

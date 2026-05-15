@@ -58,6 +58,7 @@ services:
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
       RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
+      APP_HOST: ${APP_HOST:-https://app.localtest.me}
     volumes:
       - ./compose/keycloak:/opt/keycloak/data/import:ro
     networks:
@@ -95,7 +96,9 @@ services:
       KEYCLOAK_REALM: sports-scope
       KEYCLOAK_CLIENT_ID: rails-app
       RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
-      APP_HOST: https://app.localtest.me
+      APP_HOST: ${APP_HOST:-https://app.localtest.me}
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
       VITE_PUBLIC_HOST: vite.localtest.me
       EXTRA_CA_CERT: /etc/ssl/extra/traefik.crt
     volumes:

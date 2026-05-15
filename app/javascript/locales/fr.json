@@ -50,7 +50,8 @@
         "save": "Enregistrer",
         "saved": "Enregistré",
         "split": "Séparer",
-        "drag_hint": "Glisser pour déplacer, déposer sur un graphique pour fusionner"
+        "drag_hint": "Glisser pour déplacer, déposer sur un graphique pour fusionner",
+        "merge_here": "Fusionner ici"
       },
       "loading_streams": "Chargement des graphiques…",
       "no_stream_data": "Aucune donnée disponible pour cette activité.",

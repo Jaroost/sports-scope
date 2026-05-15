@@ -109,6 +109,28 @@ function defByKey(key) {
   return chartDefs.find((d) => d.key === key)
 }
 
+// Aligns chartLayout with the streams actually present on this activity:
+// - drops streams that aren't available
+// - drops empty groups
+// - appends any present stream that wasn't referenced by the saved layout
+// Always returns a fresh array if anything changed (so the watcher fires once).
+function syncLayoutWithStreams() {
+  if (!streams.value) return
+  const present = new Set(
+    chartDefs
+      .filter((d) => Array.isArray(streams.value[d.key]?.data) && streams.value[d.key].data.length > 0)
+      .map((d) => d.key),
+  )
+  const cleaned = chartLayout.value
+    .map((g) => ({ id: g.id, streams: g.streams.filter((k) => present.has(k)) }))
+    .filter((g) => g.streams.length > 0)
+  const referenced = new Set(cleaned.flatMap((g) => g.streams))
+  const missing = [...present].filter((k) => !referenced.has(k))
+  const final = [...cleaned, ...missing.map((k) => ({ id: k, streams: [k] }))]
+  if (JSON.stringify(final) === JSON.stringify(chartLayout.value)) return
+  chartLayout.value = final
+}
+
 const chartLayout = ref(defaultLayout())
 const layoutSaving = ref(false)
 const layoutSavedAt = ref(null)
@@ -117,23 +139,9 @@ const dragSourceId = ref(null)
 const dragOverGroupId = ref(null)
 const dragOverSlotIndex = ref(null)
 
-const availableLayout = computed(() => {
-  if (!streams.value) return []
-  const present = new Set(
-    chartDefs
-      .filter((d) => Array.isArray(streams.value[d.key]?.data) && streams.value[d.key].data.length > 0)
-      .map((d) => d.key),
-  )
-  const includedInLayout = new Set(chartLayout.value.flatMap((g) => g.streams))
-  const filtered = chartLayout.value
-    .map((g) => ({ id: g.id, streams: g.streams.filter((k) => present.has(k)) }))
-    .filter((g) => g.streams.length > 0)
-  // Append present streams not referenced by the saved layout (e.g., activity has streams the user removed).
-  for (const k of present) {
-    if (!includedInLayout.has(k)) filtered.push({ id: k, streams: [k] })
-  }
-  return filtered
-})
+// All visible groups are kept in chartLayout (kept in sync via syncLayoutWithStreams),
+// so the displayed layout is just chartLayout itself — no virtual groups.
+const availableLayout = computed(() => (streams.value ? chartLayout.value : []))
 
 function timeFactor() {
   return timeUnit.value === 'h' ? 3600 : timeUnit.value === 'min' ? 60 : 1
@@ -993,6 +1001,7 @@ async function fetchSavedLayout() {
   } catch {
     // ignore — keep default layout
   }
+  syncLayoutWithStreams()
 }
 
 function csrfToken() {
@@ -1038,17 +1047,15 @@ async function resetLayout() {
 }
 
 function onChartDragStart(group, e) {
-  // Only allow the drag to actually start from the grip handle — clicking
-  // anywhere else on the card (e.g., the canvas) would otherwise hijack
-  // chart-selection / wheel-zoom interactions.
-  if (!e.target.closest || !e.target.closest('.drag-handle')) {
-    e.preventDefault()
-    return
-  }
   dragSourceId.value = group.id
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', group.id)
+    // Use the whole card as the drag image so the user sees what they're moving.
+    const card = e.currentTarget?.closest?.('.chart-group')
+    if (card) {
+      try { e.dataTransfer.setDragImage(card, 20, 20) } catch {}
+    }
   }
 }
 
@@ -1204,10 +1211,12 @@ watch(selection, (val) => {
 })
 
 onMounted(async () => {
-  fetchSavedLayout()
+  const savedLayoutPromise = fetchSavedLayout()
   await fetchActivity()
   if (!activity.value) return
   await fetchStreams()
+  await savedLayoutPromise
+  syncLayoutWithStreams()
   if (hasRoute.value) {
     await renderMap()
   }
@@ -1398,37 +1407,44 @@ onBeforeUnmount(() => {
                 class="chart-group"
                 :class="{ 'merge-target': dragOverGroupId === group.id && dragSourceId !== group.id, dragging: dragSourceId === group.id }"
                 :data-merge-label="t('strava.layout.merge_here')"
-                draggable="true"
-                @dragstart="onChartDragStart(group, $event)"
-                @dragend="onChartDragEnd"
                 @dragover="onGroupDragOver(group, $event)"
                 @dragleave="onGroupDragLeave(group)"
                 @drop="onGroupDrop(group, $event)"
               >
-                <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
-                  <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <span class="drag-handle" :title="t('strava.layout.drag_hint')">
-                      <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
-                    </span>
-                    <span
-                      v-for="streamKey in group.streams"
-                      :key="streamKey"
-                      class="text-muted small d-flex align-items-center gap-1"
+                <div
+                  class="chart-group-header"
+                  draggable="true"
+                  @dragstart="onChartDragStart(group, $event)"
+                  @dragend="onChartDragEnd"
+                  :title="t('strava.layout.drag_hint')"
+                >
+                  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                      <span class="drag-handle">
+                        <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
+                      </span>
+                      <span
+                        v-for="streamKey in group.streams"
+                        :key="streamKey"
+                        class="text-muted small d-flex align-items-center gap-1"
+                      >
+                        <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" :style="{ color: defByKey(streamKey)?.color }" aria-hidden="true"></i>
+                        <span>{{ t('strava.stream.' + streamKey) }} ({{ defByKey(streamKey)?.unit }})</span>
+                      </span>
+                    </div>
+                    <button
+                      v-if="group.streams.length > 1"
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                      draggable="false"
+                      @click="splitGroup(group)"
+                      @mousedown.stop
+                      :title="t('strava.layout.split')"
                     >
-                      <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" :style="{ color: defByKey(streamKey)?.color }" aria-hidden="true"></i>
-                      <span>{{ t('strava.stream.' + streamKey) }} ({{ defByKey(streamKey)?.unit }})</span>
-                    </span>
+                      <i class="fa-solid fa-object-ungroup" aria-hidden="true"></i>
+                      <span>{{ t('strava.layout.split') }}</span>
+                    </button>
                   </div>
-                  <button
-                    v-if="group.streams.length > 1"
-                    type="button"
-                    class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-                    @click="splitGroup(group)"
-                    :title="t('strava.layout.split')"
-                  >
-                    <i class="fa-solid fa-object-ungroup" aria-hidden="true"></i>
-                    <span>{{ t('strava.layout.split') }}</span>
-                  </button>
                 </div>
                 <div class="row g-2 align-items-stretch">
                   <div class="col-lg-9">
@@ -1603,20 +1619,30 @@ onBeforeUnmount(() => {
   z-index: 4;
   white-space: nowrap;
 }
-.drag-handle {
+.chart-group-header {
   cursor: grab;
-  color: #adb5bd;
-  padding: 0.15rem 0.25rem;
-  border-radius: 0.25rem;
-  font-size: 0.9rem;
-  transition: color 0.12s, background-color 0.12s;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.4rem;
+  border-radius: 0.4rem;
+  background: rgba(108, 117, 125, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: background-color 0.12s, border-color 0.12s;
+  user-select: none;
 }
-.drag-handle:hover {
-  color: #495057;
-  background: rgba(0, 0, 0, 0.05);
+.chart-group-header:hover {
+  background: rgba(252, 76, 2, 0.06);
+  border-color: rgba(252, 76, 2, 0.25);
 }
-.chart-group.dragging .drag-handle {
+.chart-group.dragging .chart-group-header {
   cursor: grabbing;
+}
+.drag-handle {
+  color: #adb5bd;
+  font-size: 0.95rem;
+  pointer-events: none;
+}
+.chart-group-header:hover .drag-handle {
+  color: #fc4c02;
 }
 .chart-drop-slot {
   height: 6px;

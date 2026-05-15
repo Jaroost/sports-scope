@@ -334,14 +334,70 @@ async function fetchStreams() {
   }
 }
 
-// Chart.js plugin: drag-to-select on the canvas + paint the shared selection.
+const HANDLE_TOL = 8 // pixels around a flag pole that count as a "grab"
+
+function drawChartFlag(ctx, area, x, kind) {
+  const fw = 12
+  const fh = 9
+  const headTop = Math.max(0, area.top - fh)
+  ctx.save()
+  // pole
+  ctx.strokeStyle = '#1f2937'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(x, area.top)
+  ctx.lineTo(x, area.bottom)
+  ctx.stroke()
+  // flag head
+  if (kind === 'start') {
+    ctx.fillStyle = '#22c55e'
+    ctx.fillRect(x, headTop, fw, fh)
+    ctx.strokeStyle = '#15803d'
+    ctx.lineWidth = 1
+    ctx.strokeRect(x + 0.5, headTop + 0.5, fw, fh)
+  } else {
+    const cell = 3
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 4; c++) {
+        ctx.fillStyle = (r + c) % 2 === 0 ? '#ef4444' : '#ffffff'
+        ctx.fillRect(x + c * cell, headTop + r * cell, cell, cell)
+      }
+    }
+    ctx.strokeStyle = '#7f1d1d'
+    ctx.lineWidth = 1
+    ctx.strokeRect(x + 0.5, headTop + 0.5, fw, fh)
+  }
+  // anchor dot at pole top
+  ctx.fillStyle = '#1f2937'
+  ctx.beginPath()
+  ctx.arc(x, area.top, 2, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function detectChartHandle(chart, px) {
+  const sel = chart.$selectionRange
+  if (!sel || sel.start == null || sel.end == null) return null
+  const area = chart.chartArea
+  const px1 = Math.max(area.left, Math.min(area.right, chart.scales.x.getPixelForValue(sel.start)))
+  const px2 = Math.max(area.left, Math.min(area.right, chart.scales.x.getPixelForValue(sel.end)))
+  const startVal = sel.start
+  const endVal = sel.end
+  const dStart = Math.abs(px - px1)
+  const dEnd = Math.abs(px - px2)
+  if (dStart <= HANDLE_TOL && dStart <= dEnd) return { fixedValue: endVal }
+  if (dEnd <= HANDLE_TOL) return { fixedValue: startVal }
+  return null
+}
+
+// Chart.js plugin: drag-to-select on the canvas, draggable flag handles, and selection highlight.
 const dragSelectPlugin = {
   id: 'dragSelect',
   beforeEvent(chart, args) {
     const e = args.event
     const native = e.native
     if (!native) return
-    const st = chart.$drag || (chart.$drag = { dragging: false, x0: null, x1: null })
+    const st = chart.$drag || (chart.$drag = { mode: null, x0: null, x1: null, fixedValue: null })
 
     const isStart = (native.type === 'mousedown' && native.button === 0) || native.type === 'touchstart'
     const isMove = native.type === 'mousemove' || native.type === 'touchmove'
@@ -349,52 +405,77 @@ const dragSelectPlugin = {
 
     if (isStart) {
       const area = chart.chartArea
-      if (e.x < area.left || e.x > area.right) return
-      st.dragging = true
-      st.x0 = e.x
-      st.x1 = e.x
+      if (e.x < area.left - HANDLE_TOL || e.x > area.right + HANDLE_TOL) return
+      const handle = detectChartHandle(chart, e.x)
+      if (handle) {
+        st.mode = 'handle'
+        st.fixedValue = handle.fixedValue
+        chart.canvas.style.cursor = 'ew-resize'
+      } else {
+        st.mode = 'select'
+        st.x0 = e.x
+        st.x1 = e.x
+        chart.canvas.style.cursor = 'crosshair'
+      }
       if (native.type === 'touchstart' && native.cancelable) native.preventDefault()
       chart.draw()
-    } else if (isMove && st.dragging) {
+    } else if (isMove && st.mode === 'handle') {
+      const v = chart.scales.x.getValueForPixel(e.x)
+      if (v != null && !Number.isNaN(v)) {
+        chart.$onSelect?.(st.fixedValue, v)
+      }
+      if (native.type === 'touchmove' && native.cancelable) native.preventDefault()
+    } else if (isMove && st.mode === 'select') {
       st.x1 = e.x
       if (native.type === 'touchmove' && native.cancelable) native.preventDefault()
       chart.draw()
-    } else if (isEnd && st.dragging) {
-      st.dragging = false
-      const area = chart.chartArea
-      const x0 = Math.max(area.left, Math.min(area.right, st.x0))
-      const x1 = Math.max(area.left, Math.min(area.right, st.x1))
-      if (Math.abs(x1 - x0) >= 4) {
-        const v0 = chart.scales.x.getValueForPixel(x0)
-        const v1 = chart.scales.x.getValueForPixel(x1)
-        chart.$onSelect?.(v0, v1)
+    } else if (isMove && !st.mode) {
+      const handle = detectChartHandle(chart, e.x)
+      chart.canvas.style.cursor = handle ? 'ew-resize' : 'crosshair'
+    } else if (isEnd && st.mode) {
+      if (st.mode === 'select') {
+        const area = chart.chartArea
+        const x0 = Math.max(area.left, Math.min(area.right, st.x0))
+        const x1 = Math.max(area.left, Math.min(area.right, st.x1))
+        if (Math.abs(x1 - x0) >= 4) {
+          const v0 = chart.scales.x.getValueForPixel(x0)
+          const v1 = chart.scales.x.getValueForPixel(x1)
+          chart.$onSelect?.(v0, v1)
+        }
       }
+      st.mode = null
       st.x0 = null
       st.x1 = null
+      st.fixedValue = null
+      chart.canvas.style.cursor = 'crosshair'
       chart.draw()
     }
   },
   afterDraw(chart) {
     const { ctx, chartArea } = chart
     const st = chart.$drag
-    const selRange = chart.$selectionRange
-    // Persistent selection highlight
-    if (selRange && selRange.start != null && selRange.end != null) {
-      const x1 = chart.scales.x.getPixelForValue(selRange.start)
-      const x2 = chart.scales.x.getPixelForValue(selRange.end)
-      ctx.save()
-      ctx.fillStyle = 'rgba(13, 110, 253, 0.15)'
-      ctx.fillRect(Math.min(x1, x2), chartArea.top, Math.abs(x2 - x1), chartArea.bottom - chartArea.top)
-      ctx.strokeStyle = 'rgba(13, 110, 253, 0.6)'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(x1, chartArea.top); ctx.lineTo(x1, chartArea.bottom)
-      ctx.moveTo(x2, chartArea.top); ctx.lineTo(x2, chartArea.bottom)
-      ctx.stroke()
-      ctx.restore()
+    const sel = chart.$selectionRange
+    if (sel && sel.start != null && sel.end != null) {
+      const px1 = chart.scales.x.getPixelForValue(sel.start)
+      const px2 = chart.scales.x.getPixelForValue(sel.end)
+      const lo = Math.min(px1, px2)
+      const hi = Math.max(px1, px2)
+      if (!chart.$noSelection) {
+        const clipLo = Math.max(chartArea.left, lo)
+        const clipHi = Math.min(chartArea.right, hi)
+        if (clipHi > clipLo) {
+          ctx.save()
+          ctx.fillStyle = 'rgba(13, 110, 253, 0.15)'
+          ctx.fillRect(clipLo, chartArea.top, clipHi - clipLo, chartArea.bottom - chartArea.top)
+          ctx.restore()
+        }
+      }
+      const drawLo = Math.max(chartArea.left, Math.min(chartArea.right, lo))
+      const drawHi = Math.max(chartArea.left, Math.min(chartArea.right, hi))
+      drawChartFlag(ctx, chartArea, drawLo, 'start')
+      drawChartFlag(ctx, chartArea, drawHi, 'end')
     }
-    // Live drag preview
-    if (st && st.dragging && st.x0 != null && st.x1 != null) {
+    if (st && st.mode === 'select' && st.x0 != null && st.x1 != null) {
       ctx.save()
       ctx.fillStyle = 'rgba(13, 110, 253, 0.25)'
       ctx.fillRect(Math.min(st.x0, st.x1), chartArea.top, Math.abs(st.x1 - st.x0), chartArea.bottom - chartArea.top)
@@ -710,7 +791,13 @@ async function renderCharts() {
       const r1 = chartXToRaw(Math.max(v0, v1))
       const sIdx = xValueToIndex(r0)
       const eIdx = xValueToIndex(r1)
-      setSelection(sIdx, eIdx)
+      const xs = streams.value?.[xAxis.value]?.data || streams.value?.time?.data
+      const maxIdx = (xs?.length || 1) - 1
+      if (sIdx <= 0 && eIdx >= maxIdx) {
+        selection.value = null
+      } else {
+        setSelection(sIdx, eIdx)
+      }
     }
 
     const wheelHandler = (e) => handleZoomWheel(chart, e)
@@ -724,16 +811,19 @@ async function renderCharts() {
 }
 
 function applySelectionToCharts() {
-  chartInstances.forEach((chart, key) => {
+  const xs = streams.value?.[xAxis.value]?.data
+  if (!xs || xs.length === 0) return
+  const fullStart = chartXFromRaw(xs[0])
+  const fullEnd = chartXFromRaw(xs[xs.length - 1])
+  chartInstances.forEach((chart) => {
     if (!selection.value) {
-      chart.$selectionRange = null
+      chart.$selectionRange = { start: fullStart, end: fullEnd }
+      chart.$noSelection = true
     } else {
-      const xs = streams.value?.[xAxis.value]?.data
-      if (xs) {
-        const x0 = chartXFromRaw(xs[selection.value.startIdx])
-        const x1 = chartXFromRaw(xs[selection.value.endIdx])
-        chart.$selectionRange = { start: x0, end: x1 }
-      }
+      const x0 = chartXFromRaw(xs[selection.value.startIdx])
+      const x1 = chartXFromRaw(xs[selection.value.endIdx])
+      chart.$selectionRange = { start: x0, end: x1 }
+      chart.$noSelection = false
     }
     chart.draw()
   })

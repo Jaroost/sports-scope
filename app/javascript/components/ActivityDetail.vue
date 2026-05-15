@@ -1046,61 +1046,98 @@ async function resetLayout() {
   }
 }
 
-function onChartDragStart(group, e) {
+// Pointer-events based drag instead of HTML5 native drag — gives us full control
+// and avoids browser quirks around draggable attributes, drop event registration,
+// and document-level listener wiring.
+const DRAG_THRESHOLD_PX = 6
+let pdStartX = 0
+let pdStartY = 0
+let pdInitialized = false
+let pdMoveListener = null
+let pdUpListener = null
+
+function onChartPointerDown(group, e) {
+  if (e.button !== undefined && e.button !== 0) return // left mouse only
+  // Don't initiate drag from controls inside the header (e.g., the Split button).
+  if (e.target.closest && e.target.closest('button')) return
+  pdStartX = e.clientX
+  pdStartY = e.clientY
+  pdInitialized = false
   dragSourceId.value = group.id
-  if (e.dataTransfer) {
-    e.dataTransfer.effectAllowed = 'move'
-    e.dataTransfer.setData('text/plain', group.id)
-    // Use the whole card as the drag image so the user sees what they're moving.
-    const card = e.currentTarget?.closest?.('.chart-group')
-    if (card) {
-      try { e.dataTransfer.setDragImage(card, 20, 20) } catch {}
+  pdMoveListener = (ev) => onPointerMove(ev)
+  pdUpListener = (ev) => onPointerUp(ev)
+  window.addEventListener('mousemove', pdMoveListener)
+  window.addEventListener('mouseup', pdUpListener)
+}
+
+function onPointerMove(e) {
+  if (!pdInitialized) {
+    const dx = e.clientX - pdStartX
+    const dy = e.clientY - pdStartY
+    if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+    pdInitialized = true
+    document.body.style.cursor = 'grabbing'
+  }
+  pointerHitTest(e.clientX, e.clientY)
+}
+
+function pointerHitTest(clientX, clientY) {
+  const elem = document.elementFromPoint(clientX, clientY)
+  if (!elem) {
+    dragOverGroupId.value = null
+    dragOverSlotIndex.value = null
+    return
+  }
+  let node = elem
+  while (node && node !== document.body) {
+    if (node.classList?.contains('chart-drop-slot')) {
+      const idx = parseInt(node.dataset?.slotIdx ?? '', 10)
+      if (!Number.isNaN(idx)) {
+        dragOverSlotIndex.value = idx
+        dragOverGroupId.value = null
+      }
+      return
+    }
+    if (node.classList?.contains('chart-group')) {
+      const id = node.dataset?.groupId
+      if (id && id !== dragSourceId.value) {
+        dragOverGroupId.value = id
+        dragOverSlotIndex.value = null
+      } else {
+        dragOverGroupId.value = null
+        dragOverSlotIndex.value = null
+      }
+      return
+    }
+    node = node.parentElement
+  }
+  dragOverGroupId.value = null
+  dragOverSlotIndex.value = null
+}
+
+function onPointerUp() {
+  if (pdMoveListener) {
+    window.removeEventListener('mousemove', pdMoveListener)
+    pdMoveListener = null
+  }
+  if (pdUpListener) {
+    window.removeEventListener('mouseup', pdUpListener)
+    pdUpListener = null
+  }
+  document.body.style.cursor = ''
+
+  if (pdInitialized && dragSourceId.value) {
+    if (dragOverGroupId.value && dragOverGroupId.value !== dragSourceId.value) {
+      mergeGroups(dragSourceId.value, dragOverGroupId.value)
+    } else if (dragOverSlotIndex.value != null) {
+      moveGroupToIndex(dragSourceId.value, dragOverSlotIndex.value)
     }
   }
-}
 
-function onChartDragEnd() {
   dragSourceId.value = null
   dragOverGroupId.value = null
   dragOverSlotIndex.value = null
-}
-
-function onGroupDragOver(group, e) {
-  if (!dragSourceId.value || dragSourceId.value === group.id) return
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'link'
-  dragOverGroupId.value = group.id
-}
-
-function onGroupDragLeave(group) {
-  if (dragOverGroupId.value === group.id) dragOverGroupId.value = null
-}
-
-function onGroupDrop(group, e) {
-  e.preventDefault()
-  if (!dragSourceId.value || dragSourceId.value === group.id) return
-  mergeGroups(dragSourceId.value, group.id)
-  dragOverGroupId.value = null
-  dragSourceId.value = null
-}
-
-function onSlotDragOver(idx, e) {
-  if (!dragSourceId.value) return
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  dragOverSlotIndex.value = idx
-}
-
-function onSlotDragLeave(idx) {
-  if (dragOverSlotIndex.value === idx) dragOverSlotIndex.value = null
-}
-
-function onSlotDrop(idx, e) {
-  e.preventDefault()
-  if (!dragSourceId.value) return
-  moveGroupToIndex(dragSourceId.value, idx)
-  dragOverSlotIndex.value = null
-  dragSourceId.value = null
+  pdInitialized = false
 }
 
 function setZoom(min, max) {
@@ -1399,23 +1436,17 @@ onBeforeUnmount(() => {
               <div
                 class="chart-drop-slot"
                 :class="{ active: dragOverSlotIndex === gIdx, hinting: dragSourceId }"
-                @dragover="onSlotDragOver(gIdx, $event)"
-                @dragleave="onSlotDragLeave(gIdx)"
-                @drop="onSlotDrop(gIdx, $event)"
+                :data-slot-idx="gIdx"
               ></div>
               <div
                 class="chart-group"
                 :class="{ 'merge-target': dragOverGroupId === group.id && dragSourceId !== group.id, dragging: dragSourceId === group.id }"
+                :data-group-id="group.id"
                 :data-merge-label="t('strava.layout.merge_here')"
-                @dragover="onGroupDragOver(group, $event)"
-                @dragleave="onGroupDragLeave(group)"
-                @drop="onGroupDrop(group, $event)"
               >
                 <div
                   class="chart-group-header"
-                  draggable="true"
-                  @dragstart="onChartDragStart(group, $event)"
-                  @dragend="onChartDragEnd"
+                  @mousedown="onChartPointerDown(group, $event)"
                   :title="t('strava.layout.drag_hint')"
                 >
                   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -1488,9 +1519,7 @@ onBeforeUnmount(() => {
             <div
               class="chart-drop-slot"
               :class="{ active: dragOverSlotIndex === availableLayout.length, hinting: dragSourceId }"
-              @dragover="onSlotDragOver(availableLayout.length, $event)"
-              @dragleave="onSlotDragLeave(availableLayout.length)"
-              @drop="onSlotDrop(availableLayout.length, $event)"
+              :data-slot-idx="availableLayout.length"
             ></div>
           </div>
         </div>

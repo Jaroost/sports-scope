@@ -850,6 +850,7 @@ async function renderCharts() {
         tension: 0.2,
         fill: true,
         yAxisID: `y-${idx}`,
+        $streamKey: streamKey,
       }
     }).filter(Boolean)
 
@@ -880,6 +881,14 @@ async function renderCharts() {
           // Built-in legend disabled in favor of the custom Vue legend pills
           // above each chart — gives reliable click-to-toggle behavior.
           legend: { display: false },
+          tooltip: {
+            // Custom HTML tooltip aggregating the hovered chart + all the
+            // other charts' values at the same x — see externalTooltipHandler.
+            enabled: false,
+            mode: 'index',
+            intersect: false,
+            external: externalTooltipHandler,
+          },
         },
         scales: {
           x: {
@@ -955,9 +964,110 @@ function syncMarkersFromSelection() {
 function destroyCharts() {
   wheelHandlers.forEach(({ canvas, handler }) => canvas.removeEventListener('wheel', handler))
   wheelHandlers.clear()
+  // Remove any external tooltip DOM nodes before destroying their charts.
+  chartInstances.forEach((c) => {
+    c.canvas.parentNode?.querySelector('.chart-tooltip')?.remove()
+  })
   chartInstances.forEach((c) => c.destroy())
   chartInstances.clear()
   hiddenDatasets.value = new Map()
+}
+
+function externalTooltipHandler(context) {
+  const { chart, tooltip } = context
+  const parent = chart.canvas.parentNode
+  if (!parent) return
+  let el = parent.querySelector('.chart-tooltip')
+  if (!el) {
+    el = document.createElement('div')
+    el.className = 'chart-tooltip'
+    parent.appendChild(el)
+  }
+  if (tooltip.opacity === 0 || chart.$drag?.mode) {
+    el.style.opacity = '0'
+    return
+  }
+  const xv = tooltip.dataPoints?.[0]?.parsed?.x
+  if (xv == null || Number.isNaN(xv)) {
+    el.style.opacity = '0'
+    return
+  }
+  const title = xAxis.value === 'distance'
+    ? `${xv.toFixed(2)} km`
+    : formatHMS(xv * timeFactor())
+
+  const rows = []
+  const seen = new Set()
+  // Current chart datasets (auto-filtered to visible by Chart.js).
+  tooltip.dataPoints.forEach((item) => {
+    const ds = chart.data.datasets[item.datasetIndex]
+    const sk = ds.$streamKey
+    if (sk && seen.has(sk)) return
+    if (sk) seen.add(sk)
+    rows.push(formatTooltipRow(ds, item.parsed.y))
+  })
+  // Other charts: nearest x-index, skip hidden datasets and streams we've
+  // already shown (a stream may appear in several groups via copy).
+  chartInstances.forEach((other) => {
+    if (other === chart) return
+    const first = other.data?.datasets?.[0]?.data
+    if (!first || first.length === 0) return
+    let idx = 0
+    let bestDiff = Infinity
+    for (let i = 0; i < first.length; i++) {
+      const d = Math.abs(first[i].x - xv)
+      if (d < bestDiff) {
+        bestDiff = d
+        idx = i
+      }
+    }
+    other.data.datasets.forEach((ds, di) => {
+      const meta = other.getDatasetMeta(di)
+      if (meta?.hidden) return
+      const sk = ds.$streamKey
+      if (sk && seen.has(sk)) return
+      const point = ds.data[idx]
+      if (!point) return
+      if (sk) seen.add(sk)
+      rows.push(formatTooltipRow(ds, point.y))
+    })
+  })
+
+  let html = `<div class="chart-tooltip-title">${escapeHtml(title)}</div>`
+  for (const r of rows) {
+    html += `<div class="chart-tooltip-row">
+      <span class="chart-tooltip-swatch" style="background:${r.color}"></span>
+      <span class="chart-tooltip-name">${escapeHtml(r.name)}</span>
+      <span class="chart-tooltip-value">${escapeHtml(r.value)} ${escapeHtml(r.unit)}</span>
+    </div>`
+  }
+  el.innerHTML = html
+  el.style.opacity = '1'
+
+  // Position above the caret, centered. Clamp to canvas bounds so it stays readable.
+  const cw = chart.canvas.clientWidth
+  const tipRect = el.getBoundingClientRect()
+  const halfW = tipRect.width / 2
+  let left = tooltip.caretX
+  if (left - halfW < 4) left = halfW + 4
+  if (left + halfW > cw - 4) left = cw - halfW - 4
+  el.style.left = `${left}px`
+  el.style.top = `${tooltip.caretY}px`
+  el.style.transform = 'translate(-50%, calc(-100% - 10px))'
+}
+
+function formatTooltipRow(ds, y) {
+  const sk = ds.$streamKey
+  const def = sk ? defByKey(sk) : null
+  const digits = def?.digits ?? 1
+  const value = (y != null && !Number.isNaN(y)) ? y.toFixed(digits) : '–'
+  const unit = def?.unit || ''
+  const name = sk ? t('strava.stream.' + sk) : (ds.label || '').replace(/ \(.+\)$/, '')
+  return { color: ds.borderColor, name, value, unit }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
 
 function isDatasetHidden(groupId, idx) {
@@ -1753,6 +1863,7 @@ onBeforeUnmount(() => {
   cursor: crosshair;
   touch-action: pan-y;
 }
+
 .stats-grid {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -1989,5 +2100,56 @@ onBeforeUnmount(() => {
 }
 .range-chip-stream strong {
   color: inherit;
+}
+</style>
+
+<!-- Non-scoped: the tooltip DOM is created via document.createElement and
+     therefore doesn't carry Vue's scoped data attribute, so its styles must
+     be global. -->
+<style>
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(33, 37, 41, 0.94);
+  color: #fff;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.5rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  z-index: 30;
+  white-space: nowrap;
+  transition: opacity 0.1s ease;
+  opacity: 0;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.45);
+  max-width: 360px;
+  left: 0;
+  top: 0;
+}
+.chart-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+}
+.chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  line-height: 1.65;
+}
+.chart-tooltip-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.chart-tooltip-name {
+  color: rgba(255, 255, 255, 0.78);
+  margin-right: 0.4rem;
+}
+.chart-tooltip-value {
+  margin-left: auto;
+  font-weight: 600;
+  padding-left: 0.55rem;
 }
 </style>

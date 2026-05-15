@@ -65,11 +65,12 @@ const startEndDisplay = computed(() => {
   const fmtHM = { hour: '2-digit', minute: '2-digit' }
   const start = new Date(startMs)
   const end = endMs != null ? new Date(endMs) : null
-  if (!end) return { start: start.toLocaleString(undefined, fmtFull), end: null }
+  if (!end) return { start: start.toLocaleString(undefined, fmtFull), end: null, duration: null }
   const sameDay = start.toDateString() === end.toDateString()
   return {
     start: start.toLocaleString(undefined, fmtFull),
     end: sameDay ? end.toLocaleTimeString(undefined, fmtHM) : end.toLocaleString(undefined, fmtFull),
+    duration: formatDuration(elapsed),
   }
 })
 
@@ -1586,6 +1587,13 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
                 <span>{{ startEndDisplay.end }}</span>
               </span>
+              <span
+                v-if="startEndDisplay.duration"
+                class="activity-duration-pill d-inline-flex align-items-center gap-1"
+              >
+                <i class="fa-solid fa-stopwatch" aria-hidden="true"></i>
+                <span>{{ startEndDisplay.duration }}</span>
+              </span>
             </div>
           </div>
         </div>
@@ -1871,6 +1879,13 @@ onBeforeUnmount(() => {
   font-size: 0.82rem;
   color: #495057;
   font-variant-numeric: tabular-nums;
+}
+.activity-duration-pill {
+  background: rgba(252, 76, 2, 0.12);
+  color: #fc4c02;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-weight: 600;
 }
 .activity-map {
   height: 420px;

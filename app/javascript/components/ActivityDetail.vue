@@ -52,6 +52,27 @@ const chartIcons = {
   grade_smooth: 'fa-slash',
 }
 
+const startEndDisplay = computed(() => {
+  const a = activity.value
+  if (!a?.start_date_local) return null
+  // Strava ships start_date_local as a wall-clock local time but with a "Z"
+  // suffix — strip it so JS doesn't shift it by the browser's UTC offset.
+  const startMs = new Date(a.start_date_local.replace(/Z$/, '')).getTime()
+  if (Number.isNaN(startMs)) return null
+  const elapsed = a.elapsed_time
+  const endMs = elapsed ? startMs + elapsed * 1000 : null
+  const fmtFull = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }
+  const fmtHM = { hour: '2-digit', minute: '2-digit' }
+  const start = new Date(startMs)
+  const end = endMs != null ? new Date(endMs) : null
+  if (!end) return { start: start.toLocaleString(undefined, fmtFull), end: null }
+  const sameDay = start.toDateString() === end.toDateString()
+  return {
+    start: start.toLocaleString(undefined, fmtFull),
+    end: sameDay ? end.toLocaleTimeString(undefined, fmtHM) : end.toLocaleString(undefined, fmtFull),
+  }
+})
+
 const polyline = computed(() => activity.value?.map?.summary_polyline || activity.value?.map?.polyline || '')
 
 // Prefer the high-resolution latlng stream when available (Strava stores it as [lat, lng] pairs).
@@ -1553,7 +1574,20 @@ onBeforeUnmount(() => {
           <span class="activity-type-badge">
             <i :class="`fa-solid ${activityIcon(activity.type)}`" aria-hidden="true"></i>
           </span>
-          <h2 class="h5 mb-0">{{ activity.name }}</h2>
+          <div class="flex-grow-1 min-width-0">
+            <h2 class="h5 mb-0 text-truncate">{{ activity.name }}</h2>
+            <div v-if="startEndDisplay" class="activity-times d-flex flex-wrap align-items-center gap-2 mt-1">
+              <span class="d-inline-flex align-items-center gap-1">
+                <i class="fa-solid fa-flag text-success" aria-hidden="true"></i>
+                <span>{{ startEndDisplay.start }}</span>
+              </span>
+              <i v-if="startEndDisplay.end" class="fa-solid fa-arrow-right text-muted" aria-hidden="true"></i>
+              <span v-if="startEndDisplay.end" class="d-inline-flex align-items-center gap-1">
+                <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+                <span>{{ startEndDisplay.end }}</span>
+              </span>
+            </div>
+          </div>
         </div>
         <div class="card-body p-0">
           <div v-if="hasRoute" class="map-wrap">
@@ -1829,6 +1863,14 @@ onBeforeUnmount(() => {
 <style scoped>
 .map-wrap {
   position: relative;
+}
+.min-width-0 {
+  min-width: 0;
+}
+.activity-times {
+  font-size: 0.82rem;
+  color: #495057;
+  font-variant-numeric: tabular-nums;
 }
 .activity-map {
   height: 420px;

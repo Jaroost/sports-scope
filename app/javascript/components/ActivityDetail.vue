@@ -1712,18 +1712,11 @@ onBeforeUnmount(() => {
               <i class="fa-solid fa-chart-line text-warning" aria-hidden="true"></i>
               <span>{{ t('strava.charts') }}</span>
             </h3>
-            <div class="d-flex flex-wrap gap-2 align-items-center">
-              <button
-                v-if="zoomRange"
-                type="button"
-                class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-                @click="resetZoom"
-                :title="t('strava.reset_zoom')"
-              >
-                <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
-                <span>{{ t('strava.reset_zoom') }}</span>
-              </button>
-              <div class="d-flex align-items-center gap-1" :title="t('strava.layout.title')">
+            <div class="d-flex flex-wrap gap-3 align-items-center">
+
+              <!-- GROUPE 1 : Préférence (preset nommé) -->
+              <div class="control-group" :title="t('strava.layout.title')">
+                <span class="control-group-label">{{ t('strava.layout.preset_label') }}</span>
                 <select
                   class="form-select form-select-sm preset-select"
                   :value="selectedLayoutId ?? ''"
@@ -1733,59 +1726,80 @@ onBeforeUnmount(() => {
                   <option value="">— {{ t('strava.layout.no_preset') }} —</option>
                   <option v-for="p in savedLayouts" :key="p.id" :value="p.id">{{ p.name }}</option>
                 </select>
+                <div class="btn-group btn-group-sm">
+                  <button
+                    type="button"
+                    class="btn btn-outline-primary"
+                    @click="savePresetAs"
+                    :disabled="layoutSaving"
+                    :title="t('strava.layout.save_as')"
+                  >
+                    <span v-if="layoutSaving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-outline-danger"
+                    @click="deletePreset"
+                    :disabled="!selectedLayoutId || layoutSaving"
+                    :title="t('strava.layout.delete')"
+                  >
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-outline-secondary"
+                    @click="resetLayout"
+                    :title="t('strava.layout.reset')"
+                  >
+                    <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+
+              <!-- GROUPE 2 : Axe X (toujours visible) -->
+              <div class="control-group" v-if="availableLayout.length > 0">
+                <span class="control-group-label">{{ t('strava.x_axis_label') }}</span>
+                <div class="btn-group btn-group-sm" role="group">
+                  <input type="radio" class="btn-check" name="xAxis" id="xAxis-distance" autocomplete="off" value="distance" v-model="xAxis" :disabled="!streams || !streams.distance" />
+                  <label class="btn btn-outline-secondary" for="xAxis-distance">{{ t('strava.x_distance') }}</label>
+                  <input type="radio" class="btn-check" name="xAxis" id="xAxis-time" autocomplete="off" value="time" v-model="xAxis" :disabled="!streams || !streams.time" />
+                  <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
+                </div>
+                <div v-if="xAxis === 'time'" class="btn-group btn-group-sm" role="group">
+                  <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-s" autocomplete="off" value="s" v-model="timeUnit" />
+                  <label class="btn btn-outline-secondary" for="timeUnit-s">{{ t('strava.unit_s') }}</label>
+                  <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-min" autocomplete="off" value="min" v-model="timeUnit" />
+                  <label class="btn btn-outline-secondary" for="timeUnit-min">{{ t('strava.unit_min') }}</label>
+                  <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-h" autocomplete="off" value="h" v-model="timeUnit" />
+                  <label class="btn btn-outline-secondary" for="timeUnit-h">{{ t('strava.unit_h') }}</label>
+                </div>
+              </div>
+
+              <!-- GROUPE 3 : Actions ponctuelles (visibles si applicables) -->
+              <div class="control-group" v-if="selection || zoomRange">
                 <button
+                  v-if="selection"
                   type="button"
                   class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
-                  @click="savePresetAs"
-                  :disabled="layoutSaving"
-                  :title="t('strava.layout.save_as')"
+                  @click="clearSelection"
+                  :title="t('strava.clear_selection')"
                 >
-                  <span v-if="layoutSaving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                  <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
-                  <span class="d-none d-lg-inline">{{ t('strava.layout.save_as') }}</span>
+                  <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                  <span>{{ t('strava.clear_selection') }}</span>
                 </button>
                 <button
-                  type="button"
-                  class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1"
-                  @click="deletePreset"
-                  :disabled="!selectedLayoutId || layoutSaving"
-                  :title="t('strava.layout.delete')"
-                >
-                  <i class="fa-solid fa-trash" aria-hidden="true"></i>
-                </button>
-                <button
+                  v-if="zoomRange"
                   type="button"
                   class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-                  @click="resetLayout"
-                  :title="t('strava.layout.reset')"
+                  @click="resetZoom"
+                  :title="t('strava.reset_zoom')"
                 >
-                  <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-                  <span class="d-none d-lg-inline">{{ t('strava.layout.reset') }}</span>
+                  <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
+                  <span>{{ t('strava.reset_zoom') }}</span>
                 </button>
               </div>
-              <button
-                v-if="selection"
-                type="button"
-                class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
-                @click="clearSelection"
-              >
-                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-                <span>{{ t('strava.clear_selection') }}</span>
-              </button>
-              <div v-if="availableCharts.length > 0" class="btn-group btn-group-sm" role="group">
-                <input type="radio" class="btn-check" name="xAxis" id="xAxis-distance" autocomplete="off" value="distance" v-model="xAxis" :disabled="!streams || !streams.distance" />
-                <label class="btn btn-outline-secondary" for="xAxis-distance">{{ t('strava.x_distance') }}</label>
-                <input type="radio" class="btn-check" name="xAxis" id="xAxis-time" autocomplete="off" value="time" v-model="xAxis" :disabled="!streams || !streams.time" />
-                <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
-              </div>
-              <div v-if="xAxis === 'time'" class="btn-group btn-group-sm" role="group">
-                <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-s" autocomplete="off" value="s" v-model="timeUnit" />
-                <label class="btn btn-outline-secondary" for="timeUnit-s">{{ t('strava.unit_s') }}</label>
-                <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-min" autocomplete="off" value="min" v-model="timeUnit" />
-                <label class="btn btn-outline-secondary" for="timeUnit-min">{{ t('strava.unit_min') }}</label>
-                <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-h" autocomplete="off" value="h" v-model="timeUnit" />
-                <label class="btn btn-outline-secondary" for="timeUnit-h">{{ t('strava.unit_h') }}</label>
-              </div>
+
             </div>
           </div>
           <div v-if="availableLayout.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
@@ -2304,6 +2318,29 @@ onBeforeUnmount(() => {
   width: auto;
   max-width: 220px;
   min-width: 140px;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.55rem 0.25rem 0.6rem;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 0.5rem;
+  position: relative;
+}
+.control-group-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6c757d;
+  user-select: none;
+  padding-right: 0.15rem;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  margin-right: 0.25rem;
+  line-height: 1.6;
 }
 
 .range-chip-stream {

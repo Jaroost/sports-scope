@@ -875,7 +875,7 @@ async function renderCharts() {
         maintainAspectRatio: false,
         animation: false,
         parsing: false,
-        interaction: { intersect: false, mode: 'nearest' },
+        interaction: { intersect: false, mode: 'index', axis: 'x' },
         events: ['mousedown', 'mousemove', 'mouseup', 'mouseout', 'click', 'touchstart', 'touchmove', 'touchend'],
         plugins: {
           // Built-in legend disabled in favor of the custom Vue legend pills
@@ -1004,6 +1004,22 @@ function externalTooltipHandler(context) {
     titleLines.push({ main: true, text: formatHMS(xv * timeFactor()) })
     const dm = streams.value?.distance?.data?.[idx]
     if (dm != null) titleLines.push({ main: false, text: `${(dm / 1000).toFixed(2)} km` })
+  }
+  // Absolute datetime of this point = activity start + elapsed seconds.
+  // Strava's start_date_local already is wall-clock time at the activity
+  // location, but it's serialized with a trailing "Z" — parsing it as UTC
+  // would then shift it by the browser's offset. Strip the Z so the Date is
+  // built as local time in the browser's locale.
+  const startIso = activity.value?.start_date_local
+  const tSec = streams.value?.time?.data?.[idx]
+  if (startIso && tSec != null) {
+    const localBase = new Date(startIso.replace(/Z$/, '')).getTime()
+    const dt = new Date(localBase + tSec * 1000)
+    const stamp = dt.toLocaleString(undefined, {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+    titleLines.push({ main: false, text: stamp })
   }
 
   const rows = []

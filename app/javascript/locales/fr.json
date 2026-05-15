@@ -43,6 +43,7 @@
       "unit_h": "h",
       "clear_selection": "Effacer",
       "reset_zoom": "Réinitialiser le zoom",
+      "zoom_to_selection": "Zoomer sur la sélection",
       "selection": "Sélection",
       "whole_activity": "Activité complète",
       "range_stats": {

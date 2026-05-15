@@ -1808,6 +1808,19 @@ function resetZoom() {
   zoomRange.value = null
 }
 
+function zoomToSelection() {
+  if (!selection.value) return
+  const xs = streams.value?.[xAxis.value]?.data || streams.value?.time?.data
+  if (!xs || xs.length === 0) return
+  const a = xs[selection.value.startIdx]
+  const b = xs[selection.value.endIdx]
+  if (a == null || b == null) return
+  const x0 = chartXFromRaw(a)
+  const x1 = chartXFromRaw(b)
+  if (Number.isNaN(x0) || Number.isNaN(x1) || x0 === x1) return
+  setZoom(Math.min(x0, x1), Math.max(x0, x1))
+}
+
 function applyZoomToCharts() {
   chartInstances.forEach((chart) => {
     chart.options.scales.x.min = zoomRange.value?.xMin
@@ -2114,6 +2127,16 @@ onBeforeUnmount(() => {
 
               <!-- GROUPE 3 : Actions ponctuelles (visibles si applicables) -->
               <div class="control-group" v-if="selection || zoomRange">
+                <button
+                  v-if="selection"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
+                  @click="zoomToSelection"
+                  :title="t('strava.zoom_to_selection')"
+                >
+                  <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
+                  <span>{{ t('strava.zoom_to_selection') }}</span>
+                </button>
                 <button
                   v-if="selection"
                   type="button"

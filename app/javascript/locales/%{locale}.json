@@ -276,9 +276,23 @@
       "home_lead": "An example Rails 8 app with Keycloak SSO, Strava OAuth, Vue islands and Vite."
     },
     "strava": {
+      "activity_not_found": "Activity not found.",
+      "activity_summary": "Activity summary",
+      "avg_speed": "Average speed",
+      "back_to_dashboard": "← Back to dashboard",
+      "distance": "Distance",
+      "duration": "Moving time",
+      "elapsed": "Elapsed time",
+      "elevation_gain": "Elevation gain",
+      "last_updated": "Updated at",
       "no_activities": "No activities yet.",
+      "no_route_data": "No GPS data for this activity.",
       "not_linked": "Connect your Strava account to see your activities.",
-      "recent_activities": "Recent activities"
+      "recent_activities": "Recent activities",
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…",
+      "start_date": "Start",
+      "type": "Type"
     },
     "support": {
       "array": {
@@ -324,9 +338,23 @@
       "home_lead": "Une application Rails 8 d'exemple avec Keycloak SSO, OAuth Strava, îlots Vue et Vite."
     },
     "strava": {
+      "activity_not_found": "Activité introuvable.",
+      "activity_summary": "Résumé de l'activité",
+      "avg_speed": "Vitesse moyenne",
+      "back_to_dashboard": "← Retour au tableau de bord",
+      "distance": "Distance",
+      "duration": "Temps en mouvement",
+      "elapsed": "Temps total",
+      "elevation_gain": "Dénivelé",
+      "last_updated": "Mis à jour à",
       "no_activities": "Aucune activité pour l'instant.",
+      "no_route_data": "Pas de données GPS pour cette activité.",
       "not_linked": "Liez votre compte Strava pour voir vos activités.",
-      "recent_activities": "Activités récentes"
+      "recent_activities": "Activités récentes",
+      "refresh": "Rafraîchir",
+      "refreshing": "Rafraîchissement…",
+      "start_date": "Début",
+      "type": "Type"
     }
   }
 }

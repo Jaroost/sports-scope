@@ -1,8 +1,10 @@
 import { createApp } from 'vue'
 import HelloStrava from './components/HelloStrava.vue'
+import ActivityDetail from './components/ActivityDetail.vue'
 
 const registry = {
   HelloStrava,
+  ActivityDetail,
 }
 
 export function mountVueIslands() {

@@ -15,3 +15,5 @@ public/vite/assets/*
 *.log
 *.pid
 .DS_Store
+
+public/vite/.vite/

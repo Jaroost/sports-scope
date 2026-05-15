@@ -1594,6 +1594,13 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-stopwatch" aria-hidden="true"></i>
                 <span>{{ startEndDisplay.duration }}</span>
               </span>
+              <span
+                v-if="activity.calories"
+                class="activity-cal-pill d-inline-flex align-items-center gap-1"
+              >
+                <i class="fa-solid fa-fire" aria-hidden="true"></i>
+                <span>{{ Math.round(activity.calories) }} kcal</span>
+              </span>
             </div>
           </div>
         </div>
@@ -1706,16 +1713,17 @@ onBeforeUnmount(() => {
               <i class="fa-solid fa-percent" aria-hidden="true"></i>
               <strong>{{ rangeGrade().toFixed(1) }} %</strong>
             </span>
-            <span
-              v-for="streamKey in visibleStreams"
-              :key="`mean-${streamKey}`"
-              class="range-chip range-chip-stream"
-              :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
-            >
-              <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-              <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
-              <strong v-else>–</strong>
-            </span>
+            <template v-for="streamKey in visibleStreams" :key="`mean-${streamKey}`">
+              <span
+                v-if="streamKey !== 'altitude'"
+                class="range-chip range-chip-stream"
+                :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
+              >
+                <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
+                <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
+                <strong v-else>–</strong>
+              </span>
+            </template>
           </div>
         </div>
         <div class="card-body">
@@ -1883,6 +1891,13 @@ onBeforeUnmount(() => {
 .activity-duration-pill {
   background: rgba(252, 76, 2, 0.12);
   color: #fc4c02;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.activity-cal-pill {
+  background: rgba(220, 53, 69, 0.12);
+  color: #b02a37;
   padding: 0.1rem 0.55rem;
   border-radius: 999px;
   font-weight: 600;

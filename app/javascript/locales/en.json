@@ -41,7 +41,17 @@
         "duration": "Duration",
         "distance": "Distance",
         "elev_gain": "Elev. gain",
-        "elev_loss": "Elev. loss"
+        "elev_loss": "Elev. loss",
+        "avg_grade": "Avg grade"
+      },
+      "layout": {
+        "title": "Chart layout",
+        "reset": "Reset",
+        "save": "Save",
+        "saved": "Saved",
+        "split": "Split",
+        "drag_hint": "Drag to reorder, drop on another chart to merge",
+        "merge_here": "Merge here"
       },
       "loading_streams": "Loading charts…",
       "no_stream_data": "No data available for this activity.",

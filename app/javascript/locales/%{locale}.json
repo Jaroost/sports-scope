@@ -273,6 +273,12 @@
       }
     },
     "pages": {
+      "feature_charts_body": "Altitude, heart rate, speed, power — analyze every Strava stream.",
+      "feature_charts_title": "Detailed charts",
+      "feature_routes_body": "Visualize every outing on an interactive map with direction arrows and segment selection.",
+      "feature_routes_title": "Maps & routes",
+      "feature_stats_body": "Elev. gain/loss, duration, distance and averages computed over your selection.",
+      "feature_stats_title": "Range stats",
       "home_lead": "An example Rails 8 app with Keycloak SSO, Strava OAuth, Vue islands and Vite."
     },
     "strava": {
@@ -365,6 +371,12 @@
       "logout": "Se déconnecter"
     },
     "pages": {
+      "feature_charts_body": "Altitude, fréquence cardiaque, vitesse, puissance — analysez chaque stream Strava.",
+      "feature_charts_title": "Graphiques détaillés",
+      "feature_routes_body": "Visualisez chaque sortie sur une carte interactive avec sens du trajet et sélection de segment.",
+      "feature_routes_title": "Cartes & parcours",
+      "feature_stats_body": "D+ / D-, durée, distance et moyennes calculées sur le segment sélectionné.",
+      "feature_stats_title": "Statistiques de plage",
       "home_lead": "Une application Rails 8 d'exemple avec Keycloak SSO, OAuth Strava, îlots Vue et Vite."
     },
     "strava": {

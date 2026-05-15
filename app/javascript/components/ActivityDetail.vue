@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed, useTemplateRef, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, useTemplateRef, watch } from 'vue'
 import { t } from '../i18n'
 
 const props = defineProps({
@@ -14,7 +14,8 @@ const streamsLoading = ref(false)
 const streamsError = ref(null)
 const xAxis = ref('distance')
 const timeUnit = ref('min')
-const selection = ref(null) // { startIdx, endIdx } | null
+const selection = ref(null) // { startIdx, endIdx } | null — immediate (drives map markers + chart band)
+const selectionDisplay = ref(null) // debounced copy used for stats display
 const mapEl = useTemplateRef('mapEl')
 
 let mapInstance = null
@@ -99,6 +100,48 @@ const availableCharts = computed(() => {
   if (!streams.value) return []
   return chartDefs.filter((def) => Array.isArray(streams.value[def.key]?.data) && streams.value[def.key].data.length > 0)
 })
+
+function defaultLayout() {
+  return chartDefs.map((def) => ({ id: def.key, streams: [def.key] }))
+}
+
+function defByKey(key) {
+  return chartDefs.find((d) => d.key === key)
+}
+
+// Aligns chartLayout with the streams actually present on this activity:
+// - drops streams that aren't available
+// - drops empty groups
+// - appends any present stream that wasn't referenced by the saved layout
+// Always returns a fresh array if anything changed (so the watcher fires once).
+function syncLayoutWithStreams() {
+  if (!streams.value) return
+  const present = new Set(
+    chartDefs
+      .filter((d) => Array.isArray(streams.value[d.key]?.data) && streams.value[d.key].data.length > 0)
+      .map((d) => d.key),
+  )
+  const cleaned = chartLayout.value
+    .map((g) => ({ id: g.id, streams: g.streams.filter((k) => present.has(k)) }))
+    .filter((g) => g.streams.length > 0)
+  const referenced = new Set(cleaned.flatMap((g) => g.streams))
+  const missing = [...present].filter((k) => !referenced.has(k))
+  const final = [...cleaned, ...missing.map((k) => ({ id: k, streams: [k] }))]
+  if (JSON.stringify(final) === JSON.stringify(chartLayout.value)) return
+  chartLayout.value = final
+}
+
+const chartLayout = ref(defaultLayout())
+const layoutSaving = ref(false)
+const layoutSavedAt = ref(null)
+const layoutDirty = ref(false)
+const dragSourceId = ref(null)
+const dragOverGroupId = ref(null)
+const dragOverSlotIndex = ref(null)
+
+// All visible groups are kept in chartLayout (kept in sync via syncLayoutWithStreams),
+// so the displayed layout is just chartLayout itself — no virtual groups.
+const availableLayout = computed(() => (streams.value ? chartLayout.value : []))
 
 function timeFactor() {
   return timeUnit.value === 'h' ? 3600 : timeUnit.value === 'min' ? 60 : 1
@@ -208,8 +251,8 @@ function clearSelection() {
 function chartStats(def) {
   const data = streams.value?.[def.key]?.data
   if (!data || data.length === 0) return null
-  const s = selection.value?.startIdx ?? 0
-  const e = selection.value?.endIdx ?? data.length - 1
+  const s = selectionDisplay.value?.startIdx ?? 0
+  const e = selectionDisplay.value?.endIdx ?? data.length - 1
   let count = 0
   let sum = 0
   let mn = Infinity
@@ -232,11 +275,11 @@ function fmt(v, digits) {
 }
 
 function rangeBounds() {
-  const ref = streams.value?.distance?.data || streams.value?.time?.data || streams.value?.latlng?.data
-  if (!ref || ref.length === 0) return null
-  const maxIdx = ref.length - 1
-  const s = Math.max(0, Math.min(selection.value?.startIdx ?? 0, maxIdx))
-  const e = Math.max(s, Math.min(selection.value?.endIdx ?? maxIdx, maxIdx))
+  const refStream = streams.value?.distance?.data || streams.value?.time?.data || streams.value?.latlng?.data
+  if (!refStream || refStream.length === 0) return null
+  const maxIdx = refStream.length - 1
+  const s = Math.max(0, Math.min(selectionDisplay.value?.startIdx ?? 0, maxIdx))
+  const e = Math.max(s, Math.min(selectionDisplay.value?.endIdx ?? maxIdx, maxIdx))
   return { startIdx: s, endIdx: e }
 }
 
@@ -278,6 +321,34 @@ function rangePointCount() {
   const b = rangeBounds()
   if (!b) return null
   return b.endIdx - b.startIdx + 1
+}
+
+function rangeGrade() {
+  const b = rangeBounds()
+  if (!b) return null
+  const grade = streams.value?.grade_smooth?.data
+  if (grade && grade.length > 0) {
+    let sum = 0
+    let count = 0
+    const end = Math.min(b.endIdx, grade.length - 1)
+    for (let i = b.startIdx; i <= end; i++) {
+      const v = grade[i]
+      if (v == null || Number.isNaN(v)) continue
+      sum += v
+      count++
+    }
+    if (count === 0) return null
+    return sum / count
+  }
+  const alt = streams.value?.altitude?.data
+  const dist = streams.value?.distance?.data
+  if (!alt || !dist || alt.length === 0 || dist.length === 0) return null
+  const d0 = dist[Math.min(b.startIdx, dist.length - 1)]
+  const d1 = dist[Math.min(b.endIdx, dist.length - 1)]
+  if (d1 - d0 <= 0) return null
+  const a0 = alt[Math.min(b.startIdx, alt.length - 1)]
+  const a1 = alt[Math.min(b.endIdx, alt.length - 1)]
+  return ((a1 - a0) / (d1 - d0)) * 100
 }
 
 function formatHMS(seconds) {
@@ -723,8 +794,8 @@ function xAxisLabel() {
 }
 
 async function renderCharts() {
-  const charts = availableCharts.value
-  if (charts.length === 0) return
+  const groups = availableLayout.value
+  if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
   Chart.register(...registerables, dragSelectPlugin)
@@ -737,31 +808,49 @@ async function renderCharts() {
   xMinAll = xRaw.length > 0 ? chartXFromRaw(xRaw[0]) : 0
   xMaxAll = xRaw.length > 0 ? chartXFromRaw(xRaw[xRaw.length - 1]) : 0
 
-  charts.forEach((def) => {
-    const canvas = document.getElementById(`chart-${def.key}`)
+  groups.forEach((group) => {
+    const canvas = document.getElementById(`chart-${group.id}`)
     if (!canvas) return
-    const yRaw = streams.value[def.key].data
-    const len = Math.min(xRaw.length, yRaw.length)
-    const pairs = []
-    for (let i = 0; i < len; i++) {
-      pairs.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(yRaw[i]) })
-    }
-    const data = downsample(pairs, maxPoints)
+
+    const datasets = group.streams.map((streamKey) => {
+      const def = defByKey(streamKey)
+      if (!def) return null
+      const yRaw = streams.value[streamKey].data
+      const len = Math.min(xRaw.length, yRaw.length)
+      const pairs = []
+      for (let i = 0; i < len; i++) {
+        pairs.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(yRaw[i]) })
+      }
+      const data = downsample(pairs, maxPoints)
+      return {
+        label: `${t('strava.stream.' + def.key)} (${def.unit})`,
+        data,
+        borderColor: def.color,
+        backgroundColor: def.color + '22',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        tension: 0.2,
+        fill: group.streams.length === 1,
+        yAxisID: `y-${streamKey}`,
+      }
+    }).filter(Boolean)
+
+    const yScales = {}
+    group.streams.forEach((streamKey, idx) => {
+      const def = defByKey(streamKey)
+      if (!def) return
+      yScales[`y-${streamKey}`] = {
+        type: 'linear',
+        position: idx % 2 === 0 ? 'left' : 'right',
+        title: { display: true, text: def.unit, color: def.color },
+        ticks: { maxTicksLimit: 6, color: def.color },
+        grid: { drawOnChartArea: idx === 0 },
+      }
+    })
 
     const chart = new Chart(canvas.getContext('2d'), {
       type: 'line',
-      data: {
-        datasets: [{
-          label: `${t('strava.stream.' + def.key)} (${def.unit})`,
-          data,
-          borderColor: def.color,
-          backgroundColor: def.color + '22',
-          borderWidth: 1.5,
-          pointRadius: 0,
-          tension: 0.2,
-          fill: true,
-        }],
-      },
+      data: { datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
@@ -769,7 +858,9 @@ async function renderCharts() {
         parsing: false,
         interaction: { intersect: false, mode: 'nearest' },
         events: ['mousedown', 'mousemove', 'mouseup', 'mouseout', 'click', 'touchstart', 'touchmove', 'touchend'],
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: group.streams.length > 1, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+        },
         scales: {
           x: {
             type: 'linear',
@@ -778,10 +869,7 @@ async function renderCharts() {
             min: zoomRange.value?.xMin,
             max: zoomRange.value?.xMax,
           },
-          y: {
-            title: { display: true, text: def.unit },
-            ticks: { maxTicksLimit: 6 },
-          },
+          ...yScales,
         },
       },
     })
@@ -802,9 +890,9 @@ async function renderCharts() {
 
     const wheelHandler = (e) => handleZoomWheel(chart, e)
     canvas.addEventListener('wheel', wheelHandler, { passive: false })
-    wheelHandlers.set(def.key, { canvas, handler: wheelHandler })
+    wheelHandlers.set(group.id, { canvas, handler: wheelHandler })
 
-    chartInstances.set(def.key, chart)
+    chartInstances.set(group.id, chart)
   })
 
   applySelectionToCharts()
@@ -851,6 +939,207 @@ function destroyCharts() {
   chartInstances.clear()
 }
 
+function mergeGroups(sourceId, targetId) {
+  if (sourceId === targetId) return
+  const source = chartLayout.value.find((g) => g.id === sourceId)
+  const target = chartLayout.value.find((g) => g.id === targetId)
+  if (!source || !target) return
+  const merged = {
+    id: target.id,
+    streams: [...target.streams, ...source.streams.filter((s) => !target.streams.includes(s))],
+  }
+  chartLayout.value = chartLayout.value
+    .filter((g) => g.id !== sourceId)
+    .map((g) => (g.id === targetId ? merged : g))
+  layoutDirty.value = true
+}
+
+function splitGroup(group) {
+  if (!group || group.streams.length <= 1) return
+  const idx = chartLayout.value.findIndex((g) => g.id === group.id)
+  if (idx < 0) return
+  const replacements = group.streams.map((s) => ({ id: s, streams: [s] }))
+  const newLayout = [...chartLayout.value]
+  newLayout.splice(idx, 1, ...replacements)
+  chartLayout.value = newLayout
+  layoutDirty.value = true
+}
+
+function moveGroupToIndex(groupId, targetIndex) {
+  const idx = chartLayout.value.findIndex((g) => g.id === groupId)
+  if (idx < 0) return
+  const arr = [...chartLayout.value]
+  const [moved] = arr.splice(idx, 1)
+  const clamped = Math.max(0, Math.min(targetIndex > idx ? targetIndex - 1 : targetIndex, arr.length))
+  arr.splice(clamped, 0, moved)
+  if (arr.every((g, i) => g.id === chartLayout.value[i]?.id)) return
+  chartLayout.value = arr
+  layoutDirty.value = true
+}
+
+function resetLayoutLocal() {
+  chartLayout.value = defaultLayout()
+  layoutDirty.value = true
+}
+
+async function fetchSavedLayout() {
+  try {
+    const res = await fetch('/preferences/chart_layout', {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) return
+    const payload = await res.json()
+    const list = payload.chart_layout
+    if (Array.isArray(list) && list.length > 0) {
+      chartLayout.value = list.map((g) => ({
+        id: String(g.id),
+        streams: Array.isArray(g.streams) ? g.streams.map(String) : [],
+      }))
+      layoutDirty.value = false
+    }
+  } catch {
+    // ignore — keep default layout
+  }
+  syncLayoutWithStreams()
+}
+
+function csrfToken() {
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+}
+
+async function saveLayout() {
+  if (layoutSaving.value) return
+  layoutSaving.value = true
+  try {
+    const res = await fetch('/preferences/chart_layout', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken(),
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ chart_layout: chartLayout.value }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    layoutSavedAt.value = new Date()
+    layoutDirty.value = false
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    layoutSaving.value = false
+  }
+}
+
+async function resetLayout() {
+  resetLayoutLocal()
+  try {
+    await fetch('/preferences/chart_layout', {
+      method: 'DELETE',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    })
+    layoutDirty.value = false
+  } catch {
+    // ignore
+  }
+}
+
+// Pointer-events based drag instead of HTML5 native drag — gives us full control
+// and avoids browser quirks around draggable attributes, drop event registration,
+// and document-level listener wiring.
+const DRAG_THRESHOLD_PX = 6
+let pdStartX = 0
+let pdStartY = 0
+let pdInitialized = false
+let pdMoveListener = null
+let pdUpListener = null
+
+function onChartPointerDown(group, e) {
+  if (e.button !== undefined && e.button !== 0) return // left mouse only
+  // Don't initiate drag from controls inside the header (e.g., the Split button).
+  if (e.target.closest && e.target.closest('button')) return
+  pdStartX = e.clientX
+  pdStartY = e.clientY
+  pdInitialized = false
+  dragSourceId.value = group.id
+  pdMoveListener = (ev) => onPointerMove(ev)
+  pdUpListener = (ev) => onPointerUp(ev)
+  window.addEventListener('mousemove', pdMoveListener)
+  window.addEventListener('mouseup', pdUpListener)
+}
+
+function onPointerMove(e) {
+  if (!pdInitialized) {
+    const dx = e.clientX - pdStartX
+    const dy = e.clientY - pdStartY
+    if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
+    pdInitialized = true
+    document.body.style.cursor = 'grabbing'
+  }
+  pointerHitTest(e.clientX, e.clientY)
+}
+
+function pointerHitTest(clientX, clientY) {
+  const elem = document.elementFromPoint(clientX, clientY)
+  if (!elem) {
+    dragOverGroupId.value = null
+    dragOverSlotIndex.value = null
+    return
+  }
+  let node = elem
+  while (node && node !== document.body) {
+    if (node.classList?.contains('chart-drop-slot')) {
+      const idx = parseInt(node.dataset?.slotIdx ?? '', 10)
+      if (!Number.isNaN(idx)) {
+        dragOverSlotIndex.value = idx
+        dragOverGroupId.value = null
+      }
+      return
+    }
+    if (node.classList?.contains('chart-group')) {
+      const id = node.dataset?.groupId
+      if (id && id !== dragSourceId.value) {
+        dragOverGroupId.value = id
+        dragOverSlotIndex.value = null
+      } else {
+        dragOverGroupId.value = null
+        dragOverSlotIndex.value = null
+      }
+      return
+    }
+    node = node.parentElement
+  }
+  dragOverGroupId.value = null
+  dragOverSlotIndex.value = null
+}
+
+function onPointerUp() {
+  if (pdMoveListener) {
+    window.removeEventListener('mousemove', pdMoveListener)
+    pdMoveListener = null
+  }
+  if (pdUpListener) {
+    window.removeEventListener('mouseup', pdUpListener)
+    pdUpListener = null
+  }
+  document.body.style.cursor = ''
+
+  if (pdInitialized && dragSourceId.value) {
+    if (dragOverGroupId.value && dragOverGroupId.value !== dragSourceId.value) {
+      mergeGroups(dragSourceId.value, dragOverGroupId.value)
+    } else if (dragOverSlotIndex.value != null) {
+      moveGroupToIndex(dragSourceId.value, dragOverSlotIndex.value)
+    }
+  }
+
+  dragSourceId.value = null
+  dragOverGroupId.value = null
+  dragOverSlotIndex.value = null
+  pdInitialized = false
+}
+
 function setZoom(min, max) {
   const natural = xMaxAll - xMinAll
   if (natural <= 0) return
@@ -881,19 +1170,36 @@ function applyZoomToCharts() {
   })
 }
 
+let wheelRafPending = false
+let pendingWheel = null
+
 function handleZoomWheel(chart, e) {
   e.preventDefault()
-  const xScale = chart.scales.x
   const rect = chart.canvas.getBoundingClientRect()
   const px = e.clientX - rect.left
+  // Latest event wins per frame — older pending events are dropped.
+  pendingWheel = { chart, px, deltaY: e.deltaY }
+  if (wheelRafPending) return
+  wheelRafPending = true
+  requestAnimationFrame(() => {
+    wheelRafPending = false
+    if (!pendingWheel) return
+    const { chart: c, px: p, deltaY } = pendingWheel
+    pendingWheel = null
+    applyZoomStep(c, p, deltaY)
+  })
+}
+
+function applyZoomStep(chart, px, deltaY) {
+  const xScale = chart.scales.x
   const cursorVal = xScale.getValueForPixel(px)
   const currentMin = zoomRange.value?.xMin ?? xMinAll
   const currentMax = zoomRange.value?.xMax ?? xMaxAll
   const range = currentMax - currentMin
   if (range <= 0 || cursorVal == null || Number.isNaN(cursorVal)) return
-  const factor = e.deltaY > 0 ? 1.25 : 0.8
-  let newRange = range * factor
+  const factor = deltaY > 0 ? 1.25 : 0.8
   const naturalRange = xMaxAll - xMinAll
+  const newRange = range * factor
   if (newRange >= naturalRange) {
     resetZoom()
     return
@@ -917,6 +1223,12 @@ watch([xAxis, timeUnit], () => {
   if (streams.value) renderCharts()
 })
 
+watch(chartLayout, async () => {
+  if (!streams.value) return
+  await nextTick()
+  renderCharts()
+}, { deep: true })
+
 watch(zoomRange, applyZoomToCharts)
 
 watch(selection, () => {
@@ -925,14 +1237,27 @@ watch(selection, () => {
   syncMarkersFromSelection()
 })
 
+let displayDebounceTimer = null
+const DISPLAY_DEBOUNCE_MS = 60
+watch(selection, (val) => {
+  if (displayDebounceTimer) clearTimeout(displayDebounceTimer)
+  displayDebounceTimer = setTimeout(() => {
+    displayDebounceTimer = null
+    selectionDisplay.value = val ? { ...val } : null
+  }, DISPLAY_DEBOUNCE_MS)
+})
+
 onMounted(async () => {
+  const savedLayoutPromise = fetchSavedLayout()
   await fetchActivity()
   if (!activity.value) return
   await fetchStreams()
+  await savedLayoutPromise
+  syncLayoutWithStreams()
   if (hasRoute.value) {
     await renderMap()
   }
-  if (streams.value && availableCharts.value.length > 0) {
+  if (streams.value && availableLayout.value.length > 0) {
     await new Promise((r) => requestAnimationFrame(r))
     await renderCharts()
   }
@@ -1010,6 +1335,27 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
                 <span>{{ t('strava.reset_zoom') }}</span>
               </button>
+              <div class="btn-group btn-group-sm" role="group" :title="t('strava.layout.title')">
+                <button
+                  type="button"
+                  class="btn btn-outline-secondary d-flex align-items-center gap-1"
+                  @click="resetLayout"
+                  :disabled="layoutSaving"
+                >
+                  <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline">{{ t('strava.layout.reset') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-outline-primary d-flex align-items-center gap-1"
+                  @click="saveLayout"
+                  :disabled="layoutSaving || !layoutDirty"
+                >
+                  <span v-if="layoutSaving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                  <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline">{{ layoutDirty ? t('strava.layout.save') : t('strava.layout.saved') }}</span>
+                </button>
+              </div>
               <button
                 v-if="selection"
                 type="button"
@@ -1065,6 +1411,11 @@ onBeforeUnmount(() => {
               <span class="range-chip-label">{{ t('strava.range_stats.elev_loss') }}</span>
               <strong>{{ Math.round(rangeElevation().down) }} m</strong>
             </span>
+            <span v-if="rangeGrade() != null" class="range-chip">
+              <i class="fa-solid fa-percent" aria-hidden="true"></i>
+              <span class="range-chip-label">{{ t('strava.range_stats.avg_grade') }}</span>
+              <strong>{{ rangeGrade().toFixed(1) }} %</strong>
+            </span>
           </div>
         </div>
         <div class="card-body">
@@ -1076,46 +1427,100 @@ onBeforeUnmount(() => {
             <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <span>{{ streamsError }}</span>
           </div>
-          <div v-else-if="availableCharts.length === 0" class="text-muted d-flex align-items-center gap-2">
+          <div v-else-if="availableLayout.length === 0" class="text-muted d-flex align-items-center gap-2">
             <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
             <span>{{ t('strava.no_stream_data') }}</span>
           </div>
-          <div v-else>
-            <div
-              v-for="def in availableCharts"
-              :key="def.key"
-              class="chart-row mb-3"
-            >
-              <div class="d-flex justify-content-between align-items-baseline mb-1">
-                <div class="text-muted small d-flex align-items-center gap-1">
-                  <i :class="`fa-solid ${chartIcons[def.key] || 'fa-chart-line'}`" :style="{ color: def.color }" aria-hidden="true"></i>
-                  <span>{{ t('strava.stream.' + def.key) }} ({{ def.unit }})</span>
-                </div>
-              </div>
-              <div class="row g-2 align-items-stretch">
-                <div class="col-lg-9">
-                  <div class="chart-canvas-wrap">
-                    <canvas :id="`chart-${def.key}`"></canvas>
+          <div v-else class="chart-layout">
+            <template v-for="(group, gIdx) in availableLayout" :key="group.id">
+              <div
+                class="chart-drop-slot"
+                :class="{ active: dragOverSlotIndex === gIdx, hinting: dragSourceId }"
+                :data-slot-idx="gIdx"
+              ></div>
+              <div
+                class="chart-group"
+                :class="{ 'merge-target': dragOverGroupId === group.id && dragSourceId !== group.id, dragging: dragSourceId === group.id }"
+                :data-group-id="group.id"
+                :data-merge-label="t('strava.layout.merge_here')"
+              >
+                <div
+                  class="chart-group-header"
+                  @mousedown="onChartPointerDown(group, $event)"
+                  :title="t('strava.layout.drag_hint')"
+                >
+                  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                      <span class="drag-handle">
+                        <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
+                      </span>
+                      <span
+                        v-for="streamKey in group.streams"
+                        :key="streamKey"
+                        class="text-muted small d-flex align-items-center gap-1"
+                      >
+                        <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" :style="{ color: defByKey(streamKey)?.color }" aria-hidden="true"></i>
+                        <span>{{ t('strava.stream.' + streamKey) }} ({{ defByKey(streamKey)?.unit }})</span>
+                      </span>
+                    </div>
+                    <button
+                      v-if="group.streams.length > 1"
+                      type="button"
+                      class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                      draggable="false"
+                      @click="splitGroup(group)"
+                      @mousedown.stop
+                      :title="t('strava.layout.split')"
+                    >
+                      <i class="fa-solid fa-object-ungroup" aria-hidden="true"></i>
+                      <span>{{ t('strava.layout.split') }}</span>
+                    </button>
                   </div>
                 </div>
-                <div class="col-lg-3">
-                  <dl class="small mb-0 stats-grid" v-if="chartStats(def)">
-                    <dt class="text-muted">
-                      <i class="fa-solid fa-equals stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.mean') }}
-                    </dt>
-                    <dd>{{ fmt(chartStats(def).mean, def.digits) }} {{ def.unit }}</dd>
-                    <dt class="text-muted">
-                      <i class="fa-solid fa-arrow-down-short-wide stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.min') }}
-                    </dt>
-                    <dd>{{ fmt(chartStats(def).min, def.digits) }} {{ def.unit }}</dd>
-                    <dt class="text-muted">
-                      <i class="fa-solid fa-arrow-up-wide-short stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.max') }}
-                    </dt>
-                    <dd>{{ fmt(chartStats(def).max, def.digits) }} {{ def.unit }}</dd>
-                  </dl>
+                <div class="row g-2 align-items-stretch">
+                  <div class="col-lg-9">
+                    <div class="chart-canvas-wrap">
+                      <canvas :id="`chart-${group.id}`"></canvas>
+                    </div>
+                  </div>
+                  <div class="col-lg-3">
+                    <div
+                      v-for="streamKey in group.streams"
+                      :key="streamKey"
+                      class="mb-2 stream-stats"
+                    >
+                      <div
+                        v-if="group.streams.length > 1"
+                        class="text-muted small fw-semibold mb-1 d-flex align-items-center gap-1"
+                        :style="{ color: defByKey(streamKey)?.color }"
+                      >
+                        <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
+                        <span>{{ t('strava.stream.' + streamKey) }}</span>
+                      </div>
+                      <dl class="small mb-0 stats-grid" v-if="chartStats(defByKey(streamKey))">
+                        <dt class="text-muted">
+                          <i class="fa-solid fa-equals stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.mean') }}
+                        </dt>
+                        <dd>{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</dd>
+                        <dt class="text-muted">
+                          <i class="fa-solid fa-arrow-down-short-wide stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.min') }}
+                        </dt>
+                        <dd>{{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</dd>
+                        <dt class="text-muted">
+                          <i class="fa-solid fa-arrow-up-wide-short stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.max') }}
+                        </dt>
+                        <dd>{{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</dd>
+                      </dl>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            </template>
+            <div
+              class="chart-drop-slot"
+              :class="{ active: dragOverSlotIndex === availableLayout.length, hinting: dragSourceId }"
+              :data-slot-idx="availableLayout.length"
+            ></div>
           </div>
         </div>
       </div>
@@ -1205,4 +1610,113 @@ onBeforeUnmount(() => {
   color: #b02a37;
 }
 .range-chip-danger strong { color: #842029; }
+
+.chart-layout {
+  position: relative;
+}
+.chart-group {
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid transparent;
+  position: relative;
+  transition: outline 0.12s, background-color 0.12s, opacity 0.12s, box-shadow 0.12s;
+}
+.chart-group.dragging {
+  opacity: 0.45;
+}
+.chart-group.merge-target {
+  outline: 3px dashed #0d6efd;
+  outline-offset: -3px;
+  background: rgba(13, 110, 253, 0.08);
+  box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.12);
+}
+.chart-group.merge-target::after {
+  content: "⤵ " attr(data-merge-label);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #0d6efd;
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  box-shadow: 0 6px 16px -4px rgba(13, 110, 253, 0.5);
+  z-index: 4;
+  white-space: nowrap;
+}
+.chart-group-header {
+  cursor: grab;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.4rem;
+  border-radius: 0.4rem;
+  background: rgba(108, 117, 125, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: background-color 0.12s, border-color 0.12s;
+  user-select: none;
+}
+.chart-group-header:hover {
+  background: rgba(252, 76, 2, 0.06);
+  border-color: rgba(252, 76, 2, 0.25);
+}
+.chart-group.dragging .chart-group-header {
+  cursor: grabbing;
+}
+.drag-handle {
+  color: #adb5bd;
+  font-size: 0.95rem;
+  pointer-events: none;
+}
+.chart-group-header:hover .drag-handle {
+  color: #fc4c02;
+}
+.chart-drop-slot {
+  height: 6px;
+  margin: 0;
+  border-radius: 4px;
+  background: transparent;
+  transition: background-color 0.12s, height 0.12s, margin 0.12s, box-shadow 0.12s;
+  position: relative;
+}
+.chart-drop-slot.hinting {
+  height: 24px;
+  margin: 6px 0;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(108, 117, 125, 0.14),
+    rgba(108, 117, 125, 0.14) 6px,
+    rgba(108, 117, 125, 0.05) 6px,
+    rgba(108, 117, 125, 0.05) 12px
+  );
+  border: 1px dashed rgba(108, 117, 125, 0.4);
+}
+.chart-drop-slot.hinting::before {
+  content: "↕";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(108, 117, 125, 0.6);
+  font-size: 0.95rem;
+  pointer-events: none;
+}
+.chart-drop-slot.active {
+  background: rgba(13, 110, 253, 0.35);
+  border-color: #0d6efd;
+  box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.25);
+  height: 28px;
+  margin: 6px 0;
+}
+.chart-drop-slot.active::before {
+  color: #0d6efd;
+  font-weight: bold;
+}
+.stream-stats + .stream-stats {
+  padding-top: 0.4rem;
+  border-top: 1px dashed rgba(0, 0, 0, 0.08);
+}
 </style>

@@ -2,7 +2,7 @@ class StravaController < ApplicationController
   before_action :require_login!
   before_action :ensure_strava_linked!
 
-  ACTIVITIES_TTL = 10.minutes
+  ACTIVITIES_TTL = 1.day
 
   def activities
     cache_key = "strava:activities:#{current_user.id}"

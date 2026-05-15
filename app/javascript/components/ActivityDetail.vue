@@ -138,6 +138,7 @@ const layoutDirty = ref(false)
 const dragSourceId = ref(null)
 const dragOverGroupId = ref(null)
 const dragOverSlotIndex = ref(null)
+const isCopyMode = ref(false) // true while Ctrl/Cmd is held during a drag
 
 // All visible groups are kept in chartLayout (kept in sync via syncLayoutWithStreams),
 // so the displayed layout is just chartLayout itself — no virtual groups.
@@ -812,9 +813,17 @@ async function renderCharts() {
     const canvas = document.getElementById(`chart-${group.id}`)
     if (!canvas) return
 
-    const datasets = group.streams.map((streamKey) => {
+    // Count occurrences so we can label duplicates (Altitude #2, etc.).
+    const occurrences = new Map()
+    const datasets = group.streams.map((streamKey, idx) => {
       const def = defByKey(streamKey)
       if (!def) return null
+      const count = (occurrences.get(streamKey) || 0) + 1
+      occurrences.set(streamKey, count)
+      const totalForKey = group.streams.filter((s) => s === streamKey).length
+      const label = totalForKey > 1
+        ? `${t('strava.stream.' + def.key)} #${count} (${def.unit})`
+        : `${t('strava.stream.' + def.key)} (${def.unit})`
       const yRaw = streams.value[streamKey].data
       const len = Math.min(xRaw.length, yRaw.length)
       const pairs = []
@@ -823,7 +832,7 @@ async function renderCharts() {
       }
       const data = downsample(pairs, maxPoints)
       return {
-        label: `${t('strava.stream.' + def.key)} (${def.unit})`,
+        label,
         data,
         borderColor: def.color,
         backgroundColor: def.color + '22',
@@ -831,7 +840,7 @@ async function renderCharts() {
         pointRadius: 0,
         tension: 0.2,
         fill: group.streams.length === 1,
-        yAxisID: `y-${streamKey}`,
+        yAxisID: `y-${idx}`,
       }
     }).filter(Boolean)
 
@@ -839,7 +848,7 @@ async function renderCharts() {
     group.streams.forEach((streamKey, idx) => {
       const def = defByKey(streamKey)
       if (!def) return
-      yScales[`y-${streamKey}`] = {
+      yScales[`y-${idx}`] = {
         type: 'linear',
         position: idx % 2 === 0 ? 'left' : 'right',
         title: { display: true, text: def.unit, color: def.color },
@@ -954,11 +963,43 @@ function mergeGroups(sourceId, targetId) {
   layoutDirty.value = true
 }
 
+// Copy: add source's streams to target without removing source and without dedup.
+// Lets users overlay the same curve multiple times.
+function copyToGroup(sourceId, targetId) {
+  if (sourceId === targetId) return
+  const source = chartLayout.value.find((g) => g.id === sourceId)
+  const target = chartLayout.value.find((g) => g.id === targetId)
+  if (!source || !target) return
+  const updated = {
+    id: target.id,
+    streams: [...target.streams, ...source.streams],
+  }
+  chartLayout.value = chartLayout.value.map((g) => (g.id === targetId ? updated : g))
+  layoutDirty.value = true
+}
+
 function splitGroup(group) {
   if (!group || group.streams.length <= 1) return
   const idx = chartLayout.value.findIndex((g) => g.id === group.id)
   if (idx < 0) return
-  const replacements = group.streams.map((s) => ({ id: s, streams: [s] }))
+  const otherGroups = chartLayout.value.filter((g) => g.id !== group.id)
+  const used = new Set(otherGroups.map((g) => g.id))
+  const replacements = []
+  for (const s of group.streams) {
+    // Skip if a solo group with this exact stream already exists somewhere.
+    if (otherGroups.some((g) => g.streams.length === 1 && g.streams[0] === s)) continue
+    // Skip if we already added a solo group for this stream during this split
+    // (group may contain duplicates from prior copy operations).
+    if (replacements.some((r) => r.streams[0] === s)) continue
+    let candidate = s
+    let suffix = 1
+    while (used.has(candidate)) {
+      suffix++
+      candidate = `${s}-${suffix}`
+    }
+    used.add(candidate)
+    replacements.push({ id: candidate, streams: [s] })
+  }
   const newLayout = [...chartLayout.value]
   newLayout.splice(idx, 1, ...replacements)
   chartLayout.value = newLayout
@@ -1076,9 +1117,11 @@ function onPointerMove(e) {
     const dy = e.clientY - pdStartY
     if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
     pdInitialized = true
-    document.body.style.cursor = 'grabbing'
   }
   pointerHitTest(e.clientX, e.clientY)
+  document.body.style.cursor = dragOverGroupId.value
+    ? (isCopyMode.value ? 'copy' : 'alias')
+    : 'grabbing'
 }
 
 function pointerHitTest(clientX, clientY) {
@@ -1086,6 +1129,7 @@ function pointerHitTest(clientX, clientY) {
   if (!elem) {
     dragOverGroupId.value = null
     dragOverSlotIndex.value = null
+    isCopyMode.value = false
     return
   }
   let node = elem
@@ -1095,17 +1139,23 @@ function pointerHitTest(clientX, clientY) {
       if (!Number.isNaN(idx)) {
         dragOverSlotIndex.value = idx
         dragOverGroupId.value = null
+        isCopyMode.value = false
       }
       return
     }
     if (node.classList?.contains('chart-group')) {
       const id = node.dataset?.groupId
       if (id && id !== dragSourceId.value) {
+        // Left half → merge ; right half → copy.
+        const rect = node.getBoundingClientRect()
+        const midX = rect.left + rect.width / 2
+        isCopyMode.value = clientX > midX
         dragOverGroupId.value = id
         dragOverSlotIndex.value = null
       } else {
         dragOverGroupId.value = null
         dragOverSlotIndex.value = null
+        isCopyMode.value = false
       }
       return
     }
@@ -1113,6 +1163,7 @@ function pointerHitTest(clientX, clientY) {
   }
   dragOverGroupId.value = null
   dragOverSlotIndex.value = null
+  isCopyMode.value = false
 }
 
 function onPointerUp() {
@@ -1128,7 +1179,12 @@ function onPointerUp() {
 
   if (pdInitialized && dragSourceId.value) {
     if (dragOverGroupId.value && dragOverGroupId.value !== dragSourceId.value) {
-      mergeGroups(dragSourceId.value, dragOverGroupId.value)
+      // isCopyMode was set by pointerHitTest based on cursor position over the target.
+      if (isCopyMode.value) {
+        copyToGroup(dragSourceId.value, dragOverGroupId.value)
+      } else {
+        mergeGroups(dragSourceId.value, dragOverGroupId.value)
+      }
     } else if (dragOverSlotIndex.value != null) {
       moveGroupToIndex(dragSourceId.value, dragOverSlotIndex.value)
     }
@@ -1137,6 +1193,7 @@ function onPointerUp() {
   dragSourceId.value = null
   dragOverGroupId.value = null
   dragOverSlotIndex.value = null
+  isCopyMode.value = false
   pdInitialized = false
 }
 
@@ -1440,10 +1497,23 @@ onBeforeUnmount(() => {
               ></div>
               <div
                 class="chart-group"
-                :class="{ 'merge-target': dragOverGroupId === group.id && dragSourceId !== group.id, dragging: dragSourceId === group.id }"
+                :class="{
+                  'merge-target': dragOverGroupId === group.id && dragSourceId !== group.id,
+                  dragging: dragSourceId === group.id,
+                }"
                 :data-group-id="group.id"
-                :data-merge-label="t('strava.layout.merge_here')"
               >
+                <div
+                  v-if="dragOverGroupId === group.id && dragSourceId !== group.id"
+                  class="chart-group-zones"
+                >
+                  <div class="chart-zone chart-zone-merge" :class="{ active: !isCopyMode }">
+                    <span>{{ t('strava.layout.merge_here') }}</span>
+                  </div>
+                  <div class="chart-zone chart-zone-copy" :class="{ active: isCopyMode }">
+                    <span>{{ t('strava.layout.copy_here') }}</span>
+                  </div>
+                </div>
                 <div
                   class="chart-group-header"
                   @mousedown="onChartPointerDown(group, $event)"
@@ -1625,28 +1695,59 @@ onBeforeUnmount(() => {
   opacity: 0.45;
 }
 .chart-group.merge-target {
-  outline: 3px dashed #0d6efd;
+  outline: 3px solid rgba(13, 110, 253, 0.45);
   outline-offset: -3px;
-  background: rgba(13, 110, 253, 0.08);
-  box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.12);
+  box-shadow: 0 0 0 4px rgba(13, 110, 253, 0.08);
 }
-.chart-group.merge-target::after {
-  content: "⤵ " attr(data-merge-label);
+.chart-group-zones {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: #0d6efd;
-  color: #fff;
-  padding: 0.5rem 1rem;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  inset: 0;
+  display: flex;
   pointer-events: none;
-  box-shadow: 0 6px 16px -4px rgba(13, 110, 253, 0.5);
   z-index: 4;
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.chart-zone {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  transition: background 0.12s, color 0.12s;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+}
+.chart-zone-merge {
+  background: linear-gradient(to right, rgba(13, 110, 253, 0.22), rgba(13, 110, 253, 0.06));
+  color: #0a58ca;
+  border-right: 2px dashed rgba(0, 0, 0, 0.15);
+}
+.chart-zone-copy {
+  background: linear-gradient(to left, rgba(25, 135, 84, 0.22), rgba(25, 135, 84, 0.06));
+  color: #146c43;
+}
+.chart-zone.active {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.chart-zone-merge.active {
+  background: linear-gradient(to right, rgba(13, 110, 253, 0.65), rgba(13, 110, 253, 0.35));
+}
+.chart-zone-copy.active {
+  background: linear-gradient(to left, rgba(25, 135, 84, 0.65), rgba(25, 135, 84, 0.35));
+}
+.chart-zone span {
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  box-shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.3);
   white-space: nowrap;
+}
+.chart-zone.active span {
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
 }
 .chart-group-header {
   cursor: grab;

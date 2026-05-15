@@ -992,9 +992,19 @@ function externalTooltipHandler(context) {
     el.style.opacity = '0'
     return
   }
-  const title = xAxis.value === 'distance'
-    ? `${xv.toFixed(2)} km`
-    : formatHMS(xv * timeFactor())
+  // Build a two-line title: primary in the current axis unit, secondary in the other.
+  const rawX = chartXToRaw(xv)
+  const idx = xValueToIndex(rawX)
+  const titleLines = []
+  if (xAxis.value === 'distance') {
+    titleLines.push({ main: true, text: `${xv.toFixed(2)} km` })
+    const t0 = streams.value?.time?.data?.[idx]
+    if (t0 != null) titleLines.push({ main: false, text: formatHMS(t0) })
+  } else {
+    titleLines.push({ main: true, text: formatHMS(xv * timeFactor()) })
+    const dm = streams.value?.distance?.data?.[idx]
+    if (dm != null) titleLines.push({ main: false, text: `${(dm / 1000).toFixed(2)} km` })
+  }
 
   const rows = []
   const seen = new Set()
@@ -1033,7 +1043,12 @@ function externalTooltipHandler(context) {
     })
   })
 
-  let html = `<div class="chart-tooltip-title">${escapeHtml(title)}</div>`
+  let html = '<div class="chart-tooltip-title">'
+  for (const line of titleLines) {
+    const cls = line.main ? 'chart-tooltip-title-main' : 'chart-tooltip-title-sub'
+    html += `<div class="${cls}">${escapeHtml(line.text)}</div>`
+  }
+  html += '</div>'
   for (const r of rows) {
     html += `<div class="chart-tooltip-row">
       <span class="chart-tooltip-swatch" style="background:${r.color}"></span>
@@ -1706,7 +1721,7 @@ onBeforeUnmount(() => {
                           :title="isDatasetHidden(group.id, sIdx) ? t('strava.layout.show_curve') : t('strava.layout.hide_curve')"
                         >
                           <span class="legend-swatch" :style="{ background: defByKey(streamKey)?.color }"></span>
-                          <span>{{ t('strava.stream.' + streamKey) }} ({{ defByKey(streamKey)?.unit }})</span>
+                          <span>{{ t('strava.stream.' + streamKey) }}</span>
                         </button>
                       </template>
                       <template v-else>
@@ -1814,20 +1829,22 @@ onBeforeUnmount(() => {
 
 .custom-legend {
   margin: 0.35rem 0 0.4rem;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
 }
 .legend-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.18rem 0.6rem;
+  gap: 0.3rem;
+  padding: 0.05rem 0.45rem;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.03);
   border: 1px solid rgba(0, 0, 0, 0.08);
   color: #495057;
+  font-size: 0.72rem;
   cursor: pointer;
   transition: background 0.12s, opacity 0.12s, color 0.12s;
   user-select: none;
+  line-height: 1.5;
 }
 .legend-pill:hover {
   background: rgba(0, 0, 0, 0.07);
@@ -1837,9 +1854,9 @@ onBeforeUnmount(() => {
   text-decoration: line-through;
 }
 .legend-swatch {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
   flex-shrink: 0;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
@@ -1856,7 +1873,7 @@ onBeforeUnmount(() => {
 }
 .chart-canvas-wrap {
   position: relative;
-  height: 180px;
+  height: 240px;
   width: 100%;
 }
 .chart-canvas-wrap canvas {
@@ -2126,10 +2143,20 @@ onBeforeUnmount(() => {
   top: 0;
 }
 .chart-tooltip-title {
-  font-weight: 600;
   margin-bottom: 0.35rem;
   padding-bottom: 0.3rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  text-align: center;
+}
+.chart-tooltip-title-main {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.chart-tooltip-title-sub {
+  font-weight: 400;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 0.1rem;
 }
 .chart-tooltip-row {
   display: flex;

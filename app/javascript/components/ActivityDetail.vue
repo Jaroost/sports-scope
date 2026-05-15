@@ -29,25 +29,6 @@ const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all 
 let xMinAll = 0
 let xMaxAll = 0
 
-const stats = computed(() => {
-  if (!activity.value) return []
-  const a = activity.value
-  const startLocal = a.start_date_local ? new Date(a.start_date_local) : null
-  const endLocal = startLocal && a.elapsed_time
-    ? new Date(startLocal.getTime() + a.elapsed_time * 1000)
-    : null
-  return [
-    { label: t('strava.distance'),       value: `${(a.distance / 1000).toFixed(2)} km`,             icon: 'fa-route' },
-    { label: t('strava.duration'),       value: formatDuration(a.moving_time),                       icon: 'fa-stopwatch' },
-    { label: t('strava.elapsed'),        value: formatDuration(a.elapsed_time),                      icon: 'fa-hourglass-half' },
-    { label: t('strava.elevation_gain'), value: `${Math.round(a.total_elevation_gain || 0)} m`,      icon: 'fa-mountain' },
-    { label: t('strava.avg_speed'),      value: `${((a.average_speed || 0) * 3.6).toFixed(1)} km/h`, icon: 'fa-gauge-high' },
-    { label: t('strava.type'),           value: a.type,                                              icon: activityIcon(a.type) },
-    { label: t('strava.start_date'),     value: startLocal ? startLocal.toLocaleString() : '–',      icon: 'fa-flag' },
-    { label: t('strava.end_date'),       value: endLocal ? endLocal.toLocaleString() : '–',          icon: 'fa-flag-checkered' },
-  ]
-})
-
 function activityIcon(type) {
   const t = (type || '').toLowerCase()
   if (t.includes('run')) return 'fa-person-running'
@@ -143,6 +124,22 @@ const isCopyMode = ref(false) // true while Ctrl/Cmd is held during a drag
 // All visible groups are kept in chartLayout (kept in sync via syncLayoutWithStreams),
 // so the displayed layout is just chartLayout itself — no virtual groups.
 const availableLayout = computed(() => (streams.value ? chartLayout.value : []))
+
+// Deduplicated list of streams currently displayed somewhere — used to
+// render mean chips in the sticky header.
+const visibleStreams = computed(() => {
+  const seen = new Set()
+  const result = []
+  for (const group of availableLayout.value) {
+    for (const s of group.streams) {
+      if (!seen.has(s)) {
+        seen.add(s)
+        result.push(s)
+      }
+    }
+  }
+  return result
+})
 
 function timeFactor() {
   return timeUnit.value === 'h' ? 3600 : timeUnit.value === 'min' ? 60 : 1
@@ -835,11 +832,11 @@ async function renderCharts() {
         label,
         data,
         borderColor: def.color,
-        backgroundColor: def.color + '22',
+        backgroundColor: def.color + '33',
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.2,
-        fill: group.streams.length === 1,
+        fill: true,
         yAxisID: `y-${idx}`,
       }
     }).filter(Boolean)
@@ -868,7 +865,13 @@ async function renderCharts() {
         interaction: { intersect: false, mode: 'nearest' },
         events: ['mousedown', 'mousemove', 'mouseup', 'mouseout', 'click', 'touchstart', 'touchmove', 'touchend'],
         plugins: {
-          legend: { display: group.streams.length > 1, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+          // Always show the legend — Chart.js's default onClick toggles the
+          // dataset's visibility, which is exactly what the user wants.
+          legend: {
+            display: true,
+            position: 'top',
+            labels: { boxWidth: 12, font: { size: 11 }, usePointStyle: true },
+          },
         },
         scales: {
           x: {
@@ -1356,25 +1359,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div class="row g-2 mb-3">
-        <div
-          v-for="(s, i) in stats"
-          :key="i"
-          class="col-6 col-md-4 col-lg-3"
-        >
-          <div class="stat-card">
-            <span class="stat-icon">
-              <i :class="`fa-solid ${s.icon}`" aria-hidden="true"></i>
-            </span>
-            <div>
-              <div class="stat-label">{{ s.label }}</div>
-              <div class="stat-value">{{ s.value }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card shadow-sm border-0">
+      <div class="card shadow-sm border-0 mt-3">
         <div class="card-header activity-card-header charts-sticky-header">
           <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
             <h3 class="h6 mb-0 d-flex align-items-center gap-2">
@@ -1438,40 +1423,44 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          <div v-if="availableCharts.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
+          <div v-if="availableLayout.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
             <span class="range-chip" :class="selection ? 'range-chip-accent' : 'range-chip-muted'">
               <i :class="`fa-solid ${selection ? 'fa-crop-simple' : 'fa-bars-staggered'}`" aria-hidden="true"></i>
               <span>{{ selection ? t('strava.selection') : t('strava.whole_activity') }}</span>
             </span>
             <span v-if="rangePointCount() != null" class="range-chip">
               <i class="fa-solid fa-hashtag" aria-hidden="true"></i>
-              <span class="range-chip-label">{{ t('strava.range_stats.count') }}</span>
               <strong>{{ rangePointCount() }}</strong>
             </span>
             <span v-if="rangeDuration() != null" class="range-chip">
               <i class="fa-regular fa-clock" aria-hidden="true"></i>
-              <span class="range-chip-label">{{ t('strava.range_stats.duration') }}</span>
               <strong>{{ formatHMS(rangeDuration()) }}</strong>
             </span>
             <span v-if="rangeDistance() != null" class="range-chip">
               <i class="fa-solid fa-route" aria-hidden="true"></i>
-              <span class="range-chip-label">{{ t('strava.range_stats.distance') }}</span>
               <strong>{{ formatKm(rangeDistance()) }}</strong>
             </span>
             <span v-if="rangeElevation()" class="range-chip range-chip-success">
               <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
-              <span class="range-chip-label">{{ t('strava.range_stats.elev_gain') }}</span>
               <strong>{{ Math.round(rangeElevation().up) }} m</strong>
             </span>
             <span v-if="rangeElevation()" class="range-chip range-chip-danger">
               <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
-              <span class="range-chip-label">{{ t('strava.range_stats.elev_loss') }}</span>
               <strong>{{ Math.round(rangeElevation().down) }} m</strong>
             </span>
-            <span v-if="rangeGrade() != null" class="range-chip">
+            <span v-if="rangeGrade() != null && !visibleStreams.includes('grade_smooth')" class="range-chip">
               <i class="fa-solid fa-percent" aria-hidden="true"></i>
-              <span class="range-chip-label">{{ t('strava.range_stats.avg_grade') }}</span>
               <strong>{{ rangeGrade().toFixed(1) }} %</strong>
+            </span>
+            <span
+              v-for="streamKey in visibleStreams"
+              :key="`mean-${streamKey}`"
+              class="range-chip range-chip-stream"
+              :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
+            >
+              <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
+              <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
+              <strong v-else>–</strong>
             </span>
           </div>
         </div>
@@ -1557,30 +1546,30 @@ onBeforeUnmount(() => {
                     <div
                       v-for="streamKey in group.streams"
                       :key="streamKey"
-                      class="mb-2 stream-stats"
+                      class="stream-stats-row"
                     >
-                      <div
+                      <span
                         v-if="group.streams.length > 1"
-                        class="text-muted small fw-semibold mb-1 d-flex align-items-center gap-1"
+                        class="stream-stats-id"
                         :style="{ color: defByKey(streamKey)?.color }"
+                        :title="t('strava.stream.' + streamKey)"
                       >
                         <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-                        <span>{{ t('strava.stream.' + streamKey) }}</span>
-                      </div>
-                      <dl class="small mb-0 stats-grid" v-if="chartStats(defByKey(streamKey))">
-                        <dt class="text-muted">
-                          <i class="fa-solid fa-equals stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.mean') }}
-                        </dt>
-                        <dd>{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</dd>
-                        <dt class="text-muted">
-                          <i class="fa-solid fa-arrow-down-short-wide stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.min') }}
-                        </dt>
-                        <dd>{{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</dd>
-                        <dt class="text-muted">
-                          <i class="fa-solid fa-arrow-up-wide-short stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.max') }}
-                        </dt>
-                        <dd>{{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</dd>
-                      </dl>
+                      </span>
+                      <template v-if="chartStats(defByKey(streamKey))">
+                        <span :title="t('strava.range_stats.mean')">
+                          <i class="fa-solid fa-equals" aria-hidden="true"></i>
+                          {{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }}
+                        </span>
+                        <span :title="t('strava.range_stats.min')">
+                          <i class="fa-solid fa-arrow-down-short-wide" aria-hidden="true"></i>
+                          {{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }}
+                        </span>
+                        <span :title="t('strava.range_stats.max')">
+                          <i class="fa-solid fa-arrow-up-wide-short" aria-hidden="true"></i>
+                          {{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }}
+                        </span>
+                      </template>
                     </div>
                   </div>
                 </div>
@@ -1816,8 +1805,37 @@ onBeforeUnmount(() => {
   color: #0d6efd;
   font-weight: bold;
 }
-.stream-stats + .stream-stats {
-  padding-top: 0.4rem;
+.stream-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 0.2rem 0;
+  color: #495057;
+}
+.stream-stats-row + .stream-stats-row {
   border-top: 1px dashed rgba(0, 0, 0, 0.08);
+}
+.stream-stats-row > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.stream-stats-row > span i {
+  color: #adb5bd;
+  font-size: 0.75rem;
+}
+.stream-stats-id i {
+  color: inherit !important;
+  font-size: 0.95rem !important;
+}
+
+.range-chip-stream {
+  font-weight: 500;
+}
+.range-chip-stream strong {
+  color: inherit;
 }
 </style>

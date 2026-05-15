@@ -54,7 +54,11 @@
         "split": "Split",
         "drag_hint": "Drag a chart. Drop between two charts to reorder. On the left half of a chart to merge, on the right half to copy (overlay).",
         "merge_here": "⤵ Merge",
-        "copy_here": "⧉ Copy"
+        "copy_here": "⧉ Copy",
+        "hide_chart": "Hide chart",
+        "show_chart": "Show chart",
+        "hide_curve": "Hide curve",
+        "show_curve": "Show curve"
       },
       "loading_streams": "Loading charts…",
       "no_stream_data": "No data available for this activity.",

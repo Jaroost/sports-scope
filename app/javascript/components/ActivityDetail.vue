@@ -83,7 +83,7 @@ const availableCharts = computed(() => {
 })
 
 function defaultLayout() {
-  return chartDefs.map((def) => ({ id: def.key, streams: [def.key] }))
+  return chartDefs.map((def) => ({ id: def.key, streams: [def.key], collapsed: false }))
 }
 
 function defByKey(key) {
@@ -103,11 +103,11 @@ function syncLayoutWithStreams() {
       .map((d) => d.key),
   )
   const cleaned = chartLayout.value
-    .map((g) => ({ id: g.id, streams: g.streams.filter((k) => present.has(k)) }))
+    .map((g) => ({ id: g.id, streams: g.streams.filter((k) => present.has(k)), collapsed: !!g.collapsed }))
     .filter((g) => g.streams.length > 0)
   const referenced = new Set(cleaned.flatMap((g) => g.streams))
   const missing = [...present].filter((k) => !referenced.has(k))
-  const final = [...cleaned, ...missing.map((k) => ({ id: k, streams: [k] }))]
+  const final = [...cleaned, ...missing.map((k) => ({ id: k, streams: [k], collapsed: false }))]
   if (JSON.stringify(final) === JSON.stringify(chartLayout.value)) return
   chartLayout.value = final
 }
@@ -818,6 +818,7 @@ async function renderCharts() {
   xMaxAll = xRaw.length > 0 ? chartXFromRaw(xRaw[xRaw.length - 1]) : 0
 
   groups.forEach((group) => {
+    if (group.collapsed) return
     const canvas = document.getElementById(`chart-${group.id}`)
     if (!canvas) return
 
@@ -1011,6 +1012,7 @@ function mergeGroups(sourceId, targetId) {
   const merged = {
     id: target.id,
     streams: [...target.streams, ...source.streams.filter((s) => !target.streams.includes(s))],
+    collapsed: !!target.collapsed,
   }
   chartLayout.value = chartLayout.value
     .filter((g) => g.id !== sourceId)
@@ -1028,8 +1030,17 @@ function copyToGroup(sourceId, targetId) {
   const updated = {
     id: target.id,
     streams: [...target.streams, ...source.streams],
+    collapsed: !!target.collapsed,
   }
   chartLayout.value = chartLayout.value.map((g) => (g.id === targetId ? updated : g))
+  layoutDirty.value = true
+}
+
+function toggleCollapsed(group) {
+  const next = chartLayout.value.map((g) =>
+    g.id === group.id ? { ...g, collapsed: !g.collapsed } : g,
+  )
+  chartLayout.value = next
   layoutDirty.value = true
 }
 
@@ -1053,7 +1064,7 @@ function splitGroup(group) {
       candidate = `${s}-${suffix}`
     }
     used.add(candidate)
-    replacements.push({ id: candidate, streams: [s] })
+    replacements.push({ id: candidate, streams: [s], collapsed: false })
   }
   const newLayout = [...chartLayout.value]
   newLayout.splice(idx, 1, ...replacements)
@@ -1091,6 +1102,7 @@ async function fetchSavedLayout() {
       chartLayout.value = list.map((g) => ({
         id: String(g.id),
         streams: Array.isArray(g.streams) ? g.streams.map(String) : [],
+        collapsed: !!g.collapsed,
       }))
       layoutDirty.value = false
     }
@@ -1572,44 +1584,57 @@ onBeforeUnmount(() => {
                       <span class="drag-handle">
                         <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
                       </span>
-                      <span
-                        v-for="streamKey in group.streams"
-                        :key="streamKey"
-                        class="text-muted small d-flex align-items-center gap-1"
-                      >
-                        <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" :style="{ color: defByKey(streamKey)?.color }" aria-hidden="true"></i>
-                        <span>{{ t('strava.stream.' + streamKey) }} ({{ defByKey(streamKey)?.unit }})</span>
-                      </span>
+                      <template v-if="!group.collapsed">
+                        <button
+                          v-for="(streamKey, sIdx) in group.streams"
+                          :key="`legend-${group.id}-${sIdx}`"
+                          type="button"
+                          class="legend-pill"
+                          :class="{ hidden: isDatasetHidden(group.id, sIdx) }"
+                          @click="toggleDataset(group.id, sIdx)"
+                          @mousedown.stop
+                          :title="isDatasetHidden(group.id, sIdx) ? t('strava.layout.show_curve') : t('strava.layout.hide_curve')"
+                        >
+                          <span class="legend-swatch" :style="{ background: defByKey(streamKey)?.color }"></span>
+                          <span>{{ t('strava.stream.' + streamKey) }} ({{ defByKey(streamKey)?.unit }})</span>
+                        </button>
+                      </template>
+                      <template v-else>
+                        <span
+                          v-for="streamKey in group.streams"
+                          :key="streamKey"
+                          class="legend-pill legend-pill-static"
+                        >
+                          <span class="legend-swatch" :style="{ background: defByKey(streamKey)?.color }"></span>
+                          <span>{{ t('strava.stream.' + streamKey) }}</span>
+                        </span>
+                      </template>
                     </div>
-                    <button
-                      v-if="group.streams.length > 1"
-                      type="button"
-                      class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-                      draggable="false"
-                      @click="splitGroup(group)"
-                      @mousedown.stop
-                      :title="t('strava.layout.split')"
-                    >
-                      <i class="fa-solid fa-object-ungroup" aria-hidden="true"></i>
-                      <span>{{ t('strava.layout.split') }}</span>
-                    </button>
+                    <div class="d-flex gap-1">
+                      <button
+                        v-if="group.streams.length > 1 && !group.collapsed"
+                        type="button"
+                        class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                        @click="splitGroup(group)"
+                        @mousedown.stop
+                        :title="t('strava.layout.split')"
+                      >
+                        <i class="fa-solid fa-object-ungroup" aria-hidden="true"></i>
+                        <span>{{ t('strava.layout.split') }}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                        @click="toggleCollapsed(group)"
+                        @mousedown.stop
+                        :title="group.collapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
+                      >
+                        <i :class="group.collapsed ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" aria-hidden="true"></i>
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div class="custom-legend d-flex flex-wrap gap-2">
-                  <button
-                    v-for="(streamKey, sIdx) in group.streams"
-                    :key="`legend-${group.id}-${sIdx}`"
-                    type="button"
-                    class="legend-pill"
-                    :class="{ hidden: isDatasetHidden(group.id, sIdx) }"
-                    @click="toggleDataset(group.id, sIdx)"
-                    @mousedown.stop
-                  >
-                    <span class="legend-swatch" :style="{ background: defByKey(streamKey)?.color }"></span>
-                    <span>{{ t('strava.stream.' + streamKey) }} ({{ defByKey(streamKey)?.unit }})</span>
-                  </button>
-                </div>
-                <div class="row g-2 align-items-stretch">
+                <div v-if="!group.collapsed" class="row g-2 align-items-stretch">
                   <div class="col-lg-9">
                     <div class="chart-canvas-wrap">
                       <canvas :id="`chart-${group.id}`"></canvas>
@@ -1710,6 +1735,14 @@ onBeforeUnmount(() => {
 }
 .legend-pill.hidden .legend-swatch {
   background: #adb5bd !important;
+}
+.legend-pill-static {
+  cursor: default;
+  background: rgba(0, 0, 0, 0.02);
+  border-style: dashed;
+}
+.legend-pill-static:hover {
+  background: rgba(0, 0, 0, 0.02);
 }
 .chart-canvas-wrap {
   position: relative;

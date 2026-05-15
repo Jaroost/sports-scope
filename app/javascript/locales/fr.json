@@ -54,7 +54,11 @@
         "split": "Séparer",
         "drag_hint": "Glisser un graphique. Déposer entre 2 graphiques pour réordonner. Sur la moitié gauche d'un graphique pour fusionner, sur la moitié droite pour copier (superposer).",
         "merge_here": "⤵ Fusionner",
-        "copy_here": "⧉ Copier"
+        "copy_here": "⧉ Copier",
+        "hide_chart": "Cacher le graphique",
+        "show_chart": "Afficher le graphique",
+        "hide_curve": "Cacher la courbe",
+        "show_curve": "Afficher la courbe"
       },
       "loading_streams": "Chargement des graphiques…",
       "no_stream_data": "Aucune donnée disponible pour cette activité.",

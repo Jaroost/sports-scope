@@ -21,7 +21,8 @@ class PreferencesController < ApplicationController
       id = (h["id"] || h[:id]).to_s
       streams = Array(h["streams"] || h[:streams]).map(&:to_s).select { |s| ALLOWED_STREAMS.include?(s) }
       next nil if streams.empty? || id.blank?
-      { "id" => id, "streams" => streams.uniq.take(MAX_STREAMS_PER_GROUP) }
+      collapsed = !!(h["collapsed"] || h[:collapsed])
+      { "id" => id, "streams" => streams.uniq.take(MAX_STREAMS_PER_GROUP), "collapsed" => collapsed }
     end.compact
 
     current_user.update!(chart_layout: sanitized)

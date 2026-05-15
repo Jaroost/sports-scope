@@ -6,6 +6,9 @@
     <meta name="i18n-locale" content="<%= I18n.locale %>">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
+    <% if ENV["THUNDERFOREST_API_KEY"].present? %>
+      <meta name="thunderforest-api-key" content="<%= ENV["THUNDERFOREST_API_KEY"] %>">
+    <% end %>
 
     <%= yield :head %>
 

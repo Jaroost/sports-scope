@@ -23,6 +23,7 @@ let markerA = null
 let markerB = null
 let isDragging = false
 let dragRafPending = false
+const climbMarkers = []
 const chartInstances = new Map()
 const wheelHandlers = new Map()
 const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all charts
@@ -603,7 +604,7 @@ async function renderMap() {
 
   mapInstance = new maplibregl.Map({
     container: mapEl.value,
-    style: 'https://tiles.openfreemap.org/styles/liberty',
+    style: cyclOsmStyle(),
     bounds,
     fitBoundsOptions: { padding: 40 },
     maxPitch: 75,
@@ -611,17 +612,55 @@ async function renderMap() {
   mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
 
   mapInstance.on('load', () => {
+    const altitudes = streams.value?.altitude?.data
+    const distances = streams.value?.distance?.data
+    const grades = streams.value?.grade_smooth?.data
+    const segments = buildGradedSegments(coords, grades, altitudes, distances)
+    const hasGrades = segments.length > 0 && (grades?.length || (altitudes && distances))
+
+    // Single LineString — kept around so the direction-arrow symbol layer has
+    // a continuous geometry to follow even when the visible route is split
+    // into many graded segments.
     mapInstance.addSource('route', {
       type: 'geojson',
       data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } },
     })
-    mapInstance.addLayer({
-      id: 'route-line',
-      type: 'line',
-      source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#fc4c02', 'line-width': 4 },
-    })
+
+    if (hasGrades) {
+      mapInstance.addSource('route-graded', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: segments },
+      })
+      mapInstance.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route-graded',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+          'line-color': [
+            'match', ['get', 'bucket'],
+            0, GRADE_BUCKETS[0].color,
+            1, GRADE_BUCKETS[1].color,
+            2, GRADE_BUCKETS[2].color,
+            3, GRADE_BUCKETS[3].color,
+            4, GRADE_BUCKETS[4].color,
+            5, GRADE_BUCKETS[5].color,
+            6, GRADE_BUCKETS[6].color,
+            /* default */ '#fc4c02',
+          ],
+          'line-width': 5,
+        },
+      })
+    } else {
+      // Fallback for activities without altitude/distance/grade.
+      mapInstance.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#fc4c02', 'line-width': 4 },
+      })
+    }
 
     mapInstance.addImage('route-arrow', buildArrowIcon())
     mapInstance.addLayer({
@@ -654,8 +693,69 @@ async function renderMap() {
     if (hasLatLngStream.value) {
       installMapHandles(maplibregl)
     }
+    installClimbMarkers(maplibregl)
     refreshSelectedRoute()
   })
+}
+
+function cyclOsmStyle() {
+  return {
+    version: 8,
+    sources: {
+      'cyclosm-raster': {
+        type: 'raster',
+        tiles: [
+          'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
+          'https://b.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
+          'https://c.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
+        ],
+        tileSize: 256,
+        maxzoom: 20,
+        attribution:
+          '© <a href="https://www.cyclosm.org" target="_blank" rel="noopener">CyclOSM</a> | © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+      },
+    },
+    layers: [
+      { id: 'cyclosm-base', type: 'raster', source: 'cyclosm-raster' },
+    ],
+  }
+}
+
+function installClimbMarkers(maplibregl) {
+  // Always start clean: re-rendering the map shouldn't pile markers up.
+  climbMarkers.forEach((m) => m.remove())
+  climbMarkers.length = 0
+  const latlng = streams.value?.latlng?.data
+  const altitudes = streams.value?.altitude?.data
+  const distances = streams.value?.distance?.data
+  const grades = streams.value?.grade_smooth?.data
+  if (!latlng || !altitudes || !distances) return
+  const climbs = detectClimbs(grades, altitudes, distances)
+  climbs.forEach((climb) => {
+    const pt = latlng[climb.startIdx]
+    if (!pt) return
+    const el = buildClimbMarkerEl(climb)
+    const marker = new maplibregl.Marker({ element: el, anchor: 'bottom-left' })
+      .setLngLat([pt[1], pt[0]])
+      .addTo(mapInstance)
+    climbMarkers.push(marker)
+  })
+}
+
+function buildClimbMarkerEl(climb) {
+  const el = document.createElement('div')
+  const catClass = climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'
+  el.className = `climb-marker ${catClass}`
+  const lengthStr = climb.lengthM >= 1000
+    ? `${(climb.lengthM / 1000).toFixed(1)} km`
+    : `${Math.round(climb.lengthM)} m`
+  el.innerHTML = `
+    <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+    <span class="climb-marker-stats">+${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)}%</span>
+    ${climb.category ? `<span class="climb-marker-cat">Cat ${climb.category}</span>` : ''}
+  `
+  el.title = `${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
+  return el
 }
 
 function buildArrowIcon() {
@@ -799,6 +899,109 @@ function refreshSelectedRoute() {
     type: 'Feature',
     geometry: { type: 'LineString', coordinates: coords },
   })
+}
+
+// ─── Cycling helpers: grade-colored route + climb detection ──────────────────
+
+const GRADE_BUCKETS = [
+  { max: -8,       color: '#1e3a8a' }, // very steep descent
+  { max: -3,       color: '#3b82f6' }, // descent
+  { max:  3,       color: '#22c55e' }, // flat / rolling
+  { max:  6,       color: '#eab308' }, // easy climb
+  { max: 10,       color: '#f97316' }, // medium climb
+  { max: 15,       color: '#dc2626' }, // hard climb
+  { max: Infinity, color: '#7f1d1d' }, // very hard climb
+]
+
+function bucketGrade(g) {
+  for (let i = 0; i < GRADE_BUCKETS.length; i++) {
+    if (g < GRADE_BUCKETS[i].max) return i
+  }
+  return GRADE_BUCKETS.length - 1
+}
+
+function gradeForIndex(i, grades, altitudes, distances) {
+  if (grades && grades[i] != null && !Number.isNaN(grades[i])) return grades[i]
+  if (!altitudes || !distances || i + 1 >= altitudes.length || i + 1 >= distances.length) return 0
+  const da = altitudes[i + 1] - altitudes[i]
+  const dd = distances[i + 1] - distances[i]
+  return dd > 0 ? (da / dd) * 100 : 0
+}
+
+function buildGradedSegments(coords, grades, altitudes, distances) {
+  if (!coords || coords.length < 2) return []
+  const features = []
+  let current = [coords[0]]
+  let curBucket = bucketGrade(gradeForIndex(0, grades, altitudes, distances))
+  for (let i = 1; i < coords.length; i++) {
+    const g = gradeForIndex(Math.min(i, coords.length - 2), grades, altitudes, distances)
+    const b = bucketGrade(g)
+    current.push(coords[i])
+    if (b !== curBucket && current.length >= 2) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: current.slice() },
+        properties: { bucket: curBucket },
+      })
+      current = [coords[i]]
+      curBucket = b
+    }
+  }
+  if (current.length >= 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: current },
+      properties: { bucket: curBucket },
+    })
+  }
+  return features
+}
+
+function climbCategory(lengthKm, avgGrade) {
+  const score = lengthKm * Math.pow(Math.max(0, avgGrade), 2)
+  if (score >= 400) return 'HC'
+  if (score >= 200) return '1'
+  if (score >= 100) return '2'
+  if (score >= 60) return '3'
+  if (score >= 25) return '4'
+  return null
+}
+
+function detectClimbs(grades, altitudes, distances) {
+  if (!altitudes || !distances || altitudes.length === 0 || distances.length === 0) return []
+  const MIN_GRADE = 2
+  const MIN_GAIN_M = 60
+  const MIN_LENGTH_M = 500
+  const MERGE_GAP_M = 250
+  const len = Math.min(altitudes.length, distances.length, grades?.length ?? altitudes.length)
+  const raw = []
+  let startIdx = -1
+  for (let i = 0; i < len; i++) {
+    const g = gradeForIndex(i, grades, altitudes, distances)
+    if (g >= MIN_GRADE) {
+      if (startIdx < 0) startIdx = i
+    } else if (startIdx >= 0) {
+      raw.push({ startIdx, endIdx: i })
+      startIdx = -1
+    }
+  }
+  if (startIdx >= 0) raw.push({ startIdx, endIdx: len - 1 })
+  const merged = []
+  for (const r of raw) {
+    if (!merged.length) { merged.push(r); continue }
+    const prev = merged[merged.length - 1]
+    const gap = distances[r.startIdx] - distances[prev.endIdx]
+    if (gap <= MERGE_GAP_M) prev.endIdx = r.endIdx
+    else merged.push(r)
+  }
+  return merged
+    .map((r) => {
+      const gain = altitudes[r.endIdx] - altitudes[r.startIdx]
+      const lengthM = distances[r.endIdx] - distances[r.startIdx]
+      const avgGrade = lengthM > 0 ? (gain / lengthM) * 100 : 0
+      return { ...r, gain, lengthM, avgGrade, category: climbCategory(lengthM / 1000, avgGrade) }
+    })
+    .filter((c) => c.gain >= MIN_GAIN_M && c.lengthM >= MIN_LENGTH_M && c.avgGrade >= MIN_GRADE)
 }
 
 function downsample(arr, maxPoints) {
@@ -1632,6 +1835,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  climbMarkers.forEach((m) => m.remove())
+  climbMarkers.length = 0
   if (mapInstance) {
     mapInstance.remove()
     mapInstance = null
@@ -2410,4 +2615,40 @@ onBeforeUnmount(() => {
   font-weight: 600;
   padding-left: 0.55rem;
 }
+
+.climb-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.18rem 0.5rem 0.18rem 0.45rem;
+  border-radius: 14px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border: 2px solid currentColor;
+  box-shadow: 0 4px 10px -3px rgba(0, 0, 0, 0.35);
+  cursor: default;
+  transform: translateY(-4px);
+}
+.climb-marker i { font-size: 0.85rem; }
+.climb-marker .climb-marker-stats { color: #212529; }
+.climb-marker .climb-marker-cat {
+  background: currentColor;
+  color: #fff !important;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+.climb-marker .climb-marker-cat::first-letter { text-transform: uppercase; }
+/* Force the badge's inner text to be white via a child trick — the `currentColor`
+   trick above colours background; the children inherit current text colour. */
+.climb-cat-HC    { color: #111827; }
+.climb-cat-1     { color: #b91c1c; }
+.climb-cat-2     { color: #ea580c; }
+.climb-cat-3     { color: #ca8a04; }
+.climb-cat-4     { color: #16a34a; }
+.climb-cat-uncat { color: #6c757d; }
 </style>

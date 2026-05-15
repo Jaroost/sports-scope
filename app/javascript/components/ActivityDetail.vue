@@ -120,6 +120,11 @@ const dragSourceId = ref(null)
 const dragOverGroupId = ref(null)
 const dragOverSlotIndex = ref(null)
 const isCopyMode = ref(false) // true while Ctrl/Cmd is held during a drag
+// groupId -> Set<datasetIndex> — which curves are currently hidden via the
+// custom legend pills (Chart.js's built-in legend click was unreliable in
+// our multi-axis setup).
+const hiddenDatasets = ref(new Map())
+const is3D = ref(false)
 
 // All visible groups are kept in chartLayout (kept in sync via syncLayoutWithStreams),
 // so the displayed layout is just chartLayout itself — no virtual groups.
@@ -474,7 +479,11 @@ const dragSelectPlugin = {
 
     if (isStart) {
       const area = chart.chartArea
+      // Bail out for clicks outside the plotting area (legend at the top, axis
+      // labels at the bottom/sides) — otherwise we'd start a drag-select and
+      // swallow the legend's own click handler.
       if (e.x < area.left - HANDLE_TOL || e.x > area.right + HANDLE_TOL) return
+      if (e.y < area.top || e.y > area.bottom) return
       const handle = detectChartHandle(chart, e.x)
       if (handle) {
         st.mode = 'handle'
@@ -573,7 +582,9 @@ async function renderMap() {
     style: 'https://tiles.openfreemap.org/styles/liberty',
     bounds,
     fitBoundsOptions: { padding: 40 },
+    maxPitch: 75,
   })
+  mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
 
   mapInstance.on('load', () => {
     mapInstance.addSource('route', {
@@ -865,13 +876,9 @@ async function renderCharts() {
         interaction: { intersect: false, mode: 'nearest' },
         events: ['mousedown', 'mousemove', 'mouseup', 'mouseout', 'click', 'touchstart', 'touchmove', 'touchend'],
         plugins: {
-          // Always show the legend — Chart.js's default onClick toggles the
-          // dataset's visibility, which is exactly what the user wants.
-          legend: {
-            display: true,
-            position: 'top',
-            labels: { boxWidth: 12, font: { size: 11 }, usePointStyle: true },
-          },
+          // Built-in legend disabled in favor of the custom Vue legend pills
+          // above each chart — gives reliable click-to-toggle behavior.
+          legend: { display: false },
         },
         scales: {
           x: {
@@ -949,6 +956,51 @@ function destroyCharts() {
   wheelHandlers.clear()
   chartInstances.forEach((c) => c.destroy())
   chartInstances.clear()
+  hiddenDatasets.value = new Map()
+}
+
+function isDatasetHidden(groupId, idx) {
+  return hiddenDatasets.value.get(groupId)?.has(idx) || false
+}
+
+function toggleDataset(groupId, idx) {
+  const chart = chartInstances.get(groupId)
+  if (!chart) return
+  const prev = hiddenDatasets.value.get(groupId) || new Set()
+  const next = new Set(prev)
+  if (next.has(idx)) {
+    next.delete(idx)
+    chart.show(idx)
+  } else {
+    next.add(idx)
+    chart.hide(idx)
+  }
+  const newMap = new Map(hiddenDatasets.value)
+  newMap.set(groupId, next)
+  hiddenDatasets.value = newMap
+}
+
+const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+
+function toggleMap3D() {
+  if (!mapInstance) return
+  is3D.value = !is3D.value
+  if (is3D.value) {
+    if (!mapInstance.getSource('terrain-dem')) {
+      mapInstance.addSource('terrain-dem', {
+        type: 'raster-dem',
+        tiles: [TERRAIN_TILES],
+        encoding: 'terrarium',
+        tileSize: 256,
+        maxzoom: 14,
+      })
+    }
+    mapInstance.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
+    mapInstance.easeTo({ pitch: 60, bearing: -20, duration: 700 })
+  } else {
+    mapInstance.setTerrain(null)
+    mapInstance.easeTo({ pitch: 0, bearing: 0, duration: 700 })
+  }
 }
 
 function mergeGroups(sourceId, targetId) {
@@ -1351,7 +1403,18 @@ onBeforeUnmount(() => {
           <h2 class="h5 mb-0">{{ activity.name }}</h2>
         </div>
         <div class="card-body p-0">
-          <div v-if="hasRoute" ref="mapEl" class="activity-map"></div>
+          <div v-if="hasRoute" class="map-wrap">
+            <div ref="mapEl" class="activity-map"></div>
+            <button
+              type="button"
+              class="btn btn-sm btn-light shadow-sm map-3d-btn d-flex align-items-center gap-1"
+              @click="toggleMap3D"
+              :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
+            >
+              <i :class="is3D ? 'fa-solid fa-map' : 'fa-solid fa-cube'" aria-hidden="true"></i>
+              <span class="fw-semibold">{{ is3D ? '2D' : '3D' }}</span>
+            </button>
+          </div>
           <div v-else class="alert alert-info m-3 mb-0 d-flex align-items-center gap-2">
             <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
             <span>{{ t('strava.no_route_data') }}</span>
@@ -1424,10 +1487,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div v-if="availableLayout.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
-            <span class="range-chip" :class="selection ? 'range-chip-accent' : 'range-chip-muted'">
-              <i :class="`fa-solid ${selection ? 'fa-crop-simple' : 'fa-bars-staggered'}`" aria-hidden="true"></i>
-              <span>{{ selection ? t('strava.selection') : t('strava.whole_activity') }}</span>
-            </span>
             <span v-if="rangePointCount() != null" class="range-chip">
               <i class="fa-solid fa-hashtag" aria-hidden="true"></i>
               <strong>{{ rangePointCount() }}</strong>
@@ -1536,6 +1595,20 @@ onBeforeUnmount(() => {
                     </button>
                   </div>
                 </div>
+                <div class="custom-legend d-flex flex-wrap gap-2">
+                  <button
+                    v-for="(streamKey, sIdx) in group.streams"
+                    :key="`legend-${group.id}-${sIdx}`"
+                    type="button"
+                    class="legend-pill"
+                    :class="{ hidden: isDatasetHidden(group.id, sIdx) }"
+                    @click="toggleDataset(group.id, sIdx)"
+                    @mousedown.stop
+                  >
+                    <span class="legend-swatch" :style="{ background: defByKey(streamKey)?.color }"></span>
+                    <span>{{ t('strava.stream.' + streamKey) }} ({{ defByKey(streamKey)?.unit }})</span>
+                  </button>
+                </div>
                 <div class="row g-2 align-items-stretch">
                   <div class="col-lg-9">
                     <div class="chart-canvas-wrap">
@@ -1557,13 +1630,13 @@ onBeforeUnmount(() => {
                         <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
                       </span>
                       <template v-if="chartStats(defByKey(streamKey))">
-                        <span :title="t('strava.range_stats.mean')">
-                          <i class="fa-solid fa-equals" aria-hidden="true"></i>
-                          {{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }}
-                        </span>
                         <span :title="t('strava.range_stats.min')">
                           <i class="fa-solid fa-arrow-down-short-wide" aria-hidden="true"></i>
                           {{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }}
+                        </span>
+                        <span :title="t('strava.range_stats.mean')">
+                          <i class="fa-solid fa-equals" aria-hidden="true"></i>
+                          {{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }}
                         </span>
                         <span :title="t('strava.range_stats.max')">
                           <i class="fa-solid fa-arrow-up-wide-short" aria-hidden="true"></i>
@@ -1588,9 +1661,55 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.map-wrap {
+  position: relative;
+}
 .activity-map {
   height: 420px;
   width: 100%;
+}
+.map-3d-btn {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.custom-legend {
+  margin: 0.35rem 0 0.4rem;
+  font-size: 0.78rem;
+}
+.legend-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #495057;
+  cursor: pointer;
+  transition: background 0.12s, opacity 0.12s, color 0.12s;
+  user-select: none;
+}
+.legend-pill:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+.legend-pill.hidden {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+.legend-pill.hidden .legend-swatch {
+  background: #adb5bd !important;
 }
 .chart-canvas-wrap {
   position: relative;

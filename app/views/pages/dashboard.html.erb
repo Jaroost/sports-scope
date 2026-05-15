@@ -1,0 +1,15 @@
+<% content_for :title, t("nav.dashboard") %>
+
+<h1 class="mb-4"><%= t("nav.dashboard") %></h1>
+<p class="text-muted">
+  <%= t("app.tagline") %> · <strong><%= current_user.display_name %></strong>
+</p>
+
+<% if current_user.strava_linked? %>
+  <div data-vue-component="HelloStrava"></div>
+<% else %>
+  <div class="alert alert-info">
+    <%= t("strava.not_linked") %>
+    <%= button_to t("nav.link_strava"), "/auth/strava", method: :post, class: "btn btn-warning ms-2", data: { turbo: false } %>
+  </div>
+<% end %>

@@ -1,0 +1,21 @@
+fr:
+  app:
+    title: "Sports Scope"
+    tagline: "Vos entraînements, en un coup d'œil."
+  nav:
+    home: "Accueil"
+    dashboard: "Tableau de bord"
+    login: "Se connecter"
+    logout: "Se déconnecter"
+    link_strava: "Lier Strava"
+  auth:
+    signed_in: "Bienvenue !"
+    login_first: "Veuillez vous connecter d'abord."
+    login_required: "Vous devez vous connecter pour accéder à cette page."
+    strava_linked: "Compte Strava lié avec succès."
+  strava:
+    recent_activities: "Activités récentes"
+    no_activities: "Aucune activité pour l'instant."
+    not_linked: "Liez votre compte Strava pour voir vos activités."
+  pages:
+    home_lead: "Une application Rails 8 d'exemple avec Keycloak SSO, OAuth Strava, îlots Vue et Vite."

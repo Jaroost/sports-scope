@@ -1,0 +1,9 @@
+{
+  "en": {
+    "strava": {
+      "recent_activities": "Recent activities",
+      "no_activities": "No activities yet.",
+      "not_linked": "Connect your Strava account to see your activities."
+    }
+  }
+}

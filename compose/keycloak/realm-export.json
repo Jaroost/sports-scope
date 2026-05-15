@@ -1,0 +1,69 @@
+{
+  "id": "sports-scope",
+  "realm": "sports-scope",
+  "displayName": "Sports Scope",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "defaultRoles": ["uma_authorization", "offline_access"],
+  "requiredCredentials": ["password"],
+  "passwordPolicy": "length(8)",
+  "clients": [
+    {
+      "clientId": "rails-app",
+      "name": "Sports Scope Rails App",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "${env.RAILS_KEYCLOAK_CLIENT_SECRET}",
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "demo@sports-scope.local",
+      "email": "demo@sports-scope.local",
+      "firstName": "Demo",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demopass",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "all": {
+    "sourceCodeDir": "app/javascript",
+    "watchAdditionalPaths": [],
+    "additionalEntrypoints": [
+      "~/entrypoints/*.{js,ts}",
+      "~/entrypoints/*.{css,scss}"
+    ]
+  },
+  "development": {
+    "autoBuild": false,
+    "publicOutputDir": "vite-dev",
+    "port": 3036,
+    "host": "0.0.0.0"
+  },
+  "test": {
+    "autoBuild": true,
+    "publicOutputDir": "vite-test",
+    "port": 3037
+  }
+}

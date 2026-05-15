@@ -1,0 +1,123 @@
+name: sports-scope
+
+services:
+  db_app:
+    image: postgres:18.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: sports_scope_development
+    volumes:
+      - db_app_data:/var/lib/postgresql
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  db_keycloak:
+    image: postgres:18.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      POSTGRES_DB: keycloak
+    volumes:
+      - db_keycloak_data:/var/lib/postgresql
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: keycloak/keycloak:latest
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db_keycloak:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
+      RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
+    volumes:
+      - ./compose/keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      db_keycloak:
+        condition: service_healthy
+
+  rails:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sports-scope-app
+    restart: unless-stopped
+    command: ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000"]
+    environment:
+      RAILS_ENV: development
+      DATABASE_HOST: db_app
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      VITE_RUBY_HOST: vite
+      VITE_RUBY_PORT: 3036
+      VITE_RUBY_SKIP_COMPATIBILITY_CHECK: "true"
+      KEYCLOAK_BASE_URL: http://keycloak:8080
+      KEYCLOAK_REALM: sports-scope
+      KEYCLOAK_CLIENT_ID: rails-app
+      RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
+      APP_HOST: http://localhost:3000
+    volumes:
+      - .:/app
+      - bundle_cache:/usr/local/bundle
+      - node_modules_cache:/app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      db_app:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+
+  vite:
+    image: sports-scope-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["bundle", "exec", "vite", "dev"]
+    environment:
+      RAILS_ENV: development
+      VITE_RUBY_HOST: 0.0.0.0
+      VITE_RUBY_PORT: 3036
+      VITE_RUBY_SKIP_COMPATIBILITY_CHECK: "true"
+    volumes:
+      - .:/app
+      - bundle_cache:/usr/local/bundle
+      - node_modules_cache:/app/node_modules
+    ports:
+      - "3036:3036"
+    depends_on:
+      - rails
+
+volumes:
+  db_app_data:
+  db_keycloak_data:
+  bundle_cache:
+  node_modules_cache:

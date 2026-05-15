@@ -1,0 +1,14 @@
+<div class="px-4 py-5 my-5 text-center">
+  <h1 class="display-5 fw-bold"><%= t("app.title") %></h1>
+  <p class="lead text-muted"><%= t("pages.home_lead") %></p>
+
+  <% if user_signed_in? %>
+    <p>
+      <%= link_to t("nav.dashboard"), dashboard_path, class: "btn btn-primary btn-lg" %>
+    </p>
+  <% else %>
+    <p>
+      <%= button_to t("nav.login"), "/auth/keycloak", method: :post, class: "btn btn-primary btn-lg", data: { turbo: false } %>
+    </p>
+  <% end %>
+</div>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="<%= I18n.locale %>">
+  <head>
+    <title><%= content_for(:title) || t("app.title") %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="i18n-locale" content="<%= I18n.locale %>">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+
+    <link rel="icon" href="/icon.png" type="image/png">
+    <link rel="icon" href="/icon.svg" type="image/svg+xml">
+
+    <%= vite_client_tag %>
+    <%= vite_stylesheet_tag 'application' %>
+    <%= vite_javascript_tag 'application' %>
+  </head>
+
+  <body>
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark fixed-top">
+      <div class="container">
+        <%= link_to t("app.title"), root_path, class: "navbar-brand sports-scope-brand" %>
+        <div class="collapse navbar-collapse">
+          <ul class="navbar-nav me-auto">
+            <li class="nav-item">
+              <%= link_to t("nav.home"), root_path, class: "nav-link" %>
+            </li>
+            <% if user_signed_in? %>
+              <li class="nav-item">
+                <%= link_to t("nav.dashboard"), dashboard_path, class: "nav-link" %>
+              </li>
+            <% end %>
+          </ul>
+          <ul class="navbar-nav">
+            <li class="nav-item">
+              <%= link_to "EN", url_for(locale: :en), class: "nav-link #{'active' if I18n.locale == :en}" %>
+            </li>
+            <li class="nav-item">
+              <%= link_to "FR", url_for(locale: :fr), class: "nav-link #{'active' if I18n.locale == :fr}" %>
+            </li>
+            <% if user_signed_in? %>
+              <% unless current_user.strava_linked? %>
+                <li class="nav-item">
+                  <%= button_to t("nav.link_strava"), "/auth/strava", method: :post, class: "btn btn-warning ms-2", data: { turbo: false } %>
+                </li>
+              <% end %>
+              <li class="nav-item">
+                <%= button_to t("nav.logout"), logout_path, method: :delete, class: "btn btn-outline-light ms-2", data: { turbo: false } %>
+              </li>
+            <% else %>
+              <li class="nav-item">
+                <%= button_to t("nav.login"), "/auth/keycloak", method: :post, class: "btn btn-primary ms-2", data: { turbo: false } %>
+              </li>
+            <% end %>
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <main class="container py-4">
+      <% if notice %><div class="alert alert-success"><%= notice %></div><% end %>
+      <% if alert %><div class="alert alert-warning"><%= alert %></div><% end %>
+      <%= yield %>
+    </main>
+  </body>
+</html>

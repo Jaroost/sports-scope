@@ -1,5 +1,9 @@
 name: sports-scope
 
+x-traefik-defaults: &traefik-defaults
+  traefik.enable: "true"
+  traefik.docker.network: proxy
+
 services:
   db_app:
     image: postgres:18.4
@@ -10,8 +14,8 @@ services:
       POSTGRES_DB: sports_scope_development
     volumes:
       - db_app_data:/var/lib/postgresql
-    ports:
-      - "5432:5432"
+    networks:
+      - default
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
@@ -27,8 +31,8 @@ services:
       POSTGRES_DB: keycloak
     volumes:
       - db_keycloak_data:/var/lib/postgresql
-    ports:
-      - "5433:5432"
+    networks:
+      - default
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak"]
       interval: 5s
@@ -46,21 +50,28 @@ services:
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-keycloak}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
-      KC_HOSTNAME: localhost
+      KC_HOSTNAME: https://keycloak.localtest.me
       KC_HOSTNAME_STRICT: "false"
-      KC_HOSTNAME_STRICT_HTTPS: "false"
       KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
       RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
     volumes:
       - ./compose/keycloak:/opt/keycloak/data/import:ro
-    ports:
-      - "8080:8080"
+    networks:
+      - default
+      - proxy
     depends_on:
       db_keycloak:
         condition: service_healthy
+    labels:
+      <<: *traefik-defaults
+      traefik.http.routers.keycloak.rule: Host(`keycloak.localtest.me`)
+      traefik.http.routers.keycloak.entrypoints: websecure
+      traefik.http.routers.keycloak.tls: "true"
+      traefik.http.services.keycloak.loadbalancer.server.port: "8080"
 
   rails:
     build:
@@ -68,6 +79,7 @@ services:
       dockerfile: Dockerfile
     image: sports-scope-app
     restart: unless-stopped
+    entrypoint: ["docker-entrypoint-rails"]
     command: ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000"]
     environment:
       RAILS_ENV: development
@@ -75,25 +87,40 @@ services:
       DATABASE_PORT: 5432
       DATABASE_USER: ${POSTGRES_USER:-postgres}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      VITE_RUBY_HOST: vite
-      VITE_RUBY_PORT: 3036
+      VITE_RUBY_HOST: vite.localtest.me
+      VITE_RUBY_PORT: 443
+      VITE_RUBY_HTTPS: "true"
       VITE_RUBY_SKIP_COMPATIBILITY_CHECK: "true"
-      KEYCLOAK_BASE_URL: http://keycloak:8080
+      KEYCLOAK_BASE_URL: https://keycloak.localtest.me
       KEYCLOAK_REALM: sports-scope
       KEYCLOAK_CLIENT_ID: rails-app
       RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
-      APP_HOST: http://localhost:3000
+      APP_HOST: https://app.localtest.me
+      VITE_PUBLIC_HOST: vite.localtest.me
+      EXTRA_CA_CERT: /etc/ssl/extra/traefik.crt
     volumes:
       - .:/app
       - bundle_cache:/usr/local/bundle
       - node_modules_cache:/app/node_modules
-    ports:
-      - "3000:3000"
+      - /home/user/traefik-docker/certs/cert.pem:/etc/ssl/extra/traefik.crt:ro
+    extra_hosts:
+      - "keycloak.localtest.me:host-gateway"
+      - "vite.localtest.me:host-gateway"
+      - "app.localtest.me:host-gateway"
+    networks:
+      - default
+      - proxy
     depends_on:
       db_app:
         condition: service_healthy
       keycloak:
         condition: service_started
+    labels:
+      <<: *traefik-defaults
+      traefik.http.routers.rails.rule: Host(`app.localtest.me`)
+      traefik.http.routers.rails.entrypoints: websecure
+      traefik.http.routers.rails.tls: "true"
+      traefik.http.services.rails.loadbalancer.server.port: "3000"
 
   vite:
     image: sports-scope-app
@@ -101,23 +128,37 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
+    entrypoint: ["docker-entrypoint-vite"]
     command: ["bundle", "exec", "vite", "dev"]
     environment:
       RAILS_ENV: development
       VITE_RUBY_HOST: 0.0.0.0
       VITE_RUBY_PORT: 3036
       VITE_RUBY_SKIP_COMPATIBILITY_CHECK: "true"
+      VITE_PUBLIC_HOST: vite.localtest.me
     volumes:
       - .:/app
       - bundle_cache:/usr/local/bundle
       - node_modules_cache:/app/node_modules
-    ports:
-      - "3036:3036"
+    networks:
+      - default
+      - proxy
     depends_on:
       - rails
+    labels:
+      <<: *traefik-defaults
+      traefik.http.routers.vite.rule: Host(`vite.localtest.me`)
+      traefik.http.routers.vite.entrypoints: websecure
+      traefik.http.routers.vite.tls: "true"
+      traefik.http.services.vite.loadbalancer.server.port: "3036"
 
 volumes:
   db_app_data:
   db_keycloak_data:
   bundle_cache:
   node_modules_cache:
+
+networks:
+  default:
+  proxy:
+    external: true

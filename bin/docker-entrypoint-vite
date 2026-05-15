@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -e
+
+if [[ -f /app/package.json ]]; then
+  echo "Checking pnpm packages..."
+  if [[ ! -d /app/node_modules ]] || [[ /app/pnpm-lock.yaml -nt /app/node_modules ]]; then
+    pnpm install --frozen-lockfile || pnpm install
+  fi
+fi
+
+exec "$@"

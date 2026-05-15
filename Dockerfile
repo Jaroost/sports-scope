@@ -28,10 +28,10 @@ RUN apt-get update -qq && \
 
 WORKDIR /app
 
-COPY bin/docker-entrypoint /usr/local/bin/docker-entrypoint
-RUN chmod +x /usr/local/bin/docker-entrypoint
+COPY bin/docker-entrypoint-rails /usr/local/bin/docker-entrypoint-rails
+COPY bin/docker-entrypoint-vite /usr/local/bin/docker-entrypoint-vite
+RUN chmod +x /usr/local/bin/docker-entrypoint-rails /usr/local/bin/docker-entrypoint-vite
 
 EXPOSE 3000 3036
 
-ENTRYPOINT ["docker-entrypoint"]
 CMD ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000"]

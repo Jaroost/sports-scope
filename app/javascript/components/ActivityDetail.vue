@@ -27,6 +27,7 @@ const climbMarkers = []
 let _maplibregl = null // cached after first import so toggles can re-install markers
 const mapStyleId = ref('cyclosm')
 const showClimbs = ref(true)
+const mapExpanded = ref(false)
 const chartInstances = new Map()
 const wheelHandlers = new Map()
 const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all charts
@@ -794,6 +795,15 @@ function toggleClimbs() {
   }
 }
 
+async function toggleMapSize() {
+  mapExpanded.value = !mapExpanded.value
+  // .map-wrap toggles to/from position:fixed full-screen — the layout change
+  // is instant, so a single resize() after the DOM tick is enough for
+  // maplibre to re-measure and re-project all markers (climbs, drag flags).
+  await nextTick()
+  if (mapInstance) mapInstance.resize()
+}
+
 function buildClimbMarkerEl(climb) {
   const el = document.createElement('div')
   const catClass = climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'
@@ -1360,16 +1370,26 @@ function externalTooltipHandler(context) {
   el.innerHTML = html
   el.style.opacity = '1'
 
-  // Position above the caret, centered. Clamp to canvas bounds so it stays readable.
+  // Place the tooltip to the side of the cursor (not on top) so the data
+  // point being read stays visible. Side flip near the right edge.
   const cw = chart.canvas.clientWidth
+  const ch = chart.canvas.clientHeight
   const tipRect = el.getBoundingClientRect()
-  const halfW = tipRect.width / 2
-  let left = tooltip.caretX
-  if (left - halfW < 4) left = halfW + 4
-  if (left + halfW > cw - 4) left = cw - halfW - 4
-  el.style.left = `${left}px`
-  el.style.top = `${tooltip.caretY}px`
-  el.style.transform = 'translate(-50%, calc(-100% - 10px))'
+  const OFFSET = 16
+  const placeOnRight = tooltip.caretX + OFFSET + tipRect.width < cw - 4
+  if (placeOnRight) {
+    el.style.left = `${tooltip.caretX + OFFSET}px`
+    el.style.transform = 'translate(0, -50%)'
+  } else {
+    el.style.left = `${tooltip.caretX - OFFSET}px`
+    el.style.transform = 'translate(-100%, -50%)'
+  }
+  // Vertically center on the cursor, clamp to the canvas so it stays readable.
+  let topPos = tooltip.caretY
+  const halfH = tipRect.height / 2
+  if (topPos - halfH < 4) topPos = halfH + 4
+  if (topPos + halfH > ch - 4) topPos = ch - halfH - 4
+  el.style.top = `${topPos}px`
 }
 
 function formatTooltipRow(ds, y) {
@@ -1949,50 +1969,67 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="card-body p-0">
-          <div v-if="hasRoute" class="map-wrap">
+          <div v-if="hasRoute" class="map-wrap" :class="{ expanded: mapExpanded }">
             <div ref="mapEl" class="activity-map"></div>
-            <div class="map-controls d-flex flex-column gap-2">
-              <div class="btn-group btn-group-sm shadow-sm" role="group">
+            <div class="map-controls">
+              <!-- Groupe 1 : style de fond (radio) -->
+              <div class="btn-group btn-group-sm shadow-sm" role="group" :aria-label="t('strava.map_style_label')">
                 <button
                   type="button"
-                  class="btn"
-                  :class="mapStyleId === 'cyclosm' ? 'btn-warning text-dark' : 'btn-light'"
+                  class="btn map-ctrl-btn"
+                  :class="mapStyleId === 'cyclosm' ? 'btn-warning text-dark active' : 'btn-light'"
                   @click="setMapStyle('cyclosm')"
                   :title="t('strava.map_style_cyclo')"
                 >
                   <i class="fa-solid fa-bicycle" aria-hidden="true"></i>
-                  <span class="ms-1 fw-semibold">{{ t('strava.map_style_cyclo') }}</span>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_cyclo') }}</span>
                 </button>
                 <button
                   type="button"
-                  class="btn"
-                  :class="mapStyleId === 'liberty' ? 'btn-warning text-dark' : 'btn-light'"
+                  class="btn map-ctrl-btn"
+                  :class="mapStyleId === 'liberty' ? 'btn-warning text-dark active' : 'btn-light'"
                   @click="setMapStyle('liberty')"
                   :title="t('strava.map_style_standard')"
                 >
                   <i class="fa-solid fa-map" aria-hidden="true"></i>
-                  <span class="ms-1 fw-semibold">{{ t('strava.map_style_standard') }}</span>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_standard') }}</span>
                 </button>
               </div>
-              <div class="btn-group btn-group-sm shadow-sm align-self-start" role="group">
+
+              <!-- Groupe 2 : overlays et vue (toggles indépendants) -->
+              <div class="btn-group btn-group-sm shadow-sm" role="group">
                 <button
                   type="button"
-                  class="btn"
-                  :class="showClimbs ? 'btn-warning text-dark' : 'btn-light'"
+                  class="btn map-ctrl-btn"
+                  :class="showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
                   @click="toggleClimbs"
                   :title="showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
+                  :aria-pressed="showClimbs"
                 >
                   <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-                  <span class="ms-1 fw-semibold">{{ t('strava.climbs_label') }}</span>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.climbs_label') }}</span>
                 </button>
                 <button
                   type="button"
-                  class="btn btn-light"
+                  class="btn map-ctrl-btn"
+                  :class="is3D ? 'btn-warning text-dark active' : 'btn-light'"
                   @click="toggleMap3D"
                   :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
+                  :aria-pressed="is3D"
                 >
-                  <i :class="is3D ? 'fa-solid fa-map' : 'fa-solid fa-cube'" aria-hidden="true"></i>
-                  <span class="ms-1 fw-semibold">{{ is3D ? '2D' : '3D' }}</span>
+                  <i class="fa-solid fa-cube" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline ms-1">3D</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn map-ctrl-btn"
+                  :class="mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
+                  @click="toggleMapSize"
+                  :title="mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
+                  :aria-pressed="mapExpanded"
+                >
+                  <i :class="mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline ms-1">{{ mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
                 </button>
               </div>
             </div>
@@ -2293,6 +2330,18 @@ onBeforeUnmount(() => {
 .map-wrap {
   position: relative;
 }
+.map-wrap.expanded {
+  position: fixed;
+  /* Sits below the fixed-top navbar (z-index 1030 in Bootstrap) and above
+     anything else. left=0/right=0 makes it span the full viewport width. */
+  top: 4rem;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1020;
+  background: #fff;
+  box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.2);
+}
 .min-width-0 {
   min-width: 0;
 }
@@ -2319,11 +2368,29 @@ onBeforeUnmount(() => {
   height: 420px;
   width: 100%;
 }
+.map-wrap.expanded .activity-map {
+  height: 100%;
+  width: 100%;
+}
 .map-controls {
   position: absolute;
   top: 10px;
   left: 10px;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+  pointer-events: none; /* let the map handle drags outside the buttons */
+}
+.map-controls > * { pointer-events: auto; }
+.map-ctrl-btn {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
+  font-weight: 500;
+}
+.map-ctrl-btn.active {
+  border-color: rgba(252, 76, 2, 0.6);
 }
 
 .custom-legend {
@@ -2674,7 +2741,6 @@ onBeforeUnmount(() => {
   margin-bottom: 0.35rem;
   padding-bottom: 0.3rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.18);
-  text-align: center;
 }
 .chart-tooltip-title-main {
   font-weight: 600;

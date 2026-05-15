@@ -30,6 +30,7 @@
       "unit_min": "min",
       "unit_h": "h",
       "clear_selection": "Clear",
+      "reset_zoom": "Reset zoom",
       "selection": "Selection",
       "whole_activity": "Whole activity",
       "range_stats": {

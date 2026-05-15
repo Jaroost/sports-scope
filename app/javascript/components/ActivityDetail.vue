@@ -23,6 +23,10 @@ let markerB = null
 let isDragging = false
 let dragRafPending = false
 const chartInstances = new Map()
+const wheelHandlers = new Map()
+const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all charts
+let xMinAll = 0
+let xMaxAll = 0
 
 const stats = computed(() => {
   if (!activity.value) return []
@@ -643,6 +647,8 @@ async function renderCharts() {
   const xStream = streams.value[xAxis.value]?.data || streams.value.time?.data || []
   const maxPoints = 600
   const xRaw = xStream
+  xMinAll = xRaw.length > 0 ? chartXFromRaw(xRaw[0]) : 0
+  xMaxAll = xRaw.length > 0 ? chartXFromRaw(xRaw[xRaw.length - 1]) : 0
 
   charts.forEach((def) => {
     const canvas = document.getElementById(`chart-${def.key}`)
@@ -681,6 +687,8 @@ async function renderCharts() {
             type: 'linear',
             title: { display: true, text: xAxisLabel() },
             ticks: { maxTicksLimit: 8 },
+            min: zoomRange.value?.xMin,
+            max: zoomRange.value?.xMax,
           },
           y: {
             title: { display: true, text: def.unit },
@@ -697,6 +705,11 @@ async function renderCharts() {
       const eIdx = xValueToIndex(r1)
       setSelection(sIdx, eIdx)
     }
+
+    const wheelHandler = (e) => handleZoomWheel(chart, e)
+    canvas.addEventListener('wheel', wheelHandler, { passive: false })
+    wheelHandlers.set(def.key, { canvas, handler: wheelHandler })
+
     chartInstances.set(def.key, chart)
   })
 
@@ -735,13 +748,79 @@ function syncMarkersFromSelection() {
 }
 
 function destroyCharts() {
+  wheelHandlers.forEach(({ canvas, handler }) => canvas.removeEventListener('wheel', handler))
+  wheelHandlers.clear()
   chartInstances.forEach((c) => c.destroy())
   chartInstances.clear()
 }
 
+function setZoom(min, max) {
+  const natural = xMaxAll - xMinAll
+  if (natural <= 0) return
+  const minSpan = natural * 0.005
+  let lo = Math.max(min, xMinAll)
+  let hi = Math.min(max, xMaxAll)
+  if (hi - lo < minSpan) {
+    const mid = (lo + hi) / 2
+    lo = Math.max(xMinAll, mid - minSpan / 2)
+    hi = Math.min(xMaxAll, mid + minSpan / 2)
+  }
+  if (lo <= xMinAll && hi >= xMaxAll) {
+    zoomRange.value = null
+  } else {
+    zoomRange.value = { xMin: lo, xMax: hi }
+  }
+}
+
+function resetZoom() {
+  zoomRange.value = null
+}
+
+function applyZoomToCharts() {
+  chartInstances.forEach((chart) => {
+    chart.options.scales.x.min = zoomRange.value?.xMin
+    chart.options.scales.x.max = zoomRange.value?.xMax
+    chart.update('none')
+  })
+}
+
+function handleZoomWheel(chart, e) {
+  e.preventDefault()
+  const xScale = chart.scales.x
+  const rect = chart.canvas.getBoundingClientRect()
+  const px = e.clientX - rect.left
+  const cursorVal = xScale.getValueForPixel(px)
+  const currentMin = zoomRange.value?.xMin ?? xMinAll
+  const currentMax = zoomRange.value?.xMax ?? xMaxAll
+  const range = currentMax - currentMin
+  if (range <= 0 || cursorVal == null || Number.isNaN(cursorVal)) return
+  const factor = e.deltaY > 0 ? 1.25 : 0.8
+  let newRange = range * factor
+  const naturalRange = xMaxAll - xMinAll
+  if (newRange >= naturalRange) {
+    resetZoom()
+    return
+  }
+  const leftFrac = (cursorVal - currentMin) / range
+  let newMin = cursorVal - leftFrac * newRange
+  let newMax = newMin + newRange
+  if (newMin < xMinAll) {
+    newMax += xMinAll - newMin
+    newMin = xMinAll
+  }
+  if (newMax > xMaxAll) {
+    newMin -= newMax - xMaxAll
+    newMax = xMaxAll
+  }
+  setZoom(newMin, newMax)
+}
+
 watch([xAxis, timeUnit], () => {
+  zoomRange.value = null
   if (streams.value) renderCharts()
 })
+
+watch(zoomRange, applyZoomToCharts)
 
 watch(selection, () => {
   applySelectionToCharts()
@@ -824,6 +903,16 @@ onBeforeUnmount(() => {
               <span>{{ t('strava.charts') }}</span>
             </h3>
             <div class="d-flex flex-wrap gap-2 align-items-center">
+              <button
+                v-if="zoomRange"
+                type="button"
+                class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                @click="resetZoom"
+                :title="t('strava.reset_zoom')"
+              >
+                <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
+                <span>{{ t('strava.reset_zoom') }}</span>
+              </button>
               <button
                 v-if="selection"
                 type="button"

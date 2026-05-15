@@ -758,7 +758,18 @@ function cyclOsmStyle() {
       },
     },
     layers: [
-      { id: 'cyclosm-base', type: 'raster', source: 'cyclosm-raster' },
+      {
+        id: 'cyclosm-base',
+        type: 'raster',
+        source: 'cyclosm-raster',
+        // Pulled back so the gradient-colored route stays the visual focal
+        // point. Doesn't affect any layer drawn on top.
+        paint: {
+          'raster-saturation': -0.55,
+          'raster-contrast': -0.1,
+          'raster-opacity': 0.85,
+        },
+      },
     ],
   }
 }

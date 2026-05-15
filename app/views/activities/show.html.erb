@@ -1,14 +1,20 @@
 <% content_for :title, t("strava.activity_summary") %>
 
 <div class="mb-3">
-  <%= link_to t("strava.back_to_dashboard"), dashboard_path, class: "btn btn-link p-0" %>
+  <%= link_to dashboard_path, class: "btn btn-link p-0 d-inline-flex align-items-center gap-1" do %>
+    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+    <span><%= t("strava.back_to_dashboard") %></span>
+  <% end %>
 </div>
 
 <% if @strava_linked %>
   <div data-vue-component="ActivityDetail" data-vue-props='<%= { activityId: @activity_id }.to_json %>'></div>
 <% else %>
-  <div class="alert alert-info">
-    <%= t("strava.not_linked") %>
-    <%= button_to t("nav.link_strava"), "/auth/strava", method: :post, class: "btn btn-warning ms-2", data: { turbo: false } %>
+  <div class="alert alert-info d-flex align-items-center gap-2">
+    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+    <span><%= t("strava.not_linked") %></span>
+    <%= button_to "/auth/strava", method: :post, class: "btn btn-warning ms-auto", data: { turbo: false } do %>
+      <i class="fa-brands fa-strava me-1" aria-hidden="true"></i><%= t("nav.link_strava") %>
+    <% end %>
   </div>
 <% end %>

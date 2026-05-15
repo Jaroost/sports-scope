@@ -61,3 +61,9 @@ fr:
       grade_smooth: "Pente"
   pages:
     home_lead: "Une application Rails 8 d'exemple avec Keycloak SSO, OAuth Strava, îlots Vue et Vite."
+    feature_routes_title: "Cartes & parcours"
+    feature_routes_body: "Visualisez chaque sortie sur une carte interactive avec sens du trajet et sélection de segment."
+    feature_charts_title: "Graphiques détaillés"
+    feature_charts_body: "Altitude, fréquence cardiaque, vitesse, puissance — analysez chaque stream Strava."
+    feature_stats_title: "Statistiques de plage"
+    feature_stats_body: "D+ / D-, durée, distance et moyennes calculées sur le segment sélectionné."

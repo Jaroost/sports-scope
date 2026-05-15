@@ -28,15 +28,38 @@ const stats = computed(() => {
   if (!activity.value) return []
   const a = activity.value
   return [
-    { label: t('strava.distance'), value: `${(a.distance / 1000).toFixed(2)} km` },
-    { label: t('strava.duration'), value: formatDuration(a.moving_time) },
-    { label: t('strava.elapsed'), value: formatDuration(a.elapsed_time) },
-    { label: t('strava.elevation_gain'), value: `${Math.round(a.total_elevation_gain || 0)} m` },
-    { label: t('strava.avg_speed'), value: `${((a.average_speed || 0) * 3.6).toFixed(1)} km/h` },
-    { label: t('strava.type'), value: a.type },
-    { label: t('strava.start_date'), value: new Date(a.start_date_local).toLocaleString() },
+    { label: t('strava.distance'),       value: `${(a.distance / 1000).toFixed(2)} km`,             icon: 'fa-route' },
+    { label: t('strava.duration'),       value: formatDuration(a.moving_time),                       icon: 'fa-stopwatch' },
+    { label: t('strava.elapsed'),        value: formatDuration(a.elapsed_time),                      icon: 'fa-hourglass-half' },
+    { label: t('strava.elevation_gain'), value: `${Math.round(a.total_elevation_gain || 0)} m`,      icon: 'fa-mountain' },
+    { label: t('strava.avg_speed'),      value: `${((a.average_speed || 0) * 3.6).toFixed(1)} km/h`, icon: 'fa-gauge-high' },
+    { label: t('strava.type'),           value: a.type,                                              icon: activityIcon(a.type) },
+    { label: t('strava.start_date'),     value: new Date(a.start_date_local).toLocaleString(),       icon: 'fa-calendar-day' },
   ]
 })
+
+function activityIcon(type) {
+  const t = (type || '').toLowerCase()
+  if (t.includes('run')) return 'fa-person-running'
+  if (t.includes('ride') || t.includes('cycl') || t.includes('bike') || t.includes('velo')) return 'fa-person-biking'
+  if (t.includes('swim')) return 'fa-person-swimming'
+  if (t.includes('walk') || t.includes('hike')) return 'fa-person-hiking'
+  if (t.includes('ski')) return 'fa-person-skiing'
+  if (t.includes('row')) return 'fa-water'
+  if (t.includes('yoga')) return 'fa-spa'
+  if (t.includes('workout') || t.includes('weight')) return 'fa-dumbbell'
+  return 'fa-bolt'
+}
+
+const chartIcons = {
+  altitude: 'fa-mountain',
+  heartrate: 'fa-heart-pulse',
+  velocity_smooth: 'fa-gauge-high',
+  cadence: 'fa-rotate',
+  watts: 'fa-bolt',
+  temp: 'fa-temperature-half',
+  grade_smooth: 'fa-slash',
+}
 
 const polyline = computed(() => activity.value?.map?.summary_polyline || activity.value?.map?.polyline || '')
 
@@ -197,6 +220,64 @@ function chartStats(def) {
 function fmt(v, digits) {
   if (v == null || Number.isNaN(v)) return '–'
   return v.toFixed(digits)
+}
+
+function rangeBounds() {
+  const ref = streams.value?.distance?.data || streams.value?.time?.data || streams.value?.latlng?.data
+  if (!ref || ref.length === 0) return null
+  const maxIdx = ref.length - 1
+  const s = Math.max(0, Math.min(selection.value?.startIdx ?? 0, maxIdx))
+  const e = Math.max(s, Math.min(selection.value?.endIdx ?? maxIdx, maxIdx))
+  return { startIdx: s, endIdx: e }
+}
+
+function rangeDuration() {
+  const b = rangeBounds()
+  const time = streams.value?.time?.data
+  if (!b || !time || time.length === 0) return null
+  const t0 = time[Math.min(b.startIdx, time.length - 1)]
+  const t1 = time[Math.min(b.endIdx, time.length - 1)]
+  return Math.max(0, t1 - t0)
+}
+
+function rangeDistance() {
+  const b = rangeBounds()
+  const dist = streams.value?.distance?.data
+  if (!b || !dist || dist.length === 0) return null
+  const d0 = dist[Math.min(b.startIdx, dist.length - 1)]
+  const d1 = dist[Math.min(b.endIdx, dist.length - 1)]
+  return Math.max(0, d1 - d0)
+}
+
+function rangeElevation() {
+  const b = rangeBounds()
+  const alt = streams.value?.altitude?.data
+  if (!b || !alt || alt.length < 2) return null
+  const start = Math.max(b.startIdx, 0)
+  const end = Math.min(b.endIdx, alt.length - 1)
+  let up = 0
+  let down = 0
+  for (let i = start + 1; i <= end; i++) {
+    const d = alt[i] - alt[i - 1]
+    if (d > 0) up += d
+    else down += d
+  }
+  return { up, down: Math.abs(down) }
+}
+
+function formatHMS(seconds) {
+  if (seconds == null || Number.isNaN(seconds)) return '–'
+  const total = Math.max(0, Math.round(seconds))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(h)}:${pad(m)}:${pad(s)}`
+}
+
+function formatKm(meters) {
+  if (meters == null || Number.isNaN(meters)) return '–'
+  return `${(meters / 1000).toFixed(2)} km`
 }
 
 async function fetchActivity() {
@@ -681,43 +762,64 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <div v-if="loading" class="text-muted">Loading…</div>
-    <div v-else-if="error" class="alert alert-danger">{{ error }}</div>
+    <div v-if="loading" class="text-muted d-flex align-items-center gap-2">
+      <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+      <span>Loading…</span>
+    </div>
+    <div v-else-if="error" class="alert alert-danger d-flex align-items-center gap-2">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span>{{ error }}</span>
+    </div>
     <div v-else-if="activity">
-      <div class="card mb-3">
-        <div class="card-header bg-warning-subtle">
+      <div class="card mb-3 shadow-sm border-0">
+        <div class="card-header activity-card-header d-flex align-items-center gap-2">
+          <span class="activity-type-badge">
+            <i :class="`fa-solid ${activityIcon(activity.type)}`" aria-hidden="true"></i>
+          </span>
           <h2 class="h5 mb-0">{{ activity.name }}</h2>
         </div>
         <div class="card-body p-0">
           <div v-if="hasRoute" ref="mapEl" class="activity-map"></div>
-          <div v-else class="alert alert-info m-3 mb-0">
-            {{ t('strava.no_route_data') }}
+          <div v-else class="alert alert-info m-3 mb-0 d-flex align-items-center gap-2">
+            <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+            <span>{{ t('strava.no_route_data') }}</span>
           </div>
         </div>
       </div>
 
-      <div class="card mb-3">
-        <div class="card-body">
-          <dl class="row mb-0">
-            <template v-for="(s, i) in stats" :key="i">
-              <dt class="col-sm-4 text-muted">{{ s.label }}</dt>
-              <dd class="col-sm-8">{{ s.value }}</dd>
-            </template>
-          </dl>
+      <div class="row g-2 mb-3">
+        <div
+          v-for="(s, i) in stats"
+          :key="i"
+          class="col-6 col-md-4 col-lg-3"
+        >
+          <div class="stat-card">
+            <span class="stat-icon">
+              <i :class="`fa-solid ${s.icon}`" aria-hidden="true"></i>
+            </span>
+            <div>
+              <div class="stat-label">{{ s.label }}</div>
+              <div class="stat-value">{{ s.value }}</div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="card">
-        <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
-          <h3 class="h6 mb-0">{{ t('strava.charts') }}</h3>
+      <div class="card shadow-sm border-0">
+        <div class="card-header activity-card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
+          <h3 class="h6 mb-0 d-flex align-items-center gap-2">
+            <i class="fa-solid fa-chart-line text-warning" aria-hidden="true"></i>
+            <span>{{ t('strava.charts') }}</span>
+          </h3>
           <div class="d-flex flex-wrap gap-2 align-items-center">
             <button
               v-if="selection"
               type="button"
-              class="btn btn-sm btn-outline-primary"
+              class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
               @click="clearSelection"
             >
-              {{ t('strava.clear_selection') }}
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              <span>{{ t('strava.clear_selection') }}</span>
             </button>
             <div v-if="availableCharts.length > 0" class="btn-group btn-group-sm" role="group">
               <input type="radio" class="btn-check" name="xAxis" id="xAxis-distance" autocomplete="off" value="distance" v-model="xAxis" :disabled="!streams || !streams.distance" />
@@ -736,9 +838,18 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="card-body">
-          <div v-if="streamsLoading" class="text-muted">{{ t('strava.loading_streams') }}</div>
-          <div v-else-if="streamsError" class="alert alert-danger mb-0">{{ streamsError }}</div>
-          <div v-else-if="availableCharts.length === 0" class="text-muted">{{ t('strava.no_stream_data') }}</div>
+          <div v-if="streamsLoading" class="text-muted d-flex align-items-center gap-2">
+            <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+            <span>{{ t('strava.loading_streams') }}</span>
+          </div>
+          <div v-else-if="streamsError" class="alert alert-danger mb-0 d-flex align-items-center gap-2">
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+            <span>{{ streamsError }}</span>
+          </div>
+          <div v-else-if="availableCharts.length === 0" class="text-muted d-flex align-items-center gap-2">
+            <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
+            <span>{{ t('strava.no_stream_data') }}</span>
+          </div>
           <div v-else>
             <div
               v-for="def in availableCharts"
@@ -746,9 +857,13 @@ onBeforeUnmount(() => {
               class="chart-row mb-3"
             >
               <div class="d-flex justify-content-between align-items-baseline mb-1">
-                <div class="text-muted small">{{ t('strava.stream.' + def.key) }} ({{ def.unit }})</div>
-                <div class="text-muted small">
-                  {{ selection ? t('strava.selection') : t('strava.whole_activity') }}
+                <div class="text-muted small d-flex align-items-center gap-1">
+                  <i :class="`fa-solid ${chartIcons[def.key] || 'fa-chart-line'}`" :style="{ color: def.color }" aria-hidden="true"></i>
+                  <span>{{ t('strava.stream.' + def.key) }} ({{ def.unit }})</span>
+                </div>
+                <div class="text-muted small d-flex align-items-center gap-1">
+                  <i :class="`fa-solid ${selection ? 'fa-crop-simple' : 'fa-bars-staggered'}`" aria-hidden="true"></i>
+                  <span>{{ selection ? t('strava.selection') : t('strava.whole_activity') }}</span>
                 </div>
               </div>
               <div class="row g-2 align-items-stretch">
@@ -759,14 +874,44 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="col-lg-3">
                   <dl class="small mb-0 stats-grid" v-if="chartStats(def)">
-                    <dt class="text-muted">{{ t('strava.range_stats.mean') }}</dt>
+                    <dt class="text-muted">
+                      <i class="fa-solid fa-equals stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.mean') }}
+                    </dt>
                     <dd>{{ fmt(chartStats(def).mean, def.digits) }} {{ def.unit }}</dd>
-                    <dt class="text-muted">{{ t('strava.range_stats.min') }}</dt>
+                    <dt class="text-muted">
+                      <i class="fa-solid fa-arrow-down-short-wide stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.min') }}
+                    </dt>
                     <dd>{{ fmt(chartStats(def).min, def.digits) }} {{ def.unit }}</dd>
-                    <dt class="text-muted">{{ t('strava.range_stats.max') }}</dt>
+                    <dt class="text-muted">
+                      <i class="fa-solid fa-arrow-up-wide-short stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.max') }}
+                    </dt>
                     <dd>{{ fmt(chartStats(def).max, def.digits) }} {{ def.unit }}</dd>
-                    <dt class="text-muted">{{ t('strava.range_stats.count') }}</dt>
+                    <template v-if="def.key === 'altitude' && rangeElevation()">
+                      <dt class="text-muted">
+                        <i class="fa-solid fa-arrow-trend-up stats-grid-icon text-success" aria-hidden="true"></i>{{ t('strava.range_stats.elev_gain') }}
+                      </dt>
+                      <dd>{{ Math.round(rangeElevation().up) }} m</dd>
+                      <dt class="text-muted">
+                        <i class="fa-solid fa-arrow-trend-down stats-grid-icon text-danger" aria-hidden="true"></i>{{ t('strava.range_stats.elev_loss') }}
+                      </dt>
+                      <dd>{{ Math.round(rangeElevation().down) }} m</dd>
+                    </template>
+                    <dt class="text-muted">
+                      <i class="fa-solid fa-hashtag stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.count') }}
+                    </dt>
                     <dd>{{ chartStats(def).count }}</dd>
+                    <template v-if="rangeDuration() != null">
+                      <dt class="text-muted">
+                        <i class="fa-regular fa-clock stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.duration') }}
+                      </dt>
+                      <dd>{{ formatHMS(rangeDuration()) }}</dd>
+                    </template>
+                    <template v-if="rangeDistance() != null">
+                      <dt class="text-muted">
+                        <i class="fa-solid fa-route stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.distance') }}
+                      </dt>
+                      <dd>{{ formatKm(rangeDistance()) }}</dd>
+                    </template>
                   </dl>
                 </div>
               </div>

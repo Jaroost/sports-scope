@@ -1,4 +1,5 @@
 import '../stylesheets/application.scss'
+import '@fortawesome/fontawesome-free/css/all.min.css'
 import 'bootstrap'
 
 import { setupI18n } from '../i18n'

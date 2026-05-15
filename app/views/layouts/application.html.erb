@@ -18,39 +18,52 @@
   </head>
 
   <body>
-    <nav class="navbar navbar-expand-md navbar-dark bg-dark fixed-top">
+    <nav class="navbar navbar-expand-md navbar-dark bg-dark fixed-top shadow-sm">
       <div class="container">
-        <%= link_to t("app.title"), root_path, class: "navbar-brand sports-scope-brand" %>
+        <%= link_to root_path, class: "navbar-brand sports-scope-brand d-flex align-items-center gap-2" do %>
+          <i class="fa-solid fa-mountain-sun text-warning" aria-hidden="true"></i>
+          <span><%= t("app.title") %></span>
+        <% end %>
         <div class="collapse navbar-collapse">
           <ul class="navbar-nav me-auto">
             <li class="nav-item">
-              <%= link_to t("nav.home"), root_path, class: "nav-link" %>
+              <%= link_to root_path, class: "nav-link" do %>
+                <i class="fa-solid fa-house me-1" aria-hidden="true"></i><%= t("nav.home") %>
+              <% end %>
             </li>
             <% if user_signed_in? %>
               <li class="nav-item">
-                <%= link_to t("nav.dashboard"), dashboard_path, class: "nav-link" %>
+                <%= link_to dashboard_path, class: "nav-link" do %>
+                  <i class="fa-solid fa-gauge-high me-1" aria-hidden="true"></i><%= t("nav.dashboard") %>
+                <% end %>
               </li>
             <% end %>
           </ul>
-          <ul class="navbar-nav">
+          <ul class="navbar-nav align-items-center">
             <li class="nav-item">
-              <%= link_to "EN", url_for(locale: :en), class: "nav-link #{'active' if I18n.locale == :en}" %>
+              <%= link_to "EN", url_for(locale: :en), class: "nav-link #{'active fw-semibold' if I18n.locale == :en}" %>
             </li>
             <li class="nav-item">
-              <%= link_to "FR", url_for(locale: :fr), class: "nav-link #{'active' if I18n.locale == :fr}" %>
+              <%= link_to "FR", url_for(locale: :fr), class: "nav-link #{'active fw-semibold' if I18n.locale == :fr}" %>
             </li>
             <% if user_signed_in? %>
               <% unless current_user.strava_linked? %>
                 <li class="nav-item">
-                  <%= button_to t("nav.link_strava"), "/auth/strava", method: :post, class: "btn btn-warning ms-2", data: { turbo: false } %>
+                  <%= button_to "/auth/strava", method: :post, class: "btn btn-warning ms-2", data: { turbo: false } do %>
+                    <i class="fa-brands fa-strava me-1" aria-hidden="true"></i><%= t("nav.link_strava") %>
+                  <% end %>
                 </li>
               <% end %>
               <li class="nav-item">
-                <%= button_to t("nav.logout"), logout_path, method: :delete, class: "btn btn-outline-light ms-2", data: { turbo: false } %>
+                <%= button_to logout_path, method: :delete, class: "btn btn-outline-light ms-2", data: { turbo: false } do %>
+                  <i class="fa-solid fa-right-from-bracket me-1" aria-hidden="true"></i><%= t("nav.logout") %>
+                <% end %>
               </li>
             <% else %>
               <li class="nav-item">
-                <%= button_to t("nav.login"), "/auth/keycloak", method: :post, class: "btn btn-primary ms-2", data: { turbo: false } %>
+                <%= button_to "/auth/keycloak", method: :post, class: "btn btn-primary ms-2", data: { turbo: false } do %>
+                  <i class="fa-solid fa-right-to-bracket me-1" aria-hidden="true"></i><%= t("nav.login") %>
+                <% end %>
               </li>
             <% end %>
           </ul>
@@ -59,8 +72,16 @@
     </nav>
 
     <main class="container py-4">
-      <% if notice %><div class="alert alert-success"><%= notice %></div><% end %>
-      <% if alert %><div class="alert alert-warning"><%= alert %></div><% end %>
+      <% if notice %>
+        <div class="alert alert-success d-flex align-items-center gap-2">
+          <i class="fa-solid fa-circle-check" aria-hidden="true"></i><span><%= notice %></span>
+        </div>
+      <% end %>
+      <% if alert %>
+        <div class="alert alert-warning d-flex align-items-center gap-2">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span><%= alert %></span>
+        </div>
+      <% end %>
       <%= yield %>
     </main>
   </body>

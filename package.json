@@ -8,6 +8,7 @@
     "dev": "vite dev"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.2.0",
     "@popperjs/core": "^2.11.8",
     "bootstrap": "^5.3.3",
     "chart.js": "^4.5.1",

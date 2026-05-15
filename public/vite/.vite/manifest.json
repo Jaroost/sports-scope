@@ -1,4 +1,16 @@
 {
+  "../../node_modules/.pnpm/@fortawesome+fontawesome-free@7.2.0/node_modules/@fortawesome/fontawesome-free/webfonts/fa-brands-400.woff2": {
+    "file": "assets/fa-brands-400-BP5tdqmh.woff2",
+    "src": "../../node_modules/.pnpm/@fortawesome+fontawesome-free@7.2.0/node_modules/@fortawesome/fontawesome-free/webfonts/fa-brands-400.woff2"
+  },
+  "../../node_modules/.pnpm/@fortawesome+fontawesome-free@7.2.0/node_modules/@fortawesome/fontawesome-free/webfonts/fa-regular-400.woff2": {
+    "file": "assets/fa-regular-400-nyy7hhHF.woff2",
+    "src": "../../node_modules/.pnpm/@fortawesome+fontawesome-free@7.2.0/node_modules/@fortawesome/fontawesome-free/webfonts/fa-regular-400.woff2"
+  },
+  "../../node_modules/.pnpm/@fortawesome+fontawesome-free@7.2.0/node_modules/@fortawesome/fontawesome-free/webfonts/fa-solid-900.woff2": {
+    "file": "assets/fa-solid-900-DRAAbZTg.woff2",
+    "src": "../../node_modules/.pnpm/@fortawesome+fontawesome-free@7.2.0/node_modules/@fortawesome/fontawesome-free/webfonts/fa-solid-900.woff2"
+  },
   "../../node_modules/.pnpm/chart.js@4.5.1/node_modules/chart.js/dist/chart.js": {
     "file": "assets/chart-19k6OvwP.js",
     "name": "chart",
@@ -9,8 +21,8 @@
     "file": "assets/maplibre-gl-Twyd4PtP.css",
     "src": "../../node_modules/.pnpm/maplibre-gl@5.24.0/node_modules/maplibre-gl/dist/maplibre-gl.css"
   },
-  "_maplibre-gl-CthUYZkF.js": {
-    "file": "assets/maplibre-gl-CthUYZkF.js",
+  "_maplibre-gl--fC4G7ua.js": {
+    "file": "assets/maplibre-gl--fC4G7ua.js",
     "name": "maplibre-gl",
     "isDynamicEntry": true,
     "imports": [
@@ -18,7 +30,7 @@
     ]
   },
   "entrypoints/application.js": {
-    "file": "assets/application-Dw___RSV.js",
+    "file": "assets/application-BeZoYZLw.js",
     "name": "entrypoints/application.js",
     "src": "entrypoints/application.js",
     "isEntry": true,
@@ -26,27 +38,32 @@
       "locales/%{locale}.json",
       "locales/en.json",
       "locales/fr.json",
-      "_maplibre-gl-CthUYZkF.js",
+      "_maplibre-gl--fC4G7ua.js",
       "../../node_modules/.pnpm/chart.js@4.5.1/node_modules/chart.js/dist/chart.js"
     ],
     "css": [
-      "assets/application-yPvhd5y4.css"
+      "assets/application-BilDOxXX.css"
+    ],
+    "assets": [
+      "assets/fa-brands-400-BP5tdqmh.woff2",
+      "assets/fa-regular-400-nyy7hhHF.woff2",
+      "assets/fa-solid-900-DRAAbZTg.woff2"
     ]
   },
   "locales/%{locale}.json": {
-    "file": "assets/__locale_-Dshc2h9q.js",
+    "file": "assets/__locale_-CF8uifyr.js",
     "name": "__locale_",
     "src": "locales/%{locale}.json",
     "isDynamicEntry": true
   },
   "locales/en.json": {
-    "file": "assets/en-DNpbHdqY.js",
+    "file": "assets/en-CNUzTWy7.js",
     "name": "en",
     "src": "locales/en.json",
     "isDynamicEntry": true
   },
   "locales/fr.json": {
-    "file": "assets/fr-DLmgb9o5.js",
+    "file": "assets/fr-WGlSYBz6.js",
     "name": "fr",
     "src": "locales/fr.json",
     "isDynamicEntry": true

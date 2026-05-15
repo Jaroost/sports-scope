@@ -15,6 +15,10 @@ export default defineConfig({
     strictPort: true,
     allowedHosts: [publicHost, 'localhost'],
     origin: `https://${publicHost}`,
+    cors: {
+      origin: /\.localtest\.me$/,
+      credentials: true,
+    },
     hmr: {
       host: publicHost,
       clientPort: 443,

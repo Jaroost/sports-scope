@@ -35,7 +35,11 @@
         "count": "Count",
         "mean": "Mean",
         "min": "Min",
-        "max": "Max"
+        "max": "Max",
+        "duration": "Duration",
+        "distance": "Distance",
+        "elev_gain": "Elev. gain",
+        "elev_loss": "Elev. loss"
       },
       "loading_streams": "Loading charts…",
       "no_stream_data": "No data available for this activity.",

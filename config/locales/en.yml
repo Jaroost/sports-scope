@@ -61,3 +61,9 @@ en:
       grade_smooth: "Grade"
   pages:
     home_lead: "An example Rails 8 app with Keycloak SSO, Strava OAuth, Vue islands and Vite."
+    feature_routes_title: "Maps & routes"
+    feature_routes_body: "Visualize every outing on an interactive map with direction arrows and segment selection."
+    feature_charts_title: "Detailed charts"
+    feature_charts_body: "Altitude, heart rate, speed, power — analyze every Strava stream."
+    feature_stats_title: "Range stats"
+    feature_stats_body: "Elev. gain/loss, duration, distance and averages computed over your selection."

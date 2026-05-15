@@ -35,7 +35,11 @@
         "count": "Points",
         "mean": "Moyenne",
         "min": "Min",
-        "max": "Max"
+        "max": "Max",
+        "duration": "Durée",
+        "distance": "Distance",
+        "elev_gain": "D+",
+        "elev_loss": "D-"
       },
       "loading_streams": "Chargement des graphiques…",
       "no_stream_data": "Aucune donnée disponible pour cette activité.",

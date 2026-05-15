@@ -18,6 +18,7 @@
       "avg_speed": "Vitesse moyenne",
       "type": "Type",
       "start_date": "Début",
+      "end_date": "Fin",
       "charts": "Graphiques",
       "x_distance": "Distance",
       "x_time": "Temps",

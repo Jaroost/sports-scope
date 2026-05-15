@@ -27,6 +27,10 @@ const chartInstances = new Map()
 const stats = computed(() => {
   if (!activity.value) return []
   const a = activity.value
+  const startLocal = a.start_date_local ? new Date(a.start_date_local) : null
+  const endLocal = startLocal && a.elapsed_time
+    ? new Date(startLocal.getTime() + a.elapsed_time * 1000)
+    : null
   return [
     { label: t('strava.distance'),       value: `${(a.distance / 1000).toFixed(2)} km`,             icon: 'fa-route' },
     { label: t('strava.duration'),       value: formatDuration(a.moving_time),                       icon: 'fa-stopwatch' },
@@ -34,7 +38,8 @@ const stats = computed(() => {
     { label: t('strava.elevation_gain'), value: `${Math.round(a.total_elevation_gain || 0)} m`,      icon: 'fa-mountain' },
     { label: t('strava.avg_speed'),      value: `${((a.average_speed || 0) * 3.6).toFixed(1)} km/h`, icon: 'fa-gauge-high' },
     { label: t('strava.type'),           value: a.type,                                              icon: activityIcon(a.type) },
-    { label: t('strava.start_date'),     value: new Date(a.start_date_local).toLocaleString(),       icon: 'fa-calendar-day' },
+    { label: t('strava.start_date'),     value: startLocal ? startLocal.toLocaleString() : '–',      icon: 'fa-flag' },
+    { label: t('strava.end_date'),       value: endLocal ? endLocal.toLocaleString() : '–',          icon: 'fa-flag-checkered' },
   ]
 })
 
@@ -263,6 +268,12 @@ function rangeElevation() {
     else down += d
   }
   return { up, down: Math.abs(down) }
+}
+
+function rangePointCount() {
+  const b = rangeBounds()
+  if (!b) return null
+  return b.endIdx - b.startIdx + 1
 }
 
 function formatHMS(seconds) {
@@ -806,35 +817,68 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="card shadow-sm border-0">
-        <div class="card-header activity-card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
-          <h3 class="h6 mb-0 d-flex align-items-center gap-2">
-            <i class="fa-solid fa-chart-line text-warning" aria-hidden="true"></i>
-            <span>{{ t('strava.charts') }}</span>
-          </h3>
-          <div class="d-flex flex-wrap gap-2 align-items-center">
-            <button
-              v-if="selection"
-              type="button"
-              class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
-              @click="clearSelection"
-            >
-              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-              <span>{{ t('strava.clear_selection') }}</span>
-            </button>
-            <div v-if="availableCharts.length > 0" class="btn-group btn-group-sm" role="group">
-              <input type="radio" class="btn-check" name="xAxis" id="xAxis-distance" autocomplete="off" value="distance" v-model="xAxis" :disabled="!streams || !streams.distance" />
-              <label class="btn btn-outline-secondary" for="xAxis-distance">{{ t('strava.x_distance') }}</label>
-              <input type="radio" class="btn-check" name="xAxis" id="xAxis-time" autocomplete="off" value="time" v-model="xAxis" :disabled="!streams || !streams.time" />
-              <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
+        <div class="card-header activity-card-header charts-sticky-header">
+          <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
+            <h3 class="h6 mb-0 d-flex align-items-center gap-2">
+              <i class="fa-solid fa-chart-line text-warning" aria-hidden="true"></i>
+              <span>{{ t('strava.charts') }}</span>
+            </h3>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <button
+                v-if="selection"
+                type="button"
+                class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
+                @click="clearSelection"
+              >
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                <span>{{ t('strava.clear_selection') }}</span>
+              </button>
+              <div v-if="availableCharts.length > 0" class="btn-group btn-group-sm" role="group">
+                <input type="radio" class="btn-check" name="xAxis" id="xAxis-distance" autocomplete="off" value="distance" v-model="xAxis" :disabled="!streams || !streams.distance" />
+                <label class="btn btn-outline-secondary" for="xAxis-distance">{{ t('strava.x_distance') }}</label>
+                <input type="radio" class="btn-check" name="xAxis" id="xAxis-time" autocomplete="off" value="time" v-model="xAxis" :disabled="!streams || !streams.time" />
+                <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
+              </div>
+              <div v-if="xAxis === 'time'" class="btn-group btn-group-sm" role="group">
+                <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-s" autocomplete="off" value="s" v-model="timeUnit" />
+                <label class="btn btn-outline-secondary" for="timeUnit-s">{{ t('strava.unit_s') }}</label>
+                <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-min" autocomplete="off" value="min" v-model="timeUnit" />
+                <label class="btn btn-outline-secondary" for="timeUnit-min">{{ t('strava.unit_min') }}</label>
+                <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-h" autocomplete="off" value="h" v-model="timeUnit" />
+                <label class="btn btn-outline-secondary" for="timeUnit-h">{{ t('strava.unit_h') }}</label>
+              </div>
             </div>
-            <div v-if="xAxis === 'time'" class="btn-group btn-group-sm" role="group">
-              <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-s" autocomplete="off" value="s" v-model="timeUnit" />
-              <label class="btn btn-outline-secondary" for="timeUnit-s">{{ t('strava.unit_s') }}</label>
-              <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-min" autocomplete="off" value="min" v-model="timeUnit" />
-              <label class="btn btn-outline-secondary" for="timeUnit-min">{{ t('strava.unit_min') }}</label>
-              <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-h" autocomplete="off" value="h" v-model="timeUnit" />
-              <label class="btn btn-outline-secondary" for="timeUnit-h">{{ t('strava.unit_h') }}</label>
-            </div>
+          </div>
+          <div v-if="availableCharts.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
+            <span class="range-chip" :class="selection ? 'range-chip-accent' : 'range-chip-muted'">
+              <i :class="`fa-solid ${selection ? 'fa-crop-simple' : 'fa-bars-staggered'}`" aria-hidden="true"></i>
+              <span>{{ selection ? t('strava.selection') : t('strava.whole_activity') }}</span>
+            </span>
+            <span v-if="rangePointCount() != null" class="range-chip">
+              <i class="fa-solid fa-hashtag" aria-hidden="true"></i>
+              <span class="range-chip-label">{{ t('strava.range_stats.count') }}</span>
+              <strong>{{ rangePointCount() }}</strong>
+            </span>
+            <span v-if="rangeDuration() != null" class="range-chip">
+              <i class="fa-regular fa-clock" aria-hidden="true"></i>
+              <span class="range-chip-label">{{ t('strava.range_stats.duration') }}</span>
+              <strong>{{ formatHMS(rangeDuration()) }}</strong>
+            </span>
+            <span v-if="rangeDistance() != null" class="range-chip">
+              <i class="fa-solid fa-route" aria-hidden="true"></i>
+              <span class="range-chip-label">{{ t('strava.range_stats.distance') }}</span>
+              <strong>{{ formatKm(rangeDistance()) }}</strong>
+            </span>
+            <span v-if="rangeElevation()" class="range-chip range-chip-success">
+              <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
+              <span class="range-chip-label">{{ t('strava.range_stats.elev_gain') }}</span>
+              <strong>{{ Math.round(rangeElevation().up) }} m</strong>
+            </span>
+            <span v-if="rangeElevation()" class="range-chip range-chip-danger">
+              <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+              <span class="range-chip-label">{{ t('strava.range_stats.elev_loss') }}</span>
+              <strong>{{ Math.round(rangeElevation().down) }} m</strong>
+            </span>
           </div>
         </div>
         <div class="card-body">
@@ -861,10 +905,6 @@ onBeforeUnmount(() => {
                   <i :class="`fa-solid ${chartIcons[def.key] || 'fa-chart-line'}`" :style="{ color: def.color }" aria-hidden="true"></i>
                   <span>{{ t('strava.stream.' + def.key) }} ({{ def.unit }})</span>
                 </div>
-                <div class="text-muted small d-flex align-items-center gap-1">
-                  <i :class="`fa-solid ${selection ? 'fa-crop-simple' : 'fa-bars-staggered'}`" aria-hidden="true"></i>
-                  <span>{{ selection ? t('strava.selection') : t('strava.whole_activity') }}</span>
-                </div>
               </div>
               <div class="row g-2 align-items-stretch">
                 <div class="col-lg-9">
@@ -886,32 +926,6 @@ onBeforeUnmount(() => {
                       <i class="fa-solid fa-arrow-up-wide-short stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.max') }}
                     </dt>
                     <dd>{{ fmt(chartStats(def).max, def.digits) }} {{ def.unit }}</dd>
-                    <template v-if="def.key === 'altitude' && rangeElevation()">
-                      <dt class="text-muted">
-                        <i class="fa-solid fa-arrow-trend-up stats-grid-icon text-success" aria-hidden="true"></i>{{ t('strava.range_stats.elev_gain') }}
-                      </dt>
-                      <dd>{{ Math.round(rangeElevation().up) }} m</dd>
-                      <dt class="text-muted">
-                        <i class="fa-solid fa-arrow-trend-down stats-grid-icon text-danger" aria-hidden="true"></i>{{ t('strava.range_stats.elev_loss') }}
-                      </dt>
-                      <dd>{{ Math.round(rangeElevation().down) }} m</dd>
-                    </template>
-                    <dt class="text-muted">
-                      <i class="fa-solid fa-hashtag stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.count') }}
-                    </dt>
-                    <dd>{{ chartStats(def).count }}</dd>
-                    <template v-if="rangeDuration() != null">
-                      <dt class="text-muted">
-                        <i class="fa-regular fa-clock stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.duration') }}
-                      </dt>
-                      <dd>{{ formatHMS(rangeDuration()) }}</dd>
-                    </template>
-                    <template v-if="rangeDistance() != null">
-                      <dt class="text-muted">
-                        <i class="fa-solid fa-route stats-grid-icon" aria-hidden="true"></i>{{ t('strava.range_stats.distance') }}
-                      </dt>
-                      <dd>{{ formatKm(rangeDistance()) }}</dd>
-                    </template>
                   </dl>
                 </div>
               </div>
@@ -947,4 +961,58 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
+
+.charts-sticky-header {
+  position: sticky;
+  top: 4rem;
+  z-index: 5;
+  background: #ffffff;
+  backdrop-filter: saturate(140%);
+  border-bottom: 1px solid rgba(252, 76, 2, 0.22);
+  box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.18);
+}
+
+.range-chips {
+  font-size: 0.85rem;
+}
+
+.range-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(108, 117, 125, 0.1);
+  color: #495057;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.range-chip strong {
+  font-weight: 600;
+  color: #212529;
+}
+.range-chip .range-chip-label {
+  color: #6c757d;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.range-chip-accent {
+  background: rgba(13, 110, 253, 0.12);
+  color: #0a58ca;
+}
+.range-chip-muted {
+  background: rgba(108, 117, 125, 0.12);
+  color: #495057;
+}
+.range-chip-success {
+  background: rgba(25, 135, 84, 0.12);
+  color: #198754;
+}
+.range-chip-success strong { color: #146c43; }
+.range-chip-danger {
+  background: rgba(220, 53, 69, 0.12);
+  color: #b02a37;
+}
+.range-chip-danger strong { color: #842029; }
 </style>

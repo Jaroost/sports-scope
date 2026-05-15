@@ -24,7 +24,9 @@ let markerB = null
 let isDragging = false
 let dragRafPending = false
 const climbMarkers = []
+let _maplibregl = null // cached after first import so toggles can re-install markers
 const mapStyleId = ref('cyclosm')
+const showClimbs = ref(true)
 const chartInstances = new Map()
 const wheelHandlers = new Map()
 const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all charts
@@ -592,6 +594,7 @@ async function renderMap() {
   if (!hasRoute.value || !mapEl.value) return
 
   const maplibregl = (await import('maplibre-gl')).default
+  _maplibregl = maplibregl
   await import('maplibre-gl/dist/maplibre-gl.css')
 
   const coords = routeCoords.value
@@ -763,6 +766,7 @@ function installClimbMarkers(maplibregl) {
   // Always start clean: re-rendering the map shouldn't pile markers up.
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
+  if (!showClimbs.value) return
   const latlng = streams.value?.latlng?.data
   const altitudes = streams.value?.altitude?.data
   const distances = streams.value?.distance?.data
@@ -780,6 +784,16 @@ function installClimbMarkers(maplibregl) {
   })
 }
 
+function toggleClimbs() {
+  showClimbs.value = !showClimbs.value
+  if (!showClimbs.value) {
+    climbMarkers.forEach((m) => m.remove())
+    climbMarkers.length = 0
+  } else if (_maplibregl) {
+    installClimbMarkers(_maplibregl)
+  }
+}
+
 function buildClimbMarkerEl(climb) {
   const el = document.createElement('div')
   const catClass = climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'
@@ -792,7 +806,13 @@ function buildClimbMarkerEl(climb) {
     <span class="climb-marker-stats">+${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)}%</span>
     ${climb.category ? `<span class="climb-marker-cat">Cat ${climb.category}</span>` : ''}
   `
-  el.title = `${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
+  el.title = `${t('strava.click_to_select_climb')}\n${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
+  el.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    setSelection(climb.startIdx, climb.endIdx)
+  })
+  // Make sure mousedown doesn't initiate a map pan when the user clicks the badge.
+  el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   return el
 }
 
@@ -1954,15 +1974,27 @@ onBeforeUnmount(() => {
                   <span class="ms-1 fw-semibold">{{ t('strava.map_style_standard') }}</span>
                 </button>
               </div>
-              <button
-                type="button"
-                class="btn btn-sm btn-light shadow-sm d-flex align-items-center gap-1 align-self-start"
-                @click="toggleMap3D"
-                :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
-              >
-                <i :class="is3D ? 'fa-solid fa-map' : 'fa-solid fa-cube'" aria-hidden="true"></i>
-                <span class="fw-semibold">{{ is3D ? '2D' : '3D' }}</span>
-              </button>
+              <div class="btn-group btn-group-sm shadow-sm align-self-start" role="group">
+                <button
+                  type="button"
+                  class="btn"
+                  :class="showClimbs ? 'btn-warning text-dark' : 'btn-light'"
+                  @click="toggleClimbs"
+                  :title="showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
+                >
+                  <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+                  <span class="ms-1 fw-semibold">{{ t('strava.climbs_label') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-light"
+                  @click="toggleMap3D"
+                  :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
+                >
+                  <i :class="is3D ? 'fa-solid fa-map' : 'fa-solid fa-cube'" aria-hidden="true"></i>
+                  <span class="ms-1 fw-semibold">{{ is3D ? '2D' : '3D' }}</span>
+                </button>
+              </div>
             </div>
           </div>
           <div v-else class="alert alert-info m-3 mb-0 d-flex align-items-center gap-2">
@@ -2689,8 +2721,14 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   border: 2px solid currentColor;
   box-shadow: 0 4px 10px -3px rgba(0, 0, 0, 0.35);
-  cursor: default;
+  cursor: pointer;
   transform: translateY(-4px);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  user-select: none;
+}
+.climb-marker:hover {
+  transform: translateY(-6px) scale(1.04);
+  box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.45);
 }
 .climb-marker i { font-size: 0.85rem; }
 .climb-marker .climb-marker-stats { color: #212529; }

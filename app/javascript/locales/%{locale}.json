@@ -281,6 +281,7 @@
       "avg_speed": "Average speed",
       "back_to_dashboard": "← Back to dashboard",
       "charts": "Charts",
+      "clear_selection": "Clear",
       "distance": "Distance",
       "distance_km": "Distance (km)",
       "duration": "Moving time",
@@ -292,9 +293,16 @@
       "no_route_data": "No GPS data for this activity.",
       "no_stream_data": "No data available for this activity.",
       "not_linked": "Connect your Strava account to see your activities.",
+      "range_stats": {
+        "count": "Count",
+        "max": "Max",
+        "mean": "Mean",
+        "min": "Min"
+      },
       "recent_activities": "Recent activities",
       "refresh": "Refresh",
       "refreshing": "Refreshing…",
+      "selection": "Selection",
       "start_date": "Start",
       "stream": {
         "altitude": "Elevation",
@@ -305,8 +313,14 @@
         "velocity_smooth": "Speed",
         "watts": "Power"
       },
-      "time_label": "Time (s)",
+      "time_label_h": "Time (h)",
+      "time_label_min": "Time (min)",
+      "time_label_s": "Time (s)",
       "type": "Type",
+      "unit_h": "h",
+      "unit_min": "min",
+      "unit_s": "s",
+      "whole_activity": "Whole activity",
       "x_distance": "Distance",
       "x_time": "Time"
     },
@@ -359,6 +373,7 @@
       "avg_speed": "Vitesse moyenne",
       "back_to_dashboard": "← Retour au tableau de bord",
       "charts": "Graphiques",
+      "clear_selection": "Effacer",
       "distance": "Distance",
       "distance_km": "Distance (km)",
       "duration": "Temps en mouvement",
@@ -370,9 +385,16 @@
       "no_route_data": "Pas de données GPS pour cette activité.",
       "no_stream_data": "Aucune donnée disponible pour cette activité.",
       "not_linked": "Liez votre compte Strava pour voir vos activités.",
+      "range_stats": {
+        "count": "Points",
+        "max": "Max",
+        "mean": "Moyenne",
+        "min": "Min"
+      },
       "recent_activities": "Activités récentes",
       "refresh": "Rafraîchir",
       "refreshing": "Rafraîchissement…",
+      "selection": "Sélection",
       "start_date": "Début",
       "stream": {
         "altitude": "Altitude",
@@ -383,8 +405,14 @@
         "velocity_smooth": "Vitesse",
         "watts": "Puissance"
       },
-      "time_label": "Temps (s)",
+      "time_label_h": "Temps (h)",
+      "time_label_min": "Temps (min)",
+      "time_label_s": "Temps (s)",
       "type": "Type",
+      "unit_h": "h",
+      "unit_min": "min",
+      "unit_s": "s",
+      "whole_activity": "Activité complète",
       "x_distance": "Distance",
       "x_time": "Temps"
     }

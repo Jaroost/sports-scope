@@ -18,8 +18,9 @@ const selection = ref(null) // { startIdx, endIdx } | null
 const mapEl = useTemplateRef('mapEl')
 
 let mapInstance = null
-let startMarker = null
-let endMarker = null
+let markerA = null
+let markerB = null
+let isDragging = false
 let dragRafPending = false
 const chartInstances = new Map()
 
@@ -159,20 +160,16 @@ function setSelection(startIdx, endIdx) {
   let e = Math.max(startIdx, endIdx)
   const maxIdx = (streams.value?.[xAxis.value]?.data?.length || streams.value?.time?.data?.length || 1) - 1
   e = Math.min(maxIdx, e)
-  if (s === e) {
-    selection.value = null
-    return
-  }
   selection.value = { startIdx: s, endIdx: e }
 }
 
 function clearSelection() {
   selection.value = null
-  // Snap map handles back to route endpoints
-  if (startMarker && endMarker && hasLatLngStream.value) {
+  if (markerA && markerB && hasLatLngStream.value) {
     const data = streams.value.latlng.data
-    startMarker.setLngLat([data[0][1], data[0][0]])
-    endMarker.setLngLat([data[data.length - 1][1], data[data.length - 1][0]])
+    markerA.setLngLat([data[0][1], data[0][0]])
+    markerB.setLngLat([data[data.length - 1][1], data[data.length - 1][0]])
+    applyMarkerRoles()
   }
 }
 
@@ -338,6 +335,23 @@ async function renderMap() {
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: { 'line-color': '#fc4c02', 'line-width': 4 },
     })
+
+    mapInstance.addImage('route-arrow', buildArrowIcon())
+    mapInstance.addLayer({
+      id: 'route-direction',
+      type: 'symbol',
+      source: 'route',
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 90,
+        'icon-image': 'route-arrow',
+        'icon-size': 1,
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-rotation-alignment': 'map',
+      },
+    })
+
     mapInstance.addSource('selected-route', {
       type: 'geojson',
       data: { type: 'FeatureCollection', features: [] },
@@ -357,47 +371,132 @@ async function renderMap() {
   })
 }
 
+function buildArrowIcon() {
+  const size = 18
+  const cnv = document.createElement('canvas')
+  cnv.width = size
+  cnv.height = size
+  const ctx = cnv.getContext('2d')
+  ctx.translate(size / 2, size / 2)
+  ctx.beginPath()
+  ctx.moveTo(6, 0)
+  ctx.lineTo(-5, -5)
+  ctx.lineTo(-5, 5)
+  ctx.closePath()
+  ctx.fillStyle = '#ffffff'
+  ctx.strokeStyle = '#7a2400'
+  ctx.lineWidth = 1.5
+  ctx.fill()
+  ctx.stroke()
+  const imgData = ctx.getImageData(0, 0, size, size)
+  return { width: size, height: size, data: new Uint8Array(imgData.data.buffer) }
+}
+
+function createFlagElement(kind) {
+  const el = document.createElement('div')
+  el.dataset.kind = kind
+  el.style.cursor = 'grab'
+  el.style.width = '28px'
+  el.style.height = '36px'
+  el.innerHTML = flagSvg(kind)
+  return el
+}
+
+function flagSvg(kind) {
+  if (kind === 'start') {
+    return `
+      <svg width="28" height="36" viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg">
+        <line x1="4" y1="2" x2="4" y2="34" stroke="#1f2937" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="4" cy="34" r="2.5" fill="#1f2937"/>
+        <path d="M4 4 L24 4 L24 18 L4 18 Z" fill="#22c55e" stroke="#15803d" stroke-width="1"/>
+      </svg>`
+  }
+  // checkered flag
+  const cells = []
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 4; col++) {
+      const x = 4 + col * 5
+      const y = 4 + row * 5
+      const dark = (row + col) % 2 === 0
+      cells.push(`<rect x="${x}" y="${y}" width="5" height="5" fill="${dark ? '#ef4444' : '#ffffff'}"/>`)
+    }
+  }
+  return `
+    <svg width="28" height="36" viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg">
+      <line x1="4" y1="2" x2="4" y2="34" stroke="#1f2937" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="4" cy="34" r="2.5" fill="#1f2937"/>
+      <rect x="4" y="4" width="20" height="15" fill="none" stroke="#7f1d1d" stroke-width="1"/>
+      ${cells.join('')}
+    </svg>`
+}
+
+function setFlagKind(el, kind) {
+  if (el.dataset.kind === kind) return
+  el.dataset.kind = kind
+  el.innerHTML = flagSvg(kind)
+}
+
+function applyMarkerRoles() {
+  if (!markerA || !markerB || !hasLatLngStream.value) return
+  const a = markerA.getLngLat()
+  const b = markerB.getLngLat()
+  const aIdx = latLngToIndex(a.lng, a.lat)
+  const bIdx = latLngToIndex(b.lng, b.lat)
+  const aIsStart = aIdx <= bIdx
+  setFlagKind(markerA.getElement(), aIsStart ? 'start' : 'end')
+  setFlagKind(markerB.getElement(), aIsStart ? 'end' : 'start')
+}
+
 function installMapHandles(maplibregl) {
   const data = streams.value.latlng.data
   if (data.length < 2) return
   const start = data[0]
   const end = data[data.length - 1]
 
-  startMarker = new maplibregl.Marker({ color: '#198754', draggable: true })
+  const elA = createFlagElement('start')
+  const elB = createFlagElement('end')
+  markerA = new maplibregl.Marker({ element: elA, draggable: true, anchor: 'bottom-left' })
     .setLngLat([start[1], start[0]])
     .addTo(mapInstance)
-  endMarker = new maplibregl.Marker({ color: '#dc3545', draggable: true })
+  markerB = new maplibregl.Marker({ element: elB, draggable: true, anchor: 'bottom-left' })
     .setLngLat([end[1], end[0]])
     .addTo(mapInstance)
 
-  startMarker.on('drag', () => scheduleMarkerSync('start'))
-  endMarker.on('drag', () => scheduleMarkerSync('end'))
-  startMarker.on('dragend', () => syncFromMarkers())
-  endMarker.on('dragend', () => syncFromMarkers())
+  markerA.on('dragstart', () => { isDragging = true })
+  markerB.on('dragstart', () => { isDragging = true })
+  markerA.on('drag', () => scheduleMarkerSync())
+  markerB.on('drag', () => scheduleMarkerSync())
+  markerA.on('dragend', () => { isDragging = false; syncFromMarkers() })
+  markerB.on('dragend', () => { isDragging = false; syncFromMarkers() })
+
+  applyMarkerRoles()
 }
 
-function scheduleMarkerSync(which) {
+function scheduleMarkerSync() {
   if (dragRafPending) return
   dragRafPending = true
   requestAnimationFrame(() => {
     dragRafPending = false
-    syncFromMarkers(which)
+    syncFromMarkers()
   })
 }
 
 function syncFromMarkers() {
-  if (!startMarker || !endMarker) return
-  const s = startMarker.getLngLat()
-  const e = endMarker.getLngLat()
-  const sIdx = latLngToIndex(s.lng, s.lat)
-  const eIdx = latLngToIndex(e.lng, e.lat)
+  if (!markerA || !markerB) return
+  const a = markerA.getLngLat()
+  const b = markerB.getLngLat()
+  const aIdx = latLngToIndex(a.lng, a.lat)
+  const bIdx = latLngToIndex(b.lng, b.lat)
   const maxIdx = streams.value.latlng.data.length - 1
-  const isFullRange = Math.min(sIdx, eIdx) === 0 && Math.max(sIdx, eIdx) === maxIdx
+  const lo = Math.min(aIdx, bIdx)
+  const hi = Math.max(aIdx, bIdx)
+  const isFullRange = lo === 0 && hi === maxIdx
   if (isFullRange) {
     selection.value = null
   } else {
-    setSelection(sIdx, eIdx)
+    setSelection(lo, hi)
   }
+  applyMarkerRoles()
 }
 
 function refreshSelectedRoute() {
@@ -529,16 +628,18 @@ function applySelectionToCharts() {
 }
 
 function syncMarkersFromSelection() {
-  if (!startMarker || !endMarker || !hasLatLngStream.value) return
+  if (isDragging) return
+  if (!markerA || !markerB || !hasLatLngStream.value) return
   const data = streams.value.latlng.data
   if (!selection.value) {
-    startMarker.setLngLat([data[0][1], data[0][0]])
-    endMarker.setLngLat([data[data.length - 1][1], data[data.length - 1][0]])
-    return
+    markerA.setLngLat([data[0][1], data[0][0]])
+    markerB.setLngLat([data[data.length - 1][1], data[data.length - 1][0]])
+  } else {
+    const { startIdx, endIdx } = selection.value
+    markerA.setLngLat([data[startIdx][1], data[startIdx][0]])
+    markerB.setLngLat([data[endIdx][1], data[endIdx][0]])
   }
-  const { startIdx, endIdx } = selection.value
-  startMarker.setLngLat([data[startIdx][1], data[startIdx][0]])
-  endMarker.setLngLat([data[endIdx][1], data[endIdx][0]])
+  applyMarkerRoles()
 }
 
 function destroyCharts() {

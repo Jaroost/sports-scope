@@ -1940,12 +1940,12 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <div v-if="!group.collapsed" class="row g-2 align-items-stretch">
-                  <div class="col-lg-9">
+                  <div class="col-lg-10">
                     <div class="chart-canvas-wrap">
                       <canvas :id="`chart-${group.id}`"></canvas>
                     </div>
                   </div>
-                  <div class="col-lg-3">
+                  <div class="col-lg-2">
                     <div
                       v-for="streamKey in group.streams"
                       :key="streamKey"

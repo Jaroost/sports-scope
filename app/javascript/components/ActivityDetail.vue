@@ -343,17 +343,23 @@ const dragSelectPlugin = {
     if (!native) return
     const st = chart.$drag || (chart.$drag = { dragging: false, x0: null, x1: null })
 
-    if (native.type === 'mousedown' && native.button === 0) {
+    const isStart = (native.type === 'mousedown' && native.button === 0) || native.type === 'touchstart'
+    const isMove = native.type === 'mousemove' || native.type === 'touchmove'
+    const isEnd = native.type === 'mouseup' || native.type === 'mouseout' || native.type === 'touchend' || native.type === 'touchcancel'
+
+    if (isStart) {
       const area = chart.chartArea
       if (e.x < area.left || e.x > area.right) return
       st.dragging = true
       st.x0 = e.x
       st.x1 = e.x
+      if (native.type === 'touchstart' && native.cancelable) native.preventDefault()
       chart.draw()
-    } else if (native.type === 'mousemove' && st.dragging) {
+    } else if (isMove && st.dragging) {
       st.x1 = e.x
+      if (native.type === 'touchmove' && native.cancelable) native.preventDefault()
       chart.draw()
-    } else if ((native.type === 'mouseup' || native.type === 'mouseout') && st.dragging) {
+    } else if (isEnd && st.dragging) {
       st.dragging = false
       const area = chart.chartArea
       const x0 = Math.max(area.left, Math.min(area.right, st.x0))
@@ -681,6 +687,7 @@ async function renderCharts() {
         animation: false,
         parsing: false,
         interaction: { intersect: false, mode: 'nearest' },
+        events: ['mousedown', 'mousemove', 'mouseup', 'mouseout', 'click', 'touchstart', 'touchmove', 'touchend'],
         plugins: { legend: { display: false } },
         scales: {
           x: {
@@ -1035,6 +1042,10 @@ onBeforeUnmount(() => {
   position: relative;
   height: 180px;
   width: 100%;
+}
+.chart-canvas-wrap canvas {
+  cursor: crosshair;
+  touch-action: pan-y;
 }
 .stats-grid {
   display: grid;

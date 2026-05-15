@@ -13,6 +13,8 @@
       "no_route_data": "No GPS data for this activity.",
       "map_3d": "3D view (terrain)",
       "map_2d": "2D view",
+      "map_style_cyclo": "Cycle",
+      "map_style_standard": "Standard",
       "distance": "Distance",
       "duration": "Moving time",
       "elapsed": "Elapsed time",

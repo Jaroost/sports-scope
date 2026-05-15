@@ -24,6 +24,7 @@ let markerB = null
 let isDragging = false
 let dragRafPending = false
 const climbMarkers = []
+const mapStyleId = ref('cyclosm')
 const chartInstances = new Map()
 const wheelHandlers = new Map()
 const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all charts
@@ -604,7 +605,7 @@ async function renderMap() {
 
   mapInstance = new maplibregl.Map({
     container: mapEl.value,
-    style: cyclOsmStyle(),
+    style: mapStyleFor(mapStyleId.value),
     bounds,
     fitBoundsOptions: { padding: 40 },
     maxPitch: 75,
@@ -612,89 +613,126 @@ async function renderMap() {
   mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
 
   mapInstance.on('load', () => {
-    const altitudes = streams.value?.altitude?.data
-    const distances = streams.value?.distance?.data
-    const grades = streams.value?.grade_smooth?.data
-    const segments = buildGradedSegments(coords, grades, altitudes, distances)
-    const hasGrades = segments.length > 0 && (grades?.length || (altitudes && distances))
+    installRouteLayers(coords)
+    if (hasLatLngStream.value) installMapHandles(maplibregl)
+    installClimbMarkers(maplibregl)
+  })
+}
 
-    // Single LineString — kept around so the direction-arrow symbol layer has
-    // a continuous geometry to follow even when the visible route is split
-    // into many graded segments.
-    mapInstance.addSource('route', {
+// Adds the route geometry / arrows / selection overlay to the current style.
+// Safe to call after a setStyle() swap because all of these layers/sources
+// belong to the style and are wiped when the style changes.
+function installRouteLayers(coords) {
+  if (!mapInstance) return
+  const altitudes = streams.value?.altitude?.data
+  const distances = streams.value?.distance?.data
+  const grades = streams.value?.grade_smooth?.data
+  const segments = buildGradedSegments(coords, grades, altitudes, distances)
+  const hasGrades = segments.length > 0 && (grades?.length || (altitudes && distances))
+
+  // Single LineString kept around so the direction-arrow symbol layer has a
+  // continuous geometry to follow even when the visible route is split into
+  // many graded segments.
+  mapInstance.addSource('route', {
+    type: 'geojson',
+    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } },
+  })
+
+  if (hasGrades) {
+    mapInstance.addSource('route-graded', {
       type: 'geojson',
-      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } },
+      data: { type: 'FeatureCollection', features: segments },
     })
-
-    if (hasGrades) {
-      mapInstance.addSource('route-graded', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: segments },
-      })
-      mapInstance.addLayer({
-        id: 'route-line',
-        type: 'line',
-        source: 'route-graded',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: {
-          'line-color': [
-            'match', ['get', 'bucket'],
-            0, GRADE_BUCKETS[0].color,
-            1, GRADE_BUCKETS[1].color,
-            2, GRADE_BUCKETS[2].color,
-            3, GRADE_BUCKETS[3].color,
-            4, GRADE_BUCKETS[4].color,
-            5, GRADE_BUCKETS[5].color,
-            6, GRADE_BUCKETS[6].color,
-            /* default */ '#fc4c02',
-          ],
-          'line-width': 5,
-        },
-      })
-    } else {
-      // Fallback for activities without altitude/distance/grade.
-      mapInstance.addLayer({
-        id: 'route-line',
-        type: 'line',
-        source: 'route',
-        layout: { 'line-join': 'round', 'line-cap': 'round' },
-        paint: { 'line-color': '#fc4c02', 'line-width': 4 },
-      })
-    }
-
-    mapInstance.addImage('route-arrow', buildArrowIcon())
     mapInstance.addLayer({
-      id: 'route-direction',
-      type: 'symbol',
-      source: 'route',
-      layout: {
-        'symbol-placement': 'line',
-        'symbol-spacing': 90,
-        'icon-image': 'route-arrow',
-        'icon-size': 1,
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
-        'icon-rotation-alignment': 'map',
+      id: 'route-line',
+      type: 'line',
+      source: 'route-graded',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': [
+          'match', ['get', 'bucket'],
+          0, GRADE_BUCKETS[0].color,
+          1, GRADE_BUCKETS[1].color,
+          2, GRADE_BUCKETS[2].color,
+          3, GRADE_BUCKETS[3].color,
+          4, GRADE_BUCKETS[4].color,
+          5, GRADE_BUCKETS[5].color,
+          6, GRADE_BUCKETS[6].color,
+          '#fc4c02',
+        ],
+        'line-width': 5,
       },
     })
-
-    mapInstance.addSource('selected-route', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] },
-    })
+  } else {
     mapInstance.addLayer({
-      id: 'selected-route-line',
+      id: 'route-line',
       type: 'line',
-      source: 'selected-route',
+      source: 'route',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#0d6efd', 'line-width': 6 },
+      paint: { 'line-color': '#fc4c02', 'line-width': 4 },
     })
+  }
 
-    if (hasLatLngStream.value) {
-      installMapHandles(maplibregl)
+  mapInstance.addImage('route-arrow', buildArrowIcon())
+  mapInstance.addLayer({
+    id: 'route-direction',
+    type: 'symbol',
+    source: 'route',
+    layout: {
+      'symbol-placement': 'line',
+      'symbol-spacing': 90,
+      'icon-image': 'route-arrow',
+      'icon-size': 1,
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      'icon-rotation-alignment': 'map',
+    },
+  })
+
+  mapInstance.addSource('selected-route', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  })
+  mapInstance.addLayer({
+    id: 'selected-route-line',
+    type: 'line',
+    source: 'selected-route',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#0d6efd', 'line-width': 6 },
+  })
+
+  // Re-apply the 3D terrain if it was on before the style switch.
+  if (is3D.value) {
+    if (!mapInstance.getSource('terrain-dem')) {
+      mapInstance.addSource('terrain-dem', {
+        type: 'raster-dem',
+        tiles: [TERRAIN_TILES],
+        encoding: 'terrarium',
+        tileSize: 256,
+        maxzoom: 14,
+      })
     }
-    installClimbMarkers(maplibregl)
-    refreshSelectedRoute()
+    mapInstance.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
+  }
+
+  refreshSelectedRoute()
+}
+
+function mapStyleFor(id) {
+  if (id === 'liberty') return 'https://tiles.openfreemap.org/styles/liberty'
+  return cyclOsmStyle()
+}
+
+function setMapStyle(id) {
+  if (!mapInstance || id === mapStyleId.value) return
+  mapStyleId.value = id
+  mapInstance.setStyle(mapStyleFor(id))
+  // setStyle wipes all sources/layers/images — re-install our overlays once
+  // the new style finishes loading. HTML markers (climbs + drag flags +
+  // navigation control) survive the swap because they live in the map's
+  // container, not in the style.
+  mapInstance.once('style.load', () => {
+    installRouteLayers(routeCoords.value)
   })
 }
 
@@ -1893,15 +1931,39 @@ onBeforeUnmount(() => {
         <div class="card-body p-0">
           <div v-if="hasRoute" class="map-wrap">
             <div ref="mapEl" class="activity-map"></div>
-            <button
-              type="button"
-              class="btn btn-sm btn-light shadow-sm map-3d-btn d-flex align-items-center gap-1"
-              @click="toggleMap3D"
-              :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
-            >
-              <i :class="is3D ? 'fa-solid fa-map' : 'fa-solid fa-cube'" aria-hidden="true"></i>
-              <span class="fw-semibold">{{ is3D ? '2D' : '3D' }}</span>
-            </button>
+            <div class="map-controls d-flex flex-column gap-2">
+              <div class="btn-group btn-group-sm shadow-sm" role="group">
+                <button
+                  type="button"
+                  class="btn"
+                  :class="mapStyleId === 'cyclosm' ? 'btn-warning text-dark' : 'btn-light'"
+                  @click="setMapStyle('cyclosm')"
+                  :title="t('strava.map_style_cyclo')"
+                >
+                  <i class="fa-solid fa-bicycle" aria-hidden="true"></i>
+                  <span class="ms-1 fw-semibold">{{ t('strava.map_style_cyclo') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn"
+                  :class="mapStyleId === 'liberty' ? 'btn-warning text-dark' : 'btn-light'"
+                  @click="setMapStyle('liberty')"
+                  :title="t('strava.map_style_standard')"
+                >
+                  <i class="fa-solid fa-map" aria-hidden="true"></i>
+                  <span class="ms-1 fw-semibold">{{ t('strava.map_style_standard') }}</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                class="btn btn-sm btn-light shadow-sm d-flex align-items-center gap-1 align-self-start"
+                @click="toggleMap3D"
+                :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
+              >
+                <i :class="is3D ? 'fa-solid fa-map' : 'fa-solid fa-cube'" aria-hidden="true"></i>
+                <span class="fw-semibold">{{ is3D ? '2D' : '3D' }}</span>
+              </button>
+            </div>
           </div>
           <div v-else class="alert alert-info m-3 mb-0 d-flex align-items-center gap-2">
             <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
@@ -2225,13 +2287,11 @@ onBeforeUnmount(() => {
   height: 420px;
   width: 100%;
 }
-.map-3d-btn {
+.map-controls {
   position: absolute;
   top: 10px;
   left: 10px;
   z-index: 5;
-  background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.1);
 }
 
 .custom-legend {

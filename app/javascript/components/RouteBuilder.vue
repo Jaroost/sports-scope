@@ -32,6 +32,9 @@ const waypointMarkers = []
 let hoverMarker = null
 const hoverIdx = ref(null) // geometry index under cursor when over the route
 let waypointGeomIndices = [] // for each waypoint, its index in geometry[]
+// Set to true right after a successful waypoint drag so the click event
+// maplibre synthesizes from the mouseup doesn't add/insert a spurious point.
+let suppressNextMapClick = false
 
 const hasGeometry = computed(() => geometry.value.length >= 2)
 const isEditMode = computed(() => currentId.value != null)
@@ -269,6 +272,8 @@ async function renderMap() {
     mapInstance.on('load', () => {
       installRouteLayer()
       mapInstance.on('click', (e) => {
+        // A waypoint drag just released — swallow the synthesized click.
+        if (suppressNextMapClick) { suppressNextMapClick = false; return }
         // If the cursor is on the existing route, insert a new waypoint at
         // that exact spot (between the appropriate leg). Otherwise add a
         // new waypoint at the clicked coords.
@@ -368,24 +373,67 @@ function refreshWaypointMarkers() {
     const el = document.createElement('div')
     el.className = 'wp-marker'
     el.innerHTML = `<span class="wp-marker-num">${idx + 1}</span><button type="button" class="wp-marker-del" aria-label="remove">×</button>`
-    const marker = new _maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
       .setLngLat([w.lng, w.lat])
       .addTo(mapInstance)
-    marker.on('dragend', () => {
+
+    // Manual drag — replaces maplibre's built-in draggable: behaves unreliably
+    // when nested inside our Vue island + Bootstrap layout (mousedown bubbling
+    // ordering issue with the map canvas).
+    attachWaypointDrag(el, marker, idx)
+
+    // "×" delete button (visible on hover)
+    el.querySelector('.wp-marker-del').addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      ev.preventDefault()
+      removeWaypoint(idx)
+    })
+    el.addEventListener('click', (ev) => ev.stopPropagation())
+
+    waypointMarkers.push(marker)
+  })
+}
+
+function attachWaypointDrag(el, marker, idx) {
+  el.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return
+    if (ev.target.closest('.wp-marker-del')) return // delete button — let click fire
+    ev.preventDefault()
+    ev.stopPropagation()
+
+    let moved = false
+    mapInstance.dragPan.disable()
+    mapInstance.getCanvas().style.cursor = 'grabbing'
+    el.style.cursor = 'grabbing'
+
+    const onMove = (e) => {
+      moved = true
+      const rect = mapInstance.getContainer().getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      const ll = mapInstance.unproject([x, y])
+      marker.setLngLat([ll.lng, ll.lat])
+    }
+
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      mapInstance.dragPan.enable()
+      mapInstance.getCanvas().style.cursor = 'crosshair'
+      el.style.cursor = ''
+      if (!moved) return
+      // The click event that maplibre will synthesize from this mouseup
+      // would otherwise hit the map handler and insert/add a spurious point.
+      suppressNextMapClick = true
       const pos = marker.getLngLat()
       const next = waypoints.value.slice()
       next[idx] = { lng: pos.lng, lat: pos.lat }
       waypoints.value = next
       recomputeRoute()
-    })
-    // Click on the "×" deletes
-    el.querySelector('.wp-marker-del').addEventListener('click', (ev) => {
-      ev.stopPropagation()
-      removeWaypoint(idx)
-    })
-    el.addEventListener('click', (ev) => ev.stopPropagation())
-    el.addEventListener('mousedown', (ev) => ev.stopPropagation())
-    waypointMarkers.push(marker)
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   })
 }
 
@@ -457,7 +505,8 @@ function insertWaypointAtGeomIdx(geomIdx) {
   if (!waypointGeomIndices.length) return
   const pt = geometry.value[geomIdx]
   if (!pt) return
-  // Find the leg (i, i+1) containing geomIdx.
+  // Find the leg (i, i+1) containing geomIdx — splice the new point in there
+  // so the existing waypoint order is preserved.
   let insertAt = waypoints.value.length
   for (let i = 0; i < waypointGeomIndices.length - 1; i++) {
     if (geomIdx >= waypointGeomIndices[i] && geomIdx <= waypointGeomIndices[i + 1]) {

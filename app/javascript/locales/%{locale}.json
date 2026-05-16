@@ -201,7 +201,8 @@
       "home": "Home",
       "link_strava": "Connect Strava",
       "login": "Sign in",
-      "logout": "Sign out"
+      "logout": "Sign out",
+      "routes": "Routes"
     },
     "number": {
       "currency": {
@@ -280,6 +281,10 @@
       "feature_stats_body": "Elev. gain/loss, duration, distance and averages computed over your selection.",
       "feature_stats_title": "Range stats",
       "home_lead": "An example Rails 8 app with Keycloak SSO, Strava OAuth, Vue islands and Vite."
+    },
+    "routes": {
+      "builder_title": "New route",
+      "list_title": "My routes"
     },
     "strava": {
       "activity_not_found": "Activity not found.",
@@ -368,7 +373,8 @@
       "home": "Accueil",
       "link_strava": "Lier Strava",
       "login": "Se connecter",
-      "logout": "Se déconnecter"
+      "logout": "Se déconnecter",
+      "routes": "Itinéraires"
     },
     "pages": {
       "feature_charts_body": "Altitude, fréquence cardiaque, vitesse, puissance — analysez chaque stream Strava.",
@@ -378,6 +384,10 @@
       "feature_stats_body": "D+ / D-, durée, distance et moyennes calculées sur le segment sélectionné.",
       "feature_stats_title": "Statistiques de plage",
       "home_lead": "Une application Rails 8 d'exemple avec Keycloak SSO, OAuth Strava, îlots Vue et Vite."
+    },
+    "routes": {
+      "builder_title": "Créer un itinéraire",
+      "list_title": "Mes itinéraires"
     },
     "strava": {
       "activity_not_found": "Activité introuvable.",

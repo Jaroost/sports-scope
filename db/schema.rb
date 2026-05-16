@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_15_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_16_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -22,6 +22,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_000004) do
     t.bigint "user_id", null: false
     t.index ["user_id", "name"], name: "index_chart_layouts_on_user_id_and_name", unique: true
     t.index ["user_id"], name: "index_chart_layouts_on_user_id"
+  end
+
+  create_table "routes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.float "distance_m"
+    t.float "elevation_gain_m"
+    t.float "elevation_loss_m"
+    t.jsonb "geometry", default: [], null: false
+    t.string "name", null: false
+    t.string "profile", default: "cycling"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.jsonb "waypoints", default: [], null: false
+    t.index ["user_id", "updated_at"], name: "index_routes_on_user_id_and_updated_at"
+    t.index ["user_id"], name: "index_routes_on_user_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -43,5 +58,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_15_000004) do
   end
 
   add_foreign_key "chart_layouts", "users"
+  add_foreign_key "routes", "users"
   add_foreign_key "users", "chart_layouts", column: "last_chart_layout_id", on_delete: :nullify
 end

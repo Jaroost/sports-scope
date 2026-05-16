@@ -99,6 +99,34 @@
         "temp": "Temperature",
         "grade_smooth": "Grade"
       }
+    },
+    "routes": {
+      "list_title": "My routes",
+      "builder_title": "New route",
+      "new": "New route",
+      "empty": "No routes yet. Create one by clicking \"New route\".",
+      "name_placeholder": "Route name…",
+      "click_hint": "Click on the map to add a point",
+      "search_placeholder": "Search place (city, address…)",
+      "undo": "Undo",
+      "clear": "Clear",
+      "clear_confirm": "Remove all points?",
+      "save": "Save",
+      "delete": "Delete route",
+      "delete_confirm": "Delete this route?",
+      "export_gpx": "Export GPX",
+      "back": "Back to list",
+      "computing_route": "Computing route…",
+      "computing_elevation": "Fetching elevation…",
+      "elevation_profile": "Elevation profile",
+      "no_elevation_yet": "Click on the map to add at least 2 points and generate the profile.",
+      "altitude": "Elevation",
+      "x_km": "Distance (km)",
+      "y_m": "Elevation (m)",
+      "error_name_required": "Give your route a name before saving.",
+      "error_min_points": "Add at least 2 points on the map.",
+      "error_routing": "OSRM error",
+      "error_elevation": "Elevation error"
     }
   }
 }

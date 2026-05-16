@@ -5,9 +5,13 @@ en:
   nav:
     home: "Home"
     dashboard: "Dashboard"
+    routes: "Routes"
     login: "Sign in"
     logout: "Sign out"
     link_strava: "Connect Strava"
+  routes:
+    list_title: "My routes"
+    builder_title: "New route"
   auth:
     signed_in: "Welcome!"
     login_first: "Please sign in first."

@@ -99,6 +99,34 @@
         "temp": "Température",
         "grade_smooth": "Pente"
       }
+    },
+    "routes": {
+      "list_title": "Mes itinéraires",
+      "builder_title": "Créer un itinéraire",
+      "new": "Nouvel itinéraire",
+      "empty": "Aucun itinéraire pour l'instant. Crées-en un en cliquant sur « Nouvel itinéraire ».",
+      "name_placeholder": "Nom de l'itinéraire…",
+      "click_hint": "Cliquer sur la carte pour ajouter un point",
+      "search_placeholder": "Rechercher un lieu (ville, adresse…)",
+      "undo": "Annuler",
+      "clear": "Effacer",
+      "clear_confirm": "Supprimer tous les points ?",
+      "save": "Enregistrer",
+      "delete": "Supprimer l'itinéraire",
+      "delete_confirm": "Supprimer cet itinéraire ?",
+      "export_gpx": "Exporter en GPX",
+      "back": "Retour à la liste",
+      "computing_route": "Calcul du tracé…",
+      "computing_elevation": "Récupération de l'altitude…",
+      "elevation_profile": "Profil d'altitude",
+      "no_elevation_yet": "Cliquer sur la carte pour ajouter au moins 2 points et générer le profil.",
+      "altitude": "Altitude",
+      "x_km": "Distance (km)",
+      "y_m": "Altitude (m)",
+      "error_name_required": "Donne un nom à ton itinéraire avant d'enregistrer.",
+      "error_min_points": "Ajoute au moins 2 points sur la carte.",
+      "error_routing": "Erreur OSRM",
+      "error_elevation": "Erreur altitude"
     }
   }
 }

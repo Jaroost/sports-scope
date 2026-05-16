@@ -1,5 +1,6 @@
 class User < ApplicationRecord
   has_many :chart_layouts, dependent: :destroy
+  has_many :routes, dependent: :destroy
 
   validates :keycloak_uid, presence: true, uniqueness: true
   validates :email, presence: true, uniqueness: true

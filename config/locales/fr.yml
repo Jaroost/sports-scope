@@ -5,9 +5,13 @@ fr:
   nav:
     home: "Accueil"
     dashboard: "Tableau de bord"
+    routes: "Itinéraires"
     login: "Se connecter"
     logout: "Se déconnecter"
     link_strava: "Lier Strava"
+  routes:
+    list_title: "Mes itinéraires"
+    builder_title: "Créer un itinéraire"
   auth:
     signed_in: "Bienvenue !"
     login_first: "Veuillez vous connecter d'abord."

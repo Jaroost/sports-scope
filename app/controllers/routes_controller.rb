@@ -60,15 +60,18 @@ class RoutesController < ApplicationController
   private
 
   def sanitize_attrs(p)
-    {
-      name: p[:name].to_s.strip.first(MAX_NAME_LEN).presence,
-      profile: ALLOWED_PROFILES.include?(p[:profile].to_s) ? p[:profile] : "cycling",
-      waypoints: clean_waypoints(p[:waypoints]),
-      geometry: clean_geometry(p[:geometry]),
-      distance_m: p[:distance_m].to_f.then { |v| v.positive? ? v : nil },
-      elevation_gain_m: p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil },
-      elevation_loss_m: p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil },
-    }
+    # Only include keys that were actually present in the payload so PATCH
+    # requests with partial bodies (e.g. just `name` for an inline rename) do
+    # not clobber waypoints/geometry with empty defaults.
+    out = {}
+    out[:name] = p[:name].to_s.strip.first(MAX_NAME_LEN).presence if p.key?(:name)
+    out[:profile] = ALLOWED_PROFILES.include?(p[:profile].to_s) ? p[:profile] : "cycling" if p.key?(:profile)
+    out[:waypoints] = clean_waypoints(p[:waypoints]) if p.key?(:waypoints)
+    out[:geometry] = clean_geometry(p[:geometry]) if p.key?(:geometry)
+    out[:distance_m] = p[:distance_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:distance_m)
+    out[:elevation_gain_m] = p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_gain_m)
+    out[:elevation_loss_m] = p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_loss_m)
+    out
   end
 
   def clean_waypoints(raw)

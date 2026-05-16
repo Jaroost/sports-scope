@@ -1395,22 +1395,6 @@ async function save() {
   }
 }
 
-async function remove() {
-  if (!isEditMode.value) return
-  if (!window.confirm(t('routes.delete_confirm'))) return
-  try {
-    const res = await fetch(`/api/routes/${currentId.value}`, {
-      method: 'DELETE',
-      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
-      credentials: 'same-origin',
-    })
-    if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`)
-    window.location.href = `${localePrefix}/routes`
-  } catch (e) {
-    error.value = e.message
-  }
-}
-
 function exportGpx() {
   if (!isEditMode.value) return
   window.location.href = `/api/routes/${currentId.value}/gpx`
@@ -1418,6 +1402,20 @@ function exportGpx() {
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 onMounted(async () => {
+  // When coming from the "Nouvel itinéraire" prompt, the URL carries
+  // ?name=… — pre-fill the name input and scrub the param so a reload
+  // doesn't re-apply the prefill on top of what the user has typed since.
+  if (!currentId.value) {
+    try {
+      const u = new URL(window.location.href)
+      const presetName = u.searchParams.get('name')
+      if (presetName) {
+        name.value = presetName.slice(0, 80)
+        u.searchParams.delete('name')
+        window.history.replaceState({}, '', u.toString())
+      }
+    } catch { /* ignore malformed URL */ }
+  }
   await renderMap()
   if (currentId.value) await fetchRoute(currentId.value)
 })
@@ -1614,10 +1612,6 @@ onBeforeUnmount(() => {
             @click="exportGpx" :title="t('routes.export_gpx')">
             <i class="fa-solid fa-download" aria-hidden="true"></i>
             <span class="d-none d-md-inline">GPX</span>
-          </button>
-          <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1"
-            @click="remove" :disabled="saving" :title="t('routes.delete')">
-            <i class="fa-solid fa-trash" aria-hidden="true"></i>
           </button>
           <button type="button" class="btn btn-warning d-flex align-items-center gap-1"
             @click="save" :disabled="saving || waypoints.length < 2 || !name.trim()">

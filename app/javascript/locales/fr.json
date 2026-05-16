@@ -106,6 +106,18 @@
         "grade_smooth": "Pente"
       }
     },
+    "fit": {
+      "title": "Importer une activité (.fit)",
+      "dropzone_title": "Glisser un fichier .fit ici",
+      "dropzone_hint": "ou cliquer pour le sélectionner. Le fichier reste sur ton appareil — il est lu et envoyé en JSON.",
+      "parsing": "Lecture du fichier…",
+      "uploading": "Envoi en cours…",
+      "done": "Import réussi",
+      "loading_list": "Chargement des activités importées…",
+      "empty": "Aucune activité importée pour l'instant.",
+      "delete": "Supprimer l'activité importée",
+      "delete_confirm": "Supprimer cette activité importée ?"
+    },
     "routes": {
       "list_title": "Mes itinéraires",
       "builder_title": "Créer un itinéraire",

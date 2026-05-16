@@ -7,8 +7,10 @@
   <% end %>
 </div>
 
-<% if @strava_linked %>
-  <div data-vue-component="ActivityDetail" data-vue-props='<%= { activityId: @activity_id }.to_json %>'></div>
+<% if @source == "imported" %>
+  <div data-vue-component="ActivityDetail" data-vue-props='<%= { activityId: @activity_id, source: "imported" }.to_json %>'></div>
+<% elsif @strava_linked %>
+  <div data-vue-component="ActivityDetail" data-vue-props='<%= { activityId: @activity_id, source: "strava" }.to_json %>'></div>
 <% else %>
   <div class="alert alert-info d-flex align-items-center gap-2">
     <i class="fa-solid fa-circle-info" aria-hidden="true"></i>

@@ -3,12 +3,14 @@ import HelloStrava from './components/HelloStrava.vue'
 import ActivityDetail from './components/ActivityDetail.vue'
 import RoutesList from './components/RoutesList.vue'
 import RouteBuilder from './components/RouteBuilder.vue'
+import ImportFitActivity from './components/ImportFitActivity.vue'
 
 const registry = {
   HelloStrava,
   ActivityDetail,
   RoutesList,
   RouteBuilder,
+  ImportFitActivity,
 }
 
 export function mountVueIslands() {

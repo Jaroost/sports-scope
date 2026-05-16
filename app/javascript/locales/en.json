@@ -106,6 +106,18 @@
         "grade_smooth": "Grade"
       }
     },
+    "fit": {
+      "title": "Import an activity (.fit)",
+      "dropzone_title": "Drop a .fit file here",
+      "dropzone_hint": "or click to select one. The file is parsed in your browser and sent as JSON.",
+      "parsing": "Parsing file…",
+      "uploading": "Uploading…",
+      "done": "Import successful",
+      "loading_list": "Loading imported activities…",
+      "empty": "No imported activities yet.",
+      "delete": "Delete imported activity",
+      "delete_confirm": "Delete this imported activity?"
+    },
     "routes": {
       "list_title": "My routes",
       "builder_title": "New route",

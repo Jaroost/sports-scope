@@ -4,7 +4,20 @@ import { t } from '../i18n'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
+  source: { type: String, default: 'strava' }, // 'strava' or 'imported'
 })
+
+// Build endpoint URLs from the source — Strava activities go to /strava/...,
+// FIT-imported activities to /api/imported_activities/...
+const activityUrl = computed(() => props.source === 'imported'
+  ? `/api/imported_activities/${props.activityId}`
+  : `/strava/activities/${props.activityId}`)
+const streamsUrl = computed(() => props.source === 'imported'
+  ? `/api/imported_activities/${props.activityId}/streams`
+  : `/strava/activities/${props.activityId}/streams`)
+const photosUrl = computed(() => props.source === 'imported'
+  ? null // imported (FIT) has no photos
+  : `/strava/activities/${props.activityId}/photos`)
 
 const loading = ref(true)
 const error = ref(null)
@@ -421,7 +434,7 @@ function formatKm(meters) {
 
 async function fetchActivity() {
   try {
-    const res = await fetch(`/strava/activities/${props.activityId}`, {
+    const res = await fetch(activityUrl.value, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })
@@ -444,7 +457,7 @@ async function fetchStreams() {
   streamsLoading.value = true
   streamsError.value = null
   try {
-    const res = await fetch(`/strava/activities/${props.activityId}/streams`, {
+    const res = await fetch(streamsUrl.value, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })
@@ -459,8 +472,9 @@ async function fetchStreams() {
 }
 
 async function fetchPhotos() {
+  if (!photosUrl.value) { photos.value = []; return }
   try {
-    const res = await fetch(`/strava/activities/${props.activityId}/photos`, {
+    const res = await fetch(photosUrl.value, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })

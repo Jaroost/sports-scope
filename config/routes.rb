@@ -3,6 +3,7 @@ Rails.application.routes.draw do
     root "pages#home"
     get "/dashboard", to: "pages#dashboard", as: :dashboard
     get "/activities/:id", to: "activities#show", as: :activity, constraints: { id: /\d+/ }
+    get "/imported_activities/:id", to: "activities#show_imported", as: :imported_activity, constraints: { id: /\d+/ }
     get "/routes", to: "pages#routes_index", as: :routes_index
     get "/routes/new", to: "pages#route_builder", as: :new_route
     get "/routes/:id/edit", to: "pages#route_builder", as: :edit_route, constraints: { id: /\d+/ }
@@ -28,6 +29,13 @@ Rails.application.routes.draw do
   delete "/api/routes/:id", to: "routes#destroy", constraints: { id: /\d+/ }
   get "/api/routes/:id/gpx", to: "routes#export_gpx", constraints: { id: /\d+/ }
   post "/api/routes/:id/duplicate", to: "routes#duplicate", constraints: { id: /\d+/ }
+
+  # Imported (FIT) activities (JSON consumed by Vue components)
+  get "/api/imported_activities", to: "imported_activities#index"
+  post "/api/imported_activities", to: "imported_activities#create"
+  get "/api/imported_activities/:id", to: "imported_activities#show", constraints: { id: /\d+/ }
+  get "/api/imported_activities/:id/streams", to: "imported_activities#streams", constraints: { id: /\d+/ }
+  delete "/api/imported_activities/:id", to: "imported_activities#destroy", constraints: { id: /\d+/ }
 
   # User preferences (JSON consumed by Vue components) — named layout presets
   get "/preferences/chart_layouts", to: "preferences#index"

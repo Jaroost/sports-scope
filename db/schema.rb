@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_16_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_16_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -22,6 +22,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_000001) do
     t.bigint "user_id", null: false
     t.index ["user_id", "name"], name: "index_chart_layouts_on_user_id_and_name", unique: true
     t.index ["user_id"], name: "index_chart_layouts_on_user_id"
+  end
+
+  create_table "imported_activities", force: :cascade do |t|
+    t.string "activity_type"
+    t.float "average_cadence"
+    t.float "average_heartrate"
+    t.float "average_speed"
+    t.float "average_temp"
+    t.float "average_watts"
+    t.datetime "created_at", null: false
+    t.float "distance_m"
+    t.integer "elapsed_time_s"
+    t.jsonb "end_latlng"
+    t.string "filename"
+    t.float "max_cadence"
+    t.float "max_heartrate"
+    t.float "max_speed"
+    t.float "max_watts"
+    t.integer "moving_time_s"
+    t.string "name", null: false
+    t.string "source", default: "fit", null: false
+    t.jsonb "start_latlng"
+    t.datetime "started_at"
+    t.jsonb "streams", default: {}, null: false
+    t.float "total_elevation_gain"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "started_at"], name: "index_imported_activities_on_user_id_and_started_at"
+    t.index ["user_id"], name: "index_imported_activities_on_user_id"
   end
 
   create_table "routes", force: :cascade do |t|
@@ -58,6 +87,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_16_000001) do
   end
 
   add_foreign_key "chart_layouts", "users"
+  add_foreign_key "imported_activities", "users"
   add_foreign_key "routes", "users"
   add_foreign_key "users", "chart_layouts", column: "last_chart_layout_id", on_delete: :nullify
 end

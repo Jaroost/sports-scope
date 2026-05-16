@@ -274,6 +274,9 @@
       }
     },
     "pages": {
+      "feature_builder_body": "Plan your rides: snap-to-roads, elevation profile, climb detection, grade/surface colouring, GPX export.",
+      "feature_builder_cta": "Build a route",
+      "feature_builder_title": "Route builder",
       "feature_charts_body": "Altitude, heart rate, speed, power — analyze every Strava stream.",
       "feature_charts_title": "Detailed charts",
       "feature_routes_body": "Visualize every outing on an interactive map with direction arrows and segment selection.",
@@ -377,6 +380,9 @@
       "routes": "Itinéraires"
     },
     "pages": {
+      "feature_builder_body": "Planifiez vos sorties vélo : snap aux routes, profil d'altitude, cols détectés, couleurs de pente/revêtement, export GPX.",
+      "feature_builder_cta": "Créer un itinéraire",
+      "feature_builder_title": "Créateur d'itinéraire",
       "feature_charts_body": "Altitude, fréquence cardiaque, vitesse, puissance — analysez chaque stream Strava.",
       "feature_charts_title": "Graphiques détaillés",
       "feature_routes_body": "Visualisez chaque sortie sur une carte interactive avec sens du trajet et sélection de segment.",

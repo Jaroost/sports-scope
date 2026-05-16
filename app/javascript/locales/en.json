@@ -125,6 +125,7 @@
       "duplicate": "Duplicate",
       "duplicate_prompt": "Name of the copy:",
       "open_in_google_maps": "Open in Google Maps",
+      "open_in_komoot": "Open in Komoot",
       "save_name": "Save name",
       "cancel": "Cancel",
       "export_gpx": "Export GPX",

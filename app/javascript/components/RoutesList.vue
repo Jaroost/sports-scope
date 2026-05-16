@@ -94,6 +94,30 @@ async function removeRoute(route) {
   }
 }
 
+async function duplicateRoute(route) {
+  const proposed = `${route.name} (copie)`.slice(0, 80)
+  const raw = window.prompt(t('routes.duplicate_prompt'), proposed)
+  if (raw == null) return
+  const name = raw.trim().slice(0, 80) || proposed
+  try {
+    const res = await fetch(`/api/routes/${route.id}/duplicate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken(),
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ name }),
+    })
+    if (!res.ok && res.status !== 201) throw new Error(`HTTP ${res.status}`)
+    const payload = await res.json()
+    if (payload.route) routes.value = [payload.route, ...routes.value]
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
 function createNew() {
   const raw = window.prompt(t('routes.name_prompt'), '')
   if (raw == null) return // user cancelled
@@ -208,6 +232,14 @@ onMounted(() => fetchRoutes())
             @click="startEdit(r)"
           >
             <i class="fa-solid fa-pen" aria-hidden="true"></i>
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary"
+            :title="t('routes.duplicate')"
+            @click="duplicateRoute(r)"
+          >
+            <i class="fa-solid fa-copy" aria-hidden="true"></i>
           </button>
           <button
             type="button"

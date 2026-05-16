@@ -122,6 +122,8 @@
       "delete": "Delete route",
       "delete_confirm": "Delete this route?",
       "rename": "Rename",
+      "duplicate": "Duplicate",
+      "duplicate_prompt": "Name of the copy:",
       "open_in_google_maps": "Open in Google Maps",
       "save_name": "Save name",
       "cancel": "Cancel",

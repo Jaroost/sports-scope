@@ -57,6 +57,26 @@ class RoutesController < ApplicationController
               type: "application/gpx+xml"
   end
 
+  # POST /api/routes/:id/duplicate
+  def duplicate
+    src = current_user.routes.find_by(id: params[:id])
+    return head :not_found unless src
+    requested = params[:name].to_s.strip.first(MAX_NAME_LEN).presence
+    copy_name = requested || "#{src.name} (copie)".first(MAX_NAME_LEN)
+    new_route = current_user.routes.create!(
+      name: copy_name,
+      profile: src.profile,
+      waypoints: src.waypoints,
+      geometry: src.geometry,
+      distance_m: src.distance_m,
+      elevation_gain_m: src.elevation_gain_m,
+      elevation_loss_m: src.elevation_loss_m,
+    )
+    render json: { route: serialize_full(new_route) }, status: :created
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   private
 
   def sanitize_attrs(p)

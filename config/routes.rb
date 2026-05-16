@@ -27,6 +27,7 @@ Rails.application.routes.draw do
   patch "/api/routes/:id", to: "routes#update", constraints: { id: /\d+/ }
   delete "/api/routes/:id", to: "routes#destroy", constraints: { id: /\d+/ }
   get "/api/routes/:id/gpx", to: "routes#export_gpx", constraints: { id: /\d+/ }
+  post "/api/routes/:id/duplicate", to: "routes#duplicate", constraints: { id: /\d+/ }
 
   # User preferences (JSON consumed by Vue components) — named layout presets
   get "/preferences/chart_layouts", to: "preferences#index"

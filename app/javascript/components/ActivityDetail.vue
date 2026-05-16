@@ -32,6 +32,9 @@ const photos = ref([])
 const showPhotos = ref(true)
 const photoMarkers = []
 const lightboxIndex = ref(null)
+const galleryCollapsed = ref(
+  typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.galleryCollapsed') === '1',
+)
 const chartInstances = new Map()
 const wheelHandlers = new Map()
 const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all charts
@@ -963,6 +966,15 @@ function togglePhotos() {
     photoMarkers.length = 0
   } else if (_maplibregl) {
     installPhotoMarkers(_maplibregl)
+  }
+}
+
+function toggleGalleryCollapsed() {
+  galleryCollapsed.value = !galleryCollapsed.value
+  try {
+    localStorage.setItem('sportsScope.galleryCollapsed', galleryCollapsed.value ? '1' : '0')
+  } catch {
+    // localStorage may be unavailable (private mode, etc.) — silently ignore.
   }
 }
 
@@ -2251,9 +2263,18 @@ function onLightboxKey(ev) {
       <div v-if="photos.length > 0" class="card mt-3 shadow-sm border-0">
         <div class="card-header activity-card-header d-flex align-items-center gap-2">
           <i class="fa-solid fa-images text-warning" aria-hidden="true"></i>
-          <h3 class="h6 mb-0">{{ t('strava.photo_gallery') }} ({{ photos.length }})</h3>
+          <h3 class="h6 mb-0 flex-grow-1">{{ t('strava.photo_gallery') }} ({{ photos.length }})</h3>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            @click="toggleGalleryCollapsed"
+            :title="galleryCollapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
+            :aria-pressed="galleryCollapsed"
+          >
+            <i :class="galleryCollapsed ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" aria-hidden="true"></i>
+          </button>
         </div>
-        <div class="card-body">
+        <div v-if="!galleryCollapsed" class="card-body">
           <div class="photo-gallery">
             <button
               v-for="(photo, idx) in photos"

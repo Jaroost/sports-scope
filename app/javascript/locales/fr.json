@@ -122,6 +122,7 @@
       "delete": "Supprimer l'itinéraire",
       "delete_confirm": "Supprimer cet itinéraire ?",
       "rename": "Renommer",
+      "open_in_google_maps": "Ouvrir dans Google Maps",
       "save_name": "Enregistrer le nom",
       "cancel": "Annuler",
       "export_gpx": "Exporter en GPX",

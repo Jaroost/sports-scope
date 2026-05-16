@@ -903,7 +903,12 @@ function refreshWaypointMarkers() {
   waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
     el.className = 'wp-marker'
-    el.innerHTML = `<span class="wp-marker-num">${idx + 1}</span><button type="button" class="wp-marker-del" aria-label="remove">×</button>`
+    const gmTitle = t('routes.open_in_google_maps')
+    el.innerHTML = `
+      <span class="wp-marker-num">${idx + 1}</span>
+      <a class="wp-marker-gm" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer" title="${gmTitle}" aria-label="${gmTitle}"><i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i></a>
+      <button type="button" class="wp-marker-del" aria-label="remove">×</button>
+    `
     const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
       .setLngLat([w.lng, w.lat])
       .addTo(mapInstance)
@@ -918,6 +923,11 @@ function refreshWaypointMarkers() {
       ev.stopPropagation()
       ev.preventDefault()
       removeWaypoint(idx)
+    })
+    // Google Maps link — preserve native target="_blank" navigation, just
+    // stop the click from bubbling to the map (no waypoint insert/drag).
+    el.querySelector('.wp-marker-gm').addEventListener('click', (ev) => {
+      ev.stopPropagation()
     })
     // Right-click on a marker also deletes it (no confirm — the user can
     // re-click the map to re-add a point).
@@ -936,6 +946,7 @@ function attachWaypointDrag(el, marker, idx) {
   el.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return
     if (ev.target.closest('.wp-marker-del')) return // delete button — let click fire
+    if (ev.target.closest('.wp-marker-gm')) return // Google Maps link — let click navigate
     ev.preventDefault()
     ev.stopPropagation()
 
@@ -2127,6 +2138,35 @@ onBeforeUnmount(() => {
   transition: opacity 0.1s;
 }
 .wp-marker:hover .wp-marker-del {
+  opacity: 1;
+}
+
+/* "Open in Google Maps" link — mirrors the × button on the opposite corner. */
+.wp-marker-gm {
+  position: absolute;
+  top: -6px;
+  left: -8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #4285f4;
+  color: #fff;
+  border: 2px solid #fff;
+  font-size: 0.55rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 0.1s, transform 0.1s;
+}
+.wp-marker-gm:hover {
+  transform: scale(1.1);
+  color: #fff;
+}
+.wp-marker:hover .wp-marker-gm {
   opacity: 1;
 }
 

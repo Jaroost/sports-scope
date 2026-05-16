@@ -122,6 +122,7 @@
       "delete": "Delete route",
       "delete_confirm": "Delete this route?",
       "rename": "Rename",
+      "open_in_google_maps": "Open in Google Maps",
       "save_name": "Save name",
       "cancel": "Cancel",
       "export_gpx": "Export GPX",

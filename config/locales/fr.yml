@@ -65,6 +65,9 @@ fr:
       grade_smooth: "Pente"
   pages:
     home_lead: "Une application Rails 8 d'exemple avec Keycloak SSO, OAuth Strava, îlots Vue et Vite."
+    feature_builder_title: "Créateur d'itinéraire"
+    feature_builder_body: "Planifiez vos sorties vélo : snap aux routes, profil d'altitude, cols détectés, couleurs de pente/revêtement, export GPX."
+    feature_builder_cta: "Créer un itinéraire"
     feature_routes_title: "Cartes & parcours"
     feature_routes_body: "Visualisez chaque sortie sur une carte interactive avec sens du trajet et sélection de segment."
     feature_charts_title: "Graphiques détaillés"

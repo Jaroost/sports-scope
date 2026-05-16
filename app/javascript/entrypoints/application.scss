@@ -1,4 +1,9 @@
+// Promoted to a Vite entrypoint so `vite_stylesheet_tag 'application'` emits a
+// real <link rel="stylesheet"> in both dev and prod. Previously this file was
+// imported from application.js, which made Vite inject CSS via JS at dev time
+// and caused a brief flash of unstyled content (FOUC) on every page load.
 @use "bootstrap/scss/bootstrap" as *;
+@import "@fortawesome/fontawesome-free/css/all.min.css";
 
 body {
   padding-top: 4rem;

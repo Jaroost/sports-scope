@@ -65,6 +65,9 @@ en:
       grade_smooth: "Grade"
   pages:
     home_lead: "An example Rails 8 app with Keycloak SSO, Strava OAuth, Vue islands and Vite."
+    feature_builder_title: "Route builder"
+    feature_builder_body: "Plan your rides: snap-to-roads, elevation profile, climb detection, grade/surface colouring, GPX export."
+    feature_builder_cta: "Build a route"
     feature_routes_title: "Maps & routes"
     feature_routes_body: "Visualize every outing on an interactive map with direction arrows and segment selection."
     feature_charts_title: "Detailed charts"

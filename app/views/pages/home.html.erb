@@ -6,9 +6,12 @@
   <p class="lead text-muted"><%= t("pages.home_lead") %></p>
 
   <% if user_signed_in? %>
-    <p>
+    <p class="d-flex flex-wrap justify-content-center gap-2">
       <%= link_to dashboard_path, class: "btn btn-primary btn-lg" do %>
         <i class="fa-solid fa-gauge-high me-2" aria-hidden="true"></i><%= t("nav.dashboard") %>
+      <% end %>
+      <%= link_to routes_index_path, class: "btn btn-warning btn-lg" do %>
+        <i class="fa-solid fa-route me-2" aria-hidden="true"></i><%= t("pages.feature_builder_cta") %>
       <% end %>
     </p>
   <% else %>
@@ -20,7 +23,18 @@
   <% end %>
 
   <div class="row g-3 mt-5 home-features text-start">
-    <div class="col-md-4">
+    <div class="col-md-6 col-lg-3">
+      <div class="card h-100 border-0 shadow-sm">
+        <div class="card-body">
+          <div class="feature-icon bg-warning-subtle text-warning mb-2">
+            <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+          </div>
+          <h3 class="h6 fw-bold mb-1"><%= t("pages.feature_builder_title") %></h3>
+          <p class="text-muted small mb-0"><%= t("pages.feature_builder_body") %></p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6 col-lg-3">
       <div class="card h-100 border-0 shadow-sm">
         <div class="card-body">
           <div class="feature-icon bg-warning-subtle text-warning mb-2">
@@ -31,7 +45,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-6 col-lg-3">
       <div class="card h-100 border-0 shadow-sm">
         <div class="card-body">
           <div class="feature-icon bg-success-subtle text-success mb-2">
@@ -42,7 +56,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-6 col-lg-3">
       <div class="card h-100 border-0 shadow-sm">
         <div class="card-body">
           <div class="feature-icon bg-danger-subtle text-danger mb-2">

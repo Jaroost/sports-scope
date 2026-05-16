@@ -1,5 +1,5 @@
-import '../stylesheets/application.scss'
-import '@fortawesome/fontawesome-free/css/all.min.css'
+// Styles (Bootstrap + Font Awesome + custom) live in entrypoints/application.scss
+// so vite_stylesheet_tag emits a real <link> tag in both dev and prod — no FOUC.
 import 'bootstrap'
 
 import { setupI18n } from '../i18n'

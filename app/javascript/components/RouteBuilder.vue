@@ -99,6 +99,43 @@ const avgGradePct = computed(() => {
   return ((elevGainM.value / distanceM.value) * 100).toFixed(1)
 })
 
+// Average riding speed in km/h, persisted in localStorage. Used to compute
+// an estimated ride time below the map. Default 18 km/h ≈ typical cyclo
+// touring pace including stops.
+const SPEED_KEY = 'sportsScope.routeBuilderAvgSpeed'
+function loadSpeed() {
+  try {
+    const raw = localStorage.getItem(SPEED_KEY)
+    const v = raw != null ? parseFloat(raw) : NaN
+    return Number.isFinite(v) && v >= 3 && v <= 80 ? v : 18
+  } catch { return 18 }
+}
+const avgSpeedKmh = ref(loadSpeed())
+watch(avgSpeedKmh, (v) => {
+  if (!Number.isFinite(v) || v < 3 || v > 80) return
+  try { localStorage.setItem(SPEED_KEY, String(v)) } catch { /* ignore */ }
+})
+
+// Estimated ride time: flat term (distance / speed) + climbing term.
+// Naismith-style adjustment: ~400 m of climb costs ~1 hour on top of the flat
+// speed. Descents are presumed already baked into the user's flat speed.
+const estimatedSeconds = computed(() => {
+  const d = distanceM.value
+  const v = avgSpeedKmh.value
+  if (!d || !Number.isFinite(v) || v <= 0) return 0
+  const flatHours = (d / 1000) / v
+  const climbHours = (elevGainM.value || 0) / 400
+  return Math.round((flatHours + climbHours) * 3600)
+})
+
+function formatDuration(totalSec) {
+  if (!totalSec || totalSec < 0) return '–'
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.round((totalSec - h * 3600) / 60)
+  if (h === 0) return `${m} min`
+  return `${h} h ${String(m).padStart(2, '0')}`
+}
+
 // Distance / D+ / D- shown in the elevation card header. Reflects the chart
 // selection when there is one, otherwise the full route totals.
 const chartStats = computed(() => {
@@ -1880,6 +1917,23 @@ onBeforeUnmount(() => {
             <span class="grade-icon" aria-hidden="true">\</span>
             <strong>{{ avgGradePct }} %</strong>
           </span>
+          <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
+            <i class="fa-solid fa-clock" aria-hidden="true"></i>
+            <strong>{{ formatDuration(estimatedSeconds) }}</strong>
+            <span class="speed-input-wrap">
+              <input
+                v-model.number="avgSpeedKmh"
+                type="number"
+                min="3"
+                max="80"
+                step="1"
+                class="speed-input"
+                :title="t('routes.avg_speed_hint')"
+                :aria-label="t('routes.avg_speed_hint')"
+              />
+              <small>km/h</small>
+            </span>
+          </span>
         </div>
         <div class="d-flex gap-2">
           <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
@@ -2078,6 +2132,38 @@ onBeforeUnmount(() => {
 .stat-pill-up       { background: rgba(25, 135, 84, 0.12); color: #15803d; }
 .stat-pill-down     { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
 .stat-pill-grade    { background: rgba(108, 117, 125, 0.12); color: #495057; }
+.stat-pill-time     { background: rgba(13, 110, 253, 0.10); color: #0d6efd; }
+.stat-pill-time .speed-input-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.15rem;
+  margin-left: 0.4rem;
+  padding-left: 0.45rem;
+  border-left: 1px solid rgba(13, 110, 253, 0.25);
+}
+.stat-pill-time .speed-input-wrap small { font-size: 0.7rem; opacity: 0.75; }
+.stat-pill-time .speed-input {
+  width: 2.6rem;
+  border: 1px solid rgba(13, 110, 253, 0.25);
+  background: rgba(255, 255, 255, 0.6);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: right;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.stat-pill-time .speed-input::-webkit-outer-spin-button,
+.stat-pill-time .speed-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.stat-pill-time .speed-input:focus {
+  outline: none;
+  border-color: #0d6efd;
+}
 
 .grade-icon {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

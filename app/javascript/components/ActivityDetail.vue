@@ -167,6 +167,7 @@ const isCopyMode = ref(false) // true while Ctrl/Cmd is held during a drag
 // our multi-axis setup).
 const hiddenDatasets = ref(new Map())
 const is3D = ref(false)
+const showGrade = ref(true) // false → main route renders flat orange
 
 // All visible groups are kept in chartLayout (kept in sync via syncLayoutWithStreams),
 // so the displayed layout is just chartLayout itself — no virtual groups.
@@ -689,17 +690,7 @@ function installRouteLayers(coords) {
       source: 'route-graded',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: {
-        'line-color': [
-          'match', ['get', 'bucket'],
-          0, GRADE_BUCKETS[0].color,
-          1, GRADE_BUCKETS[1].color,
-          2, GRADE_BUCKETS[2].color,
-          3, GRADE_BUCKETS[3].color,
-          4, GRADE_BUCKETS[4].color,
-          5, GRADE_BUCKETS[5].color,
-          6, GRADE_BUCKETS[6].color,
-          '#fc4c02',
-        ],
+        'line-color': gradePaintExpression(),
         'line-width': 5,
       },
     })
@@ -1645,6 +1636,28 @@ function toggleDataset(groupId, idx) {
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
+function gradePaintExpression() {
+  if (!showGrade.value) return '#fc4c02'
+  return [
+    'match', ['get', 'bucket'],
+    0, GRADE_BUCKETS[0].color,
+    1, GRADE_BUCKETS[1].color,
+    2, GRADE_BUCKETS[2].color,
+    3, GRADE_BUCKETS[3].color,
+    4, GRADE_BUCKETS[4].color,
+    5, GRADE_BUCKETS[5].color,
+    6, GRADE_BUCKETS[6].color,
+    '#fc4c02',
+  ]
+}
+
+function toggleGrade() {
+  showGrade.value = !showGrade.value
+  if (mapInstance && mapInstance.getLayer('route-line')) {
+    mapInstance.setPaintProperty('route-line', 'line-color', gradePaintExpression())
+  }
+}
+
 function toggleMap3D() {
   if (!mapInstance) return
   is3D.value = !is3D.value
@@ -2288,6 +2301,17 @@ function onLightboxKey(ev) {
                 <button
                   type="button"
                   class="btn map-ctrl-btn"
+                  :class="showGrade ? 'btn-warning text-dark active' : 'btn-light'"
+                  @click="toggleGrade"
+                  :title="showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
+                  :aria-pressed="showGrade"
+                >
+                  <i class="fa-solid fa-palette" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.grade_label') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn map-ctrl-btn"
                   :class="showPhotos ? 'btn-warning text-dark active' : 'btn-light'"
                   @click="togglePhotos"
                   :title="showPhotos ? t('strava.hide_photos') : t('strava.show_photos')"
@@ -2762,8 +2786,13 @@ function onLightboxKey(ev) {
   border-color: rgba(0, 0, 0, 0.08);
   font-weight: 500;
 }
-.map-ctrl-btn.active {
-  border-color: rgba(252, 76, 2, 0.6);
+/* Active state — has to win over .map-ctrl-btn's white background. */
+.map-ctrl-btn.active,
+.map-ctrl-btn.active:hover,
+.map-ctrl-btn.active:focus {
+  background: #ffc107;
+  color: #212529;
+  border-color: rgba(252, 76, 2, 0.7);
 }
 
 .custom-legend {

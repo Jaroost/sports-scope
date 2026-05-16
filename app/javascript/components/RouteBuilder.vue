@@ -56,6 +56,7 @@ let zoomMax = null
 const is3D = ref(false)
 const mapExpanded = ref(false)
 const showClimbs = ref(true)
+const showGrade = ref(true) // false → main route renders flat orange
 const climbMarkers = []
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
@@ -481,7 +482,8 @@ function installRouteLayer() {
     })
   }
   // Gradient-coloured visible route. Each feature carries a `bucket` property
-  // that the match expression resolves to a colour.
+  // that the match expression resolves to a colour. When `showGrade` is off,
+  // the same layer paints flat orange instead.
   if (!mapInstance.getSource('builder-route-graded')) {
     mapInstance.addSource('builder-route-graded', {
       type: 'geojson',
@@ -493,17 +495,7 @@ function installRouteLayer() {
       source: 'builder-route-graded',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: {
-        'line-color': [
-          'match', ['get', 'bucket'],
-          0, GRADE_BUCKETS[0].color,
-          1, GRADE_BUCKETS[1].color,
-          2, GRADE_BUCKETS[2].color,
-          3, GRADE_BUCKETS[3].color,
-          4, GRADE_BUCKETS[4].color,
-          5, GRADE_BUCKETS[5].color,
-          6, GRADE_BUCKETS[6].color,
-          '#fc4c02',
-        ],
+        'line-color': gradePaintExpression(),
         'line-width': 5,
       },
     })
@@ -620,6 +612,28 @@ function buildClimbMarkerEl(climb, distances) {
 function toggleClimbs() {
   showClimbs.value = !showClimbs.value
   installClimbMarkers()
+}
+
+function gradePaintExpression() {
+  if (!showGrade.value) return '#fc4c02'
+  return [
+    'match', ['get', 'bucket'],
+    0, GRADE_BUCKETS[0].color,
+    1, GRADE_BUCKETS[1].color,
+    2, GRADE_BUCKETS[2].color,
+    3, GRADE_BUCKETS[3].color,
+    4, GRADE_BUCKETS[4].color,
+    5, GRADE_BUCKETS[5].color,
+    6, GRADE_BUCKETS[6].color,
+    '#fc4c02',
+  ]
+}
+
+function toggleGrade() {
+  showGrade.value = !showGrade.value
+  if (mapInstance && mapInstance.getLayer('builder-route-line')) {
+    mapInstance.setPaintProperty('builder-route-line', 'line-color', gradePaintExpression())
+  }
 }
 
 function toggleMap3D() {
@@ -1451,40 +1465,36 @@ onBeforeUnmount(() => {
           <div class="map-controls">
             <div class="btn-group btn-group-sm shadow-sm" role="group">
               <button type="button" class="btn map-ctrl-btn"
-                :class="mapStyleId === 'cyclosm' ? 'btn-warning text-dark' : 'btn-light'"
-                @click="setMapStyle('cyclosm')">
+                :class="mapStyleId === 'cyclosm' ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="setMapStyle('cyclosm')"
+                :title="t('strava.map_style_cyclo')">
                 <i class="fa-solid fa-bicycle" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">CyclOSM</span>
+                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_cyclo') }}</span>
               </button>
               <button v-if="THUNDERFOREST_KEY" type="button" class="btn map-ctrl-btn"
-                :class="mapStyleId === 'cycle' ? 'btn-warning text-dark' : 'btn-light'"
-                @click="setMapStyle('cycle')">
+                :class="mapStyleId === 'cycle' ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="setMapStyle('cycle')"
+                :title="t('strava.map_style_opencycle')">
                 <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">Cycle</span>
+                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_opencycle') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
-                :class="mapStyleId === 'topo' ? 'btn-warning text-dark' : 'btn-light'"
-                @click="setMapStyle('topo')">
+                :class="mapStyleId === 'topo' ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="setMapStyle('topo')"
+                :title="t('strava.map_style_topo')">
                 <i class="fa-solid fa-mountain-sun" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">Topo</span>
+                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_topo') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
-                :class="mapStyleId === 'liberty' ? 'btn-warning text-dark' : 'btn-light'"
-                @click="setMapStyle('liberty')">
+                :class="mapStyleId === 'liberty' ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="setMapStyle('liberty')"
+                :title="t('strava.map_style_standard')">
                 <i class="fa-solid fa-map" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">Standard</span>
+                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_standard') }}</span>
               </button>
             </div>
             <div class="btn-group btn-group-sm shadow-sm" role="group">
-              <button type="button" class="btn"
-                :class="is3D ? 'btn-warning text-dark active' : 'btn-light'"
-                @click="toggleMap3D"
-                :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
-                :aria-pressed="is3D">
-                <i class="fa-solid fa-cube" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">3D</span>
-              </button>
-              <button type="button" class="btn"
+              <button type="button" class="btn map-ctrl-btn"
                 :class="showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleClimbs"
                 :title="showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
@@ -1492,10 +1502,28 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-mountain" aria-hidden="true"></i>
                 <span class="d-none d-md-inline ms-1">{{ t('strava.climbs_label') }}</span>
               </button>
-              <button type="button" class="btn btn-light"
+              <button type="button" class="btn map-ctrl-btn"
+                :class="showGrade ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleGrade"
+                :title="showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
+                :aria-pressed="showGrade">
+                <i class="fa-solid fa-palette" aria-hidden="true"></i>
+                <span class="d-none d-md-inline ms-1">{{ t('strava.grade_label') }}</span>
+              </button>
+              <button type="button" class="btn map-ctrl-btn"
+                :class="is3D ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleMap3D"
+                :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
+                :aria-pressed="is3D">
+                <i class="fa-solid fa-cube" aria-hidden="true"></i>
+                <span class="d-none d-md-inline ms-1">3D</span>
+              </button>
+              <button type="button" class="btn map-ctrl-btn"
+                :class="mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleMapSize"
-                :title="mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')">
-                <i class="fa-solid" :class="mapExpanded ? 'fa-compress' : 'fa-expand'" aria-hidden="true"></i>
+                :title="mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
+                :aria-pressed="mapExpanded">
+                <i :class="mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
                 <span class="d-none d-md-inline ms-1">{{ mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
               </button>
             </div>
@@ -1694,6 +1722,14 @@ onBeforeUnmount(() => {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);
   font-weight: 500;
+}
+/* Active state — has to win over .map-ctrl-btn's white background. */
+.map-ctrl-btn.active,
+.map-ctrl-btn.active:hover,
+.map-ctrl-btn.active:focus {
+  background: #ffc107;
+  color: #212529;
+  border-color: rgba(252, 76, 2, 0.7);
 }
 .map-search {
   position: absolute;

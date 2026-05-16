@@ -21,6 +21,7 @@ const mapEl = useTemplateRef('mapEl')
 let mapInstance = null
 let markerA = null
 let markerB = null
+let hoverMarker = null
 let isDragging = false
 let dragRafPending = false
 const climbMarkers = []
@@ -642,6 +643,7 @@ async function renderMap() {
     if (hasLatLngStream.value) installMapHandles(maplibregl)
     installClimbMarkers(maplibregl)
     installPhotoMarkers(maplibregl)
+    installMapHoverTooltip()
   })
 }
 
@@ -1420,6 +1422,85 @@ function destroyCharts() {
   hiddenDatasets.value = new Map()
 }
 
+// Shared tooltip builder — used by both Chart.js (`externalTooltipHandler`)
+// and the map mousemove handler so both surfaces show identical content.
+function buildTooltipHtmlForIndex(idx) {
+  if (idx == null) return ''
+  const titleLines = buildTooltipTitleLines(idx)
+  let html = '<div class="chart-tooltip-title">'
+  for (const line of titleLines) {
+    const cls = line.main ? 'chart-tooltip-title-main' : 'chart-tooltip-title-sub'
+    html += `<div class="${cls}">${escapeHtml(line.text)}</div>`
+  }
+  html += '</div>'
+  const seen = new Set()
+  for (const streamKey of visibleStreams.value) {
+    if (seen.has(streamKey)) continue
+    seen.add(streamKey)
+    const def = defByKey(streamKey)
+    if (!def) continue
+    const raw = streams.value?.[streamKey]?.data?.[idx]
+    if (raw == null) continue
+    const y = def.transform(raw)
+    const digits = def.digits ?? 1
+    const value = Number.isNaN(y) ? '–' : y.toFixed(digits)
+    html += `<div class="chart-tooltip-row">
+      <span class="chart-tooltip-swatch" style="background:${def.color}"></span>
+      <span class="chart-tooltip-name">${escapeHtml(t('strava.stream.' + streamKey))}</span>
+      <span class="chart-tooltip-value">${escapeHtml(value)} ${escapeHtml(def.unit || '')}</span>
+    </div>`
+  }
+  return html
+}
+
+function buildTooltipTitleLines(idx) {
+  const lines = []
+  const distStream = streams.value?.distance?.data
+  const timeStream = streams.value?.time?.data
+  const dm = distStream?.[idx]
+  const tSec = timeStream?.[idx]
+  // Primary line: the unit of the currently selected X axis. Secondary: the other.
+  if (xAxis.value === 'distance') {
+    if (dm != null) lines.push({ main: true, text: `${(dm / 1000).toFixed(2)} km` })
+    if (tSec != null) lines.push({ main: false, text: formatHMS(tSec) })
+  } else {
+    if (tSec != null) lines.push({ main: true, text: formatHMS(tSec) })
+    if (dm != null) lines.push({ main: false, text: `${(dm / 1000).toFixed(2)} km` })
+  }
+  // Absolute datetime = activity start (wall clock, Z stripped) + elapsed seconds.
+  const startIso = activity.value?.start_date_local
+  if (startIso && tSec != null) {
+    const localBase = new Date(startIso.replace(/Z$/, '')).getTime()
+    const dt = new Date(localBase + tSec * 1000)
+    lines.push({
+      main: false,
+      text: dt.toLocaleString(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      }),
+    })
+  }
+  return lines
+}
+
+function positionTooltipBeside(el, anchorX, anchorY, containerWidth, containerHeight) {
+  const tipRect = el.getBoundingClientRect()
+  const OFFSET = 16
+  const placeOnRight = anchorX + OFFSET + tipRect.width < containerWidth - 4
+  if (placeOnRight) {
+    el.style.left = `${anchorX + OFFSET}px`
+    el.style.transform = 'translate(0, -50%)'
+  } else {
+    el.style.left = `${anchorX - OFFSET}px`
+    el.style.transform = 'translate(-100%, -50%)'
+  }
+  let topPos = anchorY
+  const halfH = tipRect.height / 2
+  if (topPos - halfH < 4) topPos = halfH + 4
+  if (topPos + halfH > containerHeight - 4) topPos = containerHeight - halfH - 4
+  el.style.top = `${topPos}px`
+}
+
 function externalTooltipHandler(context) {
   const { chart, tooltip } = context
   const parent = chart.canvas.parentNode
@@ -1439,123 +1520,91 @@ function externalTooltipHandler(context) {
     el.style.opacity = '0'
     return
   }
-  // Build a two-line title: primary in the current axis unit, secondary in the other.
-  const rawX = chartXToRaw(xv)
-  const idx = xValueToIndex(rawX)
-  const titleLines = []
-  if (xAxis.value === 'distance') {
-    titleLines.push({ main: true, text: `${xv.toFixed(2)} km` })
-    const t0 = streams.value?.time?.data?.[idx]
-    if (t0 != null) titleLines.push({ main: false, text: formatHMS(t0) })
-  } else {
-    titleLines.push({ main: true, text: formatHMS(xv * timeFactor()) })
-    const dm = streams.value?.distance?.data?.[idx]
-    if (dm != null) titleLines.push({ main: false, text: `${(dm / 1000).toFixed(2)} km` })
-  }
-  // Absolute datetime of this point = activity start + elapsed seconds.
-  // Strava's start_date_local already is wall-clock time at the activity
-  // location, but it's serialized with a trailing "Z" — parsing it as UTC
-  // would then shift it by the browser's offset. Strip the Z so the Date is
-  // built as local time in the browser's locale.
-  const startIso = activity.value?.start_date_local
-  const tSec = streams.value?.time?.data?.[idx]
-  if (startIso && tSec != null) {
-    const localBase = new Date(startIso.replace(/Z$/, '')).getTime()
-    const dt = new Date(localBase + tSec * 1000)
-    const stamp = dt.toLocaleString(undefined, {
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    })
-    titleLines.push({ main: false, text: stamp })
-  }
-
-  const rows = []
-  const seen = new Set()
-  // Current chart datasets (auto-filtered to visible by Chart.js).
-  tooltip.dataPoints.forEach((item) => {
-    const ds = chart.data.datasets[item.datasetIndex]
-    const sk = ds.$streamKey
-    if (sk && seen.has(sk)) return
-    if (sk) seen.add(sk)
-    rows.push(formatTooltipRow(ds, item.parsed.y))
-  })
-  // Other charts: nearest x-index, skip hidden datasets and streams we've
-  // already shown (a stream may appear in several groups via copy).
-  chartInstances.forEach((other) => {
-    if (other === chart) return
-    const first = other.data?.datasets?.[0]?.data
-    if (!first || first.length === 0) return
-    let idx = 0
-    let bestDiff = Infinity
-    for (let i = 0; i < first.length; i++) {
-      const d = Math.abs(first[i].x - xv)
-      if (d < bestDiff) {
-        bestDiff = d
-        idx = i
-      }
-    }
-    other.data.datasets.forEach((ds, di) => {
-      const meta = other.getDatasetMeta(di)
-      if (meta?.hidden) return
-      const sk = ds.$streamKey
-      if (sk && seen.has(sk)) return
-      const point = ds.data[idx]
-      if (!point) return
-      if (sk) seen.add(sk)
-      rows.push(formatTooltipRow(ds, point.y))
-    })
-  })
-
-  let html = '<div class="chart-tooltip-title">'
-  for (const line of titleLines) {
-    const cls = line.main ? 'chart-tooltip-title-main' : 'chart-tooltip-title-sub'
-    html += `<div class="${cls}">${escapeHtml(line.text)}</div>`
-  }
-  html += '</div>'
-  for (const r of rows) {
-    html += `<div class="chart-tooltip-row">
-      <span class="chart-tooltip-swatch" style="background:${r.color}"></span>
-      <span class="chart-tooltip-name">${escapeHtml(r.name)}</span>
-      <span class="chart-tooltip-value">${escapeHtml(r.value)} ${escapeHtml(r.unit)}</span>
-    </div>`
-  }
-  el.innerHTML = html
+  const idx = xValueToIndex(chartXToRaw(xv))
+  el.innerHTML = buildTooltipHtmlForIndex(idx)
   el.style.opacity = '1'
-
-  // Place the tooltip to the side of the cursor (not on top) so the data
-  // point being read stays visible. Side flip near the right edge.
-  const cw = chart.canvas.clientWidth
-  const ch = chart.canvas.clientHeight
-  const tipRect = el.getBoundingClientRect()
-  const OFFSET = 16
-  const placeOnRight = tooltip.caretX + OFFSET + tipRect.width < cw - 4
-  if (placeOnRight) {
-    el.style.left = `${tooltip.caretX + OFFSET}px`
-    el.style.transform = 'translate(0, -50%)'
-  } else {
-    el.style.left = `${tooltip.caretX - OFFSET}px`
-    el.style.transform = 'translate(-100%, -50%)'
-  }
-  // Vertically center on the cursor, clamp to the canvas so it stays readable.
-  let topPos = tooltip.caretY
-  const halfH = tipRect.height / 2
-  if (topPos - halfH < 4) topPos = halfH + 4
-  if (topPos + halfH > ch - 4) topPos = ch - halfH - 4
-  el.style.top = `${topPos}px`
-}
-
-function formatTooltipRow(ds, y) {
-  const sk = ds.$streamKey
-  const def = sk ? defByKey(sk) : null
-  const digits = def?.digits ?? 1
-  const value = (y != null && !Number.isNaN(y)) ? y.toFixed(digits) : '–'
-  const unit = def?.unit || ''
-  const name = sk ? t('strava.stream.' + sk) : (ds.label || '').replace(/ \(.+\)$/, '')
-  return { color: ds.borderColor, name, value, unit }
+  positionTooltipBeside(el, tooltip.caretX, tooltip.caretY, chart.canvas.clientWidth, chart.canvas.clientHeight)
 }
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
+// Map hover tooltip — reuses the same `.chart-tooltip` DOM/CSS but lives in
+// .map-wrap. Pinned to the top-right of the map (below the NavigationControl)
+// so it doesn't move with the cursor or obscure the route.
+function showMapTooltip(idx) {
+  const wrap = mapEl.value?.parentNode
+  if (!wrap || idx == null) return
+  let el = wrap.querySelector('.chart-tooltip')
+  if (!el) {
+    el = document.createElement('div')
+    el.className = 'chart-tooltip chart-tooltip-pinned'
+    wrap.appendChild(el)
+  }
+  el.innerHTML = buildTooltipHtmlForIndex(idx)
+  el.style.opacity = '1'
+  el.style.top = '110px'
+  el.style.right = '12px'
+  el.style.left = 'auto'
+  el.style.transform = 'none'
+}
+
+function hideMapTooltip() {
+  const wrap = mapEl.value?.parentNode
+  const el = wrap?.querySelector('.chart-tooltip')
+  if (el) el.style.opacity = '0'
+}
+
+function showRouteCursor(lngLat) {
+  if (!mapInstance) return
+  if (!hoverMarker && _maplibregl) {
+    const el = document.createElement('div')
+    el.className = 'route-cursor'
+    hoverMarker = new _maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat(lngLat)
+      .addTo(mapInstance)
+  } else if (hoverMarker) {
+    hoverMarker.setLngLat(lngLat)
+    hoverMarker.getElement().style.display = ''
+  }
+}
+
+function hideRouteCursor() {
+  if (hoverMarker) hoverMarker.getElement().style.display = 'none'
+}
+
+// Returns the route index nearest to a map mousemove/click event if the
+// cursor is within `tolPx` screen pixels of the actual route, otherwise null.
+function nearestRouteIndexFromEvent(e, tolPx) {
+  const data = streams.value?.latlng?.data
+  if (!data || data.length === 0) return null
+  const idx = latLngToIndex(e.lngLat.lng, e.lngLat.lat)
+  const pt = data[idx]
+  if (!pt) return null
+  const routePx = mapInstance.project([pt[1], pt[0]])
+  const dx = e.point.x - routePx.x
+  const dy = e.point.y - routePx.y
+  if (Math.hypot(dx, dy) > tolPx) return null
+  return { idx, pt }
+}
+
+function installMapHoverTooltip() {
+  if (!mapInstance) return
+  mapInstance.on('mousemove', (e) => {
+    if (isDragging) { hideMapTooltip(); hideRouteCursor(); return }
+    const hit = nearestRouteIndexFromEvent(e, 40)
+    if (!hit) { hideMapTooltip(); hideRouteCursor(); return }
+    showMapTooltip(hit.idx)
+    showRouteCursor([hit.pt[1], hit.pt[0]])
+  })
+  mapInstance.on('mouseout', () => { hideMapTooltip(); hideRouteCursor() })
+  mapInstance.on('click', (e) => {
+    if (isDragging) return
+    const hit = nearestRouteIndexFromEvent(e, 25)
+    if (!hit) return
+    setSelection(hit.idx, hit.idx)
+  })
 }
 
 function isDatasetHidden(groupId, idx) {
@@ -2088,6 +2137,7 @@ onBeforeUnmount(() => {
   climbMarkers.length = 0
   photoMarkers.forEach((m) => m.remove())
   photoMarkers.length = 0
+  if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
   if (mapInstance) {
     mapInstance.remove()
     mapInstance = null
@@ -3162,6 +3212,17 @@ function onLightboxKey(ev) {
 .climb-cat-3     { color: #ca8a04; }
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
+
+/* Hover cursor that follows the route on the map */
+.route-cursor {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid #fc4c02;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.75), 0 2px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: none; /* clicks pass through to the map */
+}
 
 /* Photo markers on the map (HTML DOM, not in style) */
 .photo-marker {

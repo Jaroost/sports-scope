@@ -95,7 +95,7 @@ const hasRoute = computed(() => routeCoords.value.length > 0)
 const hasLatLngStream = computed(() => Array.isArray(streams.value?.latlng?.data) && streams.value.latlng.data.length > 0)
 
 const chartDefs = [
-  { key: 'altitude', color: '#198754', unit: 'm', transform: (v) => v, digits: 0 },
+  { key: 'altitude', color: '#198754', unit: 'm', transform: (v) => v, digits: 0 },  
   { key: 'heartrate', color: '#dc3545', unit: 'bpm', transform: (v) => v, digits: 0 },
   { key: 'velocity_smooth', color: '#0d6efd', unit: 'km/h', transform: (v) => v * 3.6, digits: 1 },
   { key: 'cadence', color: '#6f42c1', unit: 'rpm', transform: (v) => v, digits: 0 },
@@ -2061,6 +2061,27 @@ onBeforeUnmount(() => {
                 >
                   <i class="fa-solid fa-bicycle" aria-hidden="true"></i>
                   <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_cyclo') }}</span>
+                </button>
+                <button
+                  v-if="THUNDERFOREST_KEY"
+                  type="button"
+                  class="btn map-ctrl-btn"
+                  :class="mapStyleId === 'cycle' ? 'btn-warning text-dark active' : 'btn-light'"
+                  @click="setMapStyle('cycle')"
+                  :title="t('strava.map_style_opencycle')"
+                >
+                  <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_opencycle') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn map-ctrl-btn"
+                  :class="mapStyleId === 'topo' ? 'btn-warning text-dark active' : 'btn-light'"
+                  @click="setMapStyle('topo')"
+                  :title="t('strava.map_style_topo')"
+                >
+                  <i class="fa-solid fa-mountain-sun" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_topo') }}</span>
                 </button>
                 <button
                   type="button"

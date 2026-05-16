@@ -15,6 +15,7 @@ Rails.application.routes.draw do
   get "/strava/activities", to: "strava#activities", as: :strava_activities
   get "/strava/activities/:id", to: "strava#show", as: :strava_activity, constraints: { id: /\d+/ }
   get "/strava/activities/:id/streams", to: "strava#streams", as: :strava_activity_streams, constraints: { id: /\d+/ }
+  get "/strava/activities/:id/photos", to: "strava#photos", as: :strava_activity_photos, constraints: { id: /\d+/ }
 
   # User preferences (JSON consumed by Vue components) — named layout presets
   get "/preferences/chart_layouts", to: "preferences#index"

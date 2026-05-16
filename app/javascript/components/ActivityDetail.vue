@@ -28,6 +28,10 @@ let _maplibregl = null // cached after first import so toggles can re-install ma
 const mapStyleId = ref('cyclosm')
 const showClimbs = ref(true)
 const mapExpanded = ref(false)
+const photos = ref([])
+const showPhotos = ref(true)
+const photoMarkers = []
+const lightboxIndex = ref(null)
 const chartInstances = new Map()
 const wheelHandlers = new Map()
 const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all charts
@@ -437,6 +441,20 @@ async function fetchStreams() {
   }
 }
 
+async function fetchPhotos() {
+  try {
+    const res = await fetch(`/strava/activities/${props.activityId}/photos`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) return
+    const payload = await res.json()
+    photos.value = Array.isArray(payload.photos) ? payload.photos : []
+  } catch {
+    photos.value = []
+  }
+}
+
 const HANDLE_TOL = 8 // pixels around a flag pole that count as a "grab"
 
 function drawChartFlag(ctx, area, x, kind) {
@@ -620,6 +638,7 @@ async function renderMap() {
     installRouteLayers(coords)
     if (hasLatLngStream.value) installMapHandles(maplibregl)
     installClimbMarkers(maplibregl)
+    installPhotoMarkers(maplibregl)
   })
 }
 
@@ -889,6 +908,62 @@ function buildClimbMarkerEl(climb) {
   // Make sure mousedown doesn't initiate a map pan when the user clicks the badge.
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   return el
+}
+
+// ─── Photos ───────────────────────────────────────────────────────────────
+
+function pickPhotoUrl(photo, preferred = 256) {
+  if (!photo?.urls) return null
+  const entries = Object.entries(photo.urls)
+    .map(([k, v]) => [Number(k), v])
+    .filter(([k]) => !Number.isNaN(k))
+    .sort((a, b) => a[0] - b[0])
+  if (entries.length === 0) return null
+  const exact = entries.find(([k]) => k === preferred)
+  if (exact) return exact[1]
+  const larger = entries.find(([k]) => k >= preferred)
+  return (larger || entries[entries.length - 1])[1]
+}
+
+function installPhotoMarkers(maplibregl) {
+  photoMarkers.forEach((m) => m.remove())
+  photoMarkers.length = 0
+  if (!showPhotos.value || !mapInstance) return
+  photos.value.forEach((photo, idx) => {
+    const loc = photo.location
+    if (!Array.isArray(loc) || loc.length < 2) return
+    const el = buildPhotoMarkerEl(photo, idx)
+    const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+      .setLngLat([loc[1], loc[0]])
+      .addTo(mapInstance)
+    photoMarkers.push(marker)
+  })
+}
+
+function buildPhotoMarkerEl(photo, idx) {
+  const el = document.createElement('div')
+  el.className = 'photo-marker'
+  const thumb = pickPhotoUrl(photo, 256)
+  el.innerHTML = thumb
+    ? `<img src="${thumb}" alt="">`
+    : `<i class="fa-solid fa-camera"></i>`
+  el.title = photo.caption || t('strava.photo_marker_title')
+  el.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    lightboxIndex.value = idx
+  })
+  el.addEventListener('mousedown', (ev) => ev.stopPropagation())
+  return el
+}
+
+function togglePhotos() {
+  showPhotos.value = !showPhotos.value
+  if (!showPhotos.value) {
+    photoMarkers.forEach((m) => m.remove())
+    photoMarkers.length = 0
+  } else if (_maplibregl) {
+    installPhotoMarkers(_maplibregl)
+  }
 }
 
 function buildArrowIcon() {
@@ -1973,6 +2048,7 @@ watch(selection, (val) => {
 
 onMounted(async () => {
   const savedLayoutsPromise = fetchSavedLayouts()
+  const photosPromise = fetchPhotos()
   await fetchActivity()
   if (!activity.value) return
   await fetchStreams()
@@ -1984,21 +2060,40 @@ onMounted(async () => {
   if (hasRoute.value) {
     await renderMap()
   }
+  // Photos may finish loading after renderMap; install markers when ready.
+  photosPromise.then(() => {
+    if (mapInstance && _maplibregl) installPhotoMarkers(_maplibregl)
+  })
   if (streams.value && availableLayout.value.length > 0) {
     await new Promise((r) => requestAnimationFrame(r))
     await renderCharts()
   }
+  window.addEventListener('keydown', onLightboxKey)
 })
 
 onBeforeUnmount(() => {
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
+  photoMarkers.forEach((m) => m.remove())
+  photoMarkers.length = 0
   if (mapInstance) {
     mapInstance.remove()
     mapInstance = null
   }
   destroyCharts()
+  window.removeEventListener('keydown', onLightboxKey)
 })
+
+function onLightboxKey(ev) {
+  if (lightboxIndex.value === null) return
+  if (ev.key === 'Escape') {
+    lightboxIndex.value = null
+  } else if (ev.key === 'ArrowLeft' && lightboxIndex.value > 0) {
+    lightboxIndex.value--
+  } else if (ev.key === 'ArrowRight' && lightboxIndex.value < photos.value.length - 1) {
+    lightboxIndex.value++
+  }
+}
 </script>
 
 <template>
@@ -2111,6 +2206,18 @@ onBeforeUnmount(() => {
                 <button
                   type="button"
                   class="btn map-ctrl-btn"
+                  :class="showPhotos ? 'btn-warning text-dark active' : 'btn-light'"
+                  @click="togglePhotos"
+                  :title="showPhotos ? t('strava.hide_photos') : t('strava.show_photos')"
+                  :aria-pressed="showPhotos"
+                  :disabled="photos.length === 0"
+                >
+                  <i class="fa-solid fa-camera" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.photos_label') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn map-ctrl-btn"
                   :class="is3D ? 'btn-warning text-dark active' : 'btn-light'"
                   @click="toggleMap3D"
                   :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
@@ -2136,6 +2243,29 @@ onBeforeUnmount(() => {
           <div v-else class="alert alert-info m-3 mb-0 d-flex align-items-center gap-2">
             <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
             <span>{{ t('strava.no_route_data') }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Galerie photos -->
+      <div v-if="photos.length > 0" class="card mt-3 shadow-sm border-0">
+        <div class="card-header activity-card-header d-flex align-items-center gap-2">
+          <i class="fa-solid fa-images text-warning" aria-hidden="true"></i>
+          <h3 class="h6 mb-0">{{ t('strava.photo_gallery') }} ({{ photos.length }})</h3>
+        </div>
+        <div class="card-body">
+          <div class="photo-gallery">
+            <button
+              v-for="(photo, idx) in photos"
+              :key="photo.unique_id || photo.id || idx"
+              type="button"
+              class="photo-thumb"
+              @click="lightboxIndex = idx"
+              :title="photo.caption || ''"
+            >
+              <img :src="pickPhotoUrl(photo, 256)" :alt="photo.caption || ''" loading="lazy">
+              <span v-if="photo.caption" class="photo-thumb-caption">{{ photo.caption }}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -2432,6 +2562,53 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
+
+    <!-- Lightbox modal pour les photos (Teleport au body pour échapper aux overflow/z-index) -->
+    <Teleport to="body">
+      <div
+        v-if="lightboxIndex !== null && photos[lightboxIndex]"
+        class="photo-lightbox"
+        @click.self="lightboxIndex = null"
+      >
+        <button
+          type="button"
+          class="photo-lightbox-btn photo-lightbox-close"
+          @click="lightboxIndex = null"
+          :title="t('strava.close')"
+          :aria-label="t('strava.close')"
+        >
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+        <button
+          v-if="lightboxIndex > 0"
+          type="button"
+          class="photo-lightbox-btn photo-lightbox-prev"
+          @click="lightboxIndex--"
+          :title="t('strava.previous')"
+          :aria-label="t('strava.previous')"
+        >
+          <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+        </button>
+        <button
+          v-if="lightboxIndex < photos.length - 1"
+          type="button"
+          class="photo-lightbox-btn photo-lightbox-next"
+          @click="lightboxIndex++"
+          :title="t('strava.next')"
+          :aria-label="t('strava.next')"
+        >
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+        </button>
+        <img
+          :src="pickPhotoUrl(photos[lightboxIndex], 2048)"
+          :alt="photos[lightboxIndex].caption || ''"
+          class="photo-lightbox-img"
+        />
+        <div v-if="photos[lightboxIndex].caption" class="photo-lightbox-caption">
+          {{ photos[lightboxIndex].caption }}
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -2822,6 +2999,43 @@ onBeforeUnmount(() => {
 .range-chip-stream strong {
   color: inherit;
 }
+
+.photo-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+.photo-thumb {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-radius: 0.4rem;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.2);
+  transition: box-shadow 0.15s ease;
+}
+.photo-thumb:hover { box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.35); }
+.photo-thumb img {
+  width: 100%; height: 100%;
+  object-fit: cover; display: block;
+  transition: transform 0.15s ease;
+}
+.photo-thumb:hover img { transform: scale(1.04); }
+.photo-thumb-caption {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.72rem;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 70%, transparent 100%);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 </style>
 
 <!-- Non-scoped: the tooltip DOM is created via document.createElement and
@@ -2927,4 +3141,91 @@ onBeforeUnmount(() => {
 .climb-cat-3     { color: #ca8a04; }
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
+
+/* Photo markers on the map (HTML DOM, not in style) */
+.photo-marker {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2.5px solid #fff;
+  background: #1f2937;
+  overflow: hidden;
+  box-shadow: 0 3px 8px -2px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transform: translateY(-4px);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.photo-marker:hover {
+  transform: translateY(-6px) scale(1.1);
+  box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.55);
+  z-index: 10;
+}
+.photo-marker img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.photo-marker i {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+/* Lightbox: Teleport'd to body so styles must be global */
+.photo-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1080;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+.photo-lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.6);
+}
+.photo-lightbox-btn {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border: 0;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s ease, transform 0.12s ease;
+}
+.photo-lightbox-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(1.06);
+}
+.photo-lightbox-close { top: 1rem; right: 1rem; }
+.photo-lightbox-prev  { left: 1rem;  top: 50%; transform: translateY(-50%); }
+.photo-lightbox-next  { right: 1rem; top: 50%; transform: translateY(-50%); }
+.photo-lightbox-prev:hover { transform: translateY(-50%) scale(1.06); }
+.photo-lightbox-next:hover { transform: translateY(-50%) scale(1.06); }
+.photo-lightbox-caption {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  max-width: 70vw;
+  text-align: center;
+  font-size: 0.9rem;
+}
 </style>

@@ -56,6 +56,26 @@ class StravaController < ApplicationController
     render json: { error: e.message }, status: status
   end
 
+  def photos
+    id = params[:id]
+    cache_key = "strava:photos:v1:#{current_user.id}:#{id}"
+    Rails.cache.delete(cache_key) if params[:refresh].present?
+
+    payload = Rails.cache.fetch(cache_key, expires_in: ACTIVITIES_TTL) do
+      photos = strava_get(
+        "https://www.strava.com/api/v3/activities/#{id}/photos",
+        size: 2048,
+        photo_sources: true,
+      )
+      { cached_at: Time.current.iso8601, photos: Array(photos) }
+    end
+
+    render json: payload
+  rescue StravaApiError => e
+    status = e.status == 404 ? :not_found : :bad_gateway
+    render json: { error: e.message }, status: status
+  end
+
   private
 
   class StravaApiError < StandardError

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, useTemplateRef, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, useTemplateRef, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 
 const props = defineProps({
@@ -45,8 +45,78 @@ const divergentMarkers = []
 const selectionRange = ref(null)
 let cumDistKm = [] // cumulative distance in km per geometry index — fills during chart render
 let chartDrag = null // { startPx, currentPx } while the user is dragging on the chart
+// Wheel-zoom on the x axis of the elevation chart. zoomMin/zoomMax in km;
+// null means "natural extent" (the whole route).
+const isZoomed = ref(false)
+let zoomMin = null
+let zoomMax = null
+
+// 3D terrain toggle + map expand + climbs visibility — patterns lifted from
+// ActivityDetail.vue.
+const is3D = ref(false)
+const mapExpanded = ref(false)
+const showClimbs = ref(true)
+const climbMarkers = []
+const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+
+// Gradient color buckets for the route line — matches ActivityDetail.vue.
+const GRADE_BUCKETS = [
+  { max: -8,       color: '#1e3a8a' }, // very steep descent
+  { max: -3,       color: '#3b82f6' }, // descent
+  { max:  3,       color: '#22c55e' }, // flat / rolling
+  { max:  6,       color: '#eab308' }, // easy climb
+  { max: 10,       color: '#f97316' }, // medium climb
+  { max: 15,       color: '#dc2626' }, // hard climb
+  { max: Infinity, color: '#7f1d1d' }, // very hard climb
+]
 
 const hasGeometry = computed(() => geometry.value.length >= 2)
+
+// Average gradient over the whole route: D+ / distance, expressed in %.
+const avgGradePct = computed(() => {
+  if (!distanceM.value) return '0.0'
+  return ((elevGainM.value / distanceM.value) * 100).toFixed(1)
+})
+
+// Distance / D+ / D- shown in the elevation card header. Reflects the chart
+// selection when there is one, otherwise the full route totals.
+const chartStats = computed(() => {
+  const range = selectionRange.value
+  if (range && cumDistKm.length && geometry.value.length >= 2) {
+    const i0 = geomIdxForKm(range.startKm)
+    const i1 = geomIdxForKm(range.endKm)
+    const lo = Math.min(i0, i1)
+    const hi = Math.max(i0, i1)
+    if (hi - lo >= 1) {
+      let dist = 0; let up = 0; let down = 0
+      for (let i = lo + 1; i <= hi; i++) {
+        dist += haversine(geometry.value[i - 1], geometry.value[i])
+        const a = geometry.value[i - 1][2]
+        const b = geometry.value[i][2]
+        if (a != null && b != null) {
+          const d = b - a
+          if (d > 0) up += d
+          else down -= d
+        }
+      }
+      return {
+        distance: dist,
+        gain: up,
+        loss: down,
+        avgGrade: dist > 0 ? (up / dist) * 100 : 0,
+        isSelection: true,
+      }
+    }
+  }
+  const d = distanceM.value
+  return {
+    distance: d,
+    gain: elevGainM.value,
+    loss: elevLossM.value,
+    avgGrade: d > 0 ? (elevGainM.value / d) * 100 : 0,
+    isSelection: false,
+  }
+})
 const isEditMode = computed(() => currentId.value != null)
 
 // Place search (Nominatim/OSM — free, no key required)
@@ -312,6 +382,96 @@ async function renderMap() {
   })
 }
 
+function bucketGrade(g) {
+  for (let i = 0; i < GRADE_BUCKETS.length; i++) {
+    if (g < GRADE_BUCKETS[i].max) return i
+  }
+  return GRADE_BUCKETS.length - 1
+}
+
+function gradeForIndex(i, altitudes, distances) {
+  if (!altitudes || !distances || i + 1 >= altitudes.length || i + 1 >= distances.length) return 0
+  const da = altitudes[i + 1] - altitudes[i]
+  const dd = distances[i + 1] - distances[i]
+  return dd > 0 ? (da / dd) * 100 : 0
+}
+
+function buildGradedSegments(coords, altitudes, distances) {
+  if (!coords || coords.length < 2) return []
+  const features = []
+  let current = [coords[0]]
+  let curBucket = bucketGrade(gradeForIndex(0, altitudes, distances))
+  for (let i = 1; i < coords.length; i++) {
+    const g = gradeForIndex(Math.min(i, coords.length - 2), altitudes, distances)
+    const b = bucketGrade(g)
+    current.push(coords[i])
+    if (b !== curBucket && current.length >= 2) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: current.slice() },
+        properties: { bucket: curBucket },
+      })
+      current = [coords[i]]
+      curBucket = b
+    }
+  }
+  if (current.length >= 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: current },
+      properties: { bucket: curBucket },
+    })
+  }
+  return features
+}
+
+function climbCategory(lengthKm, avgGrade) {
+  const score = lengthKm * Math.pow(Math.max(0, avgGrade), 2)
+  if (score >= 400) return 'HC'
+  if (score >= 200) return '1'
+  if (score >= 100) return '2'
+  if (score >= 60) return '3'
+  if (score >= 25) return '4'
+  return null
+}
+
+function detectClimbs(altitudes, distances) {
+  if (!altitudes || !distances || altitudes.length === 0 || distances.length === 0) return []
+  const MIN_GRADE = 2
+  const MIN_GAIN_M = 60
+  const MIN_LENGTH_M = 500
+  const MERGE_GAP_M = 250
+  const len = Math.min(altitudes.length, distances.length)
+  const raw = []
+  let startIdx = -1
+  for (let i = 0; i < len; i++) {
+    const g = gradeForIndex(i, altitudes, distances)
+    if (g >= MIN_GRADE) {
+      if (startIdx < 0) startIdx = i
+    } else if (startIdx >= 0) {
+      raw.push({ startIdx, endIdx: i })
+      startIdx = -1
+    }
+  }
+  if (startIdx >= 0) raw.push({ startIdx, endIdx: len - 1 })
+  const merged = []
+  for (const r of raw) {
+    if (!merged.length) { merged.push(r); continue }
+    const prev = merged[merged.length - 1]
+    const gap = distances[r.startIdx] - distances[prev.endIdx]
+    if (gap <= MERGE_GAP_M) prev.endIdx = r.endIdx
+    else merged.push(r)
+  }
+  return merged
+    .map((r) => {
+      const gain = altitudes[r.endIdx] - altitudes[r.startIdx]
+      const lengthM = distances[r.endIdx] - distances[r.startIdx]
+      const avgGrade = lengthM > 0 ? (gain / lengthM) * 100 : 0
+      return { ...r, gain, lengthM, avgGrade, category: climbCategory(lengthM / 1000, avgGrade) }
+    })
+    .filter((c) => c.gain >= MIN_GAIN_M && c.lengthM >= MIN_LENGTH_M && c.avgGrade >= MIN_GRADE)
+}
+
 function installRouteLayer() {
   if (!mapInstance) return
   if (!mapInstance.getSource('builder-route')) {
@@ -319,12 +479,33 @@ function installRouteLayer() {
       type: 'geojson',
       data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
     })
+  }
+  // Gradient-coloured visible route. Each feature carries a `bucket` property
+  // that the match expression resolves to a colour.
+  if (!mapInstance.getSource('builder-route-graded')) {
+    mapInstance.addSource('builder-route-graded', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
     mapInstance.addLayer({
       id: 'builder-route-line',
       type: 'line',
-      source: 'builder-route',
+      source: 'builder-route-graded',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': '#fc4c02', 'line-width': 5 },
+      paint: {
+        'line-color': [
+          'match', ['get', 'bucket'],
+          0, GRADE_BUCKETS[0].color,
+          1, GRADE_BUCKETS[1].color,
+          2, GRADE_BUCKETS[2].color,
+          3, GRADE_BUCKETS[3].color,
+          4, GRADE_BUCKETS[4].color,
+          5, GRADE_BUCKETS[5].color,
+          6, GRADE_BUCKETS[6].color,
+          '#fc4c02',
+        ],
+        'line-width': 5,
+      },
     })
   }
   if (!mapInstance.getSource('builder-divergent')) {
@@ -363,10 +544,111 @@ function installRouteLayer() {
 
 function updateRouteLayer() {
   if (!mapInstance) return
-  const src = mapInstance.getSource('builder-route')
-  if (!src) return
+  const baseSrc = mapInstance.getSource('builder-route')
+  const gradedSrc = mapInstance.getSource('builder-route-graded')
   const coords = geometry.value.map(([lng, lat]) => [lng, lat])
-  src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
+  if (baseSrc) {
+    baseSrc.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
+  }
+  if (gradedSrc) {
+    // Build per-segment altitude/distance arrays from geometry so the existing
+    // bucket helpers (which want flat arrays) can run unchanged.
+    const altitudes = geometry.value.map((c) => c[2] ?? null)
+    const distances = []
+    let cum = 0
+    distances.push(0)
+    for (let i = 1; i < geometry.value.length; i++) {
+      cum += haversine(geometry.value[i - 1], geometry.value[i])
+      distances.push(cum)
+    }
+    const features = buildGradedSegments(coords, altitudes, distances)
+    gradedSrc.setData({ type: 'FeatureCollection', features })
+  }
+}
+
+function installClimbMarkers() {
+  if (!_maplibregl || !mapInstance) return
+  climbMarkers.forEach((m) => m.remove())
+  climbMarkers.length = 0
+  if (!showClimbs.value || geometry.value.length < 2) return
+  const altitudes = geometry.value.map((c) => c[2] ?? null)
+  const distances = []
+  let cum = 0
+  distances.push(0)
+  for (let i = 1; i < geometry.value.length; i++) {
+    cum += haversine(geometry.value[i - 1], geometry.value[i])
+    distances.push(cum)
+  }
+  const climbs = detectClimbs(altitudes, distances)
+  climbs.forEach((climb) => {
+    const pt = geometry.value[climb.startIdx]
+    if (!pt) return
+    const el = buildClimbMarkerEl(climb, distances)
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom-left' })
+      .setLngLat([pt[0], pt[1]])
+      .addTo(mapInstance)
+    climbMarkers.push(marker)
+  })
+}
+
+function buildClimbMarkerEl(climb, distances) {
+  const el = document.createElement('div')
+  const catClass = climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'
+  el.className = `climb-marker ${catClass}`
+  const lengthStr = climb.lengthM >= 1000
+    ? `${(climb.lengthM / 1000).toFixed(1)} km`
+    : `${Math.round(climb.lengthM)} m`
+  el.innerHTML = `
+    <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+    <span class="climb-marker-stats">+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>
+    ${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}
+  `
+  el.title = `${t('strava.click_to_select_climb')}\n${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
+  // Click → select the climb segment on the chart (and the map highlight).
+  el.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    const startKm = (distances[climb.startIdx] || 0) / 1000
+    const endKm = (distances[climb.endIdx] || 0) / 1000
+    selectionRange.value = { startKm, endKm }
+    updateSelectionLayer()
+    if (chartInstance) chartInstance.update('none')
+  })
+  el.addEventListener('mousedown', (ev) => ev.stopPropagation())
+  return el
+}
+
+function toggleClimbs() {
+  showClimbs.value = !showClimbs.value
+  installClimbMarkers()
+}
+
+function toggleMap3D() {
+  if (!mapInstance) return
+  is3D.value = !is3D.value
+  if (is3D.value) {
+    if (!mapInstance.getSource('terrain-dem')) {
+      mapInstance.addSource('terrain-dem', {
+        type: 'raster-dem',
+        tiles: [TERRAIN_TILES],
+        encoding: 'terrarium',
+        tileSize: 256,
+        maxzoom: 14,
+      })
+    }
+    mapInstance.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
+    mapInstance.easeTo({ pitch: 60, bearing: -20, duration: 700 })
+  } else {
+    mapInstance.setTerrain(null)
+    mapInstance.easeTo({ pitch: 0, bearing: 0, duration: 700 })
+  }
+}
+
+async function toggleMapSize() {
+  mapExpanded.value = !mapExpanded.value
+  // map-wrap toggles to position:fixed full-screen — give maplibre a chance to
+  // re-measure after the layout change.
+  await nextTick()
+  if (mapInstance) mapInstance.resize()
 }
 
 function updateDivergentLayer() {
@@ -435,6 +717,20 @@ function setMapStyle(id) {
     updateRouteLayer()
     updateDivergentLayer()
     updateSelectionLayer()
+    installClimbMarkers()
+    // Re-apply 3D terrain (the style swap dropped both layers + terrain DEM).
+    if (is3D.value) {
+      if (!mapInstance.getSource('terrain-dem')) {
+        mapInstance.addSource('terrain-dem', {
+          type: 'raster-dem',
+          tiles: [TERRAIN_TILES],
+          encoding: 'terrarium',
+          tileSize: 256,
+          maxzoom: 14,
+        })
+      }
+      mapInstance.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
+    }
   })
 }
 
@@ -641,8 +937,11 @@ function insertWaypointAtGeomIdx(geomIdx) {
 let recomputeToken = 0
 async function recomputeRoute() {
   const token = ++recomputeToken
-  // Any previous chart selection is anchored to the old km range; invalidate.
+  // Any previous chart selection / zoom is anchored to the old km range.
   selectionRange.value = null
+  zoomMin = null
+  zoomMax = null
+  isZoomed.value = false
   if (waypoints.value.length < 2) {
     geometry.value = []
     distanceM.value = 0
@@ -654,6 +953,7 @@ async function recomputeRoute() {
     updateDivergentLayer()
     refreshDivergentMarkers()
     updateSelectionLayer()
+    installClimbMarkers()
     destroyChart()
     return
   }
@@ -682,6 +982,7 @@ async function recomputeRoute() {
     updateDivergentLayer()
     refreshDivergentMarkers()
     updateSelectionLayer()
+    installClimbMarkers()
     recomputeWaypointGeomIndices()
 
     // Prefer the elevation that came inline with the route. If absent for
@@ -877,12 +1178,79 @@ const selectionRectPlugin = {
   },
 }
 
+function applyZoom() {
+  if (!chartInstance) return
+  chartInstance.options.scales.x.min = zoomMin
+  chartInstance.options.scales.x.max = zoomMax
+  chartInstance.update('none')
+  isZoomed.value = zoomMin != null || zoomMax != null
+}
+
+function resetZoom() {
+  zoomMin = null
+  zoomMax = null
+  applyZoom()
+}
+
+function zoomToSelection() {
+  if (!selectionRange.value) return
+  const { startKm, endKm } = selectionRange.value
+  zoomMin = Math.min(startKm, endKm)
+  zoomMax = Math.max(startKm, endKm)
+  applyZoom()
+}
+
+let wheelRafPending = false
+let pendingWheel = null
+function onChartWheel(e) {
+  if (!chartInstance || !cumDistKm.length) return
+  e.preventDefault()
+  const rect = chartEl.value.getBoundingClientRect()
+  pendingWheel = { px: e.clientX - rect.left, deltaY: e.deltaY }
+  if (wheelRafPending) return
+  wheelRafPending = true
+  requestAnimationFrame(() => {
+    wheelRafPending = false
+    if (!pendingWheel || !chartInstance) return
+    const { px, deltaY } = pendingWheel
+    pendingWheel = null
+    applyZoomStep(px, deltaY)
+  })
+}
+
+function applyZoomStep(px, deltaY) {
+  const chart = chartInstance
+  if (!chart) return
+  const xScale = chart.scales.x
+  const cursorVal = xScale.getValueForPixel(px)
+  const naturalMin = cumDistKm[0]
+  const naturalMax = cumDistKm[cumDistKm.length - 1]
+  if (cursorVal == null || Number.isNaN(cursorVal)) return
+  const curMin = zoomMin ?? naturalMin
+  const curMax = zoomMax ?? naturalMax
+  const range = curMax - curMin
+  if (range <= 0) return
+  const naturalRange = naturalMax - naturalMin
+  const factor = deltaY > 0 ? 1.25 : 0.8
+  const newRange = range * factor
+  if (newRange >= naturalRange) { resetZoom(); return }
+  const leftFrac = (cursorVal - curMin) / range
+  let newMin = cursorVal - leftFrac * newRange
+  let newMax = newMin + newRange
+  if (newMin < naturalMin) { newMax += naturalMin - newMin; newMin = naturalMin }
+  if (newMax > naturalMax) { newMin -= newMax - naturalMax; newMax = naturalMax }
+  zoomMin = newMin
+  zoomMax = newMax
+  applyZoom()
+}
+
 // Attached once on the canvas DOM element; each handler reads chartInstance
 // at event time so it works across re-renders of the chart.
 let chartSelectionWired = false
 function attachChartSelectionOnce(canvas) {
   if (chartSelectionWired || !canvas) return
   chartSelectionWired = true
+  canvas.addEventListener('wheel', onChartWheel, { passive: false })
   canvas.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return
     const chart = chartInstance
@@ -1046,6 +1414,8 @@ onBeforeUnmount(() => {
   waypointMarkers.length = 0
   divergentMarkers.forEach((m) => m.remove())
   divergentMarkers.length = 0
+  climbMarkers.forEach((m) => m.remove())
+  climbMarkers.length = 0
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
@@ -1076,7 +1446,7 @@ onBeforeUnmount(() => {
     <!-- Map card -->
     <div class="card shadow-sm border-0 mb-3">
       <div class="card-body p-0">
-        <div class="map-wrap">
+        <div class="map-wrap" :class="{ expanded: mapExpanded }">
           <div ref="mapEl" class="route-builder-map"></div>
           <div class="map-controls">
             <div class="btn-group btn-group-sm shadow-sm" role="group">
@@ -1103,6 +1473,30 @@ onBeforeUnmount(() => {
                 @click="setMapStyle('liberty')">
                 <i class="fa-solid fa-map" aria-hidden="true"></i>
                 <span class="d-none d-md-inline ms-1">Standard</span>
+              </button>
+            </div>
+            <div class="btn-group btn-group-sm shadow-sm" role="group">
+              <button type="button" class="btn"
+                :class="is3D ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleMap3D"
+                :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
+                :aria-pressed="is3D">
+                <i class="fa-solid fa-cube" aria-hidden="true"></i>
+                <span class="d-none d-md-inline ms-1">3D</span>
+              </button>
+              <button type="button" class="btn"
+                :class="showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleClimbs"
+                :title="showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
+                :aria-pressed="showClimbs">
+                <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+                <span class="d-none d-md-inline ms-1">{{ t('strava.climbs_label') }}</span>
+              </button>
+              <button type="button" class="btn btn-light"
+                @click="toggleMapSize"
+                :title="mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')">
+                <i class="fa-solid" :class="mapExpanded ? 'fa-compress' : 'fa-expand'" aria-hidden="true"></i>
+                <span class="d-none d-md-inline ms-1">{{ mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
               </button>
             </div>
             <div class="btn-group btn-group-sm shadow-sm" role="group">
@@ -1182,9 +1576,9 @@ onBeforeUnmount(() => {
             <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
             <strong>-{{ Math.round(elevLossM) }} m</strong>
           </span>
-          <span class="stat-pill stat-pill-points">
-            <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-            <strong>{{ waypoints.length }}</strong>
+          <span class="stat-pill stat-pill-grade">
+            <span class="grade-icon" aria-hidden="true">\</span>
+            <strong>{{ avgGradePct }} %</strong>
           </span>
         </div>
         <div class="d-flex gap-2">
@@ -1209,9 +1603,43 @@ onBeforeUnmount(() => {
 
     <!-- Elevation chart card -->
     <div class="card shadow-sm border-0">
-      <div class="card-header activity-card-header d-flex align-items-center gap-2">
+      <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
         <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
         <h3 class="h6 mb-0">{{ t('routes.elevation_profile') }}</h3>
+        <button
+          v-if="selectionRange"
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+          :title="t('routes.zoom_to_selection')"
+          @click="zoomToSelection"
+        >
+          <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">{{ t('routes.zoom_to_selection') }}</span>
+        </button>
+        <button
+          v-if="isZoomed"
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+          :title="t('routes.reset_zoom')"
+          @click="resetZoom"
+        >
+          <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">{{ t('routes.reset_zoom') }}</span>
+        </button>
+        <div v-if="hasGeometry" class="ms-auto d-flex flex-wrap gap-2">
+          <span class="stat-pill stat-pill-distance">
+            <i class="fa-solid fa-route me-1" aria-hidden="true"></i><strong>{{ formatKm(chartStats.distance) }}</strong>
+          </span>
+          <span class="stat-pill stat-pill-up">
+            <i class="fa-solid fa-arrow-trend-up me-1" aria-hidden="true"></i><strong>+{{ Math.round(chartStats.gain) }} m</strong>
+          </span>
+          <span class="stat-pill stat-pill-down">
+            <i class="fa-solid fa-arrow-trend-down me-1" aria-hidden="true"></i><strong>−{{ Math.round(chartStats.loss) }} m</strong>
+          </span>
+          <span class="stat-pill stat-pill-grade">
+            <span class="grade-icon me-1" aria-hidden="true">\</span><strong>{{ chartStats.avgGrade.toFixed(1) }} %</strong>
+          </span>
+        </div>
       </div>
       <div class="card-body">
         <div v-if="!hasGeometry" class="text-muted small d-flex align-items-center gap-2">
@@ -1230,9 +1658,24 @@ onBeforeUnmount(() => {
 .map-wrap {
   position: relative;
 }
+.map-wrap.expanded {
+  position: fixed;
+  top: 4rem;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1020;
+  background: #fff;
+  box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.2);
+}
 .route-builder-map {
   height: 75vh;
   min-height: 560px;
+  width: 100%;
+}
+.map-wrap.expanded .route-builder-map {
+  height: 100%;
+  min-height: 0;
   width: 100%;
 }
 .map-controls {
@@ -1330,7 +1773,15 @@ onBeforeUnmount(() => {
 .stat-pill-distance { background: rgba(252, 76, 2, 0.12); color: #fc4c02; }
 .stat-pill-up       { background: rgba(25, 135, 84, 0.12); color: #15803d; }
 .stat-pill-down     { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
-.stat-pill-points   { background: rgba(108, 117, 125, 0.12); color: #495057; }
+.stat-pill-grade    { background: rgba(108, 117, 125, 0.12); color: #495057; }
+
+.grade-icon {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  font-size: 0.95em;
+  line-height: 1;
+  display: inline-block;
+}
 
 .elevation-canvas-wrap {
   position: relative;
@@ -1409,6 +1860,50 @@ onBeforeUnmount(() => {
   font-size: 0.78rem;
   cursor: help;
 }
+
+/* Climb marker — small pill anchored at the foot of the climb with stats and
+   optional category badge. Click sends a selection to the chart. */
+.climb-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.1rem 0.35rem 0.1rem 0.32rem;
+  border-radius: 12px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  border: 1.5px solid currentColor;
+  box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transform: translateY(-4px);
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+  user-select: none;
+  line-height: 1.4;
+}
+.climb-marker:hover {
+  transform: translateY(-6px) scale(1.06);
+  box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.45);
+}
+.climb-marker i { font-size: 0.74rem; }
+.climb-marker .climb-marker-stats { color: #212529; }
+.climb-marker .climb-marker-cat {
+  background: currentColor;
+  color: #fff !important;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  letter-spacing: 0.02em;
+  min-width: 0.85rem;
+  text-align: center;
+}
+.climb-cat-HC    { color: #111827; }
+.climb-cat-1     { color: #b91c1c; }
+.climb-cat-2     { color: #ea580c; }
+.climb-cat-3     { color: #ca8a04; }
+.climb-cat-4     { color: #16a34a; }
+.climb-cat-uncat { color: #6c757d; }
 
 /* Ghost marker shown when hovering the existing route line. Click on the
    line inserts a new waypoint at this position. Pointer-events: none so the

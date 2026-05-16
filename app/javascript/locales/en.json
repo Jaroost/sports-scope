@@ -127,7 +127,10 @@
       "error_min_points": "Add at least 2 points on the map.",
       "error_routing": "Routing error",
       "error_elevation": "Elevation error",
-      "no_cycling_here": "No-cycling section (one-way against bikes)"
+      "no_cycling_here": "No-cycling section (one-way against bikes)",
+      "selection": "Selection",
+      "reset_zoom": "Reset zoom",
+      "zoom_to_selection": "Zoom to selection"
     }
   }
 }

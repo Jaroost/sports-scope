@@ -45,6 +45,10 @@ const divergentMarkers = []
 const selectionRange = ref(null)
 let cumDistKm = [] // cumulative distance in km per geometry index — fills during chart render
 let chartDrag = null // { startPx, currentPx } while the user is dragging on the chart
+// While the user is dragging one of the start/end flag handles to resize the
+// selection. `fixedKm` is the km the other handle stays anchored to.
+let chartHandleDrag = null // { fixedKm } | null
+const HANDLE_TOL_PX = 8 // pixels from the flag pole that count as a "grab"
 // Wheel-zoom on the x axis of the elevation chart. zoomMin/zoomMax in km;
 // null means "natural extent" (the whole route).
 const isZoomed = ref(false)
@@ -1286,8 +1290,65 @@ const waypointDotsPlugin = {
   },
 }
 
+// Paints a vertical pole with either a green flag (start) or a red/white
+// checkered flag (end) at the top. Lifted from ActivityDetail.vue.
+function drawChartFlag(ctx, area, x, kind) {
+  const fw = 12
+  const fh = 9
+  const headTop = Math.max(0, area.top - fh)
+  ctx.save()
+  ctx.strokeStyle = '#1f2937'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.moveTo(x, area.top)
+  ctx.lineTo(x, area.bottom)
+  ctx.stroke()
+  if (kind === 'start') {
+    ctx.fillStyle = '#22c55e'
+    ctx.fillRect(x, headTop, fw, fh)
+    ctx.strokeStyle = '#15803d'
+    ctx.lineWidth = 1
+    ctx.strokeRect(x + 0.5, headTop + 0.5, fw, fh)
+  } else {
+    const cell = 3
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 4; c++) {
+        ctx.fillStyle = (r + c) % 2 === 0 ? '#ef4444' : '#ffffff'
+        ctx.fillRect(x + c * cell, headTop + r * cell, cell, cell)
+      }
+    }
+    ctx.strokeStyle = '#7f1d1d'
+    ctx.lineWidth = 1
+    ctx.strokeRect(x + 0.5, headTop + 0.5, fw, fh)
+  }
+  ctx.fillStyle = '#1f2937'
+  ctx.beginPath()
+  ctx.arc(x, area.top, 2, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+// Returns 'start' | 'end' | null depending on which flag pole the pixel x is
+// closest to (within HANDLE_TOL_PX). Used by both mousedown (grab) and
+// mousemove (cursor feedback) handlers.
+function detectChartHandle(px) {
+  if (!chartInstance || !selectionRange.value) return null
+  const area = chartInstance.chartArea
+  const xScale = chartInstance.scales.x
+  const lo = Math.min(selectionRange.value.startKm, selectionRange.value.endKm)
+  const hi = Math.max(selectionRange.value.startKm, selectionRange.value.endKm)
+  const pxStart = Math.max(area.left, Math.min(area.right, xScale.getPixelForValue(lo)))
+  const pxEnd = Math.max(area.left, Math.min(area.right, xScale.getPixelForValue(hi)))
+  const dStart = Math.abs(px - pxStart)
+  const dEnd = Math.abs(px - pxEnd)
+  if (dStart <= HANDLE_TOL_PX && dStart <= dEnd) return 'start'
+  if (dEnd <= HANDLE_TOL_PX) return 'end'
+  return null
+}
+
 // Chart.js plugin that paints a translucent rectangle under the line for
-// either the in-progress drag (chartDrag) or the committed selectionRange.
+// either the in-progress drag (chartDrag) or the committed selectionRange,
+// and overlays the start/end flag handles on top of the line.
 const selectionRectPlugin = {
   id: 'routeSelectionRect',
   beforeDatasetsDraw(chart) {
@@ -1313,6 +1374,17 @@ const selectionRectPlugin = {
     ctx.lineWidth = 1
     ctx.strokeRect(xMin + 0.5, chartArea.top + 0.5, xMax - xMin - 1, chartArea.bottom - chartArea.top - 1)
     ctx.restore()
+  },
+  afterDatasetsDraw(chart) {
+    if (!selectionRange.value) return
+    const { ctx, chartArea } = chart
+    const xScale = chart.scales.x
+    const lo = Math.min(selectionRange.value.startKm, selectionRange.value.endKm)
+    const hi = Math.max(selectionRange.value.startKm, selectionRange.value.endKm)
+    const pxLo = Math.max(chartArea.left, Math.min(chartArea.right, xScale.getPixelForValue(lo)))
+    const pxHi = Math.max(chartArea.left, Math.min(chartArea.right, xScale.getPixelForValue(hi)))
+    drawChartFlag(ctx, chartArea, pxLo, 'start')
+    drawChartFlag(ctx, chartArea, pxHi, 'end')
   },
 }
 
@@ -1389,6 +1461,22 @@ function attachChartSelectionOnce(canvas) {
   if (chartSelectionWired || !canvas) return
   chartSelectionWired = true
   canvas.addEventListener('wheel', onChartWheel, { passive: false })
+
+  // Hover cursor feedback — `ew-resize` over a flag pole, `crosshair` over
+  // the plotting area.
+  canvas.addEventListener('mousemove', (ev) => {
+    if (chartHandleDrag || chartDrag) return
+    if (!chartInstance) return
+    const r = canvas.getBoundingClientRect()
+    const x = ev.clientX - r.left
+    const area = chartInstance.chartArea
+    if (x < area.left - HANDLE_TOL_PX || x > area.right + HANDLE_TOL_PX) {
+      canvas.style.cursor = ''
+      return
+    }
+    canvas.style.cursor = detectChartHandle(x) ? 'ew-resize' : 'crosshair'
+  })
+
   canvas.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return
     const chart = chartInstance
@@ -1396,8 +1484,45 @@ function attachChartSelectionOnce(canvas) {
     const rect = canvas.getBoundingClientRect()
     const x = ev.clientX - rect.left
     const area = chart.chartArea
-    if (x < area.left || x > area.right) return
+    if (x < area.left - HANDLE_TOL_PX || x > area.right + HANDLE_TOL_PX) return
     ev.preventDefault()
+
+    // Priority 1: did the user grab a flag pole? Resize the existing selection
+    // by keeping the other handle fixed.
+    const handle = detectChartHandle(x)
+    if (handle) {
+      const fixedKm = handle === 'start' ? selectionRange.value.endKm : selectionRange.value.startKm
+      chartHandleDrag = { fixedKm }
+      canvas.style.cursor = 'ew-resize'
+
+      const onMove = (e) => {
+        const c = chartInstance
+        if (!c || !chartHandleDrag) return
+        const r2 = canvas.getBoundingClientRect()
+        const xx = Math.max(c.chartArea.left, Math.min(c.chartArea.right, e.clientX - r2.left))
+        const km = c.scales.x.getValueForPixel(xx)
+        if (km == null || Number.isNaN(km)) return
+        // Auto-normalize via min/max so dragging past the fixed handle simply
+        // swaps which end is start/end — no flip glitch.
+        const lo = Math.min(chartHandleDrag.fixedKm, km)
+        const hi = Math.max(chartHandleDrag.fixedKm, km)
+        selectionRange.value = { startKm: lo, endKm: hi }
+        updateSelectionLayer()
+        c.update('none')
+      }
+      const onUp = () => {
+        window.removeEventListener('mousemove', onMove)
+        window.removeEventListener('mouseup', onUp)
+        chartHandleDrag = null
+        canvas.style.cursor = ''
+      }
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+      return
+    }
+
+    // Priority 2: regular drag-to-select on the plot area.
+    if (x < area.left || x > area.right) return
     const startPx = x
     chartDrag = { startPx, currentPx: x }
     chart.update('none')

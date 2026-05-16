@@ -1503,27 +1503,30 @@ function positionTooltipBeside(el, anchorX, anchorY, containerWidth, containerHe
 
 function externalTooltipHandler(context) {
   const { chart, tooltip } = context
-  const parent = chart.canvas.parentNode
-  if (!parent) return
-  let el = parent.querySelector('.chart-tooltip')
+  // Find the slot reserved in the side panel of this chart group.
+  const canvasId = chart.canvas.id || ''
+  const groupId = canvasId.startsWith('chart-') ? canvasId.slice(6) : null
+  if (!groupId) return
+  const slot = document.querySelector(`.chart-tooltip-slot[data-group-id="${CSS.escape(groupId)}"]`)
+  if (!slot) return
+  let el = slot.querySelector('.chart-tooltip')
   if (!el) {
     el = document.createElement('div')
-    el.className = 'chart-tooltip'
-    parent.appendChild(el)
+    el.className = 'chart-tooltip chart-tooltip-inline'
+    slot.appendChild(el)
   }
   if (tooltip.opacity === 0 || chart.$drag?.mode) {
-    el.style.opacity = '0'
+    el.classList.add('chart-tooltip-hidden')
     return
   }
   const xv = tooltip.dataPoints?.[0]?.parsed?.x
   if (xv == null || Number.isNaN(xv)) {
-    el.style.opacity = '0'
+    el.classList.add('chart-tooltip-hidden')
     return
   }
   const idx = xValueToIndex(chartXToRaw(xv))
   el.innerHTML = buildTooltipHtmlForIndex(idx)
-  el.style.opacity = '1'
-  positionTooltipBeside(el, tooltip.caretX, tooltip.caretY, chart.canvas.clientWidth, chart.canvas.clientHeight)
+  el.classList.remove('chart-tooltip-hidden')
 }
 
 function escapeHtml(s) {
@@ -2586,12 +2589,12 @@ function onLightboxKey(ev) {
                   </div>
                 </div>
                 <div v-if="!group.collapsed" class="row g-2 align-items-stretch">
-                  <div class="col-lg-10">
+                  <div class="col-lg-9">
                     <div class="chart-canvas-wrap">
                       <canvas :id="`chart-${group.id}`"></canvas>
                     </div>
                   </div>
-                  <div class="col-lg-2">
+                  <div class="col-lg-3 chart-side-panel">
                     <div
                       v-for="streamKey in group.streams"
                       :key="streamKey"
@@ -2620,6 +2623,7 @@ function onLightboxKey(ev) {
                         </span>
                       </template>
                     </div>
+                    <div class="chart-tooltip-slot" :data-group-id="group.id"></div>
                   </div>
                 </div>
               </div>
@@ -3166,6 +3170,21 @@ function onLightboxKey(ev) {
   margin-left: auto;
   font-weight: 600;
   padding-left: 0.55rem;
+}
+
+/* Inline variant: lives in the side panel slot, in flow, sized to its column. */
+.chart-tooltip-inline {
+  position: static;
+  transform: none;
+  width: 100%;
+  max-width: 100%;
+  margin-top: 0.6rem;
+  opacity: 1;
+  white-space: normal;
+  font-size: 0.72rem;
+}
+.chart-tooltip-hidden {
+  display: none;
 }
 
 .climb-marker {

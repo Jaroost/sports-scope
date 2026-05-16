@@ -15,6 +15,8 @@
       "map_2d": "Vue 2D",
       "map_style_label": "Fond de carte",
       "map_style_cyclo": "Vélo",
+      "map_style_opencycle": "Cycle",
+      "map_style_topo": "Topo",
       "map_style_standard": "Standard",
       "climbs_label": "Cols",
       "show_climbs": "Afficher les cols",

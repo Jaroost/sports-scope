@@ -95,7 +95,7 @@ const hasRoute = computed(() => routeCoords.value.length > 0)
 const hasLatLngStream = computed(() => Array.isArray(streams.value?.latlng?.data) && streams.value.latlng.data.length > 0)
 
 const chartDefs = [
-  { key: 'altitude', color: '#198754', unit: 'm', transform: (v) => v, digits: 0 },
+  { key: 'altitude', color: '#198754', unit: 'm', transform: (v) => v, digits: 0 },  
   { key: 'heartrate', color: '#dc3545', unit: 'bpm', transform: (v) => v, digits: 0 },
   { key: 'velocity_smooth', color: '#0d6efd', unit: 'km/h', transform: (v) => v * 3.6, digits: 1 },
   { key: 'cadence', color: '#6f42c1', unit: 'rpm', transform: (v) => v, digits: 0 },
@@ -722,19 +722,73 @@ function installRouteLayers(coords) {
   refreshSelectedRoute()
 }
 
+const THUNDERFOREST_KEY = (
+  document.querySelector('meta[name="thunderforest-api-key"]')?.getAttribute('content') || ''
+).trim()
+
 function mapStyleFor(id) {
   if (id === 'liberty') return 'https://tiles.openfreemap.org/styles/liberty'
+  if (id === 'topo') return openTopoMapStyle()
+  if (id === 'cycle' && THUNDERFOREST_KEY) return openCycleMapStyle(THUNDERFOREST_KEY)
   return cyclOsmStyle()
+}
+
+function openTopoMapStyle() {
+  return {
+    version: 8,
+    sources: {
+      'topo-raster': {
+        type: 'raster',
+        tiles: [
+          'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
+          'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
+          'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
+        ],
+        tileSize: 256,
+        maxzoom: 17,
+        attribution:
+          'Map: © <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC-BY-SA</a>) · Data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, SRTM',
+      },
+    },
+    layers: [
+      { id: 'topo-base', type: 'raster', source: 'topo-raster' },
+    ],
+  }
+}
+
+function openCycleMapStyle(apiKey) {
+  return {
+    version: 8,
+    sources: {
+      'thunderforest-cycle': {
+        type: 'raster',
+        tiles: [
+          `https://a.tile.thunderforest.com/cycle/{z}/{x}/{y}.png?apikey=${apiKey}`,
+          `https://b.tile.thunderforest.com/cycle/{z}/{x}/{y}.png?apikey=${apiKey}`,
+          `https://c.tile.thunderforest.com/cycle/{z}/{x}/{y}.png?apikey=${apiKey}`,
+        ],
+        tileSize: 256,
+        maxzoom: 22,
+        attribution:
+          'Maps © <a href="https://www.thunderforest.com/" target="_blank" rel="noopener">Thunderforest</a> · Data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+      },
+    },
+    layers: [
+      { id: 'cycle-base', type: 'raster', source: 'thunderforest-cycle' },
+    ],
+  }
 }
 
 function setMapStyle(id) {
   if (!mapInstance || id === mapStyleId.value) return
   mapStyleId.value = id
-  mapInstance.setStyle(mapStyleFor(id))
-  // setStyle wipes all sources/layers/images — re-install our overlays once
-  // the new style finishes loading. HTML markers (climbs + drag flags +
-  // navigation control) survive the swap because they live in the map's
-  // container, not in the style.
+  // `diff: false` forces a full wipe of the previous style (including any
+  // images/sources/layers we added on top). Without it, maplibre tries to
+  // preserve custom items across the swap and our subsequent addImage()
+  // call throws "An image named route-arrow already exists".
+  mapInstance.setStyle(mapStyleFor(id), { diff: false })
+  // HTML markers (climbs, drag flags) and NavigationControl survive — they
+  // live in the map's container, not in the style.
   mapInstance.once('style.load', () => {
     installRouteLayers(routeCoords.value)
   })
@@ -824,8 +878,8 @@ function buildClimbMarkerEl(climb) {
     : `${Math.round(climb.lengthM)} m`
   el.innerHTML = `
     <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-    <span class="climb-marker-stats">+${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)}%</span>
-    ${climb.category ? `<span class="climb-marker-cat">Cat ${climb.category}</span>` : ''}
+    <span class="climb-marker-stats">+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>
+    ${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}
   `
   el.title = `${t('strava.click_to_select_climb')}\n${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
   el.addEventListener('click', (ev) => {
@@ -2009,6 +2063,27 @@ onBeforeUnmount(() => {
                   <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_cyclo') }}</span>
                 </button>
                 <button
+                  v-if="THUNDERFOREST_KEY"
+                  type="button"
+                  class="btn map-ctrl-btn"
+                  :class="mapStyleId === 'cycle' ? 'btn-warning text-dark active' : 'btn-light'"
+                  @click="setMapStyle('cycle')"
+                  :title="t('strava.map_style_opencycle')"
+                >
+                  <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_opencycle') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn map-ctrl-btn"
+                  :class="mapStyleId === 'topo' ? 'btn-warning text-dark active' : 'btn-light'"
+                  @click="setMapStyle('topo')"
+                  :title="t('strava.map_style_topo')"
+                >
+                  <i class="fa-solid fa-mountain-sun" aria-hidden="true"></i>
+                  <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_topo') }}</span>
+                </button>
+                <button
                   type="button"
                   class="btn map-ctrl-btn"
                   :class="mapStyleId === 'liberty' ? 'btn-warning text-dark active' : 'btn-light'"
@@ -2399,7 +2474,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 .activity-map {
-  height: 420px;
+  height: 520px;
   width: 100%;
 }
 .map-wrap.expanded .activity-map {
@@ -2811,34 +2886,37 @@ onBeforeUnmount(() => {
 .climb-marker {
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.22rem;
   background: rgba(255, 255, 255, 0.96);
-  padding: 0.18rem 0.5rem 0.18rem 0.45rem;
-  border-radius: 14px;
-  font-size: 0.72rem;
+  padding: 0.1rem 0.35rem 0.1rem 0.32rem;
+  border-radius: 12px;
+  font-size: 0.66rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  border: 2px solid currentColor;
-  box-shadow: 0 4px 10px -3px rgba(0, 0, 0, 0.35);
+  border: 1.5px solid currentColor;
+  box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.35);
   cursor: pointer;
   transform: translateY(-4px);
   transition: transform 0.1s ease, box-shadow 0.1s ease;
   user-select: none;
+  line-height: 1.4;
 }
 .climb-marker:hover {
-  transform: translateY(-6px) scale(1.04);
+  transform: translateY(-6px) scale(1.06);
   box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.45);
 }
-.climb-marker i { font-size: 0.85rem; }
+.climb-marker i { font-size: 0.74rem; }
 .climb-marker .climb-marker-stats { color: #212529; }
 .climb-marker .climb-marker-cat {
   background: currentColor;
   color: #fff !important;
-  padding: 0.05rem 0.4rem;
+  padding: 0 0.3rem;
   border-radius: 999px;
-  font-size: 0.65rem;
-  letter-spacing: 0.04em;
+  font-size: 0.6rem;
+  letter-spacing: 0.02em;
+  min-width: 0.85rem;
+  text-align: center;
 }
 .climb-marker .climb-marker-cat::first-letter { text-transform: uppercase; }
 /* Force the badge's inner text to be white via a child trick — the `currentColor`

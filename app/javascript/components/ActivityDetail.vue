@@ -1874,7 +1874,10 @@ async function deletePreset() {
 function onPresetChange(ev) {
   const v = ev.target.value
   if (v === '') {
-    selectedLayoutId.value = null
+    // Picking "— Aucune —" should behave like the dedicated reset button:
+    // restore the default layout, clear the last-used preset on the server,
+    // and drop the local selection.
+    resetLayout()
   } else {
     loadPreset(v)
   }

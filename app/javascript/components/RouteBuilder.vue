@@ -804,9 +804,47 @@ async function renderElevationChart() {
       },
       plugins: { legend: { display: false } },
     },
-    plugins: [selectionRectPlugin],
+    plugins: [selectionRectPlugin, waypointDotsPlugin],
   })
   attachChartSelectionOnce(chartEl.value)
+}
+
+// Numbered dots on the elevation profile matching the route waypoints.
+// X = cumulative distance at the waypoint, Y = elevation at the waypoint.
+const waypointDotsPlugin = {
+  id: 'routeWaypointDots',
+  afterDatasetsDraw(chart) {
+    const wps = waypointGeomIndices
+    if (!wps.length || !cumDistKm.length || !geometry.value.length) return
+    const { ctx, chartArea } = chart
+    const xScale = chart.scales.x
+    const yScale = chart.scales.y
+    ctx.save()
+    for (let i = 0; i < wps.length; i++) {
+      const gi = wps[i]
+      if (gi == null || gi < 0 || gi >= cumDistKm.length) continue
+      const km = cumDistKm[gi]
+      const pt = geometry.value[gi]
+      const ele = pt?.[2]
+      if (ele == null) continue
+      const px = xScale.getPixelForValue(km)
+      const py = yScale.getPixelForValue(ele)
+      if (px < chartArea.left - 2 || px > chartArea.right + 2) continue
+      ctx.beginPath()
+      ctx.arc(px, py, 9, 0, Math.PI * 2)
+      ctx.fillStyle = '#fc4c02'
+      ctx.fill()
+      ctx.lineWidth = 2
+      ctx.strokeStyle = '#fff'
+      ctx.stroke()
+      ctx.fillStyle = '#fff'
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(String(i + 1), px, py + 0.5)
+    }
+    ctx.restore()
+  },
 }
 
 // Chart.js plugin that paints a translucent rectangle under the line for

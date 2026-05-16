@@ -4,6 +4,7 @@
 !.env.example
 node_modules/*
 public/vite/assets/*
+public/vite-dev/*
 
 /log/*
 !/log/.keep

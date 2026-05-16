@@ -125,8 +125,9 @@
       "y_m": "Altitude (m)",
       "error_name_required": "Donne un nom à ton itinéraire avant d'enregistrer.",
       "error_min_points": "Ajoute au moins 2 points sur la carte.",
-      "error_routing": "Erreur OSRM",
-      "error_elevation": "Erreur altitude"
+      "error_routing": "Erreur de routage",
+      "error_elevation": "Erreur altitude",
+      "no_cycling_here": "Sens interdit à vélo (détour cyclable)"
     }
   }
 }

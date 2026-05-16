@@ -21,8 +21,8 @@
     "file": "assets/maplibre-gl-Twyd4PtP.css",
     "src": "../../node_modules/.pnpm/maplibre-gl@5.24.0/node_modules/maplibre-gl/dist/maplibre-gl.css"
   },
-  "_maplibre-gl-bg7g0wcX.js": {
-    "file": "assets/maplibre-gl-bg7g0wcX.js",
+  "_maplibre-gl-B8yHfYYx.js": {
+    "file": "assets/maplibre-gl-B8yHfYYx.js",
     "name": "maplibre-gl",
     "isDynamicEntry": true,
     "imports": [
@@ -30,7 +30,7 @@
     ]
   },
   "entrypoints/application.js": {
-    "file": "assets/application-BNsupW7p.js",
+    "file": "assets/application-Q--9EL2p.js",
     "name": "entrypoints/application.js",
     "src": "entrypoints/application.js",
     "isEntry": true,
@@ -38,13 +38,13 @@
       "locales/%{locale}.json",
       "locales/en.json",
       "locales/fr.json",
-      "_maplibre-gl-bg7g0wcX.js",
+      "_maplibre-gl-B8yHfYYx.js",
       "../../node_modules/.pnpm/chart.js@4.5.1/node_modules/chart.js/dist/chart.js",
-      "_maplibre-gl-bg7g0wcX.js",
+      "_maplibre-gl-B8yHfYYx.js",
       "../../node_modules/.pnpm/chart.js@4.5.1/node_modules/chart.js/dist/chart.js"
     ],
     "css": [
-      "assets/application-DD51MXmU.css"
+      "assets/application-BpgE7irS.css"
     ],
     "assets": [
       "assets/fa-brands-400-BP5tdqmh.woff2",
@@ -59,13 +59,13 @@
     "isDynamicEntry": true
   },
   "locales/en.json": {
-    "file": "assets/en-B0sb-8Lc.js",
+    "file": "assets/en-CgMqGUhm.js",
     "name": "en",
     "src": "locales/en.json",
     "isDynamicEntry": true
   },
   "locales/fr.json": {
-    "file": "assets/fr-CBmj4JoW.js",
+    "file": "assets/fr-CC-my6UT.js",
     "name": "fr",
     "src": "locales/fr.json",
     "isDynamicEntry": true

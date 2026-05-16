@@ -35,6 +35,11 @@ let waypointGeomIndices = [] // for each waypoint, its index in geometry[]
 // Set to true right after a successful waypoint drag so the click event
 // maplibre synthesizes from the mouseup doesn't add/insert a spurious point.
 let suppressNextMapClick = false
+// Legs where the cycling profile detours far around the foot profile — i.e.
+// sections with a one-way restriction against the cyclist's direction. We
+// render the foot path with a red dashed overlay + warning marker.
+const divergentLegs = ref([])
+const divergentMarkers = []
 
 const hasGeometry = computed(() => geometry.value.length >= 2)
 const isEditMode = computed(() => currentId.value != null)
@@ -317,6 +322,23 @@ function installRouteLayer() {
       paint: { 'line-color': '#fc4c02', 'line-width': 5 },
     })
   }
+  if (!mapInstance.getSource('builder-divergent')) {
+    mapInstance.addSource('builder-divergent', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    })
+    mapInstance.addLayer({
+      id: 'builder-divergent-line',
+      type: 'line',
+      source: 'builder-divergent',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': '#d62828',
+        'line-width': 4,
+        'line-dasharray': [1.4, 1.4],
+      },
+    })
+  }
 }
 
 function updateRouteLayer() {
@@ -327,6 +349,34 @@ function updateRouteLayer() {
   src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
 }
 
+function updateDivergentLayer() {
+  if (!mapInstance) return
+  const src = mapInstance.getSource('builder-divergent')
+  if (!src) return
+  const features = divergentLegs.value.map((leg) => ({
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates: leg.coords },
+    properties: { extraM: leg.extraM },
+  }))
+  src.setData({ type: 'FeatureCollection', features })
+}
+
+function refreshDivergentMarkers() {
+  if (!_maplibregl || !mapInstance) return
+  divergentMarkers.forEach((m) => m.remove())
+  divergentMarkers.length = 0
+  divergentLegs.value.forEach((leg) => {
+    const el = document.createElement('div')
+    el.className = 'divergent-warning-marker'
+    el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>'
+    el.title = `${t('routes.no_cycling_here')} · +${Math.round(leg.extraM)} m`
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat(leg.midpoint)
+      .addTo(mapInstance)
+    divergentMarkers.push(marker)
+  })
+}
+
 function setMapStyle(id) {
   if (!mapInstance || id === mapStyleId.value) return
   mapStyleId.value = id
@@ -334,6 +384,7 @@ function setMapStyle(id) {
   mapInstance.once('style.load', () => {
     installRouteLayer()
     updateRouteLayer()
+    updateDivergentLayer()
   })
 }
 
@@ -522,7 +573,14 @@ function insertWaypointAtGeomIdx(geomIdx) {
   recomputeRoute()
 }
 
-// ─── OSRM road snapping ──────────────────────────────────────────────────────
+// ─── BRouter road snapping ───────────────────────────────────────────────────
+// We use BRouter (https://brouter.de) rather than OSRM because OSRM's public
+// cycling/foot profiles have lacunar coverage on dedicated cycling
+// infrastructure (national bike routes, cycleways with bicycle=yes only).
+// BRouter is purpose-built for cycling and honours OSM bicycle tags properly,
+// including legal contresens cyclables and route=bicycle networks. Bonus:
+// BRouter embeds DEM elevation in its coordinates so we don't need a separate
+// Open-Meteo round-trip in the common case.
 let recomputeToken = 0
 async function recomputeRoute() {
   const token = ++recomputeToken
@@ -531,27 +589,48 @@ async function recomputeRoute() {
     distanceM.value = 0
     elevGainM.value = 0
     elevLossM.value = 0
+    divergentLegs.value = []
     updateRouteLayer()
+    updateDivergentLayer()
+    refreshDivergentMarkers()
     destroyChart()
     return
   }
   isFetchingRoute.value = true
   error.value = null
   try {
-    const coordsStr = waypoints.value.map((w) => `${w.lng},${w.lat}`).join(';')
-    const url = `https://router.project-osrm.org/route/v1/cycling/${coordsStr}?geometries=geojson&overview=full`
+    const lonlats = waypoints.value.map((w) => `${w.lng},${w.lat}`).join('|')
+    const url = `https://brouter.de/brouter?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson`
     const res = await fetch(url)
-    if (!res.ok) throw new Error(`OSRM HTTP ${res.status}`)
+    if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
     const data = await res.json()
-    if (token !== recomputeToken) return // stale
-    if (data.code !== 'Ok' || !data.routes?.length) throw new Error('Routing impossible (no road found)')
-    const r = data.routes[0]
-    distanceM.value = r.distance
-    geometry.value = r.geometry.coordinates.map(([lng, lat]) => [lng, lat, null])
+    if (token !== recomputeToken) return
+    const feature = data?.features?.[0]
+    const coords = feature?.geometry?.coordinates
+    if (!Array.isArray(coords) || coords.length < 2) {
+      throw new Error('Routing impossible (no route)')
+    }
+    const trackLen = parseFloat(feature.properties?.['track-length'] || '0')
+    distanceM.value = Number.isFinite(trackLen) && trackLen > 0 ? trackLen : 0
+    // BRouter coords are [lng, lat, ele] (ele is SRTM/DEM, integer meters)
+    geometry.value = coords.map((c) => [c[0], c[1], c.length > 2 ? c[2] : null])
+    // BRouter handles bicycle-specific rules natively, no divergent legs.
+    divergentLegs.value = []
+
     updateRouteLayer()
+    updateDivergentLayer()
+    refreshDivergentMarkers()
     recomputeWaypointGeomIndices()
-    // Fetch altitudes asynchronously — doesn't block UI
-    fetchElevation(token)
+
+    // Prefer the elevation that came inline with the route. If absent for
+    // any reason (rare), fall back to Open-Meteo.
+    const hasInlineElevation = geometry.value.some((c) => c[2] != null)
+    if (hasInlineElevation) {
+      recomputeGain()
+      renderElevationChart()
+    } else {
+      fetchElevation(token)
+    }
   } catch (e) {
     if (token === recomputeToken) error.value = `${t('routes.error_routing')}: ${e.message}`
   } finally {
@@ -696,6 +775,12 @@ async function fetchRoute(id) {
     updateRouteLayer()
     recomputeWaypointGeomIndices()
     renderElevationChart()
+    // Re-snap the saved waypoints with the current routing profile (foot +
+    // cycling-divergence detection). The stored geometry may have been
+    // produced by an older profile and not actually pass through some
+    // waypoints — recomputing realigns it and shows divergent-leg warnings.
+    // DB stays unchanged until the user clicks Save.
+    if (waypoints.value.length >= 2) recomputeRoute()
   } catch (e) {
     error.value = e.message
   }
@@ -776,6 +861,8 @@ onBeforeUnmount(() => {
   destroyChart()
   waypointMarkers.forEach((m) => m.remove())
   waypointMarkers.length = 0
+  divergentMarkers.forEach((m) => m.remove())
+  divergentMarkers.length = 0
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
@@ -1117,6 +1204,24 @@ onBeforeUnmount(() => {
 }
 .wp-marker:hover .wp-marker-del {
   opacity: 1;
+}
+
+/* Warning marker placed at the midpoint of a leg where cycling routing
+   would take a long detour — i.e. one-way streets the cyclist can't enter.
+   The red dashed line on the map covers the same leg. */
+.divergent-warning-marker {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #d62828;
+  color: #fff;
+  border: 2px solid #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  font-size: 0.78rem;
+  cursor: help;
 }
 
 /* Ghost marker shown when hovering the existing route line. Click on the

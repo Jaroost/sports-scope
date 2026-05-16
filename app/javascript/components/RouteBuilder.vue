@@ -40,6 +40,11 @@ let suppressNextMapClick = false
 // render the foot path with a red dashed overlay + warning marker.
 const divergentLegs = ref([])
 const divergentMarkers = []
+// Selection on the elevation chart — drag a region to highlight that
+// portion of the track on the map. { startKm, endKm } or null.
+const selectionRange = ref(null)
+let cumDistKm = [] // cumulative distance in km per geometry index — fills during chart render
+let chartDrag = null // { startPx, currentPx } while the user is dragging on the chart
 
 const hasGeometry = computed(() => geometry.value.length >= 2)
 const isEditMode = computed(() => currentId.value != null)
@@ -339,6 +344,21 @@ function installRouteLayer() {
       },
     })
   }
+  // The selection layer is drawn last so it overlays both the main route and
+  // any divergent overlay.
+  if (!mapInstance.getSource('builder-route-selected')) {
+    mapInstance.addSource('builder-route-selected', {
+      type: 'geojson',
+      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
+    })
+    mapInstance.addLayer({
+      id: 'builder-route-selected-line',
+      type: 'line',
+      source: 'builder-route-selected',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#00b4d8', 'line-width': 7 },
+    })
+  }
 }
 
 function updateRouteLayer() {
@@ -359,6 +379,35 @@ function updateDivergentLayer() {
     properties: { extraM: leg.extraM },
   }))
   src.setData({ type: 'FeatureCollection', features })
+}
+
+function updateSelectionLayer() {
+  if (!mapInstance) return
+  const src = mapInstance.getSource('builder-route-selected')
+  if (!src) return
+  if (!selectionRange.value || !cumDistKm.length) {
+    src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: [] } })
+    return
+  }
+  const i0 = geomIdxForKm(selectionRange.value.startKm)
+  const i1 = geomIdxForKm(selectionRange.value.endKm)
+  const lo = Math.min(i0, i1)
+  const hi = Math.max(i0, i1)
+  const coords = geometry.value.slice(lo, hi + 1).map(([lng, lat]) => [lng, lat])
+  src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
+}
+
+function geomIdxForKm(km) {
+  if (!cumDistKm.length) return 0
+  // Binary search for the first index where cumDistKm[i] >= km.
+  let lo = 0
+  let hi = cumDistKm.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (cumDistKm[mid] < km) lo = mid + 1
+    else hi = mid
+  }
+  return lo
 }
 
 function refreshDivergentMarkers() {
@@ -385,6 +434,7 @@ function setMapStyle(id) {
     installRouteLayer()
     updateRouteLayer()
     updateDivergentLayer()
+    updateSelectionLayer()
   })
 }
 
@@ -437,6 +487,13 @@ function refreshWaypointMarkers() {
     el.querySelector('.wp-marker-del').addEventListener('click', (ev) => {
       ev.stopPropagation()
       ev.preventDefault()
+      removeWaypoint(idx)
+    })
+    // Right-click on a marker also deletes it (no confirm — the user can
+    // re-click the map to re-add a point).
+    el.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault()
+      ev.stopPropagation()
       removeWaypoint(idx)
     })
     el.addEventListener('click', (ev) => ev.stopPropagation())
@@ -584,15 +641,19 @@ function insertWaypointAtGeomIdx(geomIdx) {
 let recomputeToken = 0
 async function recomputeRoute() {
   const token = ++recomputeToken
+  // Any previous chart selection is anchored to the old km range; invalidate.
+  selectionRange.value = null
   if (waypoints.value.length < 2) {
     geometry.value = []
     distanceM.value = 0
     elevGainM.value = 0
     elevLossM.value = 0
     divergentLegs.value = []
+    cumDistKm = []
     updateRouteLayer()
     updateDivergentLayer()
     refreshDivergentMarkers()
+    updateSelectionLayer()
     destroyChart()
     return
   }
@@ -620,6 +681,7 @@ async function recomputeRoute() {
     updateRouteLayer()
     updateDivergentLayer()
     refreshDivergentMarkers()
+    updateSelectionLayer()
     recomputeWaypointGeomIndices()
 
     // Prefer the elevation that came inline with the route. If absent for
@@ -709,9 +771,12 @@ async function renderElevationChart() {
   destroyChart()
   let cumDist = 0
   const points = [{ x: 0, y: geometry.value[0][2] ?? 0 }]
+  cumDistKm = [0]
   for (let i = 1; i < geometry.value.length; i++) {
     cumDist += haversine(geometry.value[i - 1], geometry.value[i])
-    points.push({ x: cumDist / 1000, y: geometry.value[i][2] ?? points[points.length - 1].y })
+    const km = cumDist / 1000
+    cumDistKm.push(km)
+    points.push({ x: km, y: geometry.value[i][2] ?? points[points.length - 1].y })
   }
   chartInstance = new Chart(chartEl.value.getContext('2d'), {
     type: 'line',
@@ -739,6 +804,86 @@ async function renderElevationChart() {
       },
       plugins: { legend: { display: false } },
     },
+    plugins: [selectionRectPlugin],
+  })
+  attachChartSelectionOnce(chartEl.value)
+}
+
+// Chart.js plugin that paints a translucent rectangle under the line for
+// either the in-progress drag (chartDrag) or the committed selectionRange.
+const selectionRectPlugin = {
+  id: 'routeSelectionRect',
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea } = chart
+    let x1, x2
+    if (chartDrag) {
+      x1 = chartDrag.startPx
+      x2 = chartDrag.currentPx
+    } else if (selectionRange.value) {
+      const xScale = chart.scales.x
+      x1 = xScale.getPixelForValue(selectionRange.value.startKm)
+      x2 = xScale.getPixelForValue(selectionRange.value.endKm)
+    } else {
+      return
+    }
+    const xMin = Math.max(chartArea.left, Math.min(x1, x2))
+    const xMax = Math.min(chartArea.right, Math.max(x1, x2))
+    if (xMax <= xMin) return
+    ctx.save()
+    ctx.fillStyle = 'rgba(0, 180, 216, 0.22)'
+    ctx.fillRect(xMin, chartArea.top, xMax - xMin, chartArea.bottom - chartArea.top)
+    ctx.strokeStyle = '#00b4d8'
+    ctx.lineWidth = 1
+    ctx.strokeRect(xMin + 0.5, chartArea.top + 0.5, xMax - xMin - 1, chartArea.bottom - chartArea.top - 1)
+    ctx.restore()
+  },
+}
+
+// Attached once on the canvas DOM element; each handler reads chartInstance
+// at event time so it works across re-renders of the chart.
+let chartSelectionWired = false
+function attachChartSelectionOnce(canvas) {
+  if (chartSelectionWired || !canvas) return
+  chartSelectionWired = true
+  canvas.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return
+    const chart = chartInstance
+    if (!chart) return
+    const rect = canvas.getBoundingClientRect()
+    const x = ev.clientX - rect.left
+    const area = chart.chartArea
+    if (x < area.left || x > area.right) return
+    ev.preventDefault()
+    const startPx = x
+    chartDrag = { startPx, currentPx: x }
+    chart.update('none')
+
+    const onMove = (e) => {
+      const c = chartInstance
+      if (!c) return
+      const r = canvas.getBoundingClientRect()
+      const xx = Math.max(c.chartArea.left, Math.min(c.chartArea.right, e.clientX - r.left))
+      chartDrag.currentPx = xx
+      c.update('none')
+    }
+    const onUp = (e) => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      const c = chartInstance
+      if (!chartDrag || !c) { chartDrag = null; return }
+      const r = canvas.getBoundingClientRect()
+      const finalX = Math.max(c.chartArea.left, Math.min(c.chartArea.right, e.clientX - r.left))
+      const dragged = Math.abs(finalX - startPx) > 4
+      const xScale = c.scales.x
+      const km1 = xScale.getValueForPixel(Math.min(startPx, finalX))
+      const km2 = xScale.getValueForPixel(Math.max(startPx, finalX))
+      chartDrag = null
+      selectionRange.value = dragged ? { startKm: km1, endKm: km2 } : null
+      updateSelectionLayer()
+      c.update('none')
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   })
 }
 
@@ -1153,6 +1298,9 @@ onBeforeUnmount(() => {
   position: relative;
   height: 220px;
   width: 100%;
+}
+.elevation-canvas-wrap canvas {
+  cursor: crosshair;
 }
 </style>
 

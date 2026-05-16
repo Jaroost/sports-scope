@@ -102,15 +102,20 @@ const routeCoords = computed(() => {
 const hasRoute = computed(() => routeCoords.value.length > 0)
 const hasLatLngStream = computed(() => Array.isArray(streams.value?.latlng?.data) && streams.value.latlng.data.length > 0)
 
+// chartDefs order drives the default chart layout (top → bottom).
 const chartDefs = [
-  { key: 'altitude', color: '#198754', unit: 'm', transform: (v) => v, digits: 0 },  
-  { key: 'heartrate', color: '#dc3545', unit: 'bpm', transform: (v) => v, digits: 0 },
+  { key: 'altitude',        color: '#198754', unit: 'm',    transform: (v) => v,       digits: 0 },
+  { key: 'watts',           color: '#fd7e14', unit: 'W',    transform: (v) => v,       digits: 0 },
   { key: 'velocity_smooth', color: '#0d6efd', unit: 'km/h', transform: (v) => v * 3.6, digits: 1 },
-  { key: 'cadence', color: '#6f42c1', unit: 'rpm', transform: (v) => v, digits: 0 },
-  { key: 'watts', color: '#fd7e14', unit: 'W', transform: (v) => v, digits: 0 },
-  { key: 'temp', color: '#20c997', unit: '°C', transform: (v) => v, digits: 1 },
-  { key: 'grade_smooth', color: '#6c757d', unit: '%', transform: (v) => v, digits: 1 },
+  { key: 'heartrate',       color: '#dc3545', unit: 'bpm',  transform: (v) => v,       digits: 0 },
+  { key: 'cadence',         color: '#6f42c1', unit: 'rpm',  transform: (v) => v,       digits: 0 },
+  { key: 'temp',            color: '#20c997', unit: '°C',   transform: (v) => v,       digits: 1 },
+  { key: 'grade_smooth',    color: '#6c757d', unit: '%',    transform: (v) => v,       digits: 1 },
 ]
+
+// Independent order for the stream-mean chips in the sticky header — kept
+// stable regardless of how charts are ordered/merged.
+const STREAM_CHIP_ORDER = ['grade_smooth', 'watts', 'velocity_smooth', 'heartrate', 'cadence', 'temp']
 
 const availableCharts = computed(() => {
   if (!streams.value) return []
@@ -181,6 +186,13 @@ const visibleStreams = computed(() => {
     }
   }
   return result
+})
+
+// Stream chips shown in the sticky header — uses STREAM_CHIP_ORDER (independent
+// of chartDefs order) and only includes streams actually present in some chart.
+const chipStreams = computed(() => {
+  const present = new Set(visibleStreams.value)
+  return STREAM_CHIP_ORDER.filter((k) => present.has(k))
 })
 
 function timeFactor() {
@@ -1864,8 +1876,10 @@ async function deletePreset() {
     })
     if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`)
     savedLayouts.value = savedLayouts.value.filter((p) => p.id !== id)
-    selectedLayoutId.value = null
-    if (lastUsedId.value === id) lastUsedId.value = null
+    // Snap back to the default layout (same as choosing "— Aucune —" or
+    // clicking the dedicated reset button). resetLayout also clears the
+    // server-side last_used pointer.
+    resetLayout()
   } catch (e) {
     error.value = e.message
   }
@@ -2455,10 +2469,6 @@ function onLightboxKey(ev) {
             </div>
           </div>
           <div v-if="availableLayout.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
-            <span v-if="rangePointCount() != null" class="range-chip">
-              <i class="fa-solid fa-hashtag" aria-hidden="true"></i>
-              <strong>{{ rangePointCount() }}</strong>
-            </span>
             <span v-if="rangeDuration() != null" class="range-chip">
               <i class="fa-regular fa-clock" aria-hidden="true"></i>
               <strong>{{ formatHMS(rangeDuration()) }}</strong>
@@ -2479,17 +2489,16 @@ function onLightboxKey(ev) {
               <i class="fa-solid fa-percent" aria-hidden="true"></i>
               <strong>{{ rangeGrade().toFixed(1) }} %</strong>
             </span>
-            <template v-for="streamKey in visibleStreams" :key="`mean-${streamKey}`">
-              <span
-                v-if="streamKey !== 'altitude'"
-                class="range-chip range-chip-stream"
-                :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
-              >
-                <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-                <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
-                <strong v-else>–</strong>
-              </span>
-            </template>
+            <span
+              v-for="streamKey in chipStreams"
+              :key="`mean-${streamKey}`"
+              class="range-chip range-chip-stream"
+              :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
+            >
+              <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
+              <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
+              <strong v-else>–</strong>
+            </span>
           </div>
         </div>
         <div class="card-body">

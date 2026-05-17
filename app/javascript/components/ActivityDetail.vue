@@ -1,3 +1,6 @@
+//TODO regrouper toutes les chips avec tooltip pour gagner de la place
+//TODO la durée ne en fonction de la vitesse moyenne ne fonctionne pas
+//TODO trouver un moyen de se déplacer convenablement de haut en bas sans déclencher de zoom
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, useTemplateRef, watch } from 'vue'
 import { t } from '../i18n'

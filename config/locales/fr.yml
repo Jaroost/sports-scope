@@ -25,7 +25,7 @@ fr:
     refreshing: "Rafraîchissement…"
     last_updated: "Mis à jour à"
     activity_summary: "Résumé de l'activité"
-    back_to_dashboard: "← Retour au tableau de bord"
+    back_to_dashboard: "Retour au tableau de bord"
     activity_not_found: "Activité introuvable."
     no_route_data: "Pas de données GPS pour cette activité."
     distance: "Distance"

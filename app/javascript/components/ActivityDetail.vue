@@ -1475,7 +1475,11 @@ function destroyCharts() {
 
 // Shared tooltip builder — used by both Chart.js (`externalTooltipHandler`)
 // and the map mousemove handler so both surfaces show identical content.
-function buildTooltipHtmlForIndex(idx) {
+// `priorityStreams`: stream keys (in display order) that should appear *first*
+// in the tooltip. When the user hovers a specific chart, its own datasets go
+// at the top (and in the order they're laid out on that chart); the rest of
+// the visible streams follow under a separator.
+function buildTooltipHtmlForIndex(idx, priorityStreams = []) {
   if (idx == null) return ''
   const titleLines = buildTooltipTitleLines(idx)
   let html = '<div class="chart-tooltip-title">'
@@ -1484,23 +1488,33 @@ function buildTooltipHtmlForIndex(idx) {
     html += `<div class="${cls}">${escapeHtml(line.text)}</div>`
   }
   html += '</div>'
-  const seen = new Set()
-  for (const streamKey of visibleStreams.value) {
-    if (seen.has(streamKey)) continue
-    seen.add(streamKey)
+
+  const rendered = new Set()
+  const renderRow = (streamKey) => {
+    if (rendered.has(streamKey)) return ''
     const def = defByKey(streamKey)
-    if (!def) continue
+    if (!def) return ''
     const raw = streams.value?.[streamKey]?.data?.[idx]
-    if (raw == null) continue
+    if (raw == null) return ''
     const y = def.transform(raw)
     const digits = def.digits ?? 1
     const value = Number.isNaN(y) ? '–' : y.toFixed(digits)
-    html += `<div class="chart-tooltip-row">
+    rendered.add(streamKey)
+    return `<div class="chart-tooltip-row">
       <span class="chart-tooltip-swatch" style="background:${def.color}"></span>
       <span class="chart-tooltip-name">${escapeHtml(t('strava.stream.' + streamKey))}</span>
       <span class="chart-tooltip-value">${escapeHtml(value)} ${escapeHtml(def.unit || '')}</span>
     </div>`
   }
+
+  let primary = ''
+  for (const k of priorityStreams) primary += renderRow(k)
+  let secondary = ''
+  for (const k of visibleStreams.value) secondary += renderRow(k)
+
+  if (primary) html += `<div class="chart-tooltip-section">${primary}</div>`
+  if (primary && secondary) html += '<div class="chart-tooltip-divider"></div>'
+  if (secondary) html += `<div class="chart-tooltip-section chart-tooltip-section-secondary">${secondary}</div>`
   return html
 }
 
@@ -1576,7 +1590,11 @@ function externalTooltipHandler(context) {
     return
   }
   const idx = xValueToIndex(chartXToRaw(xv))
-  el.innerHTML = buildTooltipHtmlForIndex(idx)
+  // The hovered chart's own streams come first in the tooltip, in the order
+  // they're declared on the group (which is the order Chart.js stacks them).
+  const hoveredGroup = chartLayout.value.find((g) => g.id === groupId)
+  const priority = hoveredGroup?.streams || []
+  el.innerHTML = buildTooltipHtmlForIndex(idx, priority)
   el.classList.remove('chart-tooltip-hidden')
 }
 
@@ -2643,7 +2661,11 @@ function onLightboxKey(ev) {
                           @mousedown.stop
                           :title="isDatasetHidden(group.id, sIdx) ? t('strava.layout.show_curve') : t('strava.layout.hide_curve')"
                         >
-                          <span class="legend-swatch" :style="{ background: defByKey(streamKey)?.color }"></span>
+                          <i
+                            :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'} legend-icon`"
+                            :style="{ color: defByKey(streamKey)?.color }"
+                            aria-hidden="true"
+                          ></i>
                           <span>{{ t('strava.stream.' + streamKey) }}</span>
                         </button>
                       </template>
@@ -2653,7 +2675,11 @@ function onLightboxKey(ev) {
                           :key="streamKey"
                           class="legend-pill legend-pill-static"
                         >
-                          <span class="legend-swatch" :style="{ background: defByKey(streamKey)?.color }"></span>
+                          <i
+                            :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'} legend-icon`"
+                            :style="{ color: defByKey(streamKey)?.color }"
+                            aria-hidden="true"
+                          ></i>
                           <span>{{ t('strava.stream.' + streamKey) }}</span>
                         </span>
                       </template>
@@ -2695,7 +2721,6 @@ function onLightboxKey(ev) {
                       class="stream-stats-row"
                     >
                       <span
-                        v-if="group.streams.length > 1"
                         class="stream-stats-id"
                         :style="{ color: defByKey(streamKey)?.color }"
                         :title="t('strava.stream.' + streamKey)"
@@ -2705,15 +2730,15 @@ function onLightboxKey(ev) {
                       <template v-if="chartStats(defByKey(streamKey))">
                         <span :title="t('strava.range_stats.min')">
                           <i class="fa-solid fa-arrow-down-short-wide" aria-hidden="true"></i>
-                          {{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }}
+                          {{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}
                         </span>
                         <span :title="t('strava.range_stats.mean')">
                           <i class="fa-solid fa-equals" aria-hidden="true"></i>
-                          {{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }}
+                          {{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}
                         </span>
                         <span :title="t('strava.range_stats.max')">
                           <i class="fa-solid fa-arrow-up-wide-short" aria-hidden="true"></i>
-                          {{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }}
+                          {{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}
                         </span>
                       </template>
                     </div>
@@ -2879,15 +2904,13 @@ function onLightboxKey(ev) {
   opacity: 0.45;
   text-decoration: line-through;
 }
-.legend-swatch {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
+.legend-icon {
+  font-size: 0.85rem;
+  line-height: 1;
   flex-shrink: 0;
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
-.legend-pill.hidden .legend-swatch {
-  background: #adb5bd !important;
+.legend-pill.hidden .legend-icon {
+  color: #adb5bd !important;
 }
 .legend-pill-static {
   cursor: default;
@@ -3269,6 +3292,14 @@ function onLightboxKey(ev) {
   margin-left: auto;
   font-weight: 600;
   padding-left: 0.55rem;
+}
+.chart-tooltip-divider {
+  margin: 0.35rem 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.22);
+}
+.chart-tooltip-section-secondary {
+  opacity: 0.78;
+  font-size: 0.95em;
 }
 
 /* Inline variant: lives in the side panel slot, in flow, sized to its column. */

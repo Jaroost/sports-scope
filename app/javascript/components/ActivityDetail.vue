@@ -360,20 +360,6 @@ function fmt(v, digits) {
   return v.toFixed(digits)
 }
 
-// Tooltip text for a stream-mean chip: surfaces min/max of the current
-// selection so the chip stays compact while the details show on hover.
-function streamChipTitle(streamKey) {
-  const def = defByKey(streamKey)
-  if (!def) return ''
-  const s = chartStats(def)
-  if (!s) return t('strava.stream.' + streamKey)
-  const u = def.unit ? ` ${def.unit}` : ''
-  const name = t('strava.stream.' + streamKey)
-  const min = `${t('strava.range_stats.min')}: ${fmt(s.min, def.digits)}${u}`
-  const max = `${t('strava.range_stats.max')}: ${fmt(s.max, def.digits)}${u}`
-  return `${name}\n${min}\n${max}`
-}
-
 function rangeBounds() {
   const refStream = streams.value?.distance?.data || streams.value?.time?.data || streams.value?.latlng?.data
   if (!refStream || refStream.length === 0) return null
@@ -2951,11 +2937,35 @@ function onLightboxKey(ev) {
               :key="`mean-${streamKey}`"
               class="range-chip range-chip-stream"
               :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
-              :title="streamChipTitle(streamKey)"
             >
               <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
               <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
               <strong v-else>–</strong>
+              <span v-if="chartStats(defByKey(streamKey))" class="chip-popover">
+                <div class="chart-tooltip-title">
+                  <div class="chart-tooltip-title-main">
+                    <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
+                    {{ t('strava.stream.' + streamKey) }}
+                  </div>
+                </div>
+                <div class="chart-tooltip-section">
+                  <div class="chart-tooltip-row">
+                    <i class="fa-solid fa-arrow-down-short-wide chart-tooltip-icon" aria-hidden="true"></i>
+                    <span class="chart-tooltip-name">{{ t('strava.range_stats.min') }}</span>
+                    <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  </div>
+                  <div class="chart-tooltip-row">
+                    <i class="fa-solid fa-equals chart-tooltip-icon" aria-hidden="true"></i>
+                    <span class="chart-tooltip-name">{{ t('strava.range_stats.mean') }}</span>
+                    <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  </div>
+                  <div class="chart-tooltip-row">
+                    <i class="fa-solid fa-arrow-up-wide-short chart-tooltip-icon" aria-hidden="true"></i>
+                    <span class="chart-tooltip-name">{{ t('strava.range_stats.max') }}</span>
+                    <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  </div>
+                </div>
+              </span>
             </span>
           </div>
         </div>
@@ -3490,7 +3500,37 @@ function onLightboxKey(ev) {
   line-height: 1.6;
 }
 
+/* Hover popover anchored under each stream-mean chip. Reuses chart-tooltip's
+   children (title/row/name/value) so the look matches the chart hover panel. */
+.chip-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  display: none;
+  background: rgba(33, 37, 41, 0.94);
+  color: #fff;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.5rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.range-chip-stream:hover .chip-popover,
+.range-chip-stream:focus-within .chip-popover {
+  display: block;
+}
+.chart-tooltip-icon {
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
 .range-chip-stream {
+  position: relative;
   font-weight: 500;
 }
 .range-chip-stream strong {

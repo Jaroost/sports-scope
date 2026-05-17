@@ -2835,7 +2835,7 @@ function onLightboxKey(ev) {
                       <span class="visually-hidden">{{ t('strava.stats.col_duration') }}</span>
                     </th>
                     <th :title="t('strava.stats.col_power')">
-                      <i class="fa-solid fa-bolt text-success" aria-hidden="true"></i>
+                      <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
                       <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
                     </th>
                   </tr>

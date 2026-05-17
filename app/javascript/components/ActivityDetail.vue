@@ -2941,6 +2941,7 @@ function onLightboxKey(ev) {
               <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
               <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
               <strong v-else>–</strong>
+              <i v-if="chartStats(defByKey(streamKey))" class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
               <span v-if="chartStats(defByKey(streamKey))" class="chip-popover">
                 <div class="chart-tooltip-title">
                   <div class="chart-tooltip-title-main">
@@ -3532,9 +3533,20 @@ function onLightboxKey(ev) {
 .range-chip-stream {
   position: relative;
   font-weight: 500;
+  cursor: help;
 }
 .range-chip-stream strong {
   color: inherit;
+}
+.chip-info-hint {
+  font-size: 0.65em;
+  opacity: 0.55;
+  margin-left: 0.1rem;
+  transition: opacity 0.15s ease;
+}
+.range-chip-stream:hover .chip-info-hint,
+.range-chip-stream:focus-within .chip-info-hint {
+  opacity: 1;
 }
 
 .photo-gallery {

@@ -58,6 +58,12 @@ const lightboxIndex = ref(null)
 const galleryCollapsed = ref(
   typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.galleryCollapsed') === '1',
 )
+const statsCollapsed = ref(
+  typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.statsCollapsed') === '1',
+)
+const chartsCollapsed = ref(
+  typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.chartsCollapsed') === '1',
+)
 const chartInstances = new Map()
 const wheelHandlers = new Map()
 const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all charts
@@ -435,6 +441,118 @@ function formatKm(meters) {
   if (meters == null || Number.isNaN(meters)) return '–'
   return `${(meters / 1000).toFixed(2)} km`
 }
+
+// Pace m:ss/km used by the splits table when the activity is a run.
+function formatPace(secPerKm) {
+  if (!Number.isFinite(secPerKm) || secPerKm <= 0) return '–'
+  const total = Math.round(secPerKm)
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return `${m}:${String(s).padStart(2, '0')}/km`
+}
+
+// Pace vs speed in the splits table. Runs (and hikes/walks) read more
+// naturally as min/km; everything else (mostly rides) as km/h.
+const isPaceActivity = computed(() => {
+  const ty = (activity.value?.type || '').toLowerCase()
+  return ty.includes('run') || ty.includes('walk') || ty.includes('hike')
+})
+
+// elapsed - moving = time stopped (red lights, refueling, etc.). Both fields
+// are seconds on Strava and on the FIT-imported serializer.
+const movingStats = computed(() => {
+  const elapsed = activity.value?.elapsed_time
+  const moving = activity.value?.moving_time
+  if (!Number.isFinite(elapsed) || !Number.isFinite(moving)) return null
+  const stopped = Math.max(0, elapsed - moving)
+  const stopPct = elapsed > 0 ? (stopped / elapsed) * 100 : 0
+  return { elapsed, moving, stopped, stopPct }
+})
+
+// Global VAM (m/h) over the whole activity. Falls back to elapsed time when
+// moving_time is missing — the resulting number is then slightly pessimistic
+// but still useful as a coarse climbing rate.
+const globalVam = computed(() => {
+  const gain = activity.value?.total_elevation_gain
+  const denomS = movingStats.value?.moving ?? activity.value?.elapsed_time
+  if (!Number.isFinite(gain) || gain <= 0 || !Number.isFinite(denomS) || denomS <= 0) return null
+  return (gain / denomS) * 3600
+})
+
+// Per-km splits from the distance + time streams. The trailing split may be
+// shorter than 1 km — we keep it with its true length so the table shows the
+// real activity end, not a rounded distance.
+const splits = computed(() => {
+  const dist = streams.value?.distance?.data
+  const time = streams.value?.time?.data
+  if (!Array.isArray(dist) || !Array.isArray(time) || dist.length < 2) return []
+  const alt = streams.value?.altitude?.data || []
+  const hr = streams.value?.heartrate?.data || []
+  const len = Math.min(dist.length, time.length)
+  const out = []
+  let segStart = 0
+  let nextKm = 1000
+  for (let i = 1; i < len; i++) {
+    const isLast = i === len - 1
+    if (dist[i] >= nextKm || isLast) {
+      const startD = dist[segStart]
+      const endD = dist[i]
+      const sliceLen = endD - startD
+      if (sliceLen <= 0) { segStart = i; nextKm = Math.ceil(dist[i] / 1000) * 1000 + 1000; continue }
+      const durationSec = Math.max(0, time[i] - time[segStart])
+      let gain = 0
+      let loss = 0
+      for (let j = segStart + 1; j <= i; j++) {
+        const a = alt[j - 1]
+        const b = alt[j]
+        if (typeof a === 'number' && typeof b === 'number') {
+          const d = b - a
+          if (d > 0) gain += d
+          else loss -= d
+        }
+      }
+      let hrSum = 0
+      let hrCount = 0
+      for (let j = segStart; j <= i; j++) {
+        const v = hr[j]
+        if (typeof v === 'number' && Number.isFinite(v)) { hrSum += v; hrCount++ }
+      }
+      out.push({
+        kmIndex: out.length + 1,
+        distance: sliceLen,
+        durationSec,
+        paceSecPerKm: sliceLen > 0 ? (durationSec / (sliceLen / 1000)) : null,
+        speedKmh: durationSec > 0 ? (sliceLen / durationSec) * 3.6 : null,
+        gain,
+        loss,
+        avgHr: hrCount ? hrSum / hrCount : null,
+      })
+      segStart = i
+      nextKm += 1000
+    }
+  }
+  return out
+})
+
+// Per-climb stats enriched with duration + VAM. `detectClimbs` already gives
+// us gain / lengthM / avgGrade / category; we add the actual time spent on
+// each climb by looking at the time stream at start/end indices.
+const climbsWithVam = computed(() => {
+  if (!streams.value) return []
+  const alt = streams.value.altitude?.data
+  const dist = streams.value.distance?.data
+  const time = streams.value.time?.data
+  const grades = streams.value.grade_smooth?.data
+  if (!Array.isArray(alt) || !Array.isArray(dist) || alt.length === 0) return []
+  const climbs = detectClimbs(grades, alt, dist)
+  return climbs.map((c) => {
+    const t0 = Array.isArray(time) ? time[c.startIdx] : null
+    const t1 = Array.isArray(time) ? time[c.endIdx] : null
+    const duration = (t0 != null && t1 != null) ? Math.max(0, t1 - t0) : null
+    const vam = (duration && c.gain > 0) ? (c.gain / duration) * 3600 : null
+    return { ...c, duration, vam }
+  })
+})
 
 async function fetchActivity() {
   try {
@@ -989,6 +1107,20 @@ function togglePhotos() {
   } else if (_maplibregl) {
     installPhotoMarkers(_maplibregl)
   }
+}
+
+function toggleStatsCollapsed() {
+  statsCollapsed.value = !statsCollapsed.value
+  try {
+    localStorage.setItem('sportsScope.statsCollapsed', statsCollapsed.value ? '1' : '0')
+  } catch { /* private mode, etc. */ }
+}
+
+function toggleChartsCollapsed() {
+  chartsCollapsed.value = !chartsCollapsed.value
+  try {
+    localStorage.setItem('sportsScope.chartsCollapsed', chartsCollapsed.value ? '1' : '0')
+  } catch { /* private mode, etc. */ }
 }
 
 function toggleGalleryCollapsed() {
@@ -2193,6 +2325,16 @@ watch(chartLayout, async () => {
   renderCharts()
 }, { deep: true })
 
+// When the user re-shows the charts after collapsing, the canvases were torn
+// down by v-if so the previously-built Chart.js instances no longer have DOM
+// elements to draw into. Re-render once Vue has mounted the new canvases.
+watch(chartsCollapsed, async (collapsed) => {
+  if (collapsed) return
+  if (!streams.value) return
+  await nextTick()
+  renderCharts()
+})
+
 watch(zoomRange, applyZoomToCharts)
 
 watch(selection, () => {
@@ -2466,6 +2608,140 @@ function onLightboxKey(ev) {
         </div>
       </div>
 
+      <div
+        v-if="movingStats || globalVam != null || splits.length > 0 || climbsWithVam.length > 0"
+        class="card shadow-sm border-0 mt-3"
+      >
+        <div class="card-header activity-card-header d-flex align-items-center gap-2">
+          <i class="fa-solid fa-chart-simple text-warning" aria-hidden="true"></i>
+          <h3 class="h6 mb-0">{{ t('strava.stats.title') }}</h3>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary ms-auto"
+            :title="statsCollapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
+            :aria-pressed="statsCollapsed"
+            @click="toggleStatsCollapsed"
+          >
+            <i :class="statsCollapsed ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div v-if="!statsCollapsed" class="card-body">
+          <!-- Top-line stats: temps roulé / arrêts / VAM globale -->
+          <div v-if="movingStats || globalVam != null" class="row g-3 mb-3 stats-pills-row">
+            <div v-if="movingStats" class="col-6 col-md-3">
+              <div class="stat-card">
+                <span class="stat-icon"><i class="fa-solid fa-person-biking text-success" aria-hidden="true"></i></span>
+                <div>
+                  <div class="text-muted small">{{ t('strava.stats.moving') }}</div>
+                  <strong>{{ formatHMS(movingStats.moving) }}</strong>
+                </div>
+              </div>
+            </div>
+            <div v-if="movingStats" class="col-6 col-md-3">
+              <div class="stat-card">
+                <span class="stat-icon"><i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i></span>
+                <div>
+                  <div class="text-muted small">{{ t('strava.stats.elapsed') }}</div>
+                  <strong>{{ formatHMS(movingStats.elapsed) }}</strong>
+                </div>
+              </div>
+            </div>
+            <div v-if="movingStats" class="col-6 col-md-3">
+              <div class="stat-card">
+                <span class="stat-icon"><i class="fa-solid fa-pause text-danger" aria-hidden="true"></i></span>
+                <div>
+                  <div class="text-muted small">
+                    {{ t('strava.stats.stopped') }}
+                    <span v-if="movingStats.elapsed > 0" class="text-muted">· {{ movingStats.stopPct.toFixed(0) }} %</span>
+                  </div>
+                  <strong>{{ formatHMS(movingStats.stopped) }}</strong>
+                </div>
+              </div>
+            </div>
+            <div v-if="globalVam != null" class="col-6 col-md-3">
+              <div class="stat-card" :title="t('strava.stats.vam_hint')">
+                <span class="stat-icon"><i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i></span>
+                <div>
+                  <div class="text-muted small">{{ t('strava.stats.vam_global') }}</div>
+                  <strong>{{ Math.round(globalVam) }} m/h</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Climbs (per-climb VAM) -->
+          <div v-if="climbsWithVam.length > 0" class="stats-section">
+            <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+              <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
+              <span>{{ t('strava.stats.climbs_title') }}</span>
+            </h4>
+            <div class="table-responsive">
+              <table class="table table-sm stats-table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>{{ t('strava.stats.col_length') }}</th>
+                    <th>{{ t('strava.stats.col_gain') }}</th>
+                    <th>{{ t('strava.stats.col_grade') }}</th>
+                    <th>{{ t('strava.stats.col_time') }}</th>
+                    <th>{{ t('strava.stats.col_vam') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(c, i) in climbsWithVam" :key="`climb-${i}`">
+                    <td>
+                      <span class="climb-cat-badge" :class="`climb-cat-${c.category || 'HC'}`">
+                        <span>{{ c.category ? `Cat ${c.category}` : 'HC' }}</span>
+                      </span>
+                    </td>
+                    <td>{{ formatKm(c.lengthM) }}</td>
+                    <td>+{{ Math.round(c.gain) }} m</td>
+                    <td>{{ c.avgGrade.toFixed(1) }} %</td>
+                    <td>{{ c.duration != null ? formatHMS(c.duration) : '–' }}</td>
+                    <td>{{ c.vam != null ? `${Math.round(c.vam)} m/h` : '–' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Splits per km -->
+          <div v-if="splits.length > 0" class="stats-section mt-3">
+            <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+              <i class="fa-solid fa-flag-checkered text-warning" aria-hidden="true"></i>
+              <span>{{ t('strava.stats.splits_title') }}</span>
+            </h4>
+            <div class="table-responsive stats-table-scroll">
+              <table class="table table-sm stats-table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>{{ t('strava.stats.col_km') }}</th>
+                    <th>{{ t('strava.stats.col_time') }}</th>
+                    <th>{{ isPaceActivity ? t('strava.stats.col_pace') : t('strava.stats.col_speed') }}</th>
+                    <th>{{ t('strava.stats.col_gain') }}</th>
+                    <th>{{ t('strava.stats.col_loss') }}</th>
+                    <th>{{ t('strava.stats.col_hr') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="sp in splits" :key="`split-${sp.kmIndex}`">
+                    <td>
+                      <strong>{{ sp.kmIndex }}</strong>
+                      <span v-if="sp.distance < 990" class="text-muted ms-1 small">({{ (sp.distance / 1000).toFixed(2) }} km)</span>
+                    </td>
+                    <td>{{ formatHMS(sp.durationSec) }}</td>
+                    <td>{{ isPaceActivity ? formatPace(sp.paceSecPerKm) : (sp.speedKmh != null ? `${sp.speedKmh.toFixed(1)} km/h` : '–') }}</td>
+                    <td>+{{ Math.round(sp.gain) }} m</td>
+                    <td>−{{ Math.round(sp.loss) }} m</td>
+                    <td>{{ sp.avgHr != null ? `${Math.round(sp.avgHr)} bpm` : '–' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="card shadow-sm border-0 mt-3">
         <div class="card-header activity-card-header charts-sticky-header">
           <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
@@ -2474,7 +2750,9 @@ function onLightboxKey(ev) {
               <span>{{ t('strava.charts') }}</span>
             </h3>
             <div class="d-flex flex-wrap gap-3 align-items-center">
-
+              <!-- Controls only render when the charts card is expanded. The
+                   toggle button below stays visible in both states. -->
+              <template v-if="!chartsCollapsed">
               <!-- GROUPE 1 : Actions ponctuelles (visibles si applicables) -->
               <!-- Placé en premier pour que l'apparition/disparition des
                    boutons ne décale pas les groupes Préférence + Axe X qui
@@ -2565,7 +2843,17 @@ function onLightboxKey(ev) {
                   <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
                 </div>
               </div>
+              </template>
 
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                :title="chartsCollapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
+                :aria-pressed="chartsCollapsed"
+                @click="toggleChartsCollapsed"
+              >
+                <i :class="chartsCollapsed ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" aria-hidden="true"></i>
+              </button>
             </div>
           </div>
           <div v-if="availableLayout.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
@@ -2601,7 +2889,7 @@ function onLightboxKey(ev) {
             </span>
           </div>
         </div>
-        <div class="card-body">
+        <div v-if="!chartsCollapsed" class="card-body">
           <div v-if="streamsLoading" class="text-muted d-flex align-items-center gap-2">
             <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
             <span>{{ t('strava.loading_streams') }}</span>
@@ -3361,6 +3649,44 @@ function onLightboxKey(ev) {
 .climb-cat-3     { color: #ca8a04; }
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
+
+/* Inline category badge used in the Stats card's climbs table. Reuses the
+   .climb-cat-* color classes above (which set `color`); the badge's outer
+   span paints its background from currentColor and the inner span forces
+   the foreground white for legibility. */
+.climb-cat-badge {
+  display: inline-flex;
+  align-items: center;
+  background: currentColor;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+}
+.climb-cat-badge > span {
+  color: #fff;
+}
+
+/* Stats card sections + tables. */
+.stats-section + .stats-section { border-top: 1px dashed rgba(0, 0, 0, 0.08); padding-top: 0.75rem; }
+.stats-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6c757d;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.stats-table td {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.85rem;
+}
+.stats-table-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+}
 
 /* Hover cursor that follows the route on the map */
 .route-cursor {

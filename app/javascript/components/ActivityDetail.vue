@@ -33,7 +33,9 @@ const streams = ref(null)
 const streamsLoading = ref(false)
 const streamsError = ref(null)
 const xAxis = ref('distance')
-const timeUnit = ref('min')
+// X axis time scale: always minutes. Ticks are rendered as hh:mm:ss by a
+// callback on the chart's x scale, so the internal unit only drives zoom
+// granularity — no need to expose it as a user choice.
 const selection = ref(null) // { startIdx, endIdx } | null — immediate (drives map markers + chart band)
 const selectionDisplay = ref(null) // debounced copy used for stats display
 const mapEl = useTemplateRef('mapEl')
@@ -216,15 +218,10 @@ const chipStreams = computed(() => {
   return STREAM_CHIP_ORDER.filter((k) => present.has(k))
 })
 
+// Seconds per X-axis time unit. Kept as a function (not a const) so existing
+// call sites keep working unchanged.
 function timeFactor() {
-  return timeUnit.value === 'h' ? 3600 : timeUnit.value === 'min' ? 60 : 1
-}
-
-function autoTimeUnit(elapsed) {
-  if (!elapsed) return 'min'
-  if (elapsed <= 120) return 's'
-  if (elapsed <= 7200) return 'min'
-  return 'h'
+  return 60
 }
 
 function formatDuration(seconds) {
@@ -452,7 +449,6 @@ async function fetchActivity() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     activity.value = payload.activity
-    timeUnit.value = autoTimeUnit(activity.value?.elapsed_time)
   } catch (e) {
     error.value = e.message
   } finally {
@@ -1299,7 +1295,7 @@ function chartXToRaw(x) {
 
 function xAxisLabel() {
   if (xAxis.value === 'distance') return t('strava.distance_km')
-  return t('strava.time_label_' + timeUnit.value)
+  return t('strava.time_label_min')
 }
 
 async function renderCharts() {
@@ -1394,7 +1390,16 @@ async function renderCharts() {
           x: {
             type: 'linear',
             title: { display: true, text: xAxisLabel() },
-            ticks: { maxTicksLimit: 8 },
+            ticks: xAxis.value === 'time'
+              // Time axis: 10-minute step, hh:mm:ss labels. maxTicksLimit
+              // bumped so a long ride still gets ticks every 10 minutes
+              // rather than being thinned to ~20 min.
+              ? {
+                  stepSize: 10,
+                  maxTicksLimit: 30,
+                  callback: ((tf) => (val) => formatHMS(val * tf))(timeFactor()),
+                }
+              : { maxTicksLimit: 8 },
             min: zoomRange.value?.xMin,
             max: zoomRange.value?.xMax,
           },
@@ -2177,7 +2182,7 @@ function applyZoomStep(chart, px, deltaY) {
   setZoom(newMin, newMax)
 }
 
-watch([xAxis, timeUnit], () => {
+watch(xAxis, () => {
   zoomRange.value = null
   if (streams.value) renderCharts()
 })
@@ -2558,14 +2563,6 @@ function onLightboxKey(ev) {
                   <label class="btn btn-outline-secondary" for="xAxis-distance">{{ t('strava.x_distance') }}</label>
                   <input type="radio" class="btn-check" name="xAxis" id="xAxis-time" autocomplete="off" value="time" v-model="xAxis" :disabled="!streams || !streams.time" />
                   <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
-                </div>
-                <div v-if="xAxis === 'time'" class="btn-group btn-group-sm" role="group">
-                  <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-s" autocomplete="off" value="s" v-model="timeUnit" />
-                  <label class="btn btn-outline-secondary" for="timeUnit-s">{{ t('strava.unit_s') }}</label>
-                  <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-min" autocomplete="off" value="min" v-model="timeUnit" />
-                  <label class="btn btn-outline-secondary" for="timeUnit-min">{{ t('strava.unit_min') }}</label>
-                  <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-h" autocomplete="off" value="h" v-model="timeUnit" />
-                  <label class="btn btn-outline-secondary" for="timeUnit-h">{{ t('strava.unit_h') }}</label>
                 </div>
               </div>
 

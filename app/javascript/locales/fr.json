@@ -187,6 +187,12 @@
       "selection": "Sélection",
       "reset_zoom": "Réinitialiser zoom",
       "zoom_to_selection": "Zoomer sur sélection"
+    },
+    "common": {
+      "days_ago_today": "aujourd'hui",
+      "days_ago_yesterday": "hier",
+      "days_ago_other": "il y a %{count} j",
+      "days_in_future": "dans %{count} j"
     }
   }
 }

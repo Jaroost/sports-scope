@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { t } from '../i18n'
+import { formatDaysAgo } from '../timeAgo'
 
 const props = defineProps({
   endpoint: { type: String, default: '/strava/activities' },
@@ -128,6 +129,7 @@ function activityIcon(type) {
                   <i class="fa-solid fa-tag me-1" aria-hidden="true"></i>{{ activity.type }}
                   <span class="mx-1">·</span>
                   <i class="fa-regular fa-calendar me-1" aria-hidden="true"></i>{{ new Date(activity.start_date_local).toLocaleDateString() }}
+                  <span v-if="formatDaysAgo(activity.start_date_local)" class="days-ago-badge ms-1">{{ formatDaysAgo(activity.start_date_local) }}</span>
                 </small>
               </div>
             </div>

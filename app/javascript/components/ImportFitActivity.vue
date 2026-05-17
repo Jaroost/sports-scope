@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { t } from '../i18n'
+import { formatDaysAgo } from '../timeAgo'
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
@@ -313,6 +314,7 @@ onMounted(() => fetchList())
               <span class="ms-2"><i class="fa-solid fa-clock me-1"></i>{{ formatDuration(a.moving_time) }}</span>
               <span v-if="a.total_elevation_gain != null" class="ms-2"><i class="fa-solid fa-arrow-trend-up text-success me-1"></i>{{ Math.round(a.total_elevation_gain) }} m</span>
               <span class="ms-2 text-muted">· {{ formatDate(a.start_date) }}</span>
+              <span v-if="formatDaysAgo(a.start_date)" class="days-ago-badge ms-1">{{ formatDaysAgo(a.start_date) }}</span>
             </small>
           </a>
           <button type="button" class="btn btn-sm btn-outline-danger" :title="t('fit.delete')" @click="removeActivity(a)">

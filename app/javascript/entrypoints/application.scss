@@ -121,3 +121,22 @@ body {
   margin-right: 0.3rem;
   color: #6c757d;
 }
+
+// Pill rendered next to an activity date on the dashboard — quick "how long
+// ago" glance ("today" / "yesterday" / "3d ago"). Shared between the Strava
+// list and the FIT-imported list.
+.days-ago-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: rgba(13, 110, 253, 0.08);
+  color: #0d6efd;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+}
+

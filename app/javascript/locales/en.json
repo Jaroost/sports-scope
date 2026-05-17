@@ -153,6 +153,8 @@
       "elevation_profile": "Elevation profile",
       "no_elevation_yet": "Click on the map to add at least 2 points and generate the profile.",
       "altitude": "Elevation",
+      "grade": "Grade",
+      "grade_legend": "Grade legend",
       "x_km": "Distance (km)",
       "y_m": "Elevation (m)",
       "error_name_required": "Give your route a name before saving.",

@@ -93,10 +93,11 @@ const SURFACE_BUCKETS = [
 
 const hasGeometry = computed(() => geometry.value.length >= 2)
 
-// Average gradient over the whole route: D+ / distance, expressed in %.
+// Net average gradient over the route: (D+ − D−) / distance, in %. Signed,
+// so a route that ends below its start (net descent) reads negative.
 const avgGradePct = computed(() => {
   if (!distanceM.value) return '0.0'
-  return ((elevGainM.value / distanceM.value) * 100).toFixed(1)
+  return (((elevGainM.value - elevLossM.value) / distanceM.value) * 100).toFixed(1)
 })
 
 // Average riding speed in km/h, persisted in localStorage. Used to compute
@@ -161,7 +162,7 @@ const chartStats = computed(() => {
         distance: dist,
         gain: up,
         loss: down,
-        avgGrade: dist > 0 ? (up / dist) * 100 : 0,
+        avgGrade: dist > 0 ? ((up - down) / dist) * 100 : 0,
         isSelection: true,
       }
     }
@@ -171,7 +172,7 @@ const chartStats = computed(() => {
     distance: d,
     gain: elevGainM.value,
     loss: elevLossM.value,
-    avgGrade: d > 0 ? (elevGainM.value / d) * 100 : 0,
+    avgGrade: d > 0 ? ((elevGainM.value - elevLossM.value) / d) * 100 : 0,
     isSelection: false,
   }
 })
@@ -1261,11 +1262,99 @@ function recomputeGain() {
 }
 
 // ─── Elevation chart ─────────────────────────────────────────────────────────
+// Per-segment bucket color + per-segment grade (parallel to geometry segments).
+// Same GRADE_BUCKETS palette as the map line — read by gradeFillPlugin (fill),
+// the dataset's segment.borderColor (line stroke), and the tooltip callback.
+let segmentColors = []
+let segmentGrades = []
+
+function colorForGrade(g) {
+  for (let i = 0; i < GRADE_BUCKETS.length; i++) {
+    if (g < GRADE_BUCKETS[i].max) return GRADE_BUCKETS[i].color
+  }
+  return GRADE_BUCKETS[GRADE_BUCKETS.length - 1].color
+}
+
+function recomputeSegmentColors() {
+  const g = geometry.value
+  const cols = []
+  const grades = []
+  for (let i = 1; i < g.length; i++) {
+    const a = g[i - 1]
+    const b = g[i]
+    const ea = a[2]
+    const eb = b[2]
+    if (ea == null || eb == null) { cols.push('#9ca3af'); grades.push(null); continue }
+    const d = haversine(a, b)
+    const grade = d > 0 ? ((eb - ea) / d) * 100 : 0
+    grades.push(grade)
+    cols.push(colorForGrade(grade))
+  }
+  segmentColors = cols
+  segmentGrades = grades
+}
+
+// Bucket ranges → { color, label } for the chart legend below the canvas.
+// Lower bound is the previous bucket's `max` (the bucket-as-half-open-interval
+// model we use everywhere else); first/last edges become "< x%" / "> x%".
+const gradeLegend = computed(() => {
+  const out = []
+  for (let i = 0; i < GRADE_BUCKETS.length; i++) {
+    const upper = GRADE_BUCKETS[i].max
+    const lower = i === 0 ? -Infinity : GRADE_BUCKETS[i - 1].max
+    let label
+    if (!Number.isFinite(lower)) label = `< ${upper}%`
+    else if (!Number.isFinite(upper)) label = `> ${lower}%`
+    else label = `${lower} → ${upper}%`
+    out.push({ color: GRADE_BUCKETS[i].color, label })
+  }
+  return out
+})
+
+// Paints a colored trapezoid below each line segment, bucketed by gradient.
+// Runs before the dataset so the line itself sits on top of the fill.
+const gradeFillPlugin = {
+  id: 'routeGradeFill',
+  beforeDatasetsDraw(chart) {
+    if (!segmentColors.length) return
+    const ds = chart.data.datasets[0]?.data
+    if (!ds || ds.length < 2) return
+    const { ctx, chartArea } = chart
+    const xScale = chart.scales.x
+    const yScale = chart.scales.y
+    const baseY = chartArea.bottom
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+    ctx.clip()
+    for (let i = 1; i < ds.length; i++) {
+      const c = segmentColors[i - 1]
+      if (!c) continue
+      const x0 = xScale.getPixelForValue(ds[i - 1].x)
+      const x1 = xScale.getPixelForValue(ds[i].x)
+      // Skip segments fully outside the visible x range (zoomed-in case).
+      if (x1 < chartArea.left || x0 > chartArea.right) continue
+      const y0 = yScale.getPixelForValue(ds[i - 1].y)
+      const y1 = yScale.getPixelForValue(ds[i].y)
+      ctx.fillStyle = c + '66' // ~40% alpha — readable but lets grid show through
+      ctx.beginPath()
+      ctx.moveTo(x0, baseY)
+      ctx.lineTo(x0, y0)
+      ctx.lineTo(x1, y1)
+      ctx.lineTo(x1, baseY)
+      ctx.closePath()
+      ctx.fill()
+    }
+    ctx.restore()
+  },
+}
+
 async function renderElevationChart() {
   if (!chartEl.value || !hasGeometry.value) return
   const { Chart, registerables } = await import('chart.js')
   Chart.register(...registerables)
   destroyChart()
+  recomputeSegmentColors()
   let cumDist = 0
   const points = [{ x: 0, y: geometry.value[0][2] ?? 0 }]
   cumDistKm = [0]
@@ -1281,9 +1370,15 @@ async function renderElevationChart() {
       datasets: [{
         label: t('routes.altitude'),
         data: points,
+        // Per-segment color via Chart.js's segment scriptable — bucketed by
+        // gradient so the line itself matches the colored fill beneath it.
+        // The dataset-level borderColor is just a fallback before segment
+        // fires (and for the legend swatch, which we hide).
         borderColor: '#198754',
-        backgroundColor: '#19875433',
-        fill: true,
+        segment: {
+          borderColor: (ctx) => segmentColors[ctx.p0DataIndex] || '#198754',
+        },
+        fill: false,
         tension: 0.2,
         pointRadius: 0,
         borderWidth: 1.5,
@@ -1299,9 +1394,37 @@ async function renderElevationChart() {
         x: { type: 'linear', title: { display: true, text: t('routes.x_km') }, ticks: { maxTicksLimit: 8 } },
         y: { title: { display: true, text: t('routes.y_m') }, ticks: { maxTicksLimit: 6 } },
       },
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: (items) => {
+              if (!items.length) return ''
+              return `${items[0].parsed.x.toFixed(2)} km`
+            },
+            label: (item) => {
+              const alt = Math.round(item.parsed.y)
+              // Prefer the segment starting at this index (looking forward);
+              // fall back to the segment ending here for the last point.
+              const i = item.dataIndex
+              const grade = segmentGrades[i] != null
+                ? segmentGrades[i]
+                : segmentGrades[Math.max(0, i - 1)]
+              const out = [`${t('routes.altitude')}: ${alt} m`]
+              if (grade != null) {
+                const sign = grade > 0 ? '+' : ''
+                out.push(`${t('routes.grade')}: ${sign}${grade.toFixed(1)}%`)
+              }
+              return out
+            },
+          },
+        },
+      },
     },
-    plugins: [selectionRectPlugin, waypointDotsPlugin],
+    // gradeFillPlugin must come before selectionRectPlugin so the selection
+    // rectangle (also drawn in beforeDatasetsDraw) sits on top of the colored
+    // fill.
+    plugins: [gradeFillPlugin, selectionRectPlugin, waypointDotsPlugin],
   })
   attachChartSelectionOnce(chartEl.value)
 }
@@ -2030,9 +2153,21 @@ onBeforeUnmount(() => {
           <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
           <span>{{ t('routes.no_elevation_yet') }}</span>
         </div>
-        <div v-else class="elevation-canvas-wrap">
-          <canvas ref="chartEl"></canvas>
-        </div>
+        <template v-else>
+          <div class="grade-legend mb-2" :aria-label="t('routes.grade_legend')">
+            <span
+              v-for="b in gradeLegend"
+              :key="b.label"
+              class="grade-legend-item"
+            >
+              <span class="grade-legend-swatch" :style="{ backgroundColor: b.color }"></span>
+              <span class="grade-legend-label">{{ b.label }}</span>
+            </span>
+          </div>
+          <div class="elevation-canvas-wrap">
+            <canvas ref="chartEl"></canvas>
+          </div>
+        </template>
       </div>
     </div>
   </div>
@@ -2214,6 +2349,30 @@ onBeforeUnmount(() => {
 }
 .elevation-canvas-wrap canvas {
   cursor: crosshair;
+}
+
+.grade-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  color: #4b5563;
+}
+.grade-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
+}
+.grade-legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+.grade-legend-label {
+  font-variant-numeric: tabular-nums;
 }
 </style>
 

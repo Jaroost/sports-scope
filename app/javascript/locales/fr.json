@@ -57,7 +57,7 @@
       "unit_s": "s",
       "unit_min": "min",
       "unit_h": "h",
-      "clear_selection": "Effacer",
+      "clear_selection": "Effacer la sélection",
       "reset_zoom": "Réinitialiser le zoom",
       "zoom_to_selection": "Zoomer sur la sélection",
       "selection": "Sélection",

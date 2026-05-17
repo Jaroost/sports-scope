@@ -2470,7 +2470,44 @@ function onLightboxKey(ev) {
             </h3>
             <div class="d-flex flex-wrap gap-3 align-items-center">
 
-              <!-- GROUPE 1 : Préférence (preset nommé) -->
+              <!-- GROUPE 1 : Actions ponctuelles (visibles si applicables) -->
+              <!-- Placé en premier pour que l'apparition/disparition des
+                   boutons ne décale pas les groupes Préférence + Axe X qui
+                   sont ancrés à droite. -->
+              <div class="control-group" v-if="selection || zoomRange">
+                <button
+                  v-if="selection"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
+                  @click="zoomToSelection"
+                  :title="t('strava.zoom_to_selection')"
+                >
+                  <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
+                  <span>{{ t('strava.zoom_to_selection') }}</span>
+                </button>
+                <button
+                  v-if="selection"
+                  type="button"
+                  class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
+                  @click="clearSelection"
+                  :title="t('strava.clear_selection')"
+                >
+                  <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                  <span>{{ t('strava.clear_selection') }}</span>
+                </button>
+                <button
+                  v-if="zoomRange"
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                  @click="resetZoom"
+                  :title="t('strava.reset_zoom')"
+                >
+                  <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
+                  <span>{{ t('strava.reset_zoom') }}</span>
+                </button>
+              </div>
+
+              <!-- GROUPE 2 : Préférence (preset nommé) -->
               <div class="control-group" :title="t('strava.layout.title')">
                 <span class="control-group-label">{{ t('strava.layout.preset_label') }}</span>
                 <select
@@ -2513,7 +2550,7 @@ function onLightboxKey(ev) {
                 </div>
               </div>
 
-              <!-- GROUPE 2 : Axe X (toujours visible) -->
+              <!-- GROUPE 3 : Axe X (toujours visible) -->
               <div class="control-group" v-if="availableLayout.length > 0">
                 <span class="control-group-label">{{ t('strava.x_axis_label') }}</span>
                 <div class="btn-group btn-group-sm" role="group">
@@ -2530,40 +2567,6 @@ function onLightboxKey(ev) {
                   <input type="radio" class="btn-check" name="timeUnit" id="timeUnit-h" autocomplete="off" value="h" v-model="timeUnit" />
                   <label class="btn btn-outline-secondary" for="timeUnit-h">{{ t('strava.unit_h') }}</label>
                 </div>
-              </div>
-
-              <!-- GROUPE 3 : Actions ponctuelles (visibles si applicables) -->
-              <div class="control-group" v-if="selection || zoomRange">
-                <button
-                  v-if="selection"
-                  type="button"
-                  class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
-                  @click="zoomToSelection"
-                  :title="t('strava.zoom_to_selection')"
-                >
-                  <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
-                  <span>{{ t('strava.zoom_to_selection') }}</span>
-                </button>
-                <button
-                  v-if="selection"
-                  type="button"
-                  class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
-                  @click="clearSelection"
-                  :title="t('strava.clear_selection')"
-                >
-                  <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-                  <span>{{ t('strava.clear_selection') }}</span>
-                </button>
-                <button
-                  v-if="zoomRange"
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-                  @click="resetZoom"
-                  :title="t('strava.reset_zoom')"
-                >
-                  <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
-                  <span>{{ t('strava.reset_zoom') }}</span>
-                </button>
               </div>
 
             </div>

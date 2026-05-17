@@ -342,7 +342,17 @@ function chartStats(def) {
     if (v > mx) mx = v
   }
   if (count === 0) return null
-  return { count, mean: sum / count, min: mn, max: mx }
+  let mean = sum / count
+  // grade_smooth: the per-sample arithmetic mean weights each sample equally
+  // regardless of distance, so it disagrees with the climb-marker grade for
+  // the same segment. Override with rangeGrade()'s net-rise / horizontal-
+  // distance reading. Min/max stay per-sample — those describe the steepest
+  // local sections, which is what users expect from a min/max stat.
+  if (def.key === 'grade_smooth') {
+    const rg = rangeGrade()
+    if (rg != null) mean = rg
+  }
+  return { count, mean, min: mn, max: mx }
 }
 
 function fmt(v, digits) {
@@ -400,22 +410,13 @@ function rangePointCount() {
 }
 
 function rangeGrade() {
+  // Net rise / horizontal distance — matches the conventional climb grade
+  // that the map's col markers display via detectClimbs (gain / lengthM).
+  // The sample-mean of grade_smooth is intentionally NOT used here: it
+  // over-weights short steep spikes and varies with sample density, so it
+  // diverged from the col reading for the same segment.
   const b = rangeBounds()
   if (!b) return null
-  const grade = streams.value?.grade_smooth?.data
-  if (grade && grade.length > 0) {
-    let sum = 0
-    let count = 0
-    const end = Math.min(b.endIdx, grade.length - 1)
-    for (let i = b.startIdx; i <= end; i++) {
-      const v = grade[i]
-      if (v == null || Number.isNaN(v)) continue
-      sum += v
-      count++
-    }
-    if (count === 0) return null
-    return sum / count
-  }
   const alt = streams.value?.altitude?.data
   const dist = streams.value?.distance?.data
   if (!alt || !dist || alt.length === 0 || dist.length === 0) return null

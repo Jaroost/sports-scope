@@ -1350,9 +1350,16 @@ const gradeFillPlugin = {
 }
 
 async function renderElevationChart() {
-  if (!chartEl.value || !hasGeometry.value) return
+  if (!hasGeometry.value) return
   const { Chart, registerables } = await import('chart.js')
   Chart.register(...registerables)
+  // The canvas lives in the v-else branch of the chart card body. On the
+  // very first recompute after arriving with a pending route (e.g.
+  // ?fromGpx=1 from RoutesList / ActivityDetail), Vue hasn't flushed the
+  // hasGeometry: false→true DOM update yet, so chartEl is still null.
+  // Waiting one tick lets the canvas mount before we bind to it.
+  if (!chartEl.value) await nextTick()
+  if (!chartEl.value) return
   destroyChart()
   recomputeSegmentColors()
   let cumDist = 0

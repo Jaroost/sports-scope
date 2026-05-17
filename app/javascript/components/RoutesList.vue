@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
 import { t } from '../i18n'
 
 const routes = ref([])
@@ -13,6 +13,22 @@ const importingGpx = ref(false)
 // Cap waypoints handed to the builder. The controller enforces MAX_WAYPOINTS=50;
 // 25 leaves the user headroom to drag-insert more once the route is loaded.
 const GPX_IMPORT_MAX_WAYPOINTS = 25
+
+// Average riding speed in km/h — shared with the RouteBuilder via the same
+// localStorage key, so editing it in either place keeps both in sync.
+const SPEED_KEY = 'sportsScope.routeBuilderAvgSpeed'
+function loadSpeed() {
+  try {
+    const raw = localStorage.getItem(SPEED_KEY)
+    const v = raw != null ? parseFloat(raw) : NaN
+    return Number.isFinite(v) && v >= 3 && v <= 80 ? v : 18
+  } catch { return 18 }
+}
+const avgSpeedKmh = ref(loadSpeed())
+watch(avgSpeedKmh, (v) => {
+  if (!Number.isFinite(v) || v < 3 || v > 80) return
+  try { localStorage.setItem(SPEED_KEY, String(v)) } catch { /* ignore */ }
+})
 
 // Inline rename state
 const editingId = ref(null)
@@ -221,6 +237,25 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString()
 }
 
+// Same Naismith-style formula as the builder: flat term (distance / speed) +
+// climbing term (~400 m climb ≈ 1 hour). Returns 0 when we have no distance.
+function estimatedSecondsFor(r) {
+  const d = r?.distance_m
+  const v = avgSpeedKmh.value
+  if (!d || !Number.isFinite(v) || v <= 0) return 0
+  const flatHours = (d / 1000) / v
+  const climbHours = (r.elevation_gain_m || 0) / 400
+  return Math.round((flatHours + climbHours) * 3600)
+}
+
+function formatDuration(totalSec) {
+  if (!totalSec || totalSec < 0) return '–'
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.round((totalSec - h * 3600) / 60)
+  if (h === 0) return `${m} min`
+  return `${h} h ${String(m).padStart(2, '0')}`
+}
+
 onMounted(() => fetchRoutes())
 </script>
 
@@ -257,111 +292,160 @@ onMounted(() => fetchRoutes())
       />
     </div>
 
-    <div v-if="loading" class="text-muted d-flex align-items-center gap-2">
-      <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
-      <span>Loading…</span>
-    </div>
-    <div v-else-if="error" class="alert alert-danger d-flex align-items-center gap-2">
-      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-      <span class="flex-grow-1">{{ error }}</span>
-      <button type="button" class="btn-close" @click="error = null" aria-label="dismiss"></button>
-    </div>
-    <div v-else-if="routes.length === 0" class="card shadow-sm border-0">
-      <div class="card-body text-muted d-flex align-items-center gap-2">
-        <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
-        <span>{{ t('routes.empty') }}</span>
+    <div class="card shadow-sm border-0">
+      <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
+        <h2 class="h5 mb-0 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
+          <span>{{ t('routes.list_title') }}</span>
+        </h2>
+        <span v-if="!loading && !error" class="badge bg-light text-muted ms-1">{{ routes.length }}</span>
+        <label class="ms-auto d-inline-flex align-items-center gap-1 text-muted mb-0 small">
+          <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
+          <input
+            v-model.number="avgSpeedKmh"
+            type="number"
+            min="3"
+            max="80"
+            step="1"
+            class="form-control form-control-sm speed-input"
+            :title="t('routes.avg_speed_hint')"
+            :aria-label="t('routes.avg_speed_hint')"
+          />
+          <span>km/h</span>
+        </label>
+      </div>
+      <div class="card-body">
+        <div v-if="loading" class="text-muted d-flex align-items-center gap-2">
+          <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+          <span>Loading…</span>
+        </div>
+        <div v-else-if="error" class="alert alert-danger mb-0 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          <span class="flex-grow-1">{{ error }}</span>
+          <button type="button" class="btn-close" @click="error = null" aria-label="dismiss"></button>
+        </div>
+        <div v-else-if="routes.length === 0" class="text-muted d-flex align-items-center gap-2">
+          <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
+          <span>{{ t('routes.empty') }}</span>
+        </div>
+        <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1">
+          <li v-for="r in routes" :key="r.id">
+            <div v-if="editingId === r.id" class="activity-row d-flex align-items-center gap-2">
+              <input
+                :ref="(el) => setInputRef(r.id, el)"
+                v-model="editingName"
+                type="text"
+                class="form-control form-control-sm flex-grow-1"
+                :maxlength="80"
+                :disabled="savingId === r.id"
+                @keydown.enter.prevent="saveName(r)"
+                @keydown.escape.prevent="cancelEdit"
+              />
+              <button
+                type="button"
+                class="btn btn-sm btn-success"
+                :title="t('routes.save_name')"
+                :disabled="savingId === r.id || !editingName.trim()"
+                @click="saveName(r)"
+              >
+                <span v-if="savingId === r.id" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                <i v-else class="fa-solid fa-check" aria-hidden="true"></i>
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                :title="t('routes.cancel')"
+                :disabled="savingId === r.id"
+                @click="cancelEdit"
+              >
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div v-else class="activity-row d-flex align-items-center gap-3">
+              <a
+                :href="`${localePrefix}/routes/${r.id}/edit`"
+                class="flex-grow-1 d-flex align-items-center gap-3 text-decoration-none text-reset min-width-0"
+              >
+                <span class="activity-type-badge">
+                  <i class="fa-solid fa-route" aria-hidden="true"></i>
+                </span>
+                <div class="min-width-0 flex-grow-1">
+                  <div class="fw-semibold text-truncate">{{ r.name }}</div>
+                  <small class="text-muted d-flex flex-wrap align-items-center gap-x-3 gap-y-1">
+                    <span class="d-inline-flex align-items-center gap-1">
+                      <i class="fa-solid fa-route text-warning" aria-hidden="true"></i>{{ formatKm(r.distance_m) }}
+                    </span>
+                    <span v-if="r.elevation_gain_m != null" class="d-inline-flex align-items-center gap-1">
+                      <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>+{{ Math.round(r.elevation_gain_m) }} m
+                    </span>
+                    <span
+                      v-if="estimatedSecondsFor(r) > 0"
+                      class="d-inline-flex align-items-center gap-1"
+                      :title="t('routes.estimated_time_hint')"
+                    >
+                      <i class="fa-regular fa-clock" aria-hidden="true"></i>{{ formatDuration(estimatedSecondsFor(r)) }}
+                    </span>
+                    <span class="d-inline-flex align-items-center gap-1">
+                      <i class="fa-regular fa-calendar" aria-hidden="true"></i>{{ formatDate(r.updated_at) }}
+                    </span>
+                  </small>
+                </div>
+              </a>
+              <div class="d-flex align-items-center gap-1 route-row-actions">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :title="t('routes.rename')"
+                  @click="startEdit(r)"
+                >
+                  <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :title="t('routes.duplicate')"
+                  @click="duplicateRoute(r)"
+                >
+                  <i class="fa-solid fa-copy" aria-hidden="true"></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-danger"
+                  :title="t('routes.delete')"
+                  @click="removeRoute(r)"
+                >
+                  <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+          </li>
+        </ul>
       </div>
     </div>
-    <ul v-else class="list-group shadow-sm">
-      <li
-        v-for="r in routes"
-        :key="r.id"
-        class="list-group-item d-flex align-items-center gap-2"
-      >
-        <template v-if="editingId === r.id">
-          <input
-            :ref="(el) => setInputRef(r.id, el)"
-            v-model="editingName"
-            type="text"
-            class="form-control form-control-sm flex-grow-1"
-            :maxlength="80"
-            :disabled="savingId === r.id"
-            @keydown.enter.prevent="saveName(r)"
-            @keydown.escape.prevent="cancelEdit"
-          />
-          <button
-            type="button"
-            class="btn btn-sm btn-success"
-            :title="t('routes.save_name')"
-            :disabled="savingId === r.id || !editingName.trim()"
-            @click="saveName(r)"
-          >
-            <span v-if="savingId === r.id" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-            <i v-else class="fa-solid fa-check" aria-hidden="true"></i>
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-secondary"
-            :title="t('routes.cancel')"
-            :disabled="savingId === r.id"
-            @click="cancelEdit"
-          >
-            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-          </button>
-        </template>
-        <template v-else>
-          <a
-            :href="`${localePrefix}/routes/${r.id}/edit`"
-            class="flex-grow-1 text-decoration-none text-reset d-flex flex-column min-width-0"
-          >
-            <strong class="text-truncate">{{ r.name }}</strong>
-            <small class="text-muted">
-              <i class="fa-solid fa-route me-1" aria-hidden="true"></i>{{ formatKm(r.distance_m) }}
-              <span v-if="r.elevation_gain_m != null" class="ms-2">
-                <i class="fa-solid fa-arrow-trend-up text-success me-1" aria-hidden="true"></i>{{ Math.round(r.elevation_gain_m) }} m
-              </span>
-              <span class="ms-2 text-muted">· {{ formatDate(r.updated_at) }}</span>
-            </small>
-          </a>
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-secondary"
-            :title="t('routes.rename')"
-            @click="startEdit(r)"
-          >
-            <i class="fa-solid fa-pen" aria-hidden="true"></i>
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-secondary"
-            :title="t('routes.duplicate')"
-            @click="duplicateRoute(r)"
-          >
-            <i class="fa-solid fa-copy" aria-hidden="true"></i>
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-danger"
-            :title="t('routes.delete')"
-            @click="removeRoute(r)"
-          >
-            <i class="fa-solid fa-trash" aria-hidden="true"></i>
-          </button>
-          <a
-            :href="`${localePrefix}/routes/${r.id}/edit`"
-            class="text-muted ms-1"
-            :aria-label="r.name"
-          >
-            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-          </a>
-        </template>
-      </li>
-    </ul>
   </div>
 </template>
 
 <style scoped>
 .min-width-0 {
   min-width: 0;
+}
+
+/* Tighter horizontal/vertical gaps for the meta line under each route name —
+   bootstrap doesn't ship gap-x/gap-y utilities for inline gaps. */
+.gap-x-3 { column-gap: 0.75rem; }
+.gap-y-1 { row-gap: 0.25rem; }
+
+/* Compact km/h input — same shape as the one in the route builder's stats. */
+.speed-input {
+  width: 3.5rem;
+  text-align: right;
+  padding: 0.1rem 0.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Action button cluster stays at fixed size; only the row's anchor area
+   gets the translateX hover bump from .activity-row in application.scss. */
+.route-row-actions {
+  flex-shrink: 0;
 }
 </style>

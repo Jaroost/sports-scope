@@ -7,6 +7,13 @@ const props = defineProps({
   source: { type: String, default: 'strava' }, // 'strava' or 'imported'
 })
 
+const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
+const localePrefix = lang ? `/${lang}` : ''
+// Hand-off cap to the route builder: same as the GPX import path. The routes
+// controller enforces MAX_WAYPOINTS=50; 25 leaves the user headroom to insert
+// more once the route is loaded.
+const ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS = 25
+
 // Build endpoint URLs from the source — Strava activities go to /strava/...,
 // FIT-imported activities to /api/imported_activities/...
 const activityUrl = computed(() => props.source === 'imported'
@@ -1253,6 +1260,33 @@ function downsample(arr, maxPoints) {
   return out
 }
 
+// "Create route from this activity" — same handoff as the GPX import in
+// RoutesList.vue. Sample the activity's coords down to a manageable set of
+// waypoints (BRouter will road-snap + add elevation on the builder side),
+// stash them under the shared sessionStorage key, then redirect.
+function createRouteFromActivity() {
+  const coords = routeCoords.value
+  if (!coords.length) return
+  // Prompt for a name (pre-filled with the activity's name). User can edit
+  // before committing. Cancel or empty → abort, no redirect.
+  const defaultName = (activity.value?.name || '').trim().slice(0, 80)
+  const raw = window.prompt(t('routes.name_prompt'), defaultName)
+  if (raw == null) return
+  const name = raw.trim().slice(0, 80)
+  if (!name) return
+  const sampled = downsample(coords.slice(), ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS)
+  // Pin original start/end so they survive downsampling.
+  if (sampled.length >= 2) {
+    sampled[0] = coords[0]
+    sampled[sampled.length - 1] = coords[coords.length - 1]
+  }
+  sessionStorage.setItem('sportsScope.gpxImport', JSON.stringify({
+    name,
+    waypoints: sampled.map((p) => ({ lng: p[0], lat: p[1] })),
+  }))
+  window.location.href = `${localePrefix}/routes/new?fromGpx=1`
+}
+
 function chartXFromRaw(rawX) {
   if (xAxis.value === 'distance') return rawX / 1000
   return rawX / timeFactor()
@@ -2249,6 +2283,16 @@ function onLightboxKey(ev) {
               </span>
             </div>
           </div>
+          <button
+            v-if="hasRoute"
+            type="button"
+            class="btn btn-sm btn-outline-warning d-inline-flex align-items-center gap-1 ms-auto"
+            :title="t('routes.create_from_activity_title')"
+            @click="createRouteFromActivity"
+          >
+            <i class="fa-solid fa-route" aria-hidden="true"></i>
+            <span class="d-none d-md-inline">{{ t('routes.create_from_activity') }}</span>
+          </button>
         </div>
         <div class="card-body p-0">
           <div v-if="hasRoute" class="map-wrap" :class="{ expanded: mapExpanded }">

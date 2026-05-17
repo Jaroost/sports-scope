@@ -145,6 +145,8 @@
       "export_gpx": "Exporter en GPX",
       "import_gpx": "Importer GPX",
       "import_gpx_title": "Importer un fichier .gpx pour générer l'itinéraire",
+      "create_from_activity": "Créer un itinéraire",
+      "create_from_activity_title": "Créer un itinéraire éditable à partir de cette activité",
       "error_gpx_invalid": "Fichier GPX invalide",
       "error_gpx_no_points": "Aucun point trouvé dans le fichier GPX",
       "back": "Retour à la liste",

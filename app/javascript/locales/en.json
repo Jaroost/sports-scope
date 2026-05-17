@@ -145,6 +145,8 @@
       "export_gpx": "Export GPX",
       "import_gpx": "Import GPX",
       "import_gpx_title": "Upload a .gpx file to seed the route",
+      "create_from_activity": "Create route",
+      "create_from_activity_title": "Create an editable route from this activity",
       "error_gpx_invalid": "Invalid GPX file",
       "error_gpx_no_points": "No track points found in the GPX file",
       "back": "Back to list",

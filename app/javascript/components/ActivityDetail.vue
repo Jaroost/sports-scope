@@ -336,6 +336,17 @@ function isClimbSelected(c) {
   return !!s && s.startIdx === c.startIdx && s.endIdx === c.endIdx
 }
 
+// Same check for the peak-power table — the segment is the window where the
+// best average for that duration was reached.
+function isPeakPowerSelected(pp) {
+  const s = selection.value
+  return !!s && s.startIdx === pp.startIdx && s.endIdx === pp.endIdx
+}
+
+// Duration of the peak-power row currently being hovered (in seconds, since
+// `duration` is unique within the peakPowers list). Drives the row highlight.
+const hoveredPeakDuration = ref(null)
+
 function chartStats(def) {
   const data = streams.value?.[def.key]?.data
   if (!data || data.length === 0) return null
@@ -533,6 +544,8 @@ const peakPowers = computed(() => {
   for (const D of PEAK_POWER_DURATIONS) {
     if (D > totalSpan) break
     let best = null
+    let bestStart = null
+    let bestEnd = null
     let j = 0
     for (let i = 0; i < n; i++) {
       while (j < n && times[j] - times[i] < D) j++
@@ -540,10 +553,14 @@ const peakPowers = computed(() => {
       const dt = times[j] - times[i]
       if (dt <= 0) continue
       const avg = (E[j] - E[i]) / dt
-      if (best == null || avg > best) best = avg
+      if (best == null || avg > best) {
+        best = avg
+        bestStart = i
+        bestEnd = j
+      }
     }
     if (best != null && Number.isFinite(best) && best > 0) {
-      out.push({ duration: D, avgPower: best })
+      out.push({ duration: D, avgPower: best, startIdx: bestStart, endIdx: bestEnd })
     }
   }
   return out
@@ -2824,7 +2841,26 @@ function onLightboxKey(ev) {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="pp in peakPowers" :key="`peak-${pp.duration}`">
+                  <tr
+                    v-for="pp in peakPowers"
+                    :key="`peak-${pp.duration}`"
+                    class="climb-row"
+                    :class="{
+                      'climb-row-active': isPeakPowerSelected(pp),
+                      'climb-row-hover': hoveredPeakDuration === pp.duration,
+                    }"
+                    role="button"
+                    tabindex="0"
+                    :title="t('strava.click_to_select_peak_power')"
+                    :aria-pressed="isPeakPowerSelected(pp)"
+                    @click="setSelection(pp.startIdx, pp.endIdx)"
+                    @keydown.enter.prevent="setSelection(pp.startIdx, pp.endIdx)"
+                    @keydown.space.prevent="setSelection(pp.startIdx, pp.endIdx)"
+                    @mouseenter="hoveredPeakDuration = pp.duration"
+                    @mouseleave="hoveredPeakDuration = null"
+                    @focus="hoveredPeakDuration = pp.duration"
+                    @blur="hoveredPeakDuration = null"
+                  >
                     <td>{{ formatPowerDuration(pp.duration) }}</td>
                     <td>{{ Math.round(pp.avgPower) }} W</td>
                   </tr>

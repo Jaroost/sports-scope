@@ -88,6 +88,8 @@
         "col_loss": "Loss",
         "col_hr": "Avg HR",
         "col_power": "Avg power",
+        "col_duration": "Duration",
+        "peak_power_title": "Best average powers",
         "col_length": "Length",
         "col_grade": "Grade",
         "col_vam": "Vertical ascent rate"

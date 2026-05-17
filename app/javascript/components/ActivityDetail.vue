@@ -543,6 +543,53 @@ const splits = computed(() => {
 
 const splitsHavePower = computed(() => splits.value.some((s) => s.avgPower != null))
 
+// Best average power sustained over standard durations (peak power curve).
+// Uses a cumulative energy integral so it handles non-uniform sampling and
+// stoppages correctly: avg = (E[j] - E[i]) / (time[j] - time[i]).
+const PEAK_POWER_DURATIONS = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400]
+const peakPowers = computed(() => {
+  const times = streams.value?.time?.data
+  const watts = streams.value?.watts?.data
+  if (!Array.isArray(times) || !Array.isArray(watts) || times.length < 2) return []
+  const n = Math.min(times.length, watts.length)
+  if (n < 2) return []
+  // Cumulative energy (J): E[i] = Σ watts[k] * (time[k+1] - time[k])
+  const E = new Float64Array(n)
+  for (let i = 1; i < n; i++) {
+    const dt = times[i] - times[i - 1]
+    const w = watts[i - 1]
+    const wv = (typeof w === 'number' && Number.isFinite(w)) ? w : 0
+    E[i] = E[i - 1] + wv * Math.max(0, dt)
+  }
+  const totalSpan = times[n - 1] - times[0]
+  const out = []
+  for (const D of PEAK_POWER_DURATIONS) {
+    if (D > totalSpan) break
+    let best = null
+    let j = 0
+    for (let i = 0; i < n; i++) {
+      while (j < n && times[j] - times[i] < D) j++
+      if (j >= n) break
+      const dt = times[j] - times[i]
+      if (dt <= 0) continue
+      const avg = (E[j] - E[i]) / dt
+      if (best == null || avg > best) best = avg
+    }
+    if (best != null && Number.isFinite(best) && best > 0) {
+      out.push({ duration: D, avgPower: best })
+    }
+  }
+  return out
+})
+
+function formatPowerDuration(sec) {
+  if (sec < 60) return `${sec} s`
+  if (sec < 3600) return `${Math.round(sec / 60)} min`
+  const h = Math.floor(sec / 3600)
+  const m = Math.round((sec % 3600) / 60)
+  return m === 0 ? `${h} h` : `${h} h ${m}`
+}
+
 // Per-climb stats enriched with duration + VAM. `detectClimbs` already gives
 // us gain / lengthM / avgGrade / category; we add the actual time spent on
 // each climb by looking at the time stream at start/end indices.
@@ -2618,7 +2665,7 @@ function onLightboxKey(ev) {
       </div>
 
       <div
-        v-if="movingStats || globalVam != null || splits.length > 0 || climbsWithVam.length > 0"
+        v-if="movingStats || globalVam != null || splits.length > 0 || climbsWithVam.length > 0 || peakPowers.length > 0"
         class="card shadow-sm border-0 mt-3"
       >
         <div class="card-header activity-card-header d-flex align-items-center gap-2">
@@ -2782,6 +2829,36 @@ function onLightboxKey(ev) {
                     <td>−{{ Math.round(sp.loss) }} m</td>
                     <td>{{ sp.avgHr != null ? `${Math.round(sp.avgHr)} bpm` : '–' }}</td>
                     <td v-if="splitsHavePower">{{ sp.avgPower != null ? `${Math.round(sp.avgPower)} W` : '–' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Peak average power per duration (shortest → longest). -->
+          <div v-if="peakPowers.length > 0" class="stats-section mt-3">
+            <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+              <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
+              <span>{{ t('strava.stats.peak_power_title') }}</span>
+            </h4>
+            <div class="table-responsive stats-table-scroll">
+              <table class="table table-sm stats-table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th :title="t('strava.stats.col_duration')">
+                      <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_duration') }}</span>
+                    </th>
+                    <th :title="t('strava.stats.col_power')">
+                      <i class="fa-solid fa-bolt text-success" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="pp in peakPowers" :key="`peak-${pp.duration}`">
+                    <td>{{ formatPowerDuration(pp.duration) }}</td>
+                    <td>{{ Math.round(pp.avgPower) }} W</td>
                   </tr>
                 </tbody>
               </table>

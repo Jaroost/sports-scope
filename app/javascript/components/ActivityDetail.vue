@@ -409,13 +409,18 @@ function rangePointCount() {
   return b.endIdx - b.startIdx + 1
 }
 
-// VAM (m/h) over the selected range — gain in the range divided by its duration.
-// Mirrors `globalVam` but scoped to whatever the user has zoomed/selected.
+// VAM (m/h) over the selected range — net altitude change over duration.
+// Uses signed net delta (not cumulated gain) so it can be negative on net
+// descents, mirroring the tooltip's `instantVam` behavior.
 function rangeVam() {
+  const b = rangeBounds()
   const dur = rangeDuration()
-  const elev = rangeElevation()
-  if (!dur || dur <= 0 || !elev || !(elev.up > 0)) return null
-  return (elev.up / dur) * 3600
+  const alt = streams.value?.altitude?.data
+  if (!b || !dur || dur <= 0 || !Array.isArray(alt) || alt.length < 2) return null
+  const a0 = alt[Math.min(b.startIdx, alt.length - 1)]
+  const a1 = alt[Math.min(b.endIdx, alt.length - 1)]
+  if (typeof a0 !== 'number' || typeof a1 !== 'number') return null
+  return ((a1 - a0) / dur) * 3600
 }
 
 // Windowed instantaneous VAM around a hovered sample. Uses ±15 s of altitude
@@ -3044,7 +3049,12 @@ function onLightboxKey(ev) {
               <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
               <strong>{{ Math.round(rangeElevation().down) }} m</strong>
             </span>
-            <span v-if="rangeVam() != null" class="range-chip range-chip-success" :title="t('strava.stats.vam_hint')">
+            <span
+              v-if="rangeVam() != null"
+              class="range-chip"
+              :class="rangeVam() >= 0 ? 'range-chip-success' : 'range-chip-danger'"
+              :title="t('strava.stats.vam_hint')"
+            >
               <i class="fa-solid fa-mountain" aria-hidden="true"></i>
               <strong>{{ Math.round(rangeVam()) }} m/h</strong>
             </span>

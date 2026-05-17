@@ -53,8 +53,8 @@
       "distance_km": "Distance (km)",
       "time_label_min": "Temps (min)",
       "clear_selection": "Effacer la sélection",
-      "reset_zoom": "Réinitialiser le zoom",
-      "zoom_to_selection": "Zoomer sur la sélection",
+      "reset_zoom": "Réinitialiser zoom",
+      "zoom_to_selection": "Zoomer sur sélection",
       "selection": "Sélection",
       "whole_activity": "Activité complète",
       "range_stats": {
@@ -186,8 +186,8 @@
       "error_elevation": "Erreur altitude",
       "no_cycling_here": "Sens interdit à vélo (détour cyclable)",
       "selection": "Sélection",
-      "reset_zoom": "Réinitialiser le zoom",
-      "zoom_to_selection": "Zoomer sur la sélection"
+      "reset_zoom": "Réinitialiser zoom",
+      "zoom_to_selection": "Zoomer sur sélection"
     }
   }
 }

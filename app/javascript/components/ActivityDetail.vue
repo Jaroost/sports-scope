@@ -409,6 +409,35 @@ function rangePointCount() {
   return b.endIdx - b.startIdx + 1
 }
 
+// VAM (m/h) over the selected range — gain in the range divided by its duration.
+// Mirrors `globalVam` but scoped to whatever the user has zoomed/selected.
+function rangeVam() {
+  const dur = rangeDuration()
+  const elev = rangeElevation()
+  if (!dur || dur <= 0 || !elev || !(elev.up > 0)) return null
+  return (elev.up / dur) * 3600
+}
+
+// Windowed instantaneous VAM around a hovered sample. Uses ±15 s of altitude
+// data so the tooltip value doesn't jitter on a single-sample basis.
+function instantVam(idx) {
+  const times = streams.value?.time?.data
+  const alt = streams.value?.altitude?.data
+  if (!Array.isArray(times) || !Array.isArray(alt)) return null
+  const n = Math.min(times.length, alt.length)
+  if (n < 2 || idx < 0 || idx >= n) return null
+  const targetT = times[idx]
+  const HALF = 15
+  let i0 = idx
+  let i1 = idx
+  while (i0 > 0 && targetT - times[i0 - 1] < HALF) i0--
+  while (i1 < n - 1 && times[i1 + 1] - targetT < HALF) i1++
+  if (i1 <= i0) return null
+  const dt = times[i1] - times[i0]
+  if (dt <= 0) return null
+  return ((alt[i1] - alt[i0]) / dt) * 3600
+}
+
 function rangeGrade() {
   // Net rise / horizontal distance — matches the conventional climb grade
   // that the map's col markers display via detectClimbs (gain / lengthM).
@@ -1705,9 +1734,26 @@ function buildTooltipHtmlForIndex(idx, priorityStreams = []) {
   let secondary = ''
   for (const k of visibleStreams.value) secondary += renderRow(k)
 
+  // Derived "Vitesse ascensionnelle" row — windowed ±15 s around the cursor.
+  // Always shown when altitude data exists so the user can read climbing rate
+  // alongside the regular stream values.
+  const vam = instantVam(idx)
+  let vamRow = ''
+  if (vam != null && Number.isFinite(vam)) {
+    vamRow = `<div class="chart-tooltip-row">
+      <span class="chart-tooltip-swatch" style="background:#198754"></span>
+      <span class="chart-tooltip-name">${escapeHtml(t('strava.stats.col_vam'))}</span>
+      <span class="chart-tooltip-value">${escapeHtml(Math.round(vam).toString())} m/h</span>
+    </div>`
+  }
+
   if (primary) html += `<div class="chart-tooltip-section">${primary}</div>`
   if (primary && secondary) html += '<div class="chart-tooltip-divider"></div>'
   if (secondary) html += `<div class="chart-tooltip-section chart-tooltip-section-secondary">${secondary}</div>`
+  if (vamRow) {
+    if (primary || secondary) html += '<div class="chart-tooltip-divider"></div>'
+    html += `<div class="chart-tooltip-section chart-tooltip-section-secondary">${vamRow}</div>`
+  }
   return html
 }
 
@@ -2997,6 +3043,10 @@ function onLightboxKey(ev) {
             <span v-if="rangeElevation()" class="range-chip range-chip-danger">
               <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
               <strong>{{ Math.round(rangeElevation().down) }} m</strong>
+            </span>
+            <span v-if="rangeVam() != null" class="range-chip range-chip-success" :title="t('strava.stats.vam_hint')">
+              <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+              <strong>{{ Math.round(rangeVam()) }} m/h</strong>
             </span>
             <span v-if="rangeGrade() != null && !visibleStreams.includes('grade_smooth')" class="range-chip">
               <i class="fa-solid fa-percent" aria-hidden="true"></i>

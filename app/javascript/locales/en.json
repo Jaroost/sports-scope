@@ -74,7 +74,7 @@
         "elapsed": "Elapsed time",
         "stopped": "Stopped",
         "stop_percent": "% stopped",
-        "vam_global": "VAM (global)",
+        "vam_global": "Vertical ascent rate (global)",
         "vam_hint": "Vertical ascent meters per hour (m/h)",
         "splits_title": "Splits per km",
         "splits_empty": "Not enough distance data to compute splits.",
@@ -89,7 +89,7 @@
         "col_hr": "Avg HR",
         "col_length": "Length",
         "col_grade": "Grade",
-        "col_vam": "VAM"
+        "col_vam": "Vertical ascent rate"
       },
       "layout": {
         "title": "Chart layout",

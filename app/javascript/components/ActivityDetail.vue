@@ -2649,7 +2649,7 @@ function onLightboxKey(ev) {
             </div>
             <div v-if="movingStats" class="col-6 col-md-3">
               <div class="stat-card">
-                <span class="stat-icon"><i class="fa-solid fa-pause text-danger" aria-hidden="true"></i></span>
+                <span class="stat-icon"><i class="fa-solid fa-pause text-secondary" aria-hidden="true"></i></span>
                 <div>
                   <div class="text-muted small">
                     {{ t('strava.stats.stopped') }}
@@ -2661,7 +2661,7 @@ function onLightboxKey(ev) {
             </div>
             <div v-if="globalVam != null" class="col-6 col-md-3">
               <div class="stat-card" :title="t('strava.stats.vam_hint')">
-                <span class="stat-icon"><i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i></span>
+                <span class="stat-icon"><i class="fa-solid fa-mountain text-success" aria-hidden="true"></i></span>
                 <div>
                   <div class="text-muted small">{{ t('strava.stats.vam_global') }}</div>
                   <strong>{{ Math.round(globalVam) }} m/h</strong>
@@ -2676,16 +2676,31 @@ function onLightboxKey(ev) {
               <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
               <span>{{ t('strava.stats.climbs_title') }}</span>
             </h4>
-            <div class="table-responsive">
+            <div class="table-responsive stats-table-scroll">
               <table class="table table-sm stats-table align-middle mb-0">
                 <thead>
                   <tr>
                     <th>#</th>
-                    <th>{{ t('strava.stats.col_length') }}</th>
-                    <th>{{ t('strava.stats.col_gain') }}</th>
-                    <th>{{ t('strava.stats.col_grade') }}</th>
-                    <th>{{ t('strava.stats.col_time') }}</th>
-                    <th>{{ t('strava.stats.col_vam') }}</th>
+                    <th :title="t('strava.stats.col_length')">
+                      <i class="fa-solid fa-route text-secondary" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_length') }}</span>
+                    </th>
+                    <th :title="t('strava.stats.col_gain')">
+                      <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
+                    </th>
+                    <th :title="t('strava.stats.col_grade')">
+                      <i class="fa-solid fa-slash text-secondary" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_grade') }}</span>
+                    </th>
+                    <th :title="t('strava.stats.col_time')">
+                      <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
+                    </th>
+                    <th :title="t('strava.stats.col_vam')">
+                      <i class="fa-solid fa-mountain text-success" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_vam') }}</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2717,11 +2732,30 @@ function onLightboxKey(ev) {
                 <thead>
                   <tr>
                     <th>{{ t('strava.stats.col_km') }}</th>
-                    <th>{{ t('strava.stats.col_time') }}</th>
-                    <th>{{ isPaceActivity ? t('strava.stats.col_pace') : t('strava.stats.col_speed') }}</th>
-                    <th>{{ t('strava.stats.col_gain') }}</th>
-                    <th>{{ t('strava.stats.col_loss') }}</th>
-                    <th>{{ t('strava.stats.col_hr') }}</th>
+                    <th :title="t('strava.stats.col_time')">
+                      <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
+                    </th>
+                    <th>
+                      <template v-if="isPaceActivity">
+                        {{t('strava.stats.col_pace')}}
+                      </template>
+                      <template v-else>
+                        <i class="fa-solid fa-gauge-high text-primary" aria-hidden="true"></i>
+                      </template>
+                    </th>
+                    <th :title="t('strava.stats.col_gain')">
+                      <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
+                    </th>
+                    <th :title="t('strava.stats.col_loss')">
+                      <i class="fa-solid fa-arrow-trend-down text-danger" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_loss') }}</span>
+                    </th>
+                    <th :title="t('strava.stats.col_hr')">
+                      <i class="fa-solid fa-heart-pulse text-danger" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_hr') }}</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3687,6 +3721,12 @@ function onLightboxKey(ev) {
 .stats-table-scroll {
   max-height: 360px;
   overflow-y: auto;
+}
+.stats-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #fff;
 }
 
 /* Hover cursor that follows the route on the map */

@@ -74,7 +74,7 @@
         "elapsed": "Temps total",
         "stopped": "Arrêts",
         "stop_percent": "% arrêts",
-        "vam_global": "VAM (globale)",
+        "vam_global": "Vitesse ascensionnelle (globale)",
         "vam_hint": "Vitesse ascensionnelle moyenne (m/h)",
         "splits_title": "Splits par km",
         "splits_empty": "Pas assez de données de distance pour générer les splits.",
@@ -89,7 +89,7 @@
         "col_hr": "FC moy.",
         "col_length": "Longueur",
         "col_grade": "Pente",
-        "col_vam": "VAM"
+        "col_vam": "Vit. ascensionnelle"
       },
       "layout": {
         "title": "Configuration des graphiques",

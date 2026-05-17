@@ -360,6 +360,20 @@ function fmt(v, digits) {
   return v.toFixed(digits)
 }
 
+// Tooltip text for a stream-mean chip: surfaces min/max of the current
+// selection so the chip stays compact while the details show on hover.
+function streamChipTitle(streamKey) {
+  const def = defByKey(streamKey)
+  if (!def) return ''
+  const s = chartStats(def)
+  if (!s) return t('strava.stream.' + streamKey)
+  const u = def.unit ? ` ${def.unit}` : ''
+  const name = t('strava.stream.' + streamKey)
+  const min = `${t('strava.range_stats.min')}: ${fmt(s.min, def.digits)}${u}`
+  const max = `${t('strava.range_stats.max')}: ${fmt(s.max, def.digits)}${u}`
+  return `${name}\n${min}\n${max}`
+}
+
 function rangeBounds() {
   const refStream = streams.value?.distance?.data || streams.value?.time?.data || streams.value?.latlng?.data
   if (!refStream || refStream.length === 0) return null
@@ -477,22 +491,6 @@ function formatKm(meters) {
   return `${(meters / 1000).toFixed(2)} km`
 }
 
-// Pace m:ss/km used by the splits table when the activity is a run.
-function formatPace(secPerKm) {
-  if (!Number.isFinite(secPerKm) || secPerKm <= 0) return '–'
-  const total = Math.round(secPerKm)
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${String(s).padStart(2, '0')}/km`
-}
-
-// Pace vs speed in the splits table. Runs (and hikes/walks) read more
-// naturally as min/km; everything else (mostly rides) as km/h.
-const isPaceActivity = computed(() => {
-  const ty = (activity.value?.type || '').toLowerCase()
-  return ty.includes('run') || ty.includes('walk') || ty.includes('hike')
-})
-
 // elapsed - moving = time stopped (red lights, refueling, etc.). Both fields
 // are seconds on Strava and on the FIT-imported serializer.
 const movingStats = computed(() => {
@@ -513,69 +511,6 @@ const globalVam = computed(() => {
   if (!Number.isFinite(gain) || gain <= 0 || !Number.isFinite(denomS) || denomS <= 0) return null
   return (gain / denomS) * 3600
 })
-
-// Per-km splits from the distance + time streams. The trailing split may be
-// shorter than 1 km — we keep it with its true length so the table shows the
-// real activity end, not a rounded distance.
-const splits = computed(() => {
-  const dist = streams.value?.distance?.data
-  const time = streams.value?.time?.data
-  if (!Array.isArray(dist) || !Array.isArray(time) || dist.length < 2) return []
-  const alt = streams.value?.altitude?.data || []
-  const hr = streams.value?.heartrate?.data || []
-  const watts = streams.value?.watts?.data || []
-  const len = Math.min(dist.length, time.length)
-  const out = []
-  let segStart = 0
-  let nextKm = 1000
-  for (let i = 1; i < len; i++) {
-    const isLast = i === len - 1
-    if (dist[i] >= nextKm || isLast) {
-      const startD = dist[segStart]
-      const endD = dist[i]
-      const sliceLen = endD - startD
-      if (sliceLen <= 0) { segStart = i; nextKm = Math.ceil(dist[i] / 1000) * 1000 + 1000; continue }
-      const durationSec = Math.max(0, time[i] - time[segStart])
-      let gain = 0
-      let loss = 0
-      for (let j = segStart + 1; j <= i; j++) {
-        const a = alt[j - 1]
-        const b = alt[j]
-        if (typeof a === 'number' && typeof b === 'number') {
-          const d = b - a
-          if (d > 0) gain += d
-          else loss -= d
-        }
-      }
-      let hrSum = 0
-      let hrCount = 0
-      let powSum = 0
-      let powCount = 0
-      for (let j = segStart; j <= i; j++) {
-        const v = hr[j]
-        if (typeof v === 'number' && Number.isFinite(v)) { hrSum += v; hrCount++ }
-        const w = watts[j]
-        if (typeof w === 'number' && Number.isFinite(w)) { powSum += w; powCount++ }
-      }
-      out.push({
-        kmIndex: out.length + 1,
-        distance: sliceLen,
-        durationSec,
-        paceSecPerKm: sliceLen > 0 ? (durationSec / (sliceLen / 1000)) : null,
-        speedKmh: durationSec > 0 ? (sliceLen / durationSec) * 3.6 : null,
-        gain,
-        loss,
-        avgHr: hrCount ? hrSum / hrCount : null,
-        avgPower: powCount ? powSum / powCount : null,
-      })
-      segStart = i
-      nextKm += 1000
-    }
-  }
-  return out
-})
-
-const splitsHavePower = computed(() => splits.value.some((s) => s.avgPower != null))
 
 // Best average power sustained over standard durations (peak power curve).
 // Uses a cumulative energy integral so it handles non-uniform sampling and
@@ -1812,7 +1747,7 @@ function positionTooltipBeside(el, anchorX, anchorY, containerWidth, containerHe
 
 function externalTooltipHandler(context) {
   const { chart, tooltip } = context
-  // Find the slot reserved in the side panel of this chart group.
+  // Find the overlay slot anchored in this chart group's canvas wrap.
   const canvasId = chart.canvas.id || ''
   const groupId = canvasId.startsWith('chart-') ? canvasId.slice(6) : null
   if (!groupId) return
@@ -1840,6 +1775,14 @@ function externalTooltipHandler(context) {
   const priority = hoveredGroup?.streams || []
   el.innerHTML = buildTooltipHtmlForIndex(idx, priority)
   el.classList.remove('chart-tooltip-hidden')
+  // Flip the overlay to the opposite side of the cursor so the tooltip never
+  // sits on top of the data the user is inspecting (esp. near the route end).
+  const area = chart.chartArea
+  const cursorX = tooltip.caretX
+  if (area && cursorX != null) {
+    const mid = (area.left + area.right) / 2
+    slot.classList.toggle('chart-tooltip-slot-left', cursorX > mid)
+  }
 }
 
 function escapeHtml(s) {
@@ -2716,7 +2659,7 @@ function onLightboxKey(ev) {
       </div>
 
       <div
-        v-if="movingStats || globalVam != null || splits.length > 0 || climbsWithVam.length > 0 || peakPowers.length > 0"
+        v-if="movingStats || globalVam != null || climbsWithVam.length > 0 || peakPowers.length > 0"
         class="card shadow-sm border-0 mt-3"
       >
         <div class="card-header activity-card-header d-flex align-items-center gap-2">
@@ -2821,65 +2764,6 @@ function onLightboxKey(ev) {
                     <td>{{ c.avgGrade.toFixed(1) }} %</td>
                     <td>{{ c.duration != null ? formatHMS(c.duration) : '–' }}</td>
                     <td>{{ c.vam != null ? `${Math.round(c.vam)} m/h` : '–' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Splits per km -->
-          <div v-if="splits.length > 0" class="stats-section mt-3">
-            <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-              <i class="fa-solid fa-flag-checkered text-warning" aria-hidden="true"></i>
-              <span>{{ t('strava.stats.splits_title') }}</span>
-            </h4>
-            <div class="table-responsive stats-table-scroll">
-              <table class="table table-sm stats-table align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>{{ t('strava.stats.col_km') }}</th>
-                    <th :title="t('strava.stats.col_time')">
-                      <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
-                    </th>
-                    <th>
-                      <template v-if="isPaceActivity">
-                        {{t('strava.stats.col_pace')}}
-                      </template>
-                      <template v-else>
-                        <i class="fa-solid fa-gauge-high text-primary" aria-hidden="true"></i>
-                      </template>
-                    </th>
-                    <th :title="t('strava.stats.col_gain')">
-                      <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
-                    </th>
-                    <th :title="t('strava.stats.col_loss')">
-                      <i class="fa-solid fa-arrow-trend-down text-danger" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_loss') }}</span>
-                    </th>
-                    <th :title="t('strava.stats.col_hr')">
-                      <i class="fa-solid fa-heart-pulse text-danger" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_hr') }}</span>
-                    </th>
-                    <th v-if="splitsHavePower" :title="t('strava.stats.col_power')">
-                      <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="sp in splits" :key="`split-${sp.kmIndex}`">
-                    <td>
-                      <strong>{{ sp.kmIndex }}</strong>
-                      <span v-if="sp.distance < 990" class="text-muted ms-1 small">({{ (sp.distance / 1000).toFixed(2) }} km)</span>
-                    </td>
-                    <td>{{ formatHMS(sp.durationSec) }}</td>
-                    <td>{{ isPaceActivity ? formatPace(sp.paceSecPerKm) : (sp.speedKmh != null ? `${sp.speedKmh.toFixed(1)} km/h` : '–') }}</td>
-                    <td>+{{ Math.round(sp.gain) }} m</td>
-                    <td>−{{ Math.round(sp.loss) }} m</td>
-                    <td>{{ sp.avgHr != null ? `${Math.round(sp.avgHr)} bpm` : '–' }}</td>
-                    <td v-if="splitsHavePower">{{ sp.avgPower != null ? `${Math.round(sp.avgPower)} W` : '–' }}</td>
                   </tr>
                 </tbody>
               </table>
@@ -3067,6 +2951,7 @@ function onLightboxKey(ev) {
               :key="`mean-${streamKey}`"
               class="range-chip range-chip-stream"
               :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
+              :title="streamChipTitle(streamKey)"
             >
               <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
               <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
@@ -3181,40 +3066,9 @@ function onLightboxKey(ev) {
                     </div>
                   </div>
                 </div>
-                <div v-if="!group.collapsed" class="row g-2 align-items-stretch">
-                  <div class="col-lg-9">
-                    <div class="chart-canvas-wrap">
-                      <canvas :id="`chart-${group.id}`"></canvas>
-                    </div>
-                  </div>
-                  <div class="col-lg-3 chart-side-panel">
-                    <div
-                      v-for="streamKey in group.streams"
-                      :key="streamKey"
-                      class="stream-stats-row"
-                    >
-                      <span
-                        class="stream-stats-id"
-                        :style="{ color: defByKey(streamKey)?.color }"
-                        :title="t('strava.stream.' + streamKey)"
-                      >
-                        <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-                      </span>
-                      <template v-if="chartStats(defByKey(streamKey))">
-                        <span :title="t('strava.range_stats.min')">
-                          <i class="fa-solid fa-arrow-down-short-wide" aria-hidden="true"></i>
-                          {{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}
-                        </span>
-                        <span :title="t('strava.range_stats.mean')">
-                          <i class="fa-solid fa-equals" aria-hidden="true"></i>
-                          {{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}
-                        </span>
-                        <span :title="t('strava.range_stats.max')">
-                          <i class="fa-solid fa-arrow-up-wide-short" aria-hidden="true"></i>
-                          {{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}
-                        </span>
-                      </template>
-                    </div>
+                <div v-if="!group.collapsed">
+                  <div class="chart-canvas-wrap">
+                    <canvas :id="`chart-${group.id}`"></canvas>
                     <div class="chart-tooltip-slot" :data-group-id="group.id"></div>
                   </div>
                 </div>
@@ -3607,33 +3461,6 @@ function onLightboxKey(ev) {
   color: #0d6efd;
   font-weight: bold;
 }
-.stream-stats-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  font-size: 0.8rem;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  padding: 0.2rem 0;
-  color: #495057;
-}
-.stream-stats-row + .stream-stats-row {
-  border-top: 1px dashed rgba(0, 0, 0, 0.08);
-}
-.stream-stats-row > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-.stream-stats-row > span i {
-  color: #adb5bd;
-  font-size: 0.75rem;
-}
-.stream-stats-id i {
-  color: inherit !important;
-  font-size: 0.95rem !important;
-}
-
 .preset-select {
   width: auto;
   max-width: 220px;
@@ -3775,13 +3602,23 @@ function onLightboxKey(ev) {
   font-size: 0.95em;
 }
 
-/* Inline variant: lives in the side panel slot, in flow, sized to its column. */
+/* Inline variant: anchored as an overlay in the top-right corner of the
+   canvas wrap. Sits above the chart without stealing pointer events. */
+.chart-tooltip-slot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 5;
+  pointer-events: none;
+  max-width: 60%;
+}
+.chart-tooltip-slot.chart-tooltip-slot-left {
+  right: auto;
+  left: 6px;
+}
 .chart-tooltip-inline {
   position: static;
   transform: none;
-  width: 100%;
-  max-width: 100%;
-  margin-top: 0.6rem;
   opacity: 1;
   white-space: normal;
   font-size: 0.72rem;

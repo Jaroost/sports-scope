@@ -2,6 +2,31 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, useTemplateRef, watch } from 'vue'
 import { t } from '../i18n'
+import {
+  activityIcon,
+  chartIcons,
+  chartDefs,
+  defByKey,
+  STREAM_CHIP_ORDER,
+  PEAK_POWER_DURATIONS,
+  fmt,
+  formatDuration,
+  formatHMS,
+  formatKm,
+  formatPowerDuration,
+  escapeHtml,
+  decodePolyline,
+  downsample,
+  GRADE_BUCKETS,
+  bucketGrade,
+  gradeForIndex,
+  buildGradedSegments,
+  climbCategory,
+  detectClimbs,
+  pickPhotoUrl,
+} from '../activityHelpers'
+import PhotoGallery from './PhotoGallery.vue'
+import ActivityStats from './ActivityStats.vue'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -75,29 +100,6 @@ const zoomRange = ref(null) // { xMin, xMax } | null — shared zoom across all 
 let xMinAll = 0
 let xMaxAll = 0
 
-function activityIcon(type) {
-  const t = (type || '').toLowerCase()
-  if (t.includes('run')) return 'fa-person-running'
-  if (t.includes('ride') || t.includes('cycl') || t.includes('bike') || t.includes('velo')) return 'fa-person-biking'
-  if (t.includes('swim')) return 'fa-person-swimming'
-  if (t.includes('walk') || t.includes('hike')) return 'fa-person-hiking'
-  if (t.includes('ski')) return 'fa-person-skiing'
-  if (t.includes('row')) return 'fa-water'
-  if (t.includes('yoga')) return 'fa-spa'
-  if (t.includes('workout') || t.includes('weight')) return 'fa-dumbbell'
-  return 'fa-bolt'
-}
-
-const chartIcons = {
-  altitude: 'fa-mountain',
-  heartrate: 'fa-heart-pulse',
-  velocity_smooth: 'fa-gauge-high',
-  cadence: 'fa-rotate',
-  watts: 'fa-bolt',
-  temp: 'fa-temperature-half',
-  grade_smooth: 'fa-slash',
-}
-
 const startEndDisplay = computed(() => {
   const a = activity.value
   if (!a?.start_date_local) return null
@@ -135,21 +137,6 @@ const routeCoords = computed(() => {
 const hasRoute = computed(() => routeCoords.value.length > 0)
 const hasLatLngStream = computed(() => Array.isArray(streams.value?.latlng?.data) && streams.value.latlng.data.length > 0)
 
-// chartDefs order drives the default chart layout (top → bottom).
-const chartDefs = [
-  { key: 'altitude',        color: '#198754', unit: 'm',    transform: (v) => v,       digits: 0 },
-  { key: 'watts',           color: '#fd7e14', unit: 'W',    transform: (v) => v,       digits: 0 },
-  { key: 'velocity_smooth', color: '#0d6efd', unit: 'km/h', transform: (v) => v * 3.6, digits: 1 },
-  { key: 'heartrate',       color: '#dc3545', unit: 'bpm',  transform: (v) => v,       digits: 0 },
-  { key: 'cadence',         color: '#6f42c1', unit: 'rpm',  transform: (v) => v,       digits: 0 },
-  { key: 'temp',            color: '#20c997', unit: '°C',   transform: (v) => v,       digits: 1 },
-  { key: 'grade_smooth',    color: '#6c757d', unit: '%',    transform: (v) => v,       digits: 1 },
-]
-
-// Independent order for the stream-mean chips in the sticky header — kept
-// stable regardless of how charts are ordered/merged.
-const STREAM_CHIP_ORDER = ['grade_smooth', 'watts', 'velocity_smooth', 'heartrate', 'cadence', 'temp']
-
 const availableCharts = computed(() => {
   if (!streams.value) return []
   return chartDefs.filter((def) => Array.isArray(streams.value[def.key]?.data) && streams.value[def.key].data.length > 0)
@@ -157,10 +144,6 @@ const availableCharts = computed(() => {
 
 function defaultLayout() {
   return chartDefs.map((def) => ({ id: def.key, streams: [def.key], collapsed: false }))
-}
-
-function defByKey(key) {
-  return chartDefs.find((d) => d.key === key)
 }
 
 // Aligns chartLayout with the streams actually present on this activity:
@@ -235,46 +218,6 @@ function timeFactor() {
   return 60
 }
 
-function formatDuration(seconds) {
-  if (!seconds) return '–'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = seconds % 60
-  return h > 0 ? `${h}h ${m}min` : (m > 0 ? `${m}min ${s}s` : `${s}s`)
-}
-
-function decodePolyline(str) {
-  let index = 0
-  let lat = 0
-  let lng = 0
-  const coords = []
-  while (index < str.length) {
-    let b
-    let shift = 0
-    let result = 0
-    do {
-      b = str.charCodeAt(index++) - 63
-      result |= (b & 0x1f) << shift
-      shift += 5
-    } while (b >= 0x20)
-    const dlat = (result & 1) ? ~(result >> 1) : (result >> 1)
-    lat += dlat
-
-    shift = 0
-    result = 0
-    do {
-      b = str.charCodeAt(index++) - 63
-      result |= (b & 0x1f) << shift
-      shift += 5
-    } while (b >= 0x20)
-    const dlng = (result & 1) ? ~(result >> 1) : (result >> 1)
-    lng += dlng
-
-    coords.push([lng / 1e5, lat / 1e5])
-  }
-  return coords
-}
-
 // Binary search the x stream (raw units: meters or seconds) for the closest index to `target`.
 function xValueToIndex(target) {
   const stream = streams.value?.[xAxis.value]?.data
@@ -329,22 +272,9 @@ function clearSelection() {
   }
 }
 
-// True when the current selection exactly covers `c.startIdx..c.endIdx`. Used
-// to highlight the active row in the detected-climbs table.
-function isClimbSelected(c) {
-  const s = selection.value
-  return !!s && s.startIdx === c.startIdx && s.endIdx === c.endIdx
-}
-
-// Same check for the peak-power table — the segment is the window where the
-// best average for that duration was reached.
-function isPeakPowerSelected(pp) {
-  const s = selection.value
-  return !!s && s.startIdx === pp.startIdx && s.endIdx === pp.endIdx
-}
-
 // Duration of the peak-power row currently being hovered (in seconds, since
-// `duration` is unique within the peakPowers list). Drives the row highlight.
+// `duration` is unique within the peakPowers list). Lifted up to drive the
+// row highlight inside the ActivityStats sub-component via v-model.
 const hoveredPeakDuration = ref(null)
 
 function chartStats(def) {
@@ -376,11 +306,6 @@ function chartStats(def) {
     if (rg != null) mean = rg
   }
   return { count, mean, min: mn, max: mx }
-}
-
-function fmt(v, digits) {
-  if (v == null || Number.isNaN(v)) return '–'
-  return v.toFixed(digits)
 }
 
 function rangeBounds() {
@@ -485,21 +410,6 @@ function rangeGrade() {
   return ((a1 - a0) / (d1 - d0)) * 100
 }
 
-function formatHMS(seconds) {
-  if (seconds == null || Number.isNaN(seconds)) return '–'
-  const total = Math.max(0, Math.round(seconds))
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${pad(h)}:${pad(m)}:${pad(s)}`
-}
-
-function formatKm(meters) {
-  if (meters == null || Number.isNaN(meters)) return '–'
-  return `${(meters / 1000).toFixed(2)} km`
-}
-
 // elapsed - moving = time stopped (red lights, refueling, etc.). Both fields
 // are seconds on Strava and on the FIT-imported serializer.
 const movingStats = computed(() => {
@@ -523,8 +433,8 @@ const globalVam = computed(() => {
 
 // Best average power sustained over standard durations (peak power curve).
 // Uses a cumulative energy integral so it handles non-uniform sampling and
-// stoppages correctly: avg = (E[j] - E[i]) / (time[j] - time[i]).
-const PEAK_POWER_DURATIONS = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400]
+// stoppages correctly: avg = (E[j] - E[i]) / (time[j] - time[i]). The
+// duration list lives in activityHelpers.js so the Ruby side can mirror it.
 const peakPowers = computed(() => {
   const times = streams.value?.time?.data
   const watts = streams.value?.watts?.data
@@ -566,13 +476,6 @@ const peakPowers = computed(() => {
   return out
 })
 
-function formatPowerDuration(sec) {
-  if (sec < 60) return `${sec} s`
-  if (sec < 3600) return `${Math.round(sec / 60)} min`
-  const h = Math.floor(sec / 3600)
-  const m = Math.round((sec % 3600) / 60)
-  return m === 0 ? `${h} h` : `${h} h ${m}`
-}
 
 // Per-climb stats enriched with duration + VAM. `detectClimbs` already gives
 // us gain / lengthM / avgGrade / category; we add the actual time spent on
@@ -653,25 +556,6 @@ async function fetchPeakPowerRanks() {
   } catch {
     // Best-effort — the table still renders without rank badges.
   }
-}
-
-// For a row in the peak-power table, label its rank vs. the user's history:
-// 'pr'    — this activity beats every previous best for this duration
-// 'tied'  — matches the all-time best (within rounding)
-// null    — there's a better all-time effort; we surface that value separately
-function peakPowerRankLabel(pp) {
-  const bests = peakPowerRanks.value?.bests
-  if (!bests) return null
-  const best = bests[String(pp.duration)]
-  if (!best || !Number.isFinite(best.avg_watts)) return 'pr' // first activity at this duration
-  const delta = pp.avgPower - best.avg_watts
-  if (delta > 0.5) return 'pr'
-  if (Math.abs(delta) <= 0.5) return 'tied'
-  return null
-}
-
-function peakPowerBestFor(pp) {
-  return peakPowerRanks.value?.bests?.[String(pp.duration)] || null
 }
 
 async function fetchPhotos() {
@@ -1145,19 +1029,6 @@ function buildClimbMarkerEl(climb) {
 
 // ─── Photos ───────────────────────────────────────────────────────────────
 
-function pickPhotoUrl(photo, preferred = 256) {
-  if (!photo?.urls) return null
-  const entries = Object.entries(photo.urls)
-    .map(([k, v]) => [Number(k), v])
-    .filter(([k]) => !Number.isNaN(k))
-    .sort((a, b) => a[0] - b[0])
-  if (entries.length === 0) return null
-  const exact = entries.find(([k]) => k === preferred)
-  if (exact) return exact[1]
-  const larger = entries.find(([k]) => k >= preferred)
-  return (larger || entries[entries.length - 1])[1]
-}
-
 function installPhotoMarkers(maplibregl) {
   photoMarkers.forEach((m) => m.remove())
   photoMarkers.length = 0
@@ -1199,12 +1070,11 @@ function togglePhotos() {
   }
 }
 
-function toggleStatsCollapsed() {
-  statsCollapsed.value = !statsCollapsed.value
-  try {
-    localStorage.setItem('sportsScope.statsCollapsed', statsCollapsed.value ? '1' : '0')
-  } catch { /* private mode, etc. */ }
-}
+// `statsCollapsed` is driven from ActivityStats via v-model:collapsed; we
+// just mirror it to localStorage so it survives reloads.
+watch(statsCollapsed, (v) => {
+  try { localStorage.setItem('sportsScope.statsCollapsed', v ? '1' : '0') } catch { /* ignore */ }
+})
 
 function toggleChartsCollapsed() {
   chartsCollapsed.value = !chartsCollapsed.value
@@ -1213,14 +1083,11 @@ function toggleChartsCollapsed() {
   } catch { /* private mode, etc. */ }
 }
 
-function toggleGalleryCollapsed() {
-  galleryCollapsed.value = !galleryCollapsed.value
-  try {
-    localStorage.setItem('sportsScope.galleryCollapsed', galleryCollapsed.value ? '1' : '0')
-  } catch {
-    // localStorage may be unavailable (private mode, etc.) — silently ignore.
-  }
-}
+// `galleryCollapsed` is driven from PhotoGallery via v-model:collapsed; we
+// just mirror it to localStorage so it survives reloads.
+watch(galleryCollapsed, (v) => {
+  try { localStorage.setItem('sportsScope.galleryCollapsed', v ? '1' : '0') } catch { /* ignore */ }
+})
 
 function buildArrowIcon() {
   const size = 18
@@ -1363,119 +1230,6 @@ function refreshSelectedRoute() {
     type: 'Feature',
     geometry: { type: 'LineString', coordinates: coords },
   })
-}
-
-// ─── Cycling helpers: grade-colored route + climb detection ──────────────────
-
-const GRADE_BUCKETS = [
-  { max: -8,       color: '#1e3a8a' }, // very steep descent
-  { max: -3,       color: '#3b82f6' }, // descent
-  { max:  3,       color: '#22c55e' }, // flat / rolling
-  { max:  6,       color: '#eab308' }, // easy climb
-  { max: 10,       color: '#f97316' }, // medium climb
-  { max: 15,       color: '#dc2626' }, // hard climb
-  { max: Infinity, color: '#7f1d1d' }, // very hard climb
-]
-
-function bucketGrade(g) {
-  for (let i = 0; i < GRADE_BUCKETS.length; i++) {
-    if (g < GRADE_BUCKETS[i].max) return i
-  }
-  return GRADE_BUCKETS.length - 1
-}
-
-function gradeForIndex(i, grades, altitudes, distances) {
-  if (grades && grades[i] != null && !Number.isNaN(grades[i])) return grades[i]
-  if (!altitudes || !distances || i + 1 >= altitudes.length || i + 1 >= distances.length) return 0
-  const da = altitudes[i + 1] - altitudes[i]
-  const dd = distances[i + 1] - distances[i]
-  return dd > 0 ? (da / dd) * 100 : 0
-}
-
-function buildGradedSegments(coords, grades, altitudes, distances) {
-  if (!coords || coords.length < 2) return []
-  const features = []
-  let current = [coords[0]]
-  let curBucket = bucketGrade(gradeForIndex(0, grades, altitudes, distances))
-  for (let i = 1; i < coords.length; i++) {
-    const g = gradeForIndex(Math.min(i, coords.length - 2), grades, altitudes, distances)
-    const b = bucketGrade(g)
-    current.push(coords[i])
-    if (b !== curBucket && current.length >= 2) {
-      features.push({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: current.slice() },
-        properties: { bucket: curBucket },
-      })
-      current = [coords[i]]
-      curBucket = b
-    }
-  }
-  if (current.length >= 2) {
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates: current },
-      properties: { bucket: curBucket },
-    })
-  }
-  return features
-}
-
-function climbCategory(lengthKm, avgGrade) {
-  const score = lengthKm * Math.pow(Math.max(0, avgGrade), 2)
-  if (score >= 400) return 'HC'
-  if (score >= 200) return '1'
-  if (score >= 100) return '2'
-  if (score >= 60) return '3'
-  if (score >= 25) return '4'
-  return null
-}
-
-function detectClimbs(grades, altitudes, distances) {
-  if (!altitudes || !distances || altitudes.length === 0 || distances.length === 0) return []
-  const MIN_GRADE = 2
-  const MIN_GAIN_M = 60
-  const MIN_LENGTH_M = 500
-  const MERGE_GAP_M = 250
-  const len = Math.min(altitudes.length, distances.length, grades?.length ?? altitudes.length)
-  const raw = []
-  let startIdx = -1
-  for (let i = 0; i < len; i++) {
-    const g = gradeForIndex(i, grades, altitudes, distances)
-    if (g >= MIN_GRADE) {
-      if (startIdx < 0) startIdx = i
-    } else if (startIdx >= 0) {
-      raw.push({ startIdx, endIdx: i })
-      startIdx = -1
-    }
-  }
-  if (startIdx >= 0) raw.push({ startIdx, endIdx: len - 1 })
-  const merged = []
-  for (const r of raw) {
-    if (!merged.length) { merged.push(r); continue }
-    const prev = merged[merged.length - 1]
-    const gap = distances[r.startIdx] - distances[prev.endIdx]
-    if (gap <= MERGE_GAP_M) prev.endIdx = r.endIdx
-    else merged.push(r)
-  }
-  return merged
-    .map((r) => {
-      const gain = altitudes[r.endIdx] - altitudes[r.startIdx]
-      const lengthM = distances[r.endIdx] - distances[r.startIdx]
-      const avgGrade = lengthM > 0 ? (gain / lengthM) * 100 : 0
-      return { ...r, gain, lengthM, avgGrade, category: climbCategory(lengthM / 1000, avgGrade) }
-    })
-    .filter((c) => c.gain >= MIN_GAIN_M && c.lengthM >= MIN_LENGTH_M && c.avgGrade >= MIN_GRADE)
-}
-
-function downsample(arr, maxPoints) {
-  if (arr.length <= maxPoints) return arr
-  const step = arr.length / maxPoints
-  const out = []
-  for (let i = 0; i < maxPoints; i++) {
-    out.push(arr[Math.floor(i * step)])
-  }
-  return out
 }
 
 // "Create route from this activity" — same handoff as the GPX import in
@@ -1848,10 +1602,6 @@ function externalTooltipHandler(context) {
     const mid = (area.left + area.right) / 2
     slot.classList.toggle('chart-tooltip-slot-left', cursorX > mid)
   }
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 }
 
 // Map hover tooltip — reuses the same `.chart-tooltip` DOM/CSS but lives in
@@ -2500,7 +2250,6 @@ onMounted(async () => {
     await new Promise((r) => requestAnimationFrame(r))
     await renderCharts()
   }
-  window.addEventListener('keydown', onLightboxKey)
 })
 
 onBeforeUnmount(() => {
@@ -2514,19 +2263,7 @@ onBeforeUnmount(() => {
     mapInstance = null
   }
   destroyCharts()
-  window.removeEventListener('keydown', onLightboxKey)
 })
-
-function onLightboxKey(ev) {
-  if (lightboxIndex.value === null) return
-  if (ev.key === 'Escape') {
-    lightboxIndex.value = null
-  } else if (ev.key === 'ArrowLeft' && lightboxIndex.value > 0) {
-    lightboxIndex.value--
-  } else if (ev.key === 'ArrowRight' && lightboxIndex.value < photos.value.length - 1) {
-    lightboxIndex.value++
-  }
-}
 </script>
 
 <template>
@@ -2701,245 +2438,26 @@ function onLightboxKey(ev) {
         </div>
       </div>
 
-      <!-- Galerie photos -->
-      <div v-if="photos.length > 0" class="card mt-3 shadow-sm border-0">
-        <div class="card-header activity-card-header d-flex align-items-center gap-2">
-          <i class="fa-solid fa-images text-warning" aria-hidden="true"></i>
-          <h3 class="h6 mb-0 flex-grow-1">{{ t('strava.photo_gallery') }} ({{ photos.length }})</h3>
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="toggleGalleryCollapsed"
-            :title="galleryCollapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
-            :aria-pressed="galleryCollapsed"
-          >
-            <i :class="galleryCollapsed ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" aria-hidden="true"></i>
-          </button>
-        </div>
-        <div v-if="!galleryCollapsed" class="card-body">
-          <div class="photo-gallery">
-            <button
-              v-for="(photo, idx) in photos"
-              :key="photo.unique_id || photo.id || idx"
-              type="button"
-              class="photo-thumb"
-              @click="lightboxIndex = idx"
-              :title="photo.caption || ''"
-            >
-              <img :src="pickPhotoUrl(photo, 256)" :alt="photo.caption || ''" loading="lazy">
-              <span v-if="photo.caption" class="photo-thumb-caption">{{ photo.caption }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
+      <!-- Galerie photos + lightbox (Teleport au body à l'intérieur du composant) -->
+      <PhotoGallery
+        :photos="photos"
+        v-model:lightbox-index="lightboxIndex"
+        v-model:collapsed="galleryCollapsed"
+      />
 
-      <div
-        v-if="movingStats || globalVam != null || climbsWithVam.length > 0 || peakPowers.length > 0"
-        class="card shadow-sm border-0 mt-3"
-      >
-        <div class="card-header activity-card-header d-flex align-items-center gap-2">
-          <i class="fa-solid fa-chart-simple text-warning" aria-hidden="true"></i>
-          <h3 class="h6 mb-0">{{ t('strava.stats.title') }}</h3>
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-secondary ms-auto"
-            :title="statsCollapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
-            :aria-pressed="statsCollapsed"
-            @click="toggleStatsCollapsed"
-          >
-            <i :class="statsCollapsed ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" aria-hidden="true"></i>
-          </button>
-        </div>
-        <div v-if="!statsCollapsed" class="card-body">
-          <!-- Top-line stats: temps roulé / arrêts / VAM globale -->
-          <div v-if="movingStats || globalVam != null" class="row g-3 mb-3 stats-pills-row">
-            <div v-if="movingStats" class="col-6 col-md-3">
-              <div class="stat-card">
-                <span class="stat-icon"><i class="fa-solid fa-person-biking text-success" aria-hidden="true"></i></span>
-                <div>
-                  <div class="text-muted small">{{ t('strava.stats.moving') }}</div>
-                  <strong>{{ formatHMS(movingStats.moving) }}</strong>
-                </div>
-              </div>
-            </div>
-            <div v-if="movingStats" class="col-6 col-md-3">
-              <div class="stat-card">
-                <span class="stat-icon"><i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i></span>
-                <div>
-                  <div class="text-muted small">{{ t('strava.stats.elapsed') }}</div>
-                  <strong>{{ formatHMS(movingStats.elapsed) }}</strong>
-                </div>
-              </div>
-            </div>
-            <div v-if="movingStats" class="col-6 col-md-3">
-              <div class="stat-card">
-                <span class="stat-icon"><i class="fa-solid fa-pause text-secondary" aria-hidden="true"></i></span>
-                <div>
-                  <div class="text-muted small">
-                    {{ t('strava.stats.stopped') }}
-                    <span v-if="movingStats.elapsed > 0" class="text-muted">· {{ movingStats.stopPct.toFixed(0) }} %</span>
-                  </div>
-                  <strong>{{ formatHMS(movingStats.stopped) }}</strong>
-                </div>
-              </div>
-            </div>
-            <div v-if="globalVam != null" class="col-6 col-md-3">
-              <div class="stat-card" :title="t('strava.stats.vam_hint')">
-                <span class="stat-icon"><i class="fa-solid fa-mountain text-success" aria-hidden="true"></i></span>
-                <div>
-                  <div class="text-muted small">{{ t('strava.stats.vam_global') }}</div>
-                  <strong>{{ Math.round(globalVam) }} m/h</strong>
-                </div>
-              </div>
-            </div>
-          </div>
+      <ActivityStats
+        :moving-stats="movingStats"
+        :global-vam="globalVam"
+        :climbs-with-vam="climbsWithVam"
+        :peak-powers="peakPowers"
+        :peak-power-ranks="peakPowerRanks"
+        :selection="selection"
+        v-model:hovered-climb-start-idx="hoveredClimbStartIdx"
+        v-model:hovered-peak-duration="hoveredPeakDuration"
+        v-model:collapsed="statsCollapsed"
+        @select-segment="(s, e) => setSelection(s, e)"
+      />
 
-          <!-- Climbs (per-climb VAM) -->
-          <div v-if="climbsWithVam.length > 0" class="stats-section">
-            <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-              <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
-              <span>{{ t('strava.stats.climbs_title') }}</span>
-            </h4>
-            <div class="table-responsive stats-table-scroll">
-              <table class="table table-sm stats-table align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th :title="t('strava.stats.col_length')">
-                      <i class="fa-solid fa-route text-secondary" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_length') }}</span>
-                    </th>
-                    <th :title="t('strava.stats.col_gain')">
-                      <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
-                    </th>
-                    <th :title="t('strava.stats.col_grade')">
-                      <i class="fa-solid fa-slash text-secondary" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_grade') }}</span>
-                    </th>
-                    <th :title="t('strava.stats.col_time')">
-                      <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
-                    </th>
-                    <th :title="t('strava.stats.col_vam')">
-                      <i class="fa-solid fa-mountain text-success" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_vam') }}</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="(c, i) in climbsWithVam"
-                    :key="`climb-${i}`"
-                    class="climb-row"
-                    :class="{
-                      'climb-row-active': isClimbSelected(c),
-                      'climb-row-hover': hoveredClimbStartIdx === c.startIdx,
-                    }"
-                    role="button"
-                    tabindex="0"
-                    :title="t('strava.click_to_select_climb')"
-                    :aria-pressed="isClimbSelected(c)"
-                    @click="setSelection(c.startIdx, c.endIdx)"
-                    @keydown.enter.prevent="setSelection(c.startIdx, c.endIdx)"
-                    @keydown.space.prevent="setSelection(c.startIdx, c.endIdx)"
-                    @mouseenter="hoveredClimbStartIdx = c.startIdx"
-                    @mouseleave="hoveredClimbStartIdx = null"
-                    @focus="hoveredClimbStartIdx = c.startIdx"
-                    @blur="hoveredClimbStartIdx = null"
-                  >
-                    <td>
-                      <span class="climb-cat-badge" :class="`climb-cat-${c.category || 'HC'}`">
-                        <span>{{ c.category ? `Cat ${c.category}` : 'HC' }}</span>
-                      </span>
-                    </td>
-                    <td>{{ formatKm(c.lengthM) }}</td>
-                    <td>+{{ Math.round(c.gain) }} m</td>
-                    <td>{{ c.avgGrade.toFixed(1) }} %</td>
-                    <td>{{ c.duration != null ? formatHMS(c.duration) : '–' }}</td>
-                    <td>{{ c.vam != null ? `${Math.round(c.vam)} m/h` : '–' }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- Peak average power per duration (shortest → longest). -->
-          <div v-if="peakPowers.length > 0" class="stats-section mt-3">
-            <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-              <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
-              <span>{{ t('strava.stats.peak_power_title') }}</span>
-            </h4>
-            <div class="table-responsive stats-table-scroll">
-              <table class="table table-sm stats-table align-middle mb-0">
-                <thead>
-                  <tr>
-                    <th :title="t('strava.stats.col_duration')">
-                      <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_duration') }}</span>
-                    </th>
-                    <th :title="t('strava.stats.col_power')">
-                      <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
-                      <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="pp in peakPowers"
-                    :key="`peak-${pp.duration}`"
-                    class="climb-row"
-                    :class="{
-                      'climb-row-active': isPeakPowerSelected(pp),
-                      'climb-row-hover': hoveredPeakDuration === pp.duration,
-                    }"
-                    role="button"
-                    tabindex="0"
-                    :title="t('strava.click_to_select_peak_power')"
-                    :aria-pressed="isPeakPowerSelected(pp)"
-                    @click="setSelection(pp.startIdx, pp.endIdx)"
-                    @keydown.enter.prevent="setSelection(pp.startIdx, pp.endIdx)"
-                    @keydown.space.prevent="setSelection(pp.startIdx, pp.endIdx)"
-                    @mouseenter="hoveredPeakDuration = pp.duration"
-                    @mouseleave="hoveredPeakDuration = null"
-                    @focus="hoveredPeakDuration = pp.duration"
-                    @blur="hoveredPeakDuration = null"
-                  >
-                    <td>{{ formatPowerDuration(pp.duration) }}</td>
-                    <td class="d-flex align-items-center gap-2 flex-wrap">
-                      <span>{{ Math.round(pp.avgPower) }} W</span>
-                      <span
-                        v-if="peakPowerRankLabel(pp) === 'pr'"
-                        class="peak-power-badge peak-power-badge-pr"
-                        :title="t('strava.stats.peak_power_pr_hint')"
-                      >
-                        <i class="fa-solid fa-trophy" aria-hidden="true"></i>
-                        <span>{{ t('strava.stats.peak_power_pr') }}</span>
-                      </span>
-                      <span
-                        v-else-if="peakPowerRankLabel(pp) === 'tied'"
-                        class="peak-power-badge peak-power-badge-tied"
-                        :title="t('strava.stats.peak_power_tied_hint')"
-                      >
-                        <i class="fa-solid fa-equals" aria-hidden="true"></i>
-                        <span>{{ t('strava.stats.peak_power_tied') }}</span>
-                      </span>
-                      <span
-                        v-else-if="peakPowerBestFor(pp)"
-                        class="peak-power-best text-muted small"
-                        :title="t('strava.stats.peak_power_best_hint')"
-                      >
-                        <i class="fa-regular fa-star" aria-hidden="true"></i>
-                        {{ Math.round(peakPowerBestFor(pp).avg_watts) }} W
-                      </span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
 
       <div class="card shadow-sm border-0 mt-3">
         <div class="card-header activity-card-header charts-sticky-header">
@@ -3254,52 +2772,6 @@ function onLightboxKey(ev) {
       </div>
     </div>
 
-    <!-- Lightbox modal pour les photos (Teleport au body pour échapper aux overflow/z-index) -->
-    <Teleport to="body">
-      <div
-        v-if="lightboxIndex !== null && photos[lightboxIndex]"
-        class="photo-lightbox"
-        @click.self="lightboxIndex = null"
-      >
-        <button
-          type="button"
-          class="photo-lightbox-btn photo-lightbox-close"
-          @click="lightboxIndex = null"
-          :title="t('strava.close')"
-          :aria-label="t('strava.close')"
-        >
-          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-        </button>
-        <button
-          v-if="lightboxIndex > 0"
-          type="button"
-          class="photo-lightbox-btn photo-lightbox-prev"
-          @click="lightboxIndex--"
-          :title="t('strava.previous')"
-          :aria-label="t('strava.previous')"
-        >
-          <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
-        </button>
-        <button
-          v-if="lightboxIndex < photos.length - 1"
-          type="button"
-          class="photo-lightbox-btn photo-lightbox-next"
-          @click="lightboxIndex++"
-          :title="t('strava.next')"
-          :aria-label="t('strava.next')"
-        >
-          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-        </button>
-        <img
-          :src="pickPhotoUrl(photos[lightboxIndex], 2048)"
-          :alt="photos[lightboxIndex].caption || ''"
-          class="photo-lightbox-img"
-        />
-        <div v-if="photos[lightboxIndex].caption" class="photo-lightbox-caption">
-          {{ photos[lightboxIndex].caption }}
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 
@@ -3712,42 +3184,6 @@ function onLightboxKey(ev) {
   opacity: 1;
 }
 
-.photo-gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 0.5rem;
-}
-.photo-thumb {
-  position: relative;
-  padding: 0;
-  border: 0;
-  background: none;
-  cursor: pointer;
-  border-radius: 0.4rem;
-  overflow: hidden;
-  aspect-ratio: 4 / 3;
-  box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.2);
-  transition: box-shadow 0.15s ease;
-}
-.photo-thumb:hover { box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.35); }
-.photo-thumb img {
-  width: 100%; height: 100%;
-  object-fit: cover; display: block;
-  transition: transform 0.15s ease;
-}
-.photo-thumb:hover img { transform: scale(1.04); }
-.photo-thumb-caption {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  padding: 0.3rem 0.5rem;
-  font-size: 0.72rem;
-  color: #fff;
-  background: linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.3) 70%, transparent 100%);
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 </style>
 
 <!-- Non-scoped: the tooltip DOM is created via document.createElement and
@@ -3891,108 +3327,6 @@ function onLightboxKey(ev) {
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
 
-/* Inline category badge used in the Stats card's climbs table. Reuses the
-   .climb-cat-* color classes above (which set `color`); the badge's outer
-   span paints its background from currentColor and the inner span forces
-   the foreground white for legibility. */
-.climb-cat-badge {
-  display: inline-flex;
-  align-items: center;
-  background: currentColor;
-  padding: 0.05rem 0.45rem;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  line-height: 1.4;
-}
-.climb-cat-badge > span {
-  color: #fff;
-}
-
-/* Stats card sections + tables. */
-.stats-section + .stats-section { border-top: 1px dashed rgba(0, 0, 0, 0.08); padding-top: 0.75rem; }
-.stats-table th {
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #6c757d;
-  font-weight: 600;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-}
-.stats-table td {
-  font-variant-numeric: tabular-nums;
-  font-size: 0.85rem;
-}
-.stats-table-scroll {
-  max-height: 360px;
-  overflow-y: auto;
-}
-.stats-table-scroll thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #fff;
-}
-/* Detected-climb rows are clickable — they drive the same selection as the
-   climb markers on the map (highlights the segment + scopes the charts). */
-.climb-row { cursor: pointer; }
-/* Bootstrap paints `background-color` on each <td> via `--bs-table-bg`, so a
-   background on the <tr> stays invisible. We style the cells directly. */
-.climb-row > td { transition: background-color 0.12s, box-shadow 0.12s; }
-/* `.climb-row-hover` is fed by both pointer hover on the row and the map's
-   climb marker, giving a bidirectional table ↔ map link. */
-.climb-row:hover > td,
-.climb-row-hover > td {
-  background-color: rgba(252, 76, 2, 0.12);
-}
-.climb-row:focus-visible {
-  outline: none;
-}
-.climb-row:focus-visible > td {
-  box-shadow: inset 0 2px 0 rgba(252, 76, 2, 0.55),
-              inset 0 -2px 0 rgba(252, 76, 2, 0.55);
-}
-.climb-row:focus-visible > td:first-child { box-shadow: inset 2px 0 0 rgba(252, 76, 2, 0.55), inset 0 2px 0 rgba(252, 76, 2, 0.55), inset 0 -2px 0 rgba(252, 76, 2, 0.55); }
-.climb-row:focus-visible > td:last-child  { box-shadow: inset -2px 0 0 rgba(252, 76, 2, 0.55), inset 0 2px 0 rgba(252, 76, 2, 0.55), inset 0 -2px 0 rgba(252, 76, 2, 0.55); }
-.climb-row-active > td,
-.climb-row-active:hover > td,
-.climb-row-active.climb-row-hover > td {
-  background-color: rgba(252, 76, 2, 0.22);
-  font-weight: 600;
-}
-
-/* Personal-best badges on the peak-power table. `-pr` is the highlight (this
-   activity beats every prior best for that duration); `-tied` is a soft
-   variant when the values match within rounding tolerance. */
-.peak-power-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.05rem 0.45rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-}
-.peak-power-badge-pr {
-  background: rgba(255, 193, 7, 0.18);
-  color: #b45309;
-  border: 1px solid rgba(180, 83, 9, 0.35);
-}
-.peak-power-badge-tied {
-  background: rgba(108, 117, 125, 0.14);
-  color: #495057;
-  border: 1px solid rgba(108, 117, 125, 0.3);
-}
-.peak-power-best {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Hover cursor that follows the route on the map */
 .route-cursor {
   width: 14px;
@@ -4036,58 +3370,4 @@ function onLightboxKey(ev) {
   font-size: 0.95rem;
 }
 
-/* Lightbox: Teleport'd to body so styles must be global */
-.photo-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 1080;
-  background: rgba(0, 0, 0, 0.92);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem;
-}
-.photo-lightbox-img {
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.6);
-}
-.photo-lightbox-btn {
-  position: absolute;
-  background: rgba(255, 255, 255, 0.15);
-  color: #fff;
-  border: 0;
-  border-radius: 50%;
-  width: 44px;
-  height: 44px;
-  font-size: 1.2rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.12s ease, transform 0.12s ease;
-}
-.photo-lightbox-btn:hover {
-  background: rgba(255, 255, 255, 0.35);
-  transform: scale(1.06);
-}
-.photo-lightbox-close { top: 1rem; right: 1rem; }
-.photo-lightbox-prev  { left: 1rem;  top: 50%; transform: translateY(-50%); }
-.photo-lightbox-next  { right: 1rem; top: 50%; transform: translateY(-50%); }
-.photo-lightbox-prev:hover { transform: translateY(-50%) scale(1.06); }
-.photo-lightbox-next:hover { transform: translateY(-50%) scale(1.06); }
-.photo-lightbox-caption {
-  position: absolute;
-  bottom: 1.5rem;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-  padding: 0.5rem 1rem;
-  border-radius: 0.5rem;
-  max-width: 70vw;
-  text-align: center;
-  font-size: 0.9rem;
-}
 </style>

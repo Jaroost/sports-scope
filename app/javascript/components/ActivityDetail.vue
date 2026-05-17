@@ -48,6 +48,10 @@ let hoverMarker = null
 let isDragging = false
 let dragRafPending = false
 const climbMarkers = []
+// Maps a climb's startIdx to its DOM element so the table-row hover can
+// reach across and add `.climb-marker-active` (and vice versa).
+const climbMarkerEls = new Map()
+const hoveredClimbStartIdx = ref(null)
 let _maplibregl = null // cached after first import so toggles can re-install markers
 const mapStyleId = ref('cyclosm')
 const showClimbs = ref(true)
@@ -323,6 +327,13 @@ function clearSelection() {
     markerB.setLngLat([data[data.length - 1][1], data[data.length - 1][0]])
     applyMarkerRoles()
   }
+}
+
+// True when the current selection exactly covers `c.startIdx..c.endIdx`. Used
+// to highlight the active row in the detected-climbs table.
+function isClimbSelected(c) {
+  const s = selection.value
+  return !!s && s.startIdx === c.startIdx && s.endIdx === c.endIdx
 }
 
 function chartStats(def) {
@@ -1006,6 +1017,7 @@ function installClimbMarkers(maplibregl) {
   // Always start clean: re-rendering the map shouldn't pile markers up.
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
+  climbMarkerEls.clear()
   if (!showClimbs.value) return
   const latlng = streams.value?.latlng?.data
   const altitudes = streams.value?.altitude?.data
@@ -1021,6 +1033,7 @@ function installClimbMarkers(maplibregl) {
       .setLngLat([pt[1], pt[0]])
       .addTo(mapInstance)
     climbMarkers.push(marker)
+    climbMarkerEls.set(climb.startIdx, el)
   })
 }
 
@@ -1062,6 +1075,12 @@ function buildClimbMarkerEl(climb) {
   })
   // Make sure mousedown doesn't initiate a map pan when the user clicks the badge.
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
+  // Sync hover with the climbs stats table: while pointing at the marker,
+  // the corresponding row highlights, and vice versa.
+  el.addEventListener('mouseenter', () => { hoveredClimbStartIdx.value = climb.startIdx })
+  el.addEventListener('mouseleave', () => {
+    if (hoveredClimbStartIdx.value === climb.startIdx) hoveredClimbStartIdx.value = null
+  })
   return el
 }
 
@@ -2390,6 +2409,14 @@ watch(selection, (val) => {
   }, DISPLAY_DEBOUNCE_MS)
 })
 
+// Mirror table-row hover onto the map's climb marker. The marker has its own
+// CSS :hover for direct pointer interaction; `.climb-marker-active` is the
+// "remote-controlled" equivalent driven from the stats table.
+watch(hoveredClimbStartIdx, (curr, prev) => {
+  if (prev != null) climbMarkerEls.get(prev)?.classList.remove('climb-marker-active')
+  if (curr != null) climbMarkerEls.get(curr)?.classList.add('climb-marker-active')
+})
+
 onMounted(async () => {
   const savedLayoutsPromise = fetchSavedLayouts()
   const photosPromise = fetchPhotos()
@@ -2740,7 +2767,26 @@ function onLightboxKey(ev) {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(c, i) in climbsWithVam" :key="`climb-${i}`">
+                  <tr
+                    v-for="(c, i) in climbsWithVam"
+                    :key="`climb-${i}`"
+                    class="climb-row"
+                    :class="{
+                      'climb-row-active': isClimbSelected(c),
+                      'climb-row-hover': hoveredClimbStartIdx === c.startIdx,
+                    }"
+                    role="button"
+                    tabindex="0"
+                    :title="t('strava.click_to_select_climb')"
+                    :aria-pressed="isClimbSelected(c)"
+                    @click="setSelection(c.startIdx, c.endIdx)"
+                    @keydown.enter.prevent="setSelection(c.startIdx, c.endIdx)"
+                    @keydown.space.prevent="setSelection(c.startIdx, c.endIdx)"
+                    @mouseenter="hoveredClimbStartIdx = c.startIdx"
+                    @mouseleave="hoveredClimbStartIdx = null"
+                    @focus="hoveredClimbStartIdx = c.startIdx"
+                    @blur="hoveredClimbStartIdx = null"
+                  >
                     <td>
                       <span class="climb-cat-badge" :class="`climb-cat-${c.category || 'HC'}`">
                         <span>{{ c.category ? `Cat ${c.category}` : 'HC' }}</span>
@@ -3709,10 +3755,14 @@ function onLightboxKey(ev) {
   user-select: none;
   line-height: 1.4;
 }
-.climb-marker:hover {
+.climb-marker:hover,
+.climb-marker-active {
   transform: translateY(-6px) scale(1.06);
   box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.45);
 }
+/* When the marker is "remotely hovered" from the stats table, also nudge it
+   to the top of the stacking order so it isn't hidden under nearby markers. */
+.climb-marker-active { z-index: 2; }
 .climb-marker i { font-size: 0.74rem; }
 .climb-marker .climb-marker-stats { color: #212529; }
 .climb-marker .climb-marker-cat {
@@ -3777,6 +3827,33 @@ function onLightboxKey(ev) {
   top: 0;
   z-index: 1;
   background: #fff;
+}
+/* Detected-climb rows are clickable — they drive the same selection as the
+   climb markers on the map (highlights the segment + scopes the charts). */
+.climb-row { cursor: pointer; }
+/* Bootstrap paints `background-color` on each <td> via `--bs-table-bg`, so a
+   background on the <tr> stays invisible. We style the cells directly. */
+.climb-row > td { transition: background-color 0.12s, box-shadow 0.12s; }
+/* `.climb-row-hover` is fed by both pointer hover on the row and the map's
+   climb marker, giving a bidirectional table ↔ map link. */
+.climb-row:hover > td,
+.climb-row-hover > td {
+  background-color: rgba(252, 76, 2, 0.12);
+}
+.climb-row:focus-visible {
+  outline: none;
+}
+.climb-row:focus-visible > td {
+  box-shadow: inset 0 2px 0 rgba(252, 76, 2, 0.55),
+              inset 0 -2px 0 rgba(252, 76, 2, 0.55);
+}
+.climb-row:focus-visible > td:first-child { box-shadow: inset 2px 0 0 rgba(252, 76, 2, 0.55), inset 0 2px 0 rgba(252, 76, 2, 0.55), inset 0 -2px 0 rgba(252, 76, 2, 0.55); }
+.climb-row:focus-visible > td:last-child  { box-shadow: inset -2px 0 0 rgba(252, 76, 2, 0.55), inset 0 2px 0 rgba(252, 76, 2, 0.55), inset 0 -2px 0 rgba(252, 76, 2, 0.55); }
+.climb-row-active > td,
+.climb-row-active:hover > td,
+.climb-row-active.climb-row-hover > td {
+  background-color: rgba(252, 76, 2, 0.22);
+  font-weight: 600;
 }
 
 /* Hover cursor that follows the route on the map */

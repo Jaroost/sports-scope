@@ -84,6 +84,11 @@
         "col_power": "Puissance moy.",
         "col_duration": "Durée",
         "peak_power_title": "Meilleures puissances moyennes",
+        "peak_power_pr": "Record",
+        "peak_power_pr_hint": "Meilleure performance de votre historique sur cette durée",
+        "peak_power_tied": "Égalité",
+        "peak_power_tied_hint": "Identique à votre meilleur enregistrement sur cette durée",
+        "peak_power_best_hint": "Votre meilleur historique sur cette durée",
         "col_length": "Longueur",
         "col_grade": "Pente",
         "col_vam": "Vit. ascensionnelle"

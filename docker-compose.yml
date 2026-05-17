@@ -14,6 +14,8 @@ services:
       POSTGRES_DB: sports_scope_development
     volumes:
       - db_app_data:/var/lib/postgresql
+    ports:
+      - "5432:5432"
     networks:
       - default
     healthcheck:

@@ -632,6 +632,48 @@ async function fetchStreams() {
   }
 }
 
+// All-time peak-power ranks for this user — works for both imported (FIT)
+// and Strava activities; the backend persists a small cache row for Strava
+// streams so the comparison includes them. `current` mirrors what we
+// recompute client-side; `bests` is the user's all-time best per duration
+// (excluding this activity, across BOTH sources).
+const peakPowerRanks = ref(null) // { current: {dur: w}, bests: {dur: {avg_watts, source, external_id, started_at}} } | null
+const peakPowerRanksUrl = computed(() => props.source === 'imported'
+  ? `/api/imported_activities/${props.activityId}/peak_power_ranks`
+  : `/strava/activities/${props.activityId}/peak_power_ranks`)
+async function fetchPeakPowerRanks() {
+  peakPowerRanks.value = null
+  try {
+    const res = await fetch(peakPowerRanksUrl.value, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) return
+    peakPowerRanks.value = await res.json()
+  } catch {
+    // Best-effort — the table still renders without rank badges.
+  }
+}
+
+// For a row in the peak-power table, label its rank vs. the user's history:
+// 'pr'    — this activity beats every previous best for this duration
+// 'tied'  — matches the all-time best (within rounding)
+// null    — there's a better all-time effort; we surface that value separately
+function peakPowerRankLabel(pp) {
+  const bests = peakPowerRanks.value?.bests
+  if (!bests) return null
+  const best = bests[String(pp.duration)]
+  if (!best || !Number.isFinite(best.avg_watts)) return 'pr' // first activity at this duration
+  const delta = pp.avgPower - best.avg_watts
+  if (delta > 0.5) return 'pr'
+  if (Math.abs(delta) <= 0.5) return 'tied'
+  return null
+}
+
+function peakPowerBestFor(pp) {
+  return peakPowerRanks.value?.bests?.[String(pp.duration)] || null
+}
+
 async function fetchPhotos() {
   if (!photosUrl.value) { photos.value = []; return }
   try {
@@ -2440,6 +2482,8 @@ onMounted(async () => {
   await fetchActivity()
   if (!activity.value) return
   await fetchStreams()
+  // Best-effort, fire-and-forget — the table renders fine without ranks.
+  fetchPeakPowerRanks()
   await savedLayoutsPromise
   // Auto-apply the user's last-used preset if any. applyPresetById is a no-op
   // if the id no longer exists (e.g., was deleted from another tab).
@@ -2862,7 +2906,33 @@ function onLightboxKey(ev) {
                     @blur="hoveredPeakDuration = null"
                   >
                     <td>{{ formatPowerDuration(pp.duration) }}</td>
-                    <td>{{ Math.round(pp.avgPower) }} W</td>
+                    <td class="d-flex align-items-center gap-2 flex-wrap">
+                      <span>{{ Math.round(pp.avgPower) }} W</span>
+                      <span
+                        v-if="peakPowerRankLabel(pp) === 'pr'"
+                        class="peak-power-badge peak-power-badge-pr"
+                        :title="t('strava.stats.peak_power_pr_hint')"
+                      >
+                        <i class="fa-solid fa-trophy" aria-hidden="true"></i>
+                        <span>{{ t('strava.stats.peak_power_pr') }}</span>
+                      </span>
+                      <span
+                        v-else-if="peakPowerRankLabel(pp) === 'tied'"
+                        class="peak-power-badge peak-power-badge-tied"
+                        :title="t('strava.stats.peak_power_tied_hint')"
+                      >
+                        <i class="fa-solid fa-equals" aria-hidden="true"></i>
+                        <span>{{ t('strava.stats.peak_power_tied') }}</span>
+                      </span>
+                      <span
+                        v-else-if="peakPowerBestFor(pp)"
+                        class="peak-power-best text-muted small"
+                        :title="t('strava.stats.peak_power_best_hint')"
+                      >
+                        <i class="fa-regular fa-star" aria-hidden="true"></i>
+                        {{ Math.round(peakPowerBestFor(pp).avg_watts) }} W
+                      </span>
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -3890,6 +3960,37 @@ function onLightboxKey(ev) {
 .climb-row-active.climb-row-hover > td {
   background-color: rgba(252, 76, 2, 0.22);
   font-weight: 600;
+}
+
+/* Personal-best badges on the peak-power table. `-pr` is the highlight (this
+   activity beats every prior best for that duration); `-tied` is a soft
+   variant when the values match within rounding tolerance. */
+.peak-power-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.peak-power-badge-pr {
+  background: rgba(255, 193, 7, 0.18);
+  color: #b45309;
+  border: 1px solid rgba(180, 83, 9, 0.35);
+}
+.peak-power-badge-tied {
+  background: rgba(108, 117, 125, 0.14);
+  color: #495057;
+  border: 1px solid rgba(108, 117, 125, 0.3);
+}
+.peak-power-best {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Hover cursor that follows the route on the map */

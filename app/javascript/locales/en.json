@@ -84,6 +84,11 @@
         "col_power": "Avg power",
         "col_duration": "Duration",
         "peak_power_title": "Best average powers",
+        "peak_power_pr": "PR",
+        "peak_power_pr_hint": "Your best ever effort at this duration",
+        "peak_power_tied": "Tied",
+        "peak_power_tied_hint": "Matches your previous best at this duration",
+        "peak_power_best_hint": "Your all-time best at this duration",
         "col_length": "Length",
         "col_grade": "Grade",
         "col_vam": "Vertical ascent rate"

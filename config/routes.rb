@@ -19,6 +19,7 @@ Rails.application.routes.draw do
   get "/strava/activities", to: "strava#activities", as: :strava_activities
   get "/strava/activities/:id", to: "strava#show", as: :strava_activity, constraints: { id: /\d+/ }
   get "/strava/activities/:id/streams", to: "strava#streams", as: :strava_activity_streams, constraints: { id: /\d+/ }
+  get "/strava/activities/:id/peak_power_ranks", to: "strava#peak_power_ranks", as: :strava_activity_peak_power_ranks, constraints: { id: /\d+/ }
   get "/strava/activities/:id/photos", to: "strava#photos", as: :strava_activity_photos, constraints: { id: /\d+/ }
 
   # Route builder (JSON CRUD consumed by Vue components)
@@ -35,6 +36,7 @@ Rails.application.routes.draw do
   post "/api/imported_activities", to: "imported_activities#create"
   get "/api/imported_activities/:id", to: "imported_activities#show", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/streams", to: "imported_activities#streams", constraints: { id: /\d+/ }
+  get "/api/imported_activities/:id/peak_power_ranks", to: "imported_activities#peak_power_ranks", constraints: { id: /\d+/ }
   delete "/api/imported_activities/:id", to: "imported_activities#destroy", constraints: { id: /\d+/ }
 
   # User preferences (JSON consumed by Vue components) — named layout presets

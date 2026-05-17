@@ -1721,7 +1721,41 @@ onMounted(async () => {
   }
   await renderMap()
   if (currentId.value) await fetchRoute(currentId.value)
+  else applyPendingGpxImport()
 })
+
+// Handover from the routes list page: the user picked a .gpx there, we
+// downsampled the track into waypoints and stashed them in sessionStorage.
+// Read them once on mount of the empty builder and feed them through the
+// normal recompute path so BRouter snaps + adds elevation.
+function applyPendingGpxImport() {
+  try {
+    const u = new URL(window.location.href)
+    if (u.searchParams.get('fromGpx') !== '1') return
+    u.searchParams.delete('fromGpx')
+    window.history.replaceState({}, '', u.toString())
+    const raw = sessionStorage.getItem('sportsScope.gpxImport')
+    sessionStorage.removeItem('sportsScope.gpxImport')
+    if (!raw) return
+    const payload = JSON.parse(raw)
+    const wps = Array.isArray(payload?.waypoints) ? payload.waypoints : []
+    if (wps.length < 2) return
+    if (payload.name && !name.value.trim()) name.value = String(payload.name).slice(0, 80)
+    waypoints.value = wps
+    refreshWaypointMarkers()
+    if (mapInstance) {
+      const lngs = wps.map((w) => w.lng)
+      const lats = wps.map((w) => w.lat)
+      mapInstance.fitBounds(
+        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+        { padding: 60, duration: 600, maxZoom: 14 },
+      )
+    }
+    recomputeRoute()
+  } catch {
+    // bad/stale payload — drop it silently and let the user start over
+  }
+}
 
 onBeforeUnmount(() => {
   destroyChart()

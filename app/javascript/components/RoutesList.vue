@@ -237,15 +237,13 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString()
 }
 
-// Same Naismith-style formula as the builder: flat term (distance / speed) +
-// climbing term (~400 m climb ≈ 1 hour). Returns 0 when we have no distance.
+// Estimated ride time: distance / speed. Mirrors the builder — the chosen
+// avg speed already accounts for terrain, so no climb penalty is added.
 function estimatedSecondsFor(r) {
   const d = r?.distance_m
   const v = avgSpeedKmh.value
   if (!d || !Number.isFinite(v) || v <= 0) return 0
-  const flatHours = (d / 1000) / v
-  const climbHours = (r.elevation_gain_m || 0) / 400
-  return Math.round((flatHours + climbHours) * 3600)
+  return Math.round(((d / 1000) / v) * 3600)
 }
 
 function formatDuration(totalSec) {

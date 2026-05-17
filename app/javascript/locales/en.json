@@ -152,7 +152,7 @@
       "duplicate_prompt": "Name of the copy:",
       "open_in_google_maps": "Open in Google Maps",
       "open_in_komoot": "Open in Komoot",
-      "estimated_time_hint": "Estimated time (includes a penalty for elevation gain)",
+      "estimated_time_hint": "Estimated time (distance ÷ average speed)",
       "avg_speed_hint": "Average speed (km/h)",
       "save_name": "Save name",
       "cancel": "Cancel",

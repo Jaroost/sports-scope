@@ -117,16 +117,14 @@ watch(avgSpeedKmh, (v) => {
   try { localStorage.setItem(SPEED_KEY, String(v)) } catch { /* ignore */ }
 })
 
-// Estimated ride time: flat term (distance / speed) + climbing term.
-// Naismith-style adjustment: ~400 m of climb costs ~1 hour on top of the flat
-// speed. Descents are presumed already baked into the user's flat speed.
+// Estimated ride time: distance / speed. The user picks an average speed that
+// already reflects how hilly the route is, so no climb penalty is layered on
+// top — otherwise tweaking the speed barely moved the displayed duration.
 const estimatedSeconds = computed(() => {
   const d = distanceM.value
   const v = avgSpeedKmh.value
   if (!d || !Number.isFinite(v) || v <= 0) return 0
-  const flatHours = (d / 1000) / v
-  const climbHours = (elevGainM.value || 0) / 400
-  return Math.round((flatHours + climbHours) * 3600)
+  return Math.round(((d / 1000) / v) * 3600)
 })
 
 function formatDuration(totalSec) {

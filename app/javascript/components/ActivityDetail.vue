@@ -1,5 +1,3 @@
-//TODO regrouper toutes les chips avec tooltip pour gagner de la place
-//TODO la durée ne en fonction de la vitesse moyenne ne fonctionne pas
 //TODO trouver un moyen de se déplacer convenablement de haut en bas sans déclencher de zoom
 <script setup>
 import { ref, onMounted, onBeforeUnmount, computed, nextTick, useTemplateRef, watch } from 'vue'
@@ -2922,55 +2920,61 @@ function onLightboxKey(ev) {
               <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
               <strong>{{ Math.round(rangeElevation().down) }} m</strong>
             </span>
-            <span
-              v-if="rangeVam() != null"
-              class="range-chip"
-              :class="rangeVam() >= 0 ? 'range-chip-success' : 'range-chip-danger'"
-              :title="t('strava.stats.vam_hint')"
-            >
-              <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-              <strong>{{ Math.round(rangeVam()) }} m/h</strong>
-            </span>
             <span v-if="rangeGrade() != null && !visibleStreams.includes('grade_smooth')" class="range-chip">
               <i class="fa-solid fa-percent" aria-hidden="true"></i>
               <strong>{{ rangeGrade().toFixed(1) }} %</strong>
             </span>
-            <span
-              v-for="streamKey in chipStreams"
-              :key="`mean-${streamKey}`"
-              class="range-chip range-chip-stream"
-              :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
+            <div
+              v-if="rangeVam() != null || chipStreams.length > 0"
+              class="control-group range-chip-group"
             >
-              <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-              <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
-              <strong v-else>–</strong>
-              <i v-if="chartStats(defByKey(streamKey))" class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
-              <span v-if="chartStats(defByKey(streamKey))" class="chip-popover">
-                <div class="chart-tooltip-title">
-                  <div class="chart-tooltip-title-main">
-                    <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-                    {{ t('strava.stream.' + streamKey) }}
-                  </div>
-                </div>
-                <div class="chart-tooltip-section">
-                  <div class="chart-tooltip-row">
-                    <i class="fa-solid fa-arrow-down-short-wide chart-tooltip-icon" aria-hidden="true"></i>
-                    <span class="chart-tooltip-name">{{ t('strava.range_stats.min') }}</span>
-                    <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
-                  </div>
-                  <div class="chart-tooltip-row">
-                    <i class="fa-solid fa-equals chart-tooltip-icon" aria-hidden="true"></i>
-                    <span class="chart-tooltip-name">{{ t('strava.range_stats.mean') }}</span>
-                    <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
-                  </div>
-                  <div class="chart-tooltip-row">
-                    <i class="fa-solid fa-arrow-up-wide-short chart-tooltip-icon" aria-hidden="true"></i>
-                    <span class="chart-tooltip-name">{{ t('strava.range_stats.max') }}</span>
-                    <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
-                  </div>
-                </div>
+              <span
+                v-if="rangeVam() != null"
+                class="range-chip"
+                :class="rangeVam() >= 0 ? 'range-chip-success' : 'range-chip-danger'"
+                :title="t('strava.stats.vam_hint')"
+              >
+                <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+                <strong>{{ Math.round(rangeVam()) }} m/h</strong>
+                <i class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
               </span>
-            </span>
+              <span
+                v-for="streamKey in chipStreams"
+                :key="`mean-${streamKey}`"
+                class="range-chip range-chip-stream"
+                :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
+              >
+                <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
+                <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
+                <strong v-else>–</strong>
+                <i v-if="chartStats(defByKey(streamKey))" class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
+                <span v-if="chartStats(defByKey(streamKey))" class="chip-popover">
+                  <div class="chart-tooltip-title">
+                    <div class="chart-tooltip-title-main">
+                      <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
+                      {{ t('strava.stream.' + streamKey) }}
+                    </div>
+                  </div>
+                  <div class="chart-tooltip-section">
+                    <div class="chart-tooltip-row">
+                      <i class="fa-solid fa-arrow-down-short-wide chart-tooltip-icon" aria-hidden="true"></i>
+                      <span class="chart-tooltip-name">{{ t('strava.range_stats.min') }}</span>
+                      <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                    </div>
+                    <div class="chart-tooltip-row">
+                      <i class="fa-solid fa-equals chart-tooltip-icon" aria-hidden="true"></i>
+                      <span class="chart-tooltip-name">{{ t('strava.range_stats.mean') }}</span>
+                      <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                    </div>
+                    <div class="chart-tooltip-row">
+                      <i class="fa-solid fa-arrow-up-wide-short chart-tooltip-icon" aria-hidden="true"></i>
+                      <span class="chart-tooltip-name">{{ t('strava.range_stats.max') }}</span>
+                      <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                    </div>
+                  </div>
+                </span>
+              </span>
+            </div>
           </div>
         </div>
         <div v-if="!chartsCollapsed" class="card-body">
@@ -3490,6 +3494,10 @@ function onLightboxKey(ev) {
   border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: 0.5rem;
   position: relative;
+}
+.range-chip-group {
+  flex-wrap: wrap;
+  padding: 0.2rem 0.35rem;
 }
 .control-group-label {
   font-size: 0.65rem;

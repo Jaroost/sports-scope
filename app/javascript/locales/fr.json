@@ -87,6 +87,7 @@
         "col_gain": "D+",
         "col_loss": "D-",
         "col_hr": "FC moy.",
+        "col_power": "Puissance moy.",
         "col_length": "Longueur",
         "col_grade": "Pente",
         "col_vam": "Vit. ascensionnelle"

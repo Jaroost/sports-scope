@@ -87,6 +87,7 @@
         "col_gain": "Gain",
         "col_loss": "Loss",
         "col_hr": "Avg HR",
+        "col_power": "Avg power",
         "col_length": "Length",
         "col_grade": "Grade",
         "col_vam": "Vertical ascent rate"

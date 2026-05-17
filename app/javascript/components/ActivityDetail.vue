@@ -489,6 +489,7 @@ const splits = computed(() => {
   if (!Array.isArray(dist) || !Array.isArray(time) || dist.length < 2) return []
   const alt = streams.value?.altitude?.data || []
   const hr = streams.value?.heartrate?.data || []
+  const watts = streams.value?.watts?.data || []
   const len = Math.min(dist.length, time.length)
   const out = []
   let segStart = 0
@@ -514,9 +515,13 @@ const splits = computed(() => {
       }
       let hrSum = 0
       let hrCount = 0
+      let powSum = 0
+      let powCount = 0
       for (let j = segStart; j <= i; j++) {
         const v = hr[j]
         if (typeof v === 'number' && Number.isFinite(v)) { hrSum += v; hrCount++ }
+        const w = watts[j]
+        if (typeof w === 'number' && Number.isFinite(w)) { powSum += w; powCount++ }
       }
       out.push({
         kmIndex: out.length + 1,
@@ -527,6 +532,7 @@ const splits = computed(() => {
         gain,
         loss,
         avgHr: hrCount ? hrSum / hrCount : null,
+        avgPower: powCount ? powSum / powCount : null,
       })
       segStart = i
       nextKm += 1000
@@ -534,6 +540,8 @@ const splits = computed(() => {
   }
   return out
 })
+
+const splitsHavePower = computed(() => splits.value.some((s) => s.avgPower != null))
 
 // Per-climb stats enriched with duration + VAM. `detectClimbs` already gives
 // us gain / lengthM / avgGrade / category; we add the actual time spent on
@@ -2756,6 +2764,10 @@ function onLightboxKey(ev) {
                       <i class="fa-solid fa-heart-pulse text-danger" aria-hidden="true"></i>
                       <span class="visually-hidden">{{ t('strava.stats.col_hr') }}</span>
                     </th>
+                    <th v-if="splitsHavePower" :title="t('strava.stats.col_power')">
+                      <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
+                      <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2769,6 +2781,7 @@ function onLightboxKey(ev) {
                     <td>+{{ Math.round(sp.gain) }} m</td>
                     <td>−{{ Math.round(sp.loss) }} m</td>
                     <td>{{ sp.avgHr != null ? `${Math.round(sp.avgHr)} bpm` : '–' }}</td>
+                    <td v-if="splitsHavePower">{{ sp.avgPower != null ? `${Math.round(sp.avgPower)} W` : '–' }}</td>
                   </tr>
                 </tbody>
               </table>

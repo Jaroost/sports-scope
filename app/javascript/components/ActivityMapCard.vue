@@ -115,14 +115,6 @@ function formatDuration(seconds) {
 
 const ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS = 25
 
-// Optional Thunderforest API key picked up from the layout's <meta> tag —
-// only enables the "OpenCycleMap" style button when set.
-const THUNDERFOREST_KEY = (
-  typeof document !== 'undefined'
-    ? (document.querySelector('meta[name="thunderforest-api-key"]')?.getAttribute('content') || '')
-    : ''
-).trim()
-
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
 // ─── Index helpers ───────────────────────────────────────────────────────
@@ -144,7 +136,7 @@ function latLngToIndex(lng, lat) {
 function mapStyleFor(id) {
   if (id === 'liberty') return 'https://tiles.openfreemap.org/styles/liberty'
   if (id === 'topo') return openTopoMapStyle()
-  if (id === 'cycle' && THUNDERFOREST_KEY) return openCycleMapStyle(THUNDERFOREST_KEY)
+  if (id === 'cycle') return openCycleMapStyle()
   return cyclOsmStyle()
 }
 
@@ -169,16 +161,16 @@ function openTopoMapStyle() {
   }
 }
 
-function openCycleMapStyle(apiKey) {
+function openCycleMapStyle() {
   return {
     version: 8,
     sources: {
       'thunderforest-cycle': {
         type: 'raster',
         tiles: [
-          `https://a.tile.thunderforest.com/cycle/{z}/{x}/{y}.png?apikey=${apiKey}`,
-          `https://b.tile.thunderforest.com/cycle/{z}/{x}/{y}.png?apikey=${apiKey}`,
-          `https://c.tile.thunderforest.com/cycle/{z}/{x}/{y}.png?apikey=${apiKey}`,
+          `https://a.tile.thunderforest.com/cycle/{z}/{x}/{y}.png`,
+          `https://b.tile.thunderforest.com/cycle/{z}/{x}/{y}.png`,
+          `https://c.tile.thunderforest.com/cycle/{z}/{x}/{y}.png`,
         ],
         tileSize: 256,
         maxzoom: 22,
@@ -866,17 +858,6 @@ onBeforeUnmount(() => {
             >
               <i class="fa-solid fa-bicycle" aria-hidden="true"></i>
               <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_cyclo') }}</span>
-            </button>
-            <button
-              v-if="THUNDERFOREST_KEY"
-              type="button"
-              class="btn map-ctrl-btn"
-              :class="mapStyleId === 'cycle' ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="t('strava.map_style_opencycle')"
-              @click="setMapStyle('cycle')"
-            >
-              <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_opencycle') }}</span>
             </button>
             <button
               type="button"

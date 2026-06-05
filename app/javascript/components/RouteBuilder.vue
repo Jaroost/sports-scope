@@ -20,7 +20,7 @@ const isFetchingRoute = ref(false)
 const isFetchingElevation = ref(false)
 const saving = ref(false)
 const error = ref(null)
-const mapStyleId = ref('cyclosm')
+const mapStyleId = ref('topo')
 const currentId = ref(props.routeId ? Number(props.routeId) : null)
 const mapEl = useTemplateRef('mapEl')
 const chartEl = useTemplateRef('chartEl')
@@ -236,16 +236,10 @@ function clearSearch() {
   searchOpen.value = false
 }
 
-// ─── Map styles (duplicated from ActivityDetail.vue for MVP) ────────────────
-const THUNDERFOREST_KEY = (
-  document.querySelector('meta[name="thunderforest-api-key"]')?.getAttribute('content') || ''
-).trim()
-
 function mapStyleFor(id) {
   if (id === 'liberty') return 'https://tiles.openfreemap.org/styles/liberty'
   if (id === 'topo') return openTopoMapStyle()
-  if (id === 'cycle' && THUNDERFOREST_KEY) return openCycleMapStyle(THUNDERFOREST_KEY)
-  return cyclOsmStyle()
+  if (id === 'cycle') return cyclOsmStyle()
 }
 
 function cyclOsmStyle() {
@@ -876,6 +870,13 @@ function refreshDivergentMarkers() {
       .addTo(mapInstance)
     divergentMarkers.push(marker)
   })
+}
+
+function mapIcon(id) {
+  if (id === 'liberty') return $`<i class="fa-solid fa-map"></i>`
+  if (id === 'topo') return `<i class="fa-solid fa-mountain"></i>`
+  if (id === 'cycle') return `<i class="fa-solid fa-bicycle"></i>`
+  return `<i class="fa-solid fa-map"></i>`
 }
 
 function setMapStyle(id) {
@@ -1926,20 +1927,39 @@ onBeforeUnmount(() => {
         <div class="map-wrap" :class="{ expanded: mapExpanded }">
           <div ref="mapEl" class="route-builder-map"></div>
           <div class="map-controls">
+            <div class="dropdown">
+              <button class="btn btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                <i v-html="mapIcon(mapStyleId)">
+                </i>
+                {{ t( `strava.map_style_${mapStyleId}`) }}
+              </button>
+              <ul class="dropdown-menu">
+                <li>
+                  <a class="dropdown-item" @click="setMapStyle('cyclosm')">
+                    <i v-html="mapIcon('cyclosm')"></i> {{ t('strava.map_style_cyclosm') }}
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" @click="setMapStyle('cycle')">
+                    <i v-html="mapIcon('cycle')"></i> {{ t('strava.map_style_cycle') }}
+                  </a>
+                </li>
+                <li>
+                  <a class="dropdown-item" @click="setMapStyle('topo')">
+                    <i v-html="mapIcon('topo')"></i> {{ t('strava.map_style_topo') }}
+                  </a>
+                </li>
+                <li><a class="dropdown-item" href="#">Another action</a></li>
+                <li><a class="dropdown-item" href="#">Something else here</a></li>
+              </ul>
+            </div>
             <div class="btn-group btn-group-sm shadow-sm" role="group">
               <button type="button" class="btn map-ctrl-btn"
                 :class="mapStyleId === 'cyclosm' ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="setMapStyle('cyclosm')"
                 :title="t('strava.map_style_cyclo')">
                 <i class="fa-solid fa-bicycle" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_cyclo') }}</span>
-              </button>
-              <button v-if="THUNDERFOREST_KEY" type="button" class="btn map-ctrl-btn"
-                :class="mapStyleId === 'cycle' ? 'btn-warning text-dark active' : 'btn-light'"
-                @click="setMapStyle('cycle')"
-                :title="t('strava.map_style_opencycle')">
-                <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_opencycle') }}</span>
+                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_cyclosm') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
                 :class="mapStyleId === 'topo' ? 'btn-warning text-dark active' : 'btn-light'"
@@ -1951,9 +1971,9 @@ onBeforeUnmount(() => {
               <button type="button" class="btn map-ctrl-btn"
                 :class="mapStyleId === 'liberty' ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="setMapStyle('liberty')"
-                :title="t('strava.map_style_standard')">
+                :title="t('strava.map_style_liberty')">
                 <i class="fa-solid fa-map" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_standard') }}</span>
+                <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_liberty') }}</span>
               </button>
             </div>
             <div class="btn-group btn-group-sm shadow-sm" role="group">

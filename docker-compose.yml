@@ -38,7 +38,7 @@ services:
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-      KC_HOSTNAME: https://keycloak.localtest.me
+      KC_HOSTNAME: https://${KEYCLOAK_HOST:-keycloak.localtest.me}
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
@@ -46,7 +46,7 @@ services:
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
       RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
-      APP_HOST: ${APP_HOST:-https://app.localtest.me}
+      APP_HOST: https://${APP_HOST:-app.localtest.me}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
     volumes:
@@ -59,7 +59,7 @@ services:
         condition: service_healthy
     labels:
       <<: *traefik-defaults
-      traefik.http.routers.keycloak.rule: Host(`keycloak.localtest.me`)
+      traefik.http.routers.keycloak.rule: "Host(`${KEYCLOAK_HOST:-keycloak.localtest.me}`)"
       traefik.http.routers.keycloak.entrypoints: websecure
       traefik.http.routers.keycloak.tls: "true"
       traefik.http.services.keycloak.loadbalancer.server.port: "8080"
@@ -78,18 +78,18 @@ services:
       DATABASE_PORT: 5432
       DATABASE_USER: ${POSTGRES_USER:-postgres}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
-      VITE_RUBY_HOST: vite.localtest.me
+      VITE_RUBY_HOST: ${VITE_HOST:-vite.localtest.me}
       VITE_RUBY_PORT: 443
       VITE_RUBY_HTTPS: "true"
       VITE_RUBY_SKIP_COMPATIBILITY_CHECK: "true"
-      KEYCLOAK_BASE_URL: https://keycloak.localtest.me
+      KEYCLOAK_BASE_URL: https://${KEYCLOAK_HOST:-keycloak.localtest.me}
       KEYCLOAK_REALM: sports-scope
       KEYCLOAK_CLIENT_ID: rails-app
       RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
-      APP_HOST: ${APP_HOST:-https://app.localtest.me}
+      APP_HOST: https://${APP_HOST:-app.localtest.me}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
-      VITE_PUBLIC_HOST: vite.localtest.me
+      VITE_PUBLIC_HOST: ${VITE_HOST:-vite.localtest.me}
       EXTRA_CA_CERT: /etc/ssl/extra/traefik.crt
     volumes:
       - .:/app
@@ -97,9 +97,9 @@ services:
       - node_modules_cache:/app/node_modules
       - /home/user/traefik-docker/certs/cert.pem:/etc/ssl/extra/traefik.crt:ro
     extra_hosts:
-      - "keycloak.localtest.me:host-gateway"
-      - "vite.localtest.me:host-gateway"
-      - "app.localtest.me:host-gateway"
+      - "${KEYCLOAK_HOST:-keycloak.localtest.me}:host-gateway"
+      - "${VITE_HOST:-vite.localtest.me}:host-gateway"
+      - "${APP_HOST:-app.localtest.me}:host-gateway"
     networks:
       - default
       - proxy
@@ -112,7 +112,7 @@ services:
         condition: service_started
     labels:
       <<: *traefik-defaults
-      traefik.http.routers.rails.rule: Host(`app.localtest.me`)
+      traefik.http.routers.rails.rule: "Host(`${APP_HOST:-app.localtest.me}`)"
       traefik.http.routers.rails.entrypoints: websecure
       traefik.http.routers.rails.tls: "true"
       traefik.http.services.rails.loadbalancer.server.port: "3000"
@@ -130,7 +130,7 @@ services:
       VITE_RUBY_HOST: 0.0.0.0
       VITE_RUBY_PORT: 3036
       VITE_RUBY_SKIP_COMPATIBILITY_CHECK: "true"
-      VITE_PUBLIC_HOST: vite.localtest.me
+      VITE_PUBLIC_HOST: ${VITE_HOST:-vite.localtest.me}
     volumes:
       - .:/app
       - bundle_cache:/usr/local/bundle
@@ -140,7 +140,7 @@ services:
       - proxy
     labels:
       <<: *traefik-defaults
-      traefik.http.routers.vite.rule: Host(`vite.localtest.me`)
+      traefik.http.routers.vite.rule: "Host(`${VITE_HOST:-vite.localtest.me}`)"
       traefik.http.routers.vite.entrypoints: websecure
       traefik.http.routers.vite.tls: "true"
       traefik.http.services.vite.loadbalancer.server.port: "3036"

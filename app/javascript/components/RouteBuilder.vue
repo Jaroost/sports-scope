@@ -835,10 +835,16 @@ function clearAll() {
   recomputeRoute()
 }
 
+function toggleWaypoints() {
+  state.showWaypoints = !state.showWaypoints
+  refreshWaypointMarkers()
+}
+
 function refreshWaypointMarkers() {
   if (!_maplibregl || !mapInstance) return
   waypointMarkers.forEach((m) => m.remove())
   waypointMarkers.length = 0
+  if (!state.showWaypoints) return
   waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
     el.className = 'wp-marker'
@@ -1823,6 +1829,13 @@ onBeforeUnmount(() => {
             <!-- Fond de carte -->
             <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
             <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+              <button type="button" class="btn map-ctrl-btn"
+                :class="state.showWaypoints ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleWaypoints"
+                :title="state.showWaypoints ? t('routes.hide_waypoints') : t('routes.show_waypoints')"
+                :aria-pressed="state.showWaypoints">
+                <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
+              </button>
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleClimbs"

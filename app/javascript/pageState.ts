@@ -80,6 +80,7 @@ export class ActivityMapState extends MapPageState {
 
 export class RouteBuilderState extends MapPageState {
   colorMode: ColorMode = 'grade'
+  showWaypoints = true
 
   constructor() {
     super('cyclosm')
@@ -96,6 +97,6 @@ export class RouteBuilderState extends MapPageState {
   }
 
   protected override persistedFields(): string[] {
-    return [...super.persistedFields(), 'colorMode']
+    return [...super.persistedFields(), 'colorMode', 'showWaypoints']
   }
 }

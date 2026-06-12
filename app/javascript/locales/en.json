@@ -186,7 +186,9 @@
       "no_cycling_here": "No-cycling section (one-way against bikes)",
       "selection": "Selection",
       "reset_zoom": "Reset zoom",
-      "zoom_to_selection": "Zoom to selection"
+      "zoom_to_selection": "Zoom to selection",
+      "show_waypoints": "Show waypoints",
+      "hide_waypoints": "Hide waypoints"
     },
     "common": {
       "days_ago_today": "today",

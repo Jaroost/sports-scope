@@ -186,7 +186,9 @@
       "no_cycling_here": "Sens interdit à vélo (détour cyclable)",
       "selection": "Sélection",
       "reset_zoom": "Réinitialiser zoom",
-      "zoom_to_selection": "Zoomer sur sélection"
+      "zoom_to_selection": "Zoomer sur sélection",
+      "show_waypoints": "Afficher les points",
+      "hide_waypoints": "Masquer les points"
     },
     "common": {
       "days_ago_today": "aujourd'hui",

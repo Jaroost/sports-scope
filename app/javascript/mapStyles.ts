@@ -1,16 +1,21 @@
-export const MAP_STYLES = [
+export interface MapStyle {
+  id: string
+  icon: string
+}
+
+export const MAP_STYLES: MapStyle[] = [
   { id: 'cyclosm', icon: 'fa-bicycle' },
   { id: 'topo',    icon: 'fa-mountain-sun' },
   { id: 'liberty', icon: 'fa-map' },
 ]
 
-export function mapStyleFor(id) {
+export function mapStyleFor(id: string): string | object {
   if (id === 'liberty') return 'https://tiles.openfreemap.org/styles/liberty'
   if (id === 'topo') return openTopoMapStyle()
   return cyclOsmStyle()
 }
 
-export function cyclOsmStyle() {
+export function cyclOsmStyle(): object {
   return {
     version: 8,
     sources: {
@@ -39,7 +44,7 @@ export function cyclOsmStyle() {
   }
 }
 
-export function openTopoMapStyle() {
+export function openTopoMapStyle(): object {
   return {
     version: 8,
     sources: {

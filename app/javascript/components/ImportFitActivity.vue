@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'
@@ -134,7 +134,7 @@ function buildPayload(data, filename) {
   }
 
   // Drop streams that are entirely null (so the chart doesn't render them).
-  const streams = {}
+  const streams: Record<string, { data: any[] }> = {}
   streams.time = { data: time }
   if (distance.some((v) => v > 0)) streams.distance = { data: distance }
   // latlng filters out nulls but Strava preserves alignment — keep nulls as

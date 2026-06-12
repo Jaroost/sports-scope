@@ -3,8 +3,44 @@
 // formatting + climb-detection + route-geometry logic without duplication.
 // No Vue / no DOM / no module-level state — easy to test and tree-shake.
 
+export interface ChartDef {
+  key: string
+  color: string
+  unit: string
+  transform: (v: number) => number
+  digits: number
+}
+
+export interface GradeBucket {
+  max: number
+  color: string
+}
+
+export interface ClimbSegment {
+  startIdx: number
+  endIdx: number
+  gain: number
+  lengthM: number
+  avgGrade: number
+  category: string | null
+}
+
+export interface GeoFeature {
+  type: 'Feature'
+  geometry: { type: 'LineString'; coordinates: number[][] }
+  properties: { bucket: number }
+}
+
+export interface PhotoLike {
+  urls?: Record<string, string>
+  unique_id?: string
+  id?: string | number
+  caption?: string
+  location?: number[]
+}
+
 // ─── Activity-type → Font Awesome icon ────────────────────────────────────
-export function activityIcon(type) {
+export function activityIcon(type: string | null | undefined): string {
   const t = (type || '').toLowerCase()
   if (t.includes('run')) return 'fa-person-running'
   if (t.includes('ride') || t.includes('cycl') || t.includes('bike') || t.includes('velo')) return 'fa-person-biking'
@@ -19,7 +55,7 @@ export function activityIcon(type) {
 
 // Stream key → Font Awesome icon. Used by the chart legend pills + range
 // chips + chart-hover tooltip rows.
-export const chartIcons = {
+export const chartIcons: Record<string, string> = {
   altitude: 'fa-mountain',
   heartrate: 'fa-heart-pulse',
   velocity_smooth: 'fa-gauge-high',
@@ -30,7 +66,7 @@ export const chartIcons = {
 }
 
 // chartDefs order drives the default chart layout (top → bottom).
-export const chartDefs = [
+export const chartDefs: ChartDef[] = [
   { key: 'altitude',        color: '#198754', unit: 'm',    transform: (v) => v,       digits: 0 },
   { key: 'watts',           color: '#fd7e14', unit: 'W',    transform: (v) => v,       digits: 0 },
   { key: 'velocity_smooth', color: '#0d6efd', unit: 'km/h', transform: (v) => v * 3.6, digits: 1 },
@@ -40,31 +76,31 @@ export const chartDefs = [
   { key: 'grade_smooth',    color: '#6c757d', unit: '%',    transform: (v) => v,       digits: 1 },
 ]
 
-export function defByKey(key) {
+export function defByKey(key: string): ChartDef | undefined {
   return chartDefs.find((d) => d.key === key)
 }
 
 // Independent order for the stream-mean chips in the sticky header — kept
 // stable regardless of how charts are ordered/merged.
-export const STREAM_CHIP_ORDER = ['grade_smooth', 'watts', 'velocity_smooth', 'heartrate', 'cadence', 'temp']
+export const STREAM_CHIP_ORDER: string[] = ['grade_smooth', 'watts', 'velocity_smooth', 'heartrate', 'cadence', 'temp']
 
 // Standard cycling peak-power durations (mirrors PeakPowerCurve::DURATIONS
 // on the Ruby side so server-stored values align with on-screen rows).
-export const PEAK_POWER_DURATIONS = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400]
+export const PEAK_POWER_DURATIONS: number[] = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400]
 
 // ─── Elevation gain/loss ──────────────────────────────────────────────────
 // Compute D+/D- from a flat altitude array using a (2*halfWin+1)-point moving
 // average to suppress sensor/quantisation noise before accumulating. Works for
 // both FIT barometric data (floating point, baro/GPS noise) and BRouter SRTM
 // integer data. Returns { gain, loss } in metres.
-export function computeElevGain(alts, halfWin = 2) {
+export function computeElevGain(alts: (number | null)[], halfWin = 2): { gain: number; loss: number } {
   const n = alts.length
   if (n < 2) return { gain: 0, loss: 0 }
-  let up = 0, down = 0, prev = null
+  let up = 0, down = 0, prev: number | null = null
   for (let i = 0; i < n; i++) {
     let sum = 0, cnt = 0
     for (let j = Math.max(0, i - halfWin); j <= Math.min(n - 1, i + halfWin); j++) {
-      if (alts[j] != null) { sum += alts[j]; cnt++ }
+      if (alts[j] != null) { sum += alts[j] as number; cnt++ }
     }
     const smooth = cnt > 0 ? sum / cnt : null
     if (smooth == null) continue
@@ -79,12 +115,12 @@ export function computeElevGain(alts, halfWin = 2) {
 }
 
 // ─── Formatting ───────────────────────────────────────────────────────────
-export function fmt(v, digits) {
+export function fmt(v: number | null | undefined, digits: number): string {
   if (v == null || Number.isNaN(v)) return '–'
   return v.toFixed(digits)
 }
 
-export function formatDuration(seconds) {
+export function formatDuration(seconds: number | null | undefined): string {
   if (!seconds) return '–'
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -92,22 +128,22 @@ export function formatDuration(seconds) {
   return h > 0 ? `${h}h ${m}min` : (m > 0 ? `${m}min ${s}s` : `${s}s`)
 }
 
-export function formatHMS(seconds) {
+export function formatHMS(seconds: number | null | undefined): string {
   if (seconds == null || Number.isNaN(seconds)) return '–'
   const total = Math.max(0, Math.round(seconds))
   const h = Math.floor(total / 3600)
   const m = Math.floor((total % 3600) / 60)
   const s = total % 60
-  const pad = (n) => String(n).padStart(2, '0')
+  const pad = (n: number) => String(n).padStart(2, '0')
   return `${pad(h)}:${pad(m)}:${pad(s)}`
 }
 
-export function formatKm(meters) {
+export function formatKm(meters: number | null | undefined): string {
   if (meters == null || Number.isNaN(meters)) return '–'
   return `${(meters / 1000).toFixed(2)} km`
 }
 
-export function formatPowerDuration(sec) {
+export function formatPowerDuration(sec: number): string {
   if (sec < 60) return `${sec} s`
   if (sec < 3600) return `${Math.round(sec / 60)} min`
   const h = Math.floor(sec / 3600)
@@ -115,17 +151,19 @@ export function formatPowerDuration(sec) {
   return m === 0 ? `${h} h` : `${h} h ${m}`
 }
 
-export function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+export function escapeHtml(s: unknown): string {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]
+  ))
 }
 
 // Strava photos come with multiple sized URLs keyed by their max edge length
 // (e.g. `{ "100": "...", "256": "...", "2048": "..." }`). Pick the entry that
 // matches `preferred`, else the smallest one bigger, else the biggest.
-export function pickPhotoUrl(photo, preferred = 256) {
+export function pickPhotoUrl(photo: PhotoLike | null | undefined, preferred = 256): string | null {
   if (!photo?.urls) return null
   const entries = Object.entries(photo.urls)
-    .map(([k, v]) => [Number(k), v])
+    .map(([k, v]) => [Number(k), v] as [number, string])
     .filter(([k]) => !Number.isNaN(k))
     .sort((a, b) => a[0] - b[0])
   if (entries.length === 0) return null
@@ -136,13 +174,13 @@ export function pickPhotoUrl(photo, preferred = 256) {
 }
 
 // ─── Polyline + downsample ────────────────────────────────────────────────
-export function decodePolyline(str) {
+export function decodePolyline(str: string): number[][] {
   let index = 0
   let lat = 0
   let lng = 0
-  const coords = []
+  const coords: number[][] = []
   while (index < str.length) {
-    let b
+    let b: number
     let shift = 0
     let result = 0
     do {
@@ -168,10 +206,10 @@ export function decodePolyline(str) {
   return coords
 }
 
-export function downsample(arr, maxPoints) {
+export function downsample<T>(arr: T[], maxPoints: number): T[] {
   if (arr.length <= maxPoints) return arr
   const step = arr.length / maxPoints
-  const out = []
+  const out: T[] = []
   for (let i = 0; i < maxPoints; i++) {
     out.push(arr[Math.floor(i * step)])
   }
@@ -179,7 +217,7 @@ export function downsample(arr, maxPoints) {
 }
 
 // ─── Grade buckets (route colouring) + climb detection ────────────────────
-export const GRADE_BUCKETS = [
+export const GRADE_BUCKETS: GradeBucket[] = [
   { max: -8,       color: '#1e3a8a' }, // very steep descent
   { max: -3,       color: '#3b82f6' }, // descent
   { max:  3,       color: '#22c55e' }, // flat / rolling
@@ -189,14 +227,19 @@ export const GRADE_BUCKETS = [
   { max: Infinity, color: '#7f1d1d' }, // very hard climb
 ]
 
-export function bucketGrade(g) {
+export function bucketGrade(g: number): number {
   for (let i = 0; i < GRADE_BUCKETS.length; i++) {
     if (g < GRADE_BUCKETS[i].max) return i
   }
   return GRADE_BUCKETS.length - 1
 }
 
-export function gradeForIndex(i, grades, altitudes, distances) {
+export function gradeForIndex(
+  i: number,
+  grades: number[] | null | undefined,
+  altitudes: number[] | null | undefined,
+  distances: number[] | null | undefined,
+): number {
   if (grades && grades[i] != null && !Number.isNaN(grades[i])) return grades[i]
   if (!altitudes || !distances || i + 1 >= altitudes.length || i + 1 >= distances.length) return 0
   const da = altitudes[i + 1] - altitudes[i]
@@ -204,9 +247,14 @@ export function gradeForIndex(i, grades, altitudes, distances) {
   return dd > 0 ? (da / dd) * 100 : 0
 }
 
-export function buildGradedSegments(coords, grades, altitudes, distances) {
+export function buildGradedSegments(
+  coords: number[][],
+  grades: number[] | null | undefined,
+  altitudes: number[] | null | undefined,
+  distances: number[] | null | undefined,
+): GeoFeature[] {
   if (!coords || coords.length < 2) return []
-  const features = []
+  const features: GeoFeature[] = []
   let current = [coords[0]]
   let curBucket = bucketGrade(gradeForIndex(0, grades, altitudes, distances))
   for (let i = 1; i < coords.length; i++) {
@@ -233,7 +281,7 @@ export function buildGradedSegments(coords, grades, altitudes, distances) {
   return features
 }
 
-export function climbCategory(lengthKm, avgGrade) {
+export function climbCategory(lengthKm: number, avgGrade: number): string | null {
   const score = lengthKm * Math.pow(Math.max(0, avgGrade), 2)
   if (score >= 400) return 'HC'
   if (score >= 200) return '1'
@@ -243,14 +291,18 @@ export function climbCategory(lengthKm, avgGrade) {
   return null
 }
 
-export function detectClimbs(grades, altitudes, distances) {
+export function detectClimbs(
+  grades: number[] | null | undefined,
+  altitudes: number[] | null | undefined,
+  distances: number[] | null | undefined,
+): ClimbSegment[] {
   if (!altitudes || !distances || altitudes.length === 0 || distances.length === 0) return []
   const MIN_GRADE = 2
   const MIN_GAIN_M = 60
   const MIN_LENGTH_M = 500
   const MERGE_GAP_M = 250
   const len = Math.min(altitudes.length, distances.length, grades?.length ?? altitudes.length)
-  const raw = []
+  const raw: { startIdx: number; endIdx: number }[] = []
   let startIdx = -1
   for (let i = 0; i < len; i++) {
     const g = gradeForIndex(i, grades, altitudes, distances)
@@ -262,7 +314,7 @@ export function detectClimbs(grades, altitudes, distances) {
     }
   }
   if (startIdx >= 0) raw.push({ startIdx, endIdx: len - 1 })
-  const merged = []
+  const merged: { startIdx: number; endIdx: number }[] = []
   for (const r of raw) {
     if (!merged.length) { merged.push(r); continue }
     const prev = merged[merged.length - 1]
@@ -272,8 +324,8 @@ export function detectClimbs(grades, altitudes, distances) {
   }
   return merged
     .map((r) => {
-      const gain = altitudes[r.endIdx] - altitudes[r.startIdx]
-      const lengthM = distances[r.endIdx] - distances[r.startIdx]
+      const gain = altitudes![r.endIdx] - altitudes![r.startIdx]
+      const lengthM = distances![r.endIdx] - distances![r.startIdx]
       const avgGrade = lengthM > 0 ? (gain / lengthM) * 100 : 0
       return { ...r, gain, lengthM, avgGrade, category: climbCategory(lengthM / 1000, avgGrade) }
     })

@@ -7,7 +7,7 @@ import { mountVueIslands } from '../mountVueIslands'
 
 const i18nReady = setupI18n()
 
-function whenDomReady(fn) {
+function whenDomReady(fn: () => void): void {
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', fn, { once: true })
   } else {

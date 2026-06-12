@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue'
 import { t } from '../i18n'
 import { MAP_STYLES } from '../mapStyles'

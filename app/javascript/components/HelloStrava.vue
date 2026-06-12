@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'

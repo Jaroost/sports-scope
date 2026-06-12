@@ -1,5 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
+import { type PropType } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor } from '../mapStyles'
 import MapStyleDropdown from './MapStyleDropdown.vue'
@@ -11,13 +12,14 @@ import {
   detectClimbs,
   GRADE_BUCKETS,
   pickPhotoUrl,
+  type PhotoLike,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 
 const props = defineProps({
-  activity: { type: Object, required: true },
-  streams: { type: Object, default: null },
-  photos: { type: Array, default: () => [] },
+  activity: { type: Object as PropType<Record<string, any>>, required: true },
+  streams: { type: Object as PropType<Record<string, any> | null>, default: null },
+  photos: { type: Array as PropType<PhotoLike[]>, default: () => [] },
   // Current cross-component selection — { startIdx, endIdx } | null.
   selection: { type: Object, default: null },
   // v-model:hovered-climb-start-idx — synchronizes hover state with
@@ -94,8 +96,8 @@ const startEndDisplay = computed(() => {
   if (Number.isNaN(startMs)) return null
   const elapsed = a.elapsed_time
   const endMs = elapsed ? startMs + elapsed * 1000 : null
-  const fmtFull = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }
-  const fmtHM = { hour: '2-digit', minute: '2-digit' }
+  const fmtFull = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' } as const
+  const fmtHM = { hour: '2-digit', minute: '2-digit' } as const
   const start = new Date(startMs)
   const end = endMs != null ? new Date(endMs) : null
   if (!end) return { start: start.toLocaleString(undefined, fmtFull), end: null, duration: null }
@@ -502,10 +504,10 @@ function syncMarkersFromSelection() {
 }
 
 // ─── Hover tooltip + cursor ──────────────────────────────────────────────
-function showMapTooltip(idx) {
+function showMapTooltip(idx: number) {
   const wrap = mapEl.value?.parentNode
   if (!wrap || idx == null) return
-  let el = wrap.querySelector('.chart-tooltip')
+  let el = wrap.querySelector<HTMLElement>('.chart-tooltip')
   if (!el) {
     el = document.createElement('div')
     el.className = 'chart-tooltip chart-tooltip-pinned'
@@ -516,7 +518,7 @@ function showMapTooltip(idx) {
     activity: props.activity,
     xAxis: props.xAxis,
     idx,
-    visibleStreams: props.visibleStreams,
+    visibleStreams: props.visibleStreams as string[],
   })
   el.style.opacity = '1'
   el.style.top = '110px'
@@ -527,7 +529,7 @@ function showMapTooltip(idx) {
 
 function hideMapTooltip() {
   const wrap = mapEl.value?.parentNode
-  const el = wrap?.querySelector('.chart-tooltip')
+  const el = wrap?.querySelector<HTMLElement>('.chart-tooltip')
   if (el) el.style.opacity = '0'
 }
 
@@ -636,8 +638,8 @@ async function renderMap() {
 
   mapInstance = new maplibregl.Map({
     container: mapEl.value,
-    style: mapStyleFor(mapStyleId.value),
-    bounds,
+    style: mapStyleFor(mapStyleId.value) as any,
+    bounds: bounds as any,
     fitBoundsOptions: { padding: 40 },
     maxPitch: 75,
   })

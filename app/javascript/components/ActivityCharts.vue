@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { t } from '../i18n'
 import {
@@ -426,7 +426,7 @@ async function renderCharts() {
 
   groups.forEach((group) => {
     if (group.collapsed) return
-    const canvas = document.getElementById(`chart-${group.id}`)
+    const canvas = document.getElementById(`chart-${group.id}`) as HTMLCanvasElement | null
     if (!canvas) return
 
     const occurrences = new Map()
@@ -500,7 +500,7 @@ async function renderCharts() {
               ? {
                   stepSize: 10,
                   maxTicksLimit: 30,
-                  callback: ((tf) => (val) => formatHMS(val * tf))(timeFactor()),
+                  callback: ((tf) => (val: number) => formatHMS(val * tf))(timeFactor()),
                 }
               : { maxTicksLimit: 8 },
             min: props.zoomRange?.xMin,
@@ -511,7 +511,7 @@ async function renderCharts() {
       },
     })
 
-    chart.$onSelect = (v0, v1) => {
+    ;(chart as any).$onSelect = (v0: number, v1: number) => {
       const r0 = chartXToRaw(Math.min(v0, v1))
       const r1 = chartXToRaw(Math.max(v0, v1))
       const sIdx = xValueToIndex(r0)
@@ -852,7 +852,7 @@ function onChartPointerDown(group, e) {
   pdInitialized = false
   dragSourceId.value = group.id
   pdMoveListener = (ev) => onPointerMove(ev)
-  pdUpListener = (ev) => onPointerUp(ev)
+  pdUpListener = () => onPointerUp()
   window.addEventListener('mousemove', pdMoveListener)
   window.addEventListener('mouseup', pdUpListener)
 }
@@ -881,7 +881,7 @@ function pointerHitTest(clientX, clientY) {
   let node = elem
   while (node && node !== document.body) {
     if (node.classList?.contains('chart-drop-slot')) {
-      const idx = parseInt(node.dataset?.slotIdx ?? '', 10)
+      const idx = parseInt((node as HTMLElement).dataset?.slotIdx ?? '', 10)
       if (!Number.isNaN(idx)) {
         dragOverSlotIndex.value = idx
         dragOverGroupId.value = null
@@ -890,7 +890,7 @@ function pointerHitTest(clientX, clientY) {
       return
     }
     if (node.classList?.contains('chart-group')) {
-      const id = node.dataset?.groupId
+      const id = (node as HTMLElement).dataset?.groupId
       if (id && id !== dragSourceId.value) {
         const rect = node.getBoundingClientRect()
         const midX = rect.left + rect.width / 2

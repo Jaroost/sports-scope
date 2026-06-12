@@ -5,11 +5,30 @@
 import { t } from './i18n'
 import { defByKey, formatHMS, escapeHtml } from './activityHelpers'
 
+export type StreamEntry = { data: unknown[] }
+export type StreamsMap = Record<string, StreamEntry | undefined> | null | undefined
+
+export interface TooltipTitleParams {
+  streams: StreamsMap
+  idx: number
+  xAxis: string
+  activityStartIso?: string | null
+}
+
+export interface TooltipHtmlParams {
+  streams: StreamsMap
+  activity: Record<string, unknown> | null | undefined
+  xAxis: string
+  idx: number
+  visibleStreams: string[]
+  priorityStreams?: string[]
+}
+
 // Vertical ascent speed (m/h) measured over a ±15 s window around `idx`.
 // Lives next to the tooltip builders because it's only consumed there.
-export function instantVam(streams, idx) {
-  const times = streams?.time?.data
-  const alt = streams?.altitude?.data
+export function instantVam(streams: StreamsMap, idx: number): number | null {
+  const times = streams?.time?.data as number[] | undefined
+  const alt = streams?.altitude?.data as number[] | undefined
   if (!Array.isArray(times) || !Array.isArray(alt)) return null
   const n = Math.min(times.length, alt.length)
   if (n < 2 || idx < 0 || idx >= n) return null
@@ -28,10 +47,10 @@ export function instantVam(streams, idx) {
 // Builds the small "title" block at the top of the tooltip (distance + time +
 // absolute wall-clock). `xAxis` is 'distance' | 'time' and picks which line
 // is the main one. `activityStartIso` is `activity.start_date_local`.
-export function buildTooltipTitleLines({ streams, idx, xAxis, activityStartIso }) {
-  const lines = []
-  const distStream = streams?.distance?.data
-  const timeStream = streams?.time?.data
+export function buildTooltipTitleLines({ streams, idx, xAxis, activityStartIso }: TooltipTitleParams): { main: boolean; text: string }[] {
+  const lines: { main: boolean; text: string }[] = []
+  const distStream = streams?.distance?.data as number[] | undefined
+  const timeStream = streams?.time?.data as number[] | undefined
   const dm = distStream?.[idx]
   const tSec = timeStream?.[idx]
   if (xAxis === 'distance') {
@@ -61,13 +80,13 @@ export function buildTooltipTitleLines({ streams, idx, xAxis, activityStartIso }
 // (the hovered chart's own streams); `visibleStreams` populates the
 // secondary section below. The chart's "Vit. ascensionnelle" derived row is
 // always rendered when altitude data exists.
-export function buildTooltipHtml({ streams, activity, xAxis, idx, visibleStreams, priorityStreams = [] }) {
+export function buildTooltipHtml({ streams, activity, xAxis, idx, visibleStreams, priorityStreams = [] }: TooltipHtmlParams): string {
   if (idx == null) return ''
   const titleLines = buildTooltipTitleLines({
     streams,
     idx,
     xAxis,
-    activityStartIso: activity?.start_date_local,
+    activityStartIso: activity?.start_date_local as string | undefined,
   })
   let html = '<div class="chart-tooltip-title">'
   for (const line of titleLines) {
@@ -76,14 +95,15 @@ export function buildTooltipHtml({ streams, activity, xAxis, idx, visibleStreams
   }
   html += '</div>'
 
-  const rendered = new Set()
-  const renderRow = (streamKey) => {
+  const rendered = new Set<string>()
+  const renderRow = (streamKey: string): string => {
     if (rendered.has(streamKey)) return ''
     const def = defByKey(streamKey)
     if (!def) return ''
-    const raw = streams?.[streamKey]?.data?.[idx]
+    const rawArr = streams?.[streamKey]?.data as unknown[] | undefined
+    const raw = rawArr?.[idx]
     if (raw == null) return ''
-    const y = def.transform(raw)
+    const y = def.transform(raw as number)
     const digits = def.digits ?? 1
     const value = Number.isNaN(y) ? '–' : y.toFixed(digits)
     rendered.add(streamKey)
@@ -122,7 +142,13 @@ export function buildTooltipHtml({ streams, activity, xAxis, idx, visibleStreams
 // Positions a free-floating tooltip element next to a `(x, y)` anchor inside
 // a container of the given size. Picks the side (right/left) that leaves the
 // tooltip fully inside the container.
-export function positionTooltipBeside(el, anchorX, anchorY, containerWidth, containerHeight) {
+export function positionTooltipBeside(
+  el: HTMLElement,
+  anchorX: number,
+  anchorY: number,
+  containerWidth: number,
+  containerHeight: number,
+): void {
   const tipRect = el.getBoundingClientRect()
   const OFFSET = 16
   const placeOnRight = anchorX + OFFSET + tipRect.width < containerWidth - 4

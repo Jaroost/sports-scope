@@ -1,10 +1,11 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount } from 'vue'
+import { type PropType } from 'vue'
 import { t } from '../i18n'
-import { pickPhotoUrl } from '../activityHelpers'
+import { pickPhotoUrl, type PhotoLike } from '../activityHelpers'
 
 const props = defineProps({
-  photos: { type: Array, required: true },
+  photos: { type: Array as PropType<PhotoLike[]>, required: true },
   // v-model:lightbox-index — null = closed, integer = index of open photo.
   // Lives in the parent so the map's photo markers can also pop the lightbox.
   lightboxIndex: { type: Number, default: null },

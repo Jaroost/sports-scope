@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 // ActivityDetail is now a slim coordinator: it owns the data fetches and the
 // cross-component state that bridges the three big children below. All UI
 // lives in the sub-components.

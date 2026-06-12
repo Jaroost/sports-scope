@@ -1,15 +1,28 @@
-<script setup>
+<script setup lang="ts">
 import { computed } from 'vue'
+import { type PropType } from 'vue'
 import { t } from '../i18n'
-import { formatHMS, formatKm, formatPowerDuration } from '../activityHelpers'
+import { formatHMS, formatKm, formatPowerDuration, type ClimbSegment } from '../activityHelpers'
+
+interface ClimbWithVam extends ClimbSegment {
+  duration: number | null
+  vam: number | null
+}
+
+interface PeakPower {
+  duration: number
+  avgPower: number
+  startIdx: number
+  endIdx: number
+}
 
 const props = defineProps({
-  movingStats: { type: Object, default: null },          // { moving, elapsed, stopped, stopPct } | null
+  movingStats: { type: Object as PropType<{ moving: number; elapsed: number; stopped: number; stopPct: number } | null>, default: null },
   globalVam: { type: Number, default: null },
-  climbsWithVam: { type: Array, default: () => [] },
-  peakPowers: { type: Array, default: () => [] },
+  climbsWithVam: { type: Array as PropType<ClimbWithVam[]>, default: () => [] },
+  peakPowers: { type: Array as PropType<PeakPower[]>, default: () => [] },
   // { current: {dur: w}, bests: {dur: { avg_watts, source, external_id, started_at }} } | null
-  peakPowerRanks: { type: Object, default: null },
+  peakPowerRanks: { type: Object as PropType<Record<string, any> | null>, default: null },
   // The whole-activity selection (drives row highlight on map AND in here).
   selection: { type: Object, default: null },
   // v-model:hovered-climb-start-idx — synced with the map markers in the parent.

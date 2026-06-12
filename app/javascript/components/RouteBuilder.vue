@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, useTemplateRef, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { computeElevGain } from '../activityHelpers'
@@ -308,7 +308,7 @@ async function renderMap() {
 
   mapInstance = new maplibregl.Map({
     container: mapEl.value,
-    style: mapStyleFor(mapStyleId.value),
+    style: mapStyleFor(mapStyleId.value) as any,
     center,
     zoom,
   })
@@ -357,7 +357,7 @@ async function renderMap() {
         if (!currentId.value) saveMapView()
       })
       mapInstance.getCanvas().style.cursor = 'crosshair'
-      resolve()
+      resolve(undefined)
     })
   })
 }
@@ -677,8 +677,8 @@ function applyColorMode() {
   const src = mapInstance.getSource('builder-route-graded')
   if (!src) return
   const coords = geometry.value.map(([lng, lat]) => [lng, lat])
-  let features = []
-  let paint = '#fc4c02'
+  let features: any[] = []
+  let paint: string | any[] = '#fc4c02'
   if (colorMode.value === 'grade' && coords.length >= 2) {
     const altitudes = geometry.value.map((c) => c[2] ?? null)
     const distances = [0]

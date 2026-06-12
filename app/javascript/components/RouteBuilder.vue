@@ -987,9 +987,6 @@ function attachWaypointDrag(el, marker, idx) {
       mapInstance.getCanvas().style.cursor = 'crosshair'
       el.style.cursor = ''
       if (!moved) return
-      // The click event that maplibre will synthesize from this mouseup
-      // would otherwise hit the map handler and insert/add a spurious point.
-      suppressNextMapClick = true
       const pos = marker.getLngLat()
       const next = waypoints.value.slice()
       next[idx] = { lng: pos.lng, lat: pos.lat }

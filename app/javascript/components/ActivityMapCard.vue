@@ -767,7 +767,7 @@ onBeforeUnmount(() => {
           <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
 
           <!-- Groupe 2 : overlays et vue (toggles indépendants) -->
-          <div class="btn-group btn-group-sm shadow-sm" role="group">
+          <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
             <button
               type="button"
               class="btn map-ctrl-btn"
@@ -777,7 +777,6 @@ onBeforeUnmount(() => {
               @click="toggleClimbs"
             >
               <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ t('strava.climbs_label') }}</span>
             </button>
             <button
               type="button"
@@ -788,7 +787,6 @@ onBeforeUnmount(() => {
               @click="toggleGrade"
             >
               <i class="fa-solid fa-palette" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ t('strava.grade_label') }}</span>
             </button>
             <button
               type="button"
@@ -800,7 +798,6 @@ onBeforeUnmount(() => {
               @click="togglePhotos"
             >
               <i class="fa-solid fa-camera" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ t('strava.photos_label') }}</span>
             </button>
             <button
               type="button"
@@ -811,7 +808,6 @@ onBeforeUnmount(() => {
               @click="toggleMap3D"
             >
               <i class="fa-solid fa-cube" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">3D</span>
             </button>
             <button
               type="button"
@@ -822,7 +818,6 @@ onBeforeUnmount(() => {
               @click="toggleMapSize"
             >
               <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
             </button>
           </div>
         </div>
@@ -894,7 +889,12 @@ onBeforeUnmount(() => {
 .map-ctrl-btn {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);
-  font-weight: 500;
+  width: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
 }
 .map-ctrl-btn.active,
 .map-ctrl-btn.active:hover,

@@ -82,7 +82,7 @@ export class RouteBuilderState extends MapPageState {
   colorMode: ColorMode = 'grade'
 
   constructor() {
-    super('topo')
+    super('cyclosm')
   }
 
   // Derived from colorMode — reactive because `this` is the reactive proxy

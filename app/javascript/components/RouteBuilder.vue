@@ -34,6 +34,11 @@ let chartInstance = null
 let _maplibregl = null
 const waypointMarkers = []
 let hoverMarker = null
+let locationMarker = null
+let lastLocationCoords: [number, number] | null = null
+let lastLocationAccuracy = 0
+const locationVisible = ref(false)
+const locating = ref(false)
 const hoverIdx = ref(null) // geometry index under cursor when over the route
 let waypointGeomIndices = [] // for each waypoint, its index in geometry[]
 // Set to true right after a successful waypoint drag so the click event
@@ -292,17 +297,6 @@ async function renderMap() {
     zoom,
   })
   mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right')
-  // "Locate me" button — explicit user action. Uses the same browser
-  // geolocation API but at least the user knows they asked for it.
-  mapInstance.addControl(
-    new maplibregl.GeolocateControl({
-      positionOptions: { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 },
-      trackUserLocation: false,
-      showUserLocation: true,
-      fitBoundsOptions: { maxZoom: 14 },
-    }),
-    'top-right',
-  )
 
   // Block on the 'load' event so callers that await renderMap() are
   // guaranteed that the route source/layer exist before they try to write
@@ -638,6 +632,90 @@ async function toggleMapSize() {
   if (mapInstance) mapInstance.resize()
 }
 
+// ─── Ma position ─────────────────────────────────────────────────────────────
+function generateCircle(center: [number, number], radiusM: number, steps = 64): [number, number][] {
+  const [lng, lat] = center
+  const latR = lat * Math.PI / 180
+  const pts: [number, number][] = []
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI
+    pts.push([
+      lng + (radiusM / (111320 * Math.cos(latR))) * Math.cos(a),
+      lat + (radiusM / 110540) * Math.sin(a),
+    ])
+  }
+  return pts
+}
+
+function installLocationLayers(coords: [number, number], accuracy: number) {
+  if (!mapInstance) return
+  const data = {
+    type: 'Feature' as const,
+    geometry: { type: 'Polygon' as const, coordinates: [generateCircle(coords, accuracy)] },
+  }
+  if (!mapInstance.getSource('user-location')) {
+    mapInstance.addSource('user-location', { type: 'geojson', data })
+    mapInstance.addLayer({
+      id: 'user-location-fill',
+      type: 'fill',
+      source: 'user-location',
+      paint: { 'fill-color': '#4285f4', 'fill-opacity': 0.12 },
+    })
+    mapInstance.addLayer({
+      id: 'user-location-stroke',
+      type: 'line',
+      source: 'user-location',
+      paint: { 'line-color': '#4285f4', 'line-width': 1.5, 'line-opacity': 0.5 },
+    })
+  } else {
+    mapInstance.getSource('user-location').setData(data)
+  }
+}
+
+function showLocation(coords: [number, number], accuracy: number) {
+  if (!mapInstance || !_maplibregl) return
+  lastLocationCoords = coords
+  lastLocationAccuracy = accuracy
+  installLocationLayers(coords, accuracy)
+  if (locationMarker) {
+    locationMarker.setLngLat(coords)
+  } else {
+    const el = document.createElement('div')
+    el.className = 'user-location-dot'
+    locationMarker = new _maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat(coords)
+      .addTo(mapInstance)
+  }
+  locationVisible.value = true
+}
+
+function hideLocation() {
+  if (locationMarker) { locationMarker.remove(); locationMarker = null }
+  lastLocationCoords = null
+  if (mapInstance) {
+    if (mapInstance.getLayer('user-location-stroke')) mapInstance.removeLayer('user-location-stroke')
+    if (mapInstance.getLayer('user-location-fill')) mapInstance.removeLayer('user-location-fill')
+    if (mapInstance.getSource('user-location')) mapInstance.removeSource('user-location')
+  }
+  locationVisible.value = false
+}
+
+async function toggleLocation() {
+  if (locationVisible.value) { hideLocation(); return }
+  locating.value = true
+  try {
+    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true, timeout: 8000, maximumAge: 30000,
+      })
+    })
+    const coords: [number, number] = [pos.coords.longitude, pos.coords.latitude]
+    mapInstance?.flyTo({ center: coords, zoom: 14, duration: 800 })
+    showLocation(coords, pos.coords.accuracy)
+  } catch { /* permission refusée ou timeout */ }
+  finally { locating.value = false }
+}
+
 function updateDivergentLayer() {
   if (!mapInstance) return
   const src = mapInstance.getSource('builder-divergent')
@@ -706,6 +784,9 @@ function setMapStyle(id) {
     updateDivergentLayer()
     updateSelectionLayer()
     installClimbMarkers()
+    if (locationVisible.value && lastLocationCoords) {
+      installLocationLayers(lastLocationCoords, lastLocationAccuracy)
+    }
     // Re-apply 3D terrain (the style swap dropped both layers + terrain DEM).
     if (state.is3D) {
       if (!mapInstance.getSource('terrain-dem')) {
@@ -1702,6 +1783,7 @@ onBeforeUnmount(() => {
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
+  if (locationMarker) { locationMarker.remove(); locationMarker = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
 </script>
@@ -1736,14 +1818,13 @@ onBeforeUnmount(() => {
           <div class="map-controls">
             <!-- Fond de carte -->
             <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
-            <div class="btn-group btn-group-sm shadow-sm" role="group">
+            <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleClimbs"
                 :title="state.showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
                 :aria-pressed="state.showClimbs">
                 <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ t('strava.climbs_label') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.showGrade ? 'btn-warning text-dark active' : 'btn-light'"
@@ -1751,7 +1832,6 @@ onBeforeUnmount(() => {
                 :title="state.showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
                 :aria-pressed="state.showGrade">
                 <i class="fa-solid fa-palette" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ t('strava.grade_label') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"
@@ -1759,7 +1839,6 @@ onBeforeUnmount(() => {
                 :title="state.is3D ? t('strava.map_2d') : t('strava.map_3d')"
                 :aria-pressed="state.is3D">
                 <i class="fa-solid fa-cube" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">3D</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
@@ -1767,23 +1846,29 @@ onBeforeUnmount(() => {
                 :title="state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
                 :aria-pressed="state.mapExpanded">
                 <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
+              </button>
+              <button type="button" class="btn map-ctrl-btn"
+                :class="locationVisible ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleLocation"
+                :disabled="locating"
+                :title="locationVisible ? 'Masquer ma position' : 'Ma position'"
+                :aria-pressed="locationVisible">
+                <span v-if="locating" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                <i v-else class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
               </button>
             </div>
-            <div class="btn-group btn-group-sm shadow-sm" role="group">
-              <button type="button" class="btn btn-light"
+            <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+              <button type="button" class="btn btn-light map-ctrl-btn"
                 :disabled="waypoints.length === 0"
                 @click="undoLast"
                 :title="t('routes.undo')">
                 <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ t('routes.undo') }}</span>
               </button>
-              <button type="button" class="btn btn-light"
+              <button type="button" class="btn btn-light map-ctrl-btn"
                 :disabled="waypoints.length === 0"
                 @click="clearAll"
                 :title="t('routes.clear')">
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ t('routes.clear') }}</span>
               </button>
             </div>
           </div>
@@ -1989,15 +2074,27 @@ onBeforeUnmount(() => {
 .map-ctrl-btn {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);
-  font-weight: 500;
+  width: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
 }
-/* Active state — has to win over .map-ctrl-btn's white background. */
 .map-ctrl-btn.active,
 .map-ctrl-btn.active:hover,
 .map-ctrl-btn.active:focus {
   background: #ffc107;
   color: #212529;
   border-color: rgba(252, 76, 2, 0.7);
+}
+.user-location-dot {
+  width: 16px;
+  height: 16px;
+  background: #4285f4;
+  border: 2.5px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.35);
 }
 .map-search {
   position: absolute;

@@ -1020,6 +1020,7 @@ function attachWaypointDrag(el, marker, idx) {
       el.style.cursor = ''
       if (!moved) return
       suppressNextMapClick = true
+      setTimeout(() => { suppressNextMapClick = false }, 50)
       const pos = marker.getLngLat()
       const next = waypoints.value.slice()
       next[idx] = { lng: pos.lng, lat: pos.lat }

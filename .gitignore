@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.prod.example
 node_modules/*
 public/vite/assets/*
 public/vite-dev/*

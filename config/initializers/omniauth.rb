@@ -18,7 +18,7 @@ Rails.application.config.middleware.use OmniAuth::Builder do
     discovery: true,
     client_options: {
       identifier: ENV.fetch("KEYCLOAK_CLIENT_ID", "rails-app"),
-      secret: ENV.fetch("RAILS_KEYCLOAK_CLIENT_SECRET"),
+      secret: ENV.fetch("RAILS_KEYCLOAK_CLIENT_SECRET", nil),
       redirect_uri: "#{APP_HOST}/auth/keycloak/callback",
     },
   }

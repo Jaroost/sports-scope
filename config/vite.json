@@ -5,7 +5,8 @@
     "additionalEntrypoints": [
       "~/entrypoints/*.{js,ts}",
       "~/entrypoints/*.{css,scss}"
-    ]
+    ],
+    "skipCompatibilityCheck": true
   },
   "development": {
     "autoBuild": false,

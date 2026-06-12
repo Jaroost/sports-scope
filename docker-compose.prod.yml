@@ -1,0 +1,106 @@
+name: sports-scope
+
+x-traefik-defaults: &traefik-defaults
+  traefik.enable: "true"
+  traefik.docker.network: traefik-net
+
+services:
+  db:
+    image: postgres:18.4
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: sports_scope_production
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql
+      - ./compose/postgres/init-keycloak.sh:/docker-entrypoint-initdb.d/init-keycloak.sh:ro
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: keycloak/keycloak:latest
+    restart: always
+    entrypoint: ["/opt/keycloak/templates/docker-entrypoint.sh"]
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: https://${KEYCLOAK_HOST}
+      KC_HOSTNAME_STRICT: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
+      APP_HOST: https://${APP_HOST}
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+    volumes:
+      - ./compose/keycloak:/opt/keycloak/templates:ro
+    networks:
+      - default
+      - traefik-net
+    depends_on:
+      db:
+        condition: service_healthy
+    labels:
+      <<: *traefik-defaults
+      traefik.http.routers.keycloak.rule: "Host(`${KEYCLOAK_HOST}`)"
+      traefik.http.routers.keycloak.entrypoints: web
+      traefik.http.services.keycloak.loadbalancer.server.port: "8080"
+
+  rails:
+    image: jaroost-server:5000/sports-scope:${IMAGE_TAG:-latest}
+    restart: always
+    entrypoint: ["docker-entrypoint-rails"]
+    command: ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000"]
+    environment:
+      RAILS_ENV: production
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${POSTGRES_USER:-postgres}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_NAME: sports_scope_production
+      KEYCLOAK_BASE_URL: https://${KEYCLOAK_HOST}
+      KEYCLOAK_REALM: sports-scope
+      KEYCLOAK_CLIENT_ID: rails-app
+      RAILS_KEYCLOAK_CLIENT_SECRET: ${RAILS_KEYCLOAK_CLIENT_SECRET}
+      APP_HOST: https://${APP_HOST}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
+      RAILS_SERVE_STATIC_FILES: "true"
+      RAILS_LOG_TO_STDOUT: "true"
+    networks:
+      - default
+      - traefik-net
+    depends_on:
+      db:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    labels:
+      <<: *traefik-defaults
+      traefik.http.routers.rails.rule: "Host(`${APP_HOST}`)"
+      traefik.http.routers.rails.entrypoints: web
+      traefik.http.services.rails.loadbalancer.server.port: "3000"
+
+volumes:
+  db_data:
+
+networks:
+  default:
+  traefik-net:
+    external: true

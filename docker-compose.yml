@@ -81,7 +81,6 @@ services:
       VITE_RUBY_HOST: ${VITE_HOST:-vite.localtest.me}
       VITE_RUBY_PORT: 443
       VITE_RUBY_HTTPS: "true"
-      VITE_RUBY_SKIP_COMPATIBILITY_CHECK: "true"
       KEYCLOAK_BASE_URL: https://${KEYCLOAK_HOST:-keycloak.localtest.me}
       KEYCLOAK_REALM: sports-scope
       KEYCLOAK_CLIENT_ID: rails-app
@@ -129,7 +128,6 @@ services:
       RAILS_ENV: development
       VITE_RUBY_HOST: 0.0.0.0
       VITE_RUBY_PORT: 3036
-      VITE_RUBY_SKIP_COMPATIBILITY_CHECK: "true"
       VITE_PUBLIC_HOST: ${VITE_HOST:-vite.localtest.me}
     volumes:
       - .:/app

@@ -11,7 +11,7 @@ docker logout $REGISTRY 2>/dev/null || true
 docker login $REGISTRY
 
 echo "Building $IMAGE:$GIT_SHA ..."
-docker build -f Dockerfile.prod -t $IMAGE:$GIT_SHA -t $IMAGE:latest .
+docker build -f deploy/Dockerfile.prod -t $IMAGE:$GIT_SHA -t $IMAGE:latest .
 
 echo "Pushing to $REGISTRY ..."
 docker push $IMAGE:$GIT_SHA

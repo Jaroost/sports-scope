@@ -1889,11 +1889,22 @@ function exportGpx() {
 function openInKomoot() {
   const wps = waypoints.value
   if (wps.length < 2) return
-  const lats = wps.map((w) => w.lat)
-  const lngs = wps.map((w) => w.lng)
+  // Komoot accepts at most 20 waypoints via URL params — downsample while
+  // always keeping first and last.
+  const MAX = 20
+  let pts = wps
+  if (pts.length > MAX) {
+    if (!window.confirm(t('routes.komoot_waypoint_limit', { count: pts.length }))) return
+    const middle = pts.slice(1, -1)
+    const step = middle.length / (MAX - 2)
+    const sampled = Array.from({ length: MAX - 2 }, (_, i) => middle[Math.floor(i * step)])
+    pts = [pts[0], ...sampled, pts[pts.length - 1]]
+  }
+  const lats = pts.map((w) => w.lat)
+  const lngs = pts.map((w) => w.lng)
   const centerLat = ((Math.min(...lats) + Math.max(...lats)) / 2).toFixed(5)
   const centerLng = ((Math.min(...lngs) + Math.max(...lngs)) / 2).toFixed(5)
-  const points = wps.map((w, i) => `p[${i}][loc]=${w.lat},${w.lng}`).join('&')
+  const points = pts.map((w, i) => `p[${i}][loc]=${w.lat},${w.lng}`).join('&')
   window.open(
     `https://www.komoot.com/plan/@${centerLat},${centerLng},12z?sport=touringbicycle&${points}`,
     '_blank',

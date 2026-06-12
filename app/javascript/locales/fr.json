@@ -192,6 +192,7 @@
       "remove_waypoint": "Supprimer ce point",
       "return_via_same_route": "Revenir par le même chemin",
       "street_view": "Street View",
+      "komoot_waypoint_limit": "Votre itinéraire contient %{count} points, mais Komoot n'en accepte que 20 via l'URL. Le tracé sera simplifié en conservant le départ et l'arrivée. Continuer ?",
       "cyclosm_legend": "Légende CyclOSM",
       "cyclosm_paths": "Voies",
       "cyclosm_cycleway": "Piste cyclable",

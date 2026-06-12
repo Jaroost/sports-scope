@@ -922,6 +922,10 @@ function refreshWaypointMarkers() {
           <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>
           <span>Google Maps</span>
         </a>
+        <a class="wp-tooltip-action" href="https://www.google.com/maps?q=&layer=c&cbll=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
+          <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+          <span>${t('routes.street_view')}</span>
+        </a>
         <a class="wp-tooltip-action wp-tooltip-action--komoot" href="https://www.komoot.com/plan/@${w.lat},${w.lng},14z" target="_blank" rel="noopener noreferrer">
           <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
           <span>Komoot</span>

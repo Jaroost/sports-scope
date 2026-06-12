@@ -190,7 +190,8 @@
       "show_waypoints": "Afficher les points",
       "hide_waypoints": "Masquer les points",
       "remove_waypoint": "Supprimer ce point",
-      "return_via_same_route": "Revenir par le même chemin"
+      "return_via_same_route": "Revenir par le même chemin",
+      "street_view": "Street View"
     },
     "common": {
       "days_ago_today": "aujourd'hui",

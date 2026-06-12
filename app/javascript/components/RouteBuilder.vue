@@ -41,6 +41,7 @@ const locationVisible = ref(false)
 const locating = ref(false)
 const hoverIdx = ref(null) // geometry index under cursor when over the route
 let waypointGeomIndices = [] // for each waypoint, its index in geometry[]
+let selectedWpIdx = -1 // index of the currently selected waypoint, -1 if none
 // Set to true right after a successful waypoint drag so the click event
 // maplibre synthesizes from the mouseup doesn't add/insert a spurious point.
 let suppressNextMapClick = false
@@ -307,6 +308,7 @@ async function renderMap() {
       mapInstance.on('click', (e) => {
         // A waypoint drag just released — swallow the synthesized click.
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
+        deselectAll()
         // If the cursor is on the existing route, insert a new waypoint at
         // that exact spot (between the appropriate leg). Otherwise add a
         // new waypoint at the clicked coords.
@@ -807,6 +809,30 @@ function setMapStyle(id) {
   })
 }
 
+// ─── Waypoint selection & tooltip ────────────────────────────────────────────
+function isInSwitzerland(lat, lng) {
+  return lat >= 45.818 && lat <= 47.808 && lng >= 5.956 && lng <= 10.492
+}
+
+function selectWaypoint(idx) {
+  if (selectedWpIdx >= 0 && waypointMarkers[selectedWpIdx]) {
+    waypointMarkers[selectedWpIdx].getElement().classList.remove('wp-marker--selected')
+  }
+  if (selectedWpIdx === idx) {
+    selectedWpIdx = -1
+    return
+  }
+  selectedWpIdx = idx
+  waypointMarkers[idx]?.getElement().classList.add('wp-marker--selected')
+}
+
+function deselectAll() {
+  if (selectedWpIdx >= 0 && waypointMarkers[selectedWpIdx]) {
+    waypointMarkers[selectedWpIdx].getElement().classList.remove('wp-marker--selected')
+  }
+  selectedWpIdx = -1
+}
+
 // ─── Waypoint management ─────────────────────────────────────────────────────
 function addWaypoint(lng, lat) {
   waypoints.value = [...waypoints.value, { lng, lat }]
@@ -844,17 +870,37 @@ function refreshWaypointMarkers() {
   if (!_maplibregl || !mapInstance) return
   waypointMarkers.forEach((m) => m.remove())
   waypointMarkers.length = 0
+  selectedWpIdx = -1
   if (!state.showWaypoints) return
   waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
     el.className = 'wp-marker'
-    const gmTitle = t('routes.open_in_google_maps')
-    const kmtTitle = t('routes.open_in_komoot')
+    const inSwiss = isInSwitzerland(w.lat, w.lng)
+    const geoAdminHtml = inSwiss
+      ? `<a class="wp-tooltip-action" href="https://map.geo.admin.ch/?zoom=14&crosshair=circle&lat=${w.lat}&lon=${w.lng}" target="_blank" rel="noopener noreferrer">
+           <i class="fa-solid fa-map" aria-hidden="true"></i>
+           <span>SwissTopo</span>
+         </a>`
+      : ''
     el.innerHTML = `
+      <div class="wp-tooltip">
+        <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
+        <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
+          <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>
+          <span>Google Maps</span>
+        </a>
+        <a class="wp-tooltip-action wp-tooltip-action--komoot" href="https://www.komoot.com/plan/@${w.lat},${w.lng},14z" target="_blank" rel="noopener noreferrer">
+          <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+          <span>Komoot</span>
+        </a>
+        ${geoAdminHtml}
+        <button type="button" class="wp-tooltip-action wp-tooltip-action--delete">
+          <i class="fa-solid fa-trash" aria-hidden="true"></i>
+          <span>${t('routes.remove_waypoint')}</span>
+        </button>
+        <div class="wp-tooltip-arrow"></div>
+      </div>
       <span class="wp-marker-num">${idx + 1}</span>
-      <a class="wp-marker-gm" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer" title="${gmTitle}" aria-label="${gmTitle}"><i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i></a>
-      <a class="wp-marker-kmt" href="https://www.komoot.com/plan/@${w.lat},${w.lng},14z" target="_blank" rel="noopener noreferrer" title="${kmtTitle}" aria-label="${kmtTitle}"><i class="fa-solid fa-person-biking" aria-hidden="true"></i></a>
-      <button type="button" class="wp-marker-del" aria-label="remove">×</button>
     `
     const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
       .setLngLat([w.lng, w.lat])
@@ -865,28 +911,40 @@ function refreshWaypointMarkers() {
     // ordering issue with the map canvas).
     attachWaypointDrag(el, marker, idx)
 
-    // "×" delete button (visible on hover)
-    el.querySelector('.wp-marker-del').addEventListener('click', (ev) => {
+    // Click on the marker (not the tooltip) → select/deselect
+    el.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      if (ev.target.closest('.wp-tooltip')) return
+      selectWaypoint(idx)
+    })
+
+    // Close button
+    el.querySelector('.wp-tooltip-close').addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      deselectAll()
+    })
+
+    // Tooltip external links — close tooltip after navigation
+    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete)').forEach((a) => {
+      a.addEventListener('click', (ev) => {
+        ev.stopPropagation()
+        deselectAll()
+      })
+    })
+
+    // Delete button
+    el.querySelector('.wp-tooltip-action--delete').addEventListener('click', (ev) => {
       ev.stopPropagation()
       ev.preventDefault()
       removeWaypoint(idx)
     })
-    // External map links — preserve native target="_blank" navigation, just
-    // stop the click from bubbling to the map (no waypoint insert/drag).
-    el.querySelector('.wp-marker-gm').addEventListener('click', (ev) => {
-      ev.stopPropagation()
-    })
-    el.querySelector('.wp-marker-kmt').addEventListener('click', (ev) => {
-      ev.stopPropagation()
-    })
-    // Right-click on a marker also deletes it (no confirm — the user can
-    // re-click the map to re-add a point).
+
+    // Right-click also deletes (quick shortcut, no confirm)
     el.addEventListener('contextmenu', (ev) => {
       ev.preventDefault()
       ev.stopPropagation()
       removeWaypoint(idx)
     })
-    el.addEventListener('click', (ev) => ev.stopPropagation())
 
     waypointMarkers.push(marker)
   })
@@ -895,9 +953,7 @@ function refreshWaypointMarkers() {
 function attachWaypointDrag(el, marker, idx) {
   el.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return
-    if (ev.target.closest('.wp-marker-del')) return // delete button — let click fire
-    if (ev.target.closest('.wp-marker-gm')) return // Google Maps link — let click navigate
-    if (ev.target.closest('.wp-marker-kmt')) return // Komoot link — let click navigate
+    if (ev.target.closest('.wp-tooltip')) return // tooltip actions — let click fire
     ev.preventDefault()
     ev.stopPropagation()
 
@@ -2276,7 +2332,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 28px;
   height: 36px;
-  cursor: grab;
+  cursor: pointer;
 }
 .wp-marker-num {
   position: absolute;
@@ -2295,84 +2351,102 @@ onBeforeUnmount(() => {
   justify-content: center;
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: background 0.15s, box-shadow 0.15s;
 }
-.wp-marker-del {
+.wp-marker--selected .wp-marker-num {
+  background: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.32), 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Tooltip card — shown when the marker is selected */
+.wp-tooltip {
   position: absolute;
-  top: -6px;
-  right: -8px;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18), 0 1px 4px rgba(0, 0, 0, 0.10);
+  padding: 26px 4px 4px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+  z-index: 20;
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.wp-marker--selected .wp-tooltip {
+  display: flex;
+}
+.wp-tooltip-close {
+  position: absolute;
+  top: 5px;
+  right: 5px;
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #212529;
-  color: #fff;
-  border: 2px solid #fff;
-  font-size: 0.7rem;
+  border: none;
+  background: rgba(0, 0, 0, 0.07);
+  color: #6b7280;
+  font-size: 0.85rem;
   line-height: 1;
   cursor: pointer;
   padding: 0;
-  opacity: 0;
-  transition: opacity 0.1s;
-}
-.wp-marker:hover .wp-marker-del {
-  opacity: 1;
-}
-
-/* "Open in Google Maps" link — mirrors the × button on the opposite corner. */
-.wp-marker-gm {
-  position: absolute;
-  top: -6px;
-  left: -8px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #4285f4;
-  color: #fff;
-  border: 2px solid #fff;
-  font-size: 0.55rem;
-  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  text-decoration: none;
-  opacity: 0;
-  transition: opacity 0.1s, transform 0.1s;
+  transition: background 0.1s, color 0.1s;
 }
-.wp-marker-gm:hover {
-  transform: scale(1.1);
-  color: #fff;
+.wp-tooltip-close:hover {
+  background: rgba(0, 0, 0, 0.14);
+  color: #111827;
 }
-.wp-marker:hover .wp-marker-gm {
-  opacity: 1;
-}
-
-/* "Open in Komoot" link — bottom-left of the marker. */
-.wp-marker-kmt {
+.wp-tooltip-arrow {
   position: absolute;
-  bottom: 2px;
-  left: -8px;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #6aaf23; /* Komoot brand green */
-  color: #fff;
-  border: 2px solid #fff;
-  font-size: 0.55rem;
-  line-height: 1;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid #fff;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.10));
+}
+.wp-tooltip-action {
   display: flex;
   align-items: center;
-  justify-content: center;
-  cursor: pointer;
+  gap: 0.55rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 500;
   text-decoration: none;
-  opacity: 0;
-  transition: opacity 0.1s, transform 0.1s;
+  color: #212529;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  line-height: 1;
+  transition: background 0.1s;
 }
-.wp-marker-kmt:hover {
-  transform: scale(1.1);
-  color: #fff;
+.wp-tooltip-action i {
+  width: 14px;
+  text-align: center;
+  font-size: 0.78rem;
+  flex-shrink: 0;
 }
-.wp-marker:hover .wp-marker-kmt {
-  opacity: 1;
+.wp-tooltip-action:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #212529;
+}
+.wp-tooltip-action--komoot i { color: #6aaf23; }
+.wp-tooltip-action--delete { color: #dc2626; }
+.wp-tooltip-action--delete:hover {
+  background: rgba(220, 38, 38, 0.08);
+  color: #dc2626;
 }
 
 /* Warning marker placed at the midpoint of a leg where cycling routing

@@ -188,7 +188,8 @@
       "reset_zoom": "Réinitialiser zoom",
       "zoom_to_selection": "Zoomer sur sélection",
       "show_waypoints": "Afficher les points",
-      "hide_waypoints": "Masquer les points"
+      "hide_waypoints": "Masquer les points",
+      "remove_waypoint": "Supprimer ce point"
     },
     "common": {
       "days_ago_today": "aujourd'hui",

@@ -9,6 +9,9 @@ export const MAP_STYLES: MapStyle[] = [
   { id: 'liberty', icon: 'fa-map' },
 ]
 
+export const ROUTE_LINE_LAYOUT = { 'line-join': 'round', 'line-cap': 'round' } as const
+export const ROUTE_BORDER_PAINT = { 'line-color': 'rgba(0,0,0,0.28)', 'line-width': 8 } as const
+
 export function mapStyleFor(id: string): string | object {
   if (id === 'liberty') return 'https://tiles.openfreemap.org/styles/liberty'
   if (id === 'topo') return openTopoMapStyle()

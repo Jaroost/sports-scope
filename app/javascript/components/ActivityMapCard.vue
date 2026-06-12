@@ -2,7 +2,7 @@
 import { reactive, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
 import { type PropType } from 'vue'
 import { t } from '../i18n'
-import { mapStyleFor } from '../mapStyles'
+import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import { ActivityMapState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
@@ -176,18 +176,32 @@ function installRouteLayers(coords) {
       data: { type: 'FeatureCollection', features: segments },
     })
     mapInstance.addLayer({
+      id: 'route-border',
+      type: 'line',
+      source: 'route-graded',
+      layout: ROUTE_LINE_LAYOUT,
+      paint: ROUTE_BORDER_PAINT,
+    })
+    mapInstance.addLayer({
       id: 'route-line',
       type: 'line',
       source: 'route-graded',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      layout: ROUTE_LINE_LAYOUT,
       paint: { 'line-color': gradePaintExpression(), 'line-width': 5 },
     })
   } else {
     mapInstance.addLayer({
+      id: 'route-border',
+      type: 'line',
+      source: 'route',
+      layout: ROUTE_LINE_LAYOUT,
+      paint: ROUTE_BORDER_PAINT,
+    })
+    mapInstance.addLayer({
       id: 'route-line',
       type: 'line',
       source: 'route',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      layout: ROUTE_LINE_LAYOUT,
       paint: { 'line-color': '#fc4c02', 'line-width': 4 },
     })
   }

@@ -2,7 +2,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, useTemplateRef, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { computeElevGain } from '../activityHelpers'
-import { mapStyleFor } from '../mapStyles'
+import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 
@@ -443,14 +443,18 @@ function installRouteLayer() {
       data: { type: 'FeatureCollection', features: [] },
     })
     mapInstance.addLayer({
+      id: 'builder-route-border',
+      type: 'line',
+      source: 'builder-route-graded',
+      layout: ROUTE_LINE_LAYOUT,
+      paint: ROUTE_BORDER_PAINT,
+    })
+    mapInstance.addLayer({
       id: 'builder-route-line',
       type: 'line',
       source: 'builder-route-graded',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: {
-        'line-color': gradePaintExpression(),
-        'line-width': 5,
-      },
+      layout: ROUTE_LINE_LAYOUT,
+      paint: { 'line-color': gradePaintExpression(), 'line-width': 5 },
     })
   }
   if (!mapInstance.getSource('builder-divergent')) {

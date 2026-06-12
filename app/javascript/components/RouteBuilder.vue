@@ -322,6 +322,7 @@ async function renderMap() {
         if (waypoints.value.length < 2) { hideHoverMarker(); return }
         const idx = nearestGeomIndexAt(e.point)
         if (idx == null) { hideHoverMarker(); return }
+        if (isNearWaypoint(e.point)) { hideHoverMarker(); return }
         hoverIdx.value = idx
         showHoverMarker(geometry.value[idx])
       })
@@ -816,19 +817,27 @@ function isInSwitzerland(lat, lng) {
 
 function selectWaypoint(idx) {
   if (selectedWpIdx >= 0 && waypointMarkers[selectedWpIdx]) {
-    waypointMarkers[selectedWpIdx].getElement().classList.remove('wp-marker--selected')
+    const el = waypointMarkers[selectedWpIdx].getElement()
+    el.classList.remove('wp-marker--selected')
+    if (el.parentElement) el.parentElement.style.zIndex = ''
   }
   if (selectedWpIdx === idx) {
     selectedWpIdx = -1
     return
   }
   selectedWpIdx = idx
-  waypointMarkers[idx]?.getElement().classList.add('wp-marker--selected')
+  if (waypointMarkers[idx]) {
+    const el = waypointMarkers[idx].getElement()
+    el.classList.add('wp-marker--selected')
+    if (el.parentElement) el.parentElement.style.zIndex = '200'
+  }
 }
 
 function deselectAll() {
   if (selectedWpIdx >= 0 && waypointMarkers[selectedWpIdx]) {
-    waypointMarkers[selectedWpIdx].getElement().classList.remove('wp-marker--selected')
+    const el = waypointMarkers[selectedWpIdx].getElement()
+    el.classList.remove('wp-marker--selected')
+    if (el.parentElement) el.parentElement.style.zIndex = ''
   }
   selectedWpIdx = -1
 }
@@ -1034,6 +1043,18 @@ function nearestGeomIndexAt(point) {
     if (d < bestDist) { bestDist = d; best = i }
   }
   return best >= 0 ? best : null
+}
+
+function isNearWaypoint(point) {
+  if (!mapInstance) return false
+  const TOL = 22 // pixels — roughly the radius of the marker badge
+  for (const w of waypoints.value) {
+    const px = mapInstance.project([w.lng, w.lat])
+    const dx = px.x - point.x
+    const dy = px.y - point.y
+    if (dx * dx + dy * dy <= TOL * TOL) return true
+  }
+  return false
 }
 
 function showHoverMarker(coord) {

@@ -1886,6 +1886,21 @@ function exportGpx() {
   window.location.href = `/api/routes/${currentId.value}/gpx`
 }
 
+function openInKomoot() {
+  const wps = waypoints.value
+  if (wps.length < 2) return
+  const lats = wps.map((w) => w.lat)
+  const lngs = wps.map((w) => w.lng)
+  const centerLat = ((Math.min(...lats) + Math.max(...lats)) / 2).toFixed(5)
+  const centerLng = ((Math.min(...lngs) + Math.max(...lngs)) / 2).toFixed(5)
+  const points = wps.map((w, i) => `p[${i}][loc]=${w.lat},${w.lng}`).join('&')
+  window.open(
+    `https://www.komoot.com/plan/@${centerLat},${centerLng},12z?sport=touringbicycle&${points}`,
+    '_blank',
+    'noopener,noreferrer',
+  )
+}
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 watch(state, () => state.save(), { deep: true })
 
@@ -2176,6 +2191,11 @@ onBeforeUnmount(() => {
             @click="exportGpx" :title="t('routes.export_gpx')">
             <i class="fa-solid fa-download" aria-hidden="true"></i>
             <span class="d-none d-md-inline">GPX</span>
+          </button>
+          <button v-if="waypoints.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            @click="openInKomoot" :title="t('routes.open_in_komoot')">
+            <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+            <span class="d-none d-md-inline">Komoot</span>
           </button>
           <button type="button" class="btn btn-warning d-flex align-items-center gap-1"
             @click="save" :disabled="saving || waypoints.length < 2 || !name.trim()">

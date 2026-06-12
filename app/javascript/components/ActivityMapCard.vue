@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
 import { t } from '../i18n'
+import { mapStyleFor } from '../mapStyles'
+import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
   activityIcon,
   decodePolyline,
@@ -130,90 +132,6 @@ function latLngToIndex(lng, lat) {
     if (d < bestD) { bestD = d; bestIdx = i }
   }
   return bestIdx
-}
-
-// ─── Map style sources ───────────────────────────────────────────────────
-function mapStyleFor(id) {
-  if (id === 'liberty') return 'https://tiles.openfreemap.org/styles/liberty'
-  if (id === 'topo') return openTopoMapStyle()
-  if (id === 'cycle') return openCycleMapStyle()
-  return cyclOsmStyle()
-}
-
-function openTopoMapStyle() {
-  return {
-    version: 8,
-    sources: {
-      'topo-raster': {
-        type: 'raster',
-        tiles: [
-          'https://a.tile.opentopomap.org/{z}/{x}/{y}.png',
-          'https://b.tile.opentopomap.org/{z}/{x}/{y}.png',
-          'https://c.tile.opentopomap.org/{z}/{x}/{y}.png',
-        ],
-        tileSize: 256,
-        maxzoom: 17,
-        attribution:
-          'Map: © <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC-BY-SA</a>) · Data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>, SRTM',
-      },
-    },
-    layers: [{ id: 'topo-base', type: 'raster', source: 'topo-raster' }],
-  }
-}
-
-function openCycleMapStyle() {
-  return {
-    version: 8,
-    sources: {
-      'thunderforest-cycle': {
-        type: 'raster',
-        tiles: [
-          `https://a.tile.thunderforest.com/cycle/{z}/{x}/{y}.png`,
-          `https://b.tile.thunderforest.com/cycle/{z}/{x}/{y}.png`,
-          `https://c.tile.thunderforest.com/cycle/{z}/{x}/{y}.png`,
-        ],
-        tileSize: 256,
-        maxzoom: 22,
-        attribution:
-          'Maps © <a href="https://www.thunderforest.com/" target="_blank" rel="noopener">Thunderforest</a> · Data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
-      },
-    },
-    layers: [{ id: 'cycle-base', type: 'raster', source: 'thunderforest-cycle' }],
-  }
-}
-
-function cyclOsmStyle() {
-  return {
-    version: 8,
-    sources: {
-      'cyclosm-raster': {
-        type: 'raster',
-        tiles: [
-          'https://a.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
-          'https://b.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
-          'https://c.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png',
-        ],
-        tileSize: 256,
-        maxzoom: 20,
-        attribution:
-          '© <a href="https://www.cyclosm.org" target="_blank" rel="noopener">CyclOSM</a> | © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
-      },
-    },
-    layers: [
-      {
-        id: 'cyclosm-base',
-        type: 'raster',
-        source: 'cyclosm-raster',
-        // Pulled back so the gradient-colored route stays the visual focal
-        // point.
-        paint: {
-          'raster-saturation': -0.55,
-          'raster-contrast': -0.1,
-          'raster-opacity': 0.85,
-        },
-      },
-    ],
-  }
 }
 
 function setMapStyle(id) {
@@ -847,39 +765,8 @@ onBeforeUnmount(() => {
       <div v-if="hasRoute" class="map-wrap" :class="{ expanded: mapExpanded }">
         <div ref="mapEl" class="activity-map"></div>
         <div class="map-controls">
-          <!-- Groupe 1 : style de fond (radio) -->
-          <div class="btn-group btn-group-sm shadow-sm" role="group" :aria-label="t('strava.map_style_label')">
-            <button
-              type="button"
-              class="btn map-ctrl-btn"
-              :class="mapStyleId === 'cyclosm' ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="t('strava.map_style_cyclo')"
-              @click="setMapStyle('cyclosm')"
-            >
-              <i class="fa-solid fa-bicycle" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_cyclo') }}</span>
-            </button>
-            <button
-              type="button"
-              class="btn map-ctrl-btn"
-              :class="mapStyleId === 'topo' ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="t('strava.map_style_topo')"
-              @click="setMapStyle('topo')"
-            >
-              <i class="fa-solid fa-mountain-sun" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_topo') }}</span>
-            </button>
-            <button
-              type="button"
-              class="btn map-ctrl-btn"
-              :class="mapStyleId === 'liberty' ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="t('strava.map_style_standard')"
-              @click="setMapStyle('liberty')"
-            >
-              <i class="fa-solid fa-map" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ t('strava.map_style_standard') }}</span>
-            </button>
-          </div>
+          <!-- Groupe 1 : style de fond -->
+          <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
 
           <!-- Groupe 2 : overlays et vue (toggles indépendants) -->
           <div class="btn-group btn-group-sm shadow-sm" role="group">

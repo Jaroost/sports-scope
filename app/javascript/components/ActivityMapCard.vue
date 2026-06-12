@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
+import { reactive, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
 import { type PropType } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor } from '../mapStyles'
+import { ActivityMapState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
   activityIcon,
@@ -46,16 +47,8 @@ const emit = defineEmits([
   'update:lightboxIndex',
 ])
 
-// ─── Local UI state ──────────────────────────────────────────────────────
-// Six toggles that previously lived on ActivityDetail but are only consumed
-// inside the map. None are persisted (localStorage), so they're trivially
-// local refs.
-const mapStyleId = ref('cyclosm')
-const showClimbs = ref(true)
-const showPhotos = ref(true)
-const showGrade = ref(true)
-const is3D = ref(false)
-const mapExpanded = ref(false)
+// ─── Page state (persisted to localStorage) ──────────────────────────────
+const state = reactive(new ActivityMapState())
 
 // Imperative map state — kept as `let`/non-reactive caches because the map
 // library hands us instances that don't play well with deep reactivity.
@@ -137,8 +130,8 @@ function latLngToIndex(lng, lat) {
 }
 
 function setMapStyle(id) {
-  if (!mapInstance || id === mapStyleId.value) return
-  mapStyleId.value = id
+  if (!mapInstance || id === state.mapStyleId) return
+  state.mapStyleId = id
   // `diff: false` forces a full wipe — without it, maplibre preserves custom
   // items across the swap and our re-addImage() call throws.
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
@@ -147,7 +140,7 @@ function setMapStyle(id) {
 
 // ─── Map layers ──────────────────────────────────────────────────────────
 function gradePaintExpression() {
-  if (!showGrade.value) return '#fc4c02'
+  if (!state.showGrade) return '#fc4c02'
   return [
     'match', ['get', 'bucket'],
     0, GRADE_BUCKETS[0].color,
@@ -228,7 +221,7 @@ function installRouteLayers(coords) {
   })
 
   // Re-apply the 3D terrain if it was on before the style switch.
-  if (is3D.value) {
+  if (state.is3D) {
     if (!mapInstance.getSource('terrain-dem')) {
       mapInstance.addSource('terrain-dem', {
         type: 'raster-dem',
@@ -249,7 +242,7 @@ function installClimbMarkers(maplibregl) {
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
   climbMarkerEls.clear()
-  if (!showClimbs.value) return
+  if (!state.showClimbs) return
   const latlng = props.streams?.latlng?.data
   const altitudes = props.streams?.altitude?.data
   const distances = props.streams?.distance?.data
@@ -296,8 +289,8 @@ function buildClimbMarkerEl(climb) {
 }
 
 function toggleClimbs() {
-  showClimbs.value = !showClimbs.value
-  if (!showClimbs.value) {
+  state.showClimbs = !state.showClimbs
+  if (!state.showClimbs) {
     climbMarkers.forEach((m) => m.remove())
     climbMarkers.length = 0
   } else if (_maplibregl) {
@@ -309,7 +302,7 @@ function toggleClimbs() {
 function installPhotoMarkers(maplibregl) {
   photoMarkers.forEach((m) => m.remove())
   photoMarkers.length = 0
-  if (!showPhotos.value || !mapInstance) return
+  if (!state.showPhotos || !mapInstance) return
   props.photos.forEach((photo, idx) => {
     const loc = photo.location
     if (!Array.isArray(loc) || loc.length < 2) return
@@ -336,8 +329,8 @@ function buildPhotoMarkerEl(photo, idx) {
 }
 
 function togglePhotos() {
-  showPhotos.value = !showPhotos.value
-  if (!showPhotos.value) {
+  state.showPhotos = !state.showPhotos
+  if (!state.showPhotos) {
     photoMarkers.forEach((m) => m.remove())
     photoMarkers.length = 0
   } else if (_maplibregl) {
@@ -586,7 +579,7 @@ function installMapHoverTooltip() {
 
 // ─── Grade + 3D + expand ─────────────────────────────────────────────────
 function toggleGrade() {
-  showGrade.value = !showGrade.value
+  state.showGrade = !state.showGrade
   if (mapInstance && mapInstance.getLayer('route-line')) {
     mapInstance.setPaintProperty('route-line', 'line-color', gradePaintExpression())
   }
@@ -594,8 +587,8 @@ function toggleGrade() {
 
 function toggleMap3D() {
   if (!mapInstance) return
-  is3D.value = !is3D.value
-  if (is3D.value) {
+  state.is3D = !state.is3D
+  if (state.is3D) {
     if (!mapInstance.getSource('terrain-dem')) {
       mapInstance.addSource('terrain-dem', {
         type: 'raster-dem',
@@ -614,7 +607,7 @@ function toggleMap3D() {
 }
 
 async function toggleMapSize() {
-  mapExpanded.value = !mapExpanded.value
+  state.mapExpanded = !state.mapExpanded
   await nextTick()
   if (mapInstance) mapInstance.resize()
 }
@@ -638,7 +631,7 @@ async function renderMap() {
 
   mapInstance = new maplibregl.Map({
     container: mapEl.value,
-    style: mapStyleFor(mapStyleId.value) as any,
+    style: mapStyleFor(state.mapStyleId) as any,
     bounds: bounds as any,
     fitBoundsOptions: { padding: 40 },
     maxPitch: 75,
@@ -704,7 +697,10 @@ watch(() => props.hoveredClimbStartIdx, (curr, prev) => {
   if (curr != null) climbMarkerEls.get(curr)?.classList.add('climb-marker-active')
 })
 
+watch(state, () => state.save(), { deep: true })
+
 onMounted(() => {
+  state.load()
   if (hasRoute.value) renderMap()
 })
 
@@ -764,20 +760,20 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <div class="card-body p-0">
-      <div v-if="hasRoute" class="map-wrap" :class="{ expanded: mapExpanded }">
+      <div v-if="hasRoute" class="map-wrap" :class="{ expanded: state.mapExpanded }">
         <div ref="mapEl" class="activity-map"></div>
         <div class="map-controls">
           <!-- Groupe 1 : style de fond -->
-          <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
+          <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
 
           <!-- Groupe 2 : overlays et vue (toggles indépendants) -->
           <div class="btn-group btn-group-sm shadow-sm" role="group">
             <button
               type="button"
               class="btn map-ctrl-btn"
-              :class="showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
-              :aria-pressed="showClimbs"
+              :class="state.showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
+              :title="state.showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
+              :aria-pressed="state.showClimbs"
               @click="toggleClimbs"
             >
               <i class="fa-solid fa-mountain" aria-hidden="true"></i>
@@ -786,9 +782,9 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="btn map-ctrl-btn"
-              :class="showGrade ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
-              :aria-pressed="showGrade"
+              :class="state.showGrade ? 'btn-warning text-dark active' : 'btn-light'"
+              :title="state.showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
+              :aria-pressed="state.showGrade"
               @click="toggleGrade"
             >
               <i class="fa-solid fa-palette" aria-hidden="true"></i>
@@ -797,9 +793,9 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="btn map-ctrl-btn"
-              :class="showPhotos ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="showPhotos ? t('strava.hide_photos') : t('strava.show_photos')"
-              :aria-pressed="showPhotos"
+              :class="state.showPhotos ? 'btn-warning text-dark active' : 'btn-light'"
+              :title="state.showPhotos ? t('strava.hide_photos') : t('strava.show_photos')"
+              :aria-pressed="state.showPhotos"
               :disabled="photos.length === 0"
               @click="togglePhotos"
             >
@@ -809,9 +805,9 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="btn map-ctrl-btn"
-              :class="is3D ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
-              :aria-pressed="is3D"
+              :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"
+              :title="state.is3D ? t('strava.map_2d') : t('strava.map_3d')"
+              :aria-pressed="state.is3D"
               @click="toggleMap3D"
             >
               <i class="fa-solid fa-cube" aria-hidden="true"></i>
@@ -820,13 +816,13 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="btn map-ctrl-btn"
-              :class="mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
-              :aria-pressed="mapExpanded"
+              :class="state.mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
+              :title="state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
+              :aria-pressed="state.mapExpanded"
               @click="toggleMapSize"
             >
-              <i :class="mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
-              <span class="d-none d-md-inline ms-1">{{ mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
+              <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
+              <span class="d-none d-md-inline ms-1">{{ state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
             </button>
           </div>
         </div>

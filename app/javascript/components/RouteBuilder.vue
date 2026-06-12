@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, useTemplateRef, computed, watch, nextTick } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, useTemplateRef, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { computeElevGain } from '../activityHelpers'
 import { mapStyleFor } from '../mapStyles'
+import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 
 const props = defineProps({
@@ -23,7 +24,7 @@ const isFetchingRoute = ref(false)
 const isFetchingElevation = ref(false)
 const saving = ref(false)
 const error = ref(null)
-const mapStyleId = ref('topo')
+const state = reactive(new RouteBuilderState())
 const currentId = ref(props.routeId ? Number(props.routeId) : null)
 const mapEl = useTemplateRef('mapEl')
 const chartEl = useTemplateRef('chartEl')
@@ -58,17 +59,6 @@ const isZoomed = ref(false)
 let zoomMin = null
 let zoomMax = null
 
-// 3D terrain toggle + map expand + climbs visibility — patterns lifted from
-// ActivityDetail.vue.
-const is3D = ref(false)
-const mapExpanded = ref(false)
-const showClimbs = ref(true)
-// One of 'grade' / 'surface' / 'none' — the colouring applied to the main
-// route line. Both grade and surface use the same source/layer; toggling
-// swaps which segmentation + paint expression is in effect.
-const colorMode = ref('grade')
-const showGrade = computed(() => colorMode.value === 'grade')
-const showSurface = computed(() => colorMode.value === 'surface')
 let routeMessages = [] // BRouter properties.messages data rows (header dropped)
 const climbMarkers = []
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
@@ -308,7 +298,7 @@ async function renderMap() {
 
   mapInstance = new maplibregl.Map({
     container: mapEl.value,
-    style: mapStyleFor(mapStyleId.value) as any,
+    style: mapStyleFor(state.mapStyleId) as any,
     center,
     zoom,
   })
@@ -591,7 +581,7 @@ function installClimbMarkers() {
   if (!_maplibregl || !mapInstance) return
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
-  if (!showClimbs.value || geometry.value.length < 2) return
+  if (!state.showClimbs || geometry.value.length < 2) return
   const altitudes = geometry.value.map((c) => c[2] ?? null)
   const distances = []
   let cum = 0
@@ -639,7 +629,7 @@ function buildClimbMarkerEl(climb, distances) {
 }
 
 function toggleClimbs() {
-  showClimbs.value = !showClimbs.value
+  state.showClimbs = !state.showClimbs
   installClimbMarkers()
 }
 
@@ -679,7 +669,7 @@ function applyColorMode() {
   const coords = geometry.value.map(([lng, lat]) => [lng, lat])
   let features: any[] = []
   let paint: string | any[] = '#fc4c02'
-  if (colorMode.value === 'grade' && coords.length >= 2) {
+  if (state.colorMode === 'grade' && coords.length >= 2) {
     const altitudes = geometry.value.map((c) => c[2] ?? null)
     const distances = [0]
     let cum = 0
@@ -689,7 +679,7 @@ function applyColorMode() {
     }
     features = buildGradedSegments(coords, altitudes, distances)
     paint = gradePaintExpression()
-  } else if (colorMode.value === 'surface' && coords.length >= 2) {
+  } else if (state.colorMode === 'surface' && coords.length >= 2) {
     features = buildSurfaceSegments(coords, routeMessages)
     paint = surfacePaintExpression()
     // No BRouter messages → fall back to a single segment so the line stays
@@ -708,7 +698,7 @@ function applyColorMode() {
 
 function setColorMode(mode) {
   // Click the active mode → off; click another → switch to it.
-  colorMode.value = (colorMode.value === mode) ? 'none' : mode
+  state.colorMode = (state.colorMode === mode) ? 'none' : mode
   applyColorMode()
 }
 
@@ -717,8 +707,8 @@ function toggleSurface() { setColorMode('surface') }
 
 function toggleMap3D() {
   if (!mapInstance) return
-  is3D.value = !is3D.value
-  if (is3D.value) {
+  state.is3D = !state.is3D
+  if (state.is3D) {
     if (!mapInstance.getSource('terrain-dem')) {
       mapInstance.addSource('terrain-dem', {
         type: 'raster-dem',
@@ -737,7 +727,7 @@ function toggleMap3D() {
 }
 
 async function toggleMapSize() {
-  mapExpanded.value = !mapExpanded.value
+  state.mapExpanded = !state.mapExpanded
   // map-wrap toggles to position:fixed full-screen — give maplibre a chance to
   // re-measure after the layout change.
   await nextTick()
@@ -803,8 +793,8 @@ function refreshDivergentMarkers() {
 
 
 function setMapStyle(id) {
-  if (!mapInstance || id === mapStyleId.value) return
-  mapStyleId.value = id
+  if (!mapInstance || id === state.mapStyleId) return
+  state.mapStyleId = id
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
     installRouteLayer()
@@ -813,7 +803,7 @@ function setMapStyle(id) {
     updateSelectionLayer()
     installClimbMarkers()
     // Re-apply 3D terrain (the style swap dropped both layers + terrain DEM).
-    if (is3D.value) {
+    if (state.is3D) {
       if (!mapInstance.getSource('terrain-dem')) {
         mapInstance.addSource('terrain-dem', {
           type: 'raster-dem',
@@ -1751,7 +1741,10 @@ function exportGpx() {
 }
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
+watch(state, () => state.save(), { deep: true })
+
 onMounted(async () => {
+  state.load()
   // When coming from the "Nouvel itinéraire" prompt, the URL carries
   // ?name=… — pre-fill the name input and scrub the param so a reload
   // doesn't re-apply the prefill on top of what the user has typed since.
@@ -1842,51 +1835,51 @@ onBeforeUnmount(() => {
     <!-- Map card -->
     <div class="card shadow-sm border-0 mb-3">
       <div class="card-body p-0">
-        <div class="map-wrap" :class="{ expanded: mapExpanded }">
+        <div class="map-wrap" :class="{ expanded: state.mapExpanded }">
           <div ref="mapEl" class="route-builder-map"></div>
           <div class="map-controls">
             <!-- Fond de carte -->
-            <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
+            <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
             <div class="btn-group btn-group-sm shadow-sm" role="group">
               <button type="button" class="btn map-ctrl-btn"
-                :class="showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
+                :class="state.showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleClimbs"
-                :title="showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
-                :aria-pressed="showClimbs">
+                :title="state.showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
+                :aria-pressed="state.showClimbs">
                 <i class="fa-solid fa-mountain" aria-hidden="true"></i>
                 <span class="d-none d-md-inline ms-1">{{ t('strava.climbs_label') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
-                :class="showGrade ? 'btn-warning text-dark active' : 'btn-light'"
+                :class="state.showGrade ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleGrade"
-                :title="showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
-                :aria-pressed="showGrade">
+                :title="state.showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
+                :aria-pressed="state.showGrade">
                 <i class="fa-solid fa-palette" aria-hidden="true"></i>
                 <span class="d-none d-md-inline ms-1">{{ t('strava.grade_label') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
-                :class="showSurface ? 'btn-warning text-dark active' : 'btn-light'"
+                :class="state.showSurface ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleSurface"
-                :title="showSurface ? t('strava.hide_surface') : t('strava.show_surface')"
-                :aria-pressed="showSurface">
+                :title="state.showSurface ? t('strava.hide_surface') : t('strava.show_surface')"
+                :aria-pressed="state.showSurface">
                 <i class="fa-solid fa-road" aria-hidden="true"></i>
                 <span class="d-none d-md-inline ms-1">{{ t('strava.surface_label') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
-                :class="is3D ? 'btn-warning text-dark active' : 'btn-light'"
+                :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleMap3D"
-                :title="is3D ? t('strava.map_2d') : t('strava.map_3d')"
-                :aria-pressed="is3D">
+                :title="state.is3D ? t('strava.map_2d') : t('strava.map_3d')"
+                :aria-pressed="state.is3D">
                 <i class="fa-solid fa-cube" aria-hidden="true"></i>
                 <span class="d-none d-md-inline ms-1">3D</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
-                :class="mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
+                :class="state.mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleMapSize"
-                :title="mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
-                :aria-pressed="mapExpanded">
-                <i :class="mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
+                :title="state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
+                :aria-pressed="state.mapExpanded">
+                <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
+                <span class="d-none d-md-inline ms-1">{{ state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map') }}</span>
               </button>
             </div>
             <div class="btn-group btn-group-sm shadow-sm" role="group">

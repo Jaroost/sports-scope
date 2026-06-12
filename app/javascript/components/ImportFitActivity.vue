@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'
+import { computeElevGain } from '../activityHelpers'
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
@@ -185,7 +186,9 @@ function buildPayload(data, filename) {
     distance_m: numericOrNull(session.total_distance) ?? (distance.length ? distance[distance.length - 1] : null),
     moving_time_s: integerOrNull(session.total_moving_time ?? session.total_timer_time),
     elapsed_time_s: integerOrNull(session.total_elapsed_time ?? session.total_timer_time),
-    total_elevation_gain: numericOrNull(session.total_ascent),
+    total_elevation_gain: altitude.some((v) => v != null)
+      ? computeElevGain(altitude).gain
+      : numericOrNull(session.total_ascent),
     average_speed: numericOrNull(session.avg_speed ?? session.enhanced_avg_speed),
     max_speed: numericOrNull(session.max_speed ?? session.enhanced_max_speed),
     average_heartrate: numericOrNull(session.avg_heart_rate),

@@ -10,6 +10,7 @@ import {
   formatHMS,
   formatKm,
   downsample,
+  computeElevGain,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -175,21 +176,28 @@ function rangeDistance() {
   return Math.max(0, d1 - d0)
 }
 
-function rangeElevation() {
+const rangeElevation = computed(() => {
   const b = rangeBounds()
   const alt = props.streams?.altitude?.data
   if (!b || !alt || alt.length < 2) return null
   const start = Math.max(b.startIdx, 0)
   const end = Math.min(b.endIdx, alt.length - 1)
-  let up = 0
-  let down = 0
-  for (let i = start + 1; i <= end; i++) {
-    const d = alt[i] - alt[i - 1]
-    if (d > 0) up += d
-    else down += d
+
+  // Without a selection (full activity): use the provider's authoritative
+  // total_elevation_gain (D+) and derive D- from the invariant D+ - D- = net
+  // altitude change (alt_end - alt_start), which holds regardless of the
+  // smoothing algorithm used to compute D+.
+  if (!selectionDisplay.value && props.activity?.total_elevation_gain != null) {
+    const up = props.activity.total_elevation_gain
+    const netAlt = alt[end] - alt[start]
+    const down = Math.max(0, up - netAlt)
+    return { up, down }
   }
-  return { up, down: Math.abs(down) }
-}
+
+  // With a selection: compute both from the smoothed stream slice.
+  const { gain: up, loss: down } = computeElevGain(alt.slice(start, end + 1))
+  return { up, down }
+})
 
 // VAM over the selected range — net altitude / duration. Signed.
 function rangeVam() {
@@ -1195,13 +1203,13 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-route" aria-hidden="true"></i>
           <strong>{{ formatKm(rangeDistance()) }}</strong>
         </span>
-        <span v-if="rangeElevation()" class="range-chip range-chip-success">
+        <span v-if="rangeElevation" class="range-chip range-chip-success">
           <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
-          <strong>{{ Math.round(rangeElevation().up) }} m</strong>
+          <strong>{{ Math.round(rangeElevation.up) }} m</strong>
         </span>
-        <span v-if="rangeElevation()" class="range-chip range-chip-danger">
+        <span v-if="rangeElevation" class="range-chip range-chip-danger">
           <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
-          <strong>{{ Math.round(rangeElevation().down) }} m</strong>
+          <strong>{{ Math.round(rangeElevation.down) }} m</strong>
         </span>
         <span v-if="rangeGrade() != null && !visibleStreamsLocal.includes('grade_smooth')" class="range-chip">
           <i class="fa-solid fa-percent" aria-hidden="true"></i>

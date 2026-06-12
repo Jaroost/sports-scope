@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, useTemplateRef, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
+import { computeElevGain } from '../activityHelpers'
 
 const props = defineProps({
   routeId: { type: [String, Number], default: null },
@@ -145,17 +146,11 @@ const chartStats = computed(() => {
     const lo = Math.min(i0, i1)
     const hi = Math.max(i0, i1)
     if (hi - lo >= 1) {
-      let dist = 0; let up = 0; let down = 0
+      let dist = 0
       for (let i = lo + 1; i <= hi; i++) {
         dist += haversine(geometry.value[i - 1], geometry.value[i])
-        const a = geometry.value[i - 1][2]
-        const b = geometry.value[i][2]
-        if (a != null && b != null) {
-          const d = b - a
-          if (d > 0) up += d
-          else down -= d
-        }
       }
+      const { gain: up, loss: down } = computeGainLoss(geometry.value.slice(lo, hi + 1))
       return {
         distance: dist,
         gain: up,
@@ -1245,19 +1240,14 @@ function interpolateElevation(fullCoords, sampled, sampledEle) {
   geometry.value = fullCoords.slice()
 }
 
+function computeGainLoss(coords) {
+  return computeElevGain(coords.map((c) => c[2]))
+}
+
 function recomputeGain() {
-  let up = 0
-  let down = 0
-  for (let i = 1; i < geometry.value.length; i++) {
-    const a = geometry.value[i - 1][2]
-    const b = geometry.value[i][2]
-    if (a == null || b == null) continue
-    const d = b - a
-    if (d > 0) up += d
-    else down -= d
-  }
-  elevGainM.value = up
-  elevLossM.value = down
+  const { gain, loss } = computeGainLoss(geometry.value)
+  elevGainM.value = gain
+  elevLossM.value = loss
 }
 
 // ─── Elevation chart ─────────────────────────────────────────────────────────

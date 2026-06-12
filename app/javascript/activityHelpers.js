@@ -52,6 +52,32 @@ export const STREAM_CHIP_ORDER = ['grade_smooth', 'watts', 'velocity_smooth', 'h
 // on the Ruby side so server-stored values align with on-screen rows).
 export const PEAK_POWER_DURATIONS = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400]
 
+// ─── Elevation gain/loss ──────────────────────────────────────────────────
+// Compute D+/D- from a flat altitude array using a (2*halfWin+1)-point moving
+// average to suppress sensor/quantisation noise before accumulating. Works for
+// both FIT barometric data (floating point, baro/GPS noise) and BRouter SRTM
+// integer data. Returns { gain, loss } in metres.
+export function computeElevGain(alts, halfWin = 2) {
+  const n = alts.length
+  if (n < 2) return { gain: 0, loss: 0 }
+  let up = 0, down = 0, prev = null
+  for (let i = 0; i < n; i++) {
+    let sum = 0, cnt = 0
+    for (let j = Math.max(0, i - halfWin); j <= Math.min(n - 1, i + halfWin); j++) {
+      if (alts[j] != null) { sum += alts[j]; cnt++ }
+    }
+    const smooth = cnt > 0 ? sum / cnt : null
+    if (smooth == null) continue
+    if (prev != null) {
+      const d = smooth - prev
+      if (d > 0) up += d
+      else down -= d
+    }
+    prev = smooth
+  }
+  return { gain: up, loss: down }
+}
+
 // ─── Formatting ───────────────────────────────────────────────────────────
 export function fmt(v, digits) {
   if (v == null || Number.isNaN(v)) return '–'

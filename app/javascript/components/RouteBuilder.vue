@@ -59,7 +59,6 @@ const isZoomed = ref(false)
 let zoomMin = null
 let zoomMax = null
 
-let routeMessages = [] // BRouter properties.messages data rows (header dropped)
 const climbMarkers = []
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
@@ -72,16 +71,6 @@ const GRADE_BUCKETS = [
   { max: 10,       color: '#f97316' }, // medium climb
   { max: 15,       color: '#dc2626' }, // hard climb
   { max: Infinity, color: '#7f1d1d' }, // very hard climb
-]
-
-// Surface buckets derived from OSM `surface=*` / `tracktype=*` / `highway=*`
-// tags that BRouter ships in its `properties.messages` per segment.
-const SURFACE_BUCKETS = [
-  { color: '#22c55e' }, // 0 — asphalt / paved / concrete
-  { color: '#f97316' }, // 1 — pavés / sett / cobblestone
-  { color: '#eab308' }, // 2 — compacted / fine_gravel
-  { color: '#a16207' }, // 3 — gravel / unpaved
-  { color: '#7c2d12' }, // 4 — dirt / grass / sand
 ]
 
 const hasGeometry = computed(() => geometry.value.length >= 2)
@@ -366,67 +355,6 @@ function gradeForIndex(i, altitudes, distances) {
   return dd > 0 ? (da / dd) * 100 : 0
 }
 
-function parseWayTags(s) {
-  const out = {}
-  if (!s) return out
-  for (const pair of s.split('&')) {
-    const i = pair.indexOf('=')
-    if (i > 0) out[decodeURIComponent(pair.slice(0, i))] = decodeURIComponent(pair.slice(i + 1))
-  }
-  return out
-}
-
-function bucketSurface(tags) {
-  const surface = (tags.surface || tags['cycleway:surface'] || '').toLowerCase()
-  const tracktype = (tags.tracktype || '').toLowerCase()
-  const highway = (tags.highway || '').toLowerCase()
-  if (['asphalt', 'paved', 'concrete', 'concrete:plates', 'concrete:lanes', 'chipseal'].includes(surface)) return 0
-  if (['paving_stones', 'cobblestone', 'cobblestone:flattened', 'sett', 'bricks', 'unhewn_cobblestone'].includes(surface)) return 1
-  if (['compacted', 'fine_gravel'].includes(surface) || tracktype === 'grade1') return 2
-  if (['gravel', 'pebblestone', 'unpaved', 'metal', 'wood'].includes(surface) || tracktype === 'grade2') return 3
-  if (['ground', 'dirt', 'earth', 'mud', 'grass', 'sand', 'snow', 'ice', 'woodchips'].includes(surface)) return 4
-  if (['grade3', 'grade4', 'grade5'].includes(tracktype)) return 4
-  // Heuristic fallback by highway type when surface= is missing.
-  if (highway === 'track') return 3
-  if (highway === 'path' || highway === 'bridleway') return 4
-  return 0 // most highways without an explicit surface tag are paved
-}
-
-function buildSurfaceSegments(coords, messageRows) {
-  if (!coords || coords.length < 2) return []
-  // BRouter's messages contain one row per routing segment between consecutive
-  // coords. The `WayTags` column is at index 11 (current schema). We treat the
-  // row for segment i as describing the edge ending at coords[i+1].
-  const features = []
-  const bucketAt = (i) => {
-    const row = messageRows[Math.min(i, messageRows.length - 1)]
-    const tagsStr = row && row[11] != null ? String(row[11]) : ''
-    return bucketSurface(parseWayTags(tagsStr))
-  }
-  let current = [coords[0]]
-  let curBucket = bucketAt(0)
-  for (let i = 1; i < coords.length; i++) {
-    const b = bucketAt(Math.min(i, coords.length - 2))
-    current.push(coords[i])
-    if (b !== curBucket && current.length >= 2) {
-      features.push({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: current.slice() },
-        properties: { bucket: curBucket },
-      })
-      current = [coords[i]]
-      curBucket = b
-    }
-  }
-  if (current.length >= 2) {
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates: current },
-      properties: { bucket: curBucket },
-    })
-  }
-  return features
-}
 
 function buildGradedSegments(coords, altitudes, distances) {
   if (!coords || coords.length < 2) return []
@@ -647,21 +575,9 @@ function gradePaintExpression() {
   ]
 }
 
-function surfacePaintExpression() {
-  return [
-    'match', ['get', 'bucket'],
-    0, SURFACE_BUCKETS[0].color,
-    1, SURFACE_BUCKETS[1].color,
-    2, SURFACE_BUCKETS[2].color,
-    3, SURFACE_BUCKETS[3].color,
-    4, SURFACE_BUCKETS[4].color,
-    '#fc4c02',
-  ]
-}
-
 // Apply the current colorMode to the visible line: choose the right
-// segmentation (grade / surface / single feature) and the right paint
-// expression. Called from updateRouteLayer + from the toggles.
+// segmentation (grade / none) and paint expression.
+// Called from updateRouteLayer + from the toggle.
 function applyColorMode() {
   if (!mapInstance) return
   const src = mapInstance.getSource('builder-route-graded')
@@ -679,14 +595,6 @@ function applyColorMode() {
     }
     features = buildGradedSegments(coords, altitudes, distances)
     paint = gradePaintExpression()
-  } else if (state.colorMode === 'surface' && coords.length >= 2) {
-    features = buildSurfaceSegments(coords, routeMessages)
-    paint = surfacePaintExpression()
-    // No BRouter messages → fall back to a single segment so the line stays
-    // visible (paint expression's default colour kicks in).
-    if (features.length === 0) {
-      features = [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: { bucket: 0 } }]
-    }
   } else if (coords.length >= 2) {
     features = [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }]
   }
@@ -696,14 +604,10 @@ function applyColorMode() {
   }
 }
 
-function setColorMode(mode) {
-  // Click the active mode → off; click another → switch to it.
-  state.colorMode = (state.colorMode === mode) ? 'none' : mode
+function toggleGrade() {
+  state.colorMode = state.colorMode === 'grade' ? 'none' : 'grade'
   applyColorMode()
 }
-
-function toggleGrade() { setColorMode('grade') }
-function toggleSurface() { setColorMode('surface') }
 
 function toggleMap3D() {
   if (!mapInstance) return
@@ -1050,7 +954,6 @@ async function recomputeRoute() {
     elevLossM.value = 0
     divergentLegs.value = []
     cumDistKm = []
-    routeMessages = []
     updateRouteLayer()
     updateDivergentLayer()
     refreshDivergentMarkers()
@@ -1063,10 +966,7 @@ async function recomputeRoute() {
   error.value = null
   try {
     const lonlats = waypoints.value.map((w) => `${w.lng},${w.lat}`).join('|')
-    // `&messages=1` asks BRouter to embed per-segment OSM tag rows
-    // (highway/surface/tracktype/…) into properties.messages — used by the
-    // surface colour mode.
-    const url = `https://brouter.de/brouter?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson&messages=1`
+    const url = `https://brouter.de/brouter?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
     const data = await res.json()
@@ -1080,10 +980,6 @@ async function recomputeRoute() {
     distanceM.value = Number.isFinite(trackLen) && trackLen > 0 ? trackLen : 0
     // BRouter coords are [lng, lat, ele] (ele is SRTM/DEM, integer meters)
     geometry.value = coords.map((c) => [c[0], c[1], c.length > 2 ? c[2] : null])
-    // Per-segment OSM tag rows for surface colour mode. The first row is a
-    // header — skip it. Empty / missing → surface mode degrades to flat.
-    const rawMsgs = feature.properties?.messages
-    routeMessages = Array.isArray(rawMsgs) && rawMsgs.length > 1 ? rawMsgs.slice(1) : []
     // BRouter handles bicycle-specific rules natively, no divergent legs.
     divergentLegs.value = []
 
@@ -1856,14 +1752,6 @@ onBeforeUnmount(() => {
                 :aria-pressed="state.showGrade">
                 <i class="fa-solid fa-palette" aria-hidden="true"></i>
                 <span class="d-none d-md-inline ms-1">{{ t('strava.grade_label') }}</span>
-              </button>
-              <button type="button" class="btn map-ctrl-btn"
-                :class="state.showSurface ? 'btn-warning text-dark active' : 'btn-light'"
-                @click="toggleSurface"
-                :title="state.showSurface ? t('strava.hide_surface') : t('strava.show_surface')"
-                :aria-pressed="state.showSurface">
-                <i class="fa-solid fa-road" aria-hidden="true"></i>
-                <span class="d-none d-md-inline ms-1">{{ t('strava.surface_label') }}</span>
               </button>
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"

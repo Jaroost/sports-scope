@@ -9,7 +9,7 @@
 // inside the getter refers to the reactive proxy, so Vue tracks the
 // dependency on any reactive property the getter reads.
 
-export type ColorMode = 'grade' | 'surface' | 'none'
+export type ColorMode = 'grade' | 'none'
 
 // ─── Base ─────────────────────────────────────────────────────────────────
 
@@ -89,10 +89,6 @@ export class RouteBuilderState extends MapPageState {
   // when accessed through state.showGrade, so Vue tracks state.colorMode.
   get showGrade(): boolean {
     return this.colorMode === 'grade'
-  }
-
-  get showSurface(): boolean {
-    return this.colorMode === 'surface'
   }
 
   protected override storageKey(): string {

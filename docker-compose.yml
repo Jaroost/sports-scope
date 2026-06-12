@@ -15,7 +15,7 @@ services:
       KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql
-      - ./compose/postgres/init-keycloak.sh:/docker-entrypoint-initdb.d/init-keycloak.sh:ro
+      - ./deploy/postgres/init-keycloak.sh:/docker-entrypoint-initdb.d/init-keycloak.sh:ro
     ports:
       - "5432:5432"
     networks:
@@ -50,7 +50,7 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
     volumes:
-      - ./compose/keycloak:/opt/keycloak/templates:ro
+      - ./deploy/keycloak:/opt/keycloak/templates:ro
     networks:
       - default
       - proxy

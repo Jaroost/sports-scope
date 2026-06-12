@@ -15,7 +15,7 @@ services:
       KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
     volumes:
       - db_data:/var/lib/postgresql
-      - ./compose/postgres/init-keycloak.sh:/docker-entrypoint-initdb.d/init-keycloak.sh:ro
+      - ./postgres/init-keycloak.sh:/docker-entrypoint-initdb.d/init-keycloak.sh:ro
     networks:
       - default
     healthcheck:
@@ -48,7 +48,7 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
     volumes:
-      - ./compose/keycloak:/opt/keycloak/templates:ro
+      - ./keycloak:/opt/keycloak/templates:ro
     networks:
       - default
       - traefik-net

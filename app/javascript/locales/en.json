@@ -191,7 +191,18 @@
       "hide_waypoints": "Hide waypoints",
       "remove_waypoint": "Remove this point",
       "return_via_same_route": "Return via same route",
-      "street_view": "Street View"
+      "street_view": "Street View",
+      "cyclosm_legend": "CyclOSM legend",
+      "cyclosm_paths": "Paths",
+      "cyclosm_cycleway": "Cycleway",
+      "cyclosm_lane": "Bike lane",
+      "cyclosm_greenway": "Greenway",
+      "cyclosm_unpaved": "Unpaved path",
+      "cyclosm_routes": "Routes",
+      "cyclosm_lcn": "Local",
+      "cyclosm_rcn": "Regional",
+      "cyclosm_ncn": "National",
+      "cyclosm_icn": "International (EuroVelo)"
     },
     "common": {
       "days_ago_today": "today",

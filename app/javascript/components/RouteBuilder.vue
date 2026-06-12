@@ -855,6 +855,23 @@ function removeWaypoint(idx) {
   recomputeRoute()
 }
 
+// Append a return path ending at `idx`. The waypoint just before `idx` in the
+// return sequence is skipped — `idx` itself replaces it as the final point.
+// Example: [A,B,C,D] clicking A → [A,B,C,D,C,A]  (B is skipped, A is last)
+function addReturnTo(idx) {
+  const wps = waypoints.value
+  if (wps.length < 2 || idx >= wps.length - 1) return
+  const toAdd = []
+  for (let i = wps.length - 2; i > idx + 1; i--) {
+    toAdd.push(wps[i])
+  }
+  toAdd.push(wps[idx])
+  waypoints.value = [...wps, ...toAdd]
+  deselectAll()
+  refreshWaypointMarkers()
+  recomputeRoute()
+}
+
 function undoLast() {
   if (waypoints.value.length === 0) return
   waypoints.value = waypoints.value.slice(0, -1)
@@ -885,11 +902,18 @@ function refreshWaypointMarkers() {
     const el = document.createElement('div')
     el.className = 'wp-marker'
     const inSwiss = isInSwitzerland(w.lat, w.lng)
+    const isLast = idx === waypoints.value.length - 1
     const geoAdminHtml = inSwiss
       ? `<a class="wp-tooltip-action" href="https://map.geo.admin.ch/?zoom=14&crosshair=circle&lat=${w.lat}&lon=${w.lng}" target="_blank" rel="noopener noreferrer">
            <i class="fa-solid fa-map" aria-hidden="true"></i>
            <span>SwissTopo</span>
          </a>`
+      : ''
+    const returnHtml = !isLast
+      ? `<button type="button" class="wp-tooltip-action wp-tooltip-action--return">
+           <i class="fa-solid fa-right-left" aria-hidden="true"></i>
+           <span>${t('routes.return_via_same_route')}</span>
+         </button>`
       : ''
     el.innerHTML = `
       <div class="wp-tooltip">
@@ -903,6 +927,7 @@ function refreshWaypointMarkers() {
           <span>Komoot</span>
         </a>
         ${geoAdminHtml}
+        ${returnHtml}
         <button type="button" class="wp-tooltip-action wp-tooltip-action--delete">
           <i class="fa-solid fa-trash" aria-hidden="true"></i>
           <span>${t('routes.remove_waypoint')}</span>
@@ -939,6 +964,13 @@ function refreshWaypointMarkers() {
         ev.stopPropagation()
         deselectAll()
       })
+    })
+
+    // Return via same route button
+    el.querySelector('.wp-tooltip-action--return')?.addEventListener('click', (ev) => {
+      ev.stopPropagation()
+      ev.preventDefault()
+      addReturnTo(idx)
     })
 
     // Delete button
@@ -987,6 +1019,7 @@ function attachWaypointDrag(el, marker, idx) {
       mapInstance.getCanvas().style.cursor = 'crosshair'
       el.style.cursor = ''
       if (!moved) return
+      suppressNextMapClick = true
       const pos = marker.getLngLat()
       const next = waypoints.value.slice()
       next[idx] = { lng: pos.lng, lat: pos.lat }

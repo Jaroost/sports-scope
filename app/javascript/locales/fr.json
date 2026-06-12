@@ -189,7 +189,8 @@
       "zoom_to_selection": "Zoomer sur sélection",
       "show_waypoints": "Afficher les points",
       "hide_waypoints": "Masquer les points",
-      "remove_waypoint": "Supprimer ce point"
+      "remove_waypoint": "Supprimer ce point",
+      "return_via_same_route": "Revenir par le même chemin"
     },
     "common": {
       "days_ago_today": "aujourd'hui",

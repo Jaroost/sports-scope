@@ -973,7 +973,7 @@ function refreshWaypointMarkers() {
           <i class="fa-solid fa-street-view" aria-hidden="true"></i>
           <span>${t('routes.street_view')}</span>
         </a>
-        <a class="wp-tooltip-action wp-tooltip-action--komoot" href="https://www.komoot.com/plan/@${w.lat},${w.lng},14z" target="_blank" rel="noopener noreferrer">
+        <a class="wp-tooltip-action wp-tooltip-action--komoot" href="https://www.komoot.com/plan/@${w.lat},${w.lng},14z?p[0][loc]=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
           <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
           <span>Komoot</span>
         </a>

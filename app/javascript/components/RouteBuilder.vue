@@ -42,6 +42,7 @@ const locating = ref(false)
 const hoverIdx = ref(null) // geometry index under cursor when over the route
 let waypointGeomIndices = [] // for each waypoint, its index in geometry[]
 let selectedWpIdx = -1 // index of the currently selected waypoint, -1 if none
+const svCache = new Map<string, boolean>()
 // Set to true right after a successful waypoint drag so the click event
 // maplibre synthesizes from the mouseup doesn't add/insert a spurious point.
 let suppressNextMapClick = false
@@ -810,6 +811,43 @@ function setMapStyle(id) {
   })
 }
 
+// ─── Street View availability (JSONP — no API key required) ──────────────────
+function svCacheKey(lat: number, lng: number) {
+  return `${lat.toFixed(4)},${lng.toFixed(4)}`
+}
+
+function checkSV(lat: number, lng: number): Promise<boolean> {
+  const key = svCacheKey(lat, lng)
+  if (svCache.has(key)) return Promise.resolve(svCache.get(key)!)
+  return new Promise<boolean>((resolve) => {
+    const cb = `_sv${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+    const s = document.createElement('script')
+    let settled = false
+    const finish = (v: boolean) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      delete (window as any)[cb]
+      s.remove()
+      svCache.set(key, v)
+      resolve(v)
+    }
+    const timer = setTimeout(() => finish(true), 4000) // fail-open on timeout
+    ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
+    s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
+    s.onerror = () => finish(true) // fail-open on error
+    document.head.appendChild(s)
+  })
+}
+
+function applySVState(markerEl: HTMLElement, available: boolean) {
+  const link = markerEl.querySelector<HTMLElement>('.wp-tooltip-action--streetview')
+  if (!link) return
+  link.classList.toggle('wp-tooltip-action--disabled', !available)
+  if (!available) link.setAttribute('aria-disabled', 'true')
+  else link.removeAttribute('aria-disabled')
+}
+
 // ─── Waypoint selection & tooltip ────────────────────────────────────────────
 function isInSwitzerland(lat, lng) {
   return lat >= 45.818 && lat <= 47.808 && lng >= 5.956 && lng <= 10.492
@@ -830,6 +868,15 @@ function selectWaypoint(idx) {
     const el = waypointMarkers[idx].getElement()
     el.classList.add('wp-marker--selected')
     if (el.parentElement) el.parentElement.style.zIndex = '200'
+  }
+  // Lazy Street View availability check — updates the tooltip once resolved.
+  const wp = waypoints.value[idx]
+  if (wp) {
+    checkSV(wp.lat, wp.lng).then((ok) => {
+      if (selectedWpIdx === idx && waypointMarkers[idx]) {
+        applySVState(waypointMarkers[idx].getElement(), ok)
+      }
+    })
   }
 }
 
@@ -922,7 +969,7 @@ function refreshWaypointMarkers() {
           <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>
           <span>Google Maps</span>
         </a>
-        <a class="wp-tooltip-action" href="https://www.google.com/maps?q=&layer=c&cbll=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
+        <a class="wp-tooltip-action wp-tooltip-action--streetview" href="https://www.google.com/maps?q=&layer=c&cbll=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
           <i class="fa-solid fa-street-view" aria-hidden="true"></i>
           <span>${t('routes.street_view')}</span>
         </a>
@@ -2597,6 +2644,11 @@ onBeforeUnmount(() => {
 .wp-tooltip-action--delete:hover {
   background: rgba(220, 38, 38, 0.08);
   color: #dc2626;
+}
+.wp-tooltip-action--disabled {
+  opacity: 0.38;
+  pointer-events: none;
+  cursor: default;
 }
 
 /* Warning marker placed at the midpoint of a leg where cycling routing

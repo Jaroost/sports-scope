@@ -95,6 +95,37 @@ const avgGradePct = computed(() => {
   return (((elevGainM.value - elevLossM.value) / distanceM.value) * 100).toFixed(1)
 })
 
+const maxGradePct = computed(() => {
+  const g = geometry.value
+  if (g.length < 2) return '0.0'
+  const WINDOW_M = 200
+  // Precompute cumulative distances so the sliding window is exact
+  const cum = new Float64Array(g.length)
+  for (let i = 1; i < g.length; i++) cum[i] = cum[i - 1] + haversine(g[i - 1], g[i])
+  let max = 0
+  let lo = 0
+  for (let hi = 1; hi < g.length; hi++) {
+    if (g[hi][2] == null) continue
+    // Keep lo as close to hi as possible while the window stays >= WINDOW_M
+    while (lo < hi - 1 && cum[hi] - cum[lo + 1] >= WINDOW_M) lo++
+    if (g[lo][2] == null) continue
+    const dist = cum[hi] - cum[lo]
+    if (dist < WINDOW_M * 0.5) continue // ignore start of route where window is too short
+    const grade = ((g[hi][2] - g[lo][2]) / dist) * 100
+    if (grade > max) max = grade
+  }
+  return max.toFixed(1)
+})
+
+const detectedClimbs = computed(() => {
+  const g = geometry.value
+  if (g.length < 2) return []
+  const altitudes = g.map((c) => c[2] ?? null)
+  const distances = [0]
+  for (let i = 1; i < g.length; i++) distances.push(distances[i - 1] + haversine(g[i - 1], g[i]))
+  return detectClimbs(altitudes, distances)
+})
+
 // Average riding speed in km/h, persisted in localStorage. Used to compute
 // an estimated ride time below the map. Default 18 km/h ≈ typical cyclo
 // touring pace including stops.
@@ -2153,13 +2184,15 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
           <strong>+{{ Math.round(elevGainM) }} m</strong>
         </span>
-        <span class="stat-pill stat-pill-down">
-          <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
-          <strong>-{{ Math.round(elevLossM) }} m</strong>
+        <span class="stat-pill stat-pill-grade">
+          <span class="grade-icon" aria-hidden="true">↗</span>
+          <strong>{{ maxGradePct }} %</strong>
+          <small class="text-muted">max</small>
         </span>
         <span class="stat-pill stat-pill-grade">
           <span class="grade-icon" aria-hidden="true">\</span>
           <strong>{{ avgGradePct }} %</strong>
+          <small class="text-muted">moy</small>
         </span>
         <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
           <span class="d-flex align-items-center gap-2">
@@ -2183,8 +2216,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- Right column: map + elevation profile -->
+    <div class="d-flex flex-column gap-3 flex-grow-1" style="min-width:0">
+
     <!-- Map card -->
-    <div class="card shadow-sm border-0 flex-grow-1" style="min-width:0">
+    <div class="card shadow-sm border-0">
       <div class="card-body p-0">
         <div class="map-wrap" :class="{ expanded: state.mapExpanded }">
           <div ref="mapEl" class="route-builder-map"></div>
@@ -2349,30 +2385,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    </div> <!-- end map + stats flex wrapper -->
-
-    <!-- Actions bar -->
-    <div class="card shadow-sm border-0 mb-3">
-      <div class="card-body d-flex justify-content-end gap-2">
-        <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-          @click="exportGpx" :title="t('routes.export_gpx')">
-          <i class="fa-solid fa-download" aria-hidden="true"></i>
-          <span class="d-none d-md-inline">GPX</span>
-        </button>
-        <button v-if="waypoints.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-          @click="openInKomoot" :title="t('routes.open_in_komoot')">
-          <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-          <span class="d-none d-md-inline">Komoot</span>
-        </button>
-        <button type="button" class="btn btn-warning d-flex align-items-center gap-1"
-          @click="save" :disabled="saving || waypoints.length < 2 || !name.trim()">
-          <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-          <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
-          <span>{{ t('routes.save') }}</span>
-        </button>
-      </div>
-    </div>
-
     <!-- Elevation chart card -->
     <div class="card shadow-sm border-0">
       <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
@@ -2420,11 +2432,7 @@ onBeforeUnmount(() => {
         </div>
         <template v-else>
           <div class="grade-legend mb-2" :aria-label="t('routes.grade_legend')">
-            <span
-              v-for="b in gradeLegend"
-              :key="b.label"
-              class="grade-legend-item"
-            >
+            <span v-for="b in gradeLegend" :key="b.label" class="grade-legend-item">
               <span class="grade-legend-swatch" :style="{ backgroundColor: b.color }"></span>
               <span class="grade-legend-label">{{ b.label }}</span>
             </span>
@@ -2435,6 +2443,33 @@ onBeforeUnmount(() => {
         </template>
       </div>
     </div>
+
+    </div> <!-- end right column -->
+
+    </div> <!-- end map + stats flex wrapper -->
+
+    <!-- Actions bar -->
+    <div class="card shadow-sm border-0 mb-3">
+      <div class="card-body d-flex justify-content-end gap-2">
+        <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          @click="exportGpx" :title="t('routes.export_gpx')">
+          <i class="fa-solid fa-download" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">GPX</span>
+        </button>
+        <button v-if="waypoints.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          @click="openInKomoot" :title="t('routes.open_in_komoot')">
+          <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">Komoot</span>
+        </button>
+        <button type="button" class="btn btn-warning d-flex align-items-center gap-1"
+          @click="save" :disabled="saving || waypoints.length < 2 || !name.trim()">
+          <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+          <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+          <span>{{ t('routes.save') }}</span>
+        </button>
+      </div>
+    </div>
+
   </div>
 </template>
 

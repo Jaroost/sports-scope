@@ -65,6 +65,12 @@ const HANDLE_TOL_PX = 8 // pixels from the flag pole that count as a "grab"
 const isZoomed = ref(false)
 let zoomMin = null
 let zoomMax = null
+let chartCrossMarker = null // marker on the map synced to chart hover position
+let selectionMarkerA = null // draggable handle for one end of the selection
+let selectionMarkerAKm = null
+let selectionMarkerB = null // draggable handle for the other end
+let selectionMarkerBKm = null
+let selectionMarkerDragging = false
 
 const climbMarkers = []
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
@@ -937,6 +943,7 @@ function clearAll() {
 function toggleWaypoints() {
   state.showWaypoints = !state.showWaypoints
   refreshWaypointMarkers()
+  if (chartInstance) chartInstance.update('none')
 }
 
 function refreshWaypointMarkers() {
@@ -1158,6 +1165,76 @@ function showHoverMarker(coord) {
 function hideHoverMarker() {
   hoverIdx.value = null
   if (hoverMarker) hoverMarker.getElement().style.display = 'none'
+}
+
+function showChartCrossMarker(lng, lat) {
+  if (!_maplibregl || !mapInstance) return
+  if (!chartCrossMarker) {
+    const el = document.createElement('div')
+    el.className = 'chart-cross-marker'
+    chartCrossMarker = new _maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([lng, lat])
+      .addTo(mapInstance)
+  } else {
+    chartCrossMarker.setLngLat([lng, lat])
+    chartCrossMarker.getElement().style.display = ''
+  }
+}
+
+function hideChartCrossMarker() {
+  if (chartCrossMarker) chartCrossMarker.getElement().style.display = 'none'
+}
+
+function updateSelectionMarkers() {
+  if (!_maplibregl || !mapInstance || selectionMarkerDragging) return
+  if (!selectionRange.value || !cumDistKm.length || !geometry.value.length) {
+    if (selectionMarkerA) { selectionMarkerA.remove(); selectionMarkerA = null }
+    if (selectionMarkerB) { selectionMarkerB.remove(); selectionMarkerB = null }
+    selectionMarkerAKm = null
+    selectionMarkerBKm = null
+    return
+  }
+  const { startKm, endKm } = selectionRange.value
+  const ptStart = geometry.value[geomIdxForKm(startKm)]
+  const ptEnd = geometry.value[geomIdxForKm(endKm)]
+  if (!ptStart || !ptEnd) return
+  if (!selectionMarkerA) selectionMarkerA = makeSelectionMarker()
+  if (!selectionMarkerB) selectionMarkerB = makeSelectionMarker()
+  selectionMarkerAKm = startKm
+  selectionMarkerBKm = endKm
+  selectionMarkerA.setLngLat([ptStart[0], ptStart[1]])
+  selectionMarkerB.setLngLat([ptEnd[0], ptEnd[1]])
+}
+
+function makeSelectionMarker() {
+  const el = document.createElement('div')
+  el.className = 'sel-flag-marker'
+  const marker = new _maplibregl.Marker({ element: el, anchor: 'center', draggable: true })
+    .setLngLat([0, 0])
+    .addTo(mapInstance)
+  marker.on('dragstart', () => { selectionMarkerDragging = true })
+  marker.on('drag', () => {
+    const { lng: dLng, lat: dLat } = marker.getLngLat()
+    let best = 0, bestDist = Infinity
+    for (let i = 0; i < geometry.value.length; i++) {
+      const dx = geometry.value[i][0] - dLng
+      const dy = geometry.value[i][1] - dLat
+      const d = dx * dx + dy * dy
+      if (d < bestDist) { bestDist = d; best = i }
+    }
+    const km = cumDistKm[best]
+    if (km == null) return
+    marker.setLngLat([geometry.value[best][0], geometry.value[best][1]])
+    if (marker === selectionMarkerA) selectionMarkerAKm = km
+    else selectionMarkerBKm = km
+    const lo = Math.min(selectionMarkerAKm ?? km, selectionMarkerBKm ?? km)
+    const hi = Math.max(selectionMarkerAKm ?? km, selectionMarkerBKm ?? km)
+    selectionRange.value = { startKm: lo, endKm: hi }
+    updateSelectionLayer()
+    if (chartInstance) chartInstance.update('none')
+  })
+  marker.on('dragend', () => { selectionMarkerDragging = false })
+  return marker
 }
 
 function insertWaypointAtGeomIdx(geomIdx) {
@@ -1484,7 +1561,7 @@ async function renderElevationChart() {
     // gradeFillPlugin must come before selectionRectPlugin so the selection
     // rectangle (also drawn in beforeDatasetsDraw) sits on top of the colored
     // fill.
-    plugins: [gradeFillPlugin, selectionRectPlugin, waypointDotsPlugin],
+    plugins: [gradeFillPlugin, selectionRectPlugin, waypointDotsPlugin, hoverSyncPlugin],
   })
   attachChartSelectionOnce(chartEl.value)
 }
@@ -1495,7 +1572,7 @@ const waypointDotsPlugin = {
   id: 'routeWaypointDots',
   afterDatasetsDraw(chart) {
     const wps = waypointGeomIndices
-    if (!wps.length || !cumDistKm.length || !geometry.value.length) return
+    if (!state.showWaypoints || !wps.length || !cumDistKm.length || !geometry.value.length) return
     const { ctx, chartArea } = chart
     const xScale = chart.scales.x
     const yScale = chart.scales.y
@@ -1523,6 +1600,41 @@ const waypointDotsPlugin = {
       ctx.textBaseline = 'middle'
       ctx.fillText(String(i + 1), px, py + 0.5)
     }
+    ctx.restore()
+  },
+}
+
+// Draws a crosshair on the elevation chart synced to the map hover position.
+const hoverSyncPlugin = {
+  id: 'hoverSync',
+  afterDatasetsDraw(chart) {
+    const idx = hoverIdx.value
+    if (idx == null || !cumDistKm.length || idx >= cumDistKm.length) return
+    const ele = geometry.value[idx]?.[2]
+    if (ele == null) return
+    const km = cumDistKm[idx]
+    const { ctx, chartArea } = chart
+    const xScale = chart.scales.x
+    const yScale = chart.scales.y
+    const px = xScale.getPixelForValue(km)
+    const py = yScale.getPixelForValue(ele)
+    if (px < chartArea.left || px > chartArea.right) return
+    ctx.save()
+    ctx.beginPath()
+    ctx.strokeStyle = 'rgba(252, 76, 2, 0.65)'
+    ctx.lineWidth = 1.5
+    ctx.setLineDash([4, 3])
+    ctx.moveTo(px, chartArea.top)
+    ctx.lineTo(px, chartArea.bottom)
+    ctx.stroke()
+    ctx.setLineDash([])
+    ctx.beginPath()
+    ctx.arc(px, py, 5, 0, Math.PI * 2)
+    ctx.fillStyle = '#fc4c02'
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = '#fff'
+    ctx.stroke()
     ctx.restore()
   },
 }
@@ -1700,7 +1812,7 @@ function attachChartSelectionOnce(canvas) {
   canvas.addEventListener('wheel', onChartWheel, { passive: false })
 
   // Hover cursor feedback — `ew-resize` over a flag pole, `crosshair` over
-  // the plotting area.
+  // the plotting area. Also syncs a marker on the map to the hovered position.
   canvas.addEventListener('mousemove', (ev) => {
     if (chartHandleDrag || chartDrag) return
     if (!chartInstance) return
@@ -1709,10 +1821,19 @@ function attachChartSelectionOnce(canvas) {
     const area = chartInstance.chartArea
     if (x < area.left - HANDLE_TOL_PX || x > area.right + HANDLE_TOL_PX) {
       canvas.style.cursor = ''
+      hideChartCrossMarker()
       return
     }
     canvas.style.cursor = detectChartHandle(x) ? 'ew-resize' : 'crosshair'
+    if (x >= area.left && x <= area.right && cumDistKm.length) {
+      const km = chartInstance.scales.x.getValueForPixel(x)
+      if (km != null && !Number.isNaN(km)) {
+        const pt = geometry.value[geomIdxForKm(km)]
+        if (pt) showChartCrossMarker(pt[0], pt[1])
+      }
+    }
   })
+  canvas.addEventListener('mouseleave', () => { hideChartCrossMarker() })
 
   canvas.addEventListener('mousedown', (ev) => {
     if (ev.button !== 0) return
@@ -1914,6 +2035,8 @@ function openInKomoot() {
 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 watch(state, () => state.save(), { deep: true })
+watch(hoverIdx, () => { if (chartInstance) chartInstance.update('none') })
+watch(selectionRange, () => { updateSelectionMarkers() })
 
 onMounted(async () => {
   state.load()
@@ -2761,5 +2884,28 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
   pointer-events: none;
   transform: translateY(-1px);
+}
+
+.chart-cross-marker {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fc4c02;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.sel-flag-marker {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #00b4d8;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+}
+.sel-flag-marker:active {
+  cursor: grabbing;
 }
 </style>

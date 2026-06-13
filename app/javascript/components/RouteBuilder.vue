@@ -2182,18 +2182,38 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
-      <a :href="`${localePrefix}/routes`" class="btn btn-sm btn-link p-0 me-2 d-inline-flex align-items-center gap-1">
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-        <span>{{ t('routes.back') }}</span>
-      </a>
-      <input
-        v-model="name"
-        type="text"
-        class="form-control form-control-lg route-name-input"
-        :placeholder="t('routes.name_placeholder')"
-        :maxlength="80"
-      />
+    <div class="card shadow-sm border-0 mb-3">
+      <div class="card-body d-flex align-items-center gap-2 py-2 px-3">
+        <a :href="`${localePrefix}/routes`" class="btn btn-sm btn-link p-0 me-1 d-inline-flex align-items-center gap-1 flex-shrink-0">
+          <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+          <span>{{ t('routes.back') }}</span>
+        </a>
+        <input
+          v-model="name"
+          type="text"
+          class="form-control route-name-input flex-grow-1"
+          :placeholder="t('routes.name_placeholder')"
+          :maxlength="80"
+        />
+        <div class="d-flex gap-2 flex-shrink-0">
+          <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            @click="exportGpx" :title="t('routes.export_gpx')">
+            <i class="fa-solid fa-download" aria-hidden="true"></i>
+            <span class="d-none d-md-inline">GPX</span>
+          </button>
+          <button v-if="waypoints.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            @click="openInKomoot" :title="t('routes.open_in_komoot')">
+            <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+            <span class="d-none d-md-inline">Komoot</span>
+          </button>
+          <button type="button" class="btn btn-sm btn-warning d-flex align-items-center gap-1"
+            @click="save" :disabled="saving || waypoints.length < 2 || !name.trim()">
+            <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+            <span>{{ t('routes.save') }}</span>
+          </button>
+        </div>
+      </div>
     </div>
 
     <div v-if="error" class="alert alert-warning d-flex align-items-center gap-2">
@@ -2489,27 +2509,6 @@ onBeforeUnmount(() => {
 
     </div> <!-- end map + stats flex wrapper -->
 
-    <!-- Actions bar -->
-    <div class="card shadow-sm border-0 mb-3">
-      <div class="card-body d-flex justify-content-end gap-2">
-        <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-          @click="exportGpx" :title="t('routes.export_gpx')">
-          <i class="fa-solid fa-download" aria-hidden="true"></i>
-          <span class="d-none d-md-inline">GPX</span>
-        </button>
-        <button v-if="waypoints.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-          @click="openInKomoot" :title="t('routes.open_in_komoot')">
-          <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-          <span class="d-none d-md-inline">Komoot</span>
-        </button>
-        <button type="button" class="btn btn-warning d-flex align-items-center gap-1"
-          @click="save" :disabled="saving || waypoints.length < 2 || !name.trim()">
-          <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-          <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
-          <span>{{ t('routes.save') }}</span>
-        </button>
-      </div>
-    </div>
 
   </div>
 </template>
@@ -2649,7 +2648,7 @@ onBeforeUnmount(() => {
 }
 
 .route-name-input {
-  max-width: 480px;
+  min-width: 0;
   font-weight: 600;
 }
 

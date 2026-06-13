@@ -2139,8 +2139,52 @@ onBeforeUnmount(() => {
       <button type="button" class="btn-close" @click="error = null" aria-label="dismiss"></button>
     </div>
 
+    <!-- Map + Stats layout -->
+    <div class="d-flex gap-3 mb-3 align-items-stretch">
+
+    <!-- Stats sidebar -->
+    <div class="card shadow-sm border-0 route-stats-sidebar">
+      <div class="card-body d-flex flex-column gap-2 p-3">
+        <span class="stat-pill stat-pill-distance">
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
+          <strong>{{ formatKm(distanceM) }}</strong>
+        </span>
+        <span class="stat-pill stat-pill-up">
+          <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
+          <strong>+{{ Math.round(elevGainM) }} m</strong>
+        </span>
+        <span class="stat-pill stat-pill-down">
+          <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+          <strong>-{{ Math.round(elevLossM) }} m</strong>
+        </span>
+        <span class="stat-pill stat-pill-grade">
+          <span class="grade-icon" aria-hidden="true">\</span>
+          <strong>{{ avgGradePct }} %</strong>
+        </span>
+        <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
+          <span class="d-flex align-items-center gap-2">
+            <i class="fa-solid fa-clock" aria-hidden="true"></i>
+            <strong>{{ formatDuration(estimatedSeconds) }}</strong>
+          </span>
+          <span class="speed-input-wrap">
+            <input
+              v-model.number="avgSpeedKmh"
+              type="number"
+              min="3"
+              max="80"
+              step="1"
+              class="speed-input"
+              :title="t('routes.avg_speed_hint')"
+              :aria-label="t('routes.avg_speed_hint')"
+            />
+            <small>km/h</small>
+          </span>
+        </span>
+      </div>
+    </div>
+
     <!-- Map card -->
-    <div class="card shadow-sm border-0 mb-3">
+    <div class="card shadow-sm border-0 flex-grow-1" style="min-width:0">
       <div class="card-body p-0">
         <div class="map-wrap" :class="{ expanded: state.mapExpanded }">
           <div ref="mapEl" class="route-builder-map"></div>
@@ -2305,62 +2349,27 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Stats + actions bar -->
+    </div> <!-- end map + stats flex wrapper -->
+
+    <!-- Actions bar -->
     <div class="card shadow-sm border-0 mb-3">
-      <div class="card-body d-flex flex-wrap align-items-center gap-3">
-        <div class="d-flex align-items-center gap-3 flex-grow-1 flex-wrap">
-          <span class="stat-pill stat-pill-distance">
-            <i class="fa-solid fa-route" aria-hidden="true"></i>
-            <strong>{{ formatKm(distanceM) }}</strong>
-          </span>
-          <span class="stat-pill stat-pill-up">
-            <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
-            <strong>+{{ Math.round(elevGainM) }} m</strong>
-          </span>
-          <span class="stat-pill stat-pill-down">
-            <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
-            <strong>-{{ Math.round(elevLossM) }} m</strong>
-          </span>
-          <span class="stat-pill stat-pill-grade">
-            <span class="grade-icon" aria-hidden="true">\</span>
-            <strong>{{ avgGradePct }} %</strong>
-          </span>
-          <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
-            <i class="fa-solid fa-clock" aria-hidden="true"></i>
-            <strong>{{ formatDuration(estimatedSeconds) }}</strong>
-            <span class="speed-input-wrap">
-              <input
-                v-model.number="avgSpeedKmh"
-                type="number"
-                min="3"
-                max="80"
-                step="1"
-                class="speed-input"
-                :title="t('routes.avg_speed_hint')"
-                :aria-label="t('routes.avg_speed_hint')"
-              />
-              <small>km/h</small>
-            </span>
-          </span>
-        </div>
-        <div class="d-flex gap-2">
-          <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="exportGpx" :title="t('routes.export_gpx')">
-            <i class="fa-solid fa-download" aria-hidden="true"></i>
-            <span class="d-none d-md-inline">GPX</span>
-          </button>
-          <button v-if="waypoints.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="openInKomoot" :title="t('routes.open_in_komoot')">
-            <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-            <span class="d-none d-md-inline">Komoot</span>
-          </button>
-          <button type="button" class="btn btn-warning d-flex align-items-center gap-1"
-            @click="save" :disabled="saving || waypoints.length < 2 || !name.trim()">
-            <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-            <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
-            <span>{{ t('routes.save') }}</span>
-          </button>
-        </div>
+      <div class="card-body d-flex justify-content-end gap-2">
+        <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          @click="exportGpx" :title="t('routes.export_gpx')">
+          <i class="fa-solid fa-download" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">GPX</span>
+        </button>
+        <button v-if="waypoints.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          @click="openInKomoot" :title="t('routes.open_in_komoot')">
+          <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">Komoot</span>
+        </button>
+        <button type="button" class="btn btn-warning d-flex align-items-center gap-1"
+          @click="save" :disabled="saving || waypoints.length < 2 || !name.trim()">
+          <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+          <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+          <span>{{ t('routes.save') }}</span>
+        </button>
       </div>
     </div>
 
@@ -2942,5 +2951,25 @@ onBeforeUnmount(() => {
 }
 .sel-flag-marker:active {
   cursor: grabbing;
+}
+
+.route-stats-sidebar {
+  flex-shrink: 0;
+  width: 175px;
+}
+.route-stats-sidebar .stat-pill {
+  display: flex;
+  width: 100%;
+  border-radius: 0.6rem;
+}
+.route-stats-sidebar .stat-pill-time {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.route-stats-sidebar .stat-pill-time .speed-input-wrap {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
 }
 </style>

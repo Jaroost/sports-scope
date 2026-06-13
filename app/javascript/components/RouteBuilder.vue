@@ -187,6 +187,8 @@ const searchQuery = ref('')
 const searchResults = ref([])
 const searchOpen = ref(false)
 const searching = ref(false)
+const searchExpanded = ref(false)
+const searchInputEl = useTemplateRef('searchInputEl')
 let searchTimer = null
 
 watch(searchQuery, (q) => {
@@ -240,6 +242,13 @@ function clearSearch() {
   searchQuery.value = ''
   searchResults.value = []
   searchOpen.value = false
+  searchExpanded.value = false
+}
+
+async function openSearch() {
+  searchExpanded.value = true
+  await nextTick()
+  searchInputEl.value?.focus()
 }
 
 
@@ -2413,36 +2422,43 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <div class="map-search">
-            <div class="input-group input-group-sm shadow-sm">
-              <span class="input-group-text bg-white">
-                <i v-if="searching" class="fa-solid fa-circle-notch fa-spin"></i>
-                <i v-else class="fa-solid fa-magnifying-glass"></i>
-              </span>
-              <input
-                v-model="searchQuery"
-                type="search"
-                class="form-control"
-                :placeholder="t('routes.search_placeholder')"
-                @focus="searchOpen = searchResults.length > 0"
-                @keydown.escape="clearSearch"
-                @keydown.enter.prevent="searchResults[0] && pickPlace(searchResults[0])"
-              />
-              <button v-if="searchQuery" type="button" class="btn btn-light" @click="clearSearch" :title="t('routes.clear')">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
-            </div>
-            <ul v-if="searchOpen" class="map-search-results shadow">
-              <li
-                v-for="p in searchResults"
-                :key="p.place_id"
-                @click="pickPlace(p)"
-                class="map-search-result"
-              >
-                <i class="fa-solid fa-location-dot text-muted me-2"></i>
-                <span>{{ p.display_name }}</span>
-              </li>
-            </ul>
+          <div class="map-search" :class="{ 'map-search--expanded': searchExpanded }">
+            <button v-if="!searchExpanded" type="button" class="btn btn-light btn-sm shadow-sm map-search-toggle" @click="openSearch" :title="t('routes.search_placeholder')">
+              <i class="fa-solid fa-magnifying-glass"></i>
+            </button>
+            <template v-else>
+              <div class="input-group input-group-sm shadow-sm">
+                <span class="input-group-text bg-white">
+                  <i v-if="searching" class="fa-solid fa-circle-notch fa-spin"></i>
+                  <i v-else class="fa-solid fa-magnifying-glass"></i>
+                </span>
+                <input
+                  ref="searchInputEl"
+                  v-model="searchQuery"
+                  type="search"
+                  class="form-control"
+                  :placeholder="t('routes.search_placeholder')"
+                  @focus="searchOpen = searchResults.length > 0"
+                  @blur="!searchQuery && clearSearch()"
+                  @keydown.escape="clearSearch"
+                  @keydown.enter.prevent="searchResults[0] && pickPlace(searchResults[0])"
+                />
+                <button type="button" class="btn btn-light" @click="clearSearch" :title="t('routes.clear')">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+              <ul v-if="searchOpen" class="map-search-results shadow">
+                <li
+                  v-for="p in searchResults"
+                  :key="p.place_id"
+                  @click="pickPlace(p)"
+                  class="map-search-result"
+                >
+                  <i class="fa-solid fa-location-dot text-muted me-2"></i>
+                  <span>{{ p.display_name }}</span>
+                </li>
+              </ul>
+            </template>
           </div>
           <div v-if="waypoints.length === 0" class="map-overlay-hint">
             <i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>
@@ -2728,8 +2744,19 @@ onBeforeUnmount(() => {
   top: 10px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(420px, calc(100% - 220px));
+  width: auto;
   z-index: 5;
+}
+.map-search--expanded {
+  width: min(420px, calc(100% - 220px));
+}
+.map-search-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
 }
 .map-search-results {
   list-style: none;

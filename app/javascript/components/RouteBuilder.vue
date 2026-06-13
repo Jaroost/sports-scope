@@ -62,6 +62,7 @@ const exportStyleId = ref('')
 const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
 const exportShowStats = ref(true)
+const exportScale = ref(2.5)
 const exporting = ref(false)
 const mapFlex = ref(0.80)
 let resizing = false
@@ -1639,7 +1640,18 @@ async function renderElevationChart() {
       interaction: { intersect: false, mode: 'index', axis: 'x' },
       scales: {
         x: { type: 'linear', min: 0, max: cumDistKm[cumDistKm.length - 1], title: { display: true, text: t('routes.x_km') }, ticks: { maxTicksLimit: 8 } },
-        y: { title: { display: true, text: t('routes.y_m') }, ticks: { maxTicksLimit: 6 } },
+        y: {
+          title: { display: true, text: t('routes.y_m') },
+          ticks: {
+            stepSize: (() => {
+              const alts = points.map((p) => p.y).filter((v) => v != null)
+              const range = Math.max(...alts) - Math.min(...alts)
+              return range >= 150 ? 100 : undefined
+            })(),
+            maxTicksLimit: 20,
+          },
+          grid: { color: 'rgba(0,0,0,0.07)', lineWidth: 1 },
+        },
       },
       plugins: {
         legend: { display: false },
@@ -2367,18 +2379,16 @@ async function exportImage() {
     await new Promise<void>((resolve) => mapInstance.once('idle', resolve))
 
     const dpr = window.devicePixelRatio || 1
-    const UPSCALE = 1.5
+    const UPSCALE = exportScale.value
     const s = dpr * UPSCALE // effective scale for drawn elements
 
     const mapCanvas = mapInstance.getCanvas()
-    const chartCanvas = chartEl.value!
     const srcW = mapCanvas.width
     const srcH = mapCanvas.height
 
     const outW = Math.round(srcW * UPSCALE)
     const mapOutH = Math.round(srcH * UPSCALE)
-    // chart gets 35% of map height for more breathing room
-    const chartOutH = Math.round(mapOutH * 0.35)
+    const chartOutH = Math.round(mapOutH * 0.40)
     const titleH = Math.round(52 * s)
     const statsH = exportShowStats.value ? Math.round(80 * s) : 0
 
@@ -2390,17 +2400,29 @@ async function exportImage() {
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, out.width, out.height)
 
+    // Scale Chart.js fonts proportionally to UPSCALE so ticks stay readable
+    const setChartFontScale = (sc: number) => {
+      const o = chartInstance.options as any
+      const fs = (base: number) => ({ size: Math.round(base * sc) })
+      o.scales.x.ticks.font = fs(11)
+      o.scales.y.ticks.font = fs(11)
+      o.scales.x.title.font = fs(10)
+      o.scales.y.title.font = fs(10)
+      chartInstance.update('none')
+    }
+    setChartFontScale(UPSCALE)
     // Re-render chart at exact output dimensions so it's captured pixel-perfect
     // Chart.js resize() takes CSS pixels; physical canvas = cssW * dpr
     chartInstance.resize(outW / dpr, chartOutH / dpr)
     await nextTick()
 
+    const mapOffsetY = titleH + statsH
     drawTitleOnCanvas(ctx, titleH, s)
-    ctx.drawImage(mapCanvas, 0, titleH, outW, mapOutH)
-    if (exportShowClimbs.value) drawClimbMarkersOnCanvas(ctx, titleH, s)
+    if (exportShowStats.value) drawStatsOnCanvas(ctx, titleH, statsH, s)
+    ctx.drawImage(mapCanvas, 0, mapOffsetY, outW, mapOutH)
+    if (exportShowClimbs.value) drawClimbMarkersOnCanvas(ctx, mapOffsetY, s)
     // Draw chart 1:1 — canvas is now exactly outW × chartOutH physical pixels
-    ctx.drawImage(chartEl.value!, 0, titleH + mapOutH, outW, chartOutH)
-    if (exportShowStats.value) drawStatsOnCanvas(ctx, titleH + mapOutH + chartOutH, statsH, s)
+    ctx.drawImage(chartEl.value!, 0, mapOffsetY + mapOutH, outW, chartOutH)
 
     const link = document.createElement('a')
     link.download = `${(name.value ?? 'itineraire').trim() || 'itineraire'}.png`
@@ -2408,8 +2430,16 @@ async function exportImage() {
     link.click()
   } finally {
     removeExportClimbLayers()
-    // Restore chart to its natural container size
-    if (chartInstance) chartInstance.resize()
+    // Restore chart fonts and size
+    if (chartInstance) {
+      const o = chartInstance.options as any
+      o.scales.x.ticks.font = undefined
+      o.scales.y.ticks.font = undefined
+      o.scales.x.title.font = undefined
+      o.scales.y.title.font = undefined
+      chartInstance.update('none')
+      chartInstance.resize()
+    }
     await applyStyleForExport(savedStyleId)
     if (state.colorMode !== savedColorMode) { state.colorMode = savedColorMode; applyColorMode() }
     if (state.showClimbs !== savedShowClimbs) { state.showClimbs = savedShowClimbs; installClimbMarkers() }
@@ -2842,6 +2872,16 @@ onBeforeUnmount(() => {
               <div class="mb-3">
                 <label class="form-label fw-semibold small">Fond de carte</label>
                 <MapStyleDropdown :model-value="exportStyleId" @update:model-value="exportStyleId = $event" />
+              </div>
+              <div class="mb-3">
+                <label class="form-label fw-semibold small d-flex justify-content-between">
+                  <span>Taille de l'image</span>
+                  <span class="text-muted">× {{ exportScale.toFixed(1) }}</span>
+                </label>
+                <input type="range" class="form-range" v-model.number="exportScale" min="1" max="4" step="0.5" />
+                <div class="d-flex justify-content-between" style="font-size:0.7rem;color:#9ca3af;margin-top:2px">
+                  <span>Petite</span><span>Normale</span><span>Grande</span><span>Max</span>
+                </div>
               </div>
               <div class="d-flex flex-column gap-2">
                 <div class="form-check form-switch mb-0">

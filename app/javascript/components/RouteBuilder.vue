@@ -56,6 +56,10 @@ const divergentMarkers = []
 // portion of the track on the map. { startKm, endKm } or null.
 const selectionRange = ref(null)
 const climbsExpanded = ref(true)
+const placesExpanded = ref(true)
+const isFetchingPlaces = ref(false)
+const importantPlaces = ref([])
+let placesToken = 0
 const legendVisible = ref(false)
 const showExportDialog = ref(false)
 const exportStyleId = ref('')
@@ -299,6 +303,17 @@ function formatKm(m) {
   if (!m) return '0 km'
   return `${(m / 1000).toFixed(2)} km`
 }
+
+function formatDistanceShort(m) {
+  return m < 1000 ? `${Math.round(m)} m` : `${Math.round(m / 1000)} km`
+}
+
+function buildDistancesM(geom) {
+  const d = [0]
+  for (let i = 1; i < geom.length; i++) d.push(d[i - 1] + haversine(geom[i - 1], geom[i]))
+  return d
+}
+
 
 function csrfToken() {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
@@ -1377,6 +1392,61 @@ function insertWaypointAtGeomIdx(geomIdx) {
 // including legal contresens cyclables and route=bicycle networks. Bonus:
 // BRouter embeds DEM elevation in its coordinates so we don't need a separate
 // Open-Meteo round-trip in the common case.
+async function fetchImportantPlaces() {
+  const token = ++placesToken
+  importantPlaces.value = []
+  if (geometry.value.length < 2) { isFetchingPlaces.value = false; return }
+  isFetchingPlaces.value = true
+
+  const geom = geometry.value
+  let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
+  for (const [lng, lat] of geom) {
+    if (lat < south) south = lat
+    if (lat > north) north = lat
+    if (lng < west) west = lng
+    if (lng > east) east = lng
+  }
+  const BUFFER = 0.02  // ~2 km buffer around bbox
+  south -= BUFFER; north += BUFFER; west -= BUFFER; east += BUFFER
+
+  try {
+    const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}`)
+    if (!res.ok || token !== placesToken) { isFetchingPlaces.value = false; return }
+
+    const nodes = await res.json()
+    if (token !== placesToken) return
+
+    const distancesM = buildDistancesM(geom)
+    const THRESHOLD_M = 2000
+    const seen = new Set()
+    const results = []
+
+    for (const node of nodes) {
+      if (seen.has(node.name)) continue
+      // Find nearest geometry point using fast approximate distance, then verify with haversine
+      const cosLat = Math.cos(node.lat * Math.PI / 180)
+      let minD2 = Infinity
+      let nearestIdx = 0
+      for (let i = 0; i < geom.length; i++) {
+        const dLng = (geom[i][0] - node.lng) * cosLat
+        const dLat = geom[i][1] - node.lat
+        const d2 = dLng * dLng + dLat * dLat
+        if (d2 < minD2) { minD2 = d2; nearestIdx = i }
+      }
+      if (haversine(geom[nearestIdx], [node.lng, node.lat]) > THRESHOLD_M) continue
+      seen.add(node.name)
+      results.push({ name: node.name, distanceM: distancesM[nearestIdx] })
+    }
+
+    results.sort((a, b) => a.distanceM - b.distanceM)
+    if (token !== placesToken) return
+    importantPlaces.value = results
+  } catch { /* network error — leave list empty */ }
+
+  if (token !== placesToken) return
+  isFetchingPlaces.value = false
+}
+
 let recomputeToken = 0
 async function recomputeRoute() {
   const token = ++recomputeToken
@@ -2162,6 +2232,15 @@ function openInKomoot() {
 watch(state, () => state.save(), { deep: true })
 watch(hoverIdx, () => { if (chartInstance) chartInstance.update('none') })
 watch(selectionRange, () => { updateSelectionMarkers() })
+watch(geometry, (newGeom) => {
+  if (newGeom.length < 2) {
+    placesToken++
+    importantPlaces.value = []
+    isFetchingPlaces.value = false
+    return
+  }
+  fetchImportantPlaces()
+}, { deep: false })
 
 onMounted(async () => {
   state.load()
@@ -2484,6 +2563,7 @@ onBeforeUnmount(() => {
   climbMarkers.length = 0
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
   if (locationMarker) { locationMarker.remove(); locationMarker = null }
+  placesToken++
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
 </script>
@@ -2576,6 +2656,26 @@ onBeforeUnmount(() => {
                 <span class="climb-pill-grade">{{ climb.avgGrade.toFixed(1) }}%</span>
               </span>
             </button>
+          </template>
+        </template>
+        <template v-if="importantPlaces.length || isFetchingPlaces">
+          <button type="button" class="places-section-toggle" @click="placesExpanded = !placesExpanded">
+            <span class="places-section-label">
+              <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+              {{ placesExpanded ? t('routes.places_title') : `${importantPlaces.length} ${t('routes.places_count')}` }}
+            </span>
+            <span v-if="isFetchingPlaces" class="spinner-border spinner-border-sm text-secondary" aria-hidden="true"></span>
+            <i v-else :class="placesExpanded ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" aria-hidden="true"></i>
+          </button>
+          <template v-if="placesExpanded">
+            <div v-if="isFetchingPlaces && !importantPlaces.length" class="places-loading">
+              <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+              <span>{{ t('routes.places_loading') }}</span>
+            </div>
+            <div v-for="(place, idx) in importantPlaces" :key="idx" class="place-pill">
+              <span class="place-pill-dist">{{ formatDistanceShort(place.distanceM) }}</span>
+              <span class="place-pill-name">{{ place.name }}</span>
+            </div>
           </template>
         </template>
         <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
@@ -3544,6 +3644,51 @@ onBeforeUnmount(() => {
 }
 .climb-hover-flag--start { color: #16a34a; }
 .climb-hover-flag--end   { color: #1f2937; }
+
+.places-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.35rem 0.75rem;
+  border: none;
+  border-radius: 0.6rem;
+  background: rgba(13, 110, 253, 0.10);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1d4ed8;
+}
+.places-section-toggle:hover { background: rgba(13, 110, 253, 0.18); }
+.places-section-label { display: flex; align-items: center; gap: 0.4rem; }
+.place-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 0.5rem;
+  background: #f9fafb;
+  font-size: 0.8rem;
+}
+.place-pill-dist {
+  flex-shrink: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #6b7280;
+  min-width: 2.5rem;
+  text-align: right;
+}
+.place-pill-name { color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.places-loading {
+  font-size: 0.78rem;
+  color: #9ca3af;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.4rem;
+}
 
 /* Ghost marker shown when hovering the existing route line. Click on the
    line inserts a new waypoint at this position. Pointer-events: none so the

@@ -22,6 +22,9 @@ Rails.application.routes.draw do
   get "/strava/activities/:id/peak_power_ranks", to: "strava#peak_power_ranks", as: :strava_activity_peak_power_ranks, constraints: { id: /\d+/ }
   get "/strava/activities/:id/photos", to: "strava#photos", as: :strava_activity_photos, constraints: { id: /\d+/ }
 
+  # Geocoding proxy (avoids CORS when calling Nominatim from the browser)
+  get "/api/geocode/places", to: "geocodes#places"
+
   # Route builder (JSON CRUD consumed by Vue components)
   get "/api/routes", to: "routes#index"
   post "/api/routes", to: "routes#create"

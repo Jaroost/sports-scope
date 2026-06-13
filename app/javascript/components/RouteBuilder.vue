@@ -940,6 +940,16 @@ function clearAll() {
   recomputeRoute()
 }
 
+function fitMapToRoute() {
+  if (!mapInstance || geometry.value.length < 2) return
+  const lngs = geometry.value.map((c) => c[0])
+  const lats = geometry.value.map((c) => c[1])
+  mapInstance.fitBounds(
+    [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+    { padding: 40, duration: 500 },
+  )
+}
+
 function toggleWaypoints() {
   state.showWaypoints = !state.showWaypoints
   refreshWaypointMarkers()
@@ -1528,7 +1538,7 @@ async function renderElevationChart() {
       parsing: false,
       interaction: { intersect: false, mode: 'index', axis: 'x' },
       scales: {
-        x: { type: 'linear', title: { display: true, text: t('routes.x_km') }, ticks: { maxTicksLimit: 8 } },
+        x: { type: 'linear', min: 0, max: cumDistKm[cumDistKm.length - 1], title: { display: true, text: t('routes.x_km') }, ticks: { maxTicksLimit: 8 } },
         y: { title: { display: true, text: t('routes.y_m') }, ticks: { maxTicksLimit: 6 } },
       },
       plugins: {
@@ -1739,8 +1749,9 @@ const selectionRectPlugin = {
 
 function applyZoom() {
   if (!chartInstance) return
-  chartInstance.options.scales.x.min = zoomMin
-  chartInstance.options.scales.x.max = zoomMax
+  const naturalMax = cumDistKm.length ? cumDistKm[cumDistKm.length - 1] : null
+  chartInstance.options.scales.x.min = zoomMin ?? 0
+  chartInstance.options.scales.x.max = zoomMax ?? naturalMax
   chartInstance.update('none')
   isZoomed.value = zoomMin != null || zoomMax != null
 }
@@ -2158,28 +2169,13 @@ onBeforeUnmount(() => {
                 :aria-pressed="state.showGrade">
                 <i class="fa-solid fa-palette" aria-hidden="true"></i>
               </button>
-              <button type="button" class="btn map-ctrl-btn"
-                :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"
-                @click="toggleMap3D"
-                :title="state.is3D ? t('strava.map_2d') : t('strava.map_3d')"
-                :aria-pressed="state.is3D">
-                <i class="fa-solid fa-cube" aria-hidden="true"></i>
-              </button>
-              <button type="button" class="btn map-ctrl-btn"
-                :class="state.mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
-                @click="toggleMapSize"
-                :title="state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
-                :aria-pressed="state.mapExpanded">
-                <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
-              </button>
-              <button type="button" class="btn map-ctrl-btn"
-                :class="locationVisible ? 'btn-warning text-dark active' : 'btn-light'"
-                @click="toggleLocation"
-                :disabled="locating"
-                :title="locationVisible ? 'Masquer ma position' : 'Ma position'"
-                :aria-pressed="locationVisible">
-                <span v-if="locating" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                <i v-else class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
+            </div>
+            <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+              <button type="button" class="btn btn-light map-ctrl-btn"
+                :disabled="!hasGeometry"
+                @click="fitMapToRoute"
+                title="Recentrer sur le trajet">
+                <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
               </button>
             </div>
             <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
@@ -2194,6 +2190,33 @@ onBeforeUnmount(() => {
                 @click="clearAll"
                 :title="t('routes.clear')">
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div class="map-controls-right">
+            <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+              <button type="button" class="btn map-ctrl-btn"
+                :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleMap3D"
+                :title="state.is3D ? t('strava.map_2d') : t('strava.map_3d')"
+                :aria-pressed="state.is3D">
+                <i class="fa-solid fa-cube" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="btn map-ctrl-btn"
+                :class="locationVisible ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleLocation"
+                :disabled="locating"
+                :title="locationVisible ? 'Masquer ma position' : 'Ma position'"
+                :aria-pressed="locationVisible">
+                <span v-if="locating" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                <i v-else class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="btn map-ctrl-btn"
+                :class="state.mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="toggleMapSize"
+                :title="state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
+                :aria-pressed="state.mapExpanded">
+                <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -2442,6 +2465,18 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 .map-controls > * { pointer-events: auto; }
+.map-controls-right {
+  position: absolute;
+  top: 115px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.map-controls-right > * { pointer-events: auto; }
 .map-ctrl-btn {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);

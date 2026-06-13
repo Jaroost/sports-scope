@@ -66,6 +66,8 @@ const isZoomed = ref(false)
 let zoomMin = null
 let zoomMax = null
 let chartCrossMarker = null // marker on the map synced to chart hover position
+let climbHoverStartMarker = null // green flag shown on map when hovering a climb pill
+let climbHoverEndMarker = null   // checkered flag shown on map when hovering a climb pill
 let selectionMarkerA = null // draggable handle for one end of the selection
 let selectionMarkerAKm = null
 let selectionMarkerB = null // draggable handle for the other end
@@ -88,34 +90,7 @@ const GRADE_BUCKETS = [
 
 const hasGeometry = computed(() => geometry.value.length >= 2)
 
-// Net average gradient over the route: (D+ − D−) / distance, in %. Signed,
-// so a route that ends below its start (net descent) reads negative.
-const avgGradePct = computed(() => {
-  if (!distanceM.value) return '0.0'
-  return (((elevGainM.value - elevLossM.value) / distanceM.value) * 100).toFixed(1)
-})
 
-const maxGradePct = computed(() => {
-  const g = geometry.value
-  if (g.length < 2) return '0.0'
-  const WINDOW_M = 200
-  // Precompute cumulative distances so the sliding window is exact
-  const cum = new Float64Array(g.length)
-  for (let i = 1; i < g.length; i++) cum[i] = cum[i - 1] + haversine(g[i - 1], g[i])
-  let max = 0
-  let lo = 0
-  for (let hi = 1; hi < g.length; hi++) {
-    if (g[hi][2] == null) continue
-    // Keep lo as close to hi as possible while the window stays >= WINDOW_M
-    while (lo < hi - 1 && cum[hi] - cum[lo + 1] >= WINDOW_M) lo++
-    if (g[lo][2] == null) continue
-    const dist = cum[hi] - cum[lo]
-    if (dist < WINDOW_M * 0.5) continue // ignore start of route where window is too short
-    const grade = ((g[hi][2] - g[lo][2]) / dist) * 100
-    if (grade > max) max = grade
-  }
-  return max.toFixed(1)
-})
 
 const detectedClimbs = computed(() => {
   const g = geometry.value
@@ -123,7 +98,11 @@ const detectedClimbs = computed(() => {
   const altitudes = g.map((c) => c[2] ?? null)
   const distances = [0]
   for (let i = 1; i < g.length; i++) distances.push(distances[i - 1] + haversine(g[i - 1], g[i]))
-  return detectClimbs(altitudes, distances)
+  return detectClimbs(altitudes, distances).map((c) => ({
+    ...c,
+    startKm: distances[c.startIdx] / 1000,
+    endKm: distances[c.endIdx] / 1000,
+  }))
 })
 
 // Average riding speed in km/h, persisted in localStorage. Used to compute
@@ -789,6 +768,38 @@ function updateSelectionLayer() {
   src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
 }
 
+function updateClimbHoverLayer(climb) {
+  if (!_maplibregl || !mapInstance) return
+  if (!climb) {
+    if (climbHoverStartMarker) { climbHoverStartMarker.remove(); climbHoverStartMarker = null }
+    if (climbHoverEndMarker)   { climbHoverEndMarker.remove();   climbHoverEndMarker = null }
+    return
+  }
+  const ptStart = geometry.value[climb.startIdx]
+  const ptEnd   = geometry.value[climb.endIdx]
+  if (!ptStart || !ptEnd) return
+
+  function makeClimbFlagMarker(kind) {
+    const el = document.createElement('div')
+    el.className = `climb-hover-flag climb-hover-flag--${kind}`
+    el.innerHTML = kind === 'start'
+      ? '<i class="fa-solid fa-flag"></i>'
+      : '<i class="fa-solid fa-flag-checkered"></i>'
+    return new _maplibregl.Marker({ element: el, anchor: 'bottom' })
+  }
+
+  if (climbHoverStartMarker) climbHoverStartMarker.remove()
+  if (climbHoverEndMarker)   climbHoverEndMarker.remove()
+  climbHoverStartMarker = makeClimbFlagMarker('start').setLngLat([ptStart[0], ptStart[1]]).addTo(mapInstance)
+  climbHoverEndMarker   = makeClimbFlagMarker('end').setLngLat([ptEnd[0], ptEnd[1]]).addTo(mapInstance)
+}
+
+function selectClimb(climb) {
+  selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
+  updateSelectionLayer()
+  if (chartInstance) chartInstance.update('none')
+}
+
 function geomIdxForKm(km) {
   if (!cumDistKm.length) return 0
   // Binary search for the first index where cumDistKm[i] >= km.
@@ -1239,18 +1250,21 @@ function updateSelectionMarkers() {
   const ptStart = geometry.value[geomIdxForKm(startKm)]
   const ptEnd = geometry.value[geomIdxForKm(endKm)]
   if (!ptStart || !ptEnd) return
-  if (!selectionMarkerA) selectionMarkerA = makeSelectionMarker()
-  if (!selectionMarkerB) selectionMarkerB = makeSelectionMarker()
+  if (!selectionMarkerA) selectionMarkerA = makeSelectionMarker('start')
+  if (!selectionMarkerB) selectionMarkerB = makeSelectionMarker('end')
   selectionMarkerAKm = startKm
   selectionMarkerBKm = endKm
   selectionMarkerA.setLngLat([ptStart[0], ptStart[1]])
   selectionMarkerB.setLngLat([ptEnd[0], ptEnd[1]])
 }
 
-function makeSelectionMarker() {
+function makeSelectionMarker(kind) {
   const el = document.createElement('div')
-  el.className = 'sel-flag-marker'
-  const marker = new _maplibregl.Marker({ element: el, anchor: 'center', draggable: true })
+  el.className = `sel-flag-marker sel-flag-marker--${kind}`
+  el.innerHTML = kind === 'start'
+    ? '<i class="fa-solid fa-flag"></i>'
+    : '<i class="fa-solid fa-flag-checkered"></i>'
+  const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom', draggable: true })
     .setLngLat([0, 0])
     .addTo(mapInstance)
   marker.on('dragstart', () => { selectionMarkerDragging = true })
@@ -2184,16 +2198,25 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
           <strong>+{{ Math.round(elevGainM) }} m</strong>
         </span>
-        <span class="stat-pill stat-pill-grade">
-          <span class="grade-icon" aria-hidden="true">↗</span>
-          <strong>{{ maxGradePct }} %</strong>
-          <small class="text-muted">max</small>
-        </span>
-        <span class="stat-pill stat-pill-grade">
-          <span class="grade-icon" aria-hidden="true">\</span>
-          <strong>{{ avgGradePct }} %</strong>
-          <small class="text-muted">moy</small>
-        </span>
+        <template v-if="detectedClimbs.length">
+          <button
+            v-for="(climb, idx) in detectedClimbs"
+            :key="idx"
+            type="button"
+            class="climb-pill"
+            @click="selectClimb(climb)"
+            @mouseenter="updateClimbHoverLayer(climb)"
+            @mouseleave="updateClimbHoverLayer(null)"
+          >
+            <span class="climb-pill-cat" :class="climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'">
+              {{ climb.category || 'HC' }}
+            </span>
+            <span class="climb-pill-stats">
+              <span>{{ climb.lengthM >= 1000 ? (climb.lengthM / 1000).toFixed(1) + ' km' : Math.round(climb.lengthM) + ' m' }} · +{{ Math.round(climb.gain) }} m</span>
+              <span class="climb-pill-grade">{{ climb.avgGrade.toFixed(1) }}%</span>
+            </span>
+          </button>
+        </template>
         <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
           <span class="d-flex align-items-center gap-2">
             <i class="fa-solid fa-clock" aria-hidden="true"></i>
@@ -2946,6 +2969,51 @@ onBeforeUnmount(() => {
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
 
+.climb-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 0.5rem;
+  background: #f9fafb;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.8rem;
+  transition: background 0.1s, border-color 0.1s;
+}
+.climb-pill:hover {
+  background: #f0fdf4;
+  border-color: #16a34a;
+}
+.climb-pill-cat {
+  font-weight: 700;
+  font-size: 0.72rem;
+  min-width: 1.5rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+.climb-pill-stats {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  color: #374151;
+}
+.climb-pill-grade {
+  color: #6b7280;
+  font-size: 0.73rem;
+}
+
+.climb-hover-flag {
+  font-size: 1.2rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));
+  pointer-events: none;
+}
+.climb-hover-flag--start { color: #16a34a; }
+.climb-hover-flag--end   { color: #1f2937; }
+
 /* Ghost marker shown when hovering the existing route line. Click on the
    line inserts a new waypoint at this position. Pointer-events: none so the
    click reaches the map's click handler (which reads hoverIdx). */
@@ -2976,17 +3044,14 @@ onBeforeUnmount(() => {
 }
 
 .sel-flag-marker {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #00b4d8;
-  border: 2px solid #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  font-size: 1.2rem;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));
   cursor: grab;
 }
-.sel-flag-marker:active {
-  cursor: grabbing;
-}
+.sel-flag-marker:active { cursor: grabbing; }
+.sel-flag-marker--start { color: #16a34a; }
+.sel-flag-marker--end   { color: #1f2937; }
 
 .route-stats-sidebar {
   flex-shrink: 0;

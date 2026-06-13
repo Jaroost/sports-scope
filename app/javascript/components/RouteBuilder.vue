@@ -54,6 +54,7 @@ const divergentMarkers = []
 // Selection on the elevation chart — drag a region to highlight that
 // portion of the track on the map. { startKm, endKm } or null.
 const selectionRange = ref(null)
+const climbsExpanded = ref(true)
 let cumDistKm = [] // cumulative distance in km per geometry index — fills during chart render
 let chartDrag = null // { startPx, currentPx } while the user is dragging on the chart
 // While the user is dragging one of the start/end flag handles to resize the
@@ -2237,23 +2238,32 @@ onBeforeUnmount(() => {
           <strong>+{{ Math.round(elevGainM) }} m</strong>
         </span>
         <template v-if="detectedClimbs.length">
-          <button
-            v-for="(climb, idx) in detectedClimbs"
-            :key="idx"
-            type="button"
-            class="climb-pill"
-            @click="selectClimb(climb)"
-            @mouseenter="updateClimbHoverLayer(climb)"
-            @mouseleave="updateClimbHoverLayer(null)"
-          >
-            <span class="climb-pill-cat" :class="climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'">
-              {{ climb.category || 'HC' }}
+          <button type="button" class="climbs-section-toggle" @click="climbsExpanded = !climbsExpanded">
+            <span class="climbs-section-label">
+              <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+              {{ climbsExpanded ? 'Cols' : `${detectedClimbs.length} col${detectedClimbs.length > 1 ? 's' : ''}` }}
             </span>
-            <span class="climb-pill-stats">
-              <span>{{ climb.lengthM >= 1000 ? (climb.lengthM / 1000).toFixed(1) + ' km' : Math.round(climb.lengthM) + ' m' }} · +{{ Math.round(climb.gain) }} m</span>
-              <span class="climb-pill-grade">{{ climb.avgGrade.toFixed(1) }}%</span>
-            </span>
+            <i :class="climbsExpanded ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" aria-hidden="true"></i>
           </button>
+          <template v-if="climbsExpanded">
+            <button
+              v-for="(climb, idx) in detectedClimbs"
+              :key="idx"
+              type="button"
+              class="climb-pill"
+              @click="selectClimb(climb)"
+              @mouseenter="updateClimbHoverLayer(climb)"
+              @mouseleave="updateClimbHoverLayer(null)"
+            >
+              <span class="climb-pill-cat" :class="climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'">
+                {{ climb.category || 'HC' }}
+              </span>
+              <span class="climb-pill-stats">
+                <span>{{ climb.lengthM >= 1000 ? (climb.lengthM / 1000).toFixed(1) + ' km' : Math.round(climb.lengthM) + ' m' }} · +{{ Math.round(climb.gain) }} m</span>
+                <span class="climb-pill-grade">{{ climb.avgGrade.toFixed(1) }}%</span>
+              </span>
+            </button>
+          </template>
         </template>
         <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
           <span class="d-flex align-items-center gap-2">
@@ -2986,6 +2996,28 @@ onBeforeUnmount(() => {
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
 
+.climbs-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.35rem 0.75rem;
+  border: none;
+  border-radius: 0.6rem;
+  background: rgba(25, 135, 84, 0.12);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #15803d;
+}
+.climbs-section-toggle:hover {
+  background: rgba(25, 135, 84, 0.20);
+}
+.climbs-section-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
 .climb-pill {
   display: flex;
   align-items: center;

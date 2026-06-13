@@ -202,14 +202,30 @@ watch(searchQuery, (q) => {
   searchTimer = setTimeout(() => searchPlaces(trimmed), 350)
 })
 
+const EU_COUNTRY_CODES = new Set([
+  'at','be','bg','cy','cz','de','dk','ee','es','fi','gr','hr','hu','ie',
+  'it','lt','lu','lv','mt','nl','pl','pt','ro','se','si','sk',
+  'al','ba','gb','li','me','mk','no','rs','xk',
+])
+
+function searchCountryPriority(cc: string): number {
+  if (cc === 'ch') return 0
+  if (cc === 'fr') return 1
+  if (EU_COUNTRY_CODES.has(cc)) return 2
+  return 3
+}
+
 async function searchPlaces(q) {
   searching.value = true
   try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=6&addressdetails=0`
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=10&addressdetails=1`
     const res = await fetch(url, { headers: { Accept: 'application/json' } })
     if (!res.ok) return
-    const data = await res.json()
-    searchResults.value = Array.isArray(data) ? data : []
+    const raw = await res.json()
+    const data: any[] = Array.isArray(raw) ? raw : []
+    searchResults.value = data
+      .sort((a, b) => searchCountryPriority(a.address?.country_code ?? '') - searchCountryPriority(b.address?.country_code ?? ''))
+      .slice(0, 6)
     searchOpen.value = searchResults.value.length > 0
   } catch {
     searchResults.value = []

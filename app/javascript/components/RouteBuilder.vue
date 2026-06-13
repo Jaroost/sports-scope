@@ -61,6 +61,7 @@ const showExportDialog = ref(false)
 const exportStyleId = ref('')
 const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
+const exportShowStats = ref(true)
 const exporting = ref(false)
 const mapFlex = ref(0.80)
 let resizing = false
@@ -2226,28 +2227,120 @@ async function applyStyleForExport(styleId: string) {
   }))
 }
 
-function addExportClimbLayers() {
-  if (!mapInstance || !detectedClimbs.value.length) return
-  const features = detectedClimbs.value.map((c) => ({
-    type: 'Feature',
-    geometry: { type: 'Point', coordinates: [geometry.value[c.startIdx][0], geometry.value[c.startIdx][1]] },
-    properties: { label: c.category ?? 'NC', color: CLIMB_CAT_COLORS[c.category] ?? '#6c757d' },
-  }))
-  if (mapInstance.getSource('_export-climbs')) return
-  mapInstance.addSource('_export-climbs', { type: 'geojson', data: { type: 'FeatureCollection', features } as any })
-  mapInstance.addLayer({ id: '_export-climbs-bg', type: 'circle', source: '_export-climbs',
-    paint: { 'circle-radius': 12, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } })
-  mapInstance.addLayer({ id: '_export-climbs-text', type: 'symbol', source: '_export-climbs',
-    layout: { 'text-field': ['get', 'label'], 'text-size': 10, 'text-font': ['Open Sans Semibold', 'Arial Unicode MS Regular'], 'text-allow-overlap': true, 'icon-allow-overlap': true },
-    paint: { 'text-color': '#fff' } })
-}
-
 function removeExportClimbLayers() {
   if (!mapInstance) return
   for (const id of ['_export-climbs-text', '_export-climbs-bg']) {
     if (mapInstance.getLayer(id)) mapInstance.removeLayer(id)
   }
   if (mapInstance.getSource('_export-climbs')) mapInstance.removeSource('_export-climbs')
+}
+
+// s = effective pixel scale for drawn text/shapes (dpr × export upscale)
+function drawClimbMarkersOnCanvas(ctx: CanvasRenderingContext2D, mapOffsetY: number, s: number) {
+  if (!mapInstance) return
+  detectedClimbs.value.forEach((climb) => {
+    const pt = geometry.value[climb.startIdx]
+    if (!pt) return
+    const sp = mapInstance.project([pt[0], pt[1]])
+    const cx = sp.x * s
+    const cy = sp.y * s + mapOffsetY
+    const color = CLIMB_CAT_COLORS[climb.category] ?? '#6c757d'
+    const r = 13 * s
+
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, 0, Math.PI * 2)
+    ctx.fillStyle = color
+    ctx.fill()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = 2 * s
+    ctx.stroke()
+
+    ctx.fillStyle = '#ffffff'
+    ctx.font = `bold ${Math.round(11 * s)}px system-ui,sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText(climb.category ?? 'NC', cx, cy)
+
+    const lengthStr = climb.lengthM >= 1000
+      ? `${(climb.lengthM / 1000).toFixed(1)} km`
+      : `${Math.round(climb.lengthM)} m`
+    const line1 = `${climb.avgGrade.toFixed(1)}%  ·  ${lengthStr}`
+    const line2 = `+${Math.round(climb.gain)} m D+`
+    const fs = Math.round(9.5 * s)
+    ctx.font = `${fs}px system-ui,sans-serif`
+    const tw = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width)
+    const tPad = 7 * s
+    const tW = tw + tPad * 2
+    const lineH = fs + 4 * s
+    const tH = lineH * 2 + tPad * 1.5
+    const tX = cx - tW / 2
+    const tY = cy - r - tH - 5 * s
+
+    ctx.fillStyle = 'rgba(17,24,39,0.88)'
+    ctx.beginPath()
+    ctx.roundRect(tX, tY, tW, tH, 4 * s)
+    ctx.fill()
+
+    ctx.fillStyle = '#ffffff'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    ctx.font = `${fs}px system-ui,sans-serif`
+    ctx.fillText(line1, cx, tY + tPad)
+    ctx.font = `${Math.round(fs * 0.88)}px system-ui,sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,0.72)'
+    ctx.fillText(line2, cx, tY + tPad + lineH)
+  })
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+}
+
+function drawTitleOnCanvas(ctx: CanvasRenderingContext2D, h: number, s: number) {
+  ctx.fillStyle = '#111827'
+  ctx.fillRect(0, 0, ctx.canvas.width, h)
+  ctx.fillStyle = '#ffffff'
+  ctx.font = `bold ${Math.round(18 * s)}px system-ui,sans-serif`
+  ctx.textBaseline = 'middle'
+  ctx.textAlign = 'left'
+  ctx.fillText((name.value ?? '').trim() || 'Itinéraire', Math.round(20 * s), h / 2)
+  ctx.textBaseline = 'alphabetic'
+}
+
+function drawStatsOnCanvas(ctx: CanvasRenderingContext2D, y: number, h: number, s: number) {
+  const W = ctx.canvas.width
+  ctx.fillStyle = '#f9fafb'
+  ctx.fillRect(0, y, W, h)
+  ctx.fillStyle = '#e5e7eb'
+  ctx.fillRect(0, y, W, s)
+
+  const nbCols = detectedClimbs.value.length
+  const colsLabel = nbCols > 0 ? `${nbCols} col${nbCols > 1 ? 's' : ''}` : '–'
+  const items = [
+    { label: formatKm(distanceM.value), sub: 'Distance' },
+    { label: `+${Math.round(elevGainM.value)} m`, sub: 'Dénivelé +' },
+    { label: colsLabel, sub: 'Cols détectés' },
+    { label: formatDuration(estimatedSeconds.value), sub: `à ${avgSpeedKmh.value} km/h` },
+  ]
+  const colW = W / items.length
+  const cy = y + h / 2
+
+  items.forEach((item, i) => {
+    const cx = colW * i + colW / 2
+    if (i > 0) {
+      ctx.fillStyle = '#e5e7eb'
+      ctx.fillRect(colW * i, y + h * 0.2, s, h * 0.6)
+    }
+    ctx.fillStyle = '#111827'
+    ctx.font = `bold ${Math.round(14 * s)}px system-ui,sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'bottom'
+    ctx.fillText(item.label, cx, cy + 2 * s)
+    ctx.fillStyle = '#6b7280'
+    ctx.font = `${Math.round(10 * s)}px system-ui,sans-serif`
+    ctx.textBaseline = 'top'
+    ctx.fillText(item.sub, cx, cy + 4 * s)
+  })
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
 }
 
 async function exportImage() {
@@ -2265,8 +2358,6 @@ async function exportImage() {
     const targetColorMode = exportShowGrade.value ? 'grade' : 'none'
     if (state.colorMode !== targetColorMode) { state.colorMode = targetColorMode; applyColorMode() }
 
-    if (exportShowClimbs.value) addExportClimbLayers()
-
     const lngs = geometry.value.map((c) => c[0])
     const lats = geometry.value.map((c) => c[1])
     mapInstance.fitBounds(
@@ -2275,18 +2366,41 @@ async function exportImage() {
     )
     await new Promise<void>((resolve) => mapInstance.once('idle', resolve))
 
+    const dpr = window.devicePixelRatio || 1
+    const UPSCALE = 1.5
+    const s = dpr * UPSCALE // effective scale for drawn elements
+
     const mapCanvas = mapInstance.getCanvas()
     const chartCanvas = chartEl.value!
-    const W = mapCanvas.width
-    const chartH = Math.round(W * (chartCanvas.height / chartCanvas.width) * 0.5)
+    const srcW = mapCanvas.width
+    const srcH = mapCanvas.height
+
+    const outW = Math.round(srcW * UPSCALE)
+    const mapOutH = Math.round(srcH * UPSCALE)
+    // chart gets 35% of map height for more breathing room
+    const chartOutH = Math.round(mapOutH * 0.35)
+    const titleH = Math.round(52 * s)
+    const statsH = exportShowStats.value ? Math.round(80 * s) : 0
+
     const out = document.createElement('canvas')
-    out.width = W
-    out.height = mapCanvas.height + chartH
+    out.width = outW
+    out.height = titleH + mapOutH + chartOutH + statsH
     const ctx = out.getContext('2d')!
+
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, out.width, out.height)
-    ctx.drawImage(mapCanvas, 0, 0)
-    ctx.drawImage(chartCanvas, 0, mapCanvas.height, W, chartH)
+
+    // Re-render chart at exact output dimensions so it's captured pixel-perfect
+    // Chart.js resize() takes CSS pixels; physical canvas = cssW * dpr
+    chartInstance.resize(outW / dpr, chartOutH / dpr)
+    await nextTick()
+
+    drawTitleOnCanvas(ctx, titleH, s)
+    ctx.drawImage(mapCanvas, 0, titleH, outW, mapOutH)
+    if (exportShowClimbs.value) drawClimbMarkersOnCanvas(ctx, titleH, s)
+    // Draw chart 1:1 — canvas is now exactly outW × chartOutH physical pixels
+    ctx.drawImage(chartEl.value!, 0, titleH + mapOutH, outW, chartOutH)
+    if (exportShowStats.value) drawStatsOnCanvas(ctx, titleH + mapOutH + chartOutH, statsH, s)
 
     const link = document.createElement('a')
     link.download = `${(name.value ?? 'itineraire').trim() || 'itineraire'}.png`
@@ -2294,6 +2408,8 @@ async function exportImage() {
     link.click()
   } finally {
     removeExportClimbLayers()
+    // Restore chart to its natural container size
+    if (chartInstance) chartInstance.resize()
     await applyStyleForExport(savedStyleId)
     if (state.colorMode !== savedColorMode) { state.colorMode = savedColorMode; applyColorMode() }
     if (state.showClimbs !== savedShowClimbs) { state.showClimbs = savedShowClimbs; installClimbMarkers() }
@@ -2735,6 +2851,10 @@ onBeforeUnmount(() => {
                 <div class="form-check form-switch mb-0">
                   <input class="form-check-input" type="checkbox" id="exp-climbs" v-model="exportShowClimbs" />
                   <label class="form-check-label small" for="exp-climbs">Afficher les cols</label>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="exp-stats" v-model="exportShowStats" />
+                  <label class="form-check-label small" for="exp-stats">Stats de l'itinéraire</label>
                 </div>
               </div>
             </div>

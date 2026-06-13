@@ -57,6 +57,11 @@ const divergentMarkers = []
 const selectionRange = ref(null)
 const climbsExpanded = ref(true)
 const legendVisible = ref(false)
+const showExportDialog = ref(false)
+const exportStyleId = ref('')
+const exportShowGrade = ref(false)
+const exportShowClimbs = ref(false)
+const exporting = ref(false)
 const mapFlex = ref(0.80)
 let resizing = false
 let resizeStartY = 0
@@ -345,6 +350,7 @@ async function renderMap() {
     style: mapStyleFor(state.mapStyleId) as any,
     center,
     zoom,
+    ...({ preserveDrawingBuffer: true } as any),
   })
   mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right')
 
@@ -2198,6 +2204,103 @@ function applyPendingGpxImport() {
   }
 }
 
+// ─── Image export ────────────────────────────────────────────────────────────
+const CLIMB_CAT_COLORS: Record<string, string> = {
+  HC: '#111827', '1': '#b91c1c', '2': '#ea580c', '3': '#ca8a04', '4': '#16a34a',
+}
+
+function openExportDialog() {
+  exportStyleId.value = state.mapStyleId
+  exportShowGrade.value = state.colorMode === 'grade'
+  exportShowClimbs.value = state.showClimbs
+  showExportDialog.value = true
+}
+
+async function applyStyleForExport(styleId: string) {
+  if (!mapInstance || styleId === state.mapStyleId) return
+  state.mapStyleId = styleId
+  mapInstance.setStyle(mapStyleFor(styleId) as any, { diff: false })
+  await new Promise<void>((resolve) => mapInstance.once('style.load', () => {
+    installRouteLayer(); updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer()
+    resolve()
+  }))
+}
+
+function addExportClimbLayers() {
+  if (!mapInstance || !detectedClimbs.value.length) return
+  const features = detectedClimbs.value.map((c) => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [geometry.value[c.startIdx][0], geometry.value[c.startIdx][1]] },
+    properties: { label: c.category ?? 'NC', color: CLIMB_CAT_COLORS[c.category] ?? '#6c757d' },
+  }))
+  if (mapInstance.getSource('_export-climbs')) return
+  mapInstance.addSource('_export-climbs', { type: 'geojson', data: { type: 'FeatureCollection', features } as any })
+  mapInstance.addLayer({ id: '_export-climbs-bg', type: 'circle', source: '_export-climbs',
+    paint: { 'circle-radius': 12, 'circle-color': ['get', 'color'], 'circle-stroke-color': '#fff', 'circle-stroke-width': 2 } })
+  mapInstance.addLayer({ id: '_export-climbs-text', type: 'symbol', source: '_export-climbs',
+    layout: { 'text-field': ['get', 'label'], 'text-size': 10, 'text-font': ['Open Sans Semibold', 'Arial Unicode MS Regular'], 'text-allow-overlap': true, 'icon-allow-overlap': true },
+    paint: { 'text-color': '#fff' } })
+}
+
+function removeExportClimbLayers() {
+  if (!mapInstance) return
+  for (const id of ['_export-climbs-text', '_export-climbs-bg']) {
+    if (mapInstance.getLayer(id)) mapInstance.removeLayer(id)
+  }
+  if (mapInstance.getSource('_export-climbs')) mapInstance.removeSource('_export-climbs')
+}
+
+async function exportImage() {
+  if (!mapInstance || !geometry.value.length) return
+  exporting.value = true
+  showExportDialog.value = false
+
+  const savedStyleId = state.mapStyleId
+  const savedColorMode = state.colorMode
+  const savedShowClimbs = state.showClimbs
+
+  try {
+    await applyStyleForExport(exportStyleId.value)
+
+    const targetColorMode = exportShowGrade.value ? 'grade' : 'none'
+    if (state.colorMode !== targetColorMode) { state.colorMode = targetColorMode; applyColorMode() }
+
+    if (exportShowClimbs.value) addExportClimbLayers()
+
+    const lngs = geometry.value.map((c) => c[0])
+    const lats = geometry.value.map((c) => c[1])
+    mapInstance.fitBounds(
+      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+      { padding: 60, duration: 0 },
+    )
+    await new Promise<void>((resolve) => mapInstance.once('idle', resolve))
+
+    const mapCanvas = mapInstance.getCanvas()
+    const chartCanvas = chartEl.value!
+    const W = mapCanvas.width
+    const chartH = Math.round(W * (chartCanvas.height / chartCanvas.width) * 0.5)
+    const out = document.createElement('canvas')
+    out.width = W
+    out.height = mapCanvas.height + chartH
+    const ctx = out.getContext('2d')!
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, out.width, out.height)
+    ctx.drawImage(mapCanvas, 0, 0)
+    ctx.drawImage(chartCanvas, 0, mapCanvas.height, W, chartH)
+
+    const link = document.createElement('a')
+    link.download = `${(name.value ?? 'itineraire').trim() || 'itineraire'}.png`
+    link.href = out.toDataURL('image/png')
+    link.click()
+  } finally {
+    removeExportClimbLayers()
+    await applyStyleForExport(savedStyleId)
+    if (state.colorMode !== savedColorMode) { state.colorMode = savedColorMode; applyColorMode() }
+    if (state.showClimbs !== savedShowClimbs) { state.showClimbs = savedShowClimbs; installClimbMarkers() }
+    exporting.value = false
+  }
+}
+
 function startResize(e: MouseEvent) {
   resizing = true
   resizeStartY = e.clientY
@@ -2255,6 +2358,12 @@ onBeforeUnmount(() => {
           :maxlength="80"
         />
         <div class="d-flex gap-2 flex-shrink-0">
+          <button type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            @click="openExportDialog" :disabled="!hasGeometry || exporting" title="Exporter en image">
+            <span v-if="exporting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <i v-else class="fa-solid fa-image" aria-hidden="true"></i>
+            <span class="d-none d-md-inline">Image</span>
+          </button>
           <button v-if="isEditMode" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
             @click="exportGpx" :title="t('routes.export_gpx')">
             <i class="fa-solid fa-download" aria-hidden="true"></i>
@@ -2600,6 +2709,48 @@ onBeforeUnmount(() => {
 
 
   </div>
+
+  <!-- Export dialog -->
+  <teleport to="body">
+    <template v-if="showExportDialog">
+      <div class="modal d-block" tabindex="-1" @click.self="showExportDialog = false" style="z-index:1055">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header py-2">
+              <h5 class="modal-title fs-6">
+                <i class="fa-solid fa-image me-2 text-secondary"></i>Exporter en image
+              </h5>
+              <button type="button" class="btn-close" @click="showExportDialog = false"></button>
+            </div>
+            <div class="modal-body py-3">
+              <div class="mb-3">
+                <label class="form-label fw-semibold small">Fond de carte</label>
+                <MapStyleDropdown :model-value="exportStyleId" @update:model-value="exportStyleId = $event" />
+              </div>
+              <div class="d-flex flex-column gap-2">
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="exp-grade" v-model="exportShowGrade" />
+                  <label class="form-check-label small" for="exp-grade">Couleur par dénivelé</label>
+                </div>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="exp-climbs" v-model="exportShowClimbs" />
+                  <label class="form-check-label small" for="exp-climbs">Afficher les cols</label>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer py-2">
+              <button type="button" class="btn btn-sm btn-secondary" @click="showExportDialog = false">Annuler</button>
+              <button type="button" class="btn btn-sm btn-primary d-flex align-items-center gap-1" @click="exportImage">
+                <i class="fa-solid fa-image" aria-hidden="true"></i>
+                Exporter
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-backdrop fade show" style="z-index:1054"></div>
+    </template>
+  </teleport>
 </template>
 
 <style scoped>

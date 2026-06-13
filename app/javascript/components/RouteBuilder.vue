@@ -569,6 +569,7 @@ function buildClimbMarkerEl(climb, distances) {
     selectionRange.value = { startKm, endKm }
     updateSelectionLayer()
     if (chartInstance) chartInstance.update('none')
+    fitMapToSelection()
   })
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   return el
@@ -798,6 +799,7 @@ function selectClimb(climb) {
   selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
   updateSelectionLayer()
   if (chartInstance) chartInstance.update('none')
+  fitMapToSelection()
 }
 
 function geomIdxForKm(km) {
@@ -980,6 +982,20 @@ function clearAll() {
   waypoints.value = []
   refreshWaypointMarkers()
   recomputeRoute()
+}
+
+function fitMapToSelection() {
+  if (!mapInstance || !selectionRange.value || !geometry.value.length) return
+  const i0 = geomIdxForKm(selectionRange.value.startKm)
+  const i1 = geomIdxForKm(selectionRange.value.endKm)
+  const slice = geometry.value.slice(Math.min(i0, i1), Math.max(i0, i1) + 1)
+  if (slice.length < 2) return
+  const lngs = slice.map((c) => c[0])
+  const lats = slice.map((c) => c[1])
+  mapInstance.fitBounds(
+    [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+    { padding: 60, duration: 500 },
+  )
 }
 
 function fitMapToRoute() {
@@ -1288,7 +1304,7 @@ function makeSelectionMarker(kind) {
     updateSelectionLayer()
     if (chartInstance) chartInstance.update('none')
   })
-  marker.on('dragend', () => { selectionMarkerDragging = false })
+  marker.on('dragend', () => { selectionMarkerDragging = false; fitMapToSelection() })
   return marker
 }
 
@@ -1929,6 +1945,7 @@ function attachChartSelectionOnce(canvas) {
         window.removeEventListener('mouseup', onUp)
         chartHandleDrag = null
         canvas.style.cursor = ''
+        fitMapToSelection()
       }
       window.addEventListener('mousemove', onMove)
       window.addEventListener('mouseup', onUp)
@@ -1964,6 +1981,7 @@ function attachChartSelectionOnce(canvas) {
       selectionRange.value = dragged ? { startKm: km1, endKm: km2 } : null
       updateSelectionLayer()
       c.update('none')
+      if (dragged) fitMapToSelection()
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)

@@ -28,6 +28,7 @@ const state = reactive(new RouteBuilderState())
 const currentId = ref(props.routeId ? Number(props.routeId) : null)
 const mapEl = useTemplateRef('mapEl')
 const chartEl = useTemplateRef('chartEl')
+const rightColEl = useTemplateRef('rightColEl')
 
 let mapInstance = null
 let chartInstance = null
@@ -55,6 +56,11 @@ const divergentMarkers = []
 // portion of the track on the map. { startKm, endKm } or null.
 const selectionRange = ref(null)
 const climbsExpanded = ref(true)
+const legendVisible = ref(false)
+const mapFlex = ref(0.65)
+let resizing = false
+let resizeStartY = 0
+let resizeStartFlex = 0
 let cumDistKm = [] // cumulative distance in km per geometry index — fills during chart render
 let chartDrag = null // { startPx, currentPx } while the user is dragging on the chart
 // While the user is dragging one of the start/end flag handles to resize the
@@ -1633,7 +1639,7 @@ async function renderElevationChart() {
     // gradeFillPlugin must come before selectionRectPlugin so the selection
     // rectangle (also drawn in beforeDatasetsDraw) sits on top of the colored
     // fill.
-    plugins: [gradeFillPlugin, selectionRectPlugin, waypointDotsPlugin, hoverSyncPlugin],
+    plugins: [gradeFillPlugin, selectionRectPlugin, hoverSyncPlugin],
   })
   attachChartSelectionOnce(chartEl.value)
 }
@@ -2167,7 +2173,34 @@ function applyPendingGpxImport() {
   }
 }
 
+function startResize(e: MouseEvent) {
+  resizing = true
+  resizeStartY = e.clientY
+  resizeStartFlex = mapFlex.value
+  document.addEventListener('mousemove', onResize)
+  document.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+
+function onResize(e: MouseEvent) {
+  if (!resizing || !rightColEl.value) return
+  const colH = (rightColEl.value as HTMLElement).getBoundingClientRect().height
+  if (colH === 0) return
+  const delta = (e.clientY - resizeStartY) / colH
+  mapFlex.value = Math.max(0.2, Math.min(0.8, resizeStartFlex + delta))
+}
+
+function stopResize() {
+  resizing = false
+  document.removeEventListener('mousemove', onResize)
+  document.removeEventListener('mouseup', stopResize)
+  if (mapInstance) mapInstance.resize()
+  if (chartInstance) chartInstance.resize()
+}
+
 onBeforeUnmount(() => {
+  document.removeEventListener('mousemove', onResize)
+  document.removeEventListener('mouseup', stopResize)
   destroyChart()
   waypointMarkers.forEach((m) => m.remove())
   waypointMarkers.length = 0
@@ -2182,9 +2215,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div>
-    <div class="card shadow-sm border-0 mb-3">
-      <div class="card-body d-flex align-items-center gap-2 py-2 px-3">
+  <div class="route-builder-page">
+    <div class="card shadow-sm border-0">
+      <div class="card-body d-flex align-items-center gap-2 py-1 px-3">
         <a :href="`${localePrefix}/routes`" class="btn btn-sm btn-link p-0 me-1 d-inline-flex align-items-center gap-1 flex-shrink-0">
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
           <span>{{ t('routes.back') }}</span>
@@ -2224,7 +2257,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Map + Stats layout -->
-    <div class="d-flex gap-3 mb-3 align-items-stretch">
+    <div class="route-builder-main">
 
     <!-- Stats sidebar -->
     <div class="card shadow-sm border-0 route-stats-sidebar">
@@ -2288,11 +2321,11 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Right column: map + elevation profile -->
-    <div class="d-flex flex-column gap-3 flex-grow-1" style="min-width:0">
+    <div ref="rightColEl" class="route-builder-right-col">
 
     <!-- Map card -->
-    <div class="card shadow-sm border-0">
-      <div class="card-body p-0">
+    <div class="card shadow-sm border-0 route-builder-map-card" :style="{ flex: mapFlex + ' 1 0%' }">
+      <div class="card-body p-0 route-builder-map-card-body">
         <div class="map-wrap" :class="{ expanded: state.mapExpanded }">
           <div ref="mapEl" class="route-builder-map"></div>
           <div class="map-controls">
@@ -2345,6 +2378,15 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="map-controls-right">
+            <div v-if="state.mapStyleId === 'cyclosm'" class="btn-group-vertical btn-group-sm shadow-sm mb-1" role="group">
+              <button type="button" class="btn map-ctrl-btn"
+                :class="legendVisible ? 'btn-warning text-dark active' : 'btn-light'"
+                @click="legendVisible = !legendVisible"
+                :title="legendVisible ? 'Masquer la légende' : 'Afficher la légende'"
+                :aria-pressed="legendVisible">
+                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+              </button>
+            </div>
             <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"
@@ -2414,7 +2456,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <!-- CyclOSM legend — shown only when the CyclOSM base map is active -->
-      <div v-if="state.mapStyleId === 'cyclosm'" class="card-footer cyclosm-legend py-2 px-3" :aria-label="t('routes.cyclosm_legend')">
+      <div v-if="state.mapStyleId === 'cyclosm' && legendVisible" class="card-footer cyclosm-legend py-2 px-3" :aria-label="t('routes.cyclosm_legend')">
         <div class="cyclosm-legend-row">
           <span class="cyclosm-legend-group-label">{{ t('routes.cyclosm_paths') }}</span>
           <span class="cyclosm-legend-item">
@@ -2456,8 +2498,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- Resizer -->
+    <div class="map-chart-resizer" @mousedown="startResize">
+      <span class="map-chart-resizer-handle"></span>
+    </div>
+
     <!-- Elevation chart card -->
-    <div class="card shadow-sm border-0">
+    <div class="card shadow-sm border-0 route-builder-chart-card" :style="{ flex: (1 - mapFlex) + ' 1 0%' }">
       <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
         <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
         <h3 class="h6 mb-0">{{ t('routes.elevation_profile') }}</h3>
@@ -2496,7 +2543,7 @@ onBeforeUnmount(() => {
           </span>
         </div>
       </div>
-      <div class="card-body">
+      <div class="card-body route-builder-chart-card-body">
         <div v-if="!hasGeometry" class="text-muted small d-flex align-items-center gap-2">
           <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
           <span>{{ t('routes.no_elevation_yet') }}</span>
@@ -2524,8 +2571,88 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* ─── Page-level layout ───────────────────────────────────────────────────── */
+.route-builder-page {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: calc(100vh - 4rem);
+  padding: 0.5rem 0.75rem 0;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+
+.route-builder-main {
+  display: flex;
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.route-builder-right-col {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.route-builder-map-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.route-builder-map-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.route-builder-chart-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.route-builder-chart-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ─── Resizer ─────────────────────────────────────────────────────────────── */
+.map-chart-resizer {
+  flex: 0 0 8px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  user-select: none;
+}
+.map-chart-resizer:hover .map-chart-resizer-handle,
+.map-chart-resizer:active .map-chart-resizer-handle {
+  background: #9ca3af;
+}
+.map-chart-resizer-handle {
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: #d1d5db;
+  transition: background 0.15s;
+}
+
 .map-wrap {
   position: relative;
+  flex: 1;
+  min-height: 0;
 }
 .map-wrap.expanded {
   position: fixed;
@@ -2538,8 +2665,8 @@ onBeforeUnmount(() => {
   box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.2);
 }
 .route-builder-map {
-  height: 75vh;
-  min-height: 560px;
+  height: 100%;
+  min-height: 0;
   width: 100%;
 }
 .map-wrap.expanded .route-builder-map {
@@ -2718,7 +2845,8 @@ onBeforeUnmount(() => {
 
 .elevation-canvas-wrap {
   position: relative;
-  height: 220px;
+  flex: 1;
+  min-height: 0;
   width: 100%;
 }
 .elevation-canvas-wrap canvas {
@@ -3105,6 +3233,14 @@ onBeforeUnmount(() => {
 .route-stats-sidebar {
   flex-shrink: 0;
   width: 175px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.route-stats-sidebar .card-body {
+  overflow-y: auto;
+  min-height: 0;
 }
 .route-stats-sidebar .stat-pill {
   display: flex;

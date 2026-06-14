@@ -659,7 +659,8 @@ watch(() => state.showStatsSidebar, async () => {
 })
 watch(mobileSheetOpen, async (open) => {
   if (!open || !isMobile.value || !routeStore.hasGeometry.value) return
-  await nextTick(); chartRef.value?.resize()
+  await nextTick()
+  chartRef.value?.render()
 })
 watch(isMobile, async (mobile) => {
   if (!routeStore.hasGeometry.value) return
@@ -800,7 +801,7 @@ onBeforeUnmount(() => {
       <div ref="rightColEl" class="route-builder-right">
 
         <!-- Map -->
-        <div class="route-builder-map-wrap" :style="{ flex: state.showElevationChart ? mapFlex : 1 }">
+        <div class="route-builder-map-wrap" :style="{ flex: (!isMobile && state.showElevationChart) ? mapFlex : 1 }">
           <RouteBuilderMap
             ref="mapRef"
             :state="state"
@@ -810,17 +811,17 @@ onBeforeUnmount(() => {
           />
         </div>
 
-        <!-- Vertical resize handle -->
+        <!-- Vertical resize handle (desktop only) -->
         <div
-          v-if="state.showElevationChart"
+          v-if="!isMobile && state.showElevationChart"
           class="resize-handle"
           role="separator"
           @mousedown="startResize"
         ></div>
 
-        <!-- Elevation chart -->
+        <!-- Elevation chart (desktop only) -->
         <div
-          v-if="state.showElevationChart"
+          v-if="!isMobile && state.showElevationChart"
           class="route-builder-chart-wrap"
           :style="{ flex: 1 - mapFlex }"
         >

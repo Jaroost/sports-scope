@@ -1252,6 +1252,52 @@ function attachWaypointDrag(el, marker, idx) {
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   })
+
+  el.addEventListener('touchstart', (ev) => {
+    if (ev.target.closest('.wp-tooltip')) return
+    if (ev.touches.length !== 1) return
+    // preventDefault blocks map pan and suppresses the synthetic click —
+    // tap-to-select is handled explicitly in touchend when !moved.
+    ev.preventDefault()
+    ev.stopPropagation()
+
+    const startTouch = ev.touches[0]
+    let moved = false
+    mapInstance.dragPan.disable()
+
+    const onTouchMove = (e) => {
+      if (e.touches.length !== 1) return
+      e.preventDefault()
+      const touch = e.touches[0]
+      const dx = touch.clientX - startTouch.clientX
+      const dy = touch.clientY - startTouch.clientY
+      if (!moved && dx * dx + dy * dy < 25) return // 5px threshold
+      moved = true
+      const rect = mapInstance.getContainer().getBoundingClientRect()
+      const ll = mapInstance.unproject([touch.clientX - rect.left, touch.clientY - rect.top])
+      marker.setLngLat([ll.lng, ll.lat])
+    }
+
+    const onTouchEnd = () => {
+      el.removeEventListener('touchmove', onTouchMove)
+      el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
+      mapInstance.dragPan.enable()
+      if (!moved) {
+        selectWaypoint(idx)
+        return
+      }
+      const pos = marker.getLngLat()
+      const next = waypoints.value.slice()
+      next[idx] = { lng: pos.lng, lat: pos.lat }
+      waypoints.value = next
+      recomputeRoute()
+    }
+
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    el.addEventListener('touchend', onTouchEnd)
+    el.addEventListener('touchcancel', onTouchEnd)
+  }, { passive: false })
 }
 
 // ─── Hover-to-insert: drag the line to add waypoints ───────────────────────
@@ -2562,6 +2608,7 @@ watch(geometry, (newGeom) => {
 
 onMounted(async () => {
   state.load()
+  document.getElementById('navbar-route-save-btn')?.addEventListener('click', save)
   // When coming from the "Nouvel itinéraire" prompt, the URL carries
   // ?name=… — pre-fill the name input and scrub the param so a reload
   // doesn't re-apply the prefill on top of what the user has typed since.
@@ -2897,6 +2944,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mouseup', stopResize)
   document.removeEventListener('mousemove', onResizeH)
   document.removeEventListener('mouseup', stopResizeH)
+  document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   destroyChart()
   waypointMarkers.forEach((m) => m.remove())
   waypointMarkers.length = 0
@@ -2913,7 +2961,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="route-builder-page">
-    <div class="card shadow-sm border-0">
+    <div class="card shadow-sm border-0 d-none d-md-block">
       <div class="card-body d-flex align-items-center gap-2 py-1 px-3">
         <a :href="`${localePrefix}/routes`" class="btn btn-sm btn-link p-0 me-1 d-inline-flex align-items-center gap-1 flex-shrink-0">
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>

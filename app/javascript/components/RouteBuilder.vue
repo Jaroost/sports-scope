@@ -68,6 +68,8 @@ const selectionRange = ref(null)
 const climbsExpanded = ref(true)
 const placesExpanded = ref(true)
 const isFetchingPlaces = ref(false)
+const placeShowCemeteries = ref(true)
+const placeShowLocalities = ref(true)
 const importantPlaces = ref([])
 let placesToken = 0
 const wtExpanded = ref(false)
@@ -130,7 +132,12 @@ const GRADE_BUCKETS = [
 
 const hasGeometry = computed(() => geometry.value.length >= 2)
 
-
+const hasCemeteryPlaces = computed(() => importantPlaces.value.some((p) => p.type === 'cemetery'))
+const hasLocalityPlaces = computed(() => importantPlaces.value.some((p) => p.type !== 'cemetery'))
+const filteredPlaces = computed(() => importantPlaces.value.filter((p) => {
+  if (p.type === 'cemetery') return placeShowCemeteries.value
+  return placeShowLocalities.value
+}))
 
 const detectedClimbs = computed(() => {
   const g = geometry.value
@@ -1452,7 +1459,7 @@ function hidePlaceHoverMarker() {
 
 function selectPlace(place) {
   if (!mapInstance) return
-  mapInstance.flyTo({ center: [place.lng, place.lat], zoom: 15, duration: 600 })
+  mapInstance.flyTo({ center: [place.markerLng, place.markerLat], zoom: 15, duration: 600 })
   const km = place.distanceM / 1000
   placeSelectedKm = placeSelectedKm === km ? null : km
   if (chartInstance) chartInstance.update('none')
@@ -1566,13 +1573,20 @@ async function fetchImportantPlaces() {
     const nodes = await res.json()
     if (token !== placesToken) return
 
+    console.debug('[places] reçu depuis Overpass:', nodes.length, 'POIs', nodes)
+
     const distancesM = buildDistancesM(geom)
     const THRESHOLD_M = 2000
     const seen = new Set()
     const results = []
 
     for (const node of nodes) {
-      if (seen.has(node.name)) continue
+      // Cemeteries: deduplicate by position (~100m grid) so unnamed ones don't collapse into one.
+      // Localities: deduplicate by name (avoid showing same village twice).
+      const seenKey = node.type === 'cemetery'
+        ? `cemetery:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
+        : `${node.type ?? ''}:${node.name}`
+      if (seen.has(seenKey)) { console.debug('[places] dédupliqué:', node.name, node.type); continue }
       // Find nearest geometry point using fast approximate distance, then verify with haversine
       const cosLat = Math.cos(node.lat * Math.PI / 180)
       let minD2 = Infinity
@@ -1583,9 +1597,23 @@ async function fetchImportantPlaces() {
         const d2 = dLng * dLng + dLat * dLat
         if (d2 < minD2) { minD2 = d2; nearestIdx = i }
       }
-      if (haversine(geom[nearestIdx], [node.lng, node.lat]) > THRESHOLD_M) continue
-      seen.add(node.name)
-      results.push({ name: node.name, distanceM: distancesM[nearestIdx], lng: geom[nearestIdx][0], lat: geom[nearestIdx][1] })
+      const threshold = node.type === 'cemetery' ? 1000 : THRESHOLD_M
+      const dist = haversine(geom[nearestIdx], [node.lng, node.lat])
+      console.debug(`[places] ${node.name} (${node.type}) → dist=${Math.round(dist)}m threshold=${threshold}m → ${dist > threshold ? 'EXCLU' : 'OK'}`)
+      if (dist > threshold) continue
+      seen.add(seenKey)
+      const isCemetery = node.type === 'cemetery'
+      results.push({
+        name: node.name,
+        type: node.type,
+        distanceM: distancesM[nearestIdx],
+        // flyTo destination — actual POI location for all types
+        lng: node.lng,
+        lat: node.lat,
+        // hover marker — at the cemetery for cemeteries, on the route for localities
+        markerLng: isCemetery ? node.lng : geom[nearestIdx][0],
+        markerLat: isCemetery ? node.lat : geom[nearestIdx][1],
+      })
     }
 
     results.sort((a, b) => a.distanceM - b.distanceM)
@@ -3163,17 +3191,38 @@ onBeforeUnmount(() => {
               <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
               <span>{{ t('routes.places_loading') }}</span>
             </div>
+            <div v-if="hasCemeteryPlaces || hasLocalityPlaces" class="places-filter-bar">
+              <button
+                v-if="hasLocalityPlaces"
+                type="button"
+                class="places-filter-btn"
+                :class="{ active: placeShowLocalities }"
+                @click="placeShowLocalities = !placeShowLocalities"
+              >
+                <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+              </button>
+              <button
+                v-if="hasCemeteryPlaces"
+                type="button"
+                class="places-filter-btn"
+                :class="{ active: placeShowCemeteries }"
+                @click="placeShowCemeteries = !placeShowCemeteries"
+              >
+                <i class="fa-solid fa-cross" aria-hidden="true"></i>
+              </button>
+            </div>
             <div
-              v-for="(place, idx) in importantPlaces"
+              v-for="(place, idx) in filteredPlaces"
               :key="idx"
               class="place-pill"
               :title="place.name"
               style="cursor: pointer"
-              @mouseenter="showPlaceHoverMarker(place.lng, place.lat, place.distanceM)"
+              @mouseenter="showPlaceHoverMarker(place.markerLng, place.markerLat, place.distanceM)"
               @mouseleave="hidePlaceHoverMarker"
               @click="selectPlace(place)"
             >
               <span class="place-pill-dist">{{ formatDistanceShort(place.distanceM) }}</span>
+              <i v-if="place.type === 'cemetery'" class="fa-solid fa-cross place-pill-icon" aria-hidden="true"></i>
               <span class="place-pill-name">{{ place.name }}</span>
             </div>
           </template>
@@ -4358,6 +4407,31 @@ onBeforeUnmount(() => {
   text-align: right;
 }
 .place-pill-name { color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place-pill-icon { font-size: 0.65rem; color: #6b7280; flex-shrink: 0; }
+.places-filter-bar {
+  display: flex;
+  gap: 0.3rem;
+  padding: 0.1rem 0.6rem 0.35rem;
+}
+.places-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.18rem 0.5rem;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #9ca3af;
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.places-filter-btn.active {
+  background: rgba(13, 110, 253, 0.1);
+  border-color: rgba(13, 110, 253, 0.35);
+  color: #0d6efd;
+}
+.places-filter-btn:hover { background: rgba(13, 110, 253, 0.06); }
 .places-loading {
   font-size: 0.78rem;
   color: #9ca3af;

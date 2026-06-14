@@ -9,8 +9,14 @@ class GeocodesController < ApplicationController
 
     query = <<~OVERPASS
       [out:json][timeout:25];
-      node["place"~"^(city|town|village|hamlet)$"](#{south},#{west},#{north},#{east});
-      out body;
+      (
+        node["place"~"^(city|town|village|hamlet)$"](#{south},#{west},#{north},#{east});
+        node["amenity"="grave_yard"](#{south},#{west},#{north},#{east});
+        node["landuse"="cemetery"](#{south},#{west},#{north},#{east});
+        way["amenity"="grave_yard"](#{south},#{west},#{north},#{east});
+        way["landuse"="cemetery"](#{south},#{west},#{north},#{east});
+      );
+      out center;
     OVERPASS
 
     uri = URI("https://overpass-api.de/api/interpreter")
@@ -23,9 +29,20 @@ class GeocodesController < ApplicationController
 
     data = JSON.parse(response.body)
     places = data["elements"].filter_map do |el|
-      name = el.dig("tags", "name")
+      tags = el["tags"] || {}
+      # Ways return a "center" object; nodes have lat/lon at the top level
+      lat = el["lat"] || el.dig("center", "lat")
+      lng = el["lon"] || el.dig("center", "lon")
+      next unless lat && lng
+
+      is_cemetery = tags["amenity"] == "grave_yard" || tags["landuse"] == "cemetery"
+      name = tags["name"] || (is_cemetery ? "Cimetière" : nil)
       next unless name
-      { lat: el["lat"], lng: el["lon"], name: name, type: el.dig("tags", "place") }
+
+      poi_type = if is_cemetery then "cemetery"
+                 else tags["place"]
+                 end
+      { lat: lat, lng: lng, name: name, type: poi_type }
     end
 
     render json: places

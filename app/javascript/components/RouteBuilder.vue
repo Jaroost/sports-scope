@@ -3200,16 +3200,16 @@ onBeforeUnmount(() => {
                 <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
               </button>
             </div>
-            <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+            <div class="btn-group-vertical btn-group-sm shadow-sm d-none d-md-flex" role="group">
               <button type="button" class="btn map-ctrl-btn"
-                :class="state.showStatsSidebar ? 'btn-light' : 'btn-outline-secondary'"
+                :class="state.showStatsSidebar ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="state.showStatsSidebar = !state.showStatsSidebar"
                 :title="state.showStatsSidebar ? t('routes.hide_stats_sidebar') : t('routes.show_stats_sidebar')"
                 :aria-pressed="state.showStatsSidebar">
                 <i class="fa-solid fa-chart-simple" aria-hidden="true"></i>
               </button>
               <button type="button" class="btn map-ctrl-btn"
-                :class="state.showElevationChart ? 'btn-light' : 'btn-outline-secondary'"
+                :class="state.showElevationChart ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="state.showElevationChart = !state.showElevationChart"
                 :title="state.showElevationChart ? t('routes.hide_elevation_chart') : t('routes.show_elevation_chart')"
                 :aria-pressed="state.showElevationChart">
@@ -3244,7 +3244,7 @@ onBeforeUnmount(() => {
                 <span v-if="locating" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
                 <i v-else class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
               </button>
-              <button type="button" class="btn map-ctrl-btn"
+              <button type="button" class="btn map-ctrl-btn d-none d-md-flex"
                 :class="state.mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"
                 @click="toggleMapSize"
                 :title="state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
@@ -3655,8 +3655,7 @@ onBeforeUnmount(() => {
 .mobile-sheet-toggle {
   position: absolute;
   bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 14px;
   z-index: 6;
   white-space: nowrap;
   /* Caché par défaut (desktop) — visible uniquement sur téléphone */

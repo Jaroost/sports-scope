@@ -204,7 +204,7 @@
       "show_waypoints": "Show waypoints",
       "hide_waypoints": "Hide waypoints",
       "remove_waypoint": "Remove this point",
-      "return_via_same_route": "Return via same route",
+      "return_via_same_route": "Add to end of route",
       "street_view": "Street View",
       "komoot_waypoint_limit": "Your route has %{count} points, but Komoot only accepts 20 via URL. The route will be simplified while keeping the start and end. Continue?",
       "cyclosm_legend": "CyclOSM legend",

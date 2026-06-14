@@ -1173,9 +1173,12 @@ function refreshWaypointMarkers() {
     const komootUrl = `https://www.komoot.com/plan/@${w.lat},${w.lng},13z?sport=touringbicycle&${komootPoints}`
     el.innerHTML = `
       <div class="wp-tooltip">
-        <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
+        <div class="wp-tooltip-header">
+          <span class="wp-tooltip-title">Point ${idx + 1}</span>
+          <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
+        </div>
         <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
-          <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>
+          <i class="fa-brands fa-google" aria-hidden="true"></i>
           <span>Google Maps</span>
         </a>
         <a class="wp-tooltip-action wp-tooltip-action--streetview" href="https://www.google.com/maps?q=&layer=c&cbll=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
@@ -4157,7 +4160,7 @@ onBeforeUnmount(() => {
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18), 0 1px 4px rgba(0, 0, 0, 0.10);
-  padding: 26px 4px 4px;
+  padding: 4px 4px 4px;
   display: none;
   flex-direction: column;
   gap: 2px;
@@ -4169,10 +4172,21 @@ onBeforeUnmount(() => {
 .wp-marker--selected .wp-tooltip {
   display: flex;
 }
+.wp-tooltip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.2rem 0.65rem 0.2rem 0.65rem;
+  gap: 0.5rem;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+  margin-bottom: 2px;
+}
+.wp-tooltip-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6b7280;
+}
 .wp-tooltip-close {
-  position: absolute;
-  top: 5px;
-  right: 5px;
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -4183,6 +4197,7 @@ onBeforeUnmount(() => {
   line-height: 1;
   cursor: pointer;
   padding: 0;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;

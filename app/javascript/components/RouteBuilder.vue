@@ -848,6 +848,7 @@ onBeforeUnmount(() => {
           <div class="mobile-sheet-body">
           <RouteBuilderChart
             ref="chartRef"
+            :simplified="true"
             @fly-to="onChartFlyTo"
             @hover-end="onChartHoverEnd"
             @fit-to-selection="onChartFitToSelection"
@@ -1045,7 +1046,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  padding: 0 1rem 1.25rem;
+  padding: 0;
   overflow: hidden;
 }
 .mobile-sheet-enter-active, .mobile-sheet-leave-active { transition: opacity 0.2s; }

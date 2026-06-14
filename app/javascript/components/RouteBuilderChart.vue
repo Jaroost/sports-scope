@@ -6,7 +6,10 @@ import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import {
   GRADE_BUCKETS, haversine, gradeForIndex, colorForGrade, geomIdxForKm,
+  formatDuration,
 } from '../routeHelpers'
+
+const props = defineProps<{ simplified?: boolean }>()
 
 const chartEl = useTemplateRef('chartEl')
 let chartInstance: any = null
@@ -569,96 +572,146 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
 
 <template>
   <div class="card shadow-sm border-0 route-builder-chart-card">
-    <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
-      <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
-      <h3 class="h6 mb-0">{{ t('routes.elevation_profile') }}</h3>
-      <button
-        v-if="selectionStore.selectionRange.value"
-        type="button"
-        class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
-        :title="t('routes.zoom_to_selection')"
-        @click="zoomToSelection"
-      >
-        <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
-        <span class="d-none d-md-inline">{{ t('routes.zoom_to_selection') }}</span>
-      </button>
-      <button
-        v-if="selectionStore.selectionRange.value"
-        type="button"
-        class="btn btn-sm btn-outline-danger d-inline-flex align-items-center gap-1"
-        :title="t('routes.clear_selection')"
-        @click="clearSelection"
-      >
-        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-        <span class="d-none d-md-inline">{{ t('routes.clear_selection') }}</span>
-      </button>
-      <button
-        v-if="selectionStore.selectionRange.value"
-        type="button"
-        class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
-        :title="t('routes.open_selection_in_komoot')"
-        @click="$emit('open-selection-in-komoot')"
-      >
-        <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-        <span class="d-none d-md-inline">Komoot</span>
-      </button>
-      <button
-        v-if="selectionStore.isZoomed.value"
-        type="button"
-        class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
-        :title="t('routes.reset_zoom')"
-        @click="resetZoom"
-      >
-        <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
-        <span class="d-none d-md-inline">{{ t('routes.reset_zoom') }}</span>
-      </button>
-      <div class="ms-auto d-flex align-items-center gap-2 flex-wrap">
-        <template v-if="routeStore.hasGeometry.value">
-          <span class="stat-pill stat-pill-distance">
-            <i class="fa-solid fa-route me-1" aria-hidden="true"></i>
-            <strong>{{ chartStats.distance >= 1000 ? (chartStats.distance / 1000).toFixed(2) + ' km' : Math.round(chartStats.distance) + ' m' }}</strong>
+
+    <!-- ── Mode simplifié (mobile) ── -->
+    <template v-if="props.simplified">
+      <div v-if="routeStore.hasGeometry.value" class="mobile-chart-stats">
+        <span class="stat-pill stat-pill-distance">
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
+          <strong>{{ chartStats.distance >= 1000 ? (chartStats.distance / 1000).toFixed(2) + ' km' : Math.round(chartStats.distance) + ' m' }}</strong>
+        </span>
+        <span class="stat-pill stat-pill-up">
+          <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
+          <strong>+{{ Math.round(chartStats.gain) }} m</strong>
+        </span>
+        <span class="stat-pill stat-pill-down">
+          <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+          <strong>−{{ Math.round(chartStats.loss) }} m</strong>
+        </span>
+        <span class="stat-pill stat-pill-time">
+          <i class="fa-solid fa-clock" aria-hidden="true"></i>
+          <strong>{{ formatDuration(routeStore.estimatedSeconds.value) }}</strong>
+          <span class="speed-input-wrap">
+            <input
+              v-model.number="routeStore.avgSpeedKmh.value"
+              type="number" min="3" max="80" step="1"
+              class="speed-input"
+              :aria-label="t('routes.avg_speed_hint')"
+              @change="routeStore.persistSpeed()"
+            />
+            <small>km/h</small>
           </span>
-          <span class="stat-pill stat-pill-up">
-            <i class="fa-solid fa-arrow-trend-up me-1" aria-hidden="true"></i>
-            <strong>+{{ Math.round(chartStats.gain) }} m</strong>
-          </span>
-          <span class="stat-pill stat-pill-down">
-            <i class="fa-solid fa-arrow-trend-down me-1" aria-hidden="true"></i>
-            <strong>−{{ Math.round(chartStats.loss) }} m</strong>
-          </span>
-          <span class="stat-pill stat-pill-grade">
-            <span class="grade-icon me-1" aria-hidden="true">\</span>
-            <strong>{{ chartStats.avgGrade.toFixed(1) }} %</strong>
-          </span>
-        </template>
-        <button
-          type="button"
-          class="btn btn-sm btn-light chart-collapse-btn"
-          @click="$emit('collapse')"
-          :title="t('routes.hide_elevation_chart')"
-          aria-label="Réduire"
-        >
-          <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
-        </button>
+        </span>
       </div>
-    </div>
-    <div class="card-body route-builder-chart-card-body">
-      <div v-if="!routeStore.hasGeometry.value" class="text-muted small d-flex align-items-center gap-2">
-        <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
-        <span>{{ t('routes.no_elevation_yet') }}</span>
-      </div>
-      <template v-else>
-        <div class="grade-legend mb-2" :aria-label="t('routes.grade_legend')">
-          <span v-for="b in gradeLegend" :key="b.label" class="grade-legend-item">
-            <span class="grade-legend-swatch" :style="{ backgroundColor: b.color }"></span>
-            <span class="grade-legend-label">{{ b.label }}</span>
-          </span>
+      <div class="card-body route-builder-chart-card-body">
+        <div v-if="routeStore.isFetchingElevation.value" class="mobile-chart-loading">
+          <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+          <span>{{ t('routes.computing_elevation') }}</span>
         </div>
-        <div class="elevation-canvas-wrap">
+        <div v-else-if="!routeStore.hasGeometry.value" class="text-muted small text-center py-3">
+          <i class="fa-solid fa-hand-pointer me-1" aria-hidden="true"></i>
+          {{ t('routes.click_hint') }}
+        </div>
+        <div v-else class="elevation-canvas-wrap">
           <canvas ref="chartEl"></canvas>
         </div>
-      </template>
-    </div>
+      </div>
+    </template>
+
+    <!-- ── Mode complet (desktop) ── -->
+    <template v-else>
+      <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
+        <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
+        <h3 class="h6 mb-0">{{ t('routes.elevation_profile') }}</h3>
+        <button
+          v-if="selectionStore.selectionRange.value"
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+          :title="t('routes.zoom_to_selection')"
+          @click="zoomToSelection"
+        >
+          <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
+          <span>{{ t('routes.zoom_to_selection') }}</span>
+        </button>
+        <button
+          v-if="selectionStore.selectionRange.value"
+          type="button"
+          class="btn btn-sm btn-outline-danger d-inline-flex align-items-center gap-1"
+          :title="t('routes.clear_selection')"
+          @click="clearSelection"
+        >
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          <span>{{ t('routes.clear_selection') }}</span>
+        </button>
+        <button
+          v-if="selectionStore.selectionRange.value"
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+          :title="t('routes.open_selection_in_komoot')"
+          @click="$emit('open-selection-in-komoot')"
+        >
+          <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+          <span>Komoot</span>
+        </button>
+        <button
+          v-if="selectionStore.isZoomed.value"
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+          :title="t('routes.reset_zoom')"
+          @click="resetZoom"
+        >
+          <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
+          <span>{{ t('routes.reset_zoom') }}</span>
+        </button>
+        <div class="ms-auto d-flex align-items-center gap-2 flex-wrap">
+          <template v-if="routeStore.hasGeometry.value">
+            <span class="stat-pill stat-pill-distance">
+              <i class="fa-solid fa-route me-1" aria-hidden="true"></i>
+              <strong>{{ chartStats.distance >= 1000 ? (chartStats.distance / 1000).toFixed(2) + ' km' : Math.round(chartStats.distance) + ' m' }}</strong>
+            </span>
+            <span class="stat-pill stat-pill-up">
+              <i class="fa-solid fa-arrow-trend-up me-1" aria-hidden="true"></i>
+              <strong>+{{ Math.round(chartStats.gain) }} m</strong>
+            </span>
+            <span class="stat-pill stat-pill-down">
+              <i class="fa-solid fa-arrow-trend-down me-1" aria-hidden="true"></i>
+              <strong>−{{ Math.round(chartStats.loss) }} m</strong>
+            </span>
+            <span class="stat-pill stat-pill-grade">
+              <span class="grade-icon me-1" aria-hidden="true">\</span>
+              <strong>{{ chartStats.avgGrade.toFixed(1) }} %</strong>
+            </span>
+          </template>
+          <button
+            type="button"
+            class="btn btn-sm btn-light chart-collapse-btn"
+            @click="$emit('collapse')"
+            :title="t('routes.hide_elevation_chart')"
+            aria-label="Réduire"
+          >
+            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+      <div class="card-body route-builder-chart-card-body">
+        <div v-if="!routeStore.hasGeometry.value" class="text-muted small d-flex align-items-center gap-2">
+          <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
+          <span>{{ t('routes.no_elevation_yet') }}</span>
+        </div>
+        <template v-else>
+          <div class="grade-legend mb-2" :aria-label="t('routes.grade_legend')">
+            <span v-for="b in gradeLegend" :key="b.label" class="grade-legend-item">
+              <span class="grade-legend-swatch" :style="{ backgroundColor: b.color }"></span>
+              <span class="grade-legend-label">{{ b.label }}</span>
+            </span>
+          </div>
+          <div class="elevation-canvas-wrap">
+            <canvas ref="chartEl"></canvas>
+          </div>
+        </template>
+      </div>
+    </template>
+
   </div>
 </template>
 
@@ -718,5 +771,56 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
   font-size: 0.95em;
   line-height: 1;
   display: inline-block;
+}
+/* ── Mobile simplified header ── */
+.mobile-chart-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem 0.25rem;
+  overflow-x: auto;
+}
+.mobile-chart-stats .stat-pill {
+  flex-shrink: 0;
+}
+.mobile-chart-stats .stat-pill-time {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(13, 110, 253, 0.10);
+  color: #0d6efd;
+  border-radius: 999px;
+}
+.speed-input-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.15rem;
+}
+.speed-input-wrap small { font-size: 0.7rem; opacity: 0.75; }
+.speed-input {
+  width: 2.6rem;
+  border: 1px solid rgba(13, 110, 253, 0.25);
+  background: rgba(255, 255, 255, 0.6);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: right;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.speed-input::-webkit-inner-spin-button,
+.speed-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.speed-input:focus { outline: none; border-color: #0d6efd; }
+.mobile-chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: #6b7280;
+  padding: 1rem;
 }
 </style>

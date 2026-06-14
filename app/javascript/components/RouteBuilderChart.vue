@@ -584,10 +584,6 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
           <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
           <strong>+{{ Math.round(chartStats.gain) }} m</strong>
         </span>
-        <span class="stat-pill stat-pill-down">
-          <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
-          <strong>−{{ Math.round(chartStats.loss) }} m</strong>
-        </span>
         <span class="stat-pill stat-pill-time">
           <i class="fa-solid fa-clock" aria-hidden="true"></i>
           <strong>{{ formatDuration(routeStore.estimatedSeconds.value) }}</strong>

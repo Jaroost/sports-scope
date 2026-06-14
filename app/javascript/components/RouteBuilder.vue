@@ -1014,12 +1014,7 @@ function removeWaypoint(idx) {
 function addReturnTo(idx) {
   const wps = waypoints.value
   if (wps.length < 2 || idx >= wps.length - 1) return
-  const toAdd = []
-  for (let i = wps.length - 2; i > idx + 1; i--) {
-    toAdd.push(wps[i])
-  }
-  toAdd.push(wps[idx])
-  waypoints.value = [...wps, ...toAdd]
+  waypoints.value = [...wps, { ...wps[idx] }]
   deselectAll()
   refreshWaypointMarkers()
   recomputeRoute()

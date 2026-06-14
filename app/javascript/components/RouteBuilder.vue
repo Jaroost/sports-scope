@@ -1394,6 +1394,8 @@ function makeSelectionMarker(kind) {
   el.className = 'sel-flag-marker'
   el.style.cssText = 'width:28px;height:36px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35));cursor:grab'
   el.innerHTML = flagSvg(kind)
+  el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker() })
+  el.addEventListener('mouseleave', () => { overClimbMarker = false })
   const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom-left', draggable: true })
     .setLngLat([0, 0])
     .addTo(mapInstance)

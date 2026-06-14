@@ -77,7 +77,6 @@ const wtSearching = ref(false)
 const wtImportingId = ref<number | null>(null)
 const wtGeomCache = new Map<number, Array<[number, number]>>()
 let wtPreviewTimeout: ReturnType<typeof setTimeout> | null = null
-const legendVisible = ref(false)
 const showExportDialog = ref(false)
 const exportStyleId = ref('')
 const exportShowGrade = ref(false)
@@ -3202,20 +3201,6 @@ onBeforeUnmount(() => {
               </button>
             </div>
             <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
-              <button type="button" class="btn btn-light map-ctrl-btn"
-                :disabled="waypoints.length === 0"
-                @click="undoLast"
-                :title="t('routes.undo')">
-                <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-              </button>
-              <button type="button" class="btn btn-light map-ctrl-btn"
-                :disabled="waypoints.length === 0"
-                @click="clearAll"
-                :title="t('routes.clear')">
-                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-              </button>
-            </div>
-            <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.showStatsSidebar ? 'btn-light' : 'btn-outline-secondary'"
                 @click="state.showStatsSidebar = !state.showStatsSidebar"
@@ -3240,15 +3225,6 @@ onBeforeUnmount(() => {
                 :title="t('routes.wt_title')"
                 :aria-pressed="wtExpanded">
                 <i class="fa-solid fa-route" aria-hidden="true"></i>
-              </button>
-            </div>
-            <div v-if="state.mapStyleId === 'cyclosm'" class="btn-group-vertical btn-group-sm shadow-sm mb-1" role="group">
-              <button type="button" class="btn map-ctrl-btn"
-                :class="legendVisible ? 'btn-warning text-dark active' : 'btn-light'"
-                @click="legendVisible = !legendVisible"
-                :title="legendVisible ? 'Masquer la légende' : 'Afficher la légende'"
-                :aria-pressed="legendVisible">
-                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
               </button>
             </div>
             <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
@@ -3393,47 +3369,6 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </Transition>
-        </div>
-      </div>
-      <!-- CyclOSM legend — shown only when the CyclOSM base map is active -->
-      <div v-if="state.mapStyleId === 'cyclosm' && legendVisible" class="card-footer cyclosm-legend py-2 px-3" :aria-label="t('routes.cyclosm_legend')">
-        <div class="cyclosm-legend-row">
-          <span class="cyclosm-legend-group-label">{{ t('routes.cyclosm_paths') }}</span>
-          <span class="cyclosm-legend-item">
-            <span class="cyclosm-line-swatch" style="background:#0000CC"></span>
-            {{ t('routes.cyclosm_cycleway') }}
-          </span>
-          <span class="cyclosm-legend-item">
-            <span class="cyclosm-dashed-swatch" style="--dash-color:#6B96FF"></span>
-            {{ t('routes.cyclosm_lane') }}
-          </span>
-          <span class="cyclosm-legend-item">
-            <span class="cyclosm-line-swatch" style="background:#4B9B4B"></span>
-            {{ t('routes.cyclosm_greenway') }}
-          </span>
-          <span class="cyclosm-legend-item">
-            <span class="cyclosm-line-swatch" style="background:#C4A870"></span>
-            {{ t('routes.cyclosm_unpaved') }}
-          </span>
-        </div>
-        <div class="cyclosm-legend-row">
-          <span class="cyclosm-legend-group-label">{{ t('routes.cyclosm_routes') }}</span>
-          <span class="cyclosm-legend-item">
-            <span class="cyclosm-route-dot" style="background:#F2D200"></span>
-            {{ t('routes.cyclosm_lcn') }}
-          </span>
-          <span class="cyclosm-legend-item">
-            <span class="cyclosm-route-dot" style="background:#F08000"></span>
-            {{ t('routes.cyclosm_rcn') }}
-          </span>
-          <span class="cyclosm-legend-item">
-            <span class="cyclosm-route-dot" style="background:#CC0000"></span>
-            {{ t('routes.cyclosm_ncn') }}
-          </span>
-          <span class="cyclosm-legend-item">
-            <span class="cyclosm-route-dot" style="background:#7B00B4"></span>
-            {{ t('routes.cyclosm_icn') }}
-          </span>
         </div>
       </div>
     </div>
@@ -4094,58 +4029,6 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
-.cyclosm-legend {
-  background: #f8f9fa;
-  font-size: 0.75rem;
-  color: #4b5563;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-.cyclosm-legend-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.3rem 0.7rem;
-}
-.cyclosm-legend-group-label {
-  font-weight: 600;
-  color: #1f2937;
-  white-space: nowrap;
-}
-.cyclosm-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  white-space: nowrap;
-}
-.cyclosm-line-swatch {
-  display: inline-block;
-  width: 20px;
-  height: 3px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-.cyclosm-dashed-swatch {
-  display: inline-block;
-  width: 20px;
-  height: 3px;
-  border-radius: 2px;
-  flex-shrink: 0;
-  background: repeating-linear-gradient(
-    90deg,
-    var(--dash-color, #6B96FF) 0 5px,
-    transparent 5px 9px
-  );
-}
-.cyclosm-route-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.18);
-  flex-shrink: 0;
-}
 </style>
 
 <style>

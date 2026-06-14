@@ -568,7 +568,7 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
 </script>
 
 <template>
-  <div class="card shadow-sm border-0 route-builder-chart-card" style="display: contents">
+  <div class="card shadow-sm border-0 route-builder-chart-card">
     <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
       <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
       <h3 class="h6 mb-0">{{ t('routes.elevation_profile') }}</h3>
@@ -661,3 +661,62 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
     </div>
   </div>
 </template>
+
+<style scoped>
+.route-builder-chart-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  flex: 1;
+}
+.route-builder-chart-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.elevation-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.elevation-canvas-wrap canvas { cursor: crosshair; width: 100% !important; }
+.chart-collapse-btn {
+  flex-shrink: 0;
+  padding: 0.15rem 0.4rem;
+  line-height: 1;
+}
+.grade-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  font-size: 0.75rem;
+  color: #4b5563;
+}
+.grade-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
+.grade-legend-swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.08); }
+.grade-legend-label { font-variant-numeric: tabular-nums; }
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.stat-pill-distance { background: rgba(252, 76, 2, 0.12); color: #fc4c02; }
+.stat-pill-up       { background: rgba(25, 135, 84, 0.12); color: #15803d; }
+.stat-pill-down     { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
+.stat-pill-grade    { background: rgba(108, 117, 125, 0.12); color: #495057; }
+.grade-icon {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  font-size: 0.95em;
+  line-height: 1;
+  display: inline-block;
+}
+</style>

@@ -797,10 +797,10 @@ onBeforeUnmount(() => {
       ></div>
 
       <!-- Right column: map + chart -->
-      <div ref="rightColEl" class="route-builder-right" :style="{ flexDirection: 'column', display: 'flex', flex: 1, minWidth: 0 }">
+      <div ref="rightColEl" class="route-builder-right">
 
         <!-- Map -->
-        <div :style="{ flex: state.showElevationChart ? mapFlex : 1, minHeight: 0, position: 'relative' }">
+        <div class="route-builder-map-wrap" :style="{ flex: state.showElevationChart ? mapFlex : 1 }">
           <RouteBuilderMap
             ref="mapRef"
             :state="state"
@@ -821,7 +821,8 @@ onBeforeUnmount(() => {
         <!-- Elevation chart -->
         <div
           v-if="state.showElevationChart"
-          :style="{ flex: 1 - mapFlex, minHeight: 0, display: 'flex' }"
+          class="route-builder-chart-wrap"
+          :style="{ flex: 1 - mapFlex }"
         >
           <RouteBuilderChart
             ref="chartRef"
@@ -838,11 +839,12 @@ onBeforeUnmount(() => {
 
     <!-- Mobile sheet -->
     <Transition name="mobile-sheet">
-      <div v-if="mobileSheetOpen && isMobile" class="mobile-sheet" :style="{ height: mobileSheetHeight + 'px' }">
-        <div class="mobile-sheet-handle" @touchstart.prevent="onSheetHandleTouchStart">
-          <span class="mobile-sheet-grip"></span>
-        </div>
-        <div class="mobile-sheet-body">
+      <div v-if="mobileSheetOpen && isMobile" class="mobile-sheet" @click.self="mobileSheetOpen = false">
+        <div class="mobile-sheet-panel" :style="{ height: mobileSheetHeight + 'px' }">
+          <div class="mobile-sheet-handle" @touchstart.prevent="onSheetHandleTouchStart">
+            <span class="mobile-sheet-grip"></span>
+          </div>
+          <div class="mobile-sheet-body">
           <RouteBuilderChart
             ref="chartRef"
             @fly-to="onChartFlyTo"
@@ -851,6 +853,7 @@ onBeforeUnmount(() => {
             @open-selection-in-komoot="openSelectionInKomoot"
             @collapse="mobileSheetOpen = false"
           />
+          </div>
         </div>
       </div>
     </Transition>
@@ -904,3 +907,173 @@ onBeforeUnmount(() => {
     </Transition>
   </div>
 </template>
+
+<style scoped>
+/* ─── Page layout ─────────────────────────────────────────────────────────── */
+.route-builder-page {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: calc(100vh - 4rem);
+  height: calc(100dvh - 4rem);
+  padding: 0.5rem 0.75rem 0;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+@media (max-width: 767px), (max-height: 500px) {
+  .route-builder-page { padding: 0; gap: 0; }
+}
+@media (max-height: 500px) {
+  .route-builder-header-card,
+  .route-stats-sidebar { display: none !important; }
+}
+
+.route-builder-main {
+  display: flex;
+  align-items: stretch;
+  gap: 0.75rem;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+@media (max-width: 767px) {
+  .route-builder-main { gap: 0; }
+  :deep(.route-stats-sidebar) { display: none !important; }
+}
+
+.route-builder-right {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.route-builder-map-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.route-builder-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─── Resize handles ──────────────────────────────────────────────────────── */
+.resize-handle {
+  flex: 0 0 8px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  user-select: none;
+}
+.resize-handle::after {
+  content: '';
+  display: block;
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: #d1d5db;
+  transition: background 0.15s;
+}
+.resize-handle:hover::after { background: #9ca3af; }
+
+.resize-handle-h {
+  flex: 0 0 8px;
+  cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  user-select: none;
+}
+.resize-handle-h::after {
+  content: '';
+  display: block;
+  width: 4px;
+  height: 48px;
+  border-radius: 2px;
+  background: #d1d5db;
+  transition: background 0.15s;
+}
+.resize-handle-h:hover::after { background: #9ca3af; }
+
+/* ─── Header ──────────────────────────────────────────────────────────────── */
+.route-name-input { min-width: 0; font-weight: 600; }
+
+/* ─── Mobile sheet ────────────────────────────────────────────────────────── */
+.mobile-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 1040;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0,0,0,0.25);
+}
+.mobile-sheet-panel {
+  width: 100%;
+  background: #fff;
+  border-radius: 1rem 1rem 0 0;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mobile-sheet-handle {
+  display: flex;
+  justify-content: center;
+  padding: 0.65rem;
+  flex-shrink: 0;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.mobile-sheet-grip {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: #d1d5db;
+  display: block;
+}
+.mobile-sheet-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 0 1rem 1.25rem;
+  overflow: hidden;
+}
+.mobile-sheet-enter-active, .mobile-sheet-leave-active { transition: opacity 0.2s; }
+.mobile-sheet-enter-from, .mobile-sheet-leave-to { opacity: 0; }
+
+/* ─── Export dialog ────────────────────────────────────────────────────────── */
+.modal-backdrop-custom {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal-dialog-custom {
+  background: #fff;
+  border-radius: 0.75rem;
+  width: min(440px, 96vw);
+  overflow: hidden;
+}
+.modal-header-custom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+.modal-body-custom { padding: 1.25rem; }
+.modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
+.modal-enter-from, .modal-leave-to { opacity: 0; }
+</style>

@@ -2541,6 +2541,15 @@ function wtHidePreview() {
 watch(state, () => state.save(), { deep: true })
 watch(hoverIdx, () => { if (chartInstance) chartInstance.update('none') })
 watch(selectionRange, () => { updateSelectionMarkers() })
+watch(() => state.showElevationChart, async () => {
+  await nextTick()
+  mapInstance?.resize()
+  if (state.showElevationChart && chartInstance) chartInstance.resize()
+})
+watch(() => state.showStatsSidebar, async () => {
+  await nextTick()
+  mapInstance?.resize()
+})
 watch(geometry, (newGeom) => {
   if (newGeom.length < 2) {
     placesToken++
@@ -2954,7 +2963,7 @@ onBeforeUnmount(() => {
     <div class="route-builder-main">
 
     <!-- Stats sidebar -->
-    <div class="card shadow-sm border-0 route-stats-sidebar" :style="{ width: sidebarWidth + 'px', minWidth: sidebarWidth + 'px' }">
+    <div v-show="state.showStatsSidebar" class="card shadow-sm border-0 route-stats-sidebar" :style="{ width: sidebarWidth + 'px', minWidth: sidebarWidth + 'px' }">
       <div class="card-body d-flex flex-column gap-2 p-3">
         <span class="stat-pill stat-pill-distance">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
@@ -3045,7 +3054,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Sidebar / right-col resizer -->
-    <div class="sidebar-resizer" @mousedown="startResizeH">
+    <div v-show="state.showStatsSidebar" class="sidebar-resizer" @mousedown="startResizeH">
       <span class="sidebar-resizer-handle"></span>
     </div>
 
@@ -3053,7 +3062,7 @@ onBeforeUnmount(() => {
     <div ref="rightColEl" class="route-builder-right-col">
 
     <!-- Map card -->
-    <div class="card shadow-sm border-0 route-builder-map-card" :style="{ flex: mapFlex + ' 1 0%' }">
+    <div class="card shadow-sm border-0 route-builder-map-card" :style="{ flex: (state.showElevationChart ? mapFlex : 1) + ' 1 0%' }">
       <div class="card-body p-0 route-builder-map-card-body">
         <div class="map-wrap" :class="{ expanded: state.mapExpanded }">
           <div ref="mapEl" class="route-builder-map"></div>
@@ -3103,6 +3112,22 @@ onBeforeUnmount(() => {
                 @click="clearAll"
                 :title="t('routes.clear')">
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+              <button type="button" class="btn map-ctrl-btn"
+                :class="state.showStatsSidebar ? 'btn-light' : 'btn-outline-secondary'"
+                @click="state.showStatsSidebar = !state.showStatsSidebar"
+                :title="state.showStatsSidebar ? t('routes.hide_stats_sidebar') : t('routes.show_stats_sidebar')"
+                :aria-pressed="state.showStatsSidebar">
+                <i class="fa-solid fa-chart-simple" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="btn map-ctrl-btn"
+                :class="state.showElevationChart ? 'btn-light' : 'btn-outline-secondary'"
+                @click="state.showElevationChart = !state.showElevationChart"
+                :title="state.showElevationChart ? t('routes.hide_elevation_chart') : t('routes.show_elevation_chart')"
+                :aria-pressed="state.showElevationChart">
+                <i class="fa-solid fa-chart-area" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -3302,12 +3327,12 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Resizer -->
-    <div class="map-chart-resizer" @mousedown="startResize">
+    <div v-show="state.showElevationChart" class="map-chart-resizer" @mousedown="startResize">
       <span class="map-chart-resizer-handle"></span>
     </div>
 
     <!-- Elevation chart card -->
-    <div class="card shadow-sm border-0 route-builder-chart-card" :style="{ flex: (1 - mapFlex) + ' 1 0%' }">
+    <div v-show="state.showElevationChart" class="card shadow-sm border-0 route-builder-chart-card" :style="{ flex: (1 - mapFlex) + ' 1 0%' }">
       <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
         <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
         <h3 class="h6 mb-0">{{ t('routes.elevation_profile') }}</h3>
@@ -3351,19 +3376,30 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
           <span class="d-none d-md-inline">{{ t('routes.reset_zoom') }}</span>
         </button>
-        <div v-if="hasGeometry" class="ms-auto d-flex flex-wrap gap-2">
-          <span class="stat-pill stat-pill-distance">
-            <i class="fa-solid fa-route me-1" aria-hidden="true"></i><strong>{{ formatKm(chartStats.distance) }}</strong>
-          </span>
-          <span class="stat-pill stat-pill-up">
-            <i class="fa-solid fa-arrow-trend-up me-1" aria-hidden="true"></i><strong>+{{ Math.round(chartStats.gain) }} m</strong>
-          </span>
-          <span class="stat-pill stat-pill-down">
-            <i class="fa-solid fa-arrow-trend-down me-1" aria-hidden="true"></i><strong>−{{ Math.round(chartStats.loss) }} m</strong>
-          </span>
-          <span class="stat-pill stat-pill-grade">
-            <span class="grade-icon me-1" aria-hidden="true">\</span><strong>{{ chartStats.avgGrade.toFixed(1) }} %</strong>
-          </span>
+        <div class="ms-auto d-flex align-items-center gap-2 flex-wrap">
+          <template v-if="hasGeometry">
+            <span class="stat-pill stat-pill-distance">
+              <i class="fa-solid fa-route me-1" aria-hidden="true"></i><strong>{{ formatKm(chartStats.distance) }}</strong>
+            </span>
+            <span class="stat-pill stat-pill-up">
+              <i class="fa-solid fa-arrow-trend-up me-1" aria-hidden="true"></i><strong>+{{ Math.round(chartStats.gain) }} m</strong>
+            </span>
+            <span class="stat-pill stat-pill-down">
+              <i class="fa-solid fa-arrow-trend-down me-1" aria-hidden="true"></i><strong>−{{ Math.round(chartStats.loss) }} m</strong>
+            </span>
+            <span class="stat-pill stat-pill-grade">
+              <span class="grade-icon me-1" aria-hidden="true">\</span><strong>{{ chartStats.avgGrade.toFixed(1) }} %</strong>
+            </span>
+          </template>
+          <button
+            type="button"
+            class="btn btn-sm btn-light chart-collapse-btn"
+            @click="state.showElevationChart = false"
+            :title="t('routes.hide_elevation_chart')"
+            aria-label="Réduire"
+          >
+            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+          </button>
         </div>
       </div>
       <div class="card-body route-builder-chart-card-body">
@@ -3496,6 +3532,12 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.chart-collapse-btn {
+  flex-shrink: 0;
+  padding: 0.15rem 0.4rem;
+  line-height: 1;
 }
 
 .route-builder-chart-card-body {

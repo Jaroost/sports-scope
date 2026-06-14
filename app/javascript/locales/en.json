@@ -191,6 +191,7 @@
       "reset_zoom": "Reset zoom",
       "zoom_to_selection": "Zoom to selection",
       "clear_selection": "Clear selection",
+      "open_selection_in_komoot": "Open selection in Komoot",
       "show_waypoints": "Show waypoints",
       "hide_waypoints": "Hide waypoints",
       "remove_waypoint": "Remove this point",

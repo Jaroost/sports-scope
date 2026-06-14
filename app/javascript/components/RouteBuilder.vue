@@ -2307,6 +2307,38 @@ function exportGpx() {
   window.location.href = `/api/routes/${currentId.value}/gpx`
 }
 
+function openSelectionInKomoot() {
+  if (!selectionRange.value) return
+  const i0 = geomIdxForKm(selectionRange.value.startKm)
+  const i1 = geomIdxForKm(selectionRange.value.endKm)
+  const lo = Math.min(i0, i1)
+  const hi = Math.max(i0, i1)
+  const geom = geometry.value
+  if (!geom[lo] || !geom[hi]) return
+  const MAX = 20
+  const indices = [lo]
+  if (hi - lo > 1) {
+    const middle = Array.from({ length: hi - lo - 1 }, (_, i) => lo + 1 + i)
+    const step = middle.length / (MAX - 2)
+    const sampled = middle.length <= MAX - 2
+      ? middle
+      : Array.from({ length: MAX - 2 }, (_, i) => middle[Math.floor(i * step)])
+    indices.push(...sampled)
+  }
+  indices.push(hi)
+  const pts = indices.map((i) => ({ lat: geom[i][1], lng: geom[i][0] }))
+  const lats = pts.map((p) => p.lat)
+  const lngs = pts.map((p) => p.lng)
+  const centerLat = ((Math.min(...lats) + Math.max(...lats)) / 2).toFixed(5)
+  const centerLng = ((Math.min(...lngs) + Math.max(...lngs)) / 2).toFixed(5)
+  const points = pts.map((p, i) => `p[${i}][loc]=${p.lat},${p.lng}`).join('&')
+  window.open(
+    `https://www.komoot.com/plan/@${centerLat},${centerLng},12z?sport=touringbicycle&${points}`,
+    '_blank',
+    'noopener,noreferrer',
+  )
+}
+
 function openInKomoot() {
   const wps = waypoints.value
   if (wps.length < 2) return
@@ -3028,6 +3060,16 @@ onBeforeUnmount(() => {
         >
           <i class="fa-solid fa-xmark" aria-hidden="true"></i>
           <span class="d-none d-md-inline">{{ t('routes.clear_selection') }}</span>
+        </button>
+        <button
+          v-if="selectionRange"
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+          :title="t('routes.open_selection_in_komoot')"
+          @click="openSelectionInKomoot"
+        >
+          <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">Komoot</span>
         </button>
         <button
           v-if="isZoomed"

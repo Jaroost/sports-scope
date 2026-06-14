@@ -61,6 +61,13 @@ const placesExpanded = ref(true)
 const isFetchingPlaces = ref(false)
 const importantPlaces = ref([])
 let placesToken = 0
+const wtExpanded = ref(false)
+const wtQuery = ref('')
+const wtResults = ref([])
+const wtSearching = ref(false)
+const wtImportingId = ref<number | null>(null)
+const wtGeomCache = new Map<number, Array<[number, number]>>()
+let wtPreviewTimeout: ReturnType<typeof setTimeout> | null = null
 const legendVisible = ref(false)
 const showExportDialog = ref(false)
 const exportStyleId = ref('')
@@ -70,9 +77,13 @@ const exportShowStats = ref(true)
 const exportScale = ref(2.5)
 const exporting = ref(false)
 const mapFlex = ref(0.80)
+const sidebarWidth = ref(175)
 let resizing = false
 let resizeStartY = 0
 let resizeStartFlex = 0
+let resizingH = false
+let resizeStartX = 0
+let resizeStartWidth = 0
 let cumDistKm = [] // cumulative distance in km per geometry index — fills during chart render
 let chartDrag = null // { startPx, currentPx } while the user is dragging on the chart
 // While the user is dragging one of the start/end flag handles to resize the
@@ -407,6 +418,7 @@ async function renderMap() {
   await new Promise((resolve) => {
     mapInstance.on('load', () => {
       installRouteLayer()
+      wtInstallPreviewLayer()
       mapInstance.on('click', (e) => {
         // A waypoint drag just released — swallow the synthesized click.
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
@@ -925,6 +937,7 @@ function setMapStyle(id) {
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
     installRouteLayer()
+    wtInstallPreviewLayer()
     updateRouteLayer()
     updateDivergentLayer()
     updateSelectionLayer()
@@ -2365,6 +2378,165 @@ function openInKomoot() {
   )
 }
 
+// ─── Waymarked Trails ────────────────────────────────────────────────────────
+const WT_BASE = 'https://cycling.waymarkedtrails.org/api/v1'
+
+// Waymarked Trails returns geometry in EPSG:3857 (Web Mercator, meters).
+function wtMercatorToLngLat(x: number, y: number): [number, number] {
+  const lng = (x / 20037508.342) * 180
+  const lat = (Math.atan(Math.exp((y / 20037508.342) * Math.PI)) * 360) / Math.PI - 90
+  return [lng, lat]
+}
+
+// Recursively collect all LineString coordinates from the route.main tree.
+function wtExtractCoords(node: any, out: Array<[number, number]>) {
+  if (!node) return
+  if (node.geometry?.type === 'LineString' && Array.isArray(node.geometry.coordinates)) {
+    for (const c of node.geometry.coordinates) {
+      if (Array.isArray(c) && c.length >= 2) out.push(wtMercatorToLngLat(c[0], c[1]))
+    }
+  }
+  if (Array.isArray(node.ways)) node.ways.forEach((w: any) => wtExtractCoords(w, out))
+  if (Array.isArray(node.main)) node.main.forEach((m: any) => wtExtractCoords(m, out))
+}
+
+async function wtSearch(url: string) {
+  wtSearching.value = true
+  wtResults.value = []
+  try {
+    const res = await fetch(url, { headers: { Accept: 'application/json' } })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    wtResults.value = Array.isArray(data.results) ? data.results : []
+  } catch { wtResults.value = [] }
+  finally { wtSearching.value = false }
+}
+
+function wtSearchByQuery() {
+  const q = wtQuery.value.trim()
+  if (q.length < 2) return
+  wtSearch(`${WT_BASE}/list/search?query=${encodeURIComponent(q)}&limit=15`)
+}
+
+function lngLatToMercator(lng: number, lat: number): [number, number] {
+  const x = (lng / 180) * 20037508.342
+  const y = Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) * 6378137
+  return [x, y]
+}
+
+function wtSearchByArea() {
+  if (!mapInstance) return
+  const b = mapInstance.getBounds()
+  const [x1, y1] = lngLatToMercator(b.getWest(), b.getSouth())
+  const [x2, y2] = lngLatToMercator(b.getEast(), b.getNorth())
+  const bbox = `${x1.toFixed(0)},${y1.toFixed(0)},${x2.toFixed(0)},${y2.toFixed(0)}`
+  wtSearch(`${WT_BASE}/list/by_area?bbox=${bbox}&limit=20`)
+}
+
+async function wtImport(route: { id: number; type: string; name: string }) {
+  if (wtImportingId.value != null) return
+  wtHidePreview()
+  wtImportingId.value = route.id
+  try {
+    const res = await fetch(`${WT_BASE}/details/${route.type}/${route.id}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    const pts: Array<[number, number]> = []
+    wtExtractCoords(data.route, pts)
+    if (pts.length < 2) throw new Error('Pas assez de points')
+    const MAX = 25
+    const step = pts.length / MAX
+    const sampled: Array<[number, number]> = pts.length <= MAX
+      ? pts.slice()
+      : Array.from({ length: MAX }, (_, i) => pts[Math.floor(i * step)])
+    sampled[0] = pts[0]
+    sampled[sampled.length - 1] = pts[pts.length - 1]
+    if (!name.value.trim()) name.value = (data.name || route.name).slice(0, 80)
+    waypoints.value = sampled.map(([lng, lat]) => ({ lng, lat }))
+    refreshWaypointMarkers()
+    if (mapInstance) {
+      const lngs = sampled.map(([lng]) => lng)
+      const lats = sampled.map(([, lat]) => lat)
+      mapInstance.fitBounds(
+        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+        { padding: 40, duration: 600 },
+      )
+    }
+    recomputeRoute()
+    wtExpanded.value = false
+  } catch (e: any) {
+    error.value = `Waymarked Trails : ${e.message}`
+  } finally {
+    wtImportingId.value = null
+  }
+}
+
+function wtInstallPreviewLayer() {
+  if (!mapInstance) return
+  if (mapInstance.getSource('wt-preview')) return
+  mapInstance.addSource('wt-preview', {
+    type: 'geojson',
+    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } },
+  })
+  mapInstance.addLayer({
+    id: 'wt-preview-border',
+    type: 'line',
+    source: 'wt-preview',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': 'rgba(0,0,0,0.25)', 'line-width': 8 },
+  })
+  mapInstance.addLayer({
+    id: 'wt-preview-line',
+    type: 'line',
+    source: 'wt-preview',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: {
+      'line-color': '#a855f7',
+      'line-width': 5,
+      'line-dasharray': [2, 1.5],
+    },
+  })
+}
+
+function wtSetPreviewCoords(coords: Array<[number, number]>) {
+  if (!mapInstance) return
+  const src = mapInstance.getSource('wt-preview') as any
+  if (!src) return
+  src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
+}
+
+async function wtShowPreview(route: { id: number; type: string; name: string }) {
+  if (wtPreviewTimeout) { clearTimeout(wtPreviewTimeout); wtPreviewTimeout = null }
+  wtPreviewTimeout = setTimeout(async () => {
+    wtPreviewTimeout = null
+    if (!mapInstance) return
+    let pts = wtGeomCache.get(route.id)
+    if (!pts) {
+      try {
+        const res = await fetch(`${WT_BASE}/details/${route.type}/${route.id}`)
+        if (!res.ok) return
+        const data = await res.json()
+        pts = []
+        wtExtractCoords(data.route, pts)
+        if (pts.length >= 2) wtGeomCache.set(route.id, pts)
+      } catch { return }
+    }
+    if (!pts || pts.length < 2) return
+    wtSetPreviewCoords(pts)
+    const lngs = pts.map(([lng]) => lng)
+    const lats = pts.map(([, lat]) => lat)
+    mapInstance.fitBounds(
+      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+      { padding: 60, duration: 400, maxZoom: 14 },
+    )
+  }, 300)
+}
+
+function wtHidePreview() {
+  if (wtPreviewTimeout) { clearTimeout(wtPreviewTimeout); wtPreviewTimeout = null }
+  wtSetPreviewCoords([])
+}
+
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 watch(state, () => state.save(), { deep: true })
 watch(hoverIdx, () => { if (chartInstance) chartInstance.update('none') })
@@ -2450,7 +2622,7 @@ async function applyStyleForExport(styleId: string) {
   state.mapStyleId = styleId
   mapInstance.setStyle(mapStyleFor(styleId) as any, { diff: false })
   await new Promise<void>((resolve) => mapInstance.once('style.load', () => {
-    installRouteLayer(); updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer()
+    installRouteLayer(); wtInstallPreviewLayer(); updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer()
     resolve()
   }))
 }
@@ -2688,9 +2860,34 @@ function stopResize() {
   if (chartInstance) chartInstance.resize()
 }
 
+function startResizeH(e: MouseEvent) {
+  resizingH = true
+  resizeStartX = e.clientX
+  resizeStartWidth = sidebarWidth.value
+  document.addEventListener('mousemove', onResizeH)
+  document.addEventListener('mouseup', stopResizeH)
+  e.preventDefault()
+}
+
+function onResizeH(e: MouseEvent) {
+  if (!resizingH) return
+  const delta = e.clientX - resizeStartX
+  sidebarWidth.value = Math.max(130, Math.min(500, resizeStartWidth + delta))
+}
+
+function stopResizeH() {
+  resizingH = false
+  document.removeEventListener('mousemove', onResizeH)
+  document.removeEventListener('mouseup', stopResizeH)
+  if (mapInstance) mapInstance.resize()
+  if (chartInstance) chartInstance.resize()
+}
+
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResize)
   document.removeEventListener('mouseup', stopResize)
+  document.removeEventListener('mousemove', onResizeH)
+  document.removeEventListener('mouseup', stopResizeH)
   destroyChart()
   waypointMarkers.forEach((m) => m.remove())
   waypointMarkers.length = 0
@@ -2757,7 +2954,7 @@ onBeforeUnmount(() => {
     <div class="route-builder-main">
 
     <!-- Stats sidebar -->
-    <div class="card shadow-sm border-0 route-stats-sidebar">
+    <div class="card shadow-sm border-0 route-stats-sidebar" :style="{ width: sidebarWidth + 'px', minWidth: sidebarWidth + 'px' }">
       <div class="card-body d-flex flex-column gap-2 p-3">
         <span class="stat-pill stat-pill-distance">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
@@ -2843,7 +3040,13 @@ onBeforeUnmount(() => {
             </div>
           </template>
         </template>
+
       </div>
+    </div>
+
+    <!-- Sidebar / right-col resizer -->
+    <div class="sidebar-resizer" @mousedown="startResizeH">
+      <span class="sidebar-resizer-handle"></span>
     </div>
 
     <!-- Right column: map + elevation profile -->
@@ -2904,6 +3107,15 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="map-controls-right">
+            <div class="btn-group-vertical btn-group-sm shadow-sm mb-1" role="group">
+              <button type="button" class="btn map-ctrl-btn"
+                :class="wtExpanded ? 'btn-primary active' : 'btn-light'"
+                @click="wtExpanded = !wtExpanded"
+                :title="t('routes.wt_title')"
+                :aria-pressed="wtExpanded">
+                <i class="fa-solid fa-route" aria-hidden="true"></i>
+              </button>
+            </div>
             <div v-if="state.mapStyleId === 'cyclosm'" class="btn-group-vertical btn-group-sm shadow-sm mb-1" role="group">
               <button type="button" class="btn map-ctrl-btn"
                 :class="legendVisible ? 'btn-warning text-dark active' : 'btn-light'"
@@ -2986,6 +3198,64 @@ onBeforeUnmount(() => {
             <span v-if="isFetchingRoute">{{ t('routes.computing_route') }}</span>
             <span v-else>{{ t('routes.computing_elevation') }}</span>
           </div>
+
+          <!-- Known routes drawer -->
+          <Transition name="wt-drawer">
+            <div v-if="wtExpanded" class="wt-drawer">
+              <div class="wt-drawer-header">
+                <span class="wt-drawer-title">
+                  <i class="fa-solid fa-route" aria-hidden="true"></i>
+                  {{ t('routes.wt_title') }}
+                </span>
+                <button type="button" class="btn-close btn-close-sm" @click="wtExpanded = false; wtHidePreview()" aria-label="Fermer"></button>
+              </div>
+              <div class="wt-drawer-body">
+                <div class="input-group input-group-sm mb-1">
+                  <input
+                    v-model="wtQuery"
+                    type="text"
+                    class="form-control"
+                    :placeholder="t('routes.wt_search_placeholder')"
+                    @keydown.enter="wtSearchByQuery"
+                  />
+                  <button class="btn btn-outline-secondary" type="button" @click="wtSearchByQuery" :disabled="wtSearching">
+                    <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-1 mb-2"
+                  @click="wtSearchByArea" :disabled="wtSearching">
+                  <span v-if="wtSearching" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                  <i v-else class="fa-solid fa-expand" aria-hidden="true"></i>
+                  <span>{{ t('routes.wt_search_area') }}</span>
+                </button>
+                <div v-if="!wtSearching && wtResults.length === 0 && (wtQuery || wtResults.length === 0)" class="wt-no-results">
+                  <span v-if="wtQuery">{{ t('routes.wt_no_results') }}</span>
+                  <span v-else class="text-muted" style="font-size:0.78rem">{{ t('routes.wt_search_placeholder') }}</span>
+                </div>
+                <div class="wt-results-list">
+                  <div
+                    v-for="r in wtResults"
+                    :key="r.id"
+                    class="wt-result-pill"
+                    :class="{ 'wt-result-pill--loading': wtImportingId === r.id }"
+                    :title="r.name || r.ref || `#${r.id}`"
+                    @mouseenter="wtShowPreview({ id: r.id, type: r.type, name: r.name || r.ref || `#${r.id}` })"
+                    @mouseleave="wtHidePreview()"
+                    @click="wtImport({ id: r.id, type: r.type, name: r.name || r.ref || `#${r.id}` })"
+                  >
+                    <span class="wt-result-name">{{ r.name || r.ref || `#${r.id}` }}</span>
+                    <span class="wt-result-meta">
+                      <span v-if="wtImportingId === r.id" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                      <template v-else>
+                        <span v-if="r.length">{{ (r.length / 1000).toFixed(0) }} km</span>
+                        <span v-if="r.ascent">· +{{ Math.round(r.ascent) }} m</span>
+                      </template>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Transition>
         </div>
       </div>
       <!-- CyclOSM legend — shown only when the CyclOSM base map is active -->
@@ -3851,6 +4121,34 @@ onBeforeUnmount(() => {
   padding: 0.2rem 0.4rem;
 }
 
+.wt-result-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  background: rgba(13, 110, 253, 0.06);
+  transition: background 0.15s;
+}
+.wt-result-pill:hover { background: rgba(13, 110, 253, 0.15); }
+.wt-result-pill--loading { opacity: 0.6; pointer-events: none; }
+.wt-result-name {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #212529;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wt-result-meta {
+  font-size: 0.72rem;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 /* Ghost marker shown when hovering the existing route line. Click on the
    line inserts a new waypoint at this position. Pointer-events: none so the
    click reaches the map's click handler (which reads hoverIdx). */
@@ -3895,11 +4193,31 @@ onBeforeUnmount(() => {
 
 .route-stats-sidebar {
   flex-shrink: 0;
-  width: 175px;
   display: flex;
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+}
+
+.sidebar-resizer {
+  flex: 0 0 8px;
+  cursor: ew-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  user-select: none;
+}
+.sidebar-resizer:hover .sidebar-resizer-handle,
+.sidebar-resizer:active .sidebar-resizer-handle {
+  background: #9ca3af;
+}
+.sidebar-resizer-handle {
+  width: 4px;
+  height: 48px;
+  border-radius: 2px;
+  background: #d1d5db;
+  transition: background 0.15s;
 }
 .route-stats-sidebar .card-body {
   overflow-y: auto;
@@ -3919,5 +4237,68 @@ onBeforeUnmount(() => {
   margin-left: 0;
   padding-left: 0;
   border-left: none;
+}
+
+/* ── Known-routes drawer ─────────────────────────────────────────────────── */
+.wt-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  background: #fff;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+  border-radius: 0 0 0 0;
+}
+
+.wt-drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.75rem 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+.wt-drawer-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #374151;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.wt-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.6rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+}
+.wt-results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+.wt-no-results {
+  color: #9ca3af;
+  font-size: 0.78rem;
+  padding: 0.4rem 0.2rem;
+}
+
+/* slide-in / slide-out transition */
+.wt-drawer-enter-active,
+.wt-drawer-leave-active {
+  transition: transform 0.22s ease;
+}
+.wt-drawer-enter-from,
+.wt-drawer-leave-to {
+  transform: translateX(100%);
 }
 </style>

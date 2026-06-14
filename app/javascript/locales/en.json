@@ -17,6 +17,7 @@
       "map_style_cyclosm": "CyclOSM",
       "map_style_cycle": "OpenCycle",
       "map_style_topo": "Topo",
+      "map_style_swisstopo": "SwissTopo",
       "map_style_liberty": "Standard",
       "climbs_label": "Climbs",
       "show_climbs": "Show climbs",

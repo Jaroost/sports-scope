@@ -17,6 +17,7 @@
       "map_style_cyclosm": "Vélo",
       "map_style_cycle": "Cycle",
       "map_style_topo": "Topo",
+      "map_style_swisstopo": "SwissTopo",
       "map_style_liberty": "Standard",
       "climbs_label": "Cols",
       "show_climbs": "Afficher les cols",

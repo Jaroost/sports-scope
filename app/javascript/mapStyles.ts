@@ -4,17 +4,19 @@ export interface MapStyle {
 }
 
 export const MAP_STYLES: MapStyle[] = [
-  { id: 'cyclosm', icon: 'fa-bicycle' },
-  { id: 'topo',    icon: 'fa-mountain-sun' },
-  { id: 'liberty', icon: 'fa-map' },
+  { id: 'cyclosm',   icon: 'fa-bicycle' },
+  { id: 'topo',      icon: 'fa-mountain-sun' },
+  { id: 'swisstopo', icon: 'fa-flag-checkered' },
+  { id: 'liberty',   icon: 'fa-map' },
 ]
 
 export const ROUTE_LINE_LAYOUT = { 'line-join': 'round', 'line-cap': 'round' } as const
 export const ROUTE_BORDER_PAINT = { 'line-color': 'rgba(0,0,0,0.28)', 'line-width': 8 } as const
 
 export function mapStyleFor(id: string): string | object {
-  if (id === 'liberty') return 'https://tiles.openfreemap.org/styles/liberty'
-  if (id === 'topo') return openTopoMapStyle()
+  if (id === 'liberty')   return 'https://tiles.openfreemap.org/styles/liberty'
+  if (id === 'topo')      return openTopoMapStyle()
+  if (id === 'swisstopo') return swissTopoStyle()
   return cyclOsmStyle()
 }
 
@@ -65,5 +67,31 @@ export function openTopoMapStyle(): object {
       },
     },
     layers: [{ id: 'topo-base', type: 'raster', source: 'topo-raster' }],
+  }
+}
+
+export function swissTopoStyle(): object {
+  return {
+    version: 8,
+    sources: {
+      'swisstopo-raster': {
+        type: 'raster',
+        tiles: [
+          'https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-farbe/default/current/3857/{z}/{x}/{y}.jpeg',
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution:
+          '© <a href="https://www.swisstopo.admin.ch" target="_blank" rel="noopener">swisstopo</a>',
+      },
+    },
+    layers: [
+      {
+        id: 'swisstopo-base',
+        type: 'raster',
+        source: 'swisstopo-raster',
+        paint: { 'raster-opacity': 0.9 },
+      },
+    ],
   }
 }

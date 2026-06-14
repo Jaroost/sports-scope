@@ -999,9 +999,6 @@ function applySVState(markerEl: HTMLElement, available: boolean) {
 }
 
 // ─── Waypoint selection & tooltip ────────────────────────────────────────────
-function isInSwitzerland(lat, lng) {
-  return lat >= 45.818 && lat <= 47.808 && lng >= 5.956 && lng <= 10.492
-}
 
 function selectWaypoint(idx) {
   if (selectedWpIdx >= 0 && waypointMarkers[selectedWpIdx]) {
@@ -1118,20 +1115,20 @@ function refreshWaypointMarkers() {
   waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
     el.className = 'wp-marker'
-    const inSwiss = isInSwitzerland(w.lat, w.lng)
     const isLast = idx === waypoints.value.length - 1
-    const geoAdminHtml = inSwiss
-      ? `<a class="wp-tooltip-action" href="https://map.geo.admin.ch/?zoom=14&crosshair=circle&lat=${w.lat}&lon=${w.lng}" target="_blank" rel="noopener noreferrer">
-           <i class="fa-solid fa-map" aria-hidden="true"></i>
-           <span>SwissTopo</span>
-         </a>`
-      : ''
     const returnHtml = !isLast
       ? `<button type="button" class="wp-tooltip-action wp-tooltip-action--return">
            <i class="fa-solid fa-right-left" aria-hidden="true"></i>
            <span>${t('routes.return_via_same_route')}</span>
          </button>`
       : ''
+    const komootNeighbors = [
+      idx > 0 ? waypoints.value[idx - 1] : null,
+      w,
+      idx < waypoints.value.length - 1 ? waypoints.value[idx + 1] : null,
+    ].filter(Boolean)
+    const komootPoints = komootNeighbors.map((p, i) => `p[${i}][loc]=${p.lat},${p.lng}`).join('&')
+    const komootUrl = `https://www.komoot.com/plan/@${w.lat},${w.lng},13z?sport=touringbicycle&${komootPoints}`
     el.innerHTML = `
       <div class="wp-tooltip">
         <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
@@ -1143,11 +1140,10 @@ function refreshWaypointMarkers() {
           <i class="fa-solid fa-street-view" aria-hidden="true"></i>
           <span>${t('routes.street_view')}</span>
         </a>
-        <a class="wp-tooltip-action wp-tooltip-action--komoot" href="https://www.komoot.com/plan/@${w.lat},${w.lng},14z?p[0][loc]=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
+        <a class="wp-tooltip-action wp-tooltip-action--komoot" href="${komootUrl}" target="_blank" rel="noopener noreferrer">
           <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
           <span>Komoot</span>
         </a>
-        ${geoAdminHtml}
         ${returnHtml}
         <button type="button" class="wp-tooltip-action wp-tooltip-action--delete">
           <i class="fa-solid fa-trash" aria-hidden="true"></i>

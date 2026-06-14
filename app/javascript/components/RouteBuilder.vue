@@ -4222,11 +4222,11 @@ onBeforeUnmount(() => {
      transform-origin, sans perturber le translate de MapLibre. */
   display: inline-flex;
   align-items: center;
-  gap: 0.22rem;
+  gap: 0.25rem;
   background: rgba(255, 255, 255, 0.96);
-  padding: 0.1rem 0.35rem 0.1rem 0.32rem;
+  padding: 0.18rem 0.45rem 0.18rem 0.4rem;
   border-radius: 12px;
-  font-size: 0.66rem;
+  font-size: 0.72rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;

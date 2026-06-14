@@ -1568,7 +1568,8 @@ async function fetchImportantPlaces() {
 
   try {
     const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}`)
-    if (!res.ok || token !== placesToken) { isFetchingPlaces.value = false; return }
+    if (token !== placesToken) return
+    if (!res.ok) { isFetchingPlaces.value = false; return }
 
     const nodes = await res.json()
     if (token !== placesToken) return

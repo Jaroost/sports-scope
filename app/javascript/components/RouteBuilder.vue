@@ -2019,6 +2019,13 @@ function zoomToSelection() {
   applyZoom()
 }
 
+function clearSelection() {
+  selectionRange.value = null
+  updateSelectionLayer()
+  updateSelectionMarkers()
+  if (chartInstance) chartInstance.update('none')
+}
+
 let wheelRafPending = false
 let pendingWheel = null
 function onChartWheel(e) {
@@ -2980,6 +2987,16 @@ onBeforeUnmount(() => {
         >
           <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
           <span class="d-none d-md-inline">{{ t('routes.zoom_to_selection') }}</span>
+        </button>
+        <button
+          v-if="selectionRange"
+          type="button"
+          class="btn btn-sm btn-outline-danger d-inline-flex align-items-center gap-1"
+          :title="t('routes.clear_selection')"
+          @click="clearSelection"
+        >
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">{{ t('routes.clear_selection') }}</span>
         </button>
         <button
           v-if="isZoomed"

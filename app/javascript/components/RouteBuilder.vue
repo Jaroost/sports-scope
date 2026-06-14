@@ -84,6 +84,7 @@ const isZoomed = ref(false)
 let zoomMin = null
 let zoomMax = null
 let chartCrossMarker = null // marker on the map synced to chart hover position
+let placeHoverMarker = null // marker shown on the map when hovering a place pill
 let climbHoverStartMarker = null // green flag shown on map when hovering a climb pill
 let climbHoverEndMarker = null   // checkered flag shown on map when hovering a climb pill
 let selectionMarkerA = null // draggable handle for one end of the selection
@@ -1308,6 +1309,39 @@ function hideChartCrossMarker() {
   if (chartCrossMarker) chartCrossMarker.getElement().style.display = 'none'
 }
 
+let placeHoverKm = null
+let placeSelectedKm = null
+
+function showPlaceHoverMarker(lng, lat, distanceM) {
+  if (!_maplibregl || !mapInstance) return
+  if (!placeHoverMarker) {
+    const el = document.createElement('div')
+    el.className = 'place-hover-marker'
+    placeHoverMarker = new _maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([lng, lat])
+      .addTo(mapInstance)
+  } else {
+    placeHoverMarker.setLngLat([lng, lat])
+    placeHoverMarker.getElement().style.display = ''
+  }
+  placeHoverKm = distanceM / 1000
+  if (chartInstance) chartInstance.update('none')
+}
+
+function hidePlaceHoverMarker() {
+  if (placeHoverMarker) placeHoverMarker.getElement().style.display = 'none'
+  placeHoverKm = null
+  if (chartInstance) chartInstance.update('none')
+}
+
+function selectPlace(place) {
+  if (!mapInstance) return
+  mapInstance.flyTo({ center: [place.lng, place.lat], zoom: 15, duration: 600 })
+  const km = place.distanceM / 1000
+  placeSelectedKm = placeSelectedKm === km ? null : km
+  if (chartInstance) chartInstance.update('none')
+}
+
 function updateSelectionMarkers() {
   if (!_maplibregl || !mapInstance || selectionMarkerDragging) return
   if (!selectionRange.value || !cumDistKm.length || !geometry.value.length) {
@@ -1435,7 +1469,7 @@ async function fetchImportantPlaces() {
       }
       if (haversine(geom[nearestIdx], [node.lng, node.lat]) > THRESHOLD_M) continue
       seen.add(node.name)
-      results.push({ name: node.name, distanceM: distancesM[nearestIdx] })
+      results.push({ name: node.name, distanceM: distancesM[nearestIdx], lng: geom[nearestIdx][0], lat: geom[nearestIdx][1] })
     }
 
     results.sort((a, b) => a.distanceM - b.distanceM)
@@ -1753,7 +1787,7 @@ async function renderElevationChart() {
     // gradeFillPlugin must come before selectionRectPlugin so the selection
     // rectangle (also drawn in beforeDatasetsDraw) sits on top of the colored
     // fill.
-    plugins: [gradeFillPlugin, selectionRectPlugin, hoverSyncPlugin],
+    plugins: [gradeFillPlugin, selectionRectPlugin, hoverSyncPlugin, placeIndicatorPlugin],
   })
   attachChartSelectionOnce(chartEl.value)
 }
@@ -1888,6 +1922,39 @@ function detectChartHandle(px) {
 }
 
 // Chart.js plugin that paints a translucent rectangle under the line for
+const placeIndicatorPlugin = {
+  id: 'placeIndicator',
+  afterDatasetsDraw(chart) {
+    const km = placeHoverKm ?? placeSelectedKm
+    if (km == null) return
+    const { ctx, chartArea, scales } = chart
+    const x = scales.x.getPixelForValue(km)
+    if (x < chartArea.left || x > chartArea.right) return
+    const idx = geomIdxForKm(km)
+    const alt = geometry.value[idx]?.[2]
+    ctx.save()
+    ctx.strokeStyle = '#0d6efd'
+    ctx.lineWidth = 1.5
+    ctx.setLineDash([4, 3])
+    ctx.beginPath()
+    ctx.moveTo(x, chartArea.top)
+    ctx.lineTo(x, chartArea.bottom)
+    ctx.stroke()
+    if (alt != null) {
+      const y = scales.y.getPixelForValue(alt)
+      ctx.setLineDash([])
+      ctx.fillStyle = '#0d6efd'
+      ctx.beginPath()
+      ctx.arc(x, y, 5, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.strokeStyle = '#fff'
+      ctx.lineWidth = 2
+      ctx.stroke()
+    }
+    ctx.restore()
+  },
+}
+
 // either the in-progress drag (chartDrag) or the committed selectionRange,
 // and overlays the start/end flag handles on top of the line.
 const selectionRectPlugin = {
@@ -2658,26 +2725,6 @@ onBeforeUnmount(() => {
             </button>
           </template>
         </template>
-        <template v-if="importantPlaces.length || isFetchingPlaces">
-          <button type="button" class="places-section-toggle" @click="placesExpanded = !placesExpanded">
-            <span class="places-section-label">
-              <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-              {{ placesExpanded ? t('routes.places_title') : `${importantPlaces.length} ${t('routes.places_count')}` }}
-            </span>
-            <span v-if="isFetchingPlaces" class="spinner-border spinner-border-sm text-secondary" aria-hidden="true"></span>
-            <i v-else :class="placesExpanded ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" aria-hidden="true"></i>
-          </button>
-          <template v-if="placesExpanded">
-            <div v-if="isFetchingPlaces && !importantPlaces.length" class="places-loading">
-              <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-              <span>{{ t('routes.places_loading') }}</span>
-            </div>
-            <div v-for="(place, idx) in importantPlaces" :key="idx" class="place-pill">
-              <span class="place-pill-dist">{{ formatDistanceShort(place.distanceM) }}</span>
-              <span class="place-pill-name">{{ place.name }}</span>
-            </div>
-          </template>
-        </template>
         <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
           <span class="d-flex align-items-center gap-2">
             <i class="fa-solid fa-clock" aria-hidden="true"></i>
@@ -2697,6 +2744,35 @@ onBeforeUnmount(() => {
             <small>km/h</small>
           </span>
         </span>
+        <template v-if="importantPlaces.length || isFetchingPlaces">
+          <button type="button" class="places-section-toggle" @click="placesExpanded = !placesExpanded">
+            <span class="places-section-label">
+              <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+              {{ placesExpanded ? t('routes.places_title') : `${importantPlaces.length} ${t('routes.places_count')}` }}
+            </span>
+            <span v-if="isFetchingPlaces" class="spinner-border spinner-border-sm text-secondary" aria-hidden="true"></span>
+            <i v-else :class="placesExpanded ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" aria-hidden="true"></i>
+          </button>
+          <template v-if="placesExpanded">
+            <div v-if="isFetchingPlaces && !importantPlaces.length" class="places-loading">
+              <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+              <span>{{ t('routes.places_loading') }}</span>
+            </div>
+            <div
+              v-for="(place, idx) in importantPlaces"
+              :key="idx"
+              class="place-pill"
+              :title="place.name"
+              style="cursor: pointer"
+              @mouseenter="showPlaceHoverMarker(place.lng, place.lat, place.distanceM)"
+              @mouseleave="hidePlaceHoverMarker"
+              @click="selectPlace(place)"
+            >
+              <span class="place-pill-dist">{{ formatDistanceShort(place.distanceM) }}</span>
+              <span class="place-pill-name">{{ place.name }}</span>
+            </div>
+          </template>
+        </template>
       </div>
     </div>
 
@@ -3716,6 +3792,16 @@ onBeforeUnmount(() => {
   background: #fc4c02;
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+.place-hover-marker {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #0d6efd;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   pointer-events: none;
 }
 

@@ -1009,20 +1009,24 @@ function applySVState(markerEl: HTMLElement, available: boolean) {
 // ─── Waypoint selection & tooltip ────────────────────────────────────────────
 
 function selectWaypoint(idx) {
-  if (selectedWpIdx >= 0 && waypointMarkers[selectedWpIdx]) {
-    const el = waypointMarkers[selectedWpIdx].getElement()
+  // el IS the .maplibregl-marker element (MapLibre adds that class to our element).
+  // Set z-index on el itself, not el.parentElement.
+  waypointMarkers.forEach((m, i) => {
+    if (!m) return
+    const el = m.getElement()
     el.classList.remove('wp-marker--selected')
-    if (el.parentElement) el.parentElement.style.zIndex = ''
-  }
+    el.style.zIndex = i === idx ? '9999' : '1'
+  })
   if (selectedWpIdx === idx) {
     selectedWpIdx = -1
+    waypointMarkers.forEach((m) => { if (m) m.getElement().style.zIndex = '' })
     return
   }
   selectedWpIdx = idx
   if (waypointMarkers[idx]) {
     const el = waypointMarkers[idx].getElement()
     el.classList.add('wp-marker--selected')
-    if (el.parentElement) el.parentElement.style.zIndex = '200'
+    el.style.zIndex = '9999'
   }
   // Lazy Street View availability check — updates the tooltip once resolved.
   const wp = waypoints.value[idx]
@@ -1036,11 +1040,12 @@ function selectWaypoint(idx) {
 }
 
 function deselectAll() {
-  if (selectedWpIdx >= 0 && waypointMarkers[selectedWpIdx]) {
-    const el = waypointMarkers[selectedWpIdx].getElement()
+  waypointMarkers.forEach((m) => {
+    if (!m) return
+    const el = m.getElement()
     el.classList.remove('wp-marker--selected')
-    if (el.parentElement) el.parentElement.style.zIndex = ''
-  }
+    el.style.zIndex = ''
+  })
   selectedWpIdx = -1
 }
 
@@ -4031,6 +4036,12 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
+/* MapLibre ajoute .maplibregl-marker sur notre élément .wp-marker directement.
+   Ce sélecteur cible donc l'élément lui-même quand il est sélectionné. */
+.wp-marker--selected {
+  z-index: 9999 !important;
+}
+
 /* Waypoint markers (created via document.createElement, so global) */
 .wp-marker {
   position: relative;

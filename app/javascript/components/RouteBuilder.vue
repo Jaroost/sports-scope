@@ -2176,7 +2176,12 @@ function attachChartSelectionOnce(canvas) {
       selectionRange.value = dragged ? { startKm: km1, endKm: km2 } : null
       updateSelectionLayer()
       c.update('none')
-      if (dragged) fitMapToSelection()
+      if (dragged) {
+        fitMapToSelection()
+      } else if (mapInstance) {
+        const pt = geometry.value[geomIdxForKm(km1)]
+        if (pt) mapInstance.flyTo({ center: [pt[0], pt[1]], zoom: 15, duration: 600 })
+      }
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)

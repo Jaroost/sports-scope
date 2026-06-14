@@ -28,7 +28,16 @@ const state = reactive(new RouteBuilderState())
 const currentId = ref(props.routeId ? Number(props.routeId) : null)
 const mapEl = useTemplateRef('mapEl')
 const chartEl = useTemplateRef('chartEl')
+const mobileChartEl = useTemplateRef('mobileChartEl')
 const rightColEl = useTemplateRef('rightColEl')
+
+const mobileSheetOpen = ref(false)
+const isMobile = ref(typeof window !== 'undefined' && window.innerWidth < 768)
+const SHEET_HEIGHT_DEFAULT = Math.round(window.innerHeight * 0.45)
+const SHEET_HEIGHT_MIN = 140
+const SHEET_HEIGHT_MAX = Math.round(window.innerHeight * 0.85)
+const mobileSheetHeight = ref(SHEET_HEIGHT_DEFAULT)
+const activeChartEl = computed(() => isMobile.value ? mobileChartEl.value : chartEl.value)
 
 let mapInstance = null
 let chartInstance = null
@@ -1782,10 +1791,10 @@ async function renderElevationChart() {
   // The canvas lives in the v-else branch of the chart card body. On the
   // very first recompute after arriving with a pending route (e.g.
   // ?fromGpx=1 from RoutesList / ActivityDetail), Vue hasn't flushed the
-  // hasGeometry: false→true DOM update yet, so chartEl is still null.
+  // hasGeometry: false→true DOM update yet, so activeChartEl is still null.
   // Waiting one tick lets the canvas mount before we bind to it.
-  if (!chartEl.value) await nextTick()
-  if (!chartEl.value) return
+  if (!activeChartEl.value) await nextTick()
+  if (!activeChartEl.value) return
   destroyChart()
   recomputeSegmentColors()
   let cumDist = 0
@@ -1797,7 +1806,7 @@ async function renderElevationChart() {
     cumDistKm.push(km)
     points.push({ x: km, y: geometry.value[i][2] ?? points[points.length - 1].y })
   }
-  chartInstance = new Chart(chartEl.value.getContext('2d'), {
+  chartInstance = new Chart(activeChartEl.value.getContext('2d'), {
     type: 'line',
     data: {
       datasets: [{
@@ -1870,7 +1879,7 @@ async function renderElevationChart() {
     // fill.
     plugins: [gradeFillPlugin, selectionRectPlugin, hoverSyncPlugin, placeIndicatorPlugin],
   })
-  attachChartSelectionOnce(chartEl.value)
+  attachChartSelectionOnce(activeChartEl.value)
 }
 
 // Numbered dots on the elevation profile matching the route waypoints.
@@ -2112,7 +2121,7 @@ let pendingWheel = null
 function onChartWheel(e) {
   if (!chartInstance || !cumDistKm.length) return
   e.preventDefault()
-  const rect = chartEl.value.getBoundingClientRect()
+  const rect = activeChartEl.value?.getBoundingClientRect()
   pendingWheel = { px: e.clientX - rect.left, deltaY: e.deltaY }
   if (wheelRafPending) return
   wheelRafPending = true
@@ -2153,10 +2162,10 @@ function applyZoomStep(px, deltaY) {
 
 // Attached once on the canvas DOM element; each handler reads chartInstance
 // at event time so it works across re-renders of the chart.
-let chartSelectionWired = false
+let chartSelectionWiredEl: Element | null = null
 function attachChartSelectionOnce(canvas) {
-  if (chartSelectionWired || !canvas) return
-  chartSelectionWired = true
+  if (chartSelectionWiredEl === canvas || !canvas) return
+  chartSelectionWiredEl = canvas
   canvas.addEventListener('wheel', onChartWheel, { passive: false })
 
   // Hover cursor feedback — `ew-resize` over a flag pole, `crosshair` over
@@ -2592,6 +2601,23 @@ watch(() => state.showStatsSidebar, async () => {
   await nextTick()
   mapInstance?.resize()
 })
+watch(mobileSheetOpen, async (open) => {
+  if (!open || !isMobile.value || !hasGeometry.value) return
+  await nextTick()
+  if (chartInstance) {
+    chartInstance.resize()
+  } else {
+    await nextTick() // attendre que le canvas soit visible
+    renderElevationChart()
+  }
+})
+watch(isMobile, async (mobile) => {
+  if (!hasGeometry.value) return
+  destroyChart()
+  if (mobile && !mobileSheetOpen.value) return
+  await nextTick()
+  renderElevationChart()
+})
 watch(geometry, (newGeom) => {
   if (newGeom.length < 2) {
     placesToken++
@@ -2602,8 +2628,38 @@ watch(geometry, (newGeom) => {
   fetchImportantPlaces()
 }, { deep: false })
 
+function onWindowResize() {
+  const mobile = window.innerWidth < 768
+  if (mobile !== isMobile.value) isMobile.value = mobile
+  // MapLibre has a ResizeObserver but it can lag on orientation change
+  setTimeout(() => mapInstance?.resize(), 100)
+}
+
+function onSheetHandleTouchStart(ev: TouchEvent) {
+  if (ev.touches.length !== 1) return
+  const startY = ev.touches[0].clientY
+  const startH = mobileSheetHeight.value
+
+  const onMove = (e: TouchEvent) => {
+    if (e.touches.length !== 1) return
+    const dy = startY - e.touches[0].clientY
+    mobileSheetHeight.value = Math.min(SHEET_HEIGHT_MAX, Math.max(SHEET_HEIGHT_MIN, startH + dy))
+    if (chartInstance) chartInstance.resize()
+  }
+  const onEnd = () => {
+    window.removeEventListener('touchmove', onMove)
+    window.removeEventListener('touchend', onEnd)
+    // Ferme le panel si glissé très bas
+    if (mobileSheetHeight.value < SHEET_HEIGHT_MIN + 40) mobileSheetOpen.value = false
+    if (chartInstance) chartInstance.resize()
+  }
+  window.addEventListener('touchmove', onMove, { passive: true })
+  window.addEventListener('touchend', onEnd)
+}
+
 onMounted(async () => {
   state.load()
+  window.addEventListener('resize', onWindowResize)
   document.getElementById('navbar-route-save-btn')?.addEventListener('click', save)
   // When coming from the "Nouvel itinéraire" prompt, the URL carries
   // ?name=… — pre-fill the name input and scrub the param so a reload
@@ -2940,6 +2996,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mouseup', stopResize)
   document.removeEventListener('mousemove', onResizeH)
   document.removeEventListener('mouseup', stopResizeH)
+  window.removeEventListener('resize', onWindowResize)
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   destroyChart()
   waypointMarkers.forEach((m) => m.remove())
@@ -2957,7 +3014,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="route-builder-page">
-    <div class="card shadow-sm border-0 d-none d-md-block">
+    <div class="card shadow-sm border-0 d-none d-md-block route-builder-header-card">
       <div class="card-body d-flex align-items-center gap-2 py-1 px-3">
         <a :href="`${localePrefix}/routes`" class="btn btn-sm btn-link p-0 me-1 d-inline-flex align-items-center gap-1 flex-shrink-0">
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
@@ -3268,6 +3325,17 @@ onBeforeUnmount(() => {
             <span v-else>{{ t('routes.computing_elevation') }}</span>
           </div>
 
+          <!-- Mobile stats toggle (bottom-centre, hidden on md+) -->
+          <button
+            type="button"
+            class="btn btn-light btn-sm shadow-sm mobile-sheet-toggle"
+            @click="mobileSheetOpen = !mobileSheetOpen"
+          >
+            <i class="fa-solid fa-chart-area me-1" aria-hidden="true"></i>
+            <span v-if="hasGeometry">{{ formatKm(distanceM) }} · +{{ Math.round(elevGainM) }} m</span>
+            <span v-else>Stats</span>
+          </button>
+
           <!-- Known routes drawer -->
           <Transition name="wt-drawer">
             <div v-if="wtExpanded" class="wt-drawer">
@@ -3527,22 +3595,194 @@ onBeforeUnmount(() => {
       <div class="modal-backdrop fade show" style="z-index:1054"></div>
     </template>
   </teleport>
+
+  <!-- Mobile bottom sheet (v-show keeps canvas in DOM so mobileChartEl is always available) -->
+  <teleport to="body">
+    <div v-show="mobileSheetOpen" class="mobile-sheet" @click.self="mobileSheetOpen = false">
+      <div class="mobile-sheet-panel" :style="{ height: mobileSheetHeight + 'px' }">
+        <div class="mobile-sheet-handle" @touchstart.passive="onSheetHandleTouchStart" @click="mobileSheetOpen = false">
+          <span class="mobile-sheet-handle-pill"></span>
+        </div>
+        <div class="mobile-sheet-body">
+          <div v-if="hasGeometry" class="mobile-sheet-stats">
+            <span class="stat-pill stat-pill-distance">
+              <i class="fa-solid fa-route" aria-hidden="true"></i>
+              <strong>{{ formatKm(distanceM) }}</strong>
+            </span>
+            <span class="stat-pill stat-pill-up">
+              <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i>
+              <strong>+{{ Math.round(elevGainM) }} m</strong>
+            </span>
+            <span class="stat-pill stat-pill-down">
+              <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
+              <strong>−{{ Math.round(elevLossM) }} m</strong>
+            </span>
+            <span class="stat-pill stat-pill-time">
+              <i class="fa-solid fa-clock" aria-hidden="true"></i>
+              <strong>{{ formatDuration(estimatedSeconds) }}</strong>
+              <span class="speed-input-wrap">
+                <input v-model.number="avgSpeedKmh" type="number" min="3" max="80" step="1" class="speed-input" :aria-label="t('routes.avg_speed_hint')" />
+                <small>km/h</small>
+              </span>
+            </span>
+          </div>
+          <!-- canvas toujours dans le DOM quand hasGeometry pour que mobileChartEl soit disponible -->
+          <div v-show="hasGeometry" class="mobile-chart-wrap">
+            <div v-if="isFetchingElevation" class="mobile-chart-loading">
+              <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+              <span>{{ t('routes.computing_elevation') }}</span>
+            </div>
+            <div class="elevation-canvas-wrap">
+              <canvas ref="mobileChartEl"></canvas>
+            </div>
+          </div>
+          <div v-if="!hasGeometry" class="text-muted small text-center py-3">
+            <i class="fa-solid fa-hand-pointer me-1" aria-hidden="true"></i>
+            {{ t('routes.click_hint') }}
+          </div>
+        </div>
+      </div>
+    </div>
+  </teleport>
 </template>
 
 <style scoped>
+/* ─── Mobile bottom sheet ─────────────────────────────────────────────────── */
+.mobile-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 1040;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(0, 0, 0, 0.25);
+}
+.mobile-sheet-panel {
+  width: 100%;
+  background: #fff;
+  border-radius: 1rem 1rem 0 0;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: height 0.05s linear;
+}
+.mobile-sheet-handle {
+  display: flex;
+  justify-content: center;
+  padding: 0.65rem;
+  flex-shrink: 0;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.mobile-sheet-handle-pill {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: #d1d5db;
+}
+.mobile-sheet-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 0 1rem 1.25rem;
+  overflow: hidden;
+}
+.mobile-sheet-stats {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  overflow-x: auto;
+}
+.mobile-chart-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.mobile-chart-wrap .elevation-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+.mobile-chart-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  font-size: 0.82rem;
+  color: #6c757d;
+  z-index: 1;
+}
+.mobile-sheet-toggle {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  white-space: nowrap;
+  /* Caché par défaut (desktop) — visible uniquement sur téléphone */
+  display: none;
+}
+@media (max-width: 767px), (max-height: 500px) {
+  .mobile-sheet-toggle { display: flex; }
+}
+
+/* ─── Hide desktop sidebar + chart card on mobile ─────────────────────────── */
+@media (max-width: 767px) {
+  .route-stats-sidebar,
+  .sidebar-resizer,
+  .map-chart-resizer,
+  .route-builder-chart-card { display: none !important; }
+  /* La map-card a flex: 0.8 en style inline (ratio avec le graphique).
+     Sur mobile le graphique est caché → la map-card doit prendre 100%. */
+  .route-builder-map-card { flex: 1 1 0% !important; }
+}
+
 /* ─── Page-level layout ───────────────────────────────────────────────────── */
 .route-builder-page {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
   height: calc(100vh - 4rem);
+  height: calc(100dvh - 4rem);
   padding: 0.5rem 0.75rem 0;
   gap: 0.5rem;
   overflow: hidden;
 }
+/* Portrait téléphone (largeur < 768px) */
+@media (max-width: 767px) {
+  .route-builder-page {
+    padding: 0;
+    gap: 0;
+    height: calc(100vh - 4rem);
+    height: calc(100dvh - 4rem);
+  }
+}
+/* Paysage téléphone — hauteur courte quelle que soit la largeur.
+   Force le même layout que le portrait mobile :
+   pas de header, pas de padding, carte plein écran. */
+@media (max-height: 500px) {
+  .route-builder-page {
+    padding: 0;
+    gap: 0;
+    height: calc(100vh - 4rem);
+    height: calc(100dvh - 4rem);
+  }
+  .route-builder-header-card,
+  .route-stats-sidebar,
+  .sidebar-resizer,
+  .map-chart-resizer,
+  .route-builder-chart-card { display: none !important; }
+  .route-builder-map-card { flex: 1 1 0% !important; }
+}
 
 .route-builder-main {
   display: flex;
+  align-items: stretch;
   gap: 0.75rem;
   flex: 1;
   min-height: 0;
@@ -3553,6 +3793,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   flex: 1;
+  height: 100%;
   min-height: 0;
   min-width: 0;
 }

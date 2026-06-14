@@ -1597,7 +1597,7 @@ async function fetchImportantPlaces() {
         const d2 = dLng * dLng + dLat * dLat
         if (d2 < minD2) { minD2 = d2; nearestIdx = i }
       }
-      const threshold = node.type === 'cemetery' ? 1000 : THRESHOLD_M
+      const threshold = node.type === 'cemetery' ? 1500 : THRESHOLD_M
       const dist = haversine(geom[nearestIdx], [node.lng, node.lat])
       console.debug(`[places] ${node.name} (${node.type}) → dist=${Math.round(dist)}m threshold=${threshold}m → ${dist > threshold ? 'EXCLU' : 'OK'}`)
       if (dist > threshold) continue

@@ -114,6 +114,7 @@ let selectionMarkerBKm = null
 let selectionMarkerDragging = false
 
 const climbMarkers = []
+const climbMarkerObservers = []
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
 // Gradient color buckets for the route line — matches ActivityDetail.vue.
@@ -639,6 +640,8 @@ function updateRouteLayer() {
 
 function installClimbMarkers() {
   if (!_maplibregl || !mapInstance) return
+  climbMarkerObservers.forEach((obs) => obs.disconnect())
+  climbMarkerObservers.length = 0
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
   if (!state.showClimbs || geometry.value.length < 2) return
@@ -658,8 +661,26 @@ function installClimbMarkers() {
     const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom-left' })
       .setLngLat([pt[0], pt[1]])
       .addTo(mapInstance)
+    climbMarkerObservers.push(attachClimbMarkerScaleObserver(el))
     climbMarkers.push(marker)
   })
+}
+
+// Appends scale(s) after MapLibre's translate in the same transform property.
+// The CSS `scale` individual property would apply BEFORE translate (wrong order),
+// so we intercept each transform write via MutationObserver instead.
+function attachClimbMarkerScaleObserver(el) {
+  let lastSet = ''
+  const obs = new MutationObserver(() => {
+    const raw = el.style.transform
+    if (!raw || raw === lastSet) return
+    const base = raw.replace(/ scale\([^)]+\)$/, '')
+    const s = parseFloat(mapInstance.getContainer().style.getPropertyValue('--wp-scale') || '1')
+    lastSet = `${base} scale(${s})`
+    el.style.transform = lastSet
+  })
+  obs.observe(el, { attributes: true, attributeFilter: ['style'] })
+  return obs
 }
 
 function buildClimbMarkerEl(climb, distances) {
@@ -669,12 +690,7 @@ function buildClimbMarkerEl(climb, distances) {
   const lengthStr = climb.lengthM >= 1000
     ? `${(climb.lengthM / 1000).toFixed(1)} km`
     : `${Math.round(climb.lengthM)} m`
-  el.innerHTML = `
-    <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-    <span class="climb-marker-stats">${lengthStr}&nbsp;·&nbsp;+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>
-    ${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}
-  `
-  el.title = `${t('strava.click_to_select_climb')}\n${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
+  el.innerHTML = `<i class="fa-solid fa-mountain" aria-hidden="true"></i><span class="climb-marker-stats">${lengthStr}&nbsp;·&nbsp;+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}`
   // Click → select the climb segment on the chart (and the map highlight).
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
@@ -892,9 +908,8 @@ function updateClimbHoverLayer(climb) {
     if (climbHoverEndMarker)   { climbHoverEndMarker.remove();   climbHoverEndMarker = null }
     return
   }
-  const ptStart = geometry.value[climb.startIdx]
-  const ptEnd   = geometry.value[climb.endIdx]
-  if (!ptStart || !ptEnd) return
+  const ptEnd = geometry.value[climb.endIdx]
+  if (!ptEnd) return
 
   function makeClimbFlagMarker(kind) {
     const el = document.createElement('div')
@@ -904,10 +919,9 @@ function updateClimbHoverLayer(climb) {
     return new _maplibregl.Marker({ element: el, anchor: 'bottom-left' })
   }
 
-  if (climbHoverStartMarker) climbHoverStartMarker.remove()
+  if (climbHoverStartMarker) { climbHoverStartMarker.remove(); climbHoverStartMarker = null }
   if (climbHoverEndMarker)   climbHoverEndMarker.remove()
-  climbHoverStartMarker = makeClimbFlagMarker('start').setLngLat([ptStart[0], ptStart[1]]).addTo(mapInstance)
-  climbHoverEndMarker   = makeClimbFlagMarker('end').setLngLat([ptEnd[0], ptEnd[1]]).addTo(mapInstance)
+  climbHoverEndMarker = makeClimbFlagMarker('end').setLngLat([ptEnd[0], ptEnd[1]]).addTo(mapInstance)
 }
 
 function selectClimb(climb) {
@@ -3015,6 +3029,8 @@ onBeforeUnmount(() => {
   waypointMarkers.length = 0
   divergentMarkers.forEach((m) => m.remove())
   divergentMarkers.length = 0
+  climbMarkerObservers.forEach((obs) => obs.disconnect())
+  climbMarkerObservers.length = 0
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
@@ -4200,6 +4216,10 @@ onBeforeUnmount(() => {
 /* Climb marker — small pill anchored at the foot of the climb with stats and
    optional category badge. Click sends a selection to the chart. */
 .climb-marker {
+  /* MapLibre injecte transform:translate() sur cet élément via style inline.
+     Le scale est ajouté après le translate par JS (MutationObserver) :
+     transform: translate(x,y) scale(s) — scale ancré en bas-gauche grâce à
+     transform-origin, sans perturber le translate de MapLibre. */
   display: inline-flex;
   align-items: center;
   gap: 0.22rem;
@@ -4212,14 +4232,13 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   border: 1.5px solid currentColor;
   box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
-  transform: translateY(-4px);
-  transition: transform 0.1s ease, box-shadow 0.1s ease;
-  user-select: none;
   line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  transform-origin: bottom left;
+  transition: box-shadow 0.1s ease;
 }
 .climb-marker:hover {
-  transform: translateY(-6px) scale(1.06);
   box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.45);
 }
 .climb-marker i { font-size: 0.74rem; }

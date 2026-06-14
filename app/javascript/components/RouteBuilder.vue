@@ -455,6 +455,14 @@ async function renderMap() {
       mapInstance.on('moveend', () => {
         if (!currentId.value) saveMapView()
       })
+      const applyMarkerScale = () => {
+        const z = mapInstance.getZoom()
+        // Full size at zoom ≥ 14, 35% at zoom 5 and below
+        const scale = Math.max(0.35, Math.min(1, (z - 5) / 9))
+        mapInstance.getContainer().style.setProperty('--wp-scale', String(scale))
+      }
+      mapInstance.on('zoom', applyMarkerScale)
+      applyMarkerScale()
       mapInstance.getCanvas().style.cursor = 'crosshair'
       resolve(undefined)
     })
@@ -1166,7 +1174,7 @@ function refreshWaypointMarkers() {
       </div>
       <span class="wp-marker-num">${idx + 1}</span>
     `
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' })
       .setLngLat([w.lng, w.lat])
       .addTo(mapInstance)
 
@@ -4045,18 +4053,17 @@ onBeforeUnmount(() => {
 /* Waypoint markers (created via document.createElement, so global) */
 .wp-marker {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 28px;
-  height: 36px;
+  height: 28px;
   cursor: pointer;
 }
 .wp-marker-num {
   position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
+  top: 1px;
+  left: 1px;
+  transform: scale(var(--wp-scale, 1));
+  /* transform-origin: center (défaut) → le cercle scale depuis son centre,
+     qui coïncide avec l'ancre du marqueur (anchor: center). */
   width: 26px;
   height: 26px;
   border-radius: 50%;
@@ -4069,7 +4076,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
-  transition: background 0.15s, box-shadow 0.15s;
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
 }
 .wp-marker--selected .wp-marker-num {
   background: #1d4ed8;

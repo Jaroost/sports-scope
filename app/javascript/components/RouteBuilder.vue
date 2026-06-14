@@ -47,6 +47,7 @@ const svCache = new Map<string, boolean>()
 // Set to true right after a successful waypoint drag so the click event
 // maplibre synthesizes from the mouseup doesn't add/insert a spurious point.
 let suppressNextMapClick = false
+let overClimbMarker = false
 // Legs where the cycling profile detours far around the foot profile — i.e.
 // sections with a one-way restriction against the cyclist's direction. We
 // render the foot path with a red dashed overlay + warning marker.
@@ -300,6 +301,31 @@ function downsample(arr, maxPoints) {
   return out
 }
 
+function flagSvg(kind) {
+  if (kind === 'start') {
+    return `<svg width="28" height="36" viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg">
+      <line x1="4" y1="2" x2="4" y2="34" stroke="#1f2937" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="4" cy="34" r="2.5" fill="#1f2937"/>
+      <path d="M4 4 L24 4 L24 18 L4 18 Z" fill="#22c55e" stroke="#15803d" stroke-width="1"/>
+    </svg>`
+  }
+  const cells = []
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 4; col++) {
+      const x = 4 + col * 5
+      const y = 4 + row * 5
+      const dark = (row + col) % 2 === 0
+      cells.push(`<rect x="${x}" y="${y}" width="5" height="5" fill="${dark ? '#ef4444' : '#ffffff'}"/>`)
+    }
+  }
+  return `<svg width="28" height="36" viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg">
+    <line x1="4" y1="2" x2="4" y2="34" stroke="#1f2937" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="4" cy="34" r="2.5" fill="#1f2937"/>
+    <rect x="4" y="4" width="20" height="15" fill="none" stroke="#7f1d1d" stroke-width="1"/>
+    ${cells.join('')}
+  </svg>`
+}
+
 function formatKm(m) {
   if (!m) return '0 km'
   return `${(m / 1000).toFixed(2)} km`
@@ -371,6 +397,9 @@ async function renderMap() {
     ...({ preserveDrawingBuffer: true } as any),
   })
   mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right')
+  mapInstance.on('styleimagemissing', (e) => {
+    mapInstance.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
+  })
 
   // Block on the 'load' event so callers that await renderMap() are
   // guaranteed that the route source/layer exist before they try to write
@@ -392,6 +421,7 @@ async function renderMap() {
         }
       })
       mapInstance.on('mousemove', (e) => {
+        if (overClimbMarker) { hideHoverMarker(); return }
         if (waypoints.value.length < 2) { hideHoverMarker(); return }
         const idx = nearestGeomIndexAt(e.point)
         if (idx == null) { hideHoverMarker(); return }
@@ -613,7 +643,7 @@ function buildClimbMarkerEl(climb, distances) {
     : `${Math.round(climb.lengthM)} m`
   el.innerHTML = `
     <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-    <span class="climb-marker-stats">+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>
+    <span class="climb-marker-stats">${lengthStr}&nbsp;·&nbsp;+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>
     ${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}
   `
   el.title = `${t('strava.click_to_select_climb')}\n${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
@@ -628,6 +658,8 @@ function buildClimbMarkerEl(climb, distances) {
     fitMapToSelection()
   })
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
+  el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker(); updateClimbHoverLayer(climb) })
+  el.addEventListener('mouseleave', () => { overClimbMarker = false; updateClimbHoverLayer(null) })
   return el
 }
 
@@ -638,7 +670,7 @@ function toggleClimbs() {
 
 function gradePaintExpression() {
   return [
-    'match', ['get', 'bucket'],
+    'match', ['coalesce', ['get', 'bucket'], -1],
     0, GRADE_BUCKETS[0].color,
     1, GRADE_BUCKETS[1].color,
     2, GRADE_BUCKETS[2].color,
@@ -838,11 +870,10 @@ function updateClimbHoverLayer(climb) {
 
   function makeClimbFlagMarker(kind) {
     const el = document.createElement('div')
-    el.className = `climb-hover-flag climb-hover-flag--${kind}`
-    el.innerHTML = kind === 'start'
-      ? '<i class="fa-solid fa-flag"></i>'
-      : '<i class="fa-solid fa-flag-checkered"></i>'
-    return new _maplibregl.Marker({ element: el, anchor: 'bottom' })
+    el.className = `climb-hover-flag`
+    el.style.cssText = 'width:28px;height:36px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35));pointer-events:none'
+    el.innerHTML = flagSvg(kind)
+    return new _maplibregl.Marker({ element: el, anchor: 'bottom-left' })
   }
 
   if (climbHoverStartMarker) climbHoverStartMarker.remove()
@@ -1360,11 +1391,10 @@ function updateSelectionMarkers() {
 
 function makeSelectionMarker(kind) {
   const el = document.createElement('div')
-  el.className = `sel-flag-marker sel-flag-marker--${kind}`
-  el.innerHTML = kind === 'start'
-    ? '<i class="fa-solid fa-flag"></i>'
-    : '<i class="fa-solid fa-flag-checkered"></i>'
-  const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom', draggable: true })
+  el.className = 'sel-flag-marker'
+  el.style.cssText = 'width:28px;height:36px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35));cursor:grab'
+  el.innerHTML = flagSvg(kind)
+  const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom-left', draggable: true })
     .setLngLat([0, 0])
     .addTo(mapInstance)
   marker.on('dragstart', () => { selectionMarkerDragging = true })
@@ -1423,7 +1453,6 @@ function insertWaypointAtGeomIdx(geomIdx) {
 // Open-Meteo round-trip in the common case.
 async function fetchImportantPlaces() {
   const token = ++placesToken
-  importantPlaces.value = []
   if (geometry.value.length < 2) { isFetchingPlaces.value = false; return }
   isFetchingPlaces.value = true
 
@@ -3730,13 +3759,8 @@ onBeforeUnmount(() => {
 }
 
 .climb-hover-flag {
-  font-size: 1.2rem;
-  line-height: 1;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));
   pointer-events: none;
 }
-.climb-hover-flag--start { color: #16a34a; }
-.climb-hover-flag--end   { color: #1f2937; }
 
 .places-section-toggle {
   display: flex;
@@ -3822,15 +3846,8 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 
-.sel-flag-marker {
-  font-size: 1.2rem;
-  line-height: 1;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));
-  cursor: grab;
-}
+.sel-flag-marker { cursor: grab; }
 .sel-flag-marker:active { cursor: grabbing; }
-.sel-flag-marker--start { color: #16a34a; }
-.sel-flag-marker--end   { color: #1f2937; }
 
 .route-stats-sidebar {
   flex-shrink: 0;

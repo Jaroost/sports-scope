@@ -1,2 +1,3 @@
 <% content_for :title, t("routes.builder_title") %>
+<% content_for :container_class, "container-fluid" %>
 <div data-vue-component="RouteBuilder" data-vue-props='<%= { routeId: @route_id }.to_json %>'></div>

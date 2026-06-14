@@ -69,7 +69,7 @@ const climbsExpanded = ref(true)
 const placesExpanded = ref(true)
 const isFetchingPlaces = ref(false)
 const placeShowCemeteries = ref(true)
-const placeShowLocalities = ref(true)
+const placeShowLocalities = ref(false)
 const importantPlaces = ref([])
 let placesToken = 0
 const wtExpanded = ref(false)
@@ -87,7 +87,7 @@ const exportShowStats = ref(true)
 const exportScale = ref(2.5)
 const exporting = ref(false)
 const mapFlex = ref(0.80)
-const sidebarWidth = ref(175)
+const sidebarWidth = ref(195)
 let resizing = false
 let resizeStartY = 0
 let resizeStartFlex = 0
@@ -1574,8 +1574,6 @@ async function fetchImportantPlaces() {
     const nodes = await res.json()
     if (token !== placesToken) return
 
-    console.debug('[places] reçu depuis Overpass:', nodes.length, 'POIs', nodes)
-
     const distancesM = buildDistancesM(geom)
     const THRESHOLD_M = 2000
     const seen = new Set()
@@ -1587,7 +1585,7 @@ async function fetchImportantPlaces() {
       const seenKey = node.type === 'cemetery'
         ? `cemetery:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
         : `${node.type ?? ''}:${node.name}`
-      if (seen.has(seenKey)) { console.debug('[places] dédupliqué:', node.name, node.type); continue }
+      if (seen.has(seenKey)) continue
       // Find nearest geometry point using fast approximate distance, then verify with haversine
       const cosLat = Math.cos(node.lat * Math.PI / 180)
       let minD2 = Infinity
@@ -1600,7 +1598,6 @@ async function fetchImportantPlaces() {
       }
       const threshold = node.type === 'cemetery' ? 1500 : THRESHOLD_M
       const dist = haversine(geom[nearestIdx], [node.lng, node.lat])
-      console.debug(`[places] ${node.name} (${node.type}) → dist=${Math.round(dist)}m threshold=${threshold}m → ${dist > threshold ? 'EXCLU' : 'OK'}`)
       if (dist > threshold) continue
       seen.add(seenKey)
       const isCemetery = node.type === 'cemetery'
@@ -1608,6 +1605,7 @@ async function fetchImportantPlaces() {
         name: node.name,
         type: node.type,
         distanceM: distancesM[nearestIdx],
+        distFromRouteM: isCemetery ? dist : 0,
         // flyTo destination — actual POI location for all types
         lng: node.lng,
         lat: node.lat,
@@ -3225,6 +3223,7 @@ onBeforeUnmount(() => {
               <span class="place-pill-dist">{{ formatDistanceShort(place.distanceM) }}</span>
               <i v-if="place.type === 'cemetery'" class="fa-solid fa-cross place-pill-icon" aria-hidden="true"></i>
               <span class="place-pill-name">{{ place.name }}</span>
+              <span v-if="place.type === 'cemetery' && place.distFromRouteM > 0" class="place-pill-route-dist">{{ formatDistanceShort(place.distFromRouteM) }}</span>
             </div>
           </template>
         </template>
@@ -4407,8 +4406,9 @@ onBeforeUnmount(() => {
   min-width: 2.5rem;
   text-align: right;
 }
-.place-pill-name { color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place-pill-name { color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .place-pill-icon { font-size: 0.65rem; color: #6b7280; flex-shrink: 0; }
+.place-pill-route-dist { flex-shrink: 0; font-size: 0.72rem; color: #9ca3af; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .places-filter-bar {
   display: flex;
   gap: 0.3rem;

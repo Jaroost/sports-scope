@@ -415,7 +415,7 @@ async function renderMap() {
     zoom,
     ...({ preserveDrawingBuffer: true } as any),
   })
-  mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), 'top-right')
+  mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: false, showZoom: false }), 'top-right')
   mapInstance.on('styleimagemissing', (e) => {
     mapInstance.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
@@ -3218,15 +3218,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="map-controls-right">
-            <div class="btn-group-vertical btn-group-sm shadow-sm mb-1" role="group">
-              <button type="button" class="btn map-ctrl-btn"
-                :class="wtExpanded ? 'btn-primary active' : 'btn-light'"
-                @click="wtExpanded = !wtExpanded"
-                :title="t('routes.wt_title')"
-                :aria-pressed="wtExpanded">
-                <i class="fa-solid fa-route" aria-hidden="true"></i>
-              </button>
-            </div>
             <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
               <button type="button" class="btn map-ctrl-btn"
                 :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"
@@ -3250,6 +3241,15 @@ onBeforeUnmount(() => {
                 :title="state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
                 :aria-pressed="state.mapExpanded">
                 <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+              <button type="button" class="btn map-ctrl-btn"
+                :class="wtExpanded ? 'btn-primary active' : 'btn-light'"
+                @click="wtExpanded = !wtExpanded"
+                :title="t('routes.wt_title')"
+                :aria-pressed="wtExpanded">
+                <i class="fa-solid fa-route" aria-hidden="true"></i>
               </button>
             </div>
           </div>
@@ -3828,7 +3828,7 @@ onBeforeUnmount(() => {
 .map-controls > * { pointer-events: auto; }
 .map-controls-right {
   position: absolute;
-  top: 115px;
+  top: 56px;
   right: 10px;
   z-index: 5;
   display: flex;

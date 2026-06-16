@@ -390,6 +390,14 @@ onMounted(() => fetchRoutes())
                 </div>
               </a>
               <div class="d-flex align-items-center gap-1 route-row-actions">
+                <a
+                  :href="`/api/routes/${r.id}/gpx`"
+                  class="btn btn-sm btn-outline-secondary"
+                  :title="t('routes.export_gpx')"
+                  download
+                >
+                  <i class="fa-solid fa-download" aria-hidden="true"></i>
+                </a>
                 <button
                   type="button"
                   class="btn btn-sm btn-outline-secondary"

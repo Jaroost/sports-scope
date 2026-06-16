@@ -19,6 +19,11 @@ const props = defineProps({
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
+// Endpoint du moteur de routage BRouter. Surchargé via VITE_BROUTER_URL pour
+// pointer vers une instance auto-hébergée (le serveur public brouter.de n'a ni
+// SLA ni quota garanti). Voir .env.example.
+const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || 'https://brouter.de/brouter'
+
 const state = reactive(new RouteBuilderState())
 const saving = ref(false)
 const exporting = ref(false)
@@ -195,7 +200,7 @@ async function recomputeRoute() {
       if (i < wps.length - 1) straight.add(i)
     })
     const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
-    const url = `https://brouter.de/brouter?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson${straightParam}`
+    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson${straightParam}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
     const data = await res.json()

@@ -49,6 +49,7 @@ const climbMarkers: any[] = []
 const climbMarkerObservers: MutationObserver[] = []
 const placeMarkers: any[] = []
 const placeMarkerObservers: MutationObserver[] = []
+let placePopup: any = null
 let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
 const svCache = new Map<string, boolean>()
@@ -355,6 +356,33 @@ function buildClimbMarkerEl(climb: Climb) {
 function clearPlaceMarkers() {
   placeMarkerObservers.forEach((obs) => obs.disconnect()); placeMarkerObservers.length = 0
   placeMarkers.forEach((m) => m.remove()); placeMarkers.length = 0
+  if (placePopup) { placePopup.remove(); placePopup = null }
+}
+
+// Popup proposant d'ouvrir le lieu sur Google Maps, comme les points de l'itinéraire
+// (même format d'URL `maps?q=lat,lng`).
+function showBakeryReviewsPopup(place: Place) {
+  if (!_maplibregl || !mapInstance) return
+  if (placePopup) { placePopup.remove(); placePopup = null }
+  const url = `https://www.google.com/maps?q=${place.lat},${place.lng}`
+  const wrap = document.createElement('div')
+  wrap.className = 'place-popup'
+  wrap.innerHTML = `
+    <div class="place-popup-name">${escapeHtml(place.name)}</div>
+    <a class="place-popup-link" href="${url}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-brands fa-google" aria-hidden="true"></i>
+      <span>Google Maps</span>
+    </a>`
+  placePopup = new _maplibregl.Popup({ offset: 18, closeButton: true, closeOnClick: true, className: 'place-popup-container' })
+    .setLngLat([place.markerLng, place.markerLat])
+    .setDOMContent(wrap)
+    .addTo(mapInstance)
+}
+
+function escapeHtml(s: string) {
+  const div = document.createElement('div')
+  div.textContent = s
+  return div.innerHTML
 }
 
 // Rend une icône persistante et cliquable pour chaque cimetière/boulangerie filtré.
@@ -379,7 +407,11 @@ function buildPlaceMarkerEl(place: Place) {
   el.className = `place-marker place-marker--${place.type}`
   el.title = place.name
   el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
-  el.addEventListener('click', (ev) => { ev.stopPropagation(); emit('select-place', place) })
+  el.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    emit('select-place', place)
+    if (place.type === 'bakery') showBakeryReviewsPopup(place)
+  })
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker(); emit('hover-place', place) })
   el.addEventListener('mouseleave', () => { overClimbMarker = false; emit('hover-place', null) })
@@ -1809,6 +1841,28 @@ defineExpose({
 .place-marker:hover { box-shadow: 0 6px 14px -3px rgba(0,0,0,0.5); }
 .place-marker--cemetery { color: #6b7280; }
 .place-marker--bakery   { color: #b45309; }
+.place-popup-container .maplibregl-popup-content {
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.6rem;
+  box-shadow: 0 6px 18px -4px rgba(0,0,0,0.4);
+}
+.place-popup-name {
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: #1f2937;
+  margin-bottom: 0.4rem;
+  max-width: 14rem;
+}
+.place-popup-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #b45309;
+  text-decoration: none;
+}
+.place-popup-link:hover { text-decoration: underline; }
 .route-insert-marker {
   width: 22px;
   height: 22px;

@@ -27,6 +27,8 @@ class GeocodesController < ApplicationController
       http.request(req)
     end
 
+    return render json: [] unless response.is_a?(Net::HTTPSuccess)
+
     data = JSON.parse(response.body)
     places = data["elements"].filter_map do |el|
       tags = el["tags"] || {}
@@ -47,8 +49,11 @@ class GeocodesController < ApplicationController
 
     render json: places
   rescue Net::OpenTimeout, Net::ReadTimeout
-    render json: { error: "timeout" }, status: :gateway_timeout
+    render json: []
+  rescue JSON::ParserError
+    render json: []
   rescue => e
-    render json: { error: e.message }, status: :bad_gateway
+    Rails.logger.error("GeocodesController#places: #{e.class}: #{e.message}")
+    render json: [], status: :internal_server_error
   end
 end

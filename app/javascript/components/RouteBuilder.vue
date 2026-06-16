@@ -10,6 +10,7 @@ import { haversine, buildDistancesM, downsample } from '../routeHelpers'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
+import MapStyleDropdown from './MapStyleDropdown.vue'
 
 const props = defineProps({
   routeId: { type: [String, Number], default: null },
@@ -505,23 +506,27 @@ async function exportImage() {
   const savedStyleId = state.mapStyleId
   const savedColorMode = state.colorMode
   const savedShowClimbs = state.showClimbs
+  const savedPixelRatio = mapInst.getPixelRatio()
 
   try {
     await applyStyleForExport(exportStyleId.value)
     const targetColorMode = exportShowGrade.value ? 'grade' : 'none'
     if (state.colorMode !== targetColorMode) { state.colorMode = targetColorMode; mapRef.value?.applyColorMode() }
+
+    // Increase pixel ratio so MapLibre fetches higher-zoom tiles for the same geographic extent,
+    // producing sharper detail without needing to upscale the captured canvas.
+    mapInst.setPixelRatio(savedPixelRatio * exportScale.value)
+
     const lngs = routeStore.geometry.value.map((c) => c[0])
     const lats = routeStore.geometry.value.map((c) => c[1])
-    mapInst.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 60, duration: 0 })
+    mapInst.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 40, duration: 0 })
     await new Promise<void>((resolve) => mapInst.once('idle', resolve))
 
-    const dpr = window.devicePixelRatio || 1
-    const UPSCALE = exportScale.value
-    const s = dpr * UPSCALE
+    // Canvas is already at exportScale × savedPixelRatio — capture at 1:1, no software upscale.
+    const s = savedPixelRatio * exportScale.value
     const mapCanvas = mapInst.getCanvas()
-    const srcW = mapCanvas.width, srcH = mapCanvas.height
-    const outW = Math.round(srcW * UPSCALE)
-    const mapOutH = Math.round(srcH * UPSCALE)
+    const outW = mapCanvas.width
+    const mapOutH = mapCanvas.height
     const chartOutH = Math.round(mapOutH * 0.40)
     const titleH = Math.round(52 * s)
     const statsH = exportShowStats.value ? Math.round(80 * s) : 0
@@ -533,11 +538,11 @@ async function exportImage() {
     const chartInst = chartRef.value?.getChartInstance()
     if (chartInst) {
       const o = chartInst.options as any
-      const fs = (base: number) => ({ size: Math.round(base * UPSCALE) })
+      const fs = (base: number) => ({ size: Math.round(base * exportScale.value) })
       o.scales.x.ticks.font = fs(11); o.scales.y.ticks.font = fs(11)
       o.scales.x.title.font = fs(10); o.scales.y.title.font = fs(10)
       chartInst.update('none')
-      chartInst.resize(outW / dpr, chartOutH / dpr)
+      chartInst.resize(outW / savedPixelRatio, chartOutH / savedPixelRatio)
       await nextTick()
     }
 
@@ -554,6 +559,7 @@ async function exportImage() {
     link.href = out.toDataURL('image/png')
     link.click()
   } finally {
+    mapInst.setPixelRatio(savedPixelRatio)
     const chartInst = chartRef.value?.getChartInstance()
     if (chartInst) {
       const o = chartInst.options as any
@@ -870,17 +876,8 @@ onBeforeUnmount(() => {
           </div>
           <div class="modal-body-custom d-flex flex-column gap-3">
             <div>
-              <label class="form-label small fw-semibold">{{ t('routes.export_style') }}</label>
-              <div class="d-flex gap-2 flex-wrap">
-                <button
-                  v-for="sid in ['streets', 'satellite', 'outdoors', 'topo']"
-                  :key="sid"
-                  type="button"
-                  class="btn btn-sm"
-                  :class="exportStyleId === sid ? 'btn-primary' : 'btn-outline-secondary'"
-                  @click="exportStyleId = sid"
-                >{{ sid }}</button>
-              </div>
+              <label class="form-label small fw-semibold d-block">{{ t('routes.export_style') }}</label>
+              <MapStyleDropdown v-model="exportStyleId" />
             </div>
             <div class="form-check">
               <input id="export-grade" v-model="exportShowGrade" type="checkbox" class="form-check-input" />

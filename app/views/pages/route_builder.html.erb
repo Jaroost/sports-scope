@@ -1,10 +1,12 @@
 <% content_for :title, t("routes.builder_title") %>
 <% content_for :container_class, "container-fluid" %>
 <% content_for :navbar_actions do %>
-  <div class="d-flex gap-1 d-md-none me-1">
+  <div class="d-flex gap-1 d-md-none me-1 align-items-center">
     <%= link_to routes_index_path, class: "btn btn-sm btn-outline-light", title: t("routes.back"), aria: { label: t("routes.back") } do %>
       <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
     <% end %>
+    <%# Boutons Image / GPX / Komoot téléportés ici par RouteBuilder.vue (états réactifs) %>
+    <span id="rb-navbar-actions" class="d-flex gap-1"></span>
     <%= button_tag type: "button", class: "btn btn-sm btn-warning", id: "navbar-route-save-btn", title: t("routes.save"), aria: { label: t("routes.save") } do %>
       <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
     <% end %>

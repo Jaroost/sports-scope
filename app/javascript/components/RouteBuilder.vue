@@ -36,6 +36,10 @@ const exportResolutionPct = ref(100)
 const EXPORT_MAX_DIM = 6000
 const EXPORT_PAD = 30
 const EXPORT_MIN_CONTENT = 600
+// Largeur de référence (px) pour dimensionner les surcouches (titre, stats, tracé) :
+// fixe et indépendante de l'appareil, sinon le tracé/texte est démesuré sur mobile
+// (où la carte affichée est étroite) par rapport au PC.
+const EXPORT_REF_WIDTH = 900
 
 const mapFlex = ref(0.80)
 const sidebarWidth = ref(195)
@@ -56,6 +60,10 @@ const mobileSheetHeight = ref(SHEET_HEIGHT_DEFAULT)
 const mapRef = useTemplateRef('mapRef')
 const chartRef = useTemplateRef('chartRef')
 const rightColEl = useTemplateRef('rightColEl')
+// Chart dédié à l'export, monté hors écran à la volée : garantit un profil d'altitude
+// dans l'image quel que soit l'appareil (sur mobile aucun chart n'est monté hors sheet).
+const exportChartRef = useTemplateRef('exportChartRef')
+const exportChartMounted = ref(false)
 
 let recomputeToken = 0
 
@@ -603,7 +611,6 @@ async function exportImage() {
   // afficher tout l'itinéraire au maxzoom, puis on capture au ratio 1:1. C'est le zoom de la
   // carte — et non le pixelRatio — qui détermine le niveau de tuiles chargé par MapLibre.
   const container = mapInst.getContainer()
-  const refW = container.offsetWidth || 900
   const savedContainerCss = container.style.cssText
   const savedHtmlOverflow = document.documentElement.style.overflow
 
@@ -631,9 +638,9 @@ async function exportImage() {
     const mapCanvas = mapInst.getCanvas()
     const outW = mapCanvas.width
     const mapOutH = mapCanvas.height
-    // Échelle visuelle des surcouches (titre, stats, marqueurs) relative à la taille de sortie,
-    // pour qu'elles gardent les mêmes proportions qu'à l'écran quelle que soit la résolution.
-    const s = outW / refW
+    // Échelle visuelle des surcouches (titre, stats, marqueurs, tracé) relative à une largeur
+    // de référence fixe — donc identique sur mobile et PC pour une même résolution de sortie.
+    const s = outW / EXPORT_REF_WIDTH
 
     // Élargit le tracé proportionnellement à la résolution (sinon quasi invisible sur une
     // grande image), puis attend le re-rendu avant la capture.
@@ -650,7 +657,13 @@ async function exportImage() {
     const ctx = out.getContext('2d')!
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, out.width, out.height)
 
-    const chartInst = exportShowChart.value ? chartRef.value?.getChartInstance() : null
+    // Monte et rend un chart dédié hors écran (profil complet, identique sur mobile et PC).
+    if (exportShowChart.value) {
+      exportChartMounted.value = true
+      await nextTick()
+      await exportChartRef.value?.render()
+    }
+    const chartInst = exportShowChart.value ? exportChartRef.value?.getChartInstance() : null
     if (chartInst) {
       const o = chartInst.options as any
       const fs = (base: number) => ({ size: Math.round((base * s) / dpr) })
@@ -666,8 +679,8 @@ async function exportImage() {
     if (exportShowStats.value) drawStatsOnCanvas(ctx, titleH, statsH, s)
     ctx.drawImage(mapCanvas, 0, mapOffsetY, outW, mapOutH)
     if (exportShowClimbs.value) drawClimbMarkersOnCanvas(ctx, mapOffsetY, pscale, s)
-    if (exportShowChart.value) {
-      const chartEl = chartRef.value?.getChartEl()
+    if (chartInst) {
+      const chartEl = exportChartRef.value?.getChartEl()
       if (chartEl) ctx.drawImage(chartEl, 0, mapOffsetY + mapOutH, outW, chartOutH)
     }
 
@@ -686,13 +699,9 @@ async function exportImage() {
     mapRef.value?.setRouteLineScale(1)
     mapInst.setPixelRatio(savedPixelRatio)
     mapInst.resize()
-    const chartInst = chartRef.value?.getChartInstance()
-    if (chartInst) {
-      const o = chartInst.options as any
-      o.scales.x.ticks.font = undefined; o.scales.y.ticks.font = undefined
-      o.scales.x.title.font = undefined; o.scales.y.title.font = undefined
-      chartInst.update('none'); chartInst.resize()
-    }
+    // Démonte le chart d'export (Vue détruit l'instance Chart.js via onBeforeUnmount).
+    exportChartRef.value?.destroy()
+    exportChartMounted.value = false
     await applyStyleForExport(savedStyleId)
     if (state.colorMode !== savedColorMode) { state.colorMode = savedColorMode; mapRef.value?.applyColorMode() }
     if (state.showClimbs !== savedShowClimbs) { state.showClimbs = savedShowClimbs; mapRef.value?.installClimbMarkers() }
@@ -852,6 +861,30 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="route-builder-page">
+    <!-- Actions mobiles téléportées dans la navbar (Image / GPX / Komoot) -->
+    <Teleport to="#rb-navbar-actions">
+      <button type="button" class="btn btn-sm btn-outline-light"
+        @click="openExportDialog" :disabled="!routeStore.hasGeometry.value || exporting"
+        :title="t('routes.export_image')" :aria-label="t('routes.export_image')">
+        <span v-if="exporting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <i v-else class="fa-solid fa-image" aria-hidden="true"></i>
+      </button>
+      <button v-if="isEditMode()" type="button" class="btn btn-sm btn-outline-light"
+        @click="exportGpx" :title="t('routes.export_gpx')" :aria-label="t('routes.export_gpx')">
+        <i class="fa-solid fa-download" aria-hidden="true"></i>
+      </button>
+      <button v-if="routeStore.waypoints.value.length >= 2" type="button" class="btn btn-sm btn-outline-light"
+        @click="openInKomoot" :title="t('routes.open_in_komoot')" :aria-label="t('routes.open_in_komoot')">
+        <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+      </button>
+    </Teleport>
+
+    <!-- Chart hors écran utilisé uniquement pour l'export image -->
+    <div v-if="exportChartMounted" aria-hidden="true"
+      style="position: fixed; left: -99999px; top: 0; width: 900px; height: 320px; pointer-events: none;">
+      <RouteBuilderChart ref="exportChartRef" />
+    </div>
+
     <!-- Desktop header -->
     <div class="card shadow-sm border-0 d-none d-md-block route-builder-header-card">
       <div class="card-body d-flex align-items-center gap-2 py-1 px-3">

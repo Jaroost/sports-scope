@@ -6,7 +6,7 @@ import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
-import { haversine, buildDistancesM, downsample } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, formatDuration } from '../routeHelpers'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
@@ -28,6 +28,8 @@ const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
 const exportShowStats = ref(true)
 const exportShowChart = ref(true)
+// Pourcentage de la résolution max (= maxzoom de la source). 100 % par défaut.
+const exportResolutionPct = ref(100)
 
 // Largeur/hauteur max du canvas de carte (en px réels). Au-delà, certains navigateurs
 // échouent à produire l'image ; on plafonne donc la précision à cette limite.
@@ -430,7 +432,7 @@ interface ExportDims { cssW: number; cssH: number; tileZoom: number; pad: number
 // Calcule les dimensions du canvas pour rendre l'itinéraire aux plus petites tuiles
 // (maxzoom) de la source, plafonné à EXPORT_MAX_DIM. Si l'itinéraire est trop étendu
 // pour tenir au maxzoom, le zoom réellement atteint est réduit en conséquence.
-function computeExportDims(styleId: string): ExportDims | null {
+function computeExportDims(styleId: string, maxDim: number = EXPORT_MAX_DIM): ExportDims | null {
   const geom = routeStore.geometry.value
   if (!geom.length) return null
   const info = exportTileInfoFor(styleId)
@@ -450,8 +452,8 @@ function computeExportDims(styleId: string): ExportDims | null {
 
   let { w: pxW, h: pxH } = spanAt(z)
   let maxSpan = Math.max(pxW, pxH)
-  if (maxSpan + 2 * EXPORT_PAD > EXPORT_MAX_DIM) {
-    const k = (EXPORT_MAX_DIM - 2 * EXPORT_PAD) / maxSpan
+  if (maxSpan + 2 * EXPORT_PAD > maxDim) {
+    const k = (maxDim - 2 * EXPORT_PAD) / maxSpan
     z += Math.log2(k)
     ;({ w: pxW, h: pxH } = spanAt(z))
     maxSpan = Math.max(pxW, pxH)
@@ -464,16 +466,19 @@ function computeExportDims(styleId: string): ExportDims | null {
   return { cssW: Math.round(pxW + 2 * pad), cssH: Math.round(pxH + 2 * pad), tileZoom, pad: Math.round(pad) }
 }
 
-// Estimation affichée dans la modale (carte seule, hors titre/stats/profil).
+// Estimation affichée dans la modale (carte seule, hors titre/stats/profil), tenant
+// compte du curseur de résolution.
 const exportEstimate = computed<ExportDims | null>(() => {
   void routeStore.geometry.value // dépendance réactive
-  return exportStyleId.value ? computeExportDims(exportStyleId.value) : null
+  if (!exportStyleId.value) return null
+  return computeExportDims(exportStyleId.value, EXPORT_MAX_DIM * (exportResolutionPct.value / 100))
 })
 
 function openExportDialog() {
   exportStyleId.value = state.mapStyleId
   exportShowGrade.value = state.colorMode === 'grade'
   exportShowClimbs.value = state.showClimbs
+  exportResolutionPct.value = 100
   showExportDialog.value = true
 }
 
@@ -529,30 +534,54 @@ function drawClimbMarkersOnCanvas(ctx: CanvasRenderingContext2D, mapOffsetY: num
 function drawTitleOnCanvas(ctx: CanvasRenderingContext2D, h: number, s: number) {
   ctx.fillStyle = '#111827'; ctx.fillRect(0, 0, ctx.canvas.width, h)
   ctx.fillStyle = '#ffffff'
-  ctx.font = `bold ${Math.round(18 * s)}px system-ui,sans-serif`
+  ctx.font = `bold ${Math.round(22 * s)}px system-ui,sans-serif`
   ctx.textBaseline = 'middle'; ctx.textAlign = 'left'
   ctx.fillText((routeStore.name.value ?? '').trim() || 'Itinéraire', Math.round(20 * s), h / 2)
   ctx.textBaseline = 'alphabetic'
 }
 
 function drawStatsOnCanvas(ctx: CanvasRenderingContext2D, offsetY: number, h: number, s: number) {
+  const distM = routeStore.distanceM.value
+  const speed = routeStore.avgSpeedKmh.value
   const items = [
-    { icon: '↔', label: routeStore.distanceM.value >= 1000 ? `${(routeStore.distanceM.value / 1000).toFixed(1)} km` : `${Math.round(routeStore.distanceM.value)} m`, sub: 'Distance' },
-    { icon: '↑', label: `+${Math.round(routeStore.elevGainM.value)} m`, sub: 'D+' },
-    { icon: '↓', label: `-${Math.round(routeStore.elevLossM.value)} m`, sub: 'D-' },
+    {
+      value: distM >= 1000 ? `${(distM / 1000).toFixed(1)} km` : `${Math.round(distM)} m`,
+      sub: t('routes.export_stat_distance'),
+    },
+    {
+      value: `+${Math.round(routeStore.elevGainM.value)} m`,
+      sub: t('routes.export_stat_gain'),
+    },
+    {
+      value: formatDuration(routeStore.estimatedSeconds.value),
+      sub: `${t('routes.export_stat_duration')} · ${speed} km/h`,
+    },
   ]
-  ctx.fillStyle = '#f9fafb'; ctx.fillRect(0, offsetY, ctx.canvas.width, h)
-  const cellW = ctx.canvas.width / items.length
+  const W = ctx.canvas.width
+  ctx.fillStyle = '#f9fafb'; ctx.fillRect(0, offsetY, W, h)
+
+  const valueFs = Math.round(26 * s)
+  const subFs = Math.round(13 * s)
+  const gap = Math.round(8 * s)
+  const blockH = valueFs + gap + subFs
+  const top = offsetY + (h - blockH) / 2
+  const cellW = W / items.length
+
+  ctx.textAlign = 'center'
   items.forEach((item, i) => {
-    const cx = cellW * i + cellW / 2, cy = offsetY + h / 2
-    ctx.fillStyle = '#111827'
-    ctx.font = `bold ${Math.round(15 * s)}px system-ui,sans-serif`
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.fillText(item.label, cx, cy + 2 * s)
-    ctx.fillStyle = '#6b7280'
-    ctx.font = `${Math.round(10 * s)}px system-ui,sans-serif`
+    const cx = cellW * i + cellW / 2
+    // séparateur vertical entre les colonnes
+    if (i > 0) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.lineWidth = Math.max(1, s)
+      ctx.beginPath(); ctx.moveTo(cellW * i, offsetY + h * 0.2); ctx.lineTo(cellW * i, offsetY + h * 0.8); ctx.stroke()
+    }
     ctx.textBaseline = 'top'
-    ctx.fillText(item.sub, cx, cy + 4 * s)
+    ctx.fillStyle = '#111827'
+    ctx.font = `bold ${valueFs}px system-ui,sans-serif`
+    ctx.fillText(item.value, cx, top)
+    ctx.fillStyle = '#6b7280'
+    ctx.font = `${subFs}px system-ui,sans-serif`
+    ctx.fillText(item.sub, cx, top + valueFs + gap)
   })
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'
 }
@@ -560,7 +589,7 @@ function drawStatsOnCanvas(ctx: CanvasRenderingContext2D, offsetY: number, h: nu
 async function exportImage() {
   const mapInst = mapRef.value?.getMapInstance()
   if (!mapInst || !routeStore.geometry.value.length) return
-  const dims = computeExportDims(exportStyleId.value)
+  const dims = computeExportDims(exportStyleId.value, EXPORT_MAX_DIM * (exportResolutionPct.value / 100))
   if (!dims) return
   exporting.value = true
   showExportDialog.value = false
@@ -614,8 +643,8 @@ async function exportImage() {
     // là où ils sont rendus, quel que soit le pixelRatio effectif de MapLibre.
     const pscale = mapCanvas.width / (mapCanvas.clientWidth || dims.cssW)
     const chartOutH = exportShowChart.value ? Math.round(mapOutH * 0.40) : 0
-    const titleH = Math.round(52 * s)
-    const statsH = exportShowStats.value ? Math.round(80 * s) : 0
+    const titleH = Math.round(58 * s)
+    const statsH = exportShowStats.value ? Math.round(104 * s) : 0
     const out = document.createElement('canvas')
     out.width = outW; out.height = titleH + mapOutH + chartOutH + statsH
     const ctx = out.getContext('2d')!
@@ -992,14 +1021,16 @@ onBeforeUnmount(() => {
               <input id="export-chart" v-model="exportShowChart" type="checkbox" class="form-check-input" />
               <label for="export-chart" class="form-check-label small">{{ t('routes.export_show_chart') }}</label>
             </div>
-            <div class="bg-light rounded p-2 small">
-              <div class="d-flex justify-content-between">
-                <span class="fw-semibold">{{ t('routes.export_precision') }}</span>
-                <span>{{ t('routes.export_precision_max') }}</span>
+            <div>
+              <div class="d-flex justify-content-between align-items-baseline">
+                <label for="export-resolution" class="form-label small fw-semibold mb-1">{{ t('routes.export_resolution') }}</label>
+                <span class="small text-muted">
+                  {{ exportResolutionPct }}%<template v-if="exportResolutionPct === 100"> · {{ t('routes.export_precision_max') }}</template>
+                </span>
               </div>
-              <div v-if="exportEstimate" class="d-flex justify-content-between text-muted mt-1">
-                <span>{{ t('routes.export_resolution') }}</span>
-                <span>{{ exportEstimate.cssW }} × {{ exportEstimate.cssH }} px · zoom {{ exportEstimate.tileZoom }}</span>
+              <input id="export-resolution" v-model.number="exportResolutionPct" type="range" class="form-range" min="25" max="100" step="5" />
+              <div v-if="exportEstimate" class="small text-muted">
+                {{ exportEstimate.cssW }} × {{ exportEstimate.cssH }} px · zoom {{ exportEstimate.tileZoom }}
               </div>
             </div>
             <button type="button" class="btn btn-warning" @click="exportImage" :disabled="exporting">

@@ -224,6 +224,21 @@ function installRouteLayer() {
   }
 }
 
+// Épaisseurs natives (px écran) des couches de tracé. Utilisé par l'export image pour
+// élargir le tracé proportionnellement à la résolution, sinon il devient invisible.
+const ROUTE_LINE_BASE_WIDTH: Record<string, number> = {
+  'builder-route-border': 8,
+  'builder-route-line': 5,
+  'builder-route-selected-line': 7,
+  'builder-divergent-line': 4,
+}
+function setRouteLineScale(factor: number) {
+  if (!mapInstance) return
+  for (const [id, base] of Object.entries(ROUTE_LINE_BASE_WIDTH)) {
+    if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-width', base * factor)
+  }
+}
+
 function updateRouteLayer() {
   if (!mapInstance) return
   const baseSrc = mapInstance.getSource('builder-route')
@@ -1081,6 +1096,7 @@ onBeforeUnmount(() => {
 defineExpose({
   initMap,
   updateRouteLayer,
+  setRouteLineScale,
   applyColorMode,
   installClimbMarkers,
   updateSelectionLayer,

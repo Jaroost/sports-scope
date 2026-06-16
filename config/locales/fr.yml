@@ -185,6 +185,7 @@ fr:
     export_grade_color: "Couleurs de pente"
     export_show_climbs: "Afficher les cols"
     export_show_stats: "Afficher les statistiques"
+    export_show_chart: "Afficher le profil d'altitude"
     export_precision: "Précision"
     export_precision_max: "Maximale (automatique)"
     export_resolution: "Résolution estimée"

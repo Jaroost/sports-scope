@@ -27,6 +27,7 @@ const exportStyleId = ref('')
 const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
 const exportShowStats = ref(true)
+const exportShowChart = ref(true)
 
 // Largeur/hauteur max du canvas de carte (en px réels). Au-delà, certains navigateurs
 // échouent à produire l'image ; on plafonne donc la précision à cette limite.
@@ -604,7 +605,15 @@ async function exportImage() {
     // Échelle visuelle des surcouches (titre, stats, marqueurs) relative à la taille de sortie,
     // pour qu'elles gardent les mêmes proportions qu'à l'écran quelle que soit la résolution.
     const s = outW / refW
-    const chartOutH = Math.round(mapOutH * 0.40)
+
+    // Élargit le tracé proportionnellement à la résolution (sinon quasi invisible sur une
+    // grande image), puis attend le re-rendu avant la capture.
+    mapRef.value?.setRouteLineScale(s)
+    await new Promise<void>((resolve) => mapInst.once('idle', resolve))
+    // Ratio réel des pixels du canvas (CSS → buffer) : sert à projeter les cols exactement
+    // là où ils sont rendus, quel que soit le pixelRatio effectif de MapLibre.
+    const pscale = mapCanvas.width / (mapCanvas.clientWidth || dims.cssW)
+    const chartOutH = exportShowChart.value ? Math.round(mapOutH * 0.40) : 0
     const titleH = Math.round(52 * s)
     const statsH = exportShowStats.value ? Math.round(80 * s) : 0
     const out = document.createElement('canvas')
@@ -612,7 +621,7 @@ async function exportImage() {
     const ctx = out.getContext('2d')!
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, out.width, out.height)
 
-    const chartInst = chartRef.value?.getChartInstance()
+    const chartInst = exportShowChart.value ? chartRef.value?.getChartInstance() : null
     if (chartInst) {
       const o = chartInst.options as any
       const fs = (base: number) => ({ size: Math.round((base * s) / dpr) })
@@ -627,10 +636,11 @@ async function exportImage() {
     drawTitleOnCanvas(ctx, titleH, s)
     if (exportShowStats.value) drawStatsOnCanvas(ctx, titleH, statsH, s)
     ctx.drawImage(mapCanvas, 0, mapOffsetY, outW, mapOutH)
-    // pixelRatio = 1 : project() renvoie des coordonnées déjà à l'échelle de la carte capturée.
-    if (exportShowClimbs.value) drawClimbMarkersOnCanvas(ctx, mapOffsetY, 1, s)
-    const chartEl = chartRef.value?.getChartEl()
-    if (chartEl) ctx.drawImage(chartEl, 0, mapOffsetY + mapOutH, outW, chartOutH)
+    if (exportShowClimbs.value) drawClimbMarkersOnCanvas(ctx, mapOffsetY, pscale, s)
+    if (exportShowChart.value) {
+      const chartEl = chartRef.value?.getChartEl()
+      if (chartEl) ctx.drawImage(chartEl, 0, mapOffsetY + mapOutH, outW, chartOutH)
+    }
 
     const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, 'image/png'))
     if (blob) {
@@ -644,6 +654,7 @@ async function exportImage() {
   } finally {
     container.style.cssText = savedContainerCss
     document.documentElement.style.overflow = savedHtmlOverflow
+    mapRef.value?.setRouteLineScale(1)
     mapInst.setPixelRatio(savedPixelRatio)
     mapInst.resize()
     const chartInst = chartRef.value?.getChartInstance()
@@ -976,6 +987,10 @@ onBeforeUnmount(() => {
             <div class="form-check">
               <input id="export-stats" v-model="exportShowStats" type="checkbox" class="form-check-input" />
               <label for="export-stats" class="form-check-label small">{{ t('routes.export_show_stats') }}</label>
+            </div>
+            <div class="form-check">
+              <input id="export-chart" v-model="exportShowChart" type="checkbox" class="form-check-input" />
+              <label for="export-chart" class="form-check-label small">{{ t('routes.export_show_chart') }}</label>
             </div>
             <div class="bg-light rounded p-2 small">
               <div class="d-flex justify-content-between">

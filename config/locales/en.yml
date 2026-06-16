@@ -185,6 +185,7 @@ en:
     export_grade_color: "Grade colours"
     export_show_climbs: "Show climbs"
     export_show_stats: "Show stats"
+    export_show_chart: "Show elevation profile"
     export_precision: "Precision"
     export_precision_max: "Maximum (automatic)"
     export_resolution: "Estimated resolution"

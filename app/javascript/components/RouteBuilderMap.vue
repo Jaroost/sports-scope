@@ -531,6 +531,20 @@ function removeWaypoint(idx: number) {
   emit('waypoints-changed')
 }
 
+function moveWaypoint(from: number, to: number) {
+  const wps = routeStore.waypoints.value
+  if (from < 0 || from >= wps.length) return
+  to = Math.max(0, Math.min(wps.length - 1, to))
+  if (to === from) return
+  const next = wps.slice()
+  const [item] = next.splice(from, 1)
+  next.splice(to, 0, item)
+  routeStore.waypoints.value = next
+  deselectAll()
+  refreshWaypointMarkers()
+  emit('waypoints-changed')
+}
+
 function toggleWaypointFree(idx: number) {
   const wps = routeStore.waypoints.value
   if (idx < 0 || idx >= wps.length) return
@@ -658,7 +672,7 @@ function refreshWaypointMarkers() {
     el.innerHTML = `
       <div class="wp-tooltip">
         <div class="wp-tooltip-header">
-          <span class="wp-tooltip-title">Point ${idx + 1}</span>
+          <span class="wp-tooltip-title">Point&nbsp;<input type="number" class="wp-tooltip-num-input" min="1" max="${routeStore.waypoints.value.length}" value="${idx + 1}" title="${t('routes.reorder_waypoint')}" /></span>
           <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
         </div>
         <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
@@ -695,6 +709,23 @@ function refreshWaypointMarkers() {
       selectWaypoint(idx)
     })
     el.querySelector('.wp-tooltip-close')!.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
+    const numInput = el.querySelector('.wp-tooltip-num-input') as HTMLInputElement
+    const commitNum = () => {
+      const v = parseInt(numInput.value, 10)
+      const total = routeStore.waypoints.value.length
+      if (!Number.isFinite(v)) { numInput.value = String(idx + 1); return }
+      const target = Math.max(1, Math.min(total, v)) - 1
+      if (target === idx) { numInput.value = String(idx + 1); return }
+      moveWaypoint(idx, target)
+    }
+    numInput.addEventListener('click', (ev) => ev.stopPropagation())
+    numInput.addEventListener('mousedown', (ev) => ev.stopPropagation())
+    numInput.addEventListener('keydown', (ev: KeyboardEvent) => {
+      ev.stopPropagation()
+      if (ev.key === 'Enter') { ev.preventDefault(); numInput.blur() }
+      else if (ev.key === 'Escape') { numInput.value = String(idx + 1); numInput.blur() }
+    })
+    numInput.addEventListener('change', commitNum)
     el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     })
@@ -1589,7 +1620,24 @@ defineExpose({
   border-bottom: 1px solid rgba(0,0,0,0.07);
   margin-bottom: 2px;
 }
-.wp-tooltip-title { font-size: 0.78rem; font-weight: 600; color: #6b7280; }
+.wp-tooltip-title { font-size: 0.78rem; font-weight: 600; color: #6b7280; display: flex; align-items: center; }
+.wp-tooltip-num-input {
+  width: 3.2em;
+  margin-left: 0.25em;
+  padding: 1px 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #111827;
+  text-align: center;
+  border: 1px solid rgba(0,0,0,0.18);
+  border-radius: 6px;
+  background: #fff;
+}
+.wp-tooltip-num-input:focus {
+  outline: none;
+  border-color: #fc4c02;
+  box-shadow: 0 0 0 2px rgba(252,76,2,0.18);
+}
 .wp-tooltip-close {
   width: 18px;
   height: 18px;

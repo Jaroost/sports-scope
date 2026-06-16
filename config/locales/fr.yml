@@ -229,6 +229,7 @@ fr:
     show_waypoints: "Afficher les points"
     hide_waypoints: "Masquer les points"
     remove_waypoint: "Supprimer ce point"
+    reorder_waypoint: "Modifier ce numéro pour déplacer le point dans l'ordre"
     make_free: "Rendre libre (hors route)"
     anchor_to_road: "Ancrer sur la route"
     return_via_same_route: "Ajouter à la fin de l'itinéraire"

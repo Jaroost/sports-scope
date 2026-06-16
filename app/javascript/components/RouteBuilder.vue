@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { t } from '../i18n'
-import { mapStyleFor } from '../mapStyles'
+import { mapStyleFor, exportTileInfoFor } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
@@ -27,7 +27,12 @@ const exportStyleId = ref('')
 const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
 const exportShowStats = ref(true)
-const exportScale = ref(2.5)
+
+// Largeur/hauteur max du canvas de carte (en px réels). Au-delà, certains navigateurs
+// échouent à produire l'image ; on plafonne donc la précision à cette limite.
+const EXPORT_MAX_DIM = 6000
+const EXPORT_PAD = 30
+const EXPORT_MIN_CONTENT = 600
 
 const mapFlex = ref(0.80)
 const sidebarWidth = ref(195)
@@ -411,6 +416,59 @@ const CLIMB_CAT_COLORS: Record<string, string> = {
   HC: '#111827', '1': '#b91c1c', '2': '#ea580c', '3': '#ca8a04', '4': '#16a34a',
 }
 
+// Web Mercator normalisé [0,1] — sert à dimensionner l'image pour qu'elle contienne
+// tout l'itinéraire au zoom voulu.
+function mercX(lng: number) { return (lng + 180) / 360 }
+function mercY(lat: number) {
+  const s = Math.sin((lat * Math.PI) / 180)
+  return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)
+}
+
+interface ExportDims { cssW: number; cssH: number; tileZoom: number; pad: number }
+
+// Calcule les dimensions du canvas pour rendre l'itinéraire aux plus petites tuiles
+// (maxzoom) de la source, plafonné à EXPORT_MAX_DIM. Si l'itinéraire est trop étendu
+// pour tenir au maxzoom, le zoom réellement atteint est réduit en conséquence.
+function computeExportDims(styleId: string): ExportDims | null {
+  const geom = routeStore.geometry.value
+  if (!geom.length) return null
+  const info = exportTileInfoFor(styleId)
+  // transform.zoom qui charge les tuiles de niveau `maxzoom` : maxzoom - log2(512/tileSize).
+  const offset = Math.log2(512 / info.tileSize)
+  let z = info.maxzoom - offset
+
+  const xs = geom.map((c) => mercX(c[0]))
+  const ys = geom.map((c) => mercY(c[1]))
+  const dx = Math.max(...xs) - Math.min(...xs)
+  const dy = Math.max(...ys) - Math.min(...ys)
+
+  const spanAt = (zoom: number) => {
+    const world = 512 * 2 ** zoom
+    return { w: dx * world, h: dy * world }
+  }
+
+  let { w: pxW, h: pxH } = spanAt(z)
+  let maxSpan = Math.max(pxW, pxH)
+  if (maxSpan + 2 * EXPORT_PAD > EXPORT_MAX_DIM) {
+    const k = (EXPORT_MAX_DIM - 2 * EXPORT_PAD) / maxSpan
+    z += Math.log2(k)
+    ;({ w: pxW, h: pxH } = spanAt(z))
+    maxSpan = Math.max(pxW, pxH)
+  }
+  // Marge dynamique : agrandit le cadre des petits itinéraires sans gonfler le détail.
+  let pad = EXPORT_PAD
+  if (maxSpan + 2 * pad < EXPORT_MIN_CONTENT) pad = (EXPORT_MIN_CONTENT - maxSpan) / 2
+
+  const tileZoom = Math.min(info.maxzoom, Math.floor(z + offset))
+  return { cssW: Math.round(pxW + 2 * pad), cssH: Math.round(pxH + 2 * pad), tileZoom, pad: Math.round(pad) }
+}
+
+// Estimation affichée dans la modale (carte seule, hors titre/stats/profil).
+const exportEstimate = computed<ExportDims | null>(() => {
+  void routeStore.geometry.value // dépendance réactive
+  return exportStyleId.value ? computeExportDims(exportStyleId.value) : null
+})
+
 function openExportDialog() {
   exportStyleId.value = state.mapStyleId
   exportShowGrade.value = state.colorMode === 'grade'
@@ -432,14 +490,14 @@ async function applyStyleForExport(styleId: string) {
   })
 }
 
-function drawClimbMarkersOnCanvas(ctx: CanvasRenderingContext2D, mapOffsetY: number, s: number) {
+function drawClimbMarkersOnCanvas(ctx: CanvasRenderingContext2D, mapOffsetY: number, pscale: number, s: number) {
   const mapInst = mapRef.value?.getMapInstance()
   if (!mapInst) return
   routeStore.detectedClimbs.value.forEach((climb) => {
     const pt = routeStore.geometry.value[climb.startIdx]
     if (!pt) return
     const sp = mapInst.project([pt[0], pt[1]])
-    const cx = sp.x * s, cy = sp.y * s + mapOffsetY
+    const cx = sp.x * pscale, cy = sp.y * pscale + mapOffsetY
     const color = CLIMB_CAT_COLORS[climb.category] ?? '#6c757d'
     const r = 13 * s
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2)
@@ -501,32 +559,51 @@ function drawStatsOnCanvas(ctx: CanvasRenderingContext2D, offsetY: number, h: nu
 async function exportImage() {
   const mapInst = mapRef.value?.getMapInstance()
   if (!mapInst || !routeStore.geometry.value.length) return
+  const dims = computeExportDims(exportStyleId.value)
+  if (!dims) return
   exporting.value = true
   showExportDialog.value = false
   const savedStyleId = state.mapStyleId
   const savedColorMode = state.colorMode
   const savedShowClimbs = state.showClimbs
   const savedPixelRatio = mapInst.getPixelRatio()
+  const dpr = window.devicePixelRatio || 1
+
+  // On agrandit temporairement le conteneur de carte (hors écran) à la taille requise pour
+  // afficher tout l'itinéraire au maxzoom, puis on capture au ratio 1:1. C'est le zoom de la
+  // carte — et non le pixelRatio — qui détermine le niveau de tuiles chargé par MapLibre.
+  const container = mapInst.getContainer()
+  const refW = container.offsetWidth || 900
+  const savedContainerCss = container.style.cssText
+  const savedHtmlOverflow = document.documentElement.style.overflow
 
   try {
     await applyStyleForExport(exportStyleId.value)
     const targetColorMode = exportShowGrade.value ? 'grade' : 'none'
     if (state.colorMode !== targetColorMode) { state.colorMode = targetColorMode; mapRef.value?.applyColorMode() }
 
-    // Increase pixel ratio so MapLibre fetches higher-zoom tiles for the same geographic extent,
-    // producing sharper detail without needing to upscale the captured canvas.
-    mapInst.setPixelRatio(savedPixelRatio * exportScale.value)
+    document.documentElement.style.overflow = 'hidden'
+    container.style.position = 'fixed'
+    container.style.top = '0'
+    container.style.left = '0'
+    container.style.width = `${dims.cssW}px`
+    container.style.height = `${dims.cssH}px`
+    container.style.zIndex = '-1'
+    container.style.visibility = 'hidden'
+    mapInst.setPixelRatio(1)
+    mapInst.resize()
 
     const lngs = routeStore.geometry.value.map((c) => c[0])
     const lats = routeStore.geometry.value.map((c) => c[1])
-    mapInst.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 40, duration: 0 })
+    mapInst.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: dims.pad, duration: 0 })
     await new Promise<void>((resolve) => mapInst.once('idle', resolve))
 
-    // Canvas is already at exportScale × savedPixelRatio — capture at 1:1, no software upscale.
-    const s = savedPixelRatio * exportScale.value
     const mapCanvas = mapInst.getCanvas()
     const outW = mapCanvas.width
     const mapOutH = mapCanvas.height
+    // Échelle visuelle des surcouches (titre, stats, marqueurs) relative à la taille de sortie,
+    // pour qu'elles gardent les mêmes proportions qu'à l'écran quelle que soit la résolution.
+    const s = outW / refW
     const chartOutH = Math.round(mapOutH * 0.40)
     const titleH = Math.round(52 * s)
     const statsH = exportShowStats.value ? Math.round(80 * s) : 0
@@ -538,11 +615,11 @@ async function exportImage() {
     const chartInst = chartRef.value?.getChartInstance()
     if (chartInst) {
       const o = chartInst.options as any
-      const fs = (base: number) => ({ size: Math.round(base * exportScale.value) })
+      const fs = (base: number) => ({ size: Math.round((base * s) / dpr) })
       o.scales.x.ticks.font = fs(11); o.scales.y.ticks.font = fs(11)
       o.scales.x.title.font = fs(10); o.scales.y.title.font = fs(10)
       chartInst.update('none')
-      chartInst.resize(outW / savedPixelRatio, chartOutH / savedPixelRatio)
+      chartInst.resize(outW / dpr, chartOutH / dpr)
       await nextTick()
     }
 
@@ -550,16 +627,25 @@ async function exportImage() {
     drawTitleOnCanvas(ctx, titleH, s)
     if (exportShowStats.value) drawStatsOnCanvas(ctx, titleH, statsH, s)
     ctx.drawImage(mapCanvas, 0, mapOffsetY, outW, mapOutH)
-    if (exportShowClimbs.value) drawClimbMarkersOnCanvas(ctx, mapOffsetY, s)
+    // pixelRatio = 1 : project() renvoie des coordonnées déjà à l'échelle de la carte capturée.
+    if (exportShowClimbs.value) drawClimbMarkersOnCanvas(ctx, mapOffsetY, 1, s)
     const chartEl = chartRef.value?.getChartEl()
     if (chartEl) ctx.drawImage(chartEl, 0, mapOffsetY + mapOutH, outW, chartOutH)
 
-    const link = document.createElement('a')
-    link.download = `${(routeStore.name.value ?? 'itineraire').trim() || 'itineraire'}.png`
-    link.href = out.toDataURL('image/png')
-    link.click()
+    const blob = await new Promise<Blob | null>((resolve) => out.toBlob(resolve, 'image/png'))
+    if (blob) {
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.download = `${(routeStore.name.value ?? 'itineraire').trim() || 'itineraire'}.png`
+      link.href = url
+      link.click()
+      URL.revokeObjectURL(url)
+    }
   } finally {
+    container.style.cssText = savedContainerCss
+    document.documentElement.style.overflow = savedHtmlOverflow
     mapInst.setPixelRatio(savedPixelRatio)
+    mapInst.resize()
     const chartInst = chartRef.value?.getChartInstance()
     if (chartInst) {
       const o = chartInst.options as any
@@ -891,9 +977,15 @@ onBeforeUnmount(() => {
               <input id="export-stats" v-model="exportShowStats" type="checkbox" class="form-check-input" />
               <label for="export-stats" class="form-check-label small">{{ t('routes.export_show_stats') }}</label>
             </div>
-            <div>
-              <label class="form-label small fw-semibold">{{ t('routes.export_scale') }} ({{ exportScale }}×)</label>
-              <input v-model.number="exportScale" type="range" class="form-range" min="1" max="4" step="0.5" />
+            <div class="bg-light rounded p-2 small">
+              <div class="d-flex justify-content-between">
+                <span class="fw-semibold">{{ t('routes.export_precision') }}</span>
+                <span>{{ t('routes.export_precision_max') }}</span>
+              </div>
+              <div v-if="exportEstimate" class="d-flex justify-content-between text-muted mt-1">
+                <span>{{ t('routes.export_resolution') }}</span>
+                <span>{{ exportEstimate.cssW }} × {{ exportEstimate.cssH }} px · zoom {{ exportEstimate.tileZoom }}</span>
+              </div>
             </div>
             <button type="button" class="btn btn-warning" @click="exportImage" :disabled="exporting">
               <span v-if="exporting" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>

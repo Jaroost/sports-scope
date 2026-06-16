@@ -10,6 +10,20 @@ export const MAP_STYLES: MapStyle[] = [
   { id: 'liberty',   icon: 'fa-map' },
 ]
 
+// Tile metadata used by the image export to render at the finest available detail.
+// `maxzoom` = zoom des plus petites tuiles disponibles pour la source ; `tileSize` = taille
+// native d'une tuile (256 pour les sources raster, 512 pour le vectoriel OpenFreeMap).
+export interface ExportTileInfo { maxzoom: number; tileSize: number }
+export const EXPORT_TILE_INFO: Record<string, ExportTileInfo> = {
+  cyclosm:   { maxzoom: 18, tileSize: 256 },
+  topo:      { maxzoom: 17, tileSize: 256 },
+  swisstopo: { maxzoom: 18, tileSize: 256 },
+  liberty:   { maxzoom: 16, tileSize: 512 },
+}
+export function exportTileInfoFor(id: string): ExportTileInfo {
+  return EXPORT_TILE_INFO[id] ?? { maxzoom: 17, tileSize: 256 }
+}
+
 export const ROUTE_LINE_LAYOUT = { 'line-join': 'round', 'line-cap': 'round' } as const
 export const ROUTE_BORDER_PAINT = { 'line-color': 'rgba(0,0,0,0.28)', 'line-width': 8 } as const
 

@@ -56,7 +56,7 @@ t('routes.ma_nouvelle_cle')
 
 ### Configuration i18n-js
 
-- Config : `config/i18n-js.yml` — exporte tout (`patterns: ["*"]`) vers `app/javascript/locales/%{locale}.json`
+- Config : `config/i18n-js.yml` — exporte tout (`patterns: ["*"]`) vers `app/javascript/locales/:locale.json` (le placeholder doit être `:locale` — i18n-js 4.x ne reconnaît PAS `%{locale}` et écrirait alors un seul fichier nommé littéralement `%{locale}.json`)
 - Initializer : `config/initializers/i18n-js.rb` — régénère les JSON au démarrage dans tous les environnements (dev, test, prod)
 - En prod, les JSON sont générés lors du boot avant le build Vite (`assets:precompile` déclenche un boot Rails)
 

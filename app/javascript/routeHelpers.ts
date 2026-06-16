@@ -203,3 +203,82 @@ export function geomIdxForKm(km: number, cumDistKm: number[]): number {
   }
   return lo
 }
+
+// ─── Navigation helpers ────────────────────────────────────────────────────────
+
+// GPS accuracy circle as a ring of [lng, lat] points (used as a GeoJSON polygon).
+export function generateCircle(center: LngLat, radiusM: number, steps = 64): LngLat[] {
+  const [lng, lat] = center
+  const latR = (lat * Math.PI) / 180
+  const pts: LngLat[] = []
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI
+    pts.push([
+      lng + (radiusM / (111320 * Math.cos(latR))) * Math.cos(a),
+      lat + (radiusM / 110540) * Math.sin(a),
+    ])
+  }
+  return pts
+}
+
+// Initial bearing (degrees, 0 = north) from point a to point b.
+export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const lat1 = toRad(a[1])
+  const lat2 = toRad(b[1])
+  const dLng = toRad(b[0] - a[0])
+  const y = Math.sin(dLng) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+  return (Math.atan2(y, x) * 180) / Math.PI
+}
+
+// Index of the geometry vertex closest to `pos`, plus the lateral distance (m).
+// `hintIdx` restricts the search to a window around the last known index for perf;
+// pass -1 (default) to scan the whole geometry.
+export function nearestGeomIndex(
+  pos: LngLat,
+  geometry: Coord[],
+  hintIdx = -1,
+  window = 60,
+): { idx: number; distM: number } {
+  let bestIdx = 0
+  let bestDist = Infinity
+  let lo = 0
+  let hi = geometry.length
+  if (hintIdx >= 0) {
+    lo = Math.max(0, hintIdx - window)
+    hi = Math.min(geometry.length, hintIdx + window)
+  }
+  for (let i = lo; i < hi; i++) {
+    const d = haversine(pos, geometry[i])
+    if (d < bestDist) { bestDist = d; bestIdx = i }
+  }
+  return { idx: bestIdx, distM: bestDist }
+}
+
+// Remaining distance / elevation / progress ratio from a projected index.
+export function progressFor(
+  idx: number,
+  geometry: Coord[],
+  cumDistM: number[],
+): { remainingM: number; doneRatio: number; remainingGainM: number } {
+  const total = cumDistM[cumDistM.length - 1] || 0
+  const done = cumDistM[idx] || 0
+  const remainingM = Math.max(0, total - done)
+  const doneRatio = total > 0 ? Math.min(1, done / total) : 0
+  const { gain } = computeGainLoss(geometry.slice(idx))
+  return { remainingM, doneRatio, remainingGainM: gain }
+}
+
+// The climb currently being ridden (idx within [startIdx, endIdx]) and how far
+// through it we are (0..1), or null when not on a climb.
+export function activeClimb(idx: number, climbs: Climb[]): { climb: Climb; ratio: number } | null {
+  for (const climb of climbs) {
+    if (idx >= climb.startIdx && idx <= climb.endIdx) {
+      const span = climb.endIdx - climb.startIdx
+      const ratio = span > 0 ? (idx - climb.startIdx) / span : 0
+      return { climb, ratio }
+    }
+  }
+  return null
+}

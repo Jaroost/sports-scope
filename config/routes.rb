@@ -7,6 +7,7 @@ Rails.application.routes.draw do
     get "/routes", to: "pages#routes_index", as: :routes_index
     get "/routes/new", to: "pages#route_builder", as: :new_route
     get "/routes/:id/edit", to: "pages#route_builder", as: :edit_route, constraints: { id: /\d+/ }
+    get "/routes/:id/navigate", to: "pages#route_navigation", as: :navigate_route, constraints: { id: /\d+/ }
   end
 
   # OmniAuth (POST entry points, GET callbacks)

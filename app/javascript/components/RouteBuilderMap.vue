@@ -9,7 +9,7 @@ import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import type { Place } from '../stores/placesStore'
 import {
-  GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm,
+  GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
 } from '../routeHelpers'
 import type { Climb } from '../routeHelpers'
 
@@ -102,20 +102,6 @@ function saveMapView() {
 
 function csrfToken() {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
-
-function generateCircle(center: [number, number], radiusM: number, steps = 64): [number, number][] {
-  const [lng, lat] = center
-  const latR = lat * Math.PI / 180
-  const pts: [number, number][] = []
-  for (let i = 0; i <= steps; i++) {
-    const a = (i / steps) * 2 * Math.PI
-    pts.push([
-      lng + (radiusM / (111320 * Math.cos(latR))) * Math.cos(a),
-      lat + (radiusM / 110540) * Math.sin(a),
-    ])
-  }
-  return pts
 }
 
 function flagSvg(kind: 'start' | 'end') {

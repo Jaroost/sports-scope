@@ -1,0 +1,3 @@
+<% content_for :title, t("routes.navigate_title") %>
+<% content_for :container_class, "container-fluid p-0" %>
+<div data-vue-component="RouteNavigation" data-vue-props='<%= { routeId: @route_id }.to_json %>'></div>

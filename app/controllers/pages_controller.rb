@@ -14,4 +14,9 @@ class PagesController < ApplicationController
     require_login!
     @route_id = params[:id]
   end
+
+  def route_navigation
+    require_login!
+    @route_id = params[:id]
+  end
 end

@@ -183,8 +183,19 @@ async function recomputeRoute() {
   routeStore.error.value = null
 
   try {
-    const lonlats = routeStore.waypoints.value.map((w) => `${w.lng},${w.lat}`).join('|')
-    const url = `https://brouter.de/brouter?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson`
+    const wps = routeStore.waypoints.value
+    const lonlats = wps.map((w) => `${w.lng},${w.lat}`).join('|')
+    // Modèle A : un waypoint « libre » trace ses deux tronçons adjacents en ligne droite
+    // (beeline BRouter), ce qui ignore le réseau routier et les interdictions.
+    // `straight` indexe des tronçons : le tronçon i relie waypoint[i] → waypoint[i+1].
+    const straight = new Set<number>()
+    wps.forEach((w, i) => {
+      if (!w.free) return
+      if (i > 0) straight.add(i - 1)
+      if (i < wps.length - 1) straight.add(i)
+    })
+    const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
+    const url = `https://brouter.de/brouter?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson${straightParam}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
     const data = await res.json()

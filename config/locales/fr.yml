@@ -229,6 +229,8 @@ fr:
     show_waypoints: "Afficher les points"
     hide_waypoints: "Masquer les points"
     remove_waypoint: "Supprimer ce point"
+    make_free: "Rendre libre (hors route)"
+    anchor_to_road: "Ancrer sur la route"
     return_via_same_route: "Ajouter à la fin de l'itinéraire"
     street_view: "Street View"
     komoot_waypoint_limit: "Votre itinéraire contient %{count} points, mais Komoot n'en accepte que 20 via l'URL. Le tracé sera simplifié en conservant le départ et l'arrivée. Continuer ?"

@@ -102,7 +102,9 @@ class RoutesController < ApplicationController
       lng = h["lng"] || h[:lng]
       next nil unless lat.is_a?(Numeric) && lng.is_a?(Numeric)
       next nil if lat.abs > 90 || lng.abs > 180
-      { "lat" => lat.to_f, "lng" => lng.to_f }
+      wp = { "lat" => lat.to_f, "lng" => lng.to_f }
+      wp["free"] = true if h["free"] || h[:free]
+      wp
     end.compact
   end
 

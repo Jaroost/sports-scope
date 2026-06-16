@@ -530,6 +530,17 @@ function removeWaypoint(idx: number) {
   emit('waypoints-changed')
 }
 
+function toggleWaypointFree(idx: number) {
+  const wps = routeStore.waypoints.value
+  if (idx < 0 || idx >= wps.length) return
+  const next = wps.slice()
+  next[idx] = { ...next[idx], free: !next[idx].free }
+  routeStore.waypoints.value = next
+  deselectAll()
+  refreshWaypointMarkers()
+  emit('waypoints-changed')
+}
+
 function addReturnTo(idx: number) {
   const wps = routeStore.waypoints.value
   if (wps.length < 2 || idx >= wps.length - 1) return
@@ -628,7 +639,7 @@ function refreshWaypointMarkers() {
   if (!props.state.showWaypoints) return
   routeStore.waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
-    el.className = 'wp-marker'
+    el.className = w.free ? 'wp-marker wp-marker--free' : 'wp-marker'
     const isLast = idx === routeStore.waypoints.value.length - 1
     const returnHtml = !isLast
       ? `<button type="button" class="wp-tooltip-action wp-tooltip-action--return">
@@ -662,6 +673,10 @@ function refreshWaypointMarkers() {
           <span>Komoot</span>
         </a>
         ${returnHtml}
+        <button type="button" class="wp-tooltip-action wp-tooltip-action--free">
+          <i class="fa-solid fa-bezier-curve" aria-hidden="true"></i>
+          <span>${w.free ? t('routes.anchor_to_road') : t('routes.make_free')}</span>
+        </button>
         <button type="button" class="wp-tooltip-action wp-tooltip-action--delete">
           <i class="fa-solid fa-trash" aria-hidden="true"></i>
           <span>${t('routes.remove_waypoint')}</span>
@@ -678,8 +693,11 @@ function refreshWaypointMarkers() {
       selectWaypoint(idx)
     })
     el.querySelector('.wp-tooltip-close')!.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
-    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete)').forEach((a) => {
+    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
+    })
+    el.querySelector('.wp-tooltip-action--free')!.addEventListener('click', (ev: any) => {
+      ev.stopPropagation(); ev.preventDefault(); toggleWaypointFree(idx)
     })
     el.querySelector('.wp-tooltip-action--return')?.addEventListener('click', (ev: any) => {
       ev.stopPropagation(); ev.preventDefault(); addReturnTo(idx)
@@ -718,7 +736,7 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       setTimeout(() => { suppressNextMapClick = false }, 50)
       const pos = marker.getLngLat()
       const next = routeStore.waypoints.value.slice()
-      next[idx] = { lng: pos.lng, lat: pos.lat }
+      next[idx] = { ...next[idx], lng: pos.lng, lat: pos.lat }
       routeStore.waypoints.value = next
       emit('waypoints-changed')
     }
@@ -752,7 +770,7 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       if (!moved) { selectWaypoint(idx); return }
       const pos = marker.getLngLat()
       const next = routeStore.waypoints.value.slice()
-      next[idx] = { lng: pos.lng, lat: pos.lat }
+      next[idx] = { ...next[idx], lng: pos.lng, lat: pos.lat }
       routeStore.waypoints.value = next
       emit('waypoints-changed')
     }
@@ -1528,9 +1546,16 @@ defineExpose({
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(0,0,0,0.35);
 }
+.wp-marker--free .wp-marker-num {
+  background: #a855f7;
+}
 .wp-marker--selected .wp-marker-num {
   background: #1d4ed8;
   box-shadow: 0 0 0 3px rgba(29,78,216,0.32), 0 2px 6px rgba(0,0,0,0.35);
+}
+.wp-marker--free.wp-marker--selected .wp-marker-num {
+  background: #9333ea;
+  box-shadow: 0 0 0 3px rgba(168,85,247,0.32), 0 2px 6px rgba(0,0,0,0.35);
 }
 .wp-tooltip {
   position: absolute;

@@ -229,6 +229,8 @@ en:
     show_waypoints: "Show waypoints"
     hide_waypoints: "Hide waypoints"
     remove_waypoint: "Remove this point"
+    make_free: "Make free (off-road)"
+    anchor_to_road: "Anchor to road"
     return_via_same_route: "Add to end of route"
     street_view: "Street View"
     komoot_waypoint_limit: "Your route has %{count} points, but Komoot only accepts 20 via URL. The route will be simplified while keeping the start and end. Continue?"

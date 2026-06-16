@@ -15,7 +15,7 @@ function loadSpeed(): number {
 class RouteStore {
   // ─── Core route data ────────────────────────────────────────────────────────
   readonly geometry = ref<Coord[]>([])
-  readonly waypoints = ref<Array<{ lng: number; lat: number }>>([])
+  readonly waypoints = ref<Array<{ lng: number; lat: number; free?: boolean }>>([])
   readonly distanceM = ref(0)
   readonly elevGainM = ref(0)
   readonly elevLossM = ref(0)

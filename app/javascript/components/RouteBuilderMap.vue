@@ -364,7 +364,10 @@ function clearPlaceMarkers() {
 function showBakeryReviewsPopup(place: Place) {
   if (!_maplibregl || !mapInstance) return
   if (placePopup) { placePopup.remove(); placePopup = null }
-  const url = `https://www.google.com/maps?q=${place.lat},${place.lng}`
+  // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
+  // le POI boulangerie. On vise juste à côté pour le laisser visible/cliquable.
+  const OFFSET = 0.00008
+  const url = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   wrap.innerHTML = `

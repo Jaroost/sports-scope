@@ -7,6 +7,7 @@ import MapStyleDropdown from './MapStyleDropdown.vue'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
+import type { Place } from '../stores/placesStore'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm,
 } from '../routeHelpers'
@@ -15,6 +16,8 @@ import type { Climb } from '../routeHelpers'
 const props = defineProps<{ state: RouteBuilderState }>()
 const emit = defineEmits<{
   'waypoints-changed': []
+  'select-place': [place: Place]
+  'hover-place': [place: Place | null]
 }>()
 
 const mapEl = useTemplateRef('mapEl')
@@ -44,6 +47,8 @@ let selectionMarkerBKm: number | null = null
 let selectionMarkerDragging = false
 const climbMarkers: any[] = []
 const climbMarkerObservers: MutationObserver[] = []
+const placeMarkers: any[] = []
+const placeMarkerObservers: MutationObserver[] = []
 let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
 const svCache = new Map<string, boolean>()
@@ -342,6 +347,42 @@ function buildClimbMarkerEl(climb: Climb) {
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker(); updateClimbHoverLayer(climb) })
   el.addEventListener('mouseleave', () => { overClimbMarker = false; updateClimbHoverLayer(null) })
+  return el
+}
+
+// ─── Place markers (cimetières / boulangeries) ─────────────────────────────────
+
+function clearPlaceMarkers() {
+  placeMarkerObservers.forEach((obs) => obs.disconnect()); placeMarkerObservers.length = 0
+  placeMarkers.forEach((m) => m.remove()); placeMarkers.length = 0
+}
+
+// Rend une icône persistante et cliquable pour chaque cimetière/boulangerie filtré.
+// Réutilise le pattern des marqueurs de cols (observateur de scale au zoom).
+function installPlaceMarkers() {
+  if (!_maplibregl || !mapInstance) return
+  clearPlaceMarkers()
+  for (const place of placesStore.filteredPlaces.value) {
+    if (place.type !== 'cemetery' && place.type !== 'bakery') continue
+    const el = buildPlaceMarkerEl(place)
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
+      .setLngLat([place.markerLng, place.markerLat])
+      .addTo(mapInstance)
+    placeMarkerObservers.push(attachClimbMarkerScaleObserver(el))
+    placeMarkers.push(marker)
+  }
+}
+
+function buildPlaceMarkerEl(place: Place) {
+  const el = document.createElement('div')
+  const icon = place.type === 'cemetery' ? 'fa-cross' : 'fa-bread-slice'
+  el.className = `place-marker place-marker--${place.type}`
+  el.title = place.name
+  el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
+  el.addEventListener('click', (ev) => { ev.stopPropagation(); emit('select-place', place) })
+  el.addEventListener('mousedown', (ev) => ev.stopPropagation())
+  el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker(); emit('hover-place', place) })
+  el.addEventListener('mouseleave', () => { overClimbMarker = false; emit('hover-place', null) })
   return el
 }
 
@@ -905,7 +946,7 @@ function setMapStyle(id: string) {
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
     installRouteLayer(); installPreviewLayer()
-    updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); installClimbMarkers()
+    updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); installClimbMarkers(); installPlaceMarkers()
     if (locationVisible.value && lastLocationCoords) installLocationLayers(lastLocationCoords, lastLocationAccuracy)
     if (props.state.is3D) {
       if (!mapInstance.getSource('terrain-dem')) {
@@ -1133,6 +1174,9 @@ watch(selectionStore.selectionRange, () => {
   updateSelectionMarkers()
 })
 
+// Réagit aux toggles de filtre et au rafraîchissement de la liste des lieux.
+watch(placesStore.filteredPlaces, () => installPlaceMarkers())
+
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 onBeforeUnmount(() => {
@@ -1140,6 +1184,7 @@ onBeforeUnmount(() => {
   divergentMarkers.forEach((m) => m.remove()); divergentMarkers.length = 0
   climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
   climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
+  clearPlaceMarkers()
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
   if (locationMarker) { locationMarker.remove(); locationMarker = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
@@ -1153,6 +1198,7 @@ defineExpose({
   setRouteLineScale,
   applyColorMode,
   installClimbMarkers,
+  installPlaceMarkers,
   updateSelectionLayer,
   updateSelectionMarkers,
   refreshWaypointMarkers,
@@ -1744,6 +1790,25 @@ defineExpose({
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
 .climb-hover-flag { pointer-events: none; }
+.place-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid currentColor;
+  box-shadow: 0 3px 8px -2px rgba(0,0,0,0.4);
+  cursor: pointer;
+  user-select: none;
+  transform-origin: bottom center;
+  transition: box-shadow 0.1s ease;
+}
+.place-marker i { font-size: 0.78rem; }
+.place-marker:hover { box-shadow: 0 6px 14px -3px rgba(0,0,0,0.5); }
+.place-marker--cemetery { color: #6b7280; }
+.place-marker--bakery   { color: #b45309; }
 .route-insert-marker {
   width: 22px;
   height: 22px;

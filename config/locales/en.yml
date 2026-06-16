@@ -175,6 +175,7 @@ en:
     places_title: "Places"
     places_count: "place"
     places_loading: "Looking up places…"
+    places_radius: "Detection radius around the route"
     estimated_time_hint: "Estimated time (distance ÷ average speed)"
     avg_speed_hint: "Average speed (km/h)"
     save_name: "Save name"

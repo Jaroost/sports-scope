@@ -175,6 +175,7 @@ fr:
     places_title: "Lieux"
     places_count: "lieu"
     places_loading: "Recherche des lieux…"
+    places_radius: "Rayon de détection autour du tracé"
     estimated_time_hint: "Temps estimé (distance ÷ vitesse moyenne)"
     avg_speed_hint: "Vitesse moyenne (km/h)"
     save_name: "Enregistrer le nom"

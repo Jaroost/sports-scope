@@ -111,7 +111,7 @@ const climbsExpanded = ref(true)
             <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
             <span>{{ t('routes.places_loading') }}</span>
           </div>
-          <div v-if="placesStore.hasCemeteryPlaces.value || placesStore.hasLocalityPlaces.value" class="places-filter-bar">
+          <div class="places-filter-bar">
             <button
               v-if="placesStore.hasLocalityPlaces.value"
               type="button"
@@ -130,6 +130,29 @@ const climbsExpanded = ref(true)
             >
               <i class="fa-solid fa-cross" aria-hidden="true"></i>
             </button>
+            <button
+              v-if="placesStore.hasBakeryPlaces.value"
+              type="button"
+              class="places-filter-btn"
+              :class="{ active: placesStore.placeShowBakeries.value }"
+              @click="placesStore.placeShowBakeries.value = !placesStore.placeShowBakeries.value"
+            >
+              <i class="fa-solid fa-bread-slice" aria-hidden="true"></i>
+            </button>
+            <label class="places-radius-field" :title="t('routes.places_radius')">
+              <i class="fa-solid fa-ruler-horizontal" aria-hidden="true"></i>
+              <input
+                v-model.number="placesStore.placeRadiusM.value"
+                type="number"
+                min="200"
+                max="5000"
+                step="100"
+                class="places-radius-input"
+                :aria-label="t('routes.places_radius')"
+                @change="placesStore.persistRadius()"
+              />
+              <span>m</span>
+            </label>
           </div>
           <div
             v-for="(place, idx) in placesStore.filteredPlaces.value"
@@ -143,8 +166,9 @@ const climbsExpanded = ref(true)
           >
             <span class="place-pill-dist">{{ formatDistanceShort(place.distanceM) }}</span>
             <i v-if="place.type === 'cemetery'" class="fa-solid fa-cross place-pill-icon" aria-hidden="true"></i>
+            <i v-else-if="place.type === 'bakery'" class="fa-solid fa-bread-slice place-pill-icon" aria-hidden="true"></i>
             <span class="place-pill-name">{{ place.name }}</span>
-            <span v-if="place.type === 'cemetery' && place.distFromRouteM > 0" class="place-pill-route-dist">
+            <span v-if="(place.type === 'cemetery' || place.type === 'bakery') && place.distFromRouteM > 0" class="place-pill-route-dist">
               {{ formatDistanceShort(place.distFromRouteM) }}
             </span>
           </div>
@@ -280,7 +304,30 @@ const climbsExpanded = ref(true)
 .place-pill-icon { font-size: 0.65rem; color: #6b7280; flex-shrink: 0; }
 .place-pill-route-dist { flex-shrink: 0; font-size: 0.72rem; color: #9ca3af; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-.places-filter-bar { display: flex; gap: 0.3rem; padding: 0.1rem 0.6rem 0.35rem; }
+.places-filter-bar { display: flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.6rem 0.35rem; }
+.places-radius-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: auto;
+  margin-bottom: 0;
+  font-size: 0.68rem;
+  color: #6b7280;
+}
+.places-radius-input {
+  width: 3rem;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 6px;
+  padding: 0.05rem 0.25rem;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.places-radius-input::-webkit-inner-spin-button,
+.places-radius-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.places-radius-input:focus { outline: none; border-color: #0d6efd; }
 .places-filter-btn {
   display: inline-flex;
   align-items: center;

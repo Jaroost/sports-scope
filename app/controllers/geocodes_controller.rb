@@ -15,6 +15,8 @@ class GeocodesController < ApplicationController
         node["landuse"="cemetery"](#{south},#{west},#{north},#{east});
         way["amenity"="grave_yard"](#{south},#{west},#{north},#{east});
         way["landuse"="cemetery"](#{south},#{west},#{north},#{east});
+        node["shop"="bakery"](#{south},#{west},#{north},#{east});
+        way["shop"="bakery"](#{south},#{west},#{north},#{east});
       );
       out center;
     OVERPASS
@@ -38,19 +40,25 @@ class GeocodesController < ApplicationController
       next unless lat && lng
 
       is_cemetery = tags["amenity"] == "grave_yard" || tags["landuse"] == "cemetery"
-      name = tags["name"] || (is_cemetery ? "Cimetière" : nil)
+      is_bakery = tags["shop"] == "bakery"
+      name = tags["name"] || (is_cemetery ? "Cimetière" : is_bakery ? "Boulangerie" : nil)
       next unless name
 
       poi_type = if is_cemetery then "cemetery"
+                 elsif is_bakery then "bakery"
                  else tags["place"]
                  end
       { lat: lat, lng: lng, name: name, type: poi_type }
     end
 
     render json: places
-  rescue Net::OpenTimeout, Net::ReadTimeout
-    render json: []
-  rescue JSON::ParserError
+  # Overpass est un service externe best-effort : tout échec réseau (timeout,
+  # connexion refusée, réseau injoignable, DNS, TLS…) ou réponse illisible ne
+  # doit pas remonter en 500 — on dégrade en liste vide, le front gère déjà ce cas.
+  # SystemCallError couvre les Errno::* (ENETUNREACH, ECONNREFUSED, EHOSTUNREACH…).
+  rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, SystemCallError,
+         OpenSSL::SSL::SSLError, JSON::ParserError => e
+    Rails.logger.warn("GeocodesController#places: #{e.class}: #{e.message}")
     render json: []
   rescue => e
     Rails.logger.error("GeocodesController#places: #{e.class}: #{e.message}")

@@ -113,7 +113,9 @@ async function fetchImportantPlaces() {
     if (lng < west) west = lng
     if (lng > east) east = lng
   }
-  const BUFFER = 0.02
+  // La bbox doit englober le rayon de détection configurable, sinon les POI
+  // au-delà de ~2 km ne seraient pas remontés par Overpass.
+  const BUFFER = Math.max(0.02, (placesStore.placeRadiusM.value + 200) / 111000)
   south -= BUFFER; north += BUFFER; west -= BUFFER; east += BUFFER
 
   try {
@@ -129,9 +131,13 @@ async function fetchImportantPlaces() {
     const seen = new Set<string>()
     const results: any[] = []
 
+    // Cimetières et boulangeries : POI ponctuels filtrés par le rayon configurable,
+    // marqueur posé sur le lieu. Localités : accrochées au point le plus proche du tracé.
+    const radiusM = placesStore.placeRadiusM.value
     for (const node of nodes) {
-      const seenKey = node.type === 'cemetery'
-        ? `cemetery:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
+      const isPoi = node.type === 'cemetery' || node.type === 'bakery'
+      const seenKey = isPoi
+        ? `${node.type}:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
         : `${node.type ?? ''}:${node.name}`
       if (seen.has(seenKey)) continue
       const cosLat = Math.cos(node.lat * Math.PI / 180)
@@ -142,20 +148,19 @@ async function fetchImportantPlaces() {
         const d2 = dLng * dLng + dLat * dLat
         if (d2 < minD2) { minD2 = d2; nearestIdx = i }
       }
-      const threshold = node.type === 'cemetery' ? 1500 : THRESHOLD_M
+      const threshold = isPoi ? radiusM : THRESHOLD_M
       const dist = haversine(geom[nearestIdx], [node.lng, node.lat])
       if (dist > threshold) continue
       seen.add(seenKey)
-      const isCemetery = node.type === 'cemetery'
       results.push({
         name: node.name,
         type: node.type,
         distanceM: distancesM[nearestIdx],
-        distFromRouteM: isCemetery ? dist : 0,
+        distFromRouteM: isPoi ? dist : 0,
         lng: node.lng,
         lat: node.lat,
-        markerLng: isCemetery ? node.lng : geom[nearestIdx][0],
-        markerLat: isCemetery ? node.lat : geom[nearestIdx][1],
+        markerLng: isPoi ? node.lng : geom[nearestIdx][0],
+        markerLat: isPoi ? node.lat : geom[nearestIdx][1],
       })
     }
     results.sort((a, b) => a.distanceM - b.distanceM)
@@ -835,6 +840,15 @@ watch(routeStore.geometry, (newGeom) => {
   fetchImportantPlaces()
 }, { deep: false })
 
+// Changer le rayon de détection relance la recherche (bbox + seuil dépendent du rayon).
+let radiusTimer: ReturnType<typeof setTimeout> | null = null
+watch(placesStore.placeRadiusM, () => {
+  if (radiusTimer) clearTimeout(radiusTimer)
+  radiusTimer = setTimeout(() => {
+    if (routeStore.geometry.value.length >= 2) fetchImportantPlaces()
+  }, 400)
+})
+
 function onWindowResize() {
   const mobile = window.innerWidth < 768
   if (mobile !== isMobile.value) isMobile.value = mobile
@@ -987,6 +1001,8 @@ onBeforeUnmount(() => {
             ref="mapRef"
             :state="state"
             @waypoints-changed="recomputeRoute"
+            @select-place="onSelectPlace"
+            @hover-place="onHoverPlace"
             @toggle-chart="state.showElevationChart = !state.showElevationChart; nextTick(() => mapRef?.resize())"
             @toggle-mobile-sheet="mobileSheetOpen = !mobileSheetOpen"
           />

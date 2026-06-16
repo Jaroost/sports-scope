@@ -30,6 +30,7 @@ const locationVisible = ref(false)
 const locating = ref(false)
 const hoverMarkerVisible = ref(false)
 let suppressNextMapClick = false
+let suppressNextWpClick = false
 let overClimbMarker = false
 const divergentMarkers: any[] = []
 let climbHoverStartMarker: any = null
@@ -689,6 +690,7 @@ function refreshWaypointMarkers() {
     attachWaypointDrag(el, marker, idx)
     el.addEventListener('click', (ev: any) => {
       ev.stopPropagation()
+      if (suppressNextWpClick) { suppressNextWpClick = false; return }
       if (ev.target.closest('.wp-tooltip')) return
       selectWaypoint(idx)
     })
@@ -733,7 +735,8 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       el.style.cursor = ''
       if (!moved) return
       suppressNextMapClick = true
-      setTimeout(() => { suppressNextMapClick = false }, 50)
+      suppressNextWpClick = true
+      setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 50)
       const pos = marker.getLngLat()
       const next = routeStore.waypoints.value.slice()
       next[idx] = { ...next[idx], lng: pos.lng, lat: pos.lat }
@@ -768,6 +771,8 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       el.removeEventListener('touchcancel', onTouchEnd)
       mapInstance.dragPan.enable()
       if (!moved) { selectWaypoint(idx); return }
+      suppressNextWpClick = true
+      setTimeout(() => { suppressNextWpClick = false }, 50)
       const pos = marker.getLngLat()
       const next = routeStore.waypoints.value.slice()
       next[idx] = { ...next[idx], lng: pos.lng, lat: pos.lat }

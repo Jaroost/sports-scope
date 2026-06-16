@@ -5,7 +5,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import {
-  GRADE_BUCKETS, haversine, gradeForIndex, colorForGrade, geomIdxForKm,
+  haversine, colorForGrade, geomIdxForKm,
   formatDuration,
 } from '../routeHelpers'
 
@@ -62,20 +62,6 @@ const chartStats = computed(() => {
       : 0,
     isSelection: false,
   }
-})
-
-const gradeLegend = computed(() => {
-  const out = []
-  for (let i = 0; i < GRADE_BUCKETS.length; i++) {
-    const upper = GRADE_BUCKETS[i].max
-    const lower = i === 0 ? -Infinity : GRADE_BUCKETS[i - 1].max
-    let label
-    if (!Number.isFinite(lower)) label = `< ${upper}%`
-    else if (!Number.isFinite(upper)) label = `> ${lower}%`
-    else label = `${lower} → ${upper}%`
-    out.push({ color: GRADE_BUCKETS[i].color, label })
-  }
-  return out
 })
 
 // ─── Segment colours ──────────────────────────────────────────────────────────
@@ -695,12 +681,6 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
           <span>{{ t('routes.no_elevation_yet') }}</span>
         </div>
         <template v-else>
-          <div class="grade-legend mb-2" :aria-label="t('routes.grade_legend')">
-            <span v-for="b in gradeLegend" :key="b.label" class="grade-legend-item">
-              <span class="grade-legend-swatch" :style="{ backgroundColor: b.color }"></span>
-              <span class="grade-legend-label">{{ b.label }}</span>
-            </span>
-          </div>
           <div class="elevation-canvas-wrap">
             <canvas ref="chartEl"></canvas>
           </div>
@@ -719,12 +699,16 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
   overflow: hidden;
   flex: 1;
 }
+.route-builder-chart-card :deep(.card-header) {
+  padding: 0.35rem 0.75rem;
+}
 .route-builder-chart-card-body {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding: 0.4rem 0.75rem;
 }
 .elevation-canvas-wrap {
   position: relative;
@@ -738,16 +722,6 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
   padding: 0.15rem 0.4rem;
   line-height: 1;
 }
-.grade-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.75rem;
-  font-size: 0.75rem;
-  color: #4b5563;
-}
-.grade-legend-item { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
-.grade-legend-swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,0.08); }
-.grade-legend-label { font-variant-numeric: tabular-nums; }
 .stat-pill {
   display: inline-flex;
   align-items: center;

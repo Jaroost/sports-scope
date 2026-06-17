@@ -528,8 +528,12 @@ function onVisibilityChange() {
 .nav-page {
   position: relative;
   width: 100%;
+  /* svh = smallest visible viewport (browser chrome expanded). The page never
+     scrolls, so the chrome stays put and svh matches the visible area exactly —
+     unlike dvh, which some mobile browsers mis-compute on first paint and only
+     fix after a rotation, leaving the bottom stats bar clipped off-screen. */
   height: 100vh;
-  height: 100dvh;
+  height: 100svh;
   overflow: hidden;
 }
 .nav-map { position: absolute; inset: 0; }

@@ -12,9 +12,15 @@ body {
 }
 
 // Full-screen pages (e.g. route navigation) render without the fixed navbar,
-// so the body must not reserve the 4rem top padding.
+// so the body must not reserve the 4rem top padding. Lock height to the small
+// viewport and disable scroll so the body never grows past the visible area
+// (the global `min-height: 100vh` would otherwise leave a sliver that scrolls
+// and pushes the bottom bar off-screen on mobile portrait).
 body.fullscreen-page {
   padding-top: 0;
+  min-height: 100svh;
+  height: 100svh;
+  overflow: hidden;
 }
 
 .sports-scope-brand {

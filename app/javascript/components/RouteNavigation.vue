@@ -87,9 +87,10 @@ async function fetchRoute() {
   const res = await fetch(`/api/routes/${props.routeId}`, { headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(t('routes.error_routing'))
   const data = await res.json()
-  geometry = (data.geometry || []) as Coord[]
+  const route = data.route || data
+  geometry = (route.geometry || []) as Coord[]
   if (geometry.length < 2) throw new Error(t('routes.error_min_points'))
-  routeName.value = data.name || ''
+  routeName.value = route.name || ''
   cumDistM = buildDistancesM(geometry)
   climbs = detectClimbs(geometry.map((c) => c[2]), cumDistM)
   remainingM.value = cumDistM[cumDistM.length - 1] || 0

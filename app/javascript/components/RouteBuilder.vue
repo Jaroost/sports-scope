@@ -7,7 +7,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration } from '../routeHelpers'
-import type { Coord } from '../routeHelpers'
+import type { Coord, VoiceHint } from '../routeHelpers'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
@@ -206,7 +206,8 @@ async function recomputeRoute() {
       if (i < wps.length - 1) straight.add(i)
     })
     const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
-    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson${straightParam}`
+    // timode=2 makes BRouter emit turn-by-turn voicehints in the GeoJSON properties.
+    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson&timode=2${straightParam}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
     const data = await res.json()
@@ -217,6 +218,16 @@ async function recomputeRoute() {
     const trackLen = parseFloat(feature.properties?.['track-length'] || '0')
     routeStore.distanceM.value = Number.isFinite(trackLen) && trackLen > 0 ? trackLen : 0
     let geom = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null]) as Coord[]
+    // Voicehints BRouter : [indexInTrack, command, exitNumber, distanceToNext, angle].
+    // On les ancre sur la coordonnée brute (avant densification, qui décalerait les
+    // index) ; la navigation les reprojettera sur la géométrie sauvegardée.
+    const rawHints = Array.isArray(feature.properties?.voicehints) ? feature.properties.voicehints : []
+    routeStore.voiceHints.value = rawHints
+      .map((h: number[]) => {
+        const c = coords[h[0]]
+        return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0 } : null
+      })
+      .filter(Boolean) as VoiceHint[]
     // Les tronçons droits (points libres) ne contiennent que leurs extrémités : on les
     // densifie pour qu'open-meteo échantillonne le relief le long de la ligne.
     if (straight.size) geom = densifyGeometry(geom)
@@ -281,6 +292,7 @@ async function fetchRoute(id: number) {
     routeStore.name.value = r.name || ''
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
+    routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
     routeStore.distanceM.value = r.distance_m || 0
     routeStore.elevGainM.value = r.elevation_gain_m || 0
     routeStore.elevLossM.value = r.elevation_loss_m || 0
@@ -310,6 +322,7 @@ async function save() {
       name: routeStore.name.value.trim(),
       waypoints: routeStore.waypoints.value,
       geometry: routeStore.geometry.value,
+      voice_hints: routeStore.voiceHints.value,
       distance_m: routeStore.distanceM.value,
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,

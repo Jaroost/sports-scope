@@ -4,11 +4,12 @@ import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, MAP_STYLES } from '../mapStyles'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
-  buildDistancesM, detectClimbs, detectTurns, computeGainLoss, formatDistanceShort, haversine,
-  generateCircle, bearingBetween, nearestGeomIndex, progressFor, activeClimb,
+  buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
+  formatDistanceShort, haversine, bearingBetween, nearestGeomIndex,
+  progressFor, activeClimb,
 } from '../routeHelpers'
-import type { Coord, Climb, LngLat, TurnPoint } from '../routeHelpers'
-import { unlockAudio, playTurn, playOffRoute } from '../navAudio'
+import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
+import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
 
 const props = defineProps<{ routeId: string | number }>()
 
@@ -34,9 +35,10 @@ const mapStyleId = ref(loadStyle())
 const remainingM = ref(0)
 const remainingGainM = ref(0)
 const doneRatio = ref(0)
+const speedKmh = ref(0)
 const offRoute = ref(false)
 const climbInfo = ref<{ climb: Climb; ratio: number; remainingGainM: number } | null>(null)
-const turnHint = ref<{ direction: 'left' | 'right'; distM: number } | null>(null)
+const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number } | null>(null)
 
 let map: any = null
 let maplibre: any = null
@@ -56,6 +58,7 @@ let lastIdx = 0
 let located = false
 let lastPos: LngLat | null = null
 let currentBearing = 0
+let lastFixTime = 0
 let hasInitialZoom = false
 let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
 let announcedTurn = -1       // index of the last turn we played a cue for
@@ -126,7 +129,12 @@ async function fetchRoute() {
   routeName.value = route.name || ''
   cumDistM = buildDistancesM(geometry)
   climbs = detectClimbs(geometry.map((c) => c[2]), cumDistM)
-  turns = detectTurns(geometry, cumDistM)
+  // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
+  // for routes saved before voicehints were captured.
+  const hints = (route.voice_hints || []) as VoiceHint[]
+  turns = hints.length
+    ? turnsFromVoiceHints(hints, geometry, cumDistM)
+    : detectTurns(geometry, cumDistM)
   remainingM.value = cumDistM[cumDistM.length - 1] || 0
   remainingGainM.value = computeGainLoss(geometry).gain
 }
@@ -172,21 +180,14 @@ function installRouteLayers() {
   const line = geometry.map(([lng, lat]) => [lng, lat])
   map.addSource('nav-route', { type: 'geojson', data: lineFeature(line) })
   map.addSource('nav-remaining', { type: 'geojson', data: lineFeature(line) })
-  map.addSource('nav-location', { type: 'geojson', data: emptyPolygon() })
 
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
   map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': 5 } })
   map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': 5 } })
-  map.addLayer({ id: 'nav-location-fill', type: 'fill', source: 'nav-location', paint: { 'fill-color': '#4285f4', 'fill-opacity': 0.12 } })
-  map.addLayer({ id: 'nav-location-stroke', type: 'line', source: 'nav-location', paint: { 'line-color': '#4285f4', 'line-width': 1.5, 'line-opacity': 0.5 } })
 }
 
 function lineFeature(coords: number[][]) {
   return { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: coords }, properties: {} }
-}
-
-function emptyPolygon() {
-  return { type: 'Feature' as const, geometry: { type: 'Polygon' as const, coordinates: [[]] }, properties: {} }
 }
 
 function setMapStyle(id: string) {
@@ -196,14 +197,12 @@ function setMapStyle(id: string) {
   map.setStyle(mapStyleFor(id), { diff: false })
   map.once('style.load', () => {
     installRouteLayers()
-    if (lastPos) updateLocationLayer(lastPos, lastAccuracy)
+    if (lastPos) updateLocationMarker(lastPos)
     refreshRemaining()
   })
 }
 
 // ─── GPS tracking ───────────────────────────────────────────────────────────
-
-let lastAccuracy = 0
 
 function startTracking() {
   if (!('geolocation' in navigator)) { gpsError.value = t('routes.gps_error'); return }
@@ -218,7 +217,6 @@ function onPosition(pos: GeolocationPosition) {
   gpsError.value = null
   hasFix.value = true
   const here: LngLat = [pos.coords.longitude, pos.coords.latitude]
-  lastAccuracy = pos.coords.accuracy || 0
 
   // Project onto the route: global search on the first fix (so we locate
   // correctly wherever the ride is joined, including mid-loop), then a windowed
@@ -233,8 +231,9 @@ function onPosition(pos: GeolocationPosition) {
   // Heading: trust the GPS heading when moving fast enough, otherwise derive it.
   updateBearing(pos, here)
 
-  updateLocationLayer(here, lastAccuracy)
+  updateLocationMarker(here)
   if (locationMarker) locationMarker.setRotation(currentBearing)
+  updateSpeed(pos, here)
   lastPos = here
 
   const turnApproaching = updateTurns(idx)
@@ -278,15 +277,25 @@ function updateTurns(idx: number): boolean {
   const dist = turn.distM - here
 
   turnHint.value = dist <= TURN_HINT_M && dist > -5
-    ? { direction: turn.direction, distM: dist }
+    ? { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle }
     : null
 
   if (dist <= TURN_ALERT_M && dist > -5 && announcedTurn !== nextTurnPtr) {
     announcedTurn = nextTurnPtr
-    if (soundOn.value) playTurn(turn.direction)
+    if (soundOn.value) playManeuver(turn.kind, turn.direction)
     return true
   }
   return false
+}
+
+// FontAwesome icon for the visual turn indicator: plain directional arrows for
+// turns, straight-up when the deviation is negligible, and distinct icons for
+// roundabouts and U-turns.
+function turnIcon(h: { direction: 'left' | 'right'; kind: Maneuver; angle: number }): string {
+  if (h.kind === 'roundabout') return h.direction === 'left' ? 'fa-rotate-left' : 'fa-rotate-right'
+  if (h.kind === 'uturn') return 'fa-arrow-down'
+  if (Math.abs(h.angle) < 20) return 'fa-arrow-up'
+  return h.direction === 'left' ? 'fa-arrow-left' : 'fa-arrow-right'
 }
 
 function handleOffRouteSound(wasOffRoute: boolean) {
@@ -296,6 +305,22 @@ function handleOffRouteSound(wasOffRoute: boolean) {
     lastOffRouteAlert = now
     if (soundOn.value) playOffRoute()
   }
+}
+
+// Instantaneous speed in km/h: trust the GPS-reported speed when present,
+// otherwise derive it from the displacement since the previous fix.
+function updateSpeed(pos: GeolocationPosition, here: LngLat) {
+  let ms = pos.coords.speed
+  if (ms == null || Number.isNaN(ms) || ms < 0) {
+    if (lastPos && lastFixTime) {
+      const dt = (pos.timestamp - lastFixTime) / 1000
+      ms = dt > 0 ? haversine(lastPos, here) / dt : 0
+    } else {
+      ms = 0
+    }
+  }
+  lastFixTime = pos.timestamp
+  speedKmh.value = Math.max(0, ms * 3.6)
 }
 
 function updateBearing(pos: GeolocationPosition, here: LngLat) {
@@ -331,10 +356,8 @@ function refreshRemaining() {
   src.setData(lineFeature(rest))
 }
 
-function updateLocationLayer(coords: LngLat, accuracy: number) {
+function updateLocationMarker(coords: LngLat) {
   if (!map) return
-  const src = map.getSource('nav-location')
-  if (src) src.setData({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [generateCircle(coords, Math.max(accuracy, 8))] }, properties: {} })
   if (locationMarker) {
     locationMarker.setLngLat(coords)
   } else {
@@ -401,13 +424,15 @@ function onVisibilityChange() {
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
     </div>
 
+    <!-- Instantaneous speed -->
+    <div v-if="hasFix && !offRoute" class="nav-speed shadow">
+      <span class="nav-speed-value">{{ Math.round(speedKmh) }}</span>
+      <span class="nav-speed-unit">km/h</span>
+    </div>
+
     <!-- Upcoming turn indicator -->
     <div v-if="turnHint && hasFix && !offRoute" class="nav-turn shadow">
-      <i
-        class="fa-solid"
-        :class="turnHint.direction === 'left' ? 'fa-arrow-turn-up fa-flip-horizontal' : 'fa-arrow-turn-up'"
-        aria-hidden="true"
-      ></i>
+      <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
       <span class="nav-turn-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
       <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
     </div>
@@ -512,8 +537,17 @@ function onVisibilityChange() {
   border-radius: 999px; font-weight: 600;
 }
 
+.nav-speed {
+  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  z-index: 3; display: flex; align-items: baseline; gap: 0.3rem;
+  background: rgba(255, 255, 255, 0.92); border-radius: 0.75rem;
+  padding: 0.3rem 0.75rem;
+}
+.nav-speed-value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
+.nav-speed-unit { font-size: 0.8rem; color: #6c757d; font-weight: 600; }
+
 .nav-turn {
-  position: absolute; top: 3.25rem; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 4.25rem; left: 50%; transform: translateX(-50%);
   z-index: 3; display: flex; align-items: center; gap: 0.5rem;
   background: #7c3aed; color: #fff; padding: 0.5rem 1rem;
   border-radius: 0.75rem; font-size: 1.6rem; line-height: 1;

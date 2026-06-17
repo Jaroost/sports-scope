@@ -68,6 +68,7 @@ class RoutesController < ApplicationController
       profile: src.profile,
       waypoints: src.waypoints,
       geometry: src.geometry,
+      voice_hints: src.voice_hints,
       distance_m: src.distance_m,
       elevation_gain_m: src.elevation_gain_m,
       elevation_loss_m: src.elevation_loss_m,
@@ -88,6 +89,7 @@ class RoutesController < ApplicationController
     out[:profile] = ALLOWED_PROFILES.include?(p[:profile].to_s) ? p[:profile] : "cycling" if p.key?(:profile)
     out[:waypoints] = clean_waypoints(p[:waypoints]) if p.key?(:waypoints)
     out[:geometry] = clean_geometry(p[:geometry]) if p.key?(:geometry)
+    out[:voice_hints] = clean_voice_hints(p[:voice_hints]) if p.key?(:voice_hints)
     out[:distance_m] = p[:distance_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:distance_m)
     out[:elevation_gain_m] = p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_gain_m)
     out[:elevation_loss_m] = p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_loss_m)
@@ -119,6 +121,23 @@ class RoutesController < ApplicationController
     end.compact
   end
 
+  MAX_VOICE_HINTS = 2_000
+
+  def clean_voice_hints(raw)
+    return [] unless raw.is_a?(Array)
+    raw.take(MAX_VOICE_HINTS).map do |h|
+      hh = h.respond_to?(:to_unsafe_h) ? h.to_unsafe_h : h
+      next nil unless hh.is_a?(Hash)
+      lng = hh["lng"] || hh[:lng]
+      lat = hh["lat"] || hh[:lat]
+      cmd = hh["cmd"] || hh[:cmd]
+      angle = hh["angle"] || hh[:angle]
+      next nil unless lng.is_a?(Numeric) && lat.is_a?(Numeric)
+      next nil if lat.abs > 90 || lng.abs > 180
+      { "lng" => lng.to_f, "lat" => lat.to_f, "cmd" => cmd.to_i, "angle" => angle.to_f }
+    end.compact
+  end
+
   def serialize_summary(route)
     {
       id: route.id,
@@ -135,6 +154,7 @@ class RoutesController < ApplicationController
     serialize_summary(route).merge(
       waypoints: route.waypoints || [],
       geometry: route.geometry || [],
+      voice_hints: route.voice_hints || [],
     )
   end
 

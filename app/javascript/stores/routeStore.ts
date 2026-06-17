@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { haversine, detectClimbs, computeGainLoss, buildDistancesM, formatDuration } from '../routeHelpers'
-import type { Coord, Climb } from '../routeHelpers'
+import type { Coord, Climb, VoiceHint } from '../routeHelpers'
 
 const SPEED_KEY = 'sportsScope.routeBuilderAvgSpeed'
 
@@ -16,6 +16,7 @@ class RouteStore {
   // ─── Core route data ────────────────────────────────────────────────────────
   readonly geometry = ref<Coord[]>([])
   readonly waypoints = ref<Array<{ lng: number; lat: number; free?: boolean }>>([])
+  readonly voiceHints = ref<VoiceHint[]>([])
   readonly distanceM = ref(0)
   readonly elevGainM = ref(0)
   readonly elevLossM = ref(0)
@@ -54,6 +55,7 @@ class RouteStore {
   reset() {
     this.geometry.value = []
     this.waypoints.value = []
+    this.voiceHints.value = []
     this.distanceM.value = 0
     this.elevGainM.value = 0
     this.elevLossM.value = 0

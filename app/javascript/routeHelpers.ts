@@ -296,11 +296,76 @@ export function progressFor(
 
 // ─── Turn detection ─────────────────────────────────────────────────────────
 
+// Maneuver families, each mapped to a distinct audio cue.
+export type Maneuver = 'turn' | 'slight' | 'sharp' | 'keep' | 'uturn' | 'roundabout'
+
 export interface TurnPoint {
   idx: number              // geometry vertex of the turn
   distM: number            // cumulative distance to the turn from the start
   angle: number            // signed turn angle (deg): + = right, − = left
   direction: 'left' | 'right'
+  kind: Maneuver
+}
+
+// Classify a BRouter voice-hint command (and its angle as a tie-breaker) into a
+// maneuver family + side. Command ids:
+// 2 TL  3 TSLL  4 TSHL  5 TR  6 TSLR  7 TSHR  8 KL  9 KR
+// 10 TLU  11 TU  12 TRU  14 RNDB(right)  15 RNLB(left)
+function maneuverFromCmd(cmd: number, angle: number): { kind: Maneuver; direction: 'left' | 'right' } {
+  switch (cmd) {
+    case 2: return { kind: 'turn', direction: 'left' }
+    case 5: return { kind: 'turn', direction: 'right' }
+    case 3: return { kind: 'slight', direction: 'left' }
+    case 6: return { kind: 'slight', direction: 'right' }
+    case 4: return { kind: 'sharp', direction: 'left' }
+    case 7: return { kind: 'sharp', direction: 'right' }
+    case 8: return { kind: 'keep', direction: 'left' }
+    case 9: return { kind: 'keep', direction: 'right' }
+    case 10: return { kind: 'uturn', direction: 'left' }
+    case 12: return { kind: 'uturn', direction: 'right' }
+    case 11: return { kind: 'uturn', direction: angle >= 0 ? 'right' : 'left' }
+    case 14: return { kind: 'roundabout', direction: 'right' }
+    case 15: return { kind: 'roundabout', direction: 'left' }
+    default: return { kind: 'turn', direction: angle >= 0 ? 'right' : 'left' }
+  }
+}
+
+// Maneuver family for a purely geometric turn, derived from the turn sharpness.
+function kindFromAngle(absAngle: number): Maneuver {
+  if (absAngle >= 95) return 'sharp'
+  if (absAngle < 45) return 'slight'
+  return 'turn'
+}
+
+// A BRouter turn instruction, anchored to a coordinate (robust to later geometry
+// changes such as densification) rather than to a raw track index.
+export interface VoiceHint {
+  lng: number
+  lat: number
+  cmd: number              // BRouter command id (2=TL, 3=TSLL, 5=TR, 6=TSLR, 14=roundabout…)
+  angle: number            // signed turn angle (deg): + = right, − = left
+}
+
+// BRouter command ids that carry no actionable turn for our cues:
+// 1 = continue straight, 13 = off-route marker, 16 = beeline segment.
+const VOICE_HINT_SKIP = new Set([1, 13, 16])
+
+// Map stored BRouter voice hints onto the current geometry, producing the same
+// TurnPoint shape that the navigation cue logic consumes. Each hint is matched to
+// its nearest geometry vertex so the cumulative distance stays correct.
+export function turnsFromVoiceHints(
+  hints: VoiceHint[],
+  geometry: Coord[],
+  cumDistM: number[],
+): TurnPoint[] {
+  const out: TurnPoint[] = []
+  for (const h of hints) {
+    if (VOICE_HINT_SKIP.has(h.cmd)) continue
+    const { idx } = nearestGeomIndex([h.lng, h.lat], geometry)
+    const { kind, direction } = maneuverFromCmd(h.cmd, h.angle)
+    out.push({ idx, distM: cumDistM[idx] || 0, angle: h.angle, direction, kind })
+  }
+  return out.sort((a, b) => a.distM - b.distM)
 }
 
 // Detect significant turns ("intersections" the rider must take) along the
@@ -328,7 +393,7 @@ export function detectTurns(
     while (diff > 180) diff -= 360
     while (diff < -180) diff += 360
     if (Math.abs(diff) >= minAngleDeg) {
-      raw.push({ idx: i, distM: cumDistM[i], angle: diff, direction: diff > 0 ? 'right' : 'left' })
+      raw.push({ idx: i, distM: cumDistM[i], angle: diff, direction: diff > 0 ? 'right' : 'left', kind: kindFromAngle(Math.abs(diff)) })
     }
   }
   // Collapse clusters: a single road turn spans several vertices, keep the sharpest.

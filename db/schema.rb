@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_17_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_17_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -64,6 +64,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_17_000002) do
     t.string "profile", default: "cycling"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.jsonb "voice_hints", default: [], null: false
     t.jsonb "waypoints", default: [], null: false
     t.index ["user_id", "updated_at"], name: "index_routes_on_user_id_and_updated_at"
     t.index ["user_id"], name: "index_routes_on_user_id"

@@ -33,16 +33,42 @@ function beep(freq: number, start: number, durationS: number, gainPeak = 0.18): 
   osc.stop(t0 + durationS + 0.02)
 }
 
-// Two notes that rise for a right turn and fall for a left turn, so the rider
-// can tell the direction without looking at the screen.
-export function playTurn(direction: 'left' | 'right'): void {
+import type { Maneuver } from './routeHelpers'
+
+// Distinct audio cue per maneuver. Across every cue, a rising pitch means right
+// and a falling pitch means left, so the side is recognisable without looking;
+// the rhythm/shape conveys the maneuver type (slight, sharp, roundabout…).
+export function playManeuver(kind: Maneuver, direction: 'left' | 'right'): void {
   unlockAudio()
-  if (direction === 'right') {
-    beep(620, 0, 0.16)
-    beep(900, 0.18, 0.22)
-  } else {
-    beep(900, 0, 0.16)
-    beep(620, 0.18, 0.22)
+  const right = direction === 'right'
+  switch (kind) {
+    case 'slight':
+      // A single soft note — a gentle nudge.
+      beep(right ? 760 : 560, 0, 0.18, 0.13)
+      break
+    case 'sharp':
+      // Three quick, louder notes climbing/falling steeply — urgent.
+      if (right) { beep(600, 0, 0.1, 0.2); beep(820, 0.12, 0.1, 0.2); beep(1060, 0.24, 0.22, 0.2) }
+      else { beep(1060, 0, 0.1, 0.2); beep(820, 0.12, 0.1, 0.2); beep(600, 0.24, 0.22, 0.2) }
+      break
+    case 'keep':
+      // Two very short, quiet notes close together — a subtle "stay this side".
+      beep(right ? 700 : 620, 0, 0.09, 0.1)
+      beep(right ? 780 : 540, 0.11, 0.11, 0.1)
+      break
+    case 'uturn':
+      // Low descending triple — unmistakably "turn around".
+      beep(520, 0, 0.16, 0.2); beep(400, 0.18, 0.16, 0.2); beep(300, 0.36, 0.26, 0.2)
+      break
+    case 'roundabout':
+      // Even triplet on one pitch — like going round.
+      beep(700, 0, 0.1, 0.18); beep(700, 0.14, 0.1, 0.18); beep(700, 0.28, 0.18, 0.18)
+      break
+    case 'turn':
+    default:
+      // Two notes; rising for right, falling for left.
+      if (right) { beep(620, 0, 0.16); beep(900, 0.18, 0.22) }
+      else { beep(900, 0, 0.16); beep(620, 0.18, 0.22) }
   }
 }
 

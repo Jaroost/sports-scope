@@ -462,4 +462,23 @@ onMounted(() => fetchRoutes())
 .route-row-actions {
   flex-shrink: 0;
 }
+
+/* On phones the row is too cramped to keep the name + 5 actions on one line,
+   so the action cluster wraps onto its own full-width line below the name and
+   spreads the buttons out for easier tapping. */
+@media (max-width: 575.98px) {
+  .activity-row {
+    flex-wrap: wrap;
+  }
+  .route-row-actions {
+    width: 100%;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+  }
+  .route-row-actions .btn {
+    flex: 1;
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
+}
 </style>

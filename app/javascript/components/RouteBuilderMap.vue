@@ -709,6 +709,27 @@ function deselectAll() {
   selectedWpIdx = -1
 }
 
+async function copyCoords(btn: HTMLElement, text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select()
+    try { document.execCommand('copy') } catch { /* ignore */ }
+    document.body.removeChild(ta)
+  }
+  const icon = btn.querySelector('i')
+  if (icon) {
+    icon.classList.replace('fa-copy', 'fa-check')
+    icon.classList.add('wp-tooltip-coords--copied')
+    setTimeout(() => {
+      icon.classList.replace('fa-check', 'fa-copy')
+      icon.classList.remove('wp-tooltip-coords--copied')
+    }, 1200)
+  }
+}
+
 function refreshWaypointMarkers() {
   if (!_maplibregl || !mapInstance) return
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
@@ -737,6 +758,10 @@ function refreshWaypointMarkers() {
           <span class="wp-tooltip-title">Point&nbsp;<input type="number" class="wp-tooltip-num-input" min="1" max="${routeStore.waypoints.value.length}" value="${idx + 1}" title="${t('routes.reorder_waypoint')}" /></span>
           <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
         </div>
+        <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" title="${t('routes.copy_coordinates')}">
+          <i class="fa-regular fa-copy" aria-hidden="true"></i>
+          <span class="wp-tooltip-coords">${w.lat.toFixed(6)}, ${w.lng.toFixed(6)}</span>
+        </button>
         <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
           <i class="fa-brands fa-google" aria-hidden="true"></i>
           <span>Google Maps</span>
@@ -788,8 +813,12 @@ function refreshWaypointMarkers() {
       else if (ev.key === 'Escape') { numInput.value = String(idx + 1); numInput.blur() }
     })
     numInput.addEventListener('change', commitNum)
-    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free)').forEach((a) => {
+    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--copy)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
+    })
+    el.querySelector('.wp-tooltip-action--copy')!.addEventListener('click', (ev: any) => {
+      ev.stopPropagation(); ev.preventDefault()
+      copyCoords(ev.currentTarget as HTMLElement, `${w.lat.toFixed(6)}, ${w.lng.toFixed(6)}`)
     })
     el.querySelector('.wp-tooltip-action--free')!.addEventListener('click', (ev: any) => {
       ev.stopPropagation(); ev.preventDefault(); toggleWaypointFree(idx)
@@ -1758,6 +1787,8 @@ defineExpose({
 .wp-tooltip-action--delete { color: #dc2626; }
 .wp-tooltip-action--delete:hover { background: rgba(220,38,38,0.08); color: #dc2626; }
 .wp-tooltip-action--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
+.wp-tooltip-coords { font-variant-numeric: tabular-nums; letter-spacing: 0.01em; user-select: all; }
+.wp-tooltip-coords--copied { color: #16a34a; }
 .divergent-warning-marker {
   width: 26px;
   height: 26px;

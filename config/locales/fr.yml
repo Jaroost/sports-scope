@@ -245,6 +245,7 @@ fr:
     anchor_to_road: "Ancrer sur la route"
     return_via_same_route: "Ajouter à la fin de l'itinéraire"
     street_view: "Street View"
+    copy_coordinates: "Copier les coordonnées (lat, lng)"
     komoot_waypoint_limit: "Votre itinéraire contient %{count} points, mais Komoot n'en accepte que 20 via l'URL. Le tracé sera simplifié en conservant le départ et l'arrivée. Continuer ?"
     cyclosm_legend: "Légende CyclOSM"
     cyclosm_paths: "Voies"

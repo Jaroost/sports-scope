@@ -582,7 +582,11 @@ function recomputeWaypointGeomIndices() {
 }
 
 function addWaypoint(lng: number, lat: number) {
-  routeStore.waypoints.value = [...routeStore.waypoints.value, { lng, lat }]
+  const wps = routeStore.waypoints.value
+  // Ergonomie : si le dernier point est libre, le nouveau l'est aussi par défaut,
+  // jusqu'à ce qu'on rebascule le dernier point en point accroché à la route.
+  const inheritFree = wps.length > 0 && wps[wps.length - 1].free === true
+  routeStore.waypoints.value = [...wps, inheritFree ? { lng, lat, free: true } : { lng, lat }]
   refreshWaypointMarkers()
   emit('waypoints-changed')
 }

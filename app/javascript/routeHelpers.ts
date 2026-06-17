@@ -294,6 +294,56 @@ export function progressFor(
   return { remainingM, doneRatio, remainingGainM: gain }
 }
 
+// ─── Turn detection ─────────────────────────────────────────────────────────
+
+export interface TurnPoint {
+  idx: number              // geometry vertex of the turn
+  distM: number            // cumulative distance to the turn from the start
+  angle: number            // signed turn angle (deg): + = right, − = left
+  direction: 'left' | 'right'
+}
+
+// Detect significant turns ("intersections" the rider must take) along the
+// route. For each vertex we compare the heading ~spanM before and after it,
+// smoothing over noisy/dense geometry, and keep turns sharper than minAngleDeg.
+// Nearby turns within a small cluster are collapsed to their sharpest vertex.
+export function detectTurns(
+  geometry: Coord[],
+  cumDistM: number[],
+  minAngleDeg = 35,
+  spanM = 18,
+): TurnPoint[] {
+  const n = geometry.length
+  if (n < 3) return []
+  const raw: TurnPoint[] = []
+  for (let i = 1; i < n - 1; i++) {
+    let a = i
+    while (a > 0 && cumDistM[i] - cumDistM[a] < spanM) a--
+    let b = i
+    while (b < n - 1 && cumDistM[b] - cumDistM[i] < spanM) b++
+    if (a === i || b === i) continue
+    const inB = bearingBetween(geometry[a], geometry[i])
+    const outB = bearingBetween(geometry[i], geometry[b])
+    let diff = outB - inB
+    while (diff > 180) diff -= 360
+    while (diff < -180) diff += 360
+    if (Math.abs(diff) >= minAngleDeg) {
+      raw.push({ idx: i, distM: cumDistM[i], angle: diff, direction: diff > 0 ? 'right' : 'left' })
+    }
+  }
+  // Collapse clusters: a single road turn spans several vertices, keep the sharpest.
+  const out: TurnPoint[] = []
+  for (const tp of raw) {
+    const last = out[out.length - 1]
+    if (last && tp.distM - last.distM < 25) {
+      if (Math.abs(tp.angle) > Math.abs(last.angle)) out[out.length - 1] = tp
+    } else {
+      out.push(tp)
+    }
+  }
+  return out
+}
+
 // The climb currently being ridden (idx within [startIdx, endIdx]) and how far
 // through it we are (0..1), or null when not on a climb.
 export function activeClimb(idx: number, climbs: Climb[]): { climb: Climb; ratio: number } | null {

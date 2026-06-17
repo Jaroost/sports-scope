@@ -4,17 +4,22 @@ import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, MAP_STYLES } from '../mapStyles'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
-  buildDistancesM, detectClimbs, computeGainLoss, formatDistanceShort, haversine,
+  buildDistancesM, detectClimbs, detectTurns, computeGainLoss, formatDistanceShort, haversine,
   generateCircle, bearingBetween, nearestGeomIndex, progressFor, activeClimb,
 } from '../routeHelpers'
-import type { Coord, Climb, LngLat } from '../routeHelpers'
+import type { Coord, Climb, LngLat, TurnPoint } from '../routeHelpers'
+import { unlockAudio, playTurn, playOffRoute } from '../navAudio'
 
 const props = defineProps<{ routeId: string | number }>()
 
 const STYLE_KEY = 'sportsScope.routeBuilderMapStyle'
+const SOUND_KEY = 'sportsScope.navSound'
 const OFF_ROUTE_M = 50          // lateral distance beyond which we warn
 const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
+const TURN_ALERT_M = 60        // start announcing a turn this far ahead
+const TURN_HINT_M = 200        // show the turn indicator this far ahead
+const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
 
 const mapEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
@@ -22,6 +27,7 @@ const error = ref<string | null>(null)
 const gpsError = ref<string | null>(null)
 const hasFix = ref(false)
 const following = ref(true)
+const soundOn = ref(loadSound())
 const mapStyleId = ref(loadStyle())
 
 // Live navigation state (reactive, drives the UI overlays)
@@ -30,6 +36,7 @@ const remainingGainM = ref(0)
 const doneRatio = ref(0)
 const offRoute = ref(false)
 const climbInfo = ref<{ climb: Climb; ratio: number; remainingGainM: number } | null>(null)
+const turnHint = ref<{ direction: 'left' | 'right'; distM: number } | null>(null)
 
 let map: any = null
 let maplibre: any = null
@@ -41,6 +48,7 @@ let wakeLock: any = null
 let geometry: Coord[] = []
 let cumDistM: number[] = []
 let climbs: Climb[] = []
+let turns: TurnPoint[] = []
 const routeName = ref('')
 
 // Tracking helpers
@@ -48,6 +56,10 @@ let lastIdx = 0
 let located = false
 let lastPos: LngLat | null = null
 let currentBearing = 0
+let hasInitialZoom = false
+let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
+let announcedTurn = -1       // index of the last turn we played a cue for
+let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 
 const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
@@ -59,6 +71,16 @@ function loadStyle(): string {
   return 'cyclosm'
 }
 
+function loadSound(): boolean {
+  try { return localStorage.getItem(SOUND_KEY) !== 'off' } catch { return true }
+}
+
+function toggleSound() {
+  soundOn.value = !soundOn.value
+  try { localStorage.setItem(SOUND_KEY, soundOn.value ? 'on' : 'off') } catch { /* ignore */ }
+  if (soundOn.value) unlockAudio()
+}
+
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -67,6 +89,10 @@ onMounted(async () => {
     await initMap()
     startTracking()
     requestWakeLock()
+    // The screen wake lock and the audio context both need a user gesture to be
+    // granted reliably; the page load itself doesn't count, so (re)arm them on the
+    // first touch/click anywhere on the page.
+    window.addEventListener('pointerdown', onFirstGesture)
     document.addEventListener('visibilitychange', onVisibilityChange)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -77,10 +103,16 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
+  window.removeEventListener('pointerdown', onFirstGesture)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   releaseWakeLock()
   if (map) { map.remove(); map = null }
 })
+
+function onFirstGesture() {
+  unlockAudio()
+  if (!wakeLock) requestWakeLock()
+}
 
 // ─── Data ───────────────────────────────────────────────────────────────────
 
@@ -94,6 +126,7 @@ async function fetchRoute() {
   routeName.value = route.name || ''
   cumDistM = buildDistancesM(geometry)
   climbs = detectClimbs(geometry.map((c) => c[2]), cumDistM)
+  turns = detectTurns(geometry, cumDistM)
   remainingM.value = cumDistM[cumDistM.length - 1] || 0
   remainingGainM.value = computeGainLoss(geometry).gain
 }
@@ -190,6 +223,7 @@ function onPosition(pos: GeolocationPosition) {
   const { idx, distM } = nearestGeomIndex(here, geometry, located ? lastIdx : -1)
   lastIdx = idx
   located = true
+  const wasOffRoute = offRoute.value
   offRoute.value = distM > OFF_ROUTE_M
   updateProgress(idx)
 
@@ -200,8 +234,49 @@ function onPosition(pos: GeolocationPosition) {
   if (locationMarker) locationMarker.setRotation(currentBearing)
   lastPos = here
 
+  const turnApproaching = updateTurns(idx)
+  handleOffRouteSound(wasOffRoute)
+
   if (following.value) {
-    map.easeTo({ center: here, bearing: currentBearing, pitch: 55, zoom: Math.max(map.getZoom(), 15), duration: 600 })
+    // Preserve the rider's chosen zoom: only set it once, on the first fix.
+    const opts: any = { center: here, bearing: currentBearing, pitch: 55, duration: 600 }
+    if (!hasInitialZoom) { opts.zoom = 15; hasInitialZoom = true }
+    map.easeTo(opts)
+  } else if (turnApproaching) {
+    // Snap the 3D view back over the rider as they reach an intersection.
+    following.value = true
+  }
+}
+
+// Track the next turn ahead: announce it once within TURN_ALERT_M (and re-orient
+// the view), and surface a visual hint within TURN_HINT_M. Returns true on the
+// frame a turn alert fires.
+function updateTurns(idx: number): boolean {
+  if (!turns.length) { turnHint.value = null; return false }
+  const here = cumDistM[idx] || 0
+  while (nextTurnPtr < turns.length && turns[nextTurnPtr].distM < here - 5) nextTurnPtr++
+  const turn = turns[nextTurnPtr]
+  if (!turn) { turnHint.value = null; return false }
+  const dist = turn.distM - here
+
+  turnHint.value = dist <= TURN_HINT_M && dist > -5
+    ? { direction: turn.direction, distM: dist }
+    : null
+
+  if (dist <= TURN_ALERT_M && dist > -5 && announcedTurn !== nextTurnPtr) {
+    announcedTurn = nextTurnPtr
+    if (soundOn.value) playTurn(turn.direction)
+    return true
+  }
+  return false
+}
+
+function handleOffRouteSound(wasOffRoute: boolean) {
+  if (!offRoute.value) { lastOffRouteAlert = 0; return }
+  const now = Date.now()
+  if (!wasOffRoute || now - lastOffRouteAlert > OFF_ROUTE_REALERT_MS) {
+    lastOffRouteAlert = now
+    if (soundOn.value) playOffRoute()
   }
 }
 
@@ -255,7 +330,8 @@ function updateLocationLayer(coords: LngLat, accuracy: number) {
 
 function recenter() {
   following.value = true
-  if (lastPos) map.easeTo({ center: lastPos, bearing: currentBearing, pitch: 55, zoom: 15, duration: 600 })
+  // Keep the rider's current zoom — only re-center, re-orient and restore the 3D tilt.
+  if (lastPos) map.easeTo({ center: lastPos, bearing: currentBearing, pitch: 55, duration: 600 })
 }
 
 // ─── Wake lock ────────────────────────────────────────────────────────────────
@@ -289,13 +365,33 @@ function onVisibilityChange() {
     </div>
 
     <!-- Top controls -->
-    <div class="nav-top-left">
+    <div class="nav-top-left d-flex gap-2">
       <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
       </a>
+      <button
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :title="soundOn ? t('routes.sound_on') : t('routes.sound_off')"
+        :aria-label="soundOn ? t('routes.sound_on') : t('routes.sound_off')"
+        @click="toggleSound"
+      >
+        <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
+      </button>
     </div>
     <div class="nav-top-right">
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
+    </div>
+
+    <!-- Upcoming turn indicator -->
+    <div v-if="turnHint && hasFix && !offRoute" class="nav-turn shadow">
+      <i
+        class="fa-solid"
+        :class="turnHint.direction === 'left' ? 'fa-arrow-turn-up fa-flip-horizontal' : 'fa-arrow-turn-up'"
+        aria-hidden="true"
+      ></i>
+      <span class="nav-turn-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
+      <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
     </div>
 
     <!-- GPS / off-route banners -->
@@ -397,6 +493,14 @@ function onVisibilityChange() {
   position: absolute; bottom: 8.5rem; right: 0.75rem; z-index: 4;
   border-radius: 999px; font-weight: 600;
 }
+
+.nav-turn {
+  position: absolute; top: 3.25rem; left: 50%; transform: translateX(-50%);
+  z-index: 3; display: flex; align-items: center; gap: 0.5rem;
+  background: #7c3aed; color: #fff; padding: 0.5rem 1rem;
+  border-radius: 0.75rem; font-size: 1.6rem; line-height: 1;
+}
+.nav-turn-dist { font-size: 1.1rem; font-weight: 700; }
 
 .nav-climb {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6.25rem;

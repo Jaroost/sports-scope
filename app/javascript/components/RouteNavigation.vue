@@ -15,7 +15,7 @@ const props = defineProps<{ routeId: string | number }>()
 
 const STYLE_KEY = 'sportsScope.routeBuilderMapStyle'
 const SOUND_KEY = 'sportsScope.navSound'
-const OFF_ROUTE_M = 50          // lateral distance beyond which we warn
+const OFF_ROUTE_M = 10          // lateral distance beyond which we warn
 const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
 const TURN_ALERT_M = 60        // start announcing a turn this far ahead

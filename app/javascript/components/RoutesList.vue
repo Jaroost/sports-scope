@@ -391,6 +391,14 @@ onMounted(() => fetchRoutes())
               </a>
               <div class="d-flex align-items-center gap-1 route-row-actions">
                 <a
+                  :href="`${localePrefix}/routes/${r.id}/navigate`"
+                  class="btn btn-sm btn-outline-primary"
+                  :title="t('routes.navigate')"
+                  :aria-label="t('routes.navigate')"
+                >
+                  <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
+                </a>
+                <a
                   :href="`/api/routes/${r.id}/gpx`"
                   class="btn btn-sm btn-outline-secondary"
                   :title="t('routes.export_gpx')"

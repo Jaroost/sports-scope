@@ -30,6 +30,10 @@ watch(avgSpeedKmh, (v) => {
   try { localStorage.setItem(SPEED_KEY, String(v)) } catch { /* ignore */ }
 })
 
+// Share feedback: holds the id of the route whose link was just copied, so the
+// button can flash a checkmark for a couple of seconds.
+const sharedId = ref(null)
+
 // Inline rename state
 const editingId = ref(null)
 const editingName = ref('')
@@ -137,6 +141,28 @@ async function duplicateRoute(route) {
     if (payload.route) routes.value = [payload.route, ...routes.value]
   } catch (e) {
     error.value = e.message
+  }
+}
+
+// Share the navigation link (works for signed-out recipients — the navigate
+// page and its API are public). Uses the native share sheet on mobile, falling
+// back to clipboard copy (then a prompt) on desktop.
+async function shareRoute(route) {
+  const url = `${window.location.origin}${localePrefix}/routes/${route.share_token}/navigate`
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: route.name, url })
+      return
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') return // user dismissed the share sheet
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    sharedId.value = route.id
+    setTimeout(() => { if (sharedId.value === route.id) sharedId.value = null }, 2000)
+  } catch {
+    window.prompt(t('routes.share'), url)
   }
 }
 
@@ -391,13 +417,25 @@ onMounted(() => fetchRoutes())
               </a>
               <div class="d-flex align-items-center gap-1 route-row-actions">
                 <a
-                  :href="`${localePrefix}/routes/${r.id}/navigate`"
+                  :href="`${localePrefix}/routes/${r.share_token}/navigate`"
                   class="btn btn-sm btn-outline-primary"
                   :title="t('routes.navigate')"
                   :aria-label="t('routes.navigate')"
                 >
                   <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
                 </a>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :title="sharedId === r.id ? t('routes.share_copied') : t('routes.share')"
+                  :aria-label="t('routes.share')"
+                  @click="shareRoute(r)"
+                >
+                  <i
+                    :class="sharedId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-share-nodes'"
+                    aria-hidden="true"
+                  ></i>
+                </button>
                 <a
                   :href="`/api/routes/${r.id}/gpx`"
                   class="btn btn-sm btn-outline-secondary"

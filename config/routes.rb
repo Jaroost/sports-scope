@@ -7,7 +7,9 @@ Rails.application.routes.draw do
     get "/routes", to: "pages#routes_index", as: :routes_index
     get "/routes/new", to: "pages#route_builder", as: :new_route
     get "/routes/:id/edit", to: "pages#route_builder", as: :edit_route, constraints: { id: /\d+/ }
-    get "/routes/:id/navigate", to: "pages#route_navigation", as: :navigate_route, constraints: { id: /\d+/ }
+    # Navigation is addressed by share_token (not id) so the link is shareable
+    # and unguessable; the page and its API are public.
+    get "/routes/:token/navigate", to: "pages#route_navigation", as: :navigate_route
   end
 
   # OmniAuth (POST entry points, GET callbacks)
@@ -29,6 +31,7 @@ Rails.application.routes.draw do
   # Route builder (JSON CRUD consumed by Vue components)
   get "/api/routes", to: "routes#index"
   post "/api/routes", to: "routes#create"
+  get "/api/routes/shared/:token", to: "routes#shared"
   get "/api/routes/:id", to: "routes#show", constraints: { id: /\d+/ }
   patch "/api/routes/:id", to: "routes#update", constraints: { id: /\d+/ }
   delete "/api/routes/:id", to: "routes#destroy", constraints: { id: /\d+/ }

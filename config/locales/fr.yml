@@ -202,6 +202,8 @@ fr:
     back: "Retour à la liste"
     navigate: "Naviguer"
     navigate_title: "Navigation"
+    share: "Partager le lien de navigation"
+    share_copied: "Lien copié !"
     recenter: "Recentrer"
     remaining_distance: "Distance restante"
     remaining_elevation: "Dénivelé restant"
@@ -263,7 +265,8 @@ fr:
     cyclosm_ncn: "National"
     cyclosm_icn: "International (EuroVelo)"
   pages:
-    home_lead: "Une application Rails 8 d'exemple avec Keycloak SSO, OAuth Strava, îlots Vue et Vite."
+    home_lead: "Planifiez vos itinéraires vélo, suivez-les en navigation, et analysez vos sorties Strava sur des cartes interactives — le tout au même endroit."
+    home_nav_routes: "Mes itinéraires"
     feature_builder_title: "Créateur d'itinéraire"
     feature_builder_body: "Planifiez vos sorties vélo : snap aux routes, profil d'altitude, cols détectés, couleurs de pente/revêtement, export GPX."
     feature_builder_cta: "Créer un itinéraire"

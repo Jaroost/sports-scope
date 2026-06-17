@@ -1,5 +1,7 @@
 class RoutesController < ApplicationController
-  before_action :require_login!
+  # `shared` is public (token-based) so a shared navigation link works without
+  # an account. Every other action stays scoped to the signed-in owner.
+  before_action :require_login!, except: :shared
 
   MAX_WAYPOINTS = 50
   MAX_GEOMETRY_POINTS = 10_000
@@ -15,6 +17,15 @@ class RoutesController < ApplicationController
   # GET /api/routes/:id
   def show
     route = current_user.routes.find_by(id: params[:id])
+    return head :not_found unless route
+    render json: { route: serialize_full(route) }
+  end
+
+  # GET /api/routes/shared/:token
+  # Public, read-only lookup by unguessable token — powers shared navigation
+  # links for signed-out recipients.
+  def shared
+    route = Route.find_by(share_token: params[:token])
     return head :not_found unless route
     render json: { route: serialize_full(route) }
   end
@@ -146,6 +157,7 @@ class RoutesController < ApplicationController
       elevation_gain_m: route.elevation_gain_m,
       elevation_loss_m: route.elevation_loss_m,
       profile: route.profile,
+      share_token: route.share_token,
       updated_at: route.updated_at.iso8601,
     }
   end

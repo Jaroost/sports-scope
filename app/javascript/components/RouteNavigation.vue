@@ -11,7 +11,7 @@ import {
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
 
-const props = defineProps<{ routeId: string | number }>()
+const props = defineProps<{ shareToken: string }>()
 
 const STYLE_KEY = 'sportsScope.routeBuilderMapStyle'
 const SOUND_KEY = 'sportsScope.navSound'
@@ -122,7 +122,7 @@ function onFirstGesture() {
 // ─── Data ───────────────────────────────────────────────────────────────────
 
 async function fetchRoute() {
-  const res = await fetch(`/api/routes/${props.routeId}`, { headers: { Accept: 'application/json' } })
+  const res = await fetch(`/api/routes/shared/${props.shareToken}`, { headers: { Accept: 'application/json' } })
   if (!res.ok) throw new Error(t('routes.error_routing'))
   const data = await res.json()
   const route = data.route || data

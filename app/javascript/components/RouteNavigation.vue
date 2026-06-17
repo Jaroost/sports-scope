@@ -37,6 +37,8 @@ const remainingGainM = ref(0)
 const doneRatio = ref(0)
 const speedKmh = ref(0)
 const offRoute = ref(false)
+const offRouteDistM = ref(0)        // distance to the nearest point on the route
+const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" arrow
 const climbInfo = ref<{ climb: Climb; ratio: number; remainingGainM: number } | null>(null)
 const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number } | null>(null)
 
@@ -230,6 +232,7 @@ function onPosition(pos: GeolocationPosition) {
 
   // Heading: trust the GPS heading when moving fast enough, otherwise derive it.
   updateBearing(pos, here)
+  updateOffRoute(here, idx, distM)
 
   updateLocationMarker(here)
   if (locationMarker) locationMarker.setRotation(currentBearing)
@@ -321,6 +324,20 @@ function updateSpeed(pos: GeolocationPosition, here: LngLat) {
   }
   lastFixTime = pos.timestamp
   speedKmh.value = Math.max(0, ms * 3.6)
+}
+
+// When off route, point an arrow back to the nearest vertex of the route. The
+// map is rotated so its bearing is "up", so the on-screen angle is the absolute
+// bearing-to-route minus the map's bearing.
+function updateOffRoute(here: LngLat, idx: number, distM: number) {
+  if (!offRoute.value) return
+  offRouteDistM.value = distM
+  const toRoute = bearingBetween(here, geometry[idx])
+  const mapBearing = map ? map.getBearing() : currentBearing
+  let rel = toRoute - mapBearing
+  while (rel > 180) rel -= 360
+  while (rel < -180) rel += 360
+  offRouteRelBearing.value = rel
 }
 
 function updateBearing(pos: GeolocationPosition, here: LngLat) {
@@ -445,8 +462,20 @@ function onVisibilityChange() {
       <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('routes.gps_waiting') }}
     </div>
     <div v-else-if="offRoute" class="nav-banner nav-banner--danger">
-      <i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>{{ t('routes.off_route') }}
+      <i
+        class="fa-solid fa-arrow-up nav-offroute-arrow me-2"
+        :style="{ transform: `rotate(${offRouteRelBearing}deg)` }"
+        aria-hidden="true"
+      ></i>{{ t('routes.off_route') }} · {{ formatDistanceShort(offRouteDistM) }}
     </div>
+
+    <!-- Big centered arrow pointing back to the route when off-route -->
+    <i
+      v-if="offRoute && hasFix"
+      class="fa-solid fa-arrow-up nav-offroute-bigarrow"
+      :style="{ transform: `translate(-50%, -50%) rotate(${offRouteRelBearing}deg)` }"
+      aria-hidden="true"
+    ></i>
 
     <!-- Recenter button -->
     <button
@@ -529,6 +558,14 @@ function onVisibilityChange() {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 .nav-banner--danger { background: #dc3545; color: #fff; }
+.nav-offroute-arrow { display: inline-block; transition: transform 0.4s ease; }
+.nav-offroute-bigarrow {
+  position: absolute; top: 50%; left: 50%;
+  z-index: 6; pointer-events: none;
+  font-size: 40vmin; color: #dc3545; opacity: 0.5;
+  transition: transform 0.4s ease;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
+}
 .nav-banner--warn { background: #fff3cd; color: #664d03; }
 .nav-banner--info { background: #cfe2ff; color: #084298; }
 

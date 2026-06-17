@@ -45,6 +45,7 @@ const routeName = ref('')
 
 // Tracking helpers
 let lastIdx = 0
+let located = false
 let lastPos: LngLat | null = null
 let currentBearing = 0
 
@@ -183,9 +184,12 @@ function onPosition(pos: GeolocationPosition) {
   const here: LngLat = [pos.coords.longitude, pos.coords.latitude]
   lastAccuracy = pos.coords.accuracy || 0
 
-  // Project onto the route (searching around the last known index for perf).
-  const { idx, distM } = nearestGeomIndex(here, geometry, lastIdx)
+  // Project onto the route: global search on the first fix (so we locate
+  // correctly wherever the ride is joined, including mid-loop), then a windowed
+  // search around the last index for perf and to handle self-crossing loops.
+  const { idx, distM } = nearestGeomIndex(here, geometry, located ? lastIdx : -1)
   lastIdx = idx
+  located = true
   offRoute.value = distM > OFF_ROUTE_M
   updateProgress(idx)
 
@@ -356,11 +360,18 @@ function onVisibilityChange() {
 .nav-page {
   position: relative;
   width: 100%;
-  height: calc(100vh - 4rem);
-  height: calc(100dvh - 4rem);
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 .nav-map { position: absolute; inset: 0; }
+
+/* Anchor the map-style menu to the button's right edge so it never overflows
+   the screen on this full-width page. */
+.nav-top-right :deep(.dropdown-menu) {
+  right: 0;
+  left: auto;
+}
 
 .nav-overlay-center {
   position: absolute; inset: 0;

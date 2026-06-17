@@ -11,6 +11,12 @@ body {
   min-height: 100vh;
 }
 
+// Full-screen pages (e.g. route navigation) render without the fixed navbar,
+// so the body must not reserve the 4rem top padding.
+body.fullscreen-page {
+  padding-top: 0;
+}
+
 .sports-scope-brand {
   font-weight: 600;
   letter-spacing: 0.02em;

@@ -38,6 +38,30 @@ export function formatDuration(totalSec: number): string {
   return `${h} h ${String(m).padStart(2, '0')}`
 }
 
+// Densifie les longs tronçons (typiquement les lignes droites « straight » de BRouter
+// entre points libres, qui ne contiennent que leurs deux extrémités) en insérant des
+// points interpolés linéairement avec une altitude nulle, à combler ensuite par open-meteo.
+// Les tronçons routés sont déjà denses : seuls les écarts > spacingM gagnent des points.
+// Les points d'origine sont tous conservés, l'indexage des waypoints reste donc valide.
+export function densifyGeometry(coords: Coord[], spacingM = 100): Coord[] {
+  if (coords.length < 2) return coords.slice()
+  const out: Coord[] = [coords[0]]
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1]
+    const b = coords[i]
+    const d = haversine(a, b)
+    if (d > spacingM * 1.5) {
+      const n = Math.floor(d / spacingM)
+      for (let k = 1; k < n; k++) {
+        const f = k / n
+        out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, null])
+      }
+    }
+    out.push(b)
+  }
+  return out
+}
+
 export function downsample<T>(arr: T[], maxPoints: number): T[] {
   if (arr.length <= maxPoints) return arr.slice()
   const step = arr.length / maxPoints

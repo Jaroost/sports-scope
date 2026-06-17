@@ -6,7 +6,8 @@ import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
-import { haversine, buildDistancesM, downsample, formatDuration } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration } from '../routeHelpers'
+import type { Coord } from '../routeHelpers'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
@@ -215,13 +216,20 @@ async function recomputeRoute() {
     if (!Array.isArray(coords) || coords.length < 2) throw new Error('Routing impossible (no route)')
     const trackLen = parseFloat(feature.properties?.['track-length'] || '0')
     routeStore.distanceM.value = Number.isFinite(trackLen) && trackLen > 0 ? trackLen : 0
-    routeStore.geometry.value = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null])
+    let geom = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null]) as Coord[]
+    // Les tronçons droits (points libres) ne contiennent que leurs extrémités : on les
+    // densifie pour qu'open-meteo échantillonne le relief le long de la ligne.
+    if (straight.size) geom = densifyGeometry(geom)
+    routeStore.geometry.value = geom
 
     mapRef.value?.updateRouteLayer()
     mapRef.value?.installClimbMarkers()
     mapRef.value?.recomputeWaypointGeomIndices()
 
-    const hasInlineElevation = routeStore.geometry.value.some((c) => c[2] != null)
+    // BRouter ne renvoie pas d'altitude pour les tronçons « straight » (points libres).
+    // On ne se fie aux altitudes inline que si TOUS les points en ont ; sinon on
+    // interroge open-meteo pour combler les trous (sans quoi le dénivelé serait faux).
+    const hasInlineElevation = routeStore.geometry.value.every((c) => c[2] != null)
     if (hasInlineElevation) {
       routeStore.recomputeGain()
       await nextTick()

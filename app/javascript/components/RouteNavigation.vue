@@ -149,9 +149,12 @@ async function initMap() {
   map.on('styleimagemissing', (e: any) => {
     map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
-  // The user took manual control of the map → stop auto-following.
-  map.on('dragstart', () => { following.value = false })
-  map.on('rotatestart', () => { following.value = false })
+  // The user took manual control of the map → stop auto-following. Guard on
+  // `originalEvent`: our own follow animations change the bearing and fire
+  // `rotatestart` programmatically (no originalEvent), and must NOT disable it —
+  // that bug forced the rider to keep tapping "recenter".
+  map.on('dragstart', (e: any) => { if (e.originalEvent) following.value = false })
+  map.on('rotatestart', (e: any) => { if (e.originalEvent) following.value = false })
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
@@ -238,14 +241,29 @@ function onPosition(pos: GeolocationPosition) {
   handleOffRouteSound(wasOffRoute)
 
   if (following.value) {
-    // Preserve the rider's chosen zoom: only set it once, on the first fix.
-    const opts: any = { center: here, bearing: currentBearing, pitch: 55, duration: 600 }
-    if (!hasInitialZoom) { opts.zoom = 15; hasInitialZoom = true }
-    map.easeTo(opts)
+    map.easeTo(followOptions(here))
   } else if (turnApproaching) {
     // Snap the 3D view back over the rider as they reach an intersection.
     following.value = true
+    map.easeTo(followOptions(here))
   }
+}
+
+// Camera framing used whenever we follow the rider. The rider is anchored in the
+// lower third of the screen (via padding) so the look-ahead distance stays
+// constant frame to frame; the zoom is the rider's own and is only set once, on
+// the first fix, so following never fights a manual pinch-zoom.
+function followOptions(center: LngLat): any {
+  const h = map?.getContainer()?.clientHeight || 0
+  const opts: any = {
+    center,
+    bearing: currentBearing,
+    pitch: 55,
+    duration: 600,
+    padding: { top: Math.round(h * 0.45), bottom: 0, left: 0, right: 0 },
+  }
+  if (!hasInitialZoom) { opts.zoom = 15; hasInitialZoom = true }
+  return opts
 }
 
 // Track the next turn ahead: announce it once within TURN_ALERT_M (and re-orient
@@ -331,7 +349,7 @@ function updateLocationLayer(coords: LngLat, accuracy: number) {
 function recenter() {
   following.value = true
   // Keep the rider's current zoom — only re-center, re-orient and restore the 3D tilt.
-  if (lastPos) map.easeTo({ center: lastPos, bearing: currentBearing, pitch: 55, duration: 600 })
+  if (lastPos) map.easeTo(followOptions(lastPos))
 }
 
 // ─── Wake lock ────────────────────────────────────────────────────────────────

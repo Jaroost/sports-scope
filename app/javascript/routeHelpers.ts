@@ -293,7 +293,7 @@ export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
 // route vertices). `p` is the origin (0,0) in that projection, so we clamp its
 // projection parameter `s` onto the segment to [0,1]; because the projection is
 // affine, that same `s` lerps back to lng/lat for the snapped point.
-function closestOnSegment(p: LngLat, a: Coord | LngLat, b: Coord | LngLat): { point: LngLat; distM: number } {
+function closestOnSegment(p: LngLat, a: Coord | LngLat, b: Coord | LngLat): { point: LngLat; distM: number; s: number } {
   const R = 6371000
   const cosLat = Math.cos((p[1] * Math.PI) / 180)
   const toXY = (c: Coord | LngLat): [number, number] => [
@@ -307,7 +307,7 @@ function closestOnSegment(p: LngLat, a: Coord | LngLat, b: Coord | LngLat): { po
   const len2 = dx * dx + dy * dy
   const s = len2 === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2))
   const point: LngLat = [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])]
-  return { point, distM: Math.hypot(ax + s * dx, ay + s * dy) }
+  return { point, distM: Math.hypot(ax + s * dx, ay + s * dy), s }
 }
 
 // Perpendicular distance in metres from point `p` to the segment [a, b].
@@ -316,30 +316,40 @@ export function pointToSegmentM(p: LngLat, a: Coord | LngLat, b: Coord | LngLat)
 }
 
 // Snap `pos` onto the polyline, given the already-known nearest vertex `idx`.
-// Returns the snapped lng/lat plus `nextIdx` — the index of the first original
-// vertex that lies ahead of the snap point — so callers can build the geometry
-// from the rider forward as [point, ...geometry.slice(nextIdx)].
+// Returns the snapped lng/lat, `nextIdx` (the first original vertex ahead of the
+// snap point, so callers can build the geometry from the rider forward as
+// [point, ...geometry.slice(nextIdx)]), and `distAlongM` — the distance covered
+// along the route at the snap point, interpolated within the segment so progress
+// advances continuously rather than vertex by vertex.
 export function projectOnRoute(
   pos: LngLat,
   geometry: Coord[],
+  cumDistM: number[],
   idx: number,
-): { point: LngLat; nextIdx: number } {
-  let best: { point: LngLat; nextIdx: number; distM: number } = {
+): { point: LngLat; nextIdx: number; distAlongM: number } {
+  let best: { point: LngLat; nextIdx: number; distAlongM: number; distM: number } = {
     point: [geometry[idx][0], geometry[idx][1]],
     nextIdx: idx,
+    distAlongM: cumDistM[idx] || 0,
     distM: Infinity,
   }
   // Segment ending at the vertex → keep the vertex (and everything after) ahead.
   if (idx > 0) {
-    const { point, distM } = closestOnSegment(pos, geometry[idx - 1], geometry[idx])
-    if (distM < best.distM) best = { point, nextIdx: idx, distM }
+    const { point, distM, s } = closestOnSegment(pos, geometry[idx - 1], geometry[idx])
+    if (distM < best.distM) {
+      const distAlongM = cumDistM[idx - 1] + s * (cumDistM[idx] - cumDistM[idx - 1])
+      best = { point, nextIdx: idx, distAlongM, distM }
+    }
   }
   // Segment leaving the vertex → the vertex is behind us, keep from idx+1 on.
   if (idx < geometry.length - 1) {
-    const { point, distM } = closestOnSegment(pos, geometry[idx], geometry[idx + 1])
-    if (distM < best.distM) best = { point, nextIdx: idx + 1, distM }
+    const { point, distM, s } = closestOnSegment(pos, geometry[idx], geometry[idx + 1])
+    if (distM < best.distM) {
+      const distAlongM = cumDistM[idx] + s * (cumDistM[idx + 1] - cumDistM[idx])
+      best = { point, nextIdx: idx + 1, distAlongM, distM }
+    }
   }
-  return { point: best.point, nextIdx: best.nextIdx }
+  return { point: best.point, nextIdx: best.nextIdx, distAlongM: best.distAlongM }
 }
 
 // Index of the geometry vertex closest to `pos`, plus the lateral distance (m).
@@ -374,13 +384,17 @@ export function nearestGeomIndex(
 }
 
 // Remaining distance / elevation / progress ratio from a projected index.
+// Pass `doneM` (the distance covered along the route, e.g. from projectOnRoute)
+// to advance distance and ratio continuously within a segment; it defaults to
+// the distance at the vertex `idx`. Elevation gain stays vertex-granular.
 export function progressFor(
   idx: number,
   geometry: Coord[],
   cumDistM: number[],
+  doneM?: number,
 ): { remainingM: number; doneRatio: number; remainingGainM: number } {
   const total = cumDistM[cumDistM.length - 1] || 0
-  const done = cumDistM[idx] || 0
+  const done = doneM ?? cumDistM[idx] ?? 0
   const remainingM = Math.max(0, total - done)
   const doneRatio = total > 0 ? Math.min(1, done / total) : 0
   const { gain } = computeGainLoss(geometry.slice(idx))

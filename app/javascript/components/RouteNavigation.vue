@@ -65,6 +65,7 @@ const routeName = ref('')
 let lastIdx = 0
 let snapPoint: LngLat | null = null   // rider position projected onto the route
 let snapNextIdx = 0                   // first original vertex ahead of snapPoint
+let snapDistAlongM = 0                // distance covered along the route at snapPoint
 let located = false
 let lastPos: LngLat | null = null
 let currentBearing = 0
@@ -241,9 +242,10 @@ function onPosition(pos: GeolocationPosition) {
   located = true
   // Snap the raw fix onto the polyline so the grey/purple boundary follows the
   // rider continuously along a segment instead of jumping vertex to vertex.
-  const snap = projectOnRoute(here, geometry, idx)
+  const snap = projectOnRoute(here, geometry, cumDistM, idx)
   snapPoint = snap.point
   snapNextIdx = snap.nextIdx
+  snapDistAlongM = snap.distAlongM
   const wasOffRoute = offRoute.value
   // Widen the threshold by the reported GPS accuracy (capped) so an imprecise fix
   // doesn't get flagged off-route while the rider is actually on the line.
@@ -426,7 +428,7 @@ function updateBearing(pos: GeolocationPosition, here: LngLat) {
 }
 
 function updateProgress(idx: number) {
-  const p = progressFor(idx, geometry, cumDistM)
+  const p = progressFor(idx, geometry, cumDistM, snapDistAlongM)
   remainingM.value = p.remainingM
   remainingGainM.value = p.remainingGainM
   doneRatio.value = p.doneRatio

@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { t } from '../i18n'
-import { MAP_STYLES } from '../mapStyles'
+import { MAP_STYLES, MAP_STYLE_GROUPS } from '../mapStyles'
+
+const groupedStyles = computed(() =>
+  MAP_STYLE_GROUPS
+    .map(group => ({ group, styles: MAP_STYLES.filter(s => s.group === group) }))
+    .filter(g => g.styles.length > 0),
+)
 
 interface Preferences {
   points_of_interest: {
@@ -129,17 +135,26 @@ async function save() {
       </div>
       <div class="card-body">
         <p class="text-muted small mb-3">{{ t('profile.map.help') }}</p>
-        <div class="d-flex flex-wrap gap-2">
-          <label
-            v-for="style in MAP_STYLES"
-            :key="style.id"
-            class="map-style-option"
-            :class="{ active: prefs.map.default_style === style.id }"
-          >
-            <input v-model="prefs.map.default_style" class="visually-hidden" type="radio" name="map-style" :value="style.id">
-            <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
-            <span>{{ t(`profile.map.style_${style.id}`) }}</span>
-          </label>
+        <div class="d-flex flex-column gap-3">
+          <div v-for="g in groupedStyles" :key="g.group" class="card map-style-group">
+            <div class="card-body p-2">
+              <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2 px-1">
+                {{ t(`profile.map.group_${g.group}`) }}
+              </h3>
+              <div class="d-flex flex-wrap gap-2">
+                <label
+                  v-for="style in g.styles"
+                  :key="style.id"
+                  class="map-style-option"
+                  :class="{ active: prefs.map.default_style === style.id }"
+                >
+                  <input v-model="prefs.map.default_style" class="visually-hidden" type="radio" name="map-style" :value="style.id">
+                  <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
+                  <span>{{ t(`profile.map.style_${style.id}`) }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>

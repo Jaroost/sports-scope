@@ -1,16 +1,24 @@
+export type MapStyleGroup = 'world' | 'swiss'
+
 export interface MapStyle {
   id: string
   icon: string
+  group: MapStyleGroup
 }
 
+// Ordre d'affichage = ordre de ce tableau ; les en-têtes du dropdown suivent l'ordre
+// d'apparition des groupes (voir MAP_STYLE_GROUPS).
 export const MAP_STYLES: MapStyle[] = [
-  { id: 'cyclosm',    icon: 'fa-bicycle' },
-  { id: 'topo',       icon: 'fa-mountain-sun' },
-  { id: 'swisstopo',  icon: 'fa-flag-checkered' },
-  { id: 'swissgrau',  icon: 'fa-circle-half-stroke' },
-  { id: 'swissimage', icon: 'fa-satellite' },
-  { id: 'liberty',    icon: 'fa-map' },
+  { id: 'cyclosm',    icon: 'fa-bicycle',          group: 'world' },
+  { id: 'topo',       icon: 'fa-mountain-sun',     group: 'world' },
+  { id: 'liberty',    icon: 'fa-map',              group: 'world' },
+  { id: 'swissgrau',  icon: 'fa-circle-half-stroke', group: 'swiss' },
+  { id: 'swisstopo',  icon: 'fa-flag-checkered',   group: 'swiss' },
+  { id: 'swissimage', icon: 'fa-satellite',        group: 'swiss' },
 ]
+
+// Ordre des en-têtes de groupe dans le dropdown.
+export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss']
 
 // Tile metadata used by the image export to render at the finest available detail.
 // `maxzoom` = zoom des plus petites tuiles disponibles pour la source ; `tileSize` = taille

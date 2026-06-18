@@ -42,7 +42,6 @@ let suppressNextMapClick = false
 let suppressNextWpClick = false
 let overClimbMarker = false
 const divergentMarkers: any[] = []
-let placeHoverMarker: any = null
 let chartCrossMarker: any = null
 let selectionMarkerA: any = null
 let selectionMarkerB: any = null
@@ -53,6 +52,11 @@ const climbMarkers: any[] = []
 const climbMarkerObservers: MutationObserver[] = []
 const placeMarkers: any[] = []
 const placeMarkerObservers: MutationObserver[] = []
+// Permet de retrouver l'élément DOM d'un POI à partir de ses coordonnées, pour
+// surligner le bon marqueur au survol (depuis la carte ou la liste latérale).
+const placeMarkerEls = new Map<string, HTMLElement>()
+let hoveredPlaceEl: HTMLElement | null = null
+let selectedPlaceEl: HTMLElement | null = null
 let placePopup: any = null
 let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
@@ -175,6 +179,9 @@ async function initMap() {
       installOverlays()
       mapInstance.on('click', (e: any) => {
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
+        // Tooltip de POI (cimetière/boulangerie) ouverte : le clic ne fait que la
+        // refermer, sans ajouter de point au trajet.
+        if (placePopup) { closePlacePopup(); return }
         // Un point sélectionné (tooltip ouverte) : le clic ne fait que refermer la
         // tooltip, sans ajouter de nouveau point au trajet.
         if (selectedWpIdx >= 0) { deselectAll(); return }
@@ -411,10 +418,20 @@ function buildClimbMarkerEl(climb: Climb) {
 
 // ─── Place markers (cimetières / boulangeries) ─────────────────────────────────
 
+function placeMarkerKey(lng: number, lat: number) { return `${lng.toFixed(6)},${lat.toFixed(6)}` }
+
+// Ferme le popup de POI et retire le surlignage « actif » de son marqueur. Point
+// d'entrée unique pour toute fermeture (bouton, clic carte, ouverture d'un autre POI).
+function closePlacePopup() {
+  if (placePopup) { placePopup.remove(); placePopup = null }
+  if (selectedPlaceEl) { selectedPlaceEl.classList.remove('place-marker--active'); selectedPlaceEl = null }
+}
+
 function clearPlaceMarkers() {
   placeMarkerObservers.forEach((obs) => obs.disconnect()); placeMarkerObservers.length = 0
   placeMarkers.forEach((m) => m.remove()); placeMarkers.length = 0
-  if (placePopup) { placePopup.remove(); placePopup = null }
+  placeMarkerEls.clear(); hoveredPlaceEl = null
+  closePlacePopup()
 }
 
 // Popup proposant d'ouvrir le lieu sur Google Maps et en Street View, comme les
@@ -422,7 +439,7 @@ function clearPlaceMarkers() {
 // View est grisé quand aucune imagerie n'est disponible à proximité.
 function showPlacePopup(place: Place) {
   if (!_maplibregl || !mapInstance) return
-  if (placePopup) { placePopup.remove(); placePopup = null }
+  closePlacePopup()
   // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
   // le POI. On vise juste à côté pour le laisser visible/cliquable.
   const OFFSET = 0.00008
@@ -443,13 +460,16 @@ function showPlacePopup(place: Place) {
       <i class="fa-solid fa-street-view" aria-hidden="true"></i>
       <span>${t('routes.street_view')}</span>
     </a>`
-  placePopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: true, className: 'place-popup-container' })
+  // closeOnClick désactivé : la fermeture sur clic carte est gérée dans le handler
+  // de clic de la carte, pour que ce clic ne fasse que fermer sans ajouter de point.
+  placePopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([place.markerLng, place.markerLat])
     .setDOMContent(wrap)
     .addTo(mapInstance)
-  wrap.querySelector('.place-popup-close')?.addEventListener('click', () => {
-    if (placePopup) { placePopup.remove(); placePopup = null }
-  })
+  // Remplit le marqueur du POI tant que son popup est ouvert (même rendu que le survol).
+  selectedPlaceEl = placeMarkerEls.get(placeMarkerKey(place.markerLng, place.markerLat)) ?? null
+  if (selectedPlaceEl) selectedPlaceEl.classList.add('place-marker--active')
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', closePlacePopup)
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
   if (svLink) {
     checkSV(place.lat, place.lng).then((ok) => {
@@ -479,6 +499,7 @@ function installPlaceMarkers() {
       .addTo(mapInstance)
     placeMarkerObservers.push(attachClimbMarkerScaleObserver(el))
     placeMarkers.push(marker)
+    placeMarkerEls.set(placeMarkerKey(place.markerLng, place.markerLat), el)
   }
 }
 
@@ -535,21 +556,21 @@ function hideChartCrossMarker() {
   if (chartCrossMarker) chartCrossMarker.getElement().style.display = 'none'
 }
 
+// Surligne le POI survolé en remplissant son marqueur (le fond passe à la couleur
+// du POI). lng/lat sont les coordonnées du marqueur (markerLng/markerLat), qui
+// servent de clé. Le survol peut venir de la carte ou de la liste latérale.
 function showPlaceHoverMarker(lng: number, lat: number, distanceM: number) {
-  if (!_maplibregl || !mapInstance) return
-  if (!placeHoverMarker) {
-    const el = document.createElement('div')
-    el.className = 'place-hover-marker'
-    placeHoverMarker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).addTo(mapInstance)
-  } else {
-    placeHoverMarker.setLngLat([lng, lat])
-    placeHoverMarker.getElement().style.display = ''
+  const el = placeMarkerEls.get(placeMarkerKey(lng, lat)) ?? null
+  if (el !== hoveredPlaceEl) {
+    if (hoveredPlaceEl) hoveredPlaceEl.classList.remove('place-marker--hover')
+    if (el) el.classList.add('place-marker--hover')
+    hoveredPlaceEl = el
   }
   placesStore.placeHoverKm = distanceM / 1000
 }
 
 function hidePlaceHoverMarker() {
-  if (placeHoverMarker) placeHoverMarker.getElement().style.display = 'none'
+  if (hoveredPlaceEl) { hoveredPlaceEl.classList.remove('place-marker--hover'); hoveredPlaceEl = null }
   placesStore.placeHoverKm = null
 }
 
@@ -2014,6 +2035,12 @@ defineExpose({
 }
 .place-marker i { font-size: 0.78rem; }
 .place-marker:hover { box-shadow: 0 6px 14px -3px rgba(0,0,0,0.5); }
+/* Survol (carte ou liste) ou popup ouvert : le marqueur se remplit de sa couleur,
+   icône en blanc. */
+.place-marker--hover,
+.place-marker--active { background: currentColor; box-shadow: 0 6px 14px -3px rgba(0,0,0,0.5); }
+.place-marker--hover i,
+.place-marker--active i { color: #fff; }
 .place-marker--cemetery { color: #6b7280; }
 .place-marker--bakery   { color: #b45309; }
 .place-popup-container .maplibregl-popup-content {
@@ -2091,15 +2118,6 @@ defineExpose({
   background: #fc4c02;
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(0,0,0,0.45);
-  pointer-events: none;
-}
-.place-hover-marker {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #0d6efd;
-  border: 3px solid #fff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
   pointer-events: none;
 }
 .user-location-dot {

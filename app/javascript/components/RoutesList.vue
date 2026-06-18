@@ -10,9 +10,12 @@ const localePrefix = lang ? `/${lang}` : ''
 
 const gpxInputEl = ref(null)
 const importingGpx = ref(false)
-// Cap waypoints handed to the builder. The controller enforces MAX_WAYPOINTS=50;
+// Cap waypoints handed to the builder when down-sampling a foreign GPX track.
 // 25 leaves the user headroom to drag-insert more once the route is loaded.
 const GPX_IMPORT_MAX_WAYPOINTS = 25
+// A Sports Scope GPX already carries deliberate waypoints (not a dense track),
+// so we keep them all up to the controller's MAX_WAYPOINTS=500 ceiling.
+const GPX_IMPORT_MAX_NATIVE_WAYPOINTS = 500
 
 // Average riding speed in km/h — shared with the RouteBuilder via the same
 // localStorage key, so editing it in either place keeps both in sync.
@@ -196,18 +199,32 @@ async function processGpxFile(file) {
   importingGpx.value = true
   try {
     const text = await file.text()
-    const points = parseGpxPoints(text)
-    if (!points.length) throw new Error(t('routes.error_gpx_no_points'))
-    const sampled = downsample(points, GPX_IMPORT_MAX_WAYPOINTS)
-    // Pin original endpoints so they survive downsampling.
-    if (sampled.length >= 2) {
-      sampled[0] = points[0]
-      sampled[sampled.length - 1] = points[points.length - 1]
+    const doc = new DOMParser().parseFromString(text, 'application/xml')
+    if (doc.getElementsByTagName('parsererror').length) {
+      throw new Error(t('routes.error_gpx_invalid'))
+    }
+    // Si le GPX porte l'extension Sports Scope, on rejoue les waypoints d'origine
+    // (avec leur flag `free`) tels quels : pas de re-sampling, le builder relance
+    // BRouter et reconstruit un tracé identique à l'export.
+    const ssWaypoints = parseSportsScopeWaypoints(doc)
+    let waypoints
+    if (ssWaypoints.length >= 2) {
+      waypoints = ssWaypoints
+    } else {
+      const points = parseGpxPoints(doc)
+      if (!points.length) throw new Error(t('routes.error_gpx_no_points'))
+      const sampled = downsample(points, GPX_IMPORT_MAX_WAYPOINTS)
+      // Pin original endpoints so they survive downsampling.
+      if (sampled.length >= 2) {
+        sampled[0] = points[0]
+        sampled[sampled.length - 1] = points[points.length - 1]
+      }
+      waypoints = sampled.map((p) => ({ lng: p[0], lat: p[1] }))
     }
     const baseName = file.name.replace(/\.gpx$/i, '').trim().slice(0, 80)
     sessionStorage.setItem('sportsScope.gpxImport', JSON.stringify({
       name: baseName,
-      waypoints: sampled.map((p) => ({ lng: p[0], lat: p[1] })),
+      waypoints,
     }))
     window.location.href = `${localePrefix}/routes/new?fromGpx=1`
   } catch (e) {
@@ -216,13 +233,30 @@ async function processGpxFile(file) {
   }
 }
 
+// Namespace de l'extension Sports Scope — doit rester aligné sur GPX_NS côté
+// routes_controller.rb (build_gpx_extensions).
+const SS_GPX_NS = 'https://sports-scope.app/gpx/1'
+
+// Waypoints d'origine embarqués par Sports Scope, avec le flag `free`. Vide si
+// le GPX vient d'une autre source. Plafonné à MAX_WAYPOINTS (le serveur rejette
+// au-delà), même si en pratique l'export n'en produit jamais plus.
+function parseSportsScopeWaypoints(doc) {
+  const nodes = doc.getElementsByTagNameNS(SS_GPX_NS, 'wp')
+  const out = []
+  for (let i = 0; i < nodes.length && out.length < GPX_IMPORT_MAX_NATIVE_WAYPOINTS; i++) {
+    const lat = parseFloat(nodes[i].getAttribute('lat'))
+    const lng = parseFloat(nodes[i].getAttribute('lon'))
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) continue
+    const wp = { lng, lat }
+    if (nodes[i].getAttribute('free') === 'true') wp.free = true
+    out.push(wp)
+  }
+  return out
+}
+
 // [[lng, lat], ...] — <trkpt> first (device exports), then <rtept> (planned
 // routes from tools like Komoot), then <wpt> as a last resort.
-function parseGpxPoints(text) {
-  const doc = new DOMParser().parseFromString(text, 'application/xml')
-  if (doc.getElementsByTagName('parsererror').length) {
-    throw new Error(t('routes.error_gpx_invalid'))
-  }
+function parseGpxPoints(doc) {
   const collect = (tag) => {
     const out = []
     const nodes = doc.getElementsByTagName(tag)

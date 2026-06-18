@@ -170,12 +170,19 @@ class RoutesController < ApplicationController
     )
   end
 
+  # Namespace de l'extension propriétaire embarquée dans le GPX. Les apps tierces
+  # (Strava, Garmin, Komoot…) ignorent les <extensions> d'un namespace inconnu,
+  # donc le fichier reste un GPX 1.1 valide ailleurs ; côté Sports Scope on s'en
+  # sert pour ré-importer les waypoints d'origine avec leur flag « libre ».
+  GPX_NS = "https://sports-scope.app/gpx/1"
+
   def build_gpx(route)
     pts = Array(route.geometry)
+    wps = Array(route.waypoints)
     name = ERB::Util.html_escape(route.name)
     parts = []
     parts << '<?xml version="1.0" encoding="UTF-8"?>'
-    parts << '<gpx version="1.1" creator="Sports Scope" xmlns="http://www.topografix.com/GPX/1/1">'
+    parts << %(<gpx version="1.1" creator="Sports Scope" xmlns="http://www.topografix.com/GPX/1/1" xmlns:ss="#{GPX_NS}">)
     parts << "  <metadata><name>#{name}</name></metadata>"
     parts << "  <trk><name>#{name}</name><trkseg>"
     pts.each do |pt|
@@ -187,7 +194,26 @@ class RoutesController < ApplicationController
       parts << seg
     end
     parts << "  </trkseg></trk>"
+    parts.concat(build_gpx_extensions(wps))
     parts << "</gpx>"
     parts.join("\n")
+  end
+
+  # Waypoints d'origine (sommets cliqués) + flag « libre » : la trace <trkpt>
+  # ci-dessus ne dit pas lesquels étaient libres, donc on les rejoue ici pour un
+  # aller-retour fidèle. La géométrie n'a pas à être stockée : BRouter la
+  # reconstruit à l'identique depuis les waypoints (les tronçons libres sont
+  # tracés en ligne droite via le paramètre `straight`).
+  def build_gpx_extensions(wps)
+    rows = wps.filter_map do |w|
+      lat = w["lat"] || w[:lat]
+      lng = w["lng"] || w[:lng]
+      next unless lat && lng
+      attrs = %(lat="#{lat}" lon="#{lng}")
+      attrs << ' free="true"' if w["free"] || w[:free]
+      "      <ss:wp #{attrs}/>"
+    end
+    return [] if rows.empty?
+    ["  <extensions>", "    <ss:waypoints>", *rows, "    </ss:waypoints>", "  </extensions>"]
   end
 end

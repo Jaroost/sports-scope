@@ -15,7 +15,7 @@ const props = defineProps<{ shareToken: string }>()
 
 const STYLE_KEY = 'sportsScope.routeBuilderMapStyle'
 const SOUND_KEY = 'sportsScope.navSound'
-const OFF_ROUTE_M = 10          // lateral distance beyond which we warn
+const OFF_ROUTE_M = 20          // lateral distance beyond which we warn
 const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
 const TURN_ALERT_M = 60        // start announcing a turn this far ahead
@@ -260,11 +260,11 @@ function followOptions(center: LngLat): any {
   const opts: any = {
     center,
     bearing: currentBearing,
-    pitch: 55,
+    pitch: 60,
     duration: 600,
     padding: { top: Math.round(h * 0.45), bottom: 0, left: 0, right: 0 },
   }
-  if (!hasInitialZoom) { opts.zoom = 15; hasInitialZoom = true }
+  if (!hasInitialZoom) { opts.zoom = 19.5; hasInitialZoom = true }
   return opts
 }
 

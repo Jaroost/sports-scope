@@ -310,11 +310,11 @@ async function render() {
           type: 'linear',
           min: 0,
           max: cumDistKm[cumDistKm.length - 1],
-          title: { display: true, text: t('routes.x_km') },
-          ticks: { maxTicksLimit: 8 },
+          title: { display: false },
+          ticks: { maxTicksLimit: 8, font: { size: 10 } },
         },
         y: {
-          title: { display: true, text: t('routes.y_m') },
+          title: { display: true, text: t('routes.y_m'), font: { size: 10 } },
           ticks: {
             stepSize: (() => {
               const alts = points.map((p) => p.y).filter((v) => v != null)
@@ -322,6 +322,7 @@ async function render() {
               return range >= 150 ? 100 : undefined
             })(),
             maxTicksLimit: 20,
+            font: { size: 10 },
           },
           grid: { color: 'rgba(0,0,0,0.07)', lineWidth: 1 },
         },

@@ -457,7 +457,12 @@ function onSelectClimb(climb: any) {
 }
 
 function onHoverClimb(climb: any) {
-  mapRef.value?.updateClimbHoverLayer(climb)
+  // Sur ordinateur, survoler un col le sélectionne (drapeaux départ/arrivée +
+  // tronçon en bleu), en remplaçant la sélection précédente s'il y en a une.
+  if (!climb || isMobile.value) return
+  selectionStore.selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
+  mapRef.value?.updateSelectionLayer()
+  chartRef.value?.update()
 }
 
 function onSelectPlace(place: any) {

@@ -38,8 +38,6 @@ let suppressNextMapClick = false
 let suppressNextWpClick = false
 let overClimbMarker = false
 const divergentMarkers: any[] = []
-let climbHoverStartMarker: any = null
-let climbHoverEndMarker: any = null
 let placeHoverMarker: any = null
 let chartCrossMarker: any = null
 let selectionMarkerA: any = null
@@ -343,8 +341,12 @@ function buildClimbMarkerEl(climb: Climb) {
     fitMapToSelection()
   })
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
-  el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker(); updateClimbHoverLayer(climb) })
-  el.addEventListener('mouseleave', () => { overClimbMarker = false; updateClimbHoverLayer(null) })
+  el.addEventListener('mouseenter', () => {
+    overClimbMarker = true; hideHoverMarker()
+    // Survol = sélection du col (drapeaux + tronçon bleu), remplace la précédente.
+    selectionStore.selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
+  })
+  el.addEventListener('mouseleave', () => { overClimbMarker = false })
   return el
 }
 
@@ -490,27 +492,6 @@ function showPlaceHoverMarker(lng: number, lat: number, distanceM: number) {
 function hidePlaceHoverMarker() {
   if (placeHoverMarker) placeHoverMarker.getElement().style.display = 'none'
   placesStore.placeHoverKm = null
-}
-
-function updateClimbHoverLayer(climb: Climb | null) {
-  if (!_maplibregl || !mapInstance) return
-  if (!climb) {
-    if (climbHoverStartMarker) { climbHoverStartMarker.remove(); climbHoverStartMarker = null }
-    if (climbHoverEndMarker) { climbHoverEndMarker.remove(); climbHoverEndMarker = null }
-    return
-  }
-  const ptEnd = routeStore.geometry.value[climb.endIdx]
-  if (!ptEnd) return
-  function makeFlag(kind: 'start' | 'end') {
-    const el = document.createElement('div')
-    el.className = 'climb-hover-flag'
-    el.style.cssText = 'width:28px;height:36px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35));pointer-events:none'
-    el.innerHTML = flagSvg(kind)
-    return new _maplibregl.Marker({ element: el, anchor: 'bottom-left' })
-  }
-  if (climbHoverStartMarker) { climbHoverStartMarker.remove(); climbHoverStartMarker = null }
-  if (climbHoverEndMarker) climbHoverEndMarker.remove()
-  climbHoverEndMarker = makeFlag('end').setLngLat([ptEnd[0], ptEnd[1]]).addTo(mapInstance)
 }
 
 // ─── Selection markers ────────────────────────────────────────────────────────
@@ -1332,7 +1313,6 @@ defineExpose({
   showPlaceHoverMarker,
   hidePlaceHoverMarker,
   showPlacePopup,
-  updateClimbHoverLayer,
   setMapStyle,
   resize: () => mapInstance?.resize(),
   getMapInstance: () => mapInstance,
@@ -1929,7 +1909,6 @@ defineExpose({
 .climb-cat-3     { color: #ca8a04; }
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
-.climb-hover-flag { pointer-events: none; }
 .place-marker {
   display: flex;
   align-items: center;

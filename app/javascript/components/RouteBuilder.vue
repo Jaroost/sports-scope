@@ -8,6 +8,7 @@ import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration } from '../routeHelpers'
 import type { Coord, VoiceHint } from '../routeHelpers'
+import type { Sport } from '../userPreferences'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
@@ -24,6 +25,18 @@ const localePrefix = lang ? `/${lang}` : ''
 // pointer vers une instance auto-hébergée (le serveur public brouter.de n'a ni
 // SLA ni quota garanti). Voir .env.example.
 const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || 'https://brouter.de/brouter'
+
+// Profil de routage BRouter selon la catégorie d'activité sélectionnée. La rando
+// utilise `hiking-mountain`, bien plus permissif que `trekking` : il accepte les
+// sentiers de montagne étroits, non balisés et les passages exigeants que
+// `trekking` évite. Les profils alpins SAC (Hiking-Alpine-SAC6) ne sont PAS
+// installés sur l'instance publique brouter.de (HTTP 500) ; si on passe à une
+// instance auto-hébergée qui les fournit, on pourra basculer ici.
+const BROUTER_PROFILES: Record<Sport, string> = {
+  cycling: 'trekking',
+  mtb: 'gravel',
+  hiking: 'hiking-mountain',
+}
 
 const state = reactive(new RouteBuilderState())
 const saving = ref(false)
@@ -194,6 +207,15 @@ async function fetchImportantPlaces() {
 
 // ─── Route computation ────────────────────────────────────────────────────────
 
+// Changement de catégorie d'activité par l'utilisateur : le profil BRouter change
+// (voir BROUTER_PROFILES), donc on relance le routage pour redessiner un tracé
+// adapté au nouveau mode (la rando emprunte des sentiers refusés au vélo, etc.).
+function onChangeSport(sport: Sport) {
+  if (sport === routeStore.sport.value) return
+  routeStore.setSport(sport)
+  if (routeStore.waypoints.value.length >= 2) recomputeRoute({ autoSave: true })
+}
+
 async function recomputeRoute(opts: { autoSave?: boolean } = {}) {
   const token = ++recomputeToken
   selectionStore.clear()
@@ -226,7 +248,8 @@ async function recomputeRoute(opts: { autoSave?: boolean } = {}) {
     })
     const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
     // timode=2 makes BRouter emit turn-by-turn voicehints in the GeoJSON properties.
-    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson&timode=2${straightParam}`
+    const profile = BROUTER_PROFILES[routeStore.sport.value] ?? 'trekking'
+    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${straightParam}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
     const data = await res.json()
@@ -1091,6 +1114,7 @@ onBeforeUnmount(() => {
         @select-place="onSelectPlace"
         @hover-place="onHoverPlace"
         @retry-places="fetchImportantPlaces"
+        @change-sport="onChangeSport"
       />
 
       <!-- Horizontal resize handle -->

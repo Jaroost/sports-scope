@@ -26,6 +26,7 @@ const emit = defineEmits<{
   'select-place': [place: Place]
   'hover-place': [place: Place | null]
   'retry-places': []
+  'change-sport': [sport: Sport]
 }>()
 
 const climbsExpanded = ref(true)
@@ -92,7 +93,7 @@ const climbsExpanded = ref(true)
           :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
           :title="t(`routes.wt_sport_${s}`)"
           :aria-label="t(`routes.wt_sport_${s}`)"
-          @click="routeStore.setSport(s)"
+          @click="emit('change-sport', s)"
         >
           <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
           <span class="ms-1 d-none d-sm-inline">{{ t(`routes.wt_sport_${s}`) }}</span>

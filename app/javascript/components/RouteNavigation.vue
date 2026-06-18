@@ -268,7 +268,7 @@ function onPosition(pos: GeolocationPosition) {
   extrapSpeedMs = speedKmh.value / 3.6
   extrapBearing = currentBearing
 
-  const turnApproaching = updateTurns(idx)
+  const turnApproaching = updateTurns()
   handleOffRouteSound(wasOffRoute)
 
   // Snap the 3D view back over the rider as they reach an intersection.
@@ -348,9 +348,9 @@ function stopAnimation() {
 // Track the next turn ahead: announce it once within TURN_ALERT_M (and re-orient
 // the view), and surface a visual hint within TURN_HINT_M. Returns true on the
 // frame a turn alert fires.
-function updateTurns(idx: number): boolean {
+function updateTurns(): boolean {
   if (!turns.length) { turnHint.value = null; return false }
-  const here = cumDistM[idx] || 0
+  const here = snapDistAlongM
   while (nextTurnPtr < turns.length && turns[nextTurnPtr].distM < here - 5) nextTurnPtr++
   const turn = turns[nextTurnPtr]
   if (!turn) { turnHint.value = null; return false }

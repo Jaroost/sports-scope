@@ -187,6 +187,8 @@ en:
     places_title: "Places"
     places_count: "place"
     places_loading: "Looking up places…"
+    places_error: "Couldn't load places."
+    places_retry: "Retry"
     estimated_time_hint: "Estimated time (distance ÷ average speed)"
     avg_speed_hint: "Average speed (km/h)"
     save_name: "Save name"

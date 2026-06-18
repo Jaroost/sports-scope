@@ -121,6 +121,7 @@ async function fetchImportantPlaces() {
     return
   }
   placesStore.isFetchingPlaces.value = true
+  placesStore.placesFetchFailed.value = false
 
   let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
   for (const [lng, lat] of geom) {
@@ -137,7 +138,7 @@ async function fetchImportantPlaces() {
   try {
     const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}&types=${types.join(',')}`)
     if (token !== placesStore.token) return
-    if (!res.ok) { placesStore.isFetchingPlaces.value = false; return }
+    if (!res.ok) { placesStore.placesFetchFailed.value = true; placesStore.isFetchingPlaces.value = false; return }
 
     const nodes = await res.json()
     if (token !== placesStore.token) return
@@ -182,7 +183,10 @@ async function fetchImportantPlaces() {
     results.sort((a, b) => a.distanceM - b.distanceM)
     if (token !== placesStore.token) return
     placesStore.importantPlaces.value = results
-  } catch { /* leave list empty */ }
+  } catch {
+    if (token !== placesStore.token) return
+    placesStore.placesFetchFailed.value = true
+  }
 
   if (token !== placesStore.token) return
   placesStore.isFetchingPlaces.value = false
@@ -937,6 +941,7 @@ watch(routeStore.geometry, (newGeom) => {
     placesStore.token++
     placesStore.importantPlaces.value = []
     placesStore.isFetchingPlaces.value = false
+    placesStore.placesFetchFailed.value = false
     return
   }
   fetchImportantPlaces()
@@ -1085,6 +1090,7 @@ onBeforeUnmount(() => {
         @hover-climb="onHoverClimb"
         @select-place="onSelectPlace"
         @hover-place="onHoverPlace"
+        @retry-places="fetchImportantPlaces"
       />
 
       <!-- Horizontal resize handle -->
@@ -1106,6 +1112,7 @@ onBeforeUnmount(() => {
             @waypoints-changed="recomputeRoute({ autoSave: true })"
             @select-place="onSelectPlace"
             @hover-place="onHoverPlace"
+            @retry-places="fetchImportantPlaces"
             @toggle-chart="state.showElevationChart = !state.showElevationChart; nextTick(() => mapRef?.resize())"
             @toggle-mobile-sheet="mobileSheetOpen = !mobileSheetOpen"
           />

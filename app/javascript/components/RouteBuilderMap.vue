@@ -24,6 +24,7 @@ const emit = defineEmits<{
   'waypoints-changed': []
   'select-place': [place: Place]
   'hover-place': [place: Place | null]
+  'retry-places': []
 }>()
 
 const mapEl = useTemplateRef('mapEl')
@@ -1565,6 +1566,18 @@ defineExpose({
       <span v-if="routeStore.isFetchingRoute.value">{{ t('routes.computing_route') }}</span>
       <span v-else>{{ t('routes.computing_elevation') }}</span>
     </div>
+    <!-- Échec chargement POI — affiché uniquement sur mobile, la sidebar gérant le cas sur desktop -->
+    <button
+      v-if="placesStore.placesFetchFailed.value"
+      type="button"
+      class="map-overlay-places-error"
+      @click="emit('retry-places')"
+    >
+      <span>{{ t('routes.places_error') }}</span>
+      <span class="map-overlay-places-retry">
+        <i class="fa-solid fa-rotate-right me-1" aria-hidden="true"></i>{{ t('routes.places_retry') }}
+      </span>
+    </button>
 
     <!-- Mobile stats toggle -->
     <button type="button" class="btn btn-light btn-sm shadow-sm mobile-sheet-toggle" @click="$emit('toggle-mobile-sheet')">
@@ -1775,6 +1788,28 @@ defineExpose({
   display: none;
 }
 @media (max-width: 767px), (max-height: 500px) { .mobile-sheet-toggle { display: flex; } }
+
+/* Bannière d'échec de chargement des POI — visible uniquement sur mobile,
+   la sidebar Stats (masquée sur mobile) gérant déjà le cas sur desktop. */
+.map-overlay-places-error {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(33,37,41,0.9);
+  color: #fff;
+  border: none;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  z-index: 6;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+.map-overlay-places-retry { color: #6ea8fe; font-weight: 600; white-space: nowrap; }
+@media (max-width: 767px) { .map-overlay-places-error { display: flex; } }
 
 .wt-drawer {
   position: absolute;

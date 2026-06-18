@@ -15,6 +15,9 @@ export interface Place {
 class PlacesStore {
   readonly importantPlaces = ref<Place[]>([])
   readonly isFetchingPlaces = ref(false)
+  // Passe à true quand la recherche Overpass échoue (réseau / serveur). Permet
+  // d'afficher un message d'erreur et un bouton « réessayer » dans le créateur.
+  readonly placesFetchFailed = ref(false)
   // Préférences du profil : pilotent à la fois la recherche Overpass (on ne
   // requête que les catégories cochées) et l'affichage du filtre correspondant
   // dans le créateur d'itinéraire. Statiques pour la durée de la page.
@@ -57,6 +60,7 @@ class PlacesStore {
     this.token++
     this.importantPlaces.value = []
     this.isFetchingPlaces.value = false
+    this.placesFetchFailed.value = false
     this.placeHoverKm = null
     this.placeSelectedKm = null
   }

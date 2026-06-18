@@ -41,7 +41,9 @@ class GeocodesController < ApplicationController
       http.request(req)
     end
 
-    return render json: [] unless response.is_a?(Net::HTTPSuccess)
+    # Overpass injoignable / en erreur : on signale un vrai échec (≠ « aucun lieu »)
+    # pour que le front affiche le message d'erreur + bouton réessayer.
+    return render json: { error: "places_unavailable" }, status: :bad_gateway unless response.is_a?(Net::HTTPSuccess)
 
     data = JSON.parse(response.body)
     places = data["elements"].filter_map do |el|
@@ -64,14 +66,16 @@ class GeocodesController < ApplicationController
     end
 
     render json: places
-  # Overpass est un service externe best-effort : tout échec réseau (timeout,
-  # connexion refusée, réseau injoignable, DNS, TLS…) ou réponse illisible ne
-  # doit pas remonter en 500 — on dégrade en liste vide, le front gère déjà ce cas.
+  # Overpass est un service externe : tout échec réseau (timeout, connexion
+  # refusée, réseau injoignable, DNS, TLS…) ou réponse illisible est un vrai
+  # échec de chargement (≠ « aucun lieu »). On renvoie un statut non-2xx pour
+  # que le front affiche le message d'erreur + bouton réessayer, sans remonter
+  # un 500 (l'échec d'un service externe best-effort n'est pas une erreur serveur).
   # SystemCallError couvre les Errno::* (ENETUNREACH, ECONNREFUSED, EHOSTUNREACH…).
   rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, SystemCallError,
          OpenSSL::SSL::SSLError, JSON::ParserError => e
     Rails.logger.warn("GeocodesController#places: #{e.class}: #{e.message}")
-    render json: []
+    render json: { error: "places_unavailable" }, status: :bad_gateway
   rescue => e
     Rails.logger.error("GeocodesController#places: #{e.class}: #{e.message}")
     render json: [], status: :internal_server_error

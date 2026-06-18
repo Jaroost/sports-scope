@@ -25,6 +25,7 @@ const emit = defineEmits<{
   'hover-climb': [climb: Climb | null]
   'select-place': [place: Place]
   'hover-place': [place: Place | null]
+  'retry-places': []
 }>()
 
 const climbsExpanded = ref(true)
@@ -120,18 +121,29 @@ const climbsExpanded = ref(true)
       </span>
 
       <!-- Lieux -->
-      <template v-if="placesStore.importantPlaces.value.length || placesStore.isFetchingPlaces.value">
-        <button type="button" class="places-section-toggle" @click="placesStore.placesExpanded.value = !placesStore.placesExpanded.value">
+      <template v-if="placesStore.importantPlaces.value.length || placesStore.isFetchingPlaces.value || placesStore.placesFetchFailed.value">
+        <button
+          type="button"
+          class="places-section-toggle"
+          :title="placesStore.placesFetchFailed.value ? t('routes.places_retry') : undefined"
+          @click="placesStore.placesFetchFailed.value
+            ? emit('retry-places')
+            : (placesStore.placesExpanded.value = !placesStore.placesExpanded.value)"
+        >
           <span class="places-section-label">
             <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-            {{ placesStore.placesExpanded.value
+            {{ placesStore.placesFetchFailed.value || placesStore.placesExpanded.value
               ? t('routes.places_title')
               : `${placesStore.importantPlaces.value.length} ${t('routes.places_count')}` }}
           </span>
           <span v-if="placesStore.isFetchingPlaces.value" class="spinner-border spinner-border-sm text-secondary" aria-hidden="true"></span>
+          <i v-else-if="placesStore.placesFetchFailed.value" class="fa-solid fa-rotate-right" aria-hidden="true"></i>
           <i v-else :class="placesStore.placesExpanded.value ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" aria-hidden="true"></i>
         </button>
-        <template v-if="placesStore.placesExpanded.value">
+        <div v-if="placesStore.placesFetchFailed.value" class="places-error">
+          {{ t('routes.places_error') }}
+        </div>
+        <template v-if="!placesStore.placesFetchFailed.value && placesStore.placesExpanded.value">
           <div v-if="placesStore.isFetchingPlaces.value && !placesStore.importantPlaces.value.length" class="places-loading">
             <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
             <span>{{ t('routes.places_loading') }}</span>
@@ -331,4 +343,5 @@ const climbsExpanded = ref(true)
 }
 .places-filter-btn.active { background: rgba(13, 110, 253, 0.1); border-color: rgba(13, 110, 253, 0.35); color: #0d6efd; }
 .places-loading { font-size: 0.78rem; color: #9ca3af; display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0.4rem; }
+.places-error { font-size: 0.75rem; color: #dc3545; padding: 0.1rem 0.6rem 0.3rem; }
 </style>

@@ -870,7 +870,7 @@ watch(() => state.showElevationChart, async () => {
   await nextTick()
   mapRef.value?.resize()
   if (state.showElevationChart && routeStore.hasGeometry.value) {
-    chartRef.value?.resize()
+    chartRef.value?.render()
   }
 })
 watch(() => state.showStatsSidebar, async () => {

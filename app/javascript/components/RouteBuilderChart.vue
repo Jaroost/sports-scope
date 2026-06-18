@@ -8,8 +8,17 @@ import {
   haversine, colorForGrade, geomIdxForKm,
   formatDuration,
 } from '../routeHelpers'
+import type { Sport } from '../userPreferences'
 
 const props = defineProps<{ simplified?: boolean }>()
+
+// Catégories d'activité — enregistrées avec l'itinéraire, pilotent la vitesse
+// moyenne. Réexposées ici car la barre de stats mobile remplace le panneau latéral.
+const ACTIVITIES = ['cycling', 'mtb', 'hiking'] as const
+
+function sportIcon(s: Sport) {
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
 
 const chartEl = useTemplateRef('chartEl')
 let chartInstance: any = null
@@ -561,6 +570,21 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
 
     <!-- ── Mode simplifié (mobile) ── -->
     <template v-if="props.simplified">
+      <!-- Type d'activité — seul accès sur mobile (le panneau latéral est masqué) -->
+      <div class="activity-toggle btn-group btn-group-sm w-100 mb-2" role="group" :aria-label="t('routes.wt_sport')">
+        <button
+          v-for="s in ACTIVITIES"
+          :key="s"
+          type="button"
+          class="btn"
+          :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
+          :aria-label="t(`routes.wt_sport_${s}`)"
+          @click="routeStore.setSport(s)"
+        >
+          <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+          <span class="ms-1">{{ t(`routes.wt_sport_${s}`) }}</span>
+        </button>
+      </div>
       <div v-if="routeStore.hasGeometry.value" class="mobile-chart-stats">
         <span class="stat-pill stat-pill-distance">
           <i class="fa-solid fa-route" aria-hidden="true"></i>

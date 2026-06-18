@@ -27,6 +27,9 @@ const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || 'https://brouter.de/brou
 
 const state = reactive(new RouteBuilderState())
 const saving = ref(false)
+// Indicateur transitoire affiché brièvement après un enregistrement réussi.
+const saved = ref(false)
+let savedTimer: ReturnType<typeof setTimeout> | null = null
 const exporting = ref(false)
 const showExportDialog = ref(false)
 const exportStyleId = ref('')
@@ -313,7 +316,15 @@ async function fetchRoute(id: number) {
 }
 
 async function save() {
-  if (!routeStore.name.value.trim()) { routeStore.error.value = t('routes.error_name_required'); return }
+  // Sur mobile le champ nom du header n'est pas affiché : on le demande au moment de
+  // l'enregistrement plutôt que de bloquer sur une erreur impossible à corriger.
+  if (!routeStore.name.value.trim()) {
+    const raw = window.prompt(t('routes.name_prompt'), '')
+    if (raw == null) return // annulé
+    const name = raw.trim().slice(0, 80)
+    if (!name) { routeStore.error.value = t('routes.error_name_required'); return }
+    routeStore.name.value = name
+  }
   if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
   saving.value = true
   routeStore.error.value = null
@@ -343,6 +354,9 @@ async function save() {
       routeStore.currentId.value = r.id
       window.history.replaceState({}, '', `${localePrefix}/routes/${r.id}/edit`)
     }
+    saved.value = true
+    if (savedTimer) clearTimeout(savedTimer)
+    savedTimer = setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
     routeStore.error.value = e.message
   } finally {
@@ -905,6 +919,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeH); document.removeEventListener('mouseup', stopResizeH)
   window.removeEventListener('resize', onWindowResize)
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
+  if (savedTimer) clearTimeout(savedTimer)
   placesStore.reset()
   selectionStore.clear()
 })
@@ -991,6 +1006,14 @@ onBeforeUnmount(() => {
       <span class="flex-grow-1">{{ routeStore.error.value }}</span>
       <button type="button" class="btn-close" @click="routeStore.error.value = null" aria-label="dismiss"></button>
     </div>
+
+    <!-- Indicateur transitoire d'enregistrement réussi -->
+    <Transition name="saved-toast">
+      <div v-if="saved" class="saved-toast" role="status" aria-live="polite">
+        <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+        <span>{{ t('routes.saved') }}</span>
+      </div>
+    </Transition>
 
     <!-- Main layout -->
     <div class="route-builder-main">
@@ -1228,6 +1251,28 @@ onBeforeUnmount(() => {
 
 /* ─── Header ──────────────────────────────────────────────────────────────── */
 .route-name-input { min-width: 0; font-weight: 600; }
+
+/* ─── Saved toast ─────────────────────────────────────────────────────────── */
+.saved-toast {
+  position: fixed;
+  top: 4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1060;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 2rem;
+  background: #198754;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  pointer-events: none;
+}
+.saved-toast-enter-active, .saved-toast-leave-active { transition: opacity 0.25s, transform 0.25s; }
+.saved-toast-enter-from, .saved-toast-leave-to { opacity: 0; transform: translate(-50%, -0.5rem); }
 
 /* ─── Mobile sheet ────────────────────────────────────────────────────────── */
 .mobile-sheet {

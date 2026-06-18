@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
@@ -69,7 +69,11 @@ const wtSearching = ref(false)
 const wtImportingId = ref<number | null>(null)
 const wtGeomCache = new Map<number, Array<[number, number]>>()
 let wtPreviewTimeout: ReturnType<typeof setTimeout> | null = null
-const WT_BASE = 'https://cycling.waymarkedtrails.org/api/v1'
+// Waymarked Trails sépare ses bases par sport (un sous-domaine par sport, même API).
+const WT_SPORTS = ['cycling', 'mtb', 'hiking'] as const
+type WtSport = typeof WT_SPORTS[number]
+const wtSport = ref<WtSport>('cycling')
+const WT_BASE = computed(() => `https://${wtSport.value}.waymarkedtrails.org/api/v1`)
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 const EU_COUNTRY_CODES = new Set([
@@ -1118,7 +1122,17 @@ async function wtSearch(url: string) {
 function wtSearchByQuery() {
   const q = wtQuery.value.trim()
   if (q.length < 2) return
-  wtSearch(`${WT_BASE}/list/search?query=${encodeURIComponent(q)}&limit=15`)
+  wtSearch(`${WT_BASE.value}/list/search?query=${encodeURIComponent(q)}&limit=15`)
+}
+
+// Changer de sport relance la recherche courante sur la nouvelle base WT.
+function setWtSport(sport: WtSport) {
+  if (sport === wtSport.value) return
+  wtSport.value = sport
+  wtHidePreview()
+  wtGeomCache.clear()
+  if (wtQuery.value.trim().length >= 2) wtSearchByQuery()
+  else if (wtResults.value.length > 0) wtSearchByArea()
 }
 
 function lngLatToMercator(lng: number, lat: number): [number, number] {
@@ -1130,7 +1144,7 @@ function wtSearchByArea() {
   const b = mapInstance.getBounds()
   const [x1, y1] = lngLatToMercator(b.getWest(), b.getSouth())
   const [x2, y2] = lngLatToMercator(b.getEast(), b.getNorth())
-  wtSearch(`${WT_BASE}/list/by_area?bbox=${x1.toFixed(0)},${y1.toFixed(0)},${x2.toFixed(0)},${y2.toFixed(0)}&limit=20`)
+  wtSearch(`${WT_BASE.value}/list/by_area?bbox=${x1.toFixed(0)},${y1.toFixed(0)},${x2.toFixed(0)},${y2.toFixed(0)}&limit=20`)
 }
 
 async function wtImport(route: { id: number; type: string; name: string }) {
@@ -1138,7 +1152,7 @@ async function wtImport(route: { id: number; type: string; name: string }) {
   wtHidePreview()
   wtImportingId.value = route.id
   try {
-    const res = await fetch(`${WT_BASE}/details/${route.type}/${route.id}`)
+    const res = await fetch(`${WT_BASE.value}/details/${route.type}/${route.id}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     const pts: Array<[number, number]> = []
@@ -1170,7 +1184,7 @@ async function wtShowPreview(route: { id: number; type: string; name: string }) 
     let pts = wtGeomCache.get(route.id)
     if (!pts) {
       try {
-        const res = await fetch(`${WT_BASE}/details/${route.type}/${route.id}`)
+        const res = await fetch(`${WT_BASE.value}/details/${route.type}/${route.id}`)
         if (!res.ok) return
         const data = await res.json()
         pts = []
@@ -1455,6 +1469,20 @@ defineExpose({
           <button type="button" class="btn-close btn-close-sm" @click="wtExpanded = false; wtHidePreview()" aria-label="Fermer"></button>
         </div>
         <div class="wt-drawer-body">
+          <div class="btn-group btn-group-sm w-100 mb-2" role="group" :aria-label="t('routes.wt_sport')">
+            <button
+              v-for="s in WT_SPORTS"
+              :key="s"
+              type="button"
+              class="btn"
+              :class="wtSport === s ? 'btn-primary' : 'btn-outline-secondary'"
+              :disabled="wtSearching"
+              @click="setWtSport(s)"
+            >
+              <i :class="`fa-solid ${s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'}`" aria-hidden="true"></i>
+              <span class="ms-1 d-none d-sm-inline">{{ t(`routes.wt_sport_${s}`) }}</span>
+            </button>
+          </div>
           <div class="input-group input-group-sm mb-1">
             <input v-model="wtQuery" type="text" class="form-control" :placeholder="t('routes.wt_search_placeholder')" @keydown.enter="wtSearchByQuery" />
             <button class="btn btn-outline-secondary" type="button" @click="wtSearchByQuery" :disabled="wtSearching">

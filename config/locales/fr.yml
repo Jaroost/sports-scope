@@ -272,7 +272,7 @@ fr:
     cyclosm_ncn: "National"
     cyclosm_icn: "International (EuroVelo)"
   pages:
-    home_lead: "Planifiez vos itinéraires vélo, suivez-les en navigation, et analysez vos sorties Strava sur des cartes interactives — le tout au même endroit."
+    home_lead: "Planifiez vos itinéraires, suivez-les en navigation, et analysez vos sorties Strava sur des cartes interactives — le tout au même endroit."
     home_nav_routes: "Mes itinéraires"
     feature_builder_title: "Créateur d'itinéraire"
     feature_builder_body: "Planifiez vos sorties vélo : snap aux routes, profil d'altitude, cols détectés, couleurs de pente/revêtement, export GPX."

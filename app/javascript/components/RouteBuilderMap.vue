@@ -1353,7 +1353,7 @@ defineExpose({
           :disabled="!routeStore.hasGeometry.value"
           @click="fitMapToRoute"
           title="Recentrer sur le trajet">
-          <i class="fa-solid fa-crosshairs" aria-hidden="true"></i>
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
         </button>
       </div>
       <div class="btn-group-vertical btn-group-sm shadow-sm d-none d-md-flex" role="group">

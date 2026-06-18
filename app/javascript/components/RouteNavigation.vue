@@ -71,6 +71,19 @@ let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
 let announcedTurn = -1       // index of the last turn we played a cue for
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 
+// ─── Position extrapolation (dead-reckoning between GPS fixes) ────────────────
+// GPS fixes land ~once per second; rather than jumping the marker on each fix,
+// we advance the displayed position forward from the last fix using the carried
+// speed and heading, recaling on every new fix. This keeps the rider gliding.
+let rafId: number | null = null
+let anchorPos: LngLat | null = null   // last real GPS position
+let anchorTime = 0                     // performance.now() of that fix
+let extrapSpeedMs = 0                  // speed carried forward between fixes
+let extrapBearing = 0                  // travel heading (target)
+let displayBearing = 0                 // smoothed bearing actually rendered
+const MAX_EXTRAP_S = 2.5               // stop predicting if fixes stop arriving
+const BEARING_SMOOTH = 0.18            // per-frame easing toward the target bearing
+
 const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
 function loadSound(): boolean {
@@ -105,6 +118,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
+  stopAnimation()
   window.removeEventListener('pointerdown', onFirstGesture)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   releaseWakeLock()
@@ -207,7 +221,7 @@ function startTracking() {
   watchId = navigator.geolocation.watchPosition(
     onPosition,
     () => { gpsError.value = t('routes.gps_error') },
-    { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
   )
 }
 
@@ -230,20 +244,33 @@ function onPosition(pos: GeolocationPosition) {
   updateBearing(pos, here)
   updateOffRoute(here, idx, distM)
 
-  updateLocationMarker(here)
-  if (locationMarker) locationMarker.setRotation(currentBearing)
   updateSpeed(pos, here)
   lastPos = here
+
+  // Hand the fresh fix to the extrapolation loop: it owns the marker and camera
+  // from here, projecting the rider forward every frame so the view glides
+  // instead of jumping once per second.
+  anchorPos = here
+  anchorTime = performance.now()
+  extrapSpeedMs = speedKmh.value / 3.6
+  extrapBearing = currentBearing
 
   const turnApproaching = updateTurns(idx)
   handleOffRouteSound(wasOffRoute)
 
-  if (following.value) {
+  // Snap the 3D view back over the rider as they reach an intersection.
+  if (turnApproaching && !following.value) following.value = true
+
+  if (!hasInitialZoom) {
+    // First fix: a smooth intro that also applies the profile zoom & pitch once,
+    // then the rAF loop takes over the camera.
+    updateLocationMarker(here)
+    if (locationMarker) locationMarker.setRotation(currentBearing)
+    displayBearing = currentBearing
     map.easeTo(followOptions(here))
-  } else if (turnApproaching) {
-    // Snap the 3D view back over the rider as they reach an intersection.
-    following.value = true
-    map.easeTo(followOptions(here))
+    map.once('moveend', startAnimation)
+  } else {
+    startAnimation()
   }
 }
 
@@ -258,11 +285,51 @@ function followOptions(center: LngLat): any {
     center,
     bearing: currentBearing,
     pitch: navPrefs.pitch,
-    duration: 600,
+    duration: 500,
     padding: { top: Math.round(h * 0.45), bottom: 0, left: 0, right: 0 },
   }
   if (!hasInitialZoom) { opts.zoom = navPrefs.zoom; hasInitialZoom = true }
   return opts
+}
+
+// Move a lng/lat by `distM` along `bearingDeg` (equirectangular — accurate to a
+// few centimetres over the handful of metres we extrapolate between fixes).
+function moveLngLat([lng, lat]: LngLat, bearingDeg: number, distM: number): LngLat {
+  const R = 6371000
+  const br = (bearingDeg * Math.PI) / 180
+  const dLat = (distM * Math.cos(br)) / R
+  const dLng = (distM * Math.sin(br)) / (R * Math.cos((lat * Math.PI) / 180))
+  return [lng + (dLng * 180) / Math.PI, lat + (dLat * 180) / Math.PI]
+}
+
+// Render loop: between GPS fixes, advance the rider from the last fix along its
+// heading at its carried speed, and ease the rendered bearing toward the travel
+// heading. The camera is jumped (not animated) each frame — smoothness now comes
+// from the extrapolation, so a per-fix easeTo would only fight it and lag.
+function startAnimation() {
+  if (rafId != null || !map) return
+  const tick = () => {
+    rafId = requestAnimationFrame(tick)
+    if (!anchorPos) return
+    const dt = Math.min((performance.now() - anchorTime) / 1000, MAX_EXTRAP_S)
+    const pos = extrapSpeedMs > MIN_SPEED_MS
+      ? moveLngLat(anchorPos, extrapBearing, extrapSpeedMs * dt)
+      : anchorPos
+    let d = extrapBearing - displayBearing
+    while (d > 180) d -= 360
+    while (d < -180) d += 360
+    displayBearing += d * BEARING_SMOOTH
+    updateLocationMarker(pos)
+    if (locationMarker) locationMarker.setRotation(displayBearing)
+    if (following.value) {
+      map.jumpTo({ center: pos, bearing: displayBearing, pitch: navPrefs.pitch })
+    }
+  }
+  rafId = requestAnimationFrame(tick)
+}
+
+function stopAnimation() {
+  if (rafId != null) { cancelAnimationFrame(rafId); rafId = null }
 }
 
 // Track the next turn ahead: announce it once within TURN_ALERT_M (and re-orient
@@ -385,8 +452,14 @@ function updateLocationMarker(coords: LngLat) {
 
 function recenter() {
   following.value = true
-  // Keep the rider's current zoom — only re-center, re-orient and restore the 3D tilt.
-  if (lastPos) map.easeTo(followOptions(lastPos))
+  if (!lastPos) return
+  // Pause the loop so it doesn't jump-cancel the glide back; keep the rider's
+  // current zoom — only re-center, re-orient and restore the 3D tilt — then
+  // hand the camera back to the loop once we're settled over the rider.
+  stopAnimation()
+  displayBearing = currentBearing
+  map.easeTo(followOptions(lastPos))
+  map.once('moveend', startAnimation)
 }
 
 // ─── Wake lock ────────────────────────────────────────────────────────────────

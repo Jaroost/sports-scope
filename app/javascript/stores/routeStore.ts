@@ -4,6 +4,10 @@ import type { Coord, Climb, VoiceHint } from '../routeHelpers'
 
 const SPEED_KEY = 'sportsScope.routeBuilderAvgSpeed'
 
+// Plafond du nombre de waypoints — doit rester aligné sur MAX_WAYPOINTS côté
+// serveur (RoutesController), qui tronque silencieusement au-delà à la sauvegarde.
+export const MAX_WAYPOINTS = 51
+
 function loadSpeed(): number {
   try {
     const raw = localStorage.getItem(SPEED_KEY)

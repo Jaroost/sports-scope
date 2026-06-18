@@ -4,7 +4,7 @@ import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
-import { routeStore } from '../stores/routeStore'
+import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import type { Place } from '../stores/placesStore'
@@ -581,7 +581,18 @@ function recomputeWaypointGeomIndices() {
   })
 }
 
+// Bloque tout ajout de point au-delà du plafond serveur (sinon le waypoint serait
+// tronqué silencieusement à la sauvegarde). Affiche une erreur et renvoie true.
+function atWaypointLimit(): boolean {
+  if (routeStore.waypoints.value.length >= MAX_WAYPOINTS) {
+    routeStore.error.value = t('routes.error_max_waypoints', { count: MAX_WAYPOINTS })
+    return true
+  }
+  return false
+}
+
 function addWaypoint(lng: number, lat: number) {
+  if (atWaypointLimit()) return
   const wps = routeStore.waypoints.value
   // Ergonomie : si le dernier point est libre, le nouveau l'est aussi par défaut,
   // jusqu'à ce qu'on rebascule le dernier point en point accroché à la route.
@@ -623,6 +634,7 @@ function toggleWaypointFree(idx: number) {
 }
 
 function addReturnTo(idx: number) {
+  if (atWaypointLimit()) return
   const wps = routeStore.waypoints.value
   if (wps.length < 2 || idx >= wps.length - 1) return
   routeStore.waypoints.value = [...wps, { ...wps[idx] }]
@@ -632,6 +644,7 @@ function addReturnTo(idx: number) {
 }
 
 function insertWaypointAtGeomIdx(geomIdx: number) {
+  if (atWaypointLimit()) return
   if (!waypointGeomIndices.length) return
   const pt = routeStore.geometry.value[geomIdx]
   if (!pt) return

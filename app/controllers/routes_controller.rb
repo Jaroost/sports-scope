@@ -3,7 +3,7 @@ class RoutesController < ApplicationController
   # an account. Every other action stays scoped to the signed-in owner.
   before_action :require_login!, except: :shared
 
-  MAX_WAYPOINTS = 50
+  MAX_WAYPOINTS = 500
   MAX_GEOMETRY_POINTS = 10_000
   MAX_NAME_LEN = 80
   ALLOWED_PROFILES = %w[cycling foot driving].freeze

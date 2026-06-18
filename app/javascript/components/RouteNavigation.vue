@@ -6,7 +6,7 @@ import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
   formatDistanceShort, haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
-  progressFor, activeClimb,
+  progressFor, activeClimb, gradeForIndex, colorForGrade,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
@@ -45,7 +45,15 @@ const speedKmh = ref(0)
 const offRoute = ref(false)
 const offRouteDistM = ref(0)        // distance to the nearest point on the route
 const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" arrow
-const climbInfo = ref<{ climb: Climb; ratio: number; remainingGainM: number } | null>(null)
+const climbInfo = ref<{
+  climb: Climb
+  ratio: number
+  remainingGainM: number
+  segments: { d: string; color: string }[]  // graded elevation profile of the climb
+  posX: number                               // cursor x (% of profile width)
+  posY: number                               // cursor y (% of profile height)
+  grade: number                              // instantaneous grade at the rider (%)
+} | null>(null)
 const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number } | null>(null)
 
 let map: any = null
@@ -56,6 +64,7 @@ let wakeLock: any = null
 
 // Route data (non-reactive: large arrays, only read inside callbacks)
 let geometry: Coord[] = []
+let alts: (number | null)[] = []
 let cumDistM: number[] = []
 let climbs: Climb[] = []
 let turns: TurnPoint[] = []
@@ -144,8 +153,9 @@ async function fetchRoute() {
   geometry = (route.geometry || []) as Coord[]
   if (geometry.length < 2) throw new Error(t('routes.error_min_points'))
   routeName.value = route.name || ''
+  alts = geometry.map((c) => c[2] ?? null)
   cumDistM = buildDistancesM(geometry)
-  climbs = detectClimbs(geometry.map((c) => c[2]), cumDistM)
+  climbs = detectClimbs(alts, cumDistM)
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
   const hints = (route.voice_hints || []) as VoiceHint[]
@@ -435,11 +445,68 @@ function updateProgress(idx: number) {
   const ac = activeClimb(idx, climbs, cumDistM, snapDistAlongM)
   if (ac) {
     const rem = computeGainLoss(geometry.slice(idx, ac.climb.endIdx + 1)).gain
-    climbInfo.value = { climb: ac.climb, ratio: ac.ratio, remainingGainM: rem }
+    buildClimbProfile(ac.climb)
+    const posX = ac.ratio * 100
+    climbInfo.value = {
+      climb: ac.climb,
+      ratio: ac.ratio,
+      remainingGainM: rem,
+      segments: profileSegments,
+      posX,
+      posY: profileYAt(posX),
+      grade: gradeForIndex(idx, alts, cumDistM),
+    }
   } else {
     climbInfo.value = null
   }
   refreshRemaining()
+}
+
+// Build the graded elevation profile of a climb once (geometry is static), cached
+// by its start index. Each segment is a filled polygon from the altitude line down
+// to the baseline, coloured by its grade. Coordinates are in a 0–100 viewBox:
+// x spans the climb's distance, y is the altitude normalised to the climb's range.
+let profileForStart = -1
+let profileSegments: { d: string; color: string }[] = []
+let profilePts: { x: number; y: number }[] = []
+
+function buildClimbProfile(climb: Climb) {
+  if (profileForStart === climb.startIdx) return
+  profileForStart = climb.startIdx
+  const { startIdx: s, endIdx: e } = climb
+  const startM = cumDistM[s]
+  const span = (cumDistM[e] - startM) || 1
+  let minA = Infinity
+  let maxA = -Infinity
+  for (let i = s; i <= e; i++) { const a = alts[i] ?? 0; if (a < minA) minA = a; if (a > maxA) maxA = a }
+  const range = (maxA - minA) || 1
+  const xOf = (i: number) => ((cumDistM[i] - startM) / span) * 100
+  const yOf = (i: number) => 96 - (((alts[i] ?? 0) - minA) / range) * 88  // 4–96, peak near the top
+  profilePts = []
+  for (let i = s; i <= e; i++) profilePts.push({ x: xOf(i), y: yOf(i) })
+  profileSegments = []
+  for (let i = s; i < e; i++) {
+    const x1 = xOf(i)
+    const x2 = xOf(i + 1)
+    profileSegments.push({
+      d: `M${x1},${yOf(i)} L${x2},${yOf(i + 1)} L${x2},100 L${x1},100 Z`,
+      color: colorForGrade(gradeForIndex(i, alts, cumDistM)),
+    })
+  }
+}
+
+// Altitude-line y at a given x (% of width), interpolated between profile points.
+function profileYAt(x: number): number {
+  if (!profilePts.length) return 100
+  for (let i = 1; i < profilePts.length; i++) {
+    if (profilePts[i].x >= x) {
+      const a = profilePts[i - 1]
+      const b = profilePts[i]
+      const t = b.x > a.x ? (x - a.x) / (b.x - a.x) : 0
+      return a.y + t * (b.y - a.y)
+    }
+  }
+  return profilePts[profilePts.length - 1].y
 }
 
 // Redraw the bright "remaining" portion of the route from the projected index.
@@ -572,17 +639,26 @@ function onVisibilityChange() {
       <i class="fa-solid fa-location-arrow me-1" aria-hidden="true"></i>{{ t('routes.recenter') }}
     </button>
 
-    <!-- Climb card -->
+    <!-- Climb card: full graded elevation profile with a position cursor -->
     <div v-if="climbInfo" class="nav-climb shadow">
       <div class="d-flex align-items-center justify-content-between mb-1">
         <span class="fw-semibold">
           <i class="fa-solid fa-mountain text-warning me-1" aria-hidden="true"></i>{{ t('routes.climb_in_progress') }}
           <span v-if="climbInfo.climb.category" class="badge bg-dark ms-1">{{ climbInfo.climb.category }}</span>
         </span>
-        <small class="text-muted">+{{ Math.round(climbInfo.remainingGainM) }} m</small>
+        <span class="nav-climb-grade">{{ Math.round(climbInfo.grade) }} %</span>
       </div>
-      <div class="progress nav-progress">
-        <div class="progress-bar bg-warning" :style="{ width: `${Math.round(climbInfo.ratio * 100)}%` }"></div>
+      <div class="nav-climb-graph">
+        <svg class="nav-climb-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <path v-for="(seg, i) in climbInfo.segments" :key="i" :d="seg.d" :fill="seg.color" />
+        </svg>
+        <div class="nav-climb-cursor" :style="{ left: `${climbInfo.posX}%` }">
+          <span class="nav-climb-dot" :style="{ top: `${climbInfo.posY}%` }"></span>
+        </div>
+      </div>
+      <div class="d-flex justify-content-between mt-1">
+        <small class="text-muted">{{ formatDistanceShort(climbInfo.climb.lengthM) }}</small>
+        <small class="text-muted">+{{ Math.round(climbInfo.remainingGainM) }} m</small>
       </div>
     </div>
 
@@ -683,6 +759,27 @@ function onVisibilityChange() {
 .nav-climb {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6.25rem;
   z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.6rem 0.85rem;
+}
+.nav-climb-grade {
+  font-weight: 700; font-size: 1.1rem; color: #dc2626; line-height: 1;
+}
+.nav-climb-graph {
+  position: relative; height: 64px; width: 100%;
+}
+.nav-climb-svg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  border-radius: 0.4rem; background: #f8f9fa;
+}
+/* Vertical "you are here" cursor over the profile; the dot rides the altitude line. */
+.nav-climb-cursor {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: rgba(17, 24, 39, 0.55); transform: translateX(-1px);
+}
+.nav-climb-dot {
+  position: absolute; left: 50%; width: 12px; height: 12px;
+  background: #111827; border: 2px solid #fff; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .nav-stats {

@@ -517,12 +517,22 @@ export function detectTurns(
 }
 
 // The climb currently being ridden (idx within [startIdx, endIdx]) and how far
-// through it we are (0..1), or null when not on a climb.
-export function activeClimb(idx: number, climbs: Climb[]): { climb: Climb; ratio: number } | null {
+// through it we are (0..1), or null when not on a climb. The ratio is measured by
+// distance covered (via cumDistM, and `doneM` for sub-segment precision) rather
+// than by vertex count, so the progress bar advances smoothly and proportionally
+// to ground covered instead of jumping unevenly between vertices.
+export function activeClimb(
+  idx: number,
+  climbs: Climb[],
+  cumDistM: number[],
+  doneM?: number,
+): { climb: Climb; ratio: number } | null {
+  const done = doneM ?? cumDistM[idx] ?? 0
   for (const climb of climbs) {
     if (idx >= climb.startIdx && idx <= climb.endIdx) {
-      const span = climb.endIdx - climb.startIdx
-      const ratio = span > 0 ? (idx - climb.startIdx) / span : 0
+      const startM = cumDistM[climb.startIdx] || 0
+      const span = (cumDistM[climb.endIdx] || 0) - startM
+      const ratio = span > 0 ? Math.max(0, Math.min(1, (done - startM) / span)) : 0
       return { climb, ratio }
     }
   }

@@ -432,7 +432,7 @@ function updateProgress(idx: number) {
   remainingM.value = p.remainingM
   remainingGainM.value = p.remainingGainM
   doneRatio.value = p.doneRatio
-  const ac = activeClimb(idx, climbs)
+  const ac = activeClimb(idx, climbs, cumDistM, snapDistAlongM)
   if (ac) {
     const rem = computeGainLoss(geometry.slice(idx, ac.climb.endIdx + 1)).gain
     climbInfo.value = { climb: ac.climb, ratio: ac.ratio, remainingGainM: rem }

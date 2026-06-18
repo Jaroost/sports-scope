@@ -61,6 +61,10 @@ Rails.application.routes.draw do
   patch "/preferences/chart_layouts/:id", to: "preferences#update", constraints: { id: /\d+/ }
   delete "/preferences/chart_layouts/:id", to: "preferences#destroy", constraints: { id: /\d+/ }
 
+  # Digital Asset Links — lie l'app Android (TWA) au domaine (plein écran sans
+  # barre d'URL). Configuré via ANDROID_PACKAGE_NAME / ANDROID_CERT_FINGERPRINTS.
+  get "/.well-known/assetlinks.json", to: "well_known#assetlinks"
+
   # Health
   get "up" => "rails/health#show", as: :rails_health_check
 end

@@ -18,6 +18,15 @@
     <link rel="icon" href="/icon.png" type="image/png">
     <link rel="icon" href="/icon.svg" type="image/svg+xml">
 
+    <%# PWA — rend le site installable (Android / Play Store via TWA) %>
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#212529">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Sports Scope">
+    <link rel="apple-touch-icon" href="/icon-192.png">
+
     <%= vite_client_tag %>
     <%= vite_stylesheet_tag 'application.scss' %>
     <%= vite_typescript_tag 'application' %>

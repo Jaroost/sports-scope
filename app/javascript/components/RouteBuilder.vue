@@ -290,6 +290,11 @@ async function fetchElevation(token: number) {
     if (elev.length !== sampled.length) throw new Error('elevation size mismatch')
     interpolateElevation(coords as any[], sampled as any[], elev)
     routeStore.recomputeGain()
+    // Le tracé et les cols ont été rendus avant l'arrivée des altitudes (BRouter n'en
+    // fournit pas pour les tronçons libres) : on recolore selon la pente et on réinstalle
+    // les cols maintenant que le relief est connu, sinon couleur/cols restent faux.
+    mapRef.value?.applyColorMode()
+    mapRef.value?.installClimbMarkers()
     await nextTick()
     chartRef.value?.render()
   } catch (e: any) {

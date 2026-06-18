@@ -2,6 +2,10 @@ import { ref } from 'vue'
 
 class SelectionStore {
   readonly selectionRange = ref<{ startKm: number; endKm: number } | null>(null)
+  // true quand la sélection vient d'un clic / glissé (persistante) plutôt que d'un
+  // simple survol de col : un survol temporaire est effacé quand on quitte le col,
+  // une sélection épinglée reste.
+  readonly selectionPinned = ref(false)
   readonly hoverIdx = ref<number | null>(null)
   readonly isZoomed = ref(false)
 
@@ -12,6 +16,7 @@ class SelectionStore {
 
   clear() {
     this.selectionRange.value = null
+    this.selectionPinned.value = false
     this.hoverIdx.value = null
     this.isZoomed.value = false
     this.cumDistKm = []

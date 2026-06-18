@@ -399,6 +399,7 @@ function zoomToSelection() {
 
 function clearSelection() {
   selectionStore.selectionRange.value = null
+  selectionStore.selectionPinned.value = false
   if (chartInstance) chartInstance.update('none')
 }
 
@@ -508,6 +509,7 @@ function attachInteractionOnce(canvas: HTMLCanvasElement) {
         const lo = Math.min(chartHandleDrag.fixedKm, km)
         const hi = Math.max(chartHandleDrag.fixedKm, km)
         selectionStore.selectionRange.value = { startKm: lo, endKm: hi }
+        selectionStore.selectionPinned.value = true
         chartInstance.update('none')
       }
       const onUp = () => {
@@ -545,6 +547,7 @@ function attachInteractionOnce(canvas: HTMLCanvasElement) {
       const km2 = xScale.getValueForPixel(Math.max(startPx, finalX))
       chartDrag = null
       selectionStore.selectionRange.value = dragged ? { startKm: km1, endKm: km2 } : null
+      selectionStore.selectionPinned.value = dragged
       chartInstance.update('none')
       if (dragged) emit('fit-to-selection')
       else {

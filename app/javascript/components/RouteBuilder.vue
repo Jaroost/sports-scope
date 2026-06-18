@@ -511,6 +511,7 @@ function clearAll() {
 
 function onSelectClimb(climb: any) {
   selectionStore.selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
+  selectionStore.selectionPinned.value = true
   mapRef.value?.updateSelectionLayer()
   chartRef.value?.update()
   mapRef.value?.fitMapToSelection()
@@ -519,8 +520,15 @@ function onSelectClimb(climb: any) {
 function onHoverClimb(climb: any) {
   // Sur ordinateur, survoler un col le sélectionne (drapeaux départ/arrivée +
   // tronçon en bleu), en remplaçant la sélection précédente s'il y en a une.
-  if (!climb || isMobile.value) return
-  selectionStore.selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
+  if (isMobile.value) return
+  if (climb) {
+    selectionStore.selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
+    selectionStore.selectionPinned.value = false
+  } else if (!selectionStore.selectionPinned.value) {
+    // On ne survole plus de col : on efface la sélection temporaire (sauf si elle
+    // a été épinglée par un clic / glissé).
+    selectionStore.selectionRange.value = null
+  }
   mapRef.value?.updateSelectionLayer()
   chartRef.value?.update()
 }

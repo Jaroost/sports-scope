@@ -404,6 +404,7 @@ function buildClimbMarkerEl(climb: Climb) {
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
     selectionStore.selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
+    selectionStore.selectionPinned.value = true
     updateSelectionLayer()
     fitMapToSelection()
   })
@@ -412,8 +413,13 @@ function buildClimbMarkerEl(climb: Climb) {
     overClimbMarker = true; hideHoverMarker()
     // Survol = sélection du col (drapeaux + tronçon bleu), remplace la précédente.
     selectionStore.selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
+    selectionStore.selectionPinned.value = false
   })
-  el.addEventListener('mouseleave', () => { overClimbMarker = false })
+  el.addEventListener('mouseleave', () => {
+    overClimbMarker = false
+    // On quitte le col : on efface la sélection temporaire (sauf si épinglée par un clic).
+    if (!selectionStore.selectionPinned.value) selectionStore.selectionRange.value = null
+  })
   return el
 }
 
@@ -623,6 +629,7 @@ function makeSelectionMarker(kind: 'start' | 'end') {
     const lo = Math.min(selectionMarkerAKm ?? km, selectionMarkerBKm ?? km)
     const hi = Math.max(selectionMarkerAKm ?? km, selectionMarkerBKm ?? km)
     selectionStore.selectionRange.value = { startKm: lo, endKm: hi }
+    selectionStore.selectionPinned.value = true
     updateSelectionLayer()
   })
   marker.on('dragend', () => { selectionMarkerDragging = false; fitMapToSelection() })

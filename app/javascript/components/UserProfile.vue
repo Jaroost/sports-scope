@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
-import { MAP_STYLES, MAP_STYLE_GROUPS } from '../mapStyles'
+import { MAP_STYLES, MAP_STYLE_GROUPS, mapStyleFor } from '../mapStyles'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -18,6 +18,11 @@ interface Preferences {
   }
   map: {
     default_style: string
+  }
+  navigation: {
+    default_style: string
+    zoom: number
+    pitch: number
   }
   display: {
     default_sport: string
@@ -90,6 +95,79 @@ async function save() {
     saving.value = false
   }
 }
+
+// ─── Aperçu de la navigation ────────────────────────────────────────────────
+// Petite carte MapLibre qui reflète en direct les réglages de la section
+// Navigation (style, zoom, inclinaison) et se centre sur la position GPS
+// actuelle (repli sur la Suisse si la géoloc échoue ou est refusée).
+const SWITZERLAND_CENTER: [number, number] = [8.23, 46.8]
+
+const previewEl = ref<HTMLElement | null>(null)
+const previewLocating = ref(true)
+const previewLocationError = ref(false)
+
+let previewMap: any = null
+let previewMarker: any = null
+let previewMaplibre: any = null
+let previewCenter: [number, number] = SWITZERLAND_CENTER
+
+onMounted(() => { void initPreview() })
+
+onBeforeUnmount(() => {
+  if (previewMap) { previewMap.remove(); previewMap = null }
+})
+
+async function initPreview() {
+  previewMaplibre = (await import('maplibre-gl')).default
+  await import('maplibre-gl/dist/maplibre-gl.css')
+
+  previewMap = new previewMaplibre.Map({
+    container: previewEl.value,
+    style: mapStyleFor(prefs.navigation.default_style) as any,
+    center: previewCenter,
+    zoom: prefs.navigation.zoom,
+    pitch: prefs.navigation.pitch,
+    attributionControl: false,
+    interactive: false,
+  })
+  previewMap.on('styleimagemissing', (e: any) => {
+    previewMap.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
+  })
+
+  // Réagit en direct aux réglages : le zoom et l'inclinaison s'appliquent à chaud,
+  // le changement de style recharge le fond (et replace le marqueur de position).
+  watch(() => prefs.navigation.zoom, (z) => previewMap?.setZoom(z))
+  watch(() => prefs.navigation.pitch, (p) => previewMap?.setPitch(p))
+  watch(() => prefs.navigation.default_style, (id) => {
+    previewMap?.setStyle(mapStyleFor(id), { diff: false })
+  })
+
+  locatePreview()
+}
+
+function locatePreview() {
+  if (!('geolocation' in navigator)) { previewLocating.value = false; previewLocationError.value = true; return }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      previewLocating.value = false
+      previewLocationError.value = false
+      previewCenter = [pos.coords.longitude, pos.coords.latitude]
+      previewMap?.setCenter(previewCenter)
+      placePreviewMarker(previewCenter)
+    },
+    () => { previewLocating.value = false; previewLocationError.value = true },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+  )
+}
+
+function placePreviewMarker(coords: [number, number]) {
+  if (!previewMap) return
+  if (previewMarker) { previewMarker.setLngLat(coords); return }
+  const el = document.createElement('div')
+  el.className = 'nav-preview-arrow'
+  el.innerHTML = '<svg viewBox="0 0 24 24" width="30" height="30"><path d="M12 2 L20 21 L12 16 L4 21 Z" fill="#4285f4" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>'
+  previewMarker = new previewMaplibre.Marker({ element: el, anchor: 'center' }).setLngLat(coords).addTo(previewMap)
+}
 </script>
 
 <template>
@@ -153,6 +231,67 @@ async function save() {
                   <span>{{ t(`profile.map.style_${style.id}`) }}</span>
                 </label>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Navigation (mode GPS) -->
+    <section class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-location-arrow text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.navigation.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">{{ t('profile.navigation.help') }}</p>
+        <div class="d-flex flex-column gap-3 mb-3">
+          <div v-for="g in groupedStyles" :key="g.group" class="card map-style-group">
+            <div class="card-body p-2">
+              <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2 px-1">
+                {{ t(`profile.map.group_${g.group}`) }}
+              </h3>
+              <div class="d-flex flex-wrap gap-2">
+                <label
+                  v-for="style in g.styles"
+                  :key="style.id"
+                  class="map-style-option"
+                  :class="{ active: prefs.navigation.default_style === style.id }"
+                >
+                  <input v-model="prefs.navigation.default_style" class="visually-hidden" type="radio" name="nav-map-style" :value="style.id">
+                  <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
+                  <span>{{ t(`profile.map.style_${style.id}`) }}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label for="nav-zoom" class="form-label mb-1">
+              {{ t('profile.navigation.zoom') }} : <strong>{{ prefs.navigation.zoom }}</strong>
+            </label>
+            <input id="nav-zoom" v-model.number="prefs.navigation.zoom" type="range" class="form-range" min="14" max="40" step="0.5">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-pitch" class="form-label mb-1">
+              {{ t('profile.navigation.pitch') }} : <strong>{{ prefs.navigation.pitch }}°</strong>
+            </label>
+            <input id="nav-pitch" v-model.number="prefs.navigation.pitch" type="range" class="form-range" min="0" max="90" step="5">
+          </div>
+        </div>
+
+        <!-- Aperçu en direct -->
+        <div class="mt-3">
+          <label class="form-label mb-1">{{ t('profile.navigation.preview') }}</label>
+          <p class="text-muted small mb-2">{{ t('profile.navigation.preview_help') }}</p>
+          <div class="nav-preview">
+            <div ref="previewEl" class="nav-preview-map"></div>
+            <div v-if="previewLocating" class="nav-preview-overlay text-muted">
+              <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('profile.navigation.locating') }}
+            </div>
+            <div v-else-if="previewLocationError" class="nav-preview-badge">
+              <i class="fa-solid fa-location-crosshairs me-1" aria-hidden="true"></i>{{ t('profile.navigation.location_error') }}
             </div>
           </div>
         </div>
@@ -305,5 +444,49 @@ async function save() {
 
 .sticky-bottom {
   background: var(--bs-body-bg);
+}
+
+.nav-preview {
+  position: relative;
+  height: 260px;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--bs-border-color);
+}
+
+.nav-preview-map {
+  position: absolute;
+  inset: 0;
+}
+
+.nav-preview-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  z-index: 1;
+}
+
+.nav-preview-badge {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  color: var(--bs-secondary-color);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+</style>
+
+<style>
+.nav-preview-arrow {
+  pointer-events: none;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
 }
 </style>

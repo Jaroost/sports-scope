@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
-import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, MAP_STYLES } from '../mapStyles'
+import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
@@ -10,11 +10,14 @@ import {
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
+import { userPreferences } from '../userPreferences'
 
 const props = defineProps<{ shareToken: string }>()
 
-const STYLE_KEY = 'sportsScope.routeBuilderMapStyle'
 const SOUND_KEY = 'sportsScope.navSound'
+
+// Réglages caméra issus du profil (section Navigation), indépendants du créateur.
+const navPrefs = userPreferences().navigation
 const OFF_ROUTE_M = 20          // lateral distance beyond which we warn
 const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
@@ -29,7 +32,9 @@ const gpsError = ref<string | null>(null)
 const hasFix = ref(false)
 const following = ref(true)
 const soundOn = ref(loadSound())
-const mapStyleId = ref(loadStyle())
+// Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
+// on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
+const mapStyleId = ref(navPrefs.default_style as string)
 
 // Live navigation state (reactive, drives the UI overlays)
 const remainingM = ref(0)
@@ -67,14 +72,6 @@ let announcedTurn = -1       // index of the last turn we played a cue for
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 
 const donePercent = computed(() => Math.round(doneRatio.value * 100))
-
-function loadStyle(): string {
-  try {
-    const raw = localStorage.getItem(STYLE_KEY)
-    if (raw && MAP_STYLES.some((s) => s.id === raw)) return raw
-  } catch { /* ignore */ }
-  return 'cyclosm'
-}
 
 function loadSound(): boolean {
   try { return localStorage.getItem(SOUND_KEY) !== 'off' } catch { return true }
@@ -153,7 +150,7 @@ async function initMap() {
     style: mapStyleFor(mapStyleId.value) as any,
     center: coords[0],
     zoom: 14,
-    pitch: 55,
+    pitch: navPrefs.pitch,
     attributionControl: false,
   })
   map.on('styleimagemissing', (e: any) => {
@@ -172,7 +169,7 @@ async function initMap() {
       // Fit the whole route before the first GPS fix arrives.
       const b = new maplibre.LngLatBounds(coords[0], coords[0])
       coords.forEach((c) => b.extend(c))
-      map.fitBounds(b, { padding: 60, duration: 0, pitch: 55 })
+      map.fitBounds(b, { padding: 60, duration: 0, pitch: navPrefs.pitch })
       resolve()
     })
   })
@@ -195,7 +192,6 @@ function lineFeature(coords: number[][]) {
 function setMapStyle(id: string) {
   if (!map || id === mapStyleId.value) return
   mapStyleId.value = id
-  try { localStorage.setItem(STYLE_KEY, id) } catch { /* ignore */ }
   map.setStyle(mapStyleFor(id), { diff: false })
   map.once('style.load', () => {
     installRouteLayers()
@@ -253,18 +249,19 @@ function onPosition(pos: GeolocationPosition) {
 
 // Camera framing used whenever we follow the rider. The rider is anchored in the
 // lower third of the screen (via padding) so the look-ahead distance stays
-// constant frame to frame; the zoom is the rider's own and is only set once, on
-// the first fix, so following never fights a manual pinch-zoom.
+// constant frame to frame; the tilt comes from the profile, and the zoom (also
+// from the profile) is only applied once, on the first fix, so following never
+// fights a manual pinch-zoom afterwards.
 function followOptions(center: LngLat): any {
   const h = map?.getContainer()?.clientHeight || 0
   const opts: any = {
     center,
     bearing: currentBearing,
-    pitch: 60,
+    pitch: navPrefs.pitch,
     duration: 600,
     padding: { top: Math.round(h * 0.45), bottom: 0, left: 0, right: 0 },
   }
-  if (!hasInitialZoom) { opts.zoom = 19.5; hasInitialZoom = true }
+  if (!hasInitialZoom) { opts.zoom = navPrefs.zoom; hasInitialZoom = true }
   return opts
 }
 

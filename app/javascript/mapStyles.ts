@@ -20,6 +20,40 @@ export const MAP_STYLES: MapStyle[] = [
 // Ordre des en-têtes de groupe dans le dropdown.
 export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss']
 
+// ─── Overlays (couches transparentes superposables) ───────────────────────────
+// Couches WMTS swisstopo/ASTRA (SuisseMobile), format PNG transparent, à empiler
+// par-dessus le fond actif. Suisse uniquement (vides ailleurs). Plusieurs peuvent
+// être actives simultanément — cf. MapOverlayDropdown.
+export interface MapOverlay {
+  id: string
+  icon: string
+  layer: string // identifiant de couche WMTS geo.admin.ch
+}
+
+export const MAP_OVERLAYS: MapOverlay[] = [
+  { id: 'veloland',         icon: 'fa-bicycle',       layer: 'ch.astra.veloland' },
+  { id: 'mountainbikeland', icon: 'fa-person-biking', layer: 'ch.astra.mountainbikeland' },
+  { id: 'wanderland',       icon: 'fa-person-hiking', layer: 'ch.astra.wanderland' },
+  { id: 'wanderwege',       icon: 'fa-shoe-prints',   layer: 'ch.swisstopo.swisstlm3d-wanderwege' },
+]
+
+export function overlaySourceId(id: string): string { return `overlay-${id}-src` }
+export function overlayLayerId(id: string): string { return `overlay-${id}` }
+
+// Spec de source raster MapLibre pour un overlay donné.
+export function overlaySource(overlay: MapOverlay): object {
+  return {
+    type: 'raster',
+    tiles: [
+      `https://wmts.geo.admin.ch/1.0.0/${overlay.layer}/default/current/3857/{z}/{x}/{y}.png`,
+    ],
+    tileSize: 256,
+    maxzoom: 19,
+    attribution:
+      '© <a href="https://www.swisstopo.admin.ch" target="_blank" rel="noopener">swisstopo</a>',
+  }
+}
+
 // Tile metadata used by the image export to render at the finest available detail.
 // `maxzoom` = zoom des plus petites tuiles disponibles pour la source ; `tileSize` = taille
 // native d'une tuile (256 pour les sources raster, 512 pour le vectoriel OpenFreeMap).

@@ -85,12 +85,14 @@ export class RouteBuilderState extends MapPageState {
   showWaypoints = true
   showStatsSidebar = true
   showElevationChart = true
+  overlays: string[] = []
 
   constructor() {
     super(userPreferences().map.default_style)
     const prefs = userPreferences()
     this.colorMode = prefs.display.show_grade_colors ? 'grade' : 'none'
     this.showElevationChart = prefs.display.show_elevation_chart
+    this.overlays = [...prefs.map.overlays]
   }
 
   // Derived from colorMode — reactive because `this` is the reactive proxy
@@ -103,9 +105,9 @@ export class RouteBuilderState extends MapPageState {
     return 'sportsScope.routeBuilderState'
   }
 
-  // mapStyleId, colorMode et showElevationChart sont gouvernés par les préférences
-  // du profil (cf. constructeur) : on ne les persiste pas en localStorage, sinon
-  // une ancienne valeur de session écraserait silencieusement le profil. Les autres
+  // mapStyleId, colorMode, showElevationChart et overlays sont gouvernés par les
+  // préférences du profil (cf. constructeur) : on ne les persiste pas en localStorage,
+  // sinon une ancienne valeur de session écraserait silencieusement le profil. Les autres
   // réglages de vue (épingles, panneau, cols) restent locaux à la session.
   protected override persistedFields(): string[] {
     return ['showClimbs', 'showWaypoints', 'showStatsSidebar']

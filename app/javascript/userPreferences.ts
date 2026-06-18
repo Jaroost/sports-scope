@@ -17,7 +17,8 @@ export interface UserPreferences {
     show_localities: boolean
     radius_m: number
   }
-  map: { default_style: MapStyleId }
+  map: { default_style: MapStyleId; overlays: string[] }
+  navigation: { default_style: MapStyleId; zoom: number; pitch: number }
   display: {
     default_sport: Sport
     show_grade_colors: boolean
@@ -38,7 +39,8 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     show_localities: false,
     radius_m: 1500,
   },
-  map: { default_style: 'cyclosm' },
+  map: { default_style: 'cyclosm', overlays: [] },
+  navigation: { default_style: 'liberty', zoom: 19.5, pitch: 60 },
   display: {
     default_sport: 'cycling',
     show_grade_colors: true,
@@ -85,6 +87,21 @@ export function persistDefaultMapStyle(styleId: MapStyleId): void {
   const prefs = userPreferences()
   if (prefs.map.default_style === styleId) return
   prefs.map.default_style = styleId
+  patchPreferences(prefs)
+}
+
+// Miroir des overlays actifs sur le profil (même contrat que persistDefaultMapStyle).
+export function persistOverlays(overlays: string[]): void {
+  if (!isLoggedIn()) return
+  const prefs = userPreferences()
+  prefs.map.overlays = [...overlays]
+  patchPreferences(prefs)
+}
+
+// PATCH best-effort de l'objet complet de préférences. Silencieux pour les visiteurs
+// déconnectés (garde en amont) et tolérant aux erreurs réseau — ce n'est qu'un miroir
+// de réglages de vue.
+function patchPreferences(prefs: UserPreferences): void {
   void fetch('/api/profile/preferences', {
     method: 'PATCH',
     headers: {
@@ -107,7 +124,12 @@ function parse(): UserPreferences {
     const d = DEFAULT_PREFERENCES
     return {
       points_of_interest: { ...d.points_of_interest, ...incoming.points_of_interest },
-      map: { ...d.map, ...incoming.map },
+      map: {
+        ...d.map,
+        ...incoming.map,
+        overlays: Array.isArray(incoming.map?.overlays) ? incoming.map.overlays : d.map.overlays,
+      },
+      navigation: { ...d.navigation, ...incoming.navigation },
       display: { ...d.display, ...incoming.display },
       climb_detection: { ...d.climb_detection, ...incoming.climb_detection },
       speeds: { ...d.speeds, ...incoming.speeds },

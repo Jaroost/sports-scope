@@ -7,8 +7,11 @@ class ProfilesController < ApplicationController
   MIN_GAIN_RANGE = (0..1000)
   MIN_LENGTH_RANGE = (50..5000)
   SPEED_RANGE = (3.0..80.0)
+  NAV_ZOOM_RANGE = (14.0..40.0)
+  NAV_PITCH_RANGE = (0..90)
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
+  ALLOWED_OVERLAYS = %w[veloland mountainbikeland wanderland wanderwege].freeze
   ALLOWED_SPORTS = %w[cycling mtb hiking].freeze
 
   # Vitesses moyennes par défaut (km/h), miroir de User::DEFAULT_PREFERENCES.
@@ -38,6 +41,7 @@ class ProfilesController < ApplicationController
 
     poi = incoming[:points_of_interest] || {}
     map = incoming[:map] || {}
+    navigation = incoming[:navigation] || {}
     display = incoming[:display] || {}
     climb = incoming[:climb_detection] || {}
     speeds = incoming[:speeds] || {}
@@ -51,6 +55,12 @@ class ProfilesController < ApplicationController
       },
       "map" => {
         "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, "cyclosm"),
+        "overlays" => sanitize_overlays(map[:overlays]),
+      },
+      "navigation" => {
+        "default_style" => allowed(navigation[:default_style], ALLOWED_MAP_STYLES, "cyclosm"),
+        "zoom" => clamp_float(navigation[:zoom], NAV_ZOOM_RANGE, 19.5),
+        "pitch" => clamp_int(navigation[:pitch], NAV_PITCH_RANGE, 60),
       },
       "display" => {
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),
@@ -64,6 +74,12 @@ class ProfilesController < ApplicationController
       },
       "speeds" => sanitize_speeds(speeds),
     }
+  end
+
+  # Garde uniquement les ids d'overlay connus, dédoublonnés et dans l'ordre reçu.
+  def sanitize_overlays(value)
+    return [] unless value.is_a?(Array)
+    value.map(&:to_s).uniq.select { |id| ALLOWED_OVERLAYS.include?(id) }
   end
 
   def sanitize_speeds(speeds)

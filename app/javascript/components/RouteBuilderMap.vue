@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { t } from '../i18n'
-import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
+import {
+  mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT,
+  MAP_OVERLAYS, overlaySource, overlaySourceId, overlayLayerId,
+} from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
+import MapOverlayDropdown from './MapOverlayDropdown.vue'
 import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
-import { persistDefaultMapStyle } from '../userPreferences'
+import { persistDefaultMapStyle, persistOverlays } from '../userPreferences'
 import type { MapStyleId } from '../userPreferences'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
@@ -168,6 +172,7 @@ async function initMap() {
     mapInstance.on('load', () => {
       installRouteLayer()
       installPreviewLayer()
+      installOverlays()
       mapInstance.on('click', (e: any) => {
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
         // Un point sélectionné (tooltip ouverte) : le clic ne fait que refermer la
@@ -1090,7 +1095,7 @@ function setMapStyle(id: string) {
   persistDefaultMapStyle(id as MapStyleId)
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
-    installRouteLayer(); installPreviewLayer()
+    installRouteLayer(); installPreviewLayer(); installOverlays()
     updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); installClimbMarkers(); installPlaceMarkers()
     if (locationVisible.value && lastLocationCoords) installLocationLayers(lastLocationCoords, lastLocationAccuracy)
     if (props.state.is3D) {
@@ -1100,6 +1105,34 @@ function setMapStyle(id: string) {
       mapInstance.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
     }
   })
+}
+
+// Réconcilie les couches overlay (SuisseMobile/swisstopo) avec props.state.overlays :
+// ajoute les actives manquantes, retire les inactives présentes. Insérées sous le tracé
+// (beforeId = builder-route-border) pour rester au-dessus du fond mais sous l'itinéraire.
+// Idempotente : appelée au toggle comme après un setStyle (qui efface tout).
+function installOverlays() {
+  if (!mapInstance) return
+  const active = new Set(props.state.overlays)
+  const beforeId = mapInstance.getLayer('builder-route-border') ? 'builder-route-border' : undefined
+  for (const o of MAP_OVERLAYS) {
+    const srcId = overlaySourceId(o.id)
+    const lyrId = overlayLayerId(o.id)
+    const present = !!mapInstance.getLayer(lyrId)
+    if (active.has(o.id) && !present) {
+      if (!mapInstance.getSource(srcId)) mapInstance.addSource(srcId, overlaySource(o) as any)
+      mapInstance.addLayer({ id: lyrId, type: 'raster', source: srcId, paint: { 'raster-opacity': 0.9 } }, beforeId)
+    } else if (!active.has(o.id) && present) {
+      mapInstance.removeLayer(lyrId)
+      if (mapInstance.getSource(srcId)) mapInstance.removeSource(srcId)
+    }
+  }
+}
+
+function setOverlays(ids: string[]) {
+  props.state.overlays = ids
+  persistOverlays(ids)
+  installOverlays()
 }
 
 function toggleMap3D() {
@@ -1379,6 +1412,7 @@ defineExpose({
 
     <div class="map-controls">
       <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
+      <MapOverlayDropdown :model-value="state.overlays" @update:model-value="setOverlays" />
       <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
         <button type="button" class="btn map-ctrl-btn"
           :class="state.showWaypoints ? 'btn-warning text-dark active' : 'btn-light'"

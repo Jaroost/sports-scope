@@ -1,5 +1,5 @@
 <% content_for :title, t("routes.builder_title") %>
-<% content_for :container_class, "container-fluid" %>
+<% content_for :container_class, "container-fluid route-builder-container" %>
 <% content_for :navbar_actions do %>
   <div class="d-flex gap-1 d-md-none me-1 align-items-center">
     <%= link_to routes_index_path, class: "btn btn-sm btn-outline-light", title: t("routes.back"), aria: { label: t("routes.back") } do %>

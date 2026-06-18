@@ -23,6 +23,16 @@ body.fullscreen-page {
   overflow: hidden;
 }
 
+// Sur mobile, le créateur d'itinéraire occupe toute la largeur : on supprime les
+// gouttières horizontales de `.container-fluid` pour que la carte touche les bords
+// gauche/droit (le composant Vue annule déjà son propre padding sous 768px).
+@media (max-width: 767px) {
+  main.route-builder-container {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
 .sports-scope-brand {
   font-weight: 600;
   letter-spacing: 0.02em;

@@ -1022,7 +1022,16 @@ watch(routeStore.geometry, (newGeom) => {
 function onWindowResize() {
   const mobile = window.innerWidth < 768
   if (mobile !== isMobile.value) isMobile.value = mobile
+  updateNavbarHeight()
   setTimeout(() => mapRef.value?.resize(), 100)
+}
+
+// Mesure la hauteur réelle de la navbar fixe et l'expose en variable CSS : sur
+// mobile elle est plus basse que les 4rem réservés par défaut, ce qui laissait un
+// vide au-dessus de la carte (voir le media query .route-builder-page).
+function updateNavbarHeight() {
+  const nav = document.querySelector('nav.navbar') as HTMLElement | null
+  document.body.style.setProperty('--rb-navbar-h', `${nav?.offsetHeight ?? 64}px`)
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -1041,6 +1050,7 @@ onMounted(async () => {
   routeStore.reset()
   routeStore.readOnly.value = readOnly.value
   routeStore.currentId.value = props.routeId ? Number(props.routeId) : null
+  updateNavbarHeight()
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('beforeunload', onBeforeUnload)
 
@@ -1087,6 +1097,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   if (savedTimer) clearTimeout(savedTimer)
+  document.body.style.removeProperty('--rb-navbar-h')
   placesStore.reset()
   selectionStore.clear()
 })
@@ -1343,7 +1354,18 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 @media (max-width: 767px), (max-height: 500px) {
-  .route-builder-page { padding: 0; gap: 0; }
+  .route-builder-page {
+    padding: 0;
+    gap: 0;
+    /* La navbar mobile est plus basse que le `padding-top: 4rem` réservé sur le
+       body : on remonte la page de l'écart mesuré (--rb-navbar-h, posé en JS) pour
+       que la carte affleure sous la navbar, et on ajuste la hauteur en conséquence. */
+    margin-top: calc(var(--rb-navbar-h, 4rem) - 4rem);
+    height: calc(100dvh - var(--rb-navbar-h, 4rem));
+  }
+  /* La poignée de redimensionnement du panneau stats n'a pas lieu d'être quand le
+     panneau est masqué (mobile / paysage) : sinon elle laisse une colonne de 8px. */
+  .resize-handle-h { display: none !important; }
 }
 @media (max-height: 500px) {
   .route-builder-header-card,

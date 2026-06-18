@@ -64,6 +64,39 @@ export function userPreferences(): UserPreferences {
   return cached
 }
 
+// Présence de la balise = utilisateur connecté (cf. layouts/application.html.erb).
+// Les visiteurs déconnectés tombent sur les valeurs par défaut, sans profil à mettre
+// à jour côté serveur.
+export function isLoggedIn(): boolean {
+  return !!document.querySelector('meta[name="user-preferences"]')
+}
+
+function csrfToken(): string {
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+}
+
+// Reporte sur le profil le style de carte choisi dans le créateur d'itinéraire :
+// il devient le réglage par défaut du compte. Met à jour le cache local puis envoie
+// l'objet complet de préférences (PATCH /api/profile/preferences attend tout l'objet
+// et assainit le reste). Best-effort : silencieux pour les visiteurs déconnectés et
+// tolérant aux erreurs réseau — ce n'est qu'un miroir d'un réglage de vue.
+export function persistDefaultMapStyle(styleId: MapStyleId): void {
+  if (!isLoggedIn()) return
+  const prefs = userPreferences()
+  if (prefs.map.default_style === styleId) return
+  prefs.map.default_style = styleId
+  void fetch('/api/profile/preferences', {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'X-CSRF-Token': csrfToken(),
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify({ preferences: prefs }),
+  }).catch(() => { /* ignore — miroir best-effort */ })
+}
+
 function parse(): UserPreferences {
   try {
     const raw = document

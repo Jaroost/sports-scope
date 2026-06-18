@@ -462,6 +462,7 @@ function onHoverClimb(climb: any) {
 
 function onSelectPlace(place: any) {
   mapRef.value?.flyTo(place.lng, place.lat)
+  mapRef.value?.showPlacePopup(place)
   placesStore.placeSelectedKm = place.distanceM / 1000
   chartRef.value?.update()
 }

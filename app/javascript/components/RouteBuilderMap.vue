@@ -5,6 +5,8 @@ import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
+import { persistDefaultMapStyle } from '../userPreferences'
+import type { MapStyleId } from '../userPreferences'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import type { Place } from '../stores/placesStore'
@@ -354,27 +356,47 @@ function clearPlaceMarkers() {
   if (placePopup) { placePopup.remove(); placePopup = null }
 }
 
-// Popup proposant d'ouvrir le lieu sur Google Maps, comme les points de l'itinéraire
-// (même format d'URL `maps?q=lat,lng`).
-function showBakeryReviewsPopup(place: Place) {
+// Popup proposant d'ouvrir le lieu sur Google Maps et en Street View, comme les
+// points de l'itinéraire (même format d'URL `maps?q=lat,lng`). Le lien Street
+// View est grisé quand aucune imagerie n'est disponible à proximité.
+function showPlacePopup(place: Place) {
   if (!_maplibregl || !mapInstance) return
   if (placePopup) { placePopup.remove(); placePopup = null }
   // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
-  // le POI boulangerie. On vise juste à côté pour le laisser visible/cliquable.
+  // le POI. On vise juste à côté pour le laisser visible/cliquable.
   const OFFSET = 0.00008
-  const url = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
+  const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
+  const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${place.lat},${place.lng}`
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   wrap.innerHTML = `
-    <div class="place-popup-name">${escapeHtml(place.name)}</div>
-    <a class="place-popup-link" href="${url}" target="_blank" rel="noopener noreferrer">
+    <div class="place-popup-header">
+      <span class="place-popup-name">${escapeHtml(place.name)}</span>
+      <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
+    </div>
+    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
       <i class="fa-brands fa-google" aria-hidden="true"></i>
       <span>Google Maps</span>
+    </a>
+    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+      <span>${t('routes.street_view')}</span>
     </a>`
-  placePopup = new _maplibregl.Popup({ offset: 18, closeButton: true, closeOnClick: true, className: 'place-popup-container' })
+  placePopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: true, className: 'place-popup-container' })
     .setLngLat([place.markerLng, place.markerLat])
     .setDOMContent(wrap)
     .addTo(mapInstance)
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', () => {
+    if (placePopup) { placePopup.remove(); placePopup = null }
+  })
+  const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
+  if (svLink) {
+    checkSV(place.lat, place.lng).then((ok) => {
+      svLink.classList.toggle('place-popup-link--disabled', !ok)
+      if (!ok) svLink.setAttribute('aria-disabled', 'true')
+      else svLink.removeAttribute('aria-disabled')
+    })
+  }
 }
 
 function escapeHtml(s: string) {
@@ -408,7 +430,6 @@ function buildPlaceMarkerEl(place: Place) {
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
     emit('select-place', place)
-    if (place.type === 'bakery') showBakeryReviewsPopup(place)
   })
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker(); emit('hover-place', place) })
@@ -1030,6 +1051,8 @@ async function toggleLocation() {
 function setMapStyle(id: string) {
   if (!mapInstance || id === props.state.mapStyleId) return
   props.state.mapStyleId = id
+  // Reporte le choix sur le profil : ce fond devient le style par défaut du compte.
+  persistDefaultMapStyle(id as MapStyleId)
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
     installRouteLayer(); installPreviewLayer()
@@ -1308,6 +1331,7 @@ defineExpose({
   hideChartCrossMarker,
   showPlaceHoverMarker,
   hidePlaceHoverMarker,
+  showPlacePopup,
   updateClimbHoverLayer,
   setMapStyle,
   resize: () => mapInstance?.resize(),
@@ -1926,27 +1950,58 @@ defineExpose({
 .place-marker--cemetery { color: #6b7280; }
 .place-marker--bakery   { color: #b45309; }
 .place-popup-container .maplibregl-popup-content {
-  padding: 0.55rem 0.7rem;
-  border-radius: 0.6rem;
-  box-shadow: 0 6px 18px -4px rgba(0,0,0,0.4);
+  padding: 4px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
+}
+.place-popup { display: flex; flex-direction: column; gap: 2px; min-width: 180px; }
+.place-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.2rem 0.65rem;
+  border-bottom: 1px solid rgba(0,0,0,0.07);
+  margin-bottom: 2px;
 }
 .place-popup-name {
+  font-size: 0.78rem;
   font-weight: 600;
-  font-size: 0.82rem;
-  color: #1f2937;
-  margin-bottom: 0.4rem;
+  color: #6b7280;
   max-width: 14rem;
 }
-.place-popup-link {
-  display: inline-flex;
+.place-popup-close {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.07);
+  color: #6b7280;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
+  justify-content: center;
+}
+.place-popup-close:hover { background: rgba(0,0,0,0.14); color: #111827; }
+.place-popup-link {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border-radius: 7px;
   font-size: 0.8rem;
-  font-weight: 600;
-  color: #b45309;
+  font-weight: 500;
+  color: #212529;
   text-decoration: none;
 }
-.place-popup-link:hover { text-decoration: underline; }
+.place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
+.place-popup-link:hover { background: rgba(0,0,0,0.06); color: #212529; text-decoration: none; }
+.place-popup-link--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
 .route-insert-marker {
   width: 22px;
   height: 22px;

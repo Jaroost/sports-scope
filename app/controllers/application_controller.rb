@@ -4,7 +4,22 @@ class ApplicationController < ActionController::Base
   before_action :set_locale
   helper_method :current_user, :user_signed_in?
 
+  # Accès refusé par CanCanCan : JSON 403 pour l'API, redirection sinon.
+  rescue_from CanCan::AccessDenied do |exception|
+    respond_to do |format|
+      format.json { render json: { error: exception.message }, status: :forbidden }
+      format.any { redirect_to root_path, alert: t("auth.access_denied") }
+    end
+  end
+
   private
+
+  # À utiliser en before_action sur les pages réservées aux administrateurs.
+  def require_admin!
+    return if current_user&.admin?
+
+    raise CanCan::AccessDenied
+  end
 
   def set_locale
     requested = params[:locale] || session[:locale] || http_accept_language_first

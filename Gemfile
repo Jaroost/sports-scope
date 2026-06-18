@@ -32,6 +32,9 @@ gem "omniauth_openid_connect", "~> 0.8"
 gem "omniauth-rails_csrf_protection", "~> 1.0"
 gem "omniauth-oauth2", "~> 1.8"
 
+# Authorization (rôles : utilisateur simple / administrateur)
+gem "cancancan", "~> 3.6"
+
 # Share Rails translations with JS
 gem "i18n-js", "~> 4.2"
 

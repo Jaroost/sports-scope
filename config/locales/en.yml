@@ -14,6 +14,7 @@ en:
     signed_in: "Welcome!"
     login_first: "Please sign in first."
     login_required: "You need to sign in first."
+    access_denied: "You are not authorized to access this page."
     strava_linked: "Strava account connected successfully."
   strava:
     recent_activities: "Recent activities"

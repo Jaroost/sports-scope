@@ -6,17 +6,29 @@ class GeocodesController < ApplicationController
     west  = params.require(:west).to_f
     north = params.require(:north).to_f
     east  = params.require(:east).to_f
+    bbox  = "#{south},#{west},#{north},#{east}"
+
+    # On ne requête que les catégories demandées par le client (pilotées par les
+    # préférences du profil). Sans paramètre `types`, on retombe sur tout par défaut.
+    types = (params[:types].presence || "localities,cemeteries,bakeries").split(",")
+    clauses = []
+    clauses << %(node["place"~"^(city|town|village|hamlet)$"](#{bbox});) if types.include?("localities")
+    if types.include?("cemeteries")
+      clauses << %(node["amenity"="grave_yard"](#{bbox});)
+      clauses << %(node["landuse"="cemetery"](#{bbox});)
+      clauses << %(way["amenity"="grave_yard"](#{bbox});)
+      clauses << %(way["landuse"="cemetery"](#{bbox});)
+    end
+    if types.include?("bakeries")
+      clauses << %(node["shop"="bakery"](#{bbox});)
+      clauses << %(way["shop"="bakery"](#{bbox});)
+    end
+    return render json: [] if clauses.empty?
 
     query = <<~OVERPASS
       [out:json][timeout:25];
       (
-        node["place"~"^(city|town|village|hamlet)$"](#{south},#{west},#{north},#{east});
-        node["amenity"="grave_yard"](#{south},#{west},#{north},#{east});
-        node["landuse"="cemetery"](#{south},#{west},#{north},#{east});
-        way["amenity"="grave_yard"](#{south},#{west},#{north},#{east});
-        way["landuse"="cemetery"](#{south},#{west},#{north},#{east});
-        node["shop"="bakery"](#{south},#{west},#{north},#{east});
-        way["shop"="bakery"](#{south},#{west},#{north},#{east});
+        #{clauses.join("\n        ")}
       );
       out center;
     OVERPASS

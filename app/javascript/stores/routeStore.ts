@@ -1,20 +1,12 @@
 import { ref, computed } from 'vue'
 import { haversine, detectClimbs, computeGainLoss, buildDistancesM, formatDuration } from '../routeHelpers'
 import type { Coord, Climb, VoiceHint } from '../routeHelpers'
-
-const SPEED_KEY = 'sportsScope.routeBuilderAvgSpeed'
+import { userPreferences, speedForSport } from '../userPreferences'
+import type { Sport } from '../userPreferences'
 
 // Plafond du nombre de waypoints — doit rester aligné sur MAX_WAYPOINTS côté
 // serveur (RoutesController), qui tronque silencieusement au-delà à la sauvegarde.
 export const MAX_WAYPOINTS = 51
-
-function loadSpeed(): number {
-  try {
-    const raw = localStorage.getItem(SPEED_KEY)
-    const v = raw != null ? parseFloat(raw) : NaN
-    return Number.isFinite(v) && v >= 3 && v <= 80 ? v : 18
-  } catch { return 18 }
-}
 
 class RouteStore {
   // ─── Core route data ────────────────────────────────────────────────────────
@@ -29,7 +21,14 @@ class RouteStore {
   readonly name = ref('')
   readonly error = ref<string | null>(null)
   readonly currentId = ref<number | null>(null)
-  readonly avgSpeedKmh = ref(loadSpeed())
+  // Catégorie d'activité de l'itinéraire — pilote la vitesse moyenne (via le
+  // profil) et le fond de cartes de sentiers. Initialisée sur le sport par défaut
+  // du profil.
+  readonly sport = ref<Sport>(userPreferences().display.default_sport)
+  // Vitesse moyenne (km/h) issue du profil pour le sport courant. Reste
+  // modifiable ponctuellement dans le créateur, mais change de sport la réaligne
+  // sur la valeur du profil.
+  readonly avgSpeedKmh = ref(speedForSport(this.sport.value))
 
   // ─── Computed ───────────────────────────────────────────────────────────────
   readonly hasGeometry = computed(() => this.geometry.value.length >= 2)
@@ -50,10 +49,12 @@ class RouteStore {
     return detectClimbs(altitudes, distances)
   })
 
-  persistSpeed() {
-    const v = this.avgSpeedKmh.value
-    if (!Number.isFinite(v) || v < 3 || v > 80) return
-    try { localStorage.setItem(SPEED_KEY, String(v)) } catch { /* ignore */ }
+  // Change la catégorie d'activité et réaligne la vitesse moyenne sur la valeur
+  // configurée dans le profil pour ce sport.
+  setSport(sport: Sport) {
+    if (sport === this.sport.value) return
+    this.sport.value = sport
+    this.avgSpeedKmh.value = speedForSport(sport)
   }
 
   reset() {

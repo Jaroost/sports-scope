@@ -72,7 +72,9 @@ let wtPreviewTimeout: ReturnType<typeof setTimeout> | null = null
 // Waymarked Trails sépare ses bases par sport (un sous-domaine par sport, même API).
 const WT_SPORTS = ['cycling', 'mtb', 'hiking'] as const
 type WtSport = typeof WT_SPORTS[number]
-const wtSport = ref<WtSport>('cycling')
+// Catégorie d'activité partagée avec le routeStore : le même sélecteur pilote le
+// fond de cartes de sentiers (Waymarked Trails) et la vitesse moyenne d'estimation.
+const wtSport = routeStore.sport
 const WT_BASE = computed(() => `https://${wtSport.value}.waymarkedtrails.org/api/v1`)
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
@@ -168,6 +170,9 @@ async function initMap() {
       installPreviewLayer()
       mapInstance.on('click', (e: any) => {
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
+        // Un point sélectionné (tooltip ouverte) : le clic ne fait que refermer la
+        // tooltip, sans ajouter de nouveau point au trajet.
+        if (selectedWpIdx >= 0) { deselectAll(); return }
         deselectAll()
         if (selectionStore.hoverIdx.value != null) {
           insertWaypointAtGeomIdx(selectionStore.hoverIdx.value)
@@ -1128,7 +1133,7 @@ function wtSearchByQuery() {
 // Changer de sport relance la recherche courante sur la nouvelle base WT.
 function setWtSport(sport: WtSport) {
   if (sport === wtSport.value) return
-  wtSport.value = sport
+  routeStore.setSport(sport)
   wtHidePreview()
   wtGeomCache.clear()
   if (wtQuery.value.trim().length >= 2) wtSearchByQuery()

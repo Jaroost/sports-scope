@@ -15,8 +15,8 @@
   <div class="alert alert-info d-flex align-items-center gap-2">
     <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
     <span><%= t("strava.not_linked") %></span>
-    <%= button_to "/auth/strava", method: :post, class: "btn btn-warning ms-auto", data: { turbo: false } do %>
-      <i class="fa-brands fa-strava me-1" aria-hidden="true"></i><%= t("nav.link_strava") %>
+    <%= link_to profile_path, class: "btn btn-warning ms-auto" do %>
+      <i class="fa-brands fa-strava me-1" aria-hidden="true"></i><%= t("profile.strava.link") %>
     <% end %>
   </div>
 <% end %>

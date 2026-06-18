@@ -4,6 +4,9 @@
     <title><%= content_for(:title) || t("app.title") %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="i18n-locale" content="<%= I18n.locale %>">
+    <% if user_signed_in? %>
+      <meta name="user-preferences" content="<%= current_user.preferences_with_defaults.to_json %>">
+    <% end %>
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
     <% if ENV["THUNDERFOREST_API_KEY"].present? %>
@@ -34,11 +37,6 @@
         </button>
         <div class="collapse navbar-collapse" id="navbarContent">
           <ul class="navbar-nav me-auto">
-            <li class="nav-item">
-              <%= link_to root_path, class: "nav-link" do %>
-                <i class="fa-solid fa-house me-1" aria-hidden="true"></i><%= t("nav.home") %>
-              <% end %>
-            </li>
             <% if user_signed_in? %>
               <li class="nav-item">
                 <%= link_to dashboard_path, class: "nav-link" do %>
@@ -53,26 +51,46 @@
             <% end %>
           </ul>
           <ul class="navbar-nav align-items-center">
-            <li class="nav-item">
-              <%= link_to "EN", url_for(locale: :en), class: "nav-link #{'active fw-semibold' if I18n.locale == :en}" %>
-            </li>
-            <li class="nav-item">
-              <%= link_to "FR", url_for(locale: :fr), class: "nav-link #{'active fw-semibold' if I18n.locale == :fr}" %>
-            </li>
             <% if user_signed_in? %>
-              <% unless current_user.strava_linked? %>
-                <li class="nav-item">
-                  <%= button_to "/auth/strava", method: :post, class: "btn btn-warning ms-2", data: { turbo: false } do %>
-                    <i class="fa-brands fa-strava me-1" aria-hidden="true"></i><%= t("nav.link_strava") %>
-                  <% end %>
-                </li>
-              <% end %>
-              <li class="nav-item">
-                <%= button_to logout_path, method: :delete, class: "btn btn-outline-light ms-2", data: { turbo: false } do %>
-                  <i class="fa-solid fa-right-from-bracket me-1" aria-hidden="true"></i><%= t("nav.logout") %>
-                <% end %>
+              <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle d-flex align-items-center gap-2" href="#" id="userMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                  <i class="fa-solid fa-circle-user fa-lg" aria-hidden="true"></i>
+                  <span><%= current_user.display_name %></span>
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenu">
+                  <li><h6 class="dropdown-header"><%= t("nav.language") %></h6></li>
+                  <li>
+                    <%= link_to url_for(locale: :en), class: "dropdown-item d-flex align-items-center justify-content-between #{'active' if I18n.locale == :en}" do %>
+                      <span>English</span>
+                      <% if I18n.locale == :en %><i class="fa-solid fa-check" aria-hidden="true"></i><% end %>
+                    <% end %>
+                  </li>
+                  <li>
+                    <%= link_to url_for(locale: :fr), class: "dropdown-item d-flex align-items-center justify-content-between #{'active' if I18n.locale == :fr}" do %>
+                      <span>Français</span>
+                      <% if I18n.locale == :fr %><i class="fa-solid fa-check" aria-hidden="true"></i><% end %>
+                    <% end %>
+                  </li>
+                  <li><hr class="dropdown-divider"></li>
+                  <li>
+                    <%= link_to profile_path, class: "dropdown-item" do %>
+                      <i class="fa-solid fa-sliders me-2" aria-hidden="true"></i><%= t("nav.profile") %>
+                    <% end %>
+                  </li>
+                  <li>
+                    <%= button_to logout_path, method: :delete, class: "dropdown-item", data: { turbo: false } do %>
+                      <i class="fa-solid fa-right-from-bracket me-2" aria-hidden="true"></i><%= t("nav.logout") %>
+                    <% end %>
+                  </li>
+                </ul>
               </li>
             <% else %>
+              <li class="nav-item">
+                <%= link_to "EN", url_for(locale: :en), class: "nav-link #{'active fw-semibold' if I18n.locale == :en}" %>
+              </li>
+              <li class="nav-item">
+                <%= link_to "FR", url_for(locale: :fr), class: "nav-link #{'active fw-semibold' if I18n.locale == :fr}" %>
+              </li>
               <li class="nav-item">
                 <%= button_to "/auth/keycloak", method: :post, class: "btn btn-primary ms-2", data: { turbo: false } do %>
                   <i class="fa-solid fa-right-to-bracket me-1" aria-hidden="true"></i><%= t("nav.login") %>

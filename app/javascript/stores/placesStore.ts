@@ -1,17 +1,5 @@
 import { ref, computed } from 'vue'
-
-const RADIUS_KEY = 'sportsScope.placeRadiusM'
-const RADIUS_MIN = 200
-const RADIUS_MAX = 5000
-const RADIUS_DEFAULT = 1500
-
-function loadRadius(): number {
-  try {
-    const raw = localStorage.getItem(RADIUS_KEY)
-    const v = raw != null ? parseFloat(raw) : NaN
-    return Number.isFinite(v) && v >= RADIUS_MIN && v <= RADIUS_MAX ? v : RADIUS_DEFAULT
-  } catch { return RADIUS_DEFAULT }
-}
+import { userPreferences } from '../userPreferences'
 
 export interface Place {
   name: string
@@ -27,12 +15,21 @@ export interface Place {
 class PlacesStore {
   readonly importantPlaces = ref<Place[]>([])
   readonly isFetchingPlaces = ref(false)
-  readonly placeShowCemeteries = ref(true)
-  readonly placeShowBakeries = ref(true)
-  readonly placeShowLocalities = ref(false)
+  // Préférences du profil : pilotent à la fois la recherche Overpass (on ne
+  // requête que les catégories cochées) et l'affichage du filtre correspondant
+  // dans le créateur d'itinéraire. Statiques pour la durée de la page.
+  readonly searchCemeteries = userPreferences().points_of_interest.show_cemeteries
+  readonly searchBakeries = userPreferences().points_of_interest.show_bakeries
+  readonly searchLocalities = userPreferences().points_of_interest.show_localities
+  // État du filtre dans le créateur d'itinéraire (actif par défaut quand la
+  // catégorie est recherchée).
+  readonly placeShowCemeteries = ref(this.searchCemeteries)
+  readonly placeShowBakeries = ref(this.searchBakeries)
+  readonly placeShowLocalities = ref(this.searchLocalities)
   readonly placesExpanded = ref(true)
-  // Rayon de détection (m) partagé par les cimetières et les boulangeries.
-  readonly placeRadiusM = ref(loadRadius())
+  // Rayon de détection (m) des cimetières et boulangeries — piloté uniquement par
+  // les préférences du profil (plus de réglage dans le créateur d'itinéraire).
+  readonly placeRadiusM = ref(userPreferences().points_of_interest.radius_m)
 
   // Non-reactive — read synchronously by Chart.js plugins
   token = 0
@@ -55,12 +52,6 @@ class PlacesStore {
       return this.placeShowLocalities.value
     }),
   )
-
-  persistRadius() {
-    const v = this.placeRadiusM.value
-    if (!Number.isFinite(v) || v < RADIUS_MIN || v > RADIUS_MAX) return
-    try { localStorage.setItem(RADIUS_KEY, String(v)) } catch { /* ignore */ }
-  }
 
   reset() {
     this.token++

@@ -1,4 +1,36 @@
 class User < ApplicationRecord
+  # Préférences par défaut du créateur d'itinéraire. Sert à la fois de valeurs
+  # initiales et de schéma de référence (clés autorisées + types) pour assainir
+  # les payloads entrants — cf. ProfilesController.
+  DEFAULT_PREFERENCES = {
+    "points_of_interest" => {
+      "show_cemeteries" => true,
+      "show_bakeries" => true,
+      "show_localities" => false,
+      "radius_m" => 1500,
+    },
+    "map" => {
+      "default_style" => "cyclosm",
+    },
+    "display" => {
+      "default_sport" => "cycling",   # cycling | mtb | hiking
+      "show_grade_colors" => true,
+      "show_elevation_chart" => true,
+    },
+    # Vitesse moyenne (km/h) par catégorie d'activité, utilisée pour estimer le
+    # temps de parcours d'un itinéraire (créateur + liste).
+    "speeds" => {
+      "cycling" => 18,
+      "mtb" => 14,
+      "hiking" => 4.5,
+    },
+    "climb_detection" => {
+      "min_grade" => 2,        # pente moyenne minimale (%)
+      "min_gain_m" => 60,      # dénivelé positif minimal (m)
+      "min_length_m" => 500,   # longueur minimale (m)
+    },
+  }.freeze
+
   has_many :chart_layouts, dependent: :destroy
   has_many :routes, dependent: :destroy
   has_many :imported_activities, dependent: :destroy
@@ -21,6 +53,25 @@ class User < ApplicationRecord
       strava_access_token: auth.credentials.token,
       strava_refresh_token: auth.credentials.refresh_token,
       strava_expires_at: Time.at(auth.credentials.expires_at).utc
+    )
+  end
+
+  # Préférences fusionnées avec les valeurs par défaut : garantit que toute clé
+  # absente (utilisateur ancien, nouvelle préférence ajoutée depuis) est présente
+  # côté front avec sa valeur par défaut.
+  def preferences_with_defaults
+    DEFAULT_PREFERENCES.each_with_object({}) do |(section, defaults), result|
+      stored = preferences.is_a?(Hash) ? (preferences[section] || {}) : {}
+      result[section] = defaults.merge(stored.slice(*defaults.keys))
+    end
+  end
+
+  def detach_strava!
+    update!(
+      strava_uid: nil,
+      strava_access_token: nil,
+      strava_refresh_token: nil,
+      strava_expires_at: nil
     )
   end
 

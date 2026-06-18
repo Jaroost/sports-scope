@@ -52,6 +52,7 @@ const climbInfo = ref<{
   segments: { d: string; color: string }[]  // graded elevation profile of the climb
   posX: number                               // cursor x (% of profile width)
   posY: number                               // cursor y (% of profile height)
+  topY: number                               // summit y (% of profile height)
   grade: number                              // instantaneous grade at the rider (%)
 } | null>(null)
 const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number } | null>(null)
@@ -454,6 +455,7 @@ function updateProgress(idx: number) {
       segments: profileSegments,
       posX,
       posY: profileYAt(posX),
+      topY: profileTopY,
       grade: gradeForIndex(idx, alts, cumDistM),
     }
   } else {
@@ -469,6 +471,7 @@ function updateProgress(idx: number) {
 let profileForStart = -1
 let profileSegments: { d: string; color: string }[] = []
 let profilePts: { x: number; y: number }[] = []
+let profileTopY = 4   // y of the highest point of the climb (summit)
 
 function buildClimbProfile(climb: Climb) {
   if (profileForStart === climb.startIdx) return
@@ -484,6 +487,7 @@ function buildClimbProfile(climb: Climb) {
   const yOf = (i: number) => 96 - (((alts[i] ?? 0) - minA) / range) * 88  // 4–96, peak near the top
   profilePts = []
   for (let i = s; i <= e; i++) profilePts.push({ x: xOf(i), y: yOf(i) })
+  profileTopY = Math.min(...profilePts.map((p) => p.y))
   profileSegments = []
   for (let i = s; i < e; i++) {
     const x1 = xOf(i)
@@ -653,12 +657,20 @@ function onVisibilityChange() {
           <path v-for="(seg, i) in climbInfo.segments" :key="i" :d="seg.d" :fill="seg.color" />
         </svg>
         <div class="nav-climb-cursor" :style="{ left: `${climbInfo.posX}%` }">
+          <!-- Remaining vertical gain: from the rider's altitude up to the summit. -->
+          <span
+            class="nav-climb-remain"
+            :style="{ top: `${climbInfo.topY}%`, height: `${Math.max(0, climbInfo.posY - climbInfo.topY)}%` }"
+          ></span>
+          <span class="nav-climb-remain-label" :style="{ top: `${(climbInfo.topY + climbInfo.posY) / 2}%` }">
+            +{{ Math.round(climbInfo.remainingGainM) }} m
+          </span>
           <span class="nav-climb-dot" :style="{ top: `${climbInfo.posY}%` }"></span>
         </div>
       </div>
       <div class="d-flex justify-content-between mt-1">
         <small class="text-muted">{{ formatDistanceShort(climbInfo.climb.lengthM) }}</small>
-        <small class="text-muted">+{{ Math.round(climbInfo.remainingGainM) }} m</small>
+        <small class="text-muted">{{ formatDistanceShort(climbInfo.climb.lengthM * (1 - climbInfo.ratio)) }}</small>
       </div>
     </div>
 
@@ -780,6 +792,16 @@ function onVisibilityChange() {
   background: #111827; border: 2px solid #fff; border-radius: 50%;
   transform: translate(-50%, -50%);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+/* Remaining vertical gain: dashed segment from the rider up to the summit. */
+.nav-climb-remain {
+  position: absolute; left: 50%; width: 0;
+  border-left: 2px dashed #f97316; transform: translateX(-1px);
+}
+.nav-climb-remain-label {
+  position: absolute; left: 6px; transform: translateY(-50%);
+  font-size: 0.7rem; font-weight: 700; color: #c2410c; white-space: nowrap;
+  background: rgba(255, 255, 255, 0.85); padding: 0 0.2rem; border-radius: 0.25rem;
 }
 
 .nav-stats {

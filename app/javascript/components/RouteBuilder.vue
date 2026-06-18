@@ -85,6 +85,10 @@ let resizeStartFlex = 0
 let resizingH = false
 let resizeStartX = 0
 let resizeStartWidth = 0
+// Observe la navbar fixe pour garder --rb-navbar-h à jour : sa hauteur n'est pas
+// toujours connue au montage (layout/polices pas encore stabilisés), ce qui faussait
+// la hauteur de la page mobile et reléguait le bouton de profil hors écran.
+let navbarResizeObserver: ResizeObserver | null = null
 
 const mobileSheetOpen = ref(false)
 const isMobile = ref(typeof window !== 'undefined' && window.innerWidth < 768)
@@ -1044,7 +1048,10 @@ function onWindowResize() {
 // vide au-dessus de la carte (voir le media query .route-builder-page).
 function updateNavbarHeight() {
   const nav = document.querySelector('nav.navbar') as HTMLElement | null
-  document.body.style.setProperty('--rb-navbar-h', `${nav?.offsetHeight ?? 64}px`)
+  // offsetHeight peut valoir 0 avant la mise en page : on retombe alors sur 64px
+  // (4rem) plutôt que de poser une hauteur nulle qui casserait le calc() mobile.
+  const h = nav?.offsetHeight || 64
+  document.body.style.setProperty('--rb-navbar-h', `${h}px`)
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -1064,6 +1071,14 @@ onMounted(async () => {
   routeStore.readOnly.value = readOnly.value
   routeStore.currentId.value = props.routeId ? Number(props.routeId) : null
   updateNavbarHeight()
+  // Re-mesure dès que la navbar prend sa taille définitive (polices, layout) puis à
+  // chaque variation, pour que la hauteur de page mobile reste correcte sans avoir à
+  // pivoter l'appareil.
+  const nav = document.querySelector('nav.navbar') as HTMLElement | null
+  if (nav && typeof ResizeObserver !== 'undefined') {
+    navbarResizeObserver = new ResizeObserver(() => { updateNavbarHeight(); mapRef.value?.resize() })
+    navbarResizeObserver.observe(nav)
+  }
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('beforeunload', onBeforeUnload)
 
@@ -1108,6 +1123,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeH); document.removeEventListener('mouseup', stopResizeH)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('beforeunload', onBeforeUnload)
+  navbarResizeObserver?.disconnect(); navbarResizeObserver = null
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   if (savedTimer) clearTimeout(savedTimer)
   document.body.style.removeProperty('--rb-navbar-h')

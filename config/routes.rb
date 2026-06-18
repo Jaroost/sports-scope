@@ -11,6 +11,7 @@ Rails.application.routes.draw do
     # and unguessable; the page and its API are public.
     get "/routes/:token/navigate", to: "pages#route_navigation", as: :navigate_route
     get "/profile", to: "profiles#show", as: :profile
+    delete "/profile/strava", to: "profiles#unlink_strava", as: :unlink_strava
   end
 
   # User preferences profile (JSON consumed by Vue)

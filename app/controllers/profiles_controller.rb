@@ -14,6 +14,12 @@ class ProfilesController < ApplicationController
   def show
   end
 
+  # DELETE /profile/strava — délie le compte Strava de l'utilisateur courant.
+  def unlink_strava
+    current_user.detach_strava!
+    redirect_to profile_path, notice: t("profile.strava.unlinked")
+  end
+
   # PATCH /api/profile/preferences — sauvegarde JSON des préférences.
   def update
     current_user.update!(preferences: sanitize_preferences(params[:preferences]))

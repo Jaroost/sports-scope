@@ -9,7 +9,7 @@ fr:
     profile: "Profil"
     login: "Se connecter"
     logout: "Se déconnecter"
-    link_strava: "Lier Strava"
+    language: "Langue"
   auth:
     signed_in: "Bienvenue !"
     login_first: "Veuillez vous connecter d'abord."
@@ -290,6 +290,14 @@ fr:
     saving: "Enregistrement…"
     saved: "Préférences enregistrées"
     save_error: "Échec de l'enregistrement"
+    strava:
+      title: "Compte Strava"
+      help: "Liez votre compte Strava pour importer et analyser vos activités."
+      connected: "Compte Strava lié"
+      link: "Lier Strava"
+      unlink: "Délier Strava"
+      unlink_confirm: "Délier votre compte Strava ?"
+      unlinked: "Compte Strava délié."
     poi:
       title: "Points d'intérêt"
       help: "Choisissez les points d'intérêt détectés le long de vos itinéraires et leur rayon de recherche."

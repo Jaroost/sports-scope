@@ -9,7 +9,7 @@ en:
     profile: "Profile"
     login: "Sign in"
     logout: "Sign out"
-    link_strava: "Connect Strava"
+    language: "Language"
   auth:
     signed_in: "Welcome!"
     login_first: "Please sign in first."
@@ -290,6 +290,14 @@ en:
     saving: "Saving…"
     saved: "Preferences saved"
     save_error: "Save failed"
+    strava:
+      title: "Strava account"
+      help: "Connect your Strava account to import and analyze your activities."
+      connected: "Strava account connected"
+      link: "Connect Strava"
+      unlink: "Disconnect Strava"
+      unlink_confirm: "Disconnect your Strava account?"
+      unlinked: "Strava account disconnected."
     poi:
       title: "Points of interest"
       help: "Choose which points of interest are detected along your routes and their search radius."

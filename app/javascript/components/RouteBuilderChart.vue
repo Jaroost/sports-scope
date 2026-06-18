@@ -700,7 +700,7 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
   flex: 1;
 }
 .route-builder-chart-card :deep(.card-header) {
-  padding: 0.35rem 0.75rem;
+  padding: 0.15rem 0.35rem;
 }
 .route-builder-chart-card-body {
   flex: 1;

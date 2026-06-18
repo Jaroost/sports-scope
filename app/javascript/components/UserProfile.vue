@@ -207,7 +207,7 @@ async function save() {
 
 <style scoped>
 .user-profile {
-  max-width: 720px;
+
 }
 
 .map-style-option {

@@ -10,4 +10,30 @@
   <%= t("profile.lead") %> · <i class="fa-solid fa-user-astronaut me-1 text-muted" aria-hidden="true"></i><strong><%= current_user.display_name %></strong>
 </p>
 
+<section class="card mb-3 shadow-sm" style="max-width: 720px;">
+  <div class="card-header d-flex align-items-center gap-2">
+    <i class="fa-brands fa-strava text-warning" aria-hidden="true"></i>
+    <h2 class="h5 mb-0"><%= t("profile.strava.title") %></h2>
+  </div>
+  <div class="card-body">
+    <% if current_user.strava_linked? %>
+      <div class="d-flex align-items-center gap-3 flex-wrap">
+        <span class="badge bg-success-subtle text-success d-inline-flex align-items-center gap-1 fs-6">
+          <i class="fa-solid fa-circle-check" aria-hidden="true"></i><%= t("profile.strava.connected") %>
+        </span>
+        <%= button_to unlink_strava_path, method: :delete, class: "btn btn-outline-danger btn-sm ms-sm-auto",
+              data: { turbo: false },
+              form: { onsubmit: "return confirm('#{j(t('profile.strava.unlink_confirm'))}')" } do %>
+          <i class="fa-solid fa-link-slash me-1" aria-hidden="true"></i><%= t("profile.strava.unlink") %>
+        <% end %>
+      </div>
+    <% else %>
+      <p class="text-muted small mb-3"><%= t("profile.strava.help") %></p>
+      <%= button_to "/auth/strava", method: :post, class: "btn btn-warning", data: { turbo: false } do %>
+        <i class="fa-brands fa-strava me-1" aria-hidden="true"></i><%= t("profile.strava.link") %>
+      <% end %>
+    <% end %>
+  </div>
+</section>
+
 <div data-vue-component="UserProfile" data-vue-props='<%= { preferences: current_user.preferences_with_defaults }.to_json %>'></div>

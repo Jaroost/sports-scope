@@ -59,6 +59,15 @@ class User < ApplicationRecord
     end
   end
 
+  def detach_strava!
+    update!(
+      strava_uid: nil,
+      strava_access_token: nil,
+      strava_refresh_token: nil,
+      strava_expires_at: nil
+    )
+  end
+
   def strava_linked?
     strava_uid.present? && strava_access_token.present?
   end

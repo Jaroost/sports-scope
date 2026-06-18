@@ -156,6 +156,7 @@ en:
   routes:
     list_title: "My routes"
     builder_title: "New route"
+    page_title: "Route"
     new: "New route"
     empty: "No routes yet. Create one by clicking \"New route\"."
     name_placeholder: "Route name…"

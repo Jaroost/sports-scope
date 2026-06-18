@@ -156,6 +156,7 @@ fr:
   routes:
     list_title: "Mes itinéraires"
     builder_title: "Créer un itinéraire"
+    page_title: "Itinéraire"
     new: "Nouvel itinéraire"
     empty: "Aucun itinéraire pour l'instant. Crées-en un en cliquant sur « Nouvel itinéraire »."
     name_placeholder: "Nom de l'itinéraire…"

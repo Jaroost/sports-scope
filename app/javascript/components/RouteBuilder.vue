@@ -190,7 +190,7 @@ async function fetchImportantPlaces() {
 
 // ─── Route computation ────────────────────────────────────────────────────────
 
-async function recomputeRoute() {
+async function recomputeRoute(opts: { autoSave?: boolean } = {}) {
   const token = ++recomputeToken
   selectionStore.clear()
 
@@ -266,6 +266,10 @@ async function recomputeRoute() {
     } else {
       await fetchElevation(token)
     }
+    // Itinéraire recalculé (géométrie + dénivelé à jour) : on enregistre
+    // automatiquement la modification de points, sauf si un recalcul plus récent
+    // est déjà parti entre-temps.
+    if (opts.autoSave && token === recomputeToken) scheduleAutoSave()
   } catch (e: any) {
     if (token === recomputeToken) routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
   } finally {
@@ -349,6 +353,27 @@ async function save() {
     routeStore.name.value = name
   }
   if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
+  await persist()
+}
+
+// Sauvegarde automatique débouncée, déclenchée à chaque modification de points.
+// Contrairement à save(), elle ne demande jamais de nom : si le nom est vide ou
+// qu'il y a moins de 2 points, on ne persiste pas (l'utilisateur sauvegardera
+// manuellement). Un seul enregistrement à la fois pour éviter de créer des
+// doublons via plusieurs POST concurrents sur un itinéraire pas encore identifié.
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleAutoSave() {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(runAutoSave, 800)
+}
+function runAutoSave() {
+  autoSaveTimer = null
+  if (saving.value) { scheduleAutoSave(); return } // un enregistrement est déjà en vol
+  if (!routeStore.name.value.trim() || routeStore.waypoints.value.length < 2) return
+  persist()
+}
+
+async function persist() {
   saving.value = true
   routeStore.error.value = null
   try {
@@ -444,7 +469,7 @@ function undoLast() {
   if (!routeStore.waypoints.value.length) return
   routeStore.waypoints.value = routeStore.waypoints.value.slice(0, -1)
   mapRef.value?.refreshWaypointMarkers()
-  recomputeRoute()
+  recomputeRoute({ autoSave: true })
 }
 
 function clearAll() {
@@ -452,7 +477,7 @@ function clearAll() {
   if (!window.confirm(t('routes.clear_confirm'))) return
   routeStore.waypoints.value = []
   mapRef.value?.refreshWaypointMarkers()
-  recomputeRoute()
+  recomputeRoute({ autoSave: true })
 }
 
 // ─── Stats events ─────────────────────────────────────────────────────────────
@@ -871,13 +896,20 @@ function applyPendingGpxImport() {
     mapRef.value?.refreshWaypointMarkers()
     const lngs = wps.map((w: any) => w.lng), lats = wps.map((w: any) => w.lat)
     mapRef.value?.fitBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)], { padding: 60, duration: 600, maxZoom: 14 })
-    recomputeRoute()
+    recomputeRoute({ autoSave: true })
   } catch { /* stale payload */ }
 }
 
 // ─── Watchers ─────────────────────────────────────────────────────────────────
 
 watch(state, () => state.save(), { deep: true })
+
+// Titre de l'onglet : « Itinéraire - <nom> » ; retombe sur le seul préfixe tant
+// que l'itinéraire n'a pas de nom.
+watch(routeStore.name, (name) => {
+  const n = (name ?? '').trim()
+  document.title = n ? `${t('routes.page_title')} - ${n}` : t('routes.page_title')
+}, { immediate: true })
 
 watch(() => state.showElevationChart, async () => {
   await nextTick()
@@ -946,6 +978,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   if (savedTimer) clearTimeout(savedTimer)
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
   placesStore.reset()
   selectionStore.clear()
 })
@@ -1070,7 +1103,7 @@ onBeforeUnmount(() => {
           <RouteBuilderMap
             ref="mapRef"
             :state="state"
-            @waypoints-changed="recomputeRoute"
+            @waypoints-changed="recomputeRoute({ autoSave: true })"
             @select-place="onSelectPlace"
             @hover-place="onHoverPlace"
             @toggle-chart="state.showElevationChart = !state.showElevationChart; nextTick(() => mapRef?.resize())"

@@ -38,6 +38,30 @@ export function formatDuration(totalSec: number): string {
   return `${h} h ${String(m).padStart(2, '0')}`
 }
 
+// Densifie les longs tronçons (typiquement les lignes droites « straight » de BRouter
+// entre points libres, qui ne contiennent que leurs deux extrémités) en insérant des
+// points interpolés linéairement avec une altitude nulle, à combler ensuite par open-meteo.
+// Les tronçons routés sont déjà denses : seuls les écarts > spacingM gagnent des points.
+// Les points d'origine sont tous conservés, l'indexage des waypoints reste donc valide.
+export function densifyGeometry(coords: Coord[], spacingM = 100): Coord[] {
+  if (coords.length < 2) return coords.slice()
+  const out: Coord[] = [coords[0]]
+  for (let i = 1; i < coords.length; i++) {
+    const a = coords[i - 1]
+    const b = coords[i]
+    const d = haversine(a, b)
+    if (d > spacingM * 1.5) {
+      const n = Math.floor(d / spacingM)
+      for (let k = 1; k < n; k++) {
+        const f = k / n
+        out.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, null])
+      }
+    }
+    out.push(b)
+  }
+  return out
+}
+
 export function downsample<T>(arr: T[], maxPoints: number): T[] {
   if (arr.length <= maxPoints) return arr.slice()
   const step = arr.length / maxPoints
@@ -202,4 +226,198 @@ export function geomIdxForKm(km: number, cumDistKm: number[]): number {
     else hi = mid
   }
   return lo
+}
+
+// ─── Navigation helpers ────────────────────────────────────────────────────────
+
+// GPS accuracy circle as a ring of [lng, lat] points (used as a GeoJSON polygon).
+export function generateCircle(center: LngLat, radiusM: number, steps = 64): LngLat[] {
+  const [lng, lat] = center
+  const latR = (lat * Math.PI) / 180
+  const pts: LngLat[] = []
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * 2 * Math.PI
+    pts.push([
+      lng + (radiusM / (111320 * Math.cos(latR))) * Math.cos(a),
+      lat + (radiusM / 110540) * Math.sin(a),
+    ])
+  }
+  return pts
+}
+
+// Initial bearing (degrees, 0 = north) from point a to point b.
+export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
+  const toRad = (d: number) => (d * Math.PI) / 180
+  const lat1 = toRad(a[1])
+  const lat2 = toRad(b[1])
+  const dLng = toRad(b[0] - a[0])
+  const y = Math.sin(dLng) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+  return (Math.atan2(y, x) * 180) / Math.PI
+}
+
+// Index of the geometry vertex closest to `pos`, plus the lateral distance (m).
+// `hintIdx` restricts the search to a window around the last known index for perf;
+// pass -1 (default) to scan the whole geometry.
+export function nearestGeomIndex(
+  pos: LngLat,
+  geometry: Coord[],
+  hintIdx = -1,
+  window = 60,
+): { idx: number; distM: number } {
+  let bestIdx = 0
+  let bestDist = Infinity
+  let lo = 0
+  let hi = geometry.length
+  if (hintIdx >= 0) {
+    lo = Math.max(0, hintIdx - window)
+    hi = Math.min(geometry.length, hintIdx + window)
+  }
+  for (let i = lo; i < hi; i++) {
+    const d = haversine(pos, geometry[i])
+    if (d < bestDist) { bestDist = d; bestIdx = i }
+  }
+  return { idx: bestIdx, distM: bestDist }
+}
+
+// Remaining distance / elevation / progress ratio from a projected index.
+export function progressFor(
+  idx: number,
+  geometry: Coord[],
+  cumDistM: number[],
+): { remainingM: number; doneRatio: number; remainingGainM: number } {
+  const total = cumDistM[cumDistM.length - 1] || 0
+  const done = cumDistM[idx] || 0
+  const remainingM = Math.max(0, total - done)
+  const doneRatio = total > 0 ? Math.min(1, done / total) : 0
+  const { gain } = computeGainLoss(geometry.slice(idx))
+  return { remainingM, doneRatio, remainingGainM: gain }
+}
+
+// ─── Turn detection ─────────────────────────────────────────────────────────
+
+// Maneuver families, each mapped to a distinct audio cue.
+export type Maneuver = 'turn' | 'slight' | 'sharp' | 'keep' | 'uturn' | 'roundabout'
+
+export interface TurnPoint {
+  idx: number              // geometry vertex of the turn
+  distM: number            // cumulative distance to the turn from the start
+  angle: number            // signed turn angle (deg): + = right, − = left
+  direction: 'left' | 'right'
+  kind: Maneuver
+}
+
+// Classify a BRouter voice-hint command (and its angle as a tie-breaker) into a
+// maneuver family + side. Command ids:
+// 2 TL  3 TSLL  4 TSHL  5 TR  6 TSLR  7 TSHR  8 KL  9 KR
+// 10 TLU  11 TU  12 TRU  14 RNDB(right)  15 RNLB(left)
+function maneuverFromCmd(cmd: number, angle: number): { kind: Maneuver; direction: 'left' | 'right' } {
+  switch (cmd) {
+    case 2: return { kind: 'turn', direction: 'left' }
+    case 5: return { kind: 'turn', direction: 'right' }
+    case 3: return { kind: 'slight', direction: 'left' }
+    case 6: return { kind: 'slight', direction: 'right' }
+    case 4: return { kind: 'sharp', direction: 'left' }
+    case 7: return { kind: 'sharp', direction: 'right' }
+    case 8: return { kind: 'keep', direction: 'left' }
+    case 9: return { kind: 'keep', direction: 'right' }
+    case 10: return { kind: 'uturn', direction: 'left' }
+    case 12: return { kind: 'uturn', direction: 'right' }
+    case 11: return { kind: 'uturn', direction: angle >= 0 ? 'right' : 'left' }
+    case 14: return { kind: 'roundabout', direction: 'right' }
+    case 15: return { kind: 'roundabout', direction: 'left' }
+    default: return { kind: 'turn', direction: angle >= 0 ? 'right' : 'left' }
+  }
+}
+
+// Maneuver family for a purely geometric turn, derived from the turn sharpness.
+function kindFromAngle(absAngle: number): Maneuver {
+  if (absAngle >= 95) return 'sharp'
+  if (absAngle < 45) return 'slight'
+  return 'turn'
+}
+
+// A BRouter turn instruction, anchored to a coordinate (robust to later geometry
+// changes such as densification) rather than to a raw track index.
+export interface VoiceHint {
+  lng: number
+  lat: number
+  cmd: number              // BRouter command id (2=TL, 3=TSLL, 5=TR, 6=TSLR, 14=roundabout…)
+  angle: number            // signed turn angle (deg): + = right, − = left
+}
+
+// BRouter command ids that carry no actionable turn for our cues:
+// 1 = continue straight, 13 = off-route marker, 16 = beeline segment.
+const VOICE_HINT_SKIP = new Set([1, 13, 16])
+
+// Map stored BRouter voice hints onto the current geometry, producing the same
+// TurnPoint shape that the navigation cue logic consumes. Each hint is matched to
+// its nearest geometry vertex so the cumulative distance stays correct.
+export function turnsFromVoiceHints(
+  hints: VoiceHint[],
+  geometry: Coord[],
+  cumDistM: number[],
+): TurnPoint[] {
+  const out: TurnPoint[] = []
+  for (const h of hints) {
+    if (VOICE_HINT_SKIP.has(h.cmd)) continue
+    const { idx } = nearestGeomIndex([h.lng, h.lat], geometry)
+    const { kind, direction } = maneuverFromCmd(h.cmd, h.angle)
+    out.push({ idx, distM: cumDistM[idx] || 0, angle: h.angle, direction, kind })
+  }
+  return out.sort((a, b) => a.distM - b.distM)
+}
+
+// Detect significant turns ("intersections" the rider must take) along the
+// route. For each vertex we compare the heading ~spanM before and after it,
+// smoothing over noisy/dense geometry, and keep turns sharper than minAngleDeg.
+// Nearby turns within a small cluster are collapsed to their sharpest vertex.
+export function detectTurns(
+  geometry: Coord[],
+  cumDistM: number[],
+  minAngleDeg = 35,
+  spanM = 18,
+): TurnPoint[] {
+  const n = geometry.length
+  if (n < 3) return []
+  const raw: TurnPoint[] = []
+  for (let i = 1; i < n - 1; i++) {
+    let a = i
+    while (a > 0 && cumDistM[i] - cumDistM[a] < spanM) a--
+    let b = i
+    while (b < n - 1 && cumDistM[b] - cumDistM[i] < spanM) b++
+    if (a === i || b === i) continue
+    const inB = bearingBetween(geometry[a], geometry[i])
+    const outB = bearingBetween(geometry[i], geometry[b])
+    let diff = outB - inB
+    while (diff > 180) diff -= 360
+    while (diff < -180) diff += 360
+    if (Math.abs(diff) >= minAngleDeg) {
+      raw.push({ idx: i, distM: cumDistM[i], angle: diff, direction: diff > 0 ? 'right' : 'left', kind: kindFromAngle(Math.abs(diff)) })
+    }
+  }
+  // Collapse clusters: a single road turn spans several vertices, keep the sharpest.
+  const out: TurnPoint[] = []
+  for (const tp of raw) {
+    const last = out[out.length - 1]
+    if (last && tp.distM - last.distM < 25) {
+      if (Math.abs(tp.angle) > Math.abs(last.angle)) out[out.length - 1] = tp
+    } else {
+      out.push(tp)
+    }
+  }
+  return out
+}
+
+// The climb currently being ridden (idx within [startIdx, endIdx]) and how far
+// through it we are (0..1), or null when not on a climb.
+export function activeClimb(idx: number, climbs: Climb[]): { climb: Climb; ratio: number } | null {
+  for (const climb of climbs) {
+    if (idx >= climb.startIdx && idx <= climb.endIdx) {
+      const span = climb.endIdx - climb.startIdx
+      const ratio = span > 0 ? (idx - climb.startIdx) / span : 0
+      return { climb, ratio }
+    }
+  }
+  return null
 }

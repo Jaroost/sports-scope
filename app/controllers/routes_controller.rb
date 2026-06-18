@@ -1,7 +1,9 @@
 class RoutesController < ApplicationController
-  before_action :require_login!
+  # `shared` is public (token-based) so a shared navigation link works without
+  # an account. Every other action stays scoped to the signed-in owner.
+  before_action :require_login!, except: :shared
 
-  MAX_WAYPOINTS = 50
+  MAX_WAYPOINTS = 500
   MAX_GEOMETRY_POINTS = 10_000
   MAX_NAME_LEN = 80
   ALLOWED_PROFILES = %w[cycling foot driving].freeze
@@ -15,6 +17,15 @@ class RoutesController < ApplicationController
   # GET /api/routes/:id
   def show
     route = current_user.routes.find_by(id: params[:id])
+    return head :not_found unless route
+    render json: { route: serialize_full(route) }
+  end
+
+  # GET /api/routes/shared/:token
+  # Public, read-only lookup by unguessable token — powers shared navigation
+  # links for signed-out recipients.
+  def shared
+    route = Route.find_by(share_token: params[:token])
     return head :not_found unless route
     render json: { route: serialize_full(route) }
   end
@@ -68,6 +79,7 @@ class RoutesController < ApplicationController
       profile: src.profile,
       waypoints: src.waypoints,
       geometry: src.geometry,
+      voice_hints: src.voice_hints,
       distance_m: src.distance_m,
       elevation_gain_m: src.elevation_gain_m,
       elevation_loss_m: src.elevation_loss_m,
@@ -88,6 +100,7 @@ class RoutesController < ApplicationController
     out[:profile] = ALLOWED_PROFILES.include?(p[:profile].to_s) ? p[:profile] : "cycling" if p.key?(:profile)
     out[:waypoints] = clean_waypoints(p[:waypoints]) if p.key?(:waypoints)
     out[:geometry] = clean_geometry(p[:geometry]) if p.key?(:geometry)
+    out[:voice_hints] = clean_voice_hints(p[:voice_hints]) if p.key?(:voice_hints)
     out[:distance_m] = p[:distance_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:distance_m)
     out[:elevation_gain_m] = p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_gain_m)
     out[:elevation_loss_m] = p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_loss_m)
@@ -119,6 +132,23 @@ class RoutesController < ApplicationController
     end.compact
   end
 
+  MAX_VOICE_HINTS = 2_000
+
+  def clean_voice_hints(raw)
+    return [] unless raw.is_a?(Array)
+    raw.take(MAX_VOICE_HINTS).map do |h|
+      hh = h.respond_to?(:to_unsafe_h) ? h.to_unsafe_h : h
+      next nil unless hh.is_a?(Hash)
+      lng = hh["lng"] || hh[:lng]
+      lat = hh["lat"] || hh[:lat]
+      cmd = hh["cmd"] || hh[:cmd]
+      angle = hh["angle"] || hh[:angle]
+      next nil unless lng.is_a?(Numeric) && lat.is_a?(Numeric)
+      next nil if lat.abs > 90 || lng.abs > 180
+      { "lng" => lng.to_f, "lat" => lat.to_f, "cmd" => cmd.to_i, "angle" => angle.to_f }
+    end.compact
+  end
+
   def serialize_summary(route)
     {
       id: route.id,
@@ -127,6 +157,7 @@ class RoutesController < ApplicationController
       elevation_gain_m: route.elevation_gain_m,
       elevation_loss_m: route.elevation_loss_m,
       profile: route.profile,
+      share_token: route.share_token,
       updated_at: route.updated_at.iso8601,
     }
   end
@@ -135,15 +166,23 @@ class RoutesController < ApplicationController
     serialize_summary(route).merge(
       waypoints: route.waypoints || [],
       geometry: route.geometry || [],
+      voice_hints: route.voice_hints || [],
     )
   end
 
+  # Namespace de l'extension propriétaire embarquée dans le GPX. Les apps tierces
+  # (Strava, Garmin, Komoot…) ignorent les <extensions> d'un namespace inconnu,
+  # donc le fichier reste un GPX 1.1 valide ailleurs ; côté Sports Scope on s'en
+  # sert pour ré-importer les waypoints d'origine avec leur flag « libre ».
+  GPX_NS = "https://sports-scope.app/gpx/1"
+
   def build_gpx(route)
     pts = Array(route.geometry)
+    wps = Array(route.waypoints)
     name = ERB::Util.html_escape(route.name)
     parts = []
     parts << '<?xml version="1.0" encoding="UTF-8"?>'
-    parts << '<gpx version="1.1" creator="Sports Scope" xmlns="http://www.topografix.com/GPX/1/1">'
+    parts << %(<gpx version="1.1" creator="Sports Scope" xmlns="http://www.topografix.com/GPX/1/1" xmlns:ss="#{GPX_NS}">)
     parts << "  <metadata><name>#{name}</name></metadata>"
     parts << "  <trk><name>#{name}</name><trkseg>"
     pts.each do |pt|
@@ -155,7 +194,26 @@ class RoutesController < ApplicationController
       parts << seg
     end
     parts << "  </trkseg></trk>"
+    parts.concat(build_gpx_extensions(wps))
     parts << "</gpx>"
     parts.join("\n")
+  end
+
+  # Waypoints d'origine (sommets cliqués) + flag « libre » : la trace <trkpt>
+  # ci-dessus ne dit pas lesquels étaient libres, donc on les rejoue ici pour un
+  # aller-retour fidèle. La géométrie n'a pas à être stockée : BRouter la
+  # reconstruit à l'identique depuis les waypoints (les tronçons libres sont
+  # tracés en ligne droite via le paramètre `straight`).
+  def build_gpx_extensions(wps)
+    rows = wps.filter_map do |w|
+      lat = w["lat"] || w[:lat]
+      lng = w["lng"] || w[:lng]
+      next unless lat && lng
+      attrs = %(lat="#{lat}" lon="#{lng}")
+      attrs << ' free="true"' if w["free"] || w[:free]
+      "      <ss:wp #{attrs}/>"
+    end
+    return [] if rows.empty?
+    ["  <extensions>", "    <ss:waypoints>", *rows, "    </ss:waypoints>", "  </extensions>"]
   end
 end

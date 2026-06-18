@@ -6,7 +6,8 @@ import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
-import { haversine, buildDistancesM, downsample, formatDuration } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration } from '../routeHelpers'
+import type { Coord, VoiceHint } from '../routeHelpers'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
@@ -26,6 +27,9 @@ const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || 'https://brouter.de/brou
 
 const state = reactive(new RouteBuilderState())
 const saving = ref(false)
+// Indicateur transitoire affiché brièvement après un enregistrement réussi.
+const saved = ref(false)
+let savedTimer: ReturnType<typeof setTimeout> | null = null
 const exporting = ref(false)
 const showExportDialog = ref(false)
 const exportStyleId = ref('')
@@ -205,7 +209,8 @@ async function recomputeRoute() {
       if (i < wps.length - 1) straight.add(i)
     })
     const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
-    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson${straightParam}`
+    // timode=2 makes BRouter emit turn-by-turn voicehints in the GeoJSON properties.
+    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=trekking&alternativeidx=0&format=geojson&timode=2${straightParam}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
     const data = await res.json()
@@ -215,13 +220,30 @@ async function recomputeRoute() {
     if (!Array.isArray(coords) || coords.length < 2) throw new Error('Routing impossible (no route)')
     const trackLen = parseFloat(feature.properties?.['track-length'] || '0')
     routeStore.distanceM.value = Number.isFinite(trackLen) && trackLen > 0 ? trackLen : 0
-    routeStore.geometry.value = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null])
+    let geom = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null]) as Coord[]
+    // Voicehints BRouter : [indexInTrack, command, exitNumber, distanceToNext, angle].
+    // On les ancre sur la coordonnée brute (avant densification, qui décalerait les
+    // index) ; la navigation les reprojettera sur la géométrie sauvegardée.
+    const rawHints = Array.isArray(feature.properties?.voicehints) ? feature.properties.voicehints : []
+    routeStore.voiceHints.value = rawHints
+      .map((h: number[]) => {
+        const c = coords[h[0]]
+        return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0 } : null
+      })
+      .filter(Boolean) as VoiceHint[]
+    // Les tronçons droits (points libres) ne contiennent que leurs extrémités : on les
+    // densifie pour qu'open-meteo échantillonne le relief le long de la ligne.
+    if (straight.size) geom = densifyGeometry(geom)
+    routeStore.geometry.value = geom
 
     mapRef.value?.updateRouteLayer()
     mapRef.value?.installClimbMarkers()
     mapRef.value?.recomputeWaypointGeomIndices()
 
-    const hasInlineElevation = routeStore.geometry.value.some((c) => c[2] != null)
+    // BRouter ne renvoie pas d'altitude pour les tronçons « straight » (points libres).
+    // On ne se fie aux altitudes inline que si TOUS les points en ont ; sinon on
+    // interroge open-meteo pour combler les trous (sans quoi le dénivelé serait faux).
+    const hasInlineElevation = routeStore.geometry.value.every((c) => c[2] != null)
     if (hasInlineElevation) {
       routeStore.recomputeGain()
       await nextTick()
@@ -273,6 +295,7 @@ async function fetchRoute(id: number) {
     routeStore.name.value = r.name || ''
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
+    routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
     routeStore.distanceM.value = r.distance_m || 0
     routeStore.elevGainM.value = r.elevation_gain_m || 0
     routeStore.elevLossM.value = r.elevation_loss_m || 0
@@ -293,7 +316,15 @@ async function fetchRoute(id: number) {
 }
 
 async function save() {
-  if (!routeStore.name.value.trim()) { routeStore.error.value = t('routes.error_name_required'); return }
+  // Sur mobile le champ nom du header n'est pas affiché : on le demande au moment de
+  // l'enregistrement plutôt que de bloquer sur une erreur impossible à corriger.
+  if (!routeStore.name.value.trim()) {
+    const raw = window.prompt(t('routes.name_prompt'), '')
+    if (raw == null) return // annulé
+    const name = raw.trim().slice(0, 80)
+    if (!name) { routeStore.error.value = t('routes.error_name_required'); return }
+    routeStore.name.value = name
+  }
   if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
   saving.value = true
   routeStore.error.value = null
@@ -302,6 +333,7 @@ async function save() {
       name: routeStore.name.value.trim(),
       waypoints: routeStore.waypoints.value,
       geometry: routeStore.geometry.value,
+      voice_hints: routeStore.voiceHints.value,
       distance_m: routeStore.distanceM.value,
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,
@@ -322,6 +354,9 @@ async function save() {
       routeStore.currentId.value = r.id
       window.history.replaceState({}, '', `${localePrefix}/routes/${r.id}/edit`)
     }
+    saved.value = true
+    if (savedTimer) clearTimeout(savedTimer)
+    savedTimer = setTimeout(() => { saved.value = false }, 2500)
   } catch (e: any) {
     routeStore.error.value = e.message
   } finally {
@@ -884,6 +919,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResizeH); document.removeEventListener('mouseup', stopResizeH)
   window.removeEventListener('resize', onWindowResize)
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
+  if (savedTimer) clearTimeout(savedTimer)
   placesStore.reset()
   selectionStore.clear()
 })
@@ -970,6 +1006,14 @@ onBeforeUnmount(() => {
       <span class="flex-grow-1">{{ routeStore.error.value }}</span>
       <button type="button" class="btn-close" @click="routeStore.error.value = null" aria-label="dismiss"></button>
     </div>
+
+    <!-- Indicateur transitoire d'enregistrement réussi -->
+    <Transition name="saved-toast">
+      <div v-if="saved" class="saved-toast" role="status" aria-live="polite">
+        <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+        <span>{{ t('routes.saved') }}</span>
+      </div>
+    </Transition>
 
     <!-- Main layout -->
     <div class="route-builder-main">
@@ -1207,6 +1251,28 @@ onBeforeUnmount(() => {
 
 /* ─── Header ──────────────────────────────────────────────────────────────── */
 .route-name-input { min-width: 0; font-weight: 600; }
+
+/* ─── Saved toast ─────────────────────────────────────────────────────────── */
+.saved-toast {
+  position: fixed;
+  top: 4.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1060;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 2rem;
+  background: #198754;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.9rem;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  pointer-events: none;
+}
+.saved-toast-enter-active, .saved-toast-leave-active { transition: opacity 0.25s, transform 0.25s; }
+.saved-toast-enter-from, .saved-toast-leave-to { opacity: 0; transform: translate(-50%, -0.5rem); }
 
 /* ─── Mobile sheet ────────────────────────────────────────────────────────── */
 .mobile-sheet {

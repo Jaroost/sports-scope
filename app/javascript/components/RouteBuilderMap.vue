@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
-import { routeStore } from '../stores/routeStore'
+import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import type { Place } from '../stores/placesStore'
 import {
-  GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm,
+  GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
 } from '../routeHelpers'
 import type { Climb } from '../routeHelpers'
 
@@ -69,7 +69,11 @@ const wtSearching = ref(false)
 const wtImportingId = ref<number | null>(null)
 const wtGeomCache = new Map<number, Array<[number, number]>>()
 let wtPreviewTimeout: ReturnType<typeof setTimeout> | null = null
-const WT_BASE = 'https://cycling.waymarkedtrails.org/api/v1'
+// Waymarked Trails sépare ses bases par sport (un sous-domaine par sport, même API).
+const WT_SPORTS = ['cycling', 'mtb', 'hiking'] as const
+type WtSport = typeof WT_SPORTS[number]
+const wtSport = ref<WtSport>('cycling')
+const WT_BASE = computed(() => `https://${wtSport.value}.waymarkedtrails.org/api/v1`)
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 const EU_COUNTRY_CODES = new Set([
@@ -102,20 +106,6 @@ function saveMapView() {
 
 function csrfToken() {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
-
-function generateCircle(center: [number, number], radiusM: number, steps = 64): [number, number][] {
-  const [lng, lat] = center
-  const latR = lat * Math.PI / 180
-  const pts: [number, number][] = []
-  for (let i = 0; i <= steps; i++) {
-    const a = (i / steps) * 2 * Math.PI
-    pts.push([
-      lng + (radiusM / (111320 * Math.cos(latR))) * Math.cos(a),
-      lat + (radiusM / 110540) * Math.sin(a),
-    ])
-  }
-  return pts
 }
 
 function flagSvg(kind: 'start' | 'end') {
@@ -595,8 +585,23 @@ function recomputeWaypointGeomIndices() {
   })
 }
 
+// Bloque tout ajout de point au-delà du plafond serveur (sinon le waypoint serait
+// tronqué silencieusement à la sauvegarde). Affiche une erreur et renvoie true.
+function atWaypointLimit(): boolean {
+  if (routeStore.waypoints.value.length >= MAX_WAYPOINTS) {
+    routeStore.error.value = t('routes.error_max_waypoints', { count: MAX_WAYPOINTS })
+    return true
+  }
+  return false
+}
+
 function addWaypoint(lng: number, lat: number) {
-  routeStore.waypoints.value = [...routeStore.waypoints.value, { lng, lat }]
+  if (atWaypointLimit()) return
+  const wps = routeStore.waypoints.value
+  // Ergonomie : si le dernier point est libre, le nouveau l'est aussi par défaut,
+  // jusqu'à ce qu'on rebascule le dernier point en point accroché à la route.
+  const inheritFree = wps.length > 0 && wps[wps.length - 1].free === true
+  routeStore.waypoints.value = [...wps, inheritFree ? { lng, lat, free: true } : { lng, lat }]
   refreshWaypointMarkers()
   emit('waypoints-changed')
 }
@@ -633,6 +638,7 @@ function toggleWaypointFree(idx: number) {
 }
 
 function addReturnTo(idx: number) {
+  if (atWaypointLimit()) return
   const wps = routeStore.waypoints.value
   if (wps.length < 2 || idx >= wps.length - 1) return
   routeStore.waypoints.value = [...wps, { ...wps[idx] }]
@@ -642,6 +648,7 @@ function addReturnTo(idx: number) {
 }
 
 function insertWaypointAtGeomIdx(geomIdx: number) {
+  if (atWaypointLimit()) return
   if (!waypointGeomIndices.length) return
   const pt = routeStore.geometry.value[geomIdx]
   if (!pt) return
@@ -723,6 +730,29 @@ function deselectAll() {
   selectedWpIdx = -1
 }
 
+async function copyCoords(btn: HTMLElement, text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select()
+    try { document.execCommand('copy') } catch { /* ignore */ }
+    document.body.removeChild(ta)
+  }
+  const icon = btn.querySelector('i')
+  if (icon) {
+    icon.classList.replace('fa-regular', 'fa-solid')
+    icon.classList.replace('fa-copy', 'fa-check')
+    icon.classList.add('wp-tooltip-coords--copied')
+    setTimeout(() => {
+      icon.classList.replace('fa-check', 'fa-copy')
+      icon.classList.replace('fa-solid', 'fa-regular')
+      icon.classList.remove('wp-tooltip-coords--copied')
+    }, 1200)
+  }
+}
+
 function refreshWaypointMarkers() {
   if (!_maplibregl || !mapInstance) return
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
@@ -750,6 +780,16 @@ function refreshWaypointMarkers() {
         <div class="wp-tooltip-header">
           <span class="wp-tooltip-title">Point&nbsp;<input type="number" class="wp-tooltip-num-input" min="1" max="${routeStore.waypoints.value.length}" value="${idx + 1}" title="${t('routes.reorder_waypoint')}" /></span>
           <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
+        </div>
+        <div class="wp-tooltip-coords-row">
+          <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${w.lat.toFixed(6)}" title="${t('routes.copy_latitude')}">
+            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+            <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lat</span>${w.lat.toFixed(6)}</span>
+          </button>
+          <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${w.lng.toFixed(6)}" title="${t('routes.copy_longitude')}">
+            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+            <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lng</span>${w.lng.toFixed(6)}</span>
+          </button>
         </div>
         <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
           <i class="fa-brands fa-google" aria-hidden="true"></i>
@@ -802,8 +842,15 @@ function refreshWaypointMarkers() {
       else if (ev.key === 'Escape') { numInput.value = String(idx + 1); numInput.blur() }
     })
     numInput.addEventListener('change', commitNum)
-    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free)').forEach((a) => {
+    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--copy)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
+    })
+    el.querySelectorAll('.wp-tooltip-action--copy').forEach((btn) => {
+      btn.addEventListener('click', (ev: any) => {
+        ev.stopPropagation(); ev.preventDefault()
+        const el = ev.currentTarget as HTMLElement
+        copyCoords(el, el.dataset.coord || '')
+      })
     })
     el.querySelector('.wp-tooltip-action--free')!.addEventListener('click', (ev: any) => {
       ev.stopPropagation(); ev.preventDefault(); toggleWaypointFree(idx)
@@ -1075,7 +1122,17 @@ async function wtSearch(url: string) {
 function wtSearchByQuery() {
   const q = wtQuery.value.trim()
   if (q.length < 2) return
-  wtSearch(`${WT_BASE}/list/search?query=${encodeURIComponent(q)}&limit=15`)
+  wtSearch(`${WT_BASE.value}/list/search?query=${encodeURIComponent(q)}&limit=15`)
+}
+
+// Changer de sport relance la recherche courante sur la nouvelle base WT.
+function setWtSport(sport: WtSport) {
+  if (sport === wtSport.value) return
+  wtSport.value = sport
+  wtHidePreview()
+  wtGeomCache.clear()
+  if (wtQuery.value.trim().length >= 2) wtSearchByQuery()
+  else if (wtResults.value.length > 0) wtSearchByArea()
 }
 
 function lngLatToMercator(lng: number, lat: number): [number, number] {
@@ -1087,7 +1144,7 @@ function wtSearchByArea() {
   const b = mapInstance.getBounds()
   const [x1, y1] = lngLatToMercator(b.getWest(), b.getSouth())
   const [x2, y2] = lngLatToMercator(b.getEast(), b.getNorth())
-  wtSearch(`${WT_BASE}/list/by_area?bbox=${x1.toFixed(0)},${y1.toFixed(0)},${x2.toFixed(0)},${y2.toFixed(0)}&limit=20`)
+  wtSearch(`${WT_BASE.value}/list/by_area?bbox=${x1.toFixed(0)},${y1.toFixed(0)},${x2.toFixed(0)},${y2.toFixed(0)}&limit=20`)
 }
 
 async function wtImport(route: { id: number; type: string; name: string }) {
@@ -1095,7 +1152,7 @@ async function wtImport(route: { id: number; type: string; name: string }) {
   wtHidePreview()
   wtImportingId.value = route.id
   try {
-    const res = await fetch(`${WT_BASE}/details/${route.type}/${route.id}`)
+    const res = await fetch(`${WT_BASE.value}/details/${route.type}/${route.id}`)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
     const pts: Array<[number, number]> = []
@@ -1127,7 +1184,7 @@ async function wtShowPreview(route: { id: number; type: string; name: string }) 
     let pts = wtGeomCache.get(route.id)
     if (!pts) {
       try {
-        const res = await fetch(`${WT_BASE}/details/${route.type}/${route.id}`)
+        const res = await fetch(`${WT_BASE.value}/details/${route.type}/${route.id}`)
         if (!res.ok) return
         const data = await res.json()
         pts = []
@@ -1412,6 +1469,20 @@ defineExpose({
           <button type="button" class="btn-close btn-close-sm" @click="wtExpanded = false; wtHidePreview()" aria-label="Fermer"></button>
         </div>
         <div class="wt-drawer-body">
+          <div class="btn-group btn-group-sm w-100 mb-2" role="group" :aria-label="t('routes.wt_sport')">
+            <button
+              v-for="s in WT_SPORTS"
+              :key="s"
+              type="button"
+              class="btn"
+              :class="wtSport === s ? 'btn-primary' : 'btn-outline-secondary'"
+              :disabled="wtSearching"
+              @click="setWtSport(s)"
+            >
+              <i :class="`fa-solid ${s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'}`" aria-hidden="true"></i>
+              <span class="ms-1 d-none d-sm-inline">{{ t(`routes.wt_sport_${s}`) }}</span>
+            </button>
+          </div>
           <div class="input-group input-group-sm mb-1">
             <input v-model="wtQuery" type="text" class="form-control" :placeholder="t('routes.wt_search_placeholder')" @keydown.enter="wtSearchByQuery" />
             <button class="btn btn-outline-secondary" type="button" @click="wtSearchByQuery" :disabled="wtSearching">
@@ -1772,6 +1843,11 @@ defineExpose({
 .wp-tooltip-action--delete { color: #dc2626; }
 .wp-tooltip-action--delete:hover { background: rgba(220,38,38,0.08); color: #dc2626; }
 .wp-tooltip-action--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
+.wp-tooltip-coords-row { display: flex; gap: 0.25rem; }
+.wp-tooltip-coords-row .wp-tooltip-action { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; padding-right: 0.45rem; }
+.wp-tooltip-coords { display: flex; align-items: baseline; gap: 0.3rem; min-width: 0; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
+.wp-tooltip-coord-label { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; color: #6c757d; flex-shrink: 0; }
+.wp-tooltip-coords--copied { color: #16a34a; }
 .divergent-warning-marker {
   width: 26px;
   height: 26px;

@@ -3,6 +3,7 @@ import HelloStrava from './components/HelloStrava.vue'
 import ActivityDetail from './components/ActivityDetail.vue'
 import RoutesList from './components/RoutesList.vue'
 import RouteBuilder from './components/RouteBuilder.vue'
+import RouteNavigation from './components/RouteNavigation.vue'
 import ImportFitActivity from './components/ImportFitActivity.vue'
 
 const registry: Record<string, Component> = {
@@ -10,6 +11,7 @@ const registry: Record<string, Component> = {
   ActivityDetail,
   RoutesList,
   RouteBuilder,
+  RouteNavigation,
   ImportFitActivity,
 }
 

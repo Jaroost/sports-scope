@@ -14,4 +14,10 @@ class PagesController < ApplicationController
     require_login!
     @route_id = params[:id]
   end
+
+  def route_navigation
+    # No login required: navigation links are addressed by share_token and can
+    # be shared with anyone.
+    @share_token = params[:token]
+  end
 end

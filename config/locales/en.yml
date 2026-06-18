@@ -33,6 +33,7 @@ en:
     map_style_cycle: "OpenCycle"
     map_style_topo: "Topo"
     map_style_swisstopo: "SwissTopo"
+    map_style_swissimage: "Satellite"
     map_style_liberty: "Standard"
     climbs_label: "Climbs"
     show_climbs: "Show climbs"
@@ -314,6 +315,7 @@ en:
       style_cyclosm: "Cycle"
       style_topo: "Topo"
       style_swisstopo: "SwissTopo"
+      style_swissimage: "Satellite"
       style_liberty: "Standard"
     display:
       title: "Display preferences"

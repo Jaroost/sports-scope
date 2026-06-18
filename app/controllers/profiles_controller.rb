@@ -8,7 +8,7 @@ class ProfilesController < ApplicationController
   MIN_LENGTH_RANGE = (50..5000)
   SPEED_RANGE = (3.0..80.0)
 
-  ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo liberty].freeze
+  ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissimage liberty].freeze
   ALLOWED_SPORTS = %w[cycling mtb hiking].freeze
 
   # Vitesses moyennes par défaut (km/h), miroir de User::DEFAULT_PREFERENCES.

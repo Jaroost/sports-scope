@@ -4,10 +4,11 @@ export interface MapStyle {
 }
 
 export const MAP_STYLES: MapStyle[] = [
-  { id: 'cyclosm',   icon: 'fa-bicycle' },
-  { id: 'topo',      icon: 'fa-mountain-sun' },
-  { id: 'swisstopo', icon: 'fa-flag-checkered' },
-  { id: 'liberty',   icon: 'fa-map' },
+  { id: 'cyclosm',    icon: 'fa-bicycle' },
+  { id: 'topo',       icon: 'fa-mountain-sun' },
+  { id: 'swisstopo',  icon: 'fa-flag-checkered' },
+  { id: 'swissimage', icon: 'fa-satellite' },
+  { id: 'liberty',    icon: 'fa-map' },
 ]
 
 // Tile metadata used by the image export to render at the finest available detail.
@@ -15,10 +16,11 @@ export const MAP_STYLES: MapStyle[] = [
 // native d'une tuile (256 pour les sources raster, 512 pour le vectoriel OpenFreeMap).
 export interface ExportTileInfo { maxzoom: number; tileSize: number }
 export const EXPORT_TILE_INFO: Record<string, ExportTileInfo> = {
-  cyclosm:   { maxzoom: 18, tileSize: 256 },
-  topo:      { maxzoom: 17, tileSize: 256 },
-  swisstopo: { maxzoom: 18, tileSize: 256 },
-  liberty:   { maxzoom: 16, tileSize: 512 },
+  cyclosm:    { maxzoom: 18, tileSize: 256 },
+  topo:       { maxzoom: 17, tileSize: 256 },
+  swisstopo:  { maxzoom: 18, tileSize: 256 },
+  swissimage: { maxzoom: 18, tileSize: 256 },
+  liberty:    { maxzoom: 16, tileSize: 512 },
 }
 export function exportTileInfoFor(id: string): ExportTileInfo {
   return EXPORT_TILE_INFO[id] ?? { maxzoom: 17, tileSize: 256 }
@@ -28,9 +30,10 @@ export const ROUTE_LINE_LAYOUT = { 'line-join': 'round', 'line-cap': 'round' } a
 export const ROUTE_BORDER_PAINT = { 'line-color': 'rgba(0,0,0,0.28)', 'line-width': 8 } as const
 
 export function mapStyleFor(id: string): string | object {
-  if (id === 'liberty')   return 'https://tiles.openfreemap.org/styles/liberty'
-  if (id === 'topo')      return openTopoMapStyle()
-  if (id === 'swisstopo') return swissTopoStyle()
+  if (id === 'liberty')    return 'https://tiles.openfreemap.org/styles/liberty'
+  if (id === 'topo')       return openTopoMapStyle()
+  if (id === 'swisstopo')  return swissTopoStyle()
+  if (id === 'swissimage') return swissImageStyle()
   return cyclOsmStyle()
 }
 
@@ -81,6 +84,31 @@ export function openTopoMapStyle(): object {
       },
     },
     layers: [{ id: 'topo-base', type: 'raster', source: 'topo-raster' }],
+  }
+}
+
+export function swissImageStyle(): object {
+  return {
+    version: 8,
+    sources: {
+      'swissimage-raster': {
+        type: 'raster',
+        tiles: [
+          'https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.swissimage/default/current/3857/{z}/{x}/{y}.jpeg',
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution:
+          '© <a href="https://www.swisstopo.admin.ch" target="_blank" rel="noopener">swisstopo</a>',
+      },
+    },
+    layers: [
+      {
+        id: 'swissimage-base',
+        type: 'raster',
+        source: 'swissimage-raster',
+      },
+    ],
   }
 }
 

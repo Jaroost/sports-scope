@@ -259,6 +259,8 @@ function installRouteLayer() {
     mapInstance.addSource('builder-route-selected', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
     mapInstance.addLayer({ id: 'builder-route-selected-line', type: 'line', source: 'builder-route-selected', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#00b4d8', 'line-width': 7 } })
   }
+  // Applique l'échelle d'affichage (élargissement mobile) aux largeurs natives ci-dessus.
+  setRouteLineScale(1)
 }
 
 // Épaisseurs natives (px écran) des couches de tracé. Utilisé par l'export image pour
@@ -270,10 +272,17 @@ const ROUTE_LINE_BASE_WIDTH: Record<string, number> = {
   'builder-route-selected-line': 7,
   'builder-divergent-line': 4,
 }
+// Sur petit écran tactile, on élargit légèrement le tracé pour offrir une cible de clic
+// plus généreuse (insertion de point sur la ligne) et éviter les clics au mauvais endroit.
+const ROUTE_LINE_DISPLAY_SCALE = window.matchMedia('(max-width: 767px)').matches ? 1.3 : 1
 function setRouteLineScale(factor: number) {
   if (!mapInstance) return
+  // factor === 1 = état d'affichage par défaut (à l'init et après un export) : on applique
+  // l'élargissement mobile. Tout autre facteur vient de l'export (mise à l'échelle selon la
+  // résolution de sortie) et doit rester identique sur mobile et PC — pas de boost mobile.
+  const eff = factor === 1 ? ROUTE_LINE_DISPLAY_SCALE : factor
   for (const [id, base] of Object.entries(ROUTE_LINE_BASE_WIDTH)) {
-    if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-width', base * factor)
+    if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-width', base * eff)
   }
 }
 
@@ -1830,7 +1839,7 @@ defineExpose({
    la sidebar Stats (masquée sur mobile) gérant déjà le cas sur desktop. */
 .map-overlay-places-error {
   position: absolute;
-  bottom: 34px;
+  bottom: 15px;
   right: 8px;
   display: none;
   align-items: center;
@@ -1841,7 +1850,7 @@ defineExpose({
   padding: 0.45rem 0.9rem;
   border-radius: 999px;
   font-size: 0.8rem;
-  z-index: 6;
+  z-index: 10;
   box-shadow: 0 4px 12px rgba(0,0,0,0.25);
 }
 .map-overlay-places-retry { color: #6ea8fe; font-weight: 600; white-space: nowrap; }
@@ -2114,6 +2123,14 @@ defineExpose({
 .place-marker--active i { color: #fff; }
 .place-marker--cemetery { color: #6b7280; }
 .place-marker--bakery   { color: #b45309; }
+/* Sur petit écran tactile, on agrandit légèrement les marqueurs (points POI et points du
+   tracé) pour offrir une cible de clic plus généreuse et éviter les clics au mauvais endroit. */
+@media (max-width: 767px) {
+  .wp-marker { width: 36px; height: 36px; }
+  .wp-marker-num { top: 3px; left: 3px; width: 30px; height: 30px; font-size: 0.82rem; }
+  .place-marker { width: 32px; height: 32px; }
+  .place-marker i { font-size: 0.92rem; }
+}
 .place-popup-container .maplibregl-popup-content {
   padding: 4px;
   border-radius: 10px;

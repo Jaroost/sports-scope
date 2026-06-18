@@ -1822,13 +1822,13 @@ defineExpose({
   .map-overlay-loading {
     top: auto;
     right: 8px;
-    bottom: 15px;
+    bottom: 5px;
   }
 }
 .mobile-sheet-toggle {
   position: absolute;
-  bottom: 14px;
-  left: 14px;
+  bottom: 5px;
+  left: 5px;
   z-index: 6;
   white-space: nowrap;
   display: none;
@@ -1839,7 +1839,7 @@ defineExpose({
    la sidebar Stats (masquée sur mobile) gérant déjà le cas sur desktop. */
 .map-overlay-places-error {
   position: absolute;
-  bottom: 15px;
+  bottom: 5px;
   right: 8px;
   display: none;
   align-items: center;

@@ -21,6 +21,10 @@ class RouteStore {
   readonly name = ref('')
   readonly error = ref<string | null>(null)
   readonly currentId = ref<number | null>(null)
+  // Mode lecture seule : itinéraire ouvert via un lien de partage. Désactive
+  // toute édition (ajout/déplacement de points, sauvegarde, renommage) et
+  // fonctionne pour les visiteurs non connectés.
+  readonly readOnly = ref(false)
   // Catégorie d'activité de l'itinéraire — pilote la vitesse moyenne (via le
   // profil) et le fond de cartes de sentiers. Initialisée sur le sport par défaut
   // du profil.

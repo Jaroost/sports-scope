@@ -35,6 +35,8 @@ function sportIcon(s: Sport) {
 // Share feedback: holds the id of the route whose link was just copied, so the
 // button can flash a checkmark for a couple of seconds.
 const sharedId = ref(null)
+// Même mécanique pour le partage du lien « vue en lecture seule » (créateur).
+const sharedViewId = ref(null)
 
 // Inline rename state
 const editingId = ref(null)
@@ -165,6 +167,27 @@ async function shareRoute(route) {
     setTimeout(() => { if (sharedId.value === route.id) sharedId.value = null }, 2000)
   } catch {
     window.prompt(t('routes.share'), url)
+  }
+}
+
+// Partage le lien « vue en lecture seule » : ouvre l'itinéraire dans le créateur,
+// non modifiable, accessible sans compte (page + API publiques par jeton).
+async function shareViewRoute(route) {
+  const url = `${window.location.origin}${localePrefix}/routes/${route.share_token}/view`
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: route.name, url })
+      return
+    }
+  } catch (e) {
+    if (e?.name === 'AbortError') return // user dismissed the share sheet
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    sharedViewId.value = route.id
+    setTimeout(() => { if (sharedViewId.value === route.id) sharedViewId.value = null }, 2000)
+  } catch {
+    window.prompt(t('routes.share_view'), url)
   }
 }
 
@@ -477,6 +500,18 @@ onMounted(() => fetchRoutes())
                 >
                   <i
                     :class="sharedId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-share-nodes'"
+                    aria-hidden="true"
+                  ></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :title="sharedViewId === r.id ? t('routes.share_copied') : t('routes.share_view')"
+                  :aria-label="t('routes.share_view')"
+                  @click="shareViewRoute(r)"
+                >
+                  <i
+                    :class="sharedViewId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-eye'"
                     aria-hidden="true"
                   ></i>
                 </button>

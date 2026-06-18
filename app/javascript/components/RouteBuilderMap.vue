@@ -180,6 +180,9 @@ async function initMap() {
       installOverlays()
       mapInstance.on('click', (e: any) => {
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
+        // Lecture seule : le clic ne sert qu'à refermer une éventuelle tooltip de
+        // POI, jamais à modifier le tracé.
+        if (routeStore.readOnly.value) { if (placePopup) closePlacePopup(); return }
         // Tooltip de POI (cimetière/boulangerie) ouverte : le clic ne fait que la
         // refermer, sans ajouter de point au trajet.
         if (placePopup) { closePlacePopup(); return }
@@ -194,6 +197,7 @@ async function initMap() {
         }
       })
       mapInstance.on('mousemove', (e: any) => {
+        if (routeStore.readOnly.value) { hideHoverMarker(); return }
         if (overClimbMarker) { hideHoverMarker(); return }
         if (routeStore.waypoints.value.length < 2) { hideHoverMarker(); return }
         const idx = nearestGeomIndexAt(e.point)
@@ -211,7 +215,8 @@ async function initMap() {
       }
       mapInstance.on('zoom', applyMarkerScale)
       applyMarkerScale()
-      mapInstance.getCanvas().style.cursor = 'crosshair'
+      // En lecture seule, pas de curseur « crosshair » qui suggérerait l'ajout de points.
+      mapInstance.getCanvas().style.cursor = routeStore.readOnly.value ? '' : 'crosshair'
       resolve()
     })
   })
@@ -853,6 +858,9 @@ function refreshWaypointMarkers() {
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
   selectedWpIdx = -1
   if (!props.state.showWaypoints) return
+  // Lecture seule : on n'affiche pas les marqueurs de points d'étape (déplaçables
+  // et porteurs des actions d'édition) — seul le tracé reste visible.
+  if (routeStore.readOnly.value) return
   routeStore.waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
     el.className = w.free ? 'wp-marker wp-marker--free' : 'wp-marker'
@@ -1443,7 +1451,7 @@ defineExpose({
       <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
       <MapOverlayDropdown :model-value="state.overlays" @update:model-value="setOverlays" />
       <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
-        <button type="button" class="btn map-ctrl-btn"
+        <button v-if="!routeStore.readOnly.value" type="button" class="btn map-ctrl-btn"
           :class="state.showWaypoints ? 'btn-warning text-dark active' : 'btn-light'"
           @click="toggleWaypoints"
           :title="state.showWaypoints ? t('routes.hide_waypoints') : t('routes.show_waypoints')"

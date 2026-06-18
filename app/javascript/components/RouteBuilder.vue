@@ -16,7 +16,14 @@ import MapStyleDropdown from './MapStyleDropdown.vue'
 
 const props = defineProps({
   routeId: { type: [String, Number], default: null },
+  // Jeton de partage : présent => itinéraire ouvert en lecture seule via un lien
+  // public (fonctionne sans être connecté).
+  shareToken: { type: String, default: null },
 })
+
+// Lecture seule dès qu'on est arrivé par un lien de partage : aucune édition,
+// aucune sauvegarde.
+const readOnly = computed(() => !!props.shareToken)
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
@@ -211,6 +218,7 @@ async function fetchImportantPlaces() {
 // (voir BROUTER_PROFILES), donc on relance le routage pour redessiner un tracé
 // adapté au nouveau mode (la rando emprunte des sentiers refusés au vélo, etc.).
 function onChangeSport(sport: Sport) {
+  if (routeStore.readOnly.value) return
   if (sport === routeStore.sport.value) return
   routeStore.setSport(sport)
   if (routeStore.waypoints.value.length >= 2) recomputeRoute({ autoSave: true })
@@ -369,7 +377,44 @@ async function fetchRoute(id: number) {
   }
 }
 
+// Chargement public en lecture seule via le jeton de partage. Contrairement à
+// fetchRoute, on ne relance pas BRouter (recomputeRoute) : on affiche la
+// géométrie enregistrée telle quelle, et on ne pose pas de marqueurs de points
+// d'étape (édition désactivée).
+async function fetchSharedRoute(token: string) {
+  try {
+    const res = await fetch(`/api/routes/shared/${encodeURIComponent(token)}`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new Error(res.status === 404 ? t('routes.error_shared_not_found') : `HTTP ${res.status}`)
+    const payload = await res.json()
+    const r = payload.route
+    routeStore.name.value = r.name || ''
+    if (r.activity) routeStore.setSport(r.activity)
+    routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
+    routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
+    routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
+    routeStore.distanceM.value = r.distance_m || 0
+    routeStore.elevGainM.value = r.elevation_gain_m || 0
+    routeStore.elevLossM.value = r.elevation_loss_m || 0
+    if (routeStore.geometry.value.length >= 2) {
+      const lngs = routeStore.geometry.value.map((c) => c[0])
+      const lats = routeStore.geometry.value.map((c) => c[1])
+      mapRef.value?.fitBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)], { padding: 40, duration: 0 })
+    }
+    mapRef.value?.applyColorMode()
+    mapRef.value?.installClimbMarkers()
+    mapRef.value?.updateRouteLayer()
+    await nextTick()
+    chartRef.value?.render()
+  } catch (e: any) {
+    routeStore.error.value = e.message
+  }
+}
+
 async function save() {
+  if (routeStore.readOnly.value) return
   // Sur mobile le champ nom du header n'est pas affiché : on le demande au moment de
   // l'enregistrement plutôt que de bloquer sur une erreur impossible à corriger.
   if (!routeStore.name.value.trim()) {
@@ -401,6 +446,7 @@ function runAutoSave() {
 }
 
 async function persist() {
+  if (routeStore.readOnly.value) return
   saving.value = true
   routeStore.error.value = null
   try {
@@ -992,8 +1038,18 @@ function onWindowResize() {
 onMounted(async () => {
   state.load()
   routeStore.reset()
+  routeStore.readOnly.value = readOnly.value
   routeStore.currentId.value = props.routeId ? Number(props.routeId) : null
   window.addEventListener('resize', onWindowResize)
+
+  // Mode lecture seule (lien de partage) : on charge l'itinéraire via le jeton
+  // public, sans brancher la sauvegarde ni lire les paramètres de pré-remplissage.
+  if (readOnly.value) {
+    await mapRef.value?.initMap()
+    await fetchSharedRoute(props.shareToken as string)
+    return
+  }
+
   document.getElementById('navbar-route-save-btn')?.addEventListener('click', save)
   if (!routeStore.currentId.value) {
     try {
@@ -1059,7 +1115,7 @@ onBeforeUnmount(() => {
     <!-- Desktop header -->
     <div class="card shadow-sm border-0 d-none d-md-block route-builder-header-card">
       <div class="card-body d-flex align-items-center gap-2 py-1 px-3">
-        <a :href="`${localePrefix}/routes`" class="btn btn-sm btn-link p-0 me-1 d-inline-flex align-items-center gap-1 flex-shrink-0">
+        <a v-if="!readOnly" :href="`${localePrefix}/routes`" class="btn btn-sm btn-link p-0 me-1 d-inline-flex align-items-center gap-1 flex-shrink-0">
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
           <span>{{ t('routes.back') }}</span>
         </a>
@@ -1069,13 +1125,17 @@ onBeforeUnmount(() => {
           class="form-control route-name-input flex-grow-1"
           :placeholder="t('routes.name_placeholder')"
           :maxlength="80"
+          :readonly="readOnly"
         />
+        <span v-if="readOnly" class="badge bg-secondary d-inline-flex align-items-center gap-1 flex-shrink-0">
+          <i class="fa-solid fa-eye" aria-hidden="true"></i>{{ t('routes.readonly_badge') }}
+        </span>
         <div class="d-flex gap-2 flex-shrink-0">
-          <button type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
             :disabled="!routeStore.hasGeometry.value" @click="undoLast" :title="t('routes.undo')">
             <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
           </button>
-          <button type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
             :disabled="!routeStore.hasGeometry.value" @click="clearAll" :title="t('routes.clear')">
             <i class="fa-solid fa-trash" aria-hidden="true"></i>
           </button>
@@ -1095,7 +1155,7 @@ onBeforeUnmount(() => {
             <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">Komoot</span>
           </button>
-          <button type="button" class="btn btn-sm btn-warning d-flex align-items-center gap-1"
+          <button v-if="!readOnly" type="button" class="btn btn-sm btn-warning d-flex align-items-center gap-1"
             @click="save" :disabled="saving || routeStore.waypoints.value.length < 2 || !routeStore.name.value.trim()">
             <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
             <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>

@@ -93,6 +93,7 @@ const climbsExpanded = ref(true)
           :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
           :title="t(`routes.wt_sport_${s}`)"
           :aria-label="t(`routes.wt_sport_${s}`)"
+          :disabled="routeStore.readOnly.value"
           @click="emit('change-sport', s)"
         >
           <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>

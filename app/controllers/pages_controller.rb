@@ -20,4 +20,10 @@ class PagesController < ApplicationController
     # be shared with anyone.
     @share_token = params[:token]
   end
+
+  def route_view
+    # No login required: read-only builder view addressed by share_token, meant
+    # to be shared with anyone (signed-out recipients included).
+    @share_token = params[:token]
+  end
 end

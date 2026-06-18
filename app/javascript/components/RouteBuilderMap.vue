@@ -2218,4 +2218,6 @@ defineExpose({
 }
 .sel-flag-marker { cursor: grab; }
 .sel-flag-marker:active { cursor: grabbing; }
+/* Icône d'attribution (compacte) en bas à droite de la carte : marge resserrée à 5px. */
+.maplibregl-ctrl-bottom-right .maplibregl-ctrl { margin: 0 5px 5px 0; }
 </style>

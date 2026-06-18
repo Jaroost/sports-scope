@@ -274,7 +274,7 @@ const ROUTE_LINE_BASE_WIDTH: Record<string, number> = {
 }
 // Sur petit écran tactile, on élargit légèrement le tracé pour offrir une cible de clic
 // plus généreuse (insertion de point sur la ligne) et éviter les clics au mauvais endroit.
-const ROUTE_LINE_DISPLAY_SCALE = window.matchMedia('(max-width: 767px)').matches ? 1.3 : 1
+const ROUTE_LINE_DISPLAY_SCALE = window.matchMedia('(max-width: 767px), (max-height: 500px)').matches ? 1.3 : 1
 function setRouteLineScale(factor: number) {
   if (!mapInstance) return
   // factor === 1 = état d'affichage par défaut (à l'init et après un export) : on applique

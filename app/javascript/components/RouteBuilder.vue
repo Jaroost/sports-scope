@@ -91,7 +91,13 @@ let resizeStartWidth = 0
 let navbarResizeObserver: ResizeObserver | null = null
 
 const mobileSheetOpen = ref(false)
-const isMobile = ref(typeof window !== 'undefined' && window.innerWidth < 768)
+// Le mode mobile doit suivre le même critère que le CSS : largeur étroite OU
+// écran court (téléphone en paysage). Sinon le JS reste en "desktop" alors que
+// le CSS est déjà passé en mobile.
+function computeIsMobile() {
+  return typeof window !== 'undefined' && (window.innerWidth < 768 || window.innerHeight <= 500)
+}
+const isMobile = ref(computeIsMobile())
 const SHEET_HEIGHT_DEFAULT = Math.round(window.innerHeight * 0.45)
 const SHEET_HEIGHT_MIN = 140
 const SHEET_HEIGHT_MAX = Math.round(window.innerHeight * 0.85)
@@ -1037,7 +1043,7 @@ watch(routeStore.geometry, (newGeom) => {
 }, { deep: false })
 
 function onWindowResize() {
-  const mobile = window.innerWidth < 768
+  const mobile = computeIsMobile()
   if (mobile !== isMobile.value) isMobile.value = mobile
   updateNavbarHeight()
   setTimeout(() => mapRef.value?.resize(), 100)

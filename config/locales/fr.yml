@@ -177,7 +177,6 @@ fr:
     places_title: "Lieux"
     places_count: "lieu"
     places_loading: "Recherche des lieux…"
-    places_radius: "Rayon de détection autour du tracé"
     estimated_time_hint: "Temps estimé (distance ÷ vitesse moyenne)"
     avg_speed_hint: "Vitesse moyenne (km/h)"
     save_name: "Enregistrer le nom"
@@ -311,9 +310,6 @@ fr:
       sport_cycling: "Vélo"
       sport_mtb: "VTT"
       sport_hiking: "Rando"
-      units: "Unités"
-      units_metric: "Métriques (km, m)"
-      units_imperial: "Impériales (mi, ft)"
       show_grade_colors: "Afficher les couleurs de pente par défaut"
       show_elevation_chart: "Afficher le profil d'altitude par défaut"
     climb:

@@ -875,15 +875,6 @@ watch(routeStore.geometry, (newGeom) => {
   fetchImportantPlaces()
 }, { deep: false })
 
-// Changer le rayon de détection relance la recherche (bbox + seuil dépendent du rayon).
-let radiusTimer: ReturnType<typeof setTimeout> | null = null
-watch(placesStore.placeRadiusM, () => {
-  if (radiusTimer) clearTimeout(radiusTimer)
-  radiusTimer = setTimeout(() => {
-    if (routeStore.geometry.value.length >= 2) fetchImportantPlaces()
-  }, 400)
-})
-
 function onWindowResize() {
   const mobile = window.innerWidth < 768
   if (mobile !== isMobile.value) isMobile.value = mobile

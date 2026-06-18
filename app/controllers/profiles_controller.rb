@@ -8,7 +8,6 @@ class ProfilesController < ApplicationController
   MIN_LENGTH_RANGE = (50..5000)
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo liberty].freeze
-  ALLOWED_UNITS = %w[metric imperial].freeze
   ALLOWED_SPORTS = %w[cycling mtb hiking].freeze
 
   # GET /profile — page HTML qui monte l'îlot Vue UserProfile.
@@ -43,7 +42,6 @@ class ProfilesController < ApplicationController
         "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, "cyclosm"),
       },
       "display" => {
-        "units" => allowed(display[:units], ALLOWED_UNITS, "metric"),
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),
         "show_grade_colors" => to_bool(display[:show_grade_colors], true),
         "show_elevation_chart" => to_bool(display[:show_elevation_chart], true),

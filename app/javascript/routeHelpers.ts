@@ -1,6 +1,8 @@
 // Utility functions shared between RouteBuilder sub-components.
 // No Vue imports — pure TypeScript.
 
+import { userPreferences } from './userPreferences'
+
 export type Coord = [number, number, number | null]
 export type LngLat = [number, number]
 
@@ -124,11 +126,29 @@ function climbCategory(lengthKm: number, avgGrade: number): string | null {
   return null
 }
 
-export function detectClimbs(altitudes: (number | null)[], distances: number[]): Climb[] {
+export interface ClimbDetectionOptions {
+  minGrade: number
+  minGainM: number
+  minLengthM: number
+}
+
+// Seuils par défaut issus des préférences du profil (cf. userPreferences). Tombe
+// sur les valeurs par défaut sûres hors page connectée (navigation partagée…).
+function defaultClimbOptions(): ClimbDetectionOptions {
+  const c = userPreferences().climb_detection
+  return { minGrade: c.min_grade, minGainM: c.min_gain_m, minLengthM: c.min_length_m }
+}
+
+export function detectClimbs(
+  altitudes: (number | null)[],
+  distances: number[],
+  options?: Partial<ClimbDetectionOptions>,
+): Climb[] {
   if (!altitudes?.length || !distances?.length) return []
-  const MIN_GRADE = 2
-  const MIN_GAIN_M = 60
-  const MIN_LENGTH_M = 500
+  const { minGrade: MIN_GRADE, minGainM: MIN_GAIN_M, minLengthM: MIN_LENGTH_M } = {
+    ...defaultClimbOptions(),
+    ...options,
+  }
   const MERGE_GAP_M = 250
   const len = Math.min(altitudes.length, distances.length)
   const raw: { startIdx: number; endIdx: number }[] = []

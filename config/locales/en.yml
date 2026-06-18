@@ -177,7 +177,6 @@ en:
     places_title: "Places"
     places_count: "place"
     places_loading: "Looking up places…"
-    places_radius: "Detection radius around the route"
     estimated_time_hint: "Estimated time (distance ÷ average speed)"
     avg_speed_hint: "Average speed (km/h)"
     save_name: "Save name"
@@ -273,7 +272,7 @@ en:
     cyclosm_ncn: "National"
     cyclosm_icn: "International (EuroVelo)"
   pages:
-    home_lead: "Plan your cycling routes, follow them with turn-by-turn navigation, and analyze your Strava rides on interactive maps — all in one place."
+    home_lead: "Plan your cycling, treaking routes, follow them with turn-by-turn navigation, and analyze your Strava rides on interactive maps — all in one place."
     home_nav_routes: "My routes"
     feature_builder_title: "Route builder"
     feature_builder_body: "Plan your rides: snap-to-roads, elevation profile, climb detection, grade/surface colouring, GPX export."
@@ -311,9 +310,6 @@ en:
       sport_cycling: "Bike"
       sport_mtb: "MTB"
       sport_hiking: "Hike"
-      units: "Units"
-      units_metric: "Metric (km, m)"
-      units_imperial: "Imperial (mi, ft)"
       show_grade_colors: "Show grade colours by default"
       show_elevation_chart: "Show elevation profile by default"
     climb:

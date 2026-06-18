@@ -9,6 +9,8 @@
 // inside the getter refers to the reactive proxy, so Vue tracks the
 // dependency on any reactive property the getter reads.
 
+import { userPreferences } from './userPreferences'
+
 export type ColorMode = 'grade' | 'none'
 
 // ─── Base ─────────────────────────────────────────────────────────────────
@@ -85,7 +87,10 @@ export class RouteBuilderState extends MapPageState {
   showElevationChart = true
 
   constructor() {
-    super('cyclosm')
+    super(userPreferences().map.default_style)
+    const prefs = userPreferences()
+    this.colorMode = prefs.display.show_grade_colors ? 'grade' : 'none'
+    this.showElevationChart = prefs.display.show_elevation_chart
   }
 
   // Derived from colorMode — reactive because `this` is the reactive proxy
@@ -98,7 +103,11 @@ export class RouteBuilderState extends MapPageState {
     return 'sportsScope.routeBuilderState'
   }
 
+  // mapStyleId, colorMode et showElevationChart sont gouvernés par les préférences
+  // du profil (cf. constructeur) : on ne les persiste pas en localStorage, sinon
+  // une ancienne valeur de session écraserait silencieusement le profil. Les autres
+  // réglages de vue (épingles, panneau, cols) restent locaux à la session.
   protected override persistedFields(): string[] {
-    return [...super.persistedFields(), 'colorMode', 'showWaypoints', 'showStatsSidebar', 'showElevationChart']
+    return ['showClimbs', 'showWaypoints', 'showStatsSidebar']
   }
 }

@@ -13,7 +13,6 @@ class User < ApplicationRecord
       "default_style" => "cyclosm",
     },
     "display" => {
-      "units" => "metric",            # metric | imperial
       "default_sport" => "cycling",   # cycling | mtb | hiking
       "show_grade_colors" => true,
       "show_elevation_chart" => true,

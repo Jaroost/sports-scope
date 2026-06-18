@@ -8,6 +8,7 @@ import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import type { Place } from '../stores/placesStore'
+import { userPreferences } from '../userPreferences'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
 } from '../routeHelpers'
@@ -72,7 +73,7 @@ let wtPreviewTimeout: ReturnType<typeof setTimeout> | null = null
 // Waymarked Trails sépare ses bases par sport (un sous-domaine par sport, même API).
 const WT_SPORTS = ['cycling', 'mtb', 'hiking'] as const
 type WtSport = typeof WT_SPORTS[number]
-const wtSport = ref<WtSport>('cycling')
+const wtSport = ref<WtSport>(userPreferences().display.default_sport)
 const WT_BASE = computed(() => `https://${wtSport.value}.waymarkedtrails.org/api/v1`)
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'

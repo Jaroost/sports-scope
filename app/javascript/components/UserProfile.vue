@@ -14,7 +14,6 @@ interface Preferences {
     default_style: string
   }
   display: {
-    units: string
     default_sport: string
     show_grade_colors: boolean
     show_elevation_chart: boolean
@@ -37,7 +36,6 @@ const error = ref<string | null>(null)
 let savedTimer: ReturnType<typeof setTimeout> | undefined
 
 const SPORTS = ['cycling', 'mtb', 'hiking'] as const
-const UNITS = ['metric', 'imperial'] as const
 
 function csrfToken(): string {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
@@ -142,12 +140,6 @@ async function save() {
             <label for="disp-sport" class="form-label">{{ t('profile.display.default_sport') }}</label>
             <select id="disp-sport" v-model="prefs.display.default_sport" class="form-select">
               <option v-for="s in SPORTS" :key="s" :value="s">{{ t(`profile.display.sport_${s}`) }}</option>
-            </select>
-          </div>
-          <div class="col-sm-6">
-            <label for="disp-units" class="form-label">{{ t('profile.display.units') }}</label>
-            <select id="disp-units" v-model="prefs.display.units" class="form-select">
-              <option v-for="u in UNITS" :key="u" :value="u">{{ t(`profile.display.units_${u}`) }}</option>
             </select>
           </div>
         </div>

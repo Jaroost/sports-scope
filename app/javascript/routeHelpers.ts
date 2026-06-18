@@ -288,11 +288,12 @@ export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
   return (Math.atan2(y, x) * 180) / Math.PI
 }
 
-// Perpendicular distance in metres from point `p` to the segment [a, b], using
-// an equirectangular projection centred on `p` (accurate over the short spans
-// between adjacent route vertices). `p` is the origin (0,0) in that projection,
-// so we just clamp its projection onto the segment to [0,1] and measure back.
-export function pointToSegmentM(p: LngLat, a: Coord | LngLat, b: Coord | LngLat): number {
+// Closest point on the segment [a, b] to `p`, using an equirectangular
+// projection centred on `p` (accurate over the short spans between adjacent
+// route vertices). `p` is the origin (0,0) in that projection, so we clamp its
+// projection parameter `s` onto the segment to [0,1]; because the projection is
+// affine, that same `s` lerps back to lng/lat for the snapped point.
+function closestOnSegment(p: LngLat, a: Coord | LngLat, b: Coord | LngLat): { point: LngLat; distM: number } {
   const R = 6371000
   const cosLat = Math.cos((p[1] * Math.PI) / 180)
   const toXY = (c: Coord | LngLat): [number, number] => [
@@ -304,10 +305,41 @@ export function pointToSegmentM(p: LngLat, a: Coord | LngLat, b: Coord | LngLat)
   const dx = bx - ax
   const dy = by - ay
   const len2 = dx * dx + dy * dy
-  if (len2 === 0) return Math.hypot(ax, ay)
-  let s = -(ax * dx + ay * dy) / len2
-  s = Math.max(0, Math.min(1, s))
-  return Math.hypot(ax + s * dx, ay + s * dy)
+  const s = len2 === 0 ? 0 : Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2))
+  const point: LngLat = [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])]
+  return { point, distM: Math.hypot(ax + s * dx, ay + s * dy) }
+}
+
+// Perpendicular distance in metres from point `p` to the segment [a, b].
+export function pointToSegmentM(p: LngLat, a: Coord | LngLat, b: Coord | LngLat): number {
+  return closestOnSegment(p, a, b).distM
+}
+
+// Snap `pos` onto the polyline, given the already-known nearest vertex `idx`.
+// Returns the snapped lng/lat plus `nextIdx` — the index of the first original
+// vertex that lies ahead of the snap point — so callers can build the geometry
+// from the rider forward as [point, ...geometry.slice(nextIdx)].
+export function projectOnRoute(
+  pos: LngLat,
+  geometry: Coord[],
+  idx: number,
+): { point: LngLat; nextIdx: number } {
+  let best: { point: LngLat; nextIdx: number; distM: number } = {
+    point: [geometry[idx][0], geometry[idx][1]],
+    nextIdx: idx,
+    distM: Infinity,
+  }
+  // Segment ending at the vertex → keep the vertex (and everything after) ahead.
+  if (idx > 0) {
+    const { point, distM } = closestOnSegment(pos, geometry[idx - 1], geometry[idx])
+    if (distM < best.distM) best = { point, nextIdx: idx, distM }
+  }
+  // Segment leaving the vertex → the vertex is behind us, keep from idx+1 on.
+  if (idx < geometry.length - 1) {
+    const { point, distM } = closestOnSegment(pos, geometry[idx], geometry[idx + 1])
+    if (distM < best.distM) best = { point, nextIdx: idx + 1, distM }
+  }
+  return { point: best.point, nextIdx: best.nextIdx }
 }
 
 // Index of the geometry vertex closest to `pos`, plus the lateral distance (m).

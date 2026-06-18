@@ -5,7 +5,7 @@ import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
-  formatDistanceShort, haversine, bearingBetween, nearestGeomIndex,
+  formatDistanceShort, haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
   progressFor, activeClimb,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
@@ -63,6 +63,8 @@ const routeName = ref('')
 
 // Tracking helpers
 let lastIdx = 0
+let snapPoint: LngLat | null = null   // rider position projected onto the route
+let snapNextIdx = 0                   // first original vertex ahead of snapPoint
 let located = false
 let lastPos: LngLat | null = null
 let currentBearing = 0
@@ -237,6 +239,11 @@ function onPosition(pos: GeolocationPosition) {
   const { idx, distM } = nearestGeomIndex(here, geometry, located ? lastIdx : -1)
   lastIdx = idx
   located = true
+  // Snap the raw fix onto the polyline so the grey/purple boundary follows the
+  // rider continuously along a segment instead of jumping vertex to vertex.
+  const snap = projectOnRoute(here, geometry, idx)
+  snapPoint = snap.point
+  snapNextIdx = snap.nextIdx
   const wasOffRoute = offRoute.value
   // Widen the threshold by the reported GPS accuracy (capped) so an imprecise fix
   // doesn't get flagged off-route while the rider is actually on the line.
@@ -437,7 +444,9 @@ function updateProgress(idx: number) {
 function refreshRemaining() {
   const src = map?.getSource('nav-remaining')
   if (!src) return
-  const rest = geometry.slice(lastIdx).map(([lng, lat]) => [lng, lat])
+  const rest = geometry.slice(snapPoint ? snapNextIdx : lastIdx).map(([lng, lat]) => [lng, lat])
+  // Start the remaining line exactly at the rider's projected position.
+  if (snapPoint) rest.unshift([snapPoint[0], snapPoint[1]])
   src.setData(lineFeature(rest))
 }
 

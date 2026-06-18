@@ -211,14 +211,14 @@ async function recomputeRoute() {
   try {
     const wps = routeStore.waypoints.value
     const lonlats = wps.map((w) => `${w.lng},${w.lat}`).join('|')
-    // Modèle A : un waypoint « libre » trace ses deux tronçons adjacents en ligne droite
-    // (beeline BRouter), ce qui ignore le réseau routier et les interdictions.
-    // `straight` indexe des tronçons : le tronçon i relie waypoint[i] → waypoint[i+1].
+    // Un waypoint « libre » n'affecte que son tronçon entrant : on trace une ligne droite
+    // (beeline BRouter) depuis le point précédent jusqu'à lui. Le tronçon sortant (libre →
+    // point suivant) reste routé/accroché à la route, sauf si le point suivant est lui aussi
+    // libre. `straight` indexe des tronçons : le tronçon i relie waypoint[i] → waypoint[i+1],
+    // donc le tronçon i est droit ssi waypoint[i+1] est libre.
     const straight = new Set<number>()
     wps.forEach((w, i) => {
-      if (!w.free) return
-      if (i > 0) straight.add(i - 1)
-      if (i < wps.length - 1) straight.add(i)
+      if (i > 0 && w.free) straight.add(i - 1)
     })
     const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
     // timode=2 makes BRouter emit turn-by-turn voicehints in the GeoJSON properties.
@@ -248,9 +248,12 @@ async function recomputeRoute() {
     if (straight.size) geom = densifyGeometry(geom)
     routeStore.geometry.value = geom
 
+    // Recalcule d'abord les index géométriques des waypoints : le rendu du tracé
+    // (updateRouteLayer → applyColorMode) s'en sert pour repérer les tronçons droits
+    // (points libres) à dessiner en traitillé.
+    mapRef.value?.recomputeWaypointGeomIndices()
     mapRef.value?.updateRouteLayer()
     mapRef.value?.installClimbMarkers()
-    mapRef.value?.recomputeWaypointGeomIndices()
 
     // BRouter ne renvoie pas d'altitude pour les tronçons « straight » (points libres).
     // On ne se fie aux altitudes inline que si TOUS les points en ont ; sinon on
@@ -320,8 +323,8 @@ async function fetchRoute(id: number) {
       mapRef.value?.fitBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)], { padding: 40, duration: 0 })
     }
     mapRef.value?.refreshWaypointMarkers()
-    mapRef.value?.updateRouteLayer()
     mapRef.value?.recomputeWaypointGeomIndices()
+    mapRef.value?.updateRouteLayer()
     await nextTick()
     chartRef.value?.render()
     if (routeStore.waypoints.value.length >= 2) recomputeRoute()

@@ -216,6 +216,13 @@ function installRouteLayer() {
     mapInstance.addLayer({ id: 'builder-route-border', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
     mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5 } })
   }
+  // Tronçons « libres » : tracés en ligne droite (beeline) entre points, rendus en
+  // traitillé pour les distinguer du tracé routé. La géométrie droite est exclue de
+  // la source graduée (applyColorMode) pour que le pointillé reste lisible.
+  if (!mapInstance.getSource('builder-route-straight')) {
+    mapInstance.addSource('builder-route-straight', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+    mapInstance.addLayer({ id: 'builder-route-straight-line', type: 'line', source: 'builder-route-straight', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#fc4c02', 'line-width': 4, 'line-dasharray': [1.6, 1.4] } })
+  }
   if (!mapInstance.getSource('builder-divergent')) {
     mapInstance.addSource('builder-divergent', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     mapInstance.addLayer({ id: 'builder-divergent-line', type: 'line', source: 'builder-divergent', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#d62828', 'line-width': 4, 'line-dasharray': [1.4, 1.4] } })
@@ -231,6 +238,7 @@ function installRouteLayer() {
 const ROUTE_LINE_BASE_WIDTH: Record<string, number> = {
   'builder-route-border': 8,
   'builder-route-line': 5,
+  'builder-route-straight-line': 4,
   'builder-route-selected-line': 7,
   'builder-divergent-line': 4,
 }
@@ -250,28 +258,74 @@ function updateRouteLayer() {
   applyColorMode()
 }
 
+// Pour chaque arête j (geom[j] → geom[j+1]), renvoie true si elle appartient à un
+// tronçon « libre » (ligne droite entre un point et le point libre qui le suit). On se
+// base sur les index géométriques des waypoints, alignés sur la règle de routage de
+// recomputeRoute : le tronçon i (waypoint[i] → waypoint[i+1]) est droit ssi waypoint[i+1]
+// est libre.
+function straightEdgeFlags(): boolean[] {
+  const geom = routeStore.geometry.value
+  const flags = new Array(Math.max(0, geom.length - 1)).fill(false)
+  const wps = routeStore.waypoints.value
+  // Sans index à jour (longueur incohérente), on retombe sur un tracé entièrement plein.
+  if (geom.length < 2 || waypointGeomIndices.length !== wps.length) return flags
+  for (let i = 0; i < wps.length - 1; i++) {
+    if (!wps[i + 1]?.free) continue
+    const a = waypointGeomIndices[i]
+    const b = waypointGeomIndices[i + 1]
+    if (a == null || b == null) continue
+    const lo = Math.min(a, b), hi = Math.max(a, b)
+    for (let j = lo; j < hi; j++) flags[j] = true
+  }
+  return flags
+}
+
 function applyColorMode() {
   if (!mapInstance) return
   const src = mapInstance.getSource('builder-route-graded')
+  const straightSrc = mapInstance.getSource('builder-route-straight')
   if (!src) return
-  const coords = routeStore.geometry.value.map(([lng, lat]: any) => [lng, lat])
-  let features: any[] = []
+  const geom = routeStore.geometry.value
+  const coords = geom.map(([lng, lat]: any) => [lng, lat])
+  const gradeMode = props.state.colorMode === 'grade'
+  const routedFeatures: any[] = []
+  const straightFeatures: any[] = []
   let paint: any = '#fc4c02'
-  if (props.state.colorMode === 'grade' && coords.length >= 2) {
-    const altitudes = routeStore.geometry.value.map((c) => c[2])
+
+  if (coords.length >= 2) {
+    if (gradeMode) paint = gradePaintExpression()
+    const flags = straightEdgeFlags()
+    const altitudes = geom.map((c) => c[2])
     const distances = [0]
-    let cum = 0
-    for (let i = 1; i < routeStore.geometry.value.length; i++) {
-      cum += haversine(routeStore.geometry.value[i - 1], routeStore.geometry.value[i])
-      distances.push(cum)
+    for (let i = 1; i < geom.length; i++) distances.push(distances[i - 1] + haversine(geom[i - 1], geom[i]))
+
+    // Découpe la géométrie en runs contigus de même nature (droit / routé). Les arêtes
+    // [j, k) couvrent les sommets j..k.
+    let j = 0
+    while (j < flags.length) {
+      const isStraight = flags[j]
+      let k = j
+      while (k < flags.length && flags[k] === isStraight) k++
+      const sub = coords.slice(j, k + 1)
+      if (sub.length >= 2) {
+        // En mode pente, les tronçons libres sont aussi colorés : leur altitude est
+        // interpolée le long de la ligne droite (open-meteo), la pente y est donc exploitable.
+        const target = isStraight ? straightFeatures : routedFeatures
+        if (gradeMode) {
+          target.push(...buildGradedSegments(sub, altitudes.slice(j, k + 1), distances.slice(j, k + 1)))
+        } else {
+          target.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: sub }, properties: {} })
+        }
+      }
+      j = k
     }
-    features = buildGradedSegments(coords, altitudes, distances)
-    paint = gradePaintExpression()
-  } else if (coords.length >= 2) {
-    features = [{ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} }]
   }
-  src.setData({ type: 'FeatureCollection', features })
+
+  src.setData({ type: 'FeatureCollection', features: routedFeatures })
+  if (straightSrc) straightSrc.setData({ type: 'FeatureCollection', features: straightFeatures })
   if (mapInstance.getLayer('builder-route-line')) mapInstance.setPaintProperty('builder-route-line', 'line-color', paint)
+  // Le traitillé suit le même code couleur que la ligne pleine en mode pente.
+  if (mapInstance.getLayer('builder-route-straight-line')) mapInstance.setPaintProperty('builder-route-straight-line', 'line-color', paint)
 }
 
 function updateSelectionLayer() {
@@ -675,7 +729,7 @@ function nearestGeomIndexAt(point: { x: number; y: number }) {
   if (!mapInstance || !routeStore.geometry.value.length) return null
   const features = mapInstance.queryRenderedFeatures(
     [[point.x - 6, point.y - 6], [point.x + 6, point.y + 6]],
-    { layers: ['builder-route-line'] },
+    { layers: ['builder-route-line', 'builder-route-straight-line'] },
   )
   if (!features.length) return null
   let best = -1, bestDist = Infinity

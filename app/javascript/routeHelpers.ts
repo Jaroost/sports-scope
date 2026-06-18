@@ -288,7 +288,33 @@ export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
   return (Math.atan2(y, x) * 180) / Math.PI
 }
 
+// Perpendicular distance in metres from point `p` to the segment [a, b], using
+// an equirectangular projection centred on `p` (accurate over the short spans
+// between adjacent route vertices). `p` is the origin (0,0) in that projection,
+// so we just clamp its projection onto the segment to [0,1] and measure back.
+export function pointToSegmentM(p: LngLat, a: Coord | LngLat, b: Coord | LngLat): number {
+  const R = 6371000
+  const cosLat = Math.cos((p[1] * Math.PI) / 180)
+  const toXY = (c: Coord | LngLat): [number, number] => [
+    (((c[0] - p[0]) * Math.PI) / 180) * cosLat * R,
+    (((c[1] - p[1]) * Math.PI) / 180) * R,
+  ]
+  const [ax, ay] = toXY(a)
+  const [bx, by] = toXY(b)
+  const dx = bx - ax
+  const dy = by - ay
+  const len2 = dx * dx + dy * dy
+  if (len2 === 0) return Math.hypot(ax, ay)
+  let s = -(ax * dx + ay * dy) / len2
+  s = Math.max(0, Math.min(1, s))
+  return Math.hypot(ax + s * dx, ay + s * dy)
+}
+
 // Index of the geometry vertex closest to `pos`, plus the lateral distance (m).
+// The distance is measured to the nearest point on the polyline (the two segments
+// adjacent to the nearest vertex), not to the vertex itself — so a position
+// squarely on a long straight segment isn't mis-flagged as off-route just because
+// the nearest vertex happens to be far along that segment.
 // `hintIdx` restricts the search to a window around the last known index for perf;
 // pass -1 (default) to scan the whole geometry.
 export function nearestGeomIndex(
@@ -309,7 +335,10 @@ export function nearestGeomIndex(
     const d = haversine(pos, geometry[i])
     if (d < bestDist) { bestDist = d; bestIdx = i }
   }
-  return { idx: bestIdx, distM: bestDist }
+  let distM = bestDist
+  if (bestIdx > 0) distM = Math.min(distM, pointToSegmentM(pos, geometry[bestIdx - 1], geometry[bestIdx]))
+  if (bestIdx < geometry.length - 1) distM = Math.min(distM, pointToSegmentM(pos, geometry[bestIdx], geometry[bestIdx + 1]))
+  return { idx: bestIdx, distM }
 }
 
 // Remaining distance / elevation / progress ratio from a projected index.

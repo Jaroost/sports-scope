@@ -19,6 +19,7 @@ const SOUND_KEY = 'sportsScope.navSound'
 // Réglages caméra issus du profil (section Navigation), indépendants du créateur.
 const navPrefs = userPreferences().navigation
 const OFF_ROUTE_M = 20          // lateral distance beyond which we warn
+const OFF_ROUTE_ACCURACY_CAP = 35  // most we widen the threshold by for a fuzzy GPS fix
 const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
 const TURN_ALERT_M = 60        // start announcing a turn this far ahead
@@ -237,7 +238,10 @@ function onPosition(pos: GeolocationPosition) {
   lastIdx = idx
   located = true
   const wasOffRoute = offRoute.value
-  offRoute.value = distM > OFF_ROUTE_M
+  // Widen the threshold by the reported GPS accuracy (capped) so an imprecise fix
+  // doesn't get flagged off-route while the rider is actually on the line.
+  const accuracyM = Math.min(pos.coords.accuracy ?? 0, OFF_ROUTE_ACCURACY_CAP)
+  offRoute.value = distM > OFF_ROUTE_M + accuracyM
   updateProgress(idx)
 
   // Heading: trust the GPS heading when moving fast enough, otherwise derive it.

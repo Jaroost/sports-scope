@@ -7,7 +7,7 @@
 //
 // Le schéma reflète User::DEFAULT_PREFERENCES côté serveur.
 
-export type MapStyleId = 'cyclosm' | 'topo' | 'swisstopo' | 'liberty'
+export type MapStyleId = 'cyclosm' | 'topo' | 'swisstopo' | 'swissgrau' | 'swissimage' | 'liberty'
 export type Sport = 'cycling' | 'mtb' | 'hiking'
 
 export interface UserPreferences {

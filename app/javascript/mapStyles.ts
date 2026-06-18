@@ -7,6 +7,7 @@ export const MAP_STYLES: MapStyle[] = [
   { id: 'cyclosm',    icon: 'fa-bicycle' },
   { id: 'topo',       icon: 'fa-mountain-sun' },
   { id: 'swisstopo',  icon: 'fa-flag-checkered' },
+  { id: 'swissgrau',  icon: 'fa-circle-half-stroke' },
   { id: 'swissimage', icon: 'fa-satellite' },
   { id: 'liberty',    icon: 'fa-map' },
 ]
@@ -19,6 +20,7 @@ export const EXPORT_TILE_INFO: Record<string, ExportTileInfo> = {
   cyclosm:    { maxzoom: 18, tileSize: 256 },
   topo:       { maxzoom: 17, tileSize: 256 },
   swisstopo:  { maxzoom: 18, tileSize: 256 },
+  swissgrau:  { maxzoom: 18, tileSize: 256 },
   swissimage: { maxzoom: 18, tileSize: 256 },
   liberty:    { maxzoom: 16, tileSize: 512 },
 }
@@ -33,6 +35,7 @@ export function mapStyleFor(id: string): string | object {
   if (id === 'liberty')    return 'https://tiles.openfreemap.org/styles/liberty'
   if (id === 'topo')       return openTopoMapStyle()
   if (id === 'swisstopo')  return swissTopoStyle()
+  if (id === 'swissgrau')  return swissGrauStyle()
   if (id === 'swissimage') return swissImageStyle()
   return cyclOsmStyle()
 }
@@ -84,6 +87,31 @@ export function openTopoMapStyle(): object {
       },
     },
     layers: [{ id: 'topo-base', type: 'raster', source: 'topo-raster' }],
+  }
+}
+
+export function swissGrauStyle(): object {
+  return {
+    version: 8,
+    sources: {
+      'swissgrau-raster': {
+        type: 'raster',
+        tiles: [
+          'https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/{z}/{x}/{y}.jpeg',
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution:
+          '© <a href="https://www.swisstopo.admin.ch" target="_blank" rel="noopener">swisstopo</a>',
+      },
+    },
+    layers: [
+      {
+        id: 'swissgrau-base',
+        type: 'raster',
+        source: 'swissgrau-raster',
+      },
+    ],
   }
 }
 

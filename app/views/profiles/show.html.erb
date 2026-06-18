@@ -10,7 +10,7 @@
   <%= t("profile.lead") %> · <i class="fa-solid fa-user-astronaut me-1 text-muted" aria-hidden="true"></i><strong><%= current_user.display_name %></strong>
 </p>
 
-<section class="card mb-3 shadow-sm" style="max-width: 720px;">
+<section class="card mb-3 shadow-sm">
   <div class="card-header d-flex align-items-center gap-2">
     <i class="fa-brands fa-strava text-warning" aria-hidden="true"></i>
     <h2 class="h5 mb-0"><%= t("profile.strava.title") %></h2>
@@ -36,4 +36,4 @@
   </div>
 </section>
 
-<div data-vue-component="UserProfile" data-vue-props='<%= { preferences: current_user.preferences_with_defaults }.to_json %>'></div>
+<div data-vue-component="UserProfile" data-vue-props='<%= { preferences: current_user.preferences_with_defaults, defaults: User::DEFAULT_PREFERENCES }.to_json %>'></div>

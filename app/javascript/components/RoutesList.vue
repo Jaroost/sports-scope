@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { t } from '../i18n'
+import { speedForSport } from '../userPreferences'
+import type { Sport } from '../userPreferences'
 
 const routes = ref([])
 const loading = ref(true)
@@ -17,21 +19,16 @@ const GPX_IMPORT_MAX_WAYPOINTS = 25
 // so we keep them all up to the controller's MAX_WAYPOINTS=500 ceiling.
 const GPX_IMPORT_MAX_NATIVE_WAYPOINTS = 500
 
-// Average riding speed in km/h — shared with the RouteBuilder via the same
-// localStorage key, so editing it in either place keeps both in sync.
-const SPEED_KEY = 'sportsScope.routeBuilderAvgSpeed'
-function loadSpeed() {
-  try {
-    const raw = localStorage.getItem(SPEED_KEY)
-    const v = raw != null ? parseFloat(raw) : NaN
-    return Number.isFinite(v) && v >= 3 && v <= 80 ? v : 18
-  } catch { return 18 }
+// Estimation du temps de parcours et icône de la liste : pilotées par la catégorie
+// d'activité enregistrée avec chaque itinéraire (cycling | mtb | hiking). La vitesse
+// moyenne correspondante vient du profil utilisateur.
+function activityOf(r): Sport {
+  return r?.activity === 'mtb' || r?.activity === 'hiking' ? r.activity : 'cycling'
 }
-const avgSpeedKmh = ref(loadSpeed())
-watch(avgSpeedKmh, (v) => {
-  if (!Number.isFinite(v) || v < 3 || v > 80) return
-  try { localStorage.setItem(SPEED_KEY, String(v)) } catch { /* ignore */ }
-})
+
+function sportIcon(s: Sport) {
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
 
 // Share feedback: holds the id of the route whose link was just copied, so the
 // button can flash a checkmark for a couple of seconds.
@@ -301,7 +298,7 @@ function formatDate(iso) {
 // avg speed already accounts for terrain, so no climb penalty is added.
 function estimatedSecondsFor(r) {
   const d = r?.distance_m
-  const v = avgSpeedKmh.value
+  const v = speedForSport(activityOf(r))
   if (!d || !Number.isFinite(v) || v <= 0) return 0
   return Math.round(((d / 1000) / v) * 3600)
 }
@@ -357,20 +354,6 @@ onMounted(() => fetchRoutes())
           <span>{{ t('routes.list_title') }}</span>
         </h2>
         <span v-if="!loading && !error" class="badge bg-light text-muted ms-1">{{ routes.length }}</span>
-        <label class="ms-auto d-inline-flex align-items-center gap-1 text-muted mb-0 small">
-          <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
-          <input
-            v-model.number="avgSpeedKmh"
-            type="number"
-            min="3"
-            max="80"
-            step="1"
-            class="form-control form-control-sm speed-input"
-            :title="t('routes.avg_speed_hint')"
-            :aria-label="t('routes.avg_speed_hint')"
-          />
-          <span>km/h</span>
-        </label>
       </div>
       <div class="card-body">
         <div v-if="loading" class="text-muted d-flex align-items-center gap-2">
@@ -424,8 +407,8 @@ onMounted(() => fetchRoutes())
                 :href="`${localePrefix}/routes/${r.id}/edit`"
                 class="flex-grow-1 d-flex align-items-center gap-3 text-decoration-none text-reset min-width-0"
               >
-                <span class="activity-type-badge">
-                  <i class="fa-solid fa-route" aria-hidden="true"></i>
+                <span class="activity-type-badge" :title="t(`routes.wt_sport_${activityOf(r)}`)">
+                  <i :class="`fa-solid ${sportIcon(activityOf(r))}`" aria-hidden="true"></i>
                 </span>
                 <div class="min-width-0 flex-grow-1">
                   <div class="fw-semibold text-truncate">{{ r.name }}</div>
@@ -520,14 +503,6 @@ onMounted(() => fetchRoutes())
    bootstrap doesn't ship gap-x/gap-y utilities for inline gaps. */
 .gap-x-3 { column-gap: 0.75rem; }
 .gap-y-1 { row-gap: 0.25rem; }
-
-/* Compact km/h input — same shape as the one in the route builder's stats. */
-.speed-input {
-  width: 3.5rem;
-  text-align: right;
-  padding: 0.1rem 0.35rem;
-  font-variant-numeric: tabular-nums;
-}
 
 /* Action button cluster stays at fixed size; only the row's anchor area
    gets the translateX hover bump from .activity-row in application.scss. */

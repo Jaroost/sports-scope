@@ -23,12 +23,24 @@ interface Preferences {
     min_gain_m: number
     min_length_m: number
   }
+  speeds: {
+    cycling: number
+    mtb: number
+    hiking: number
+  }
 }
 
-const props = defineProps<{ preferences: Preferences }>()
+const props = defineProps<{ preferences: Preferences; defaults: Preferences }>()
 
 // Copie réactive locale : on n'écrit côté serveur qu'à la sauvegarde explicite.
 const prefs = reactive<Preferences>(JSON.parse(JSON.stringify(props.preferences)))
+
+// Restaure les valeurs d'origine (par défaut) dans le formulaire, sans toucher
+// au compte Strava. L'utilisateur doit ensuite enregistrer pour persister.
+function resetToDefaults() {
+  if (!window.confirm(t('profile.reset_confirm'))) return
+  Object.assign(prefs, JSON.parse(JSON.stringify(props.defaults)))
+}
 
 const saving = ref(false)
 const saved = ref(false)
@@ -36,6 +48,10 @@ const error = ref<string | null>(null)
 let savedTimer: ReturnType<typeof setTimeout> | undefined
 
 const SPORTS = ['cycling', 'mtb', 'hiking'] as const
+
+function sportIcon(s: (typeof SPORTS)[number]): string {
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
 
 function csrfToken(): string {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
@@ -189,11 +205,45 @@ async function save() {
       </div>
     </section>
 
+    <!-- Vitesses moyennes -->
+    <section class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-gauge-high text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.speeds.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">{{ t('profile.speeds.help') }}</p>
+        <div class="row g-3">
+          <div v-for="s in SPORTS" :key="s" class="col-sm-4">
+            <label :for="`speed-${s}`" class="form-label d-flex align-items-center gap-2">
+              <i :class="`fa-solid ${sportIcon(s)} text-muted`" aria-hidden="true"></i>
+              {{ t(`profile.display.sport_${s}`) }}
+            </label>
+            <div class="input-group">
+              <input
+                :id="`speed-${s}`"
+                v-model.number="prefs.speeds[s]"
+                type="number"
+                class="form-control"
+                min="3"
+                max="80"
+                step="0.5"
+              >
+              <span class="input-group-text">km/h</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Barre de sauvegarde -->
     <div class="d-flex align-items-center gap-3 sticky-bottom py-2">
       <button type="submit" class="btn btn-primary" :disabled="saving">
         <i class="fa-solid fa-floppy-disk me-1" aria-hidden="true"></i>
         {{ saving ? t('profile.saving') : t('profile.save') }}
+      </button>
+      <button type="button" class="btn btn-outline-secondary" :disabled="saving" @click="resetToDefaults">
+        <i class="fa-solid fa-rotate-left me-1" aria-hidden="true"></i>{{ t('profile.reset') }}
       </button>
       <span v-if="saved" class="text-success">
         <i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>{{ t('profile.saved') }}

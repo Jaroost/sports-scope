@@ -7,6 +7,7 @@ class RoutesController < ApplicationController
   MAX_GEOMETRY_POINTS = 10_000
   MAX_NAME_LEN = 80
   ALLOWED_PROFILES = %w[cycling foot driving].freeze
+  ALLOWED_ACTIVITIES = Route::ACTIVITIES
 
   # GET /api/routes
   def index
@@ -77,6 +78,7 @@ class RoutesController < ApplicationController
     new_route = current_user.routes.create!(
       name: copy_name,
       profile: src.profile,
+      activity: src.activity,
       waypoints: src.waypoints,
       geometry: src.geometry,
       voice_hints: src.voice_hints,
@@ -98,6 +100,7 @@ class RoutesController < ApplicationController
     out = {}
     out[:name] = p[:name].to_s.strip.first(MAX_NAME_LEN).presence if p.key?(:name)
     out[:profile] = ALLOWED_PROFILES.include?(p[:profile].to_s) ? p[:profile] : "cycling" if p.key?(:profile)
+    out[:activity] = ALLOWED_ACTIVITIES.include?(p[:activity].to_s) ? p[:activity] : "cycling" if p.key?(:activity)
     out[:waypoints] = clean_waypoints(p[:waypoints]) if p.key?(:waypoints)
     out[:geometry] = clean_geometry(p[:geometry]) if p.key?(:geometry)
     out[:voice_hints] = clean_voice_hints(p[:voice_hints]) if p.key?(:voice_hints)
@@ -157,6 +160,7 @@ class RoutesController < ApplicationController
       elevation_gain_m: route.elevation_gain_m,
       elevation_loss_m: route.elevation_loss_m,
       profile: route.profile,
+      activity: route.activity,
       share_token: route.share_token,
       updated_at: route.updated_at.iso8601,
     }

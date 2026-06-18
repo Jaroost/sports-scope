@@ -15,9 +15,17 @@ export interface Place {
 class PlacesStore {
   readonly importantPlaces = ref<Place[]>([])
   readonly isFetchingPlaces = ref(false)
-  readonly placeShowCemeteries = ref(userPreferences().points_of_interest.show_cemeteries)
-  readonly placeShowBakeries = ref(userPreferences().points_of_interest.show_bakeries)
-  readonly placeShowLocalities = ref(userPreferences().points_of_interest.show_localities)
+  // Préférences du profil : pilotent à la fois la recherche Overpass (on ne
+  // requête que les catégories cochées) et l'affichage du filtre correspondant
+  // dans le créateur d'itinéraire. Statiques pour la durée de la page.
+  readonly searchCemeteries = userPreferences().points_of_interest.show_cemeteries
+  readonly searchBakeries = userPreferences().points_of_interest.show_bakeries
+  readonly searchLocalities = userPreferences().points_of_interest.show_localities
+  // État du filtre dans le créateur d'itinéraire (actif par défaut quand la
+  // catégorie est recherchée).
+  readonly placeShowCemeteries = ref(this.searchCemeteries)
+  readonly placeShowBakeries = ref(this.searchBakeries)
+  readonly placeShowLocalities = ref(this.searchLocalities)
   readonly placesExpanded = ref(true)
   // Rayon de détection (m) des cimetières et boulangeries — piloté uniquement par
   // les préférences du profil (plus de réglage dans le créateur d'itinéraire).

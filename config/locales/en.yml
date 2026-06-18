@@ -290,6 +290,8 @@ en:
     saving: "Saving…"
     saved: "Preferences saved"
     save_error: "Save failed"
+    reset: "Reset to defaults"
+    reset_confirm: "Restore all preferences to their default values?"
     strava:
       title: "Strava account"
       help: "Connect your Strava account to import and analyze your activities."
@@ -326,6 +328,9 @@ en:
       min_grade: "Min. average grade"
       min_gain: "Min. elevation gain"
       min_length: "Min. length"
+    speeds:
+      title: "Average speeds"
+      help: "Average speed per activity, used to estimate ride time on a route. The route builder and list pick the speed matching the selected activity."
   common:
     days_ago_today: "today"
     days_ago_yesterday: "yesterday"

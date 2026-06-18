@@ -290,6 +290,8 @@ fr:
     saving: "Enregistrement…"
     saved: "Préférences enregistrées"
     save_error: "Échec de l'enregistrement"
+    reset: "Valeurs par défaut"
+    reset_confirm: "Restaurer toutes les préférences à leurs valeurs par défaut ?"
     strava:
       title: "Compte Strava"
       help: "Liez votre compte Strava pour importer et analyser vos activités."
@@ -326,6 +328,9 @@ fr:
       min_grade: "Pente moyenne min."
       min_gain: "Dénivelé positif min."
       min_length: "Longueur min."
+    speeds:
+      title: "Vitesses moyennes"
+      help: "Vitesse moyenne par activité, utilisée pour estimer le temps de parcours d'un itinéraire. Le créateur et la liste choisissent la vitesse correspondant à l'activité sélectionnée."
   common:
     days_ago_today: "aujourd'hui"
     days_ago_yesterday: "hier"

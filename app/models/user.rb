@@ -17,6 +17,13 @@ class User < ApplicationRecord
       "show_grade_colors" => true,
       "show_elevation_chart" => true,
     },
+    # Vitesse moyenne (km/h) par catégorie d'activité, utilisée pour estimer le
+    # temps de parcours d'un itinéraire (créateur + liste).
+    "speeds" => {
+      "cycling" => 18,
+      "mtb" => 14,
+      "hiking" => 4.5,
+    },
     "climb_detection" => {
       "min_grade" => 2,        # pente moyenne minimale (%)
       "min_gain_m" => 60,      # dénivelé positif minimal (m)

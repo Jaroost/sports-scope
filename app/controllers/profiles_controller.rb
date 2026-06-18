@@ -6,9 +6,13 @@ class ProfilesController < ApplicationController
   MIN_GRADE_RANGE = (0.0..15.0)
   MIN_GAIN_RANGE = (0..1000)
   MIN_LENGTH_RANGE = (50..5000)
+  SPEED_RANGE = (3.0..80.0)
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo liberty].freeze
   ALLOWED_SPORTS = %w[cycling mtb hiking].freeze
+
+  # Vitesses moyennes par défaut (km/h), miroir de User::DEFAULT_PREFERENCES.
+  DEFAULT_SPEEDS = { "cycling" => 18, "mtb" => 14, "hiking" => 4.5 }.freeze
 
   # GET /profile — page HTML qui monte l'îlot Vue UserProfile.
   def show
@@ -36,6 +40,7 @@ class ProfilesController < ApplicationController
     map = incoming[:map] || {}
     display = incoming[:display] || {}
     climb = incoming[:climb_detection] || {}
+    speeds = incoming[:speeds] || {}
 
     {
       "points_of_interest" => {
@@ -57,7 +62,14 @@ class ProfilesController < ApplicationController
         "min_gain_m" => clamp_int(climb[:min_gain_m], MIN_GAIN_RANGE, 60),
         "min_length_m" => clamp_int(climb[:min_length_m], MIN_LENGTH_RANGE, 500),
       },
+      "speeds" => sanitize_speeds(speeds),
     }
+  end
+
+  def sanitize_speeds(speeds)
+    DEFAULT_SPEEDS.each_with_object({}) do |(sport, default), out|
+      out[sport] = clamp_float(speeds[sport], SPEED_RANGE, default)
+    end
   end
 
   def to_bool(value, default)

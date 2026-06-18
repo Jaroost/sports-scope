@@ -108,6 +108,18 @@ async function fetchImportantPlaces() {
   const token = ++placesStore.token
   const geom = routeStore.geometry.value
   if (geom.length < 2) { placesStore.isFetchingPlaces.value = false; return }
+
+  // On ne recherche que les catégories cochées dans le profil. Si aucune n'est
+  // activée, on n'interroge pas Overpass du tout.
+  const types: string[] = []
+  if (placesStore.searchLocalities) types.push('localities')
+  if (placesStore.searchCemeteries) types.push('cemeteries')
+  if (placesStore.searchBakeries) types.push('bakeries')
+  if (types.length === 0) {
+    placesStore.importantPlaces.value = []
+    placesStore.isFetchingPlaces.value = false
+    return
+  }
   placesStore.isFetchingPlaces.value = true
 
   let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
@@ -123,7 +135,7 @@ async function fetchImportantPlaces() {
   south -= BUFFER; north += BUFFER; west -= BUFFER; east += BUFFER
 
   try {
-    const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}`)
+    const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}&types=${types.join(',')}`)
     if (token !== placesStore.token) return
     if (!res.ok) { placesStore.isFetchingPlaces.value = false; return }
 
@@ -293,6 +305,9 @@ async function fetchRoute(id: number) {
     const payload = await res.json()
     const r = payload.route
     routeStore.name.value = r.name || ''
+    // Réaligne la catégorie d'activité (et donc la vitesse moyenne) sur celle
+    // enregistrée avec l'itinéraire.
+    if (r.activity) routeStore.setSport(r.activity)
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
@@ -338,6 +353,7 @@ async function save() {
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,
       profile: 'cycling',
+      activity: routeStore.sport.value,
     })
     const url = isEditMode() ? `/api/routes/${routeStore.currentId.value}` : '/api/routes'
     const method = isEditMode() ? 'PATCH' : 'POST'

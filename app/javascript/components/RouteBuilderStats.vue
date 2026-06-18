@@ -6,6 +6,15 @@ import { placesStore } from '../stores/placesStore'
 import { formatKm, formatDistanceShort, formatDuration } from '../routeHelpers'
 import type { Climb } from '../routeHelpers'
 import type { Place } from '../stores/placesStore'
+import type { Sport } from '../userPreferences'
+
+// Catégories d'activité — pilotent la vitesse moyenne (via le profil) et sont
+// enregistrées avec l'itinéraire.
+const ACTIVITIES = ['cycling', 'mtb', 'hiking'] as const
+
+function sportIcon(s: Sport) {
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
 
 const props = defineProps<{
   sidebarWidth: number
@@ -72,6 +81,23 @@ const climbsExpanded = ref(true)
         </template>
       </template>
 
+      <!-- Type d'activité — enregistré avec l'itinéraire, pilote la vitesse moyenne -->
+      <div class="activity-toggle btn-group btn-group-sm w-100" role="group" :aria-label="t('routes.wt_sport')">
+        <button
+          v-for="s in ACTIVITIES"
+          :key="s"
+          type="button"
+          class="btn"
+          :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
+          :title="t(`routes.wt_sport_${s}`)"
+          :aria-label="t(`routes.wt_sport_${s}`)"
+          @click="routeStore.setSport(s)"
+        >
+          <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+          <span class="ms-1 d-none d-sm-inline">{{ t(`routes.wt_sport_${s}`) }}</span>
+        </button>
+      </div>
+
       <!-- Temps estimé -->
       <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
         <span class="d-flex align-items-center gap-2">
@@ -88,7 +114,6 @@ const climbsExpanded = ref(true)
             class="speed-input"
             :title="t('routes.avg_speed_hint')"
             :aria-label="t('routes.avg_speed_hint')"
-            @change="routeStore.persistSpeed()"
           />
           <small>km/h</small>
         </span>

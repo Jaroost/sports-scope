@@ -579,7 +579,6 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
               type="number" min="3" max="80" step="1"
               class="speed-input"
               :aria-label="t('routes.avg_speed_hint')"
-              @change="routeStore.persistSpeed()"
             />
             <small>km/h</small>
           </span>

@@ -486,6 +486,11 @@ function onChartFlyTo(lng: number, lat: number) {
   mapRef.value?.showChartCrossMarker(lng, lat)
 }
 
+function onChartZoomTo(lng: number, lat: number) {
+  mapRef.value?.showChartCrossMarker(lng, lat)
+  mapRef.value?.flyTo(lng, lat)
+}
+
 function onChartHoverEnd() {
   mapRef.value?.hideChartCrossMarker()
 }
@@ -618,8 +623,8 @@ function drawClimbMarkersOnCanvas(ctx: CanvasRenderingContext2D, mapOffsetY: num
 }
 
 function drawTitleOnCanvas(ctx: CanvasRenderingContext2D, h: number, s: number) {
-  ctx.fillStyle = '#111827'; ctx.fillRect(0, 0, ctx.canvas.width, h)
-  ctx.fillStyle = '#ffffff'
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, ctx.canvas.width, h)
+  ctx.fillStyle = '#111827'
   ctx.font = `bold ${Math.round(22 * s)}px system-ui,sans-serif`
   ctx.textBaseline = 'middle'; ctx.textAlign = 'left'
   ctx.fillText((routeStore.name.value ?? '').trim() || 'Itinéraire', Math.round(20 * s), h / 2)
@@ -1082,6 +1087,7 @@ onBeforeUnmount(() => {
           <RouteBuilderChart
             ref="chartRef"
             @fly-to="onChartFlyTo"
+            @zoom-to="onChartZoomTo"
             @hover-end="onChartHoverEnd"
             @fit-to-selection="onChartFitToSelection"
             @open-selection-in-komoot="openSelectionInKomoot"
@@ -1104,6 +1110,7 @@ onBeforeUnmount(() => {
             ref="chartRef"
             :simplified="true"
             @fly-to="onChartFlyTo"
+            @zoom-to="onChartZoomTo"
             @hover-end="onChartHoverEnd"
             @fit-to-selection="onChartFitToSelection"
             @open-selection-in-komoot="openSelectionInKomoot"

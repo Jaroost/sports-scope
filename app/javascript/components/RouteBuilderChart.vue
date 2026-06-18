@@ -33,6 +33,7 @@ const HANDLE_TOL_PX = 8
 
 const emit = defineEmits<{
   'fly-to': [lng: number, lat: number]
+  'zoom-to': [lng: number, lat: number]
   'hover-end': []
   'fit-to-selection': []
 }>()
@@ -548,7 +549,7 @@ function attachInteractionOnce(canvas: HTMLCanvasElement) {
       if (dragged) emit('fit-to-selection')
       else {
         const pt = routeStore.geometry.value[geomIdxForKm(km1, selectionStore.cumDistKm)]
-        if (pt) emit('fly-to', pt[0], pt[1])
+        if (pt) emit('zoom-to', pt[0], pt[1])
       }
     }
     window.addEventListener('mousemove', onMove)

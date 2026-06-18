@@ -54,6 +54,8 @@ const climbInfo = ref<{
   posY: number                               // cursor y (% of profile height)
   topY: number                               // summit y (% of profile height)
   grade: number                              // instantaneous grade at the rider (%)
+  gradeColor: string                         // grade-bucket colour for the badge background
+  gradeText: string                          // contrasting text colour (black/white)
 } | null>(null)
 const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number } | null>(null)
 
@@ -97,6 +99,11 @@ let extrapBearing = 0                  // travel heading (target)
 let displayBearing = 0                 // smoothed bearing actually rendered
 const MAX_EXTRAP_S = 2.5               // stop predicting if fixes stop arriving
 const BEARING_SMOOTH = 0.18            // per-frame easing toward the target bearing
+// Bottom camera padding lifts the rider's anchor up the screen so the climb card
+// (which overlays the lower map) doesn't hide the position arrow. Eased per frame.
+const CLIMB_LIFT_RATIO = 0.33          // extra bottom padding (× height) while climbing
+const PAD_SMOOTH = 0.12                // per-frame easing toward the target padding
+let displayBottomPad = 0               // smoothed bottom padding actually rendered
 
 const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
@@ -310,10 +317,21 @@ function followOptions(center: LngLat): any {
     bearing: currentBearing,
     pitch: navPrefs.pitch,
     duration: 500,
-    padding: { top: Math.round(h * 0.45), bottom: 0, left: 0, right: 0 },
+    padding: followPadding(h),
   }
   if (!hasInitialZoom) { opts.zoom = navPrefs.zoom; hasInitialZoom = true }
   return opts
+}
+
+// Extra bottom padding so the rider sits above the climb card when it's shown.
+function bottomPadTarget(h: number): number {
+  return climbInfo.value ? Math.round(h * CLIMB_LIFT_RATIO) : 0
+}
+
+// Camera padding: a fixed top inset keeps the look-ahead constant; the bottom
+// inset (smoothed) lifts the rider clear of the climb card overlay.
+function followPadding(h: number): { top: number; bottom: number; left: number; right: number } {
+  return { top: Math.round(h * 0.45), bottom: Math.round(displayBottomPad), left: 0, right: 0 }
 }
 
 // Move a lng/lat by `distM` along `bearingDeg` (equirectangular — accurate to a
@@ -346,7 +364,9 @@ function startAnimation() {
     updateLocationMarker(pos)
     if (locationMarker) locationMarker.setRotation(displayBearing)
     if (following.value) {
-      map.jumpTo({ center: pos, bearing: displayBearing, pitch: navPrefs.pitch })
+      const h = map.getContainer()?.clientHeight || 0
+      displayBottomPad += (bottomPadTarget(h) - displayBottomPad) * PAD_SMOOTH
+      map.jumpTo({ center: pos, bearing: displayBearing, pitch: navPrefs.pitch, padding: followPadding(h) })
     }
   }
   rafId = requestAnimationFrame(tick)
@@ -448,6 +468,8 @@ function updateProgress(idx: number) {
     const rem = computeGainLoss(geometry.slice(idx, ac.climb.endIdx + 1)).gain
     buildClimbProfile(ac.climb)
     const posX = ac.ratio * 100
+    const grade = gradeForIndex(idx, alts, cumDistM)
+    const gradeColor = colorForGrade(grade)
     climbInfo.value = {
       climb: ac.climb,
       ratio: ac.ratio,
@@ -456,7 +478,9 @@ function updateProgress(idx: number) {
       posX,
       posY: profileYAt(posX),
       topY: profileTopY,
-      grade: gradeForIndex(idx, alts, cumDistM),
+      grade,
+      gradeColor,
+      gradeText: textColorOn(gradeColor),
     }
   } else {
     climbInfo.value = null
@@ -497,6 +521,15 @@ function buildClimbProfile(climb: Climb) {
       color: colorForGrade(gradeForIndex(i, alts, cumDistM)),
     })
   }
+}
+
+// Black or white, whichever reads best on `hex` (perceived luminance, BT.601).
+function textColorOn(hex: string): string {
+  const c = hex.replace('#', '')
+  const r = parseInt(c.slice(0, 2), 16)
+  const g = parseInt(c.slice(2, 4), 16)
+  const b = parseInt(c.slice(4, 6), 16)
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#111827' : '#ffffff'
 }
 
 // Altitude-line y at a given x (% of width), interpolated between profile points.
@@ -650,7 +683,7 @@ function onVisibilityChange() {
           <i class="fa-solid fa-mountain text-warning me-1" aria-hidden="true"></i>{{ t('routes.climb_in_progress') }}
           <span v-if="climbInfo.climb.category" class="badge bg-dark ms-1">{{ climbInfo.climb.category }}</span>
         </span>
-        <span class="nav-climb-grade">{{ Math.round(climbInfo.grade) }} %</span>
+        <span class="nav-climb-grade" :style="{ background: climbInfo.gradeColor, color: climbInfo.gradeText }">{{ Math.round(climbInfo.grade) }} %</span>
       </div>
       <div class="nav-climb-graph">
         <svg class="nav-climb-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -773,7 +806,8 @@ function onVisibilityChange() {
   z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.6rem 0.85rem;
 }
 .nav-climb-grade {
-  font-weight: 700; font-size: 1.1rem; color: #dc2626; line-height: 1;
+  font-weight: 700; font-size: 1.1rem; line-height: 1;
+  padding: 0.15rem 0.45rem; border-radius: 0.4rem;
 }
 .nav-climb-graph {
   position: relative; height: 64px; width: 100%;

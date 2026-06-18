@@ -50,6 +50,13 @@ const saving = ref(false)
 // Indicateur transitoire affiché brièvement après un enregistrement réussi.
 const saved = ref(false)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
+// Modifications non enregistrées : passe à true dès qu'on édite les données
+// persistées (points, nom, activité), repasse à false après un enregistrement.
+// Sert à avertir l'utilisateur avant de quitter la page (voir onBeforeUnload).
+const dirty = ref(false)
+// Activé seulement une fois le chargement initial terminé, pour ne pas marquer
+// « sale » les mutations programmatiques de reset/fetchRoute.
+let trackDirty = false
 const exporting = ref(false)
 const showExportDialog = ref(false)
 const exportStyleId = ref('')
@@ -221,10 +228,10 @@ function onChangeSport(sport: Sport) {
   if (routeStore.readOnly.value) return
   if (sport === routeStore.sport.value) return
   routeStore.setSport(sport)
-  if (routeStore.waypoints.value.length >= 2) recomputeRoute({ autoSave: true })
+  if (routeStore.waypoints.value.length >= 2) recomputeRoute()
 }
 
-async function recomputeRoute(opts: { autoSave?: boolean } = {}) {
+async function recomputeRoute() {
   const token = ++recomputeToken
   selectionStore.clear()
 
@@ -301,10 +308,6 @@ async function recomputeRoute(opts: { autoSave?: boolean } = {}) {
     } else {
       await fetchElevation(token)
     }
-    // Itinéraire recalculé (géométrie + dénivelé à jour) : on enregistre
-    // automatiquement la modification de points, sauf si un recalcul plus récent
-    // est déjà parti entre-temps.
-    if (opts.autoSave && token === recomputeToken) scheduleAutoSave()
   } catch (e: any) {
     if (token === recomputeToken) routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
   } finally {
@@ -428,23 +431,6 @@ async function save() {
   await persist()
 }
 
-// Sauvegarde automatique débouncée, déclenchée à chaque modification de points.
-// Contrairement à save(), elle ne demande jamais de nom : si le nom est vide ou
-// qu'il y a moins de 2 points, on ne persiste pas (l'utilisateur sauvegardera
-// manuellement). Un seul enregistrement à la fois pour éviter de créer des
-// doublons via plusieurs POST concurrents sur un itinéraire pas encore identifié.
-let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-function scheduleAutoSave() {
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-  autoSaveTimer = setTimeout(runAutoSave, 800)
-}
-function runAutoSave() {
-  autoSaveTimer = null
-  if (saving.value) { scheduleAutoSave(); return } // un enregistrement est déjà en vol
-  if (!routeStore.name.value.trim() || routeStore.waypoints.value.length < 2) return
-  persist()
-}
-
 async function persist() {
   if (routeStore.readOnly.value) return
   saving.value = true
@@ -476,6 +462,7 @@ async function persist() {
       routeStore.currentId.value = r.id
       window.history.replaceState({}, '', `${localePrefix}/routes/${r.id}/edit`)
     }
+    dirty.value = false
     saved.value = true
     if (savedTimer) clearTimeout(savedTimer)
     savedTimer = setTimeout(() => { saved.value = false }, 2500)
@@ -542,7 +529,7 @@ function undoLast() {
   if (!routeStore.waypoints.value.length) return
   routeStore.waypoints.value = routeStore.waypoints.value.slice(0, -1)
   mapRef.value?.refreshWaypointMarkers()
-  recomputeRoute({ autoSave: true })
+  recomputeRoute()
 }
 
 function clearAll() {
@@ -550,7 +537,7 @@ function clearAll() {
   if (!window.confirm(t('routes.clear_confirm'))) return
   routeStore.waypoints.value = []
   mapRef.value?.refreshWaypointMarkers()
-  recomputeRoute({ autoSave: true })
+  recomputeRoute()
 }
 
 // ─── Stats events ─────────────────────────────────────────────────────────────
@@ -980,13 +967,18 @@ function applyPendingGpxImport() {
     mapRef.value?.refreshWaypointMarkers()
     const lngs = wps.map((w: any) => w.lng), lats = wps.map((w: any) => w.lat)
     mapRef.value?.fitBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)], { padding: 60, duration: 600, maxZoom: 14 })
-    recomputeRoute({ autoSave: true })
+    recomputeRoute()
   } catch { /* stale payload */ }
 }
 
 // ─── Watchers ─────────────────────────────────────────────────────────────────
 
 watch(state, () => state.save(), { deep: true })
+
+// Toute édition des données persistées marque l'itinéraire comme non enregistré.
+watch([routeStore.waypoints, routeStore.name, routeStore.sport], () => {
+  if (trackDirty) dirty.value = true
+}, { deep: true })
 
 // Titre de l'onglet : « Itinéraire - <nom> » ; retombe sur le seul préfixe tant
 // que l'itinéraire n'a pas de nom.
@@ -1035,12 +1027,22 @@ function onWindowResize() {
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
+// Avertit avant de quitter la page (rechargement, fermeture d'onglet, navigation
+// sortante) tant que des modifications n'ont pas été enregistrées. En lecture
+// seule (lien de partage), aucune édition possible : pas d'avertissement.
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (readOnly.value || !dirty.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+
 onMounted(async () => {
   state.load()
   routeStore.reset()
   routeStore.readOnly.value = readOnly.value
   routeStore.currentId.value = props.routeId ? Number(props.routeId) : null
   window.addEventListener('resize', onWindowResize)
+  window.addEventListener('beforeunload', onBeforeUnload)
 
   // Mode lecture seule (lien de partage) : on charge l'itinéraire via le jeton
   // public, sans brancher la sauvegarde ni lire les paramètres de pré-remplissage.
@@ -1072,15 +1074,19 @@ onMounted(async () => {
   await mapRef.value?.initMap()
   if (routeStore.currentId.value) await fetchRoute(routeStore.currentId.value)
   else applyPendingGpxImport()
+  // Chargement initial terminé : on commence à suivre les modifications. Un
+  // import GPX en cours (applyPendingGpxImport) reste lui marqué comme non
+  // enregistré, ses mutations de points étant vues une fois trackDirty activé.
+  trackDirty = true
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousemove', onResize); document.removeEventListener('mouseup', stopResize)
   document.removeEventListener('mousemove', onResizeH); document.removeEventListener('mouseup', stopResizeH)
   window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('beforeunload', onBeforeUnload)
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   if (savedTimer) clearTimeout(savedTimer)
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
   placesStore.reset()
   selectionStore.clear()
 })
@@ -1211,7 +1217,7 @@ onBeforeUnmount(() => {
           <RouteBuilderMap
             ref="mapRef"
             :state="state"
-            @waypoints-changed="recomputeRoute({ autoSave: true })"
+            @waypoints-changed="recomputeRoute()"
             @select-place="onSelectPlace"
             @hover-place="onHoverPlace"
             @retry-places="fetchImportantPlaces"

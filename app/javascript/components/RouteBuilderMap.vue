@@ -29,6 +29,12 @@ const emit = defineEmits<{
 
 const mapEl = useTemplateRef('mapEl')
 
+// Icône FontAwesome du sport courant (même logique que la sidebar Stats).
+function sportIcon() {
+  const s = routeStore.sport.value
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
+
 let mapInstance: any = null
 let _maplibregl: any = null
 const waypointMarkers: any[] = []
@@ -167,9 +173,13 @@ async function initMap() {
     style: mapStyleFor(props.state.mapStyleId) as any,
     center,
     zoom,
+    // On désactive l'attribution par défaut (étalée « MapLibre | swisstopo ») pour la
+    // remplacer par sa version compacte : juste une icône ⓘ qu'on déplie d'un clic.
+    attributionControl: false,
     ...({ preserveDrawingBuffer: true } as any),
   })
   mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: false, showZoom: false }), 'top-right')
+  mapInstance.addControl(new maplibregl.AttributionControl({ compact: true }))
   mapInstance.on('styleimagemissing', (e: any) => {
     mapInstance.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
@@ -1576,10 +1586,11 @@ defineExpose({
       <i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>
       <span>{{ t('routes.click_hint') }}</span>
     </div>
-    <div v-if="routeStore.isFetchingRoute.value || routeStore.isFetchingElevation.value" class="map-overlay-loading">
+    <div v-if="routeStore.isFetchingRoute.value || routeStore.isFetchingElevation.value || placesStore.isFetchingPlaces.value" class="map-overlay-loading">
       <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
       <span v-if="routeStore.isFetchingRoute.value">{{ t('routes.computing_route') }}</span>
-      <span v-else>{{ t('routes.computing_elevation') }}</span>
+      <span v-else-if="routeStore.isFetchingElevation.value">{{ t('routes.computing_elevation') }}</span>
+      <span v-else>{{ t('routes.places_loading') }}</span>
     </div>
     <!-- Échec chargement POI — affiché uniquement sur mobile, la sidebar gérant le cas sur desktop -->
     <button
@@ -1596,6 +1607,7 @@ defineExpose({
 
     <!-- Mobile stats toggle -->
     <button type="button" class="btn btn-light btn-sm shadow-sm mobile-sheet-toggle" @click="$emit('toggle-mobile-sheet')">
+      <i :class="`fa-solid ${sportIcon()} me-1`" aria-hidden="true"></i>
       <i class="fa-solid fa-chart-area me-1" aria-hidden="true"></i>
       <span v-if="routeStore.hasGeometry.value">
         {{ routeStore.distanceM.value >= 1000 ? (routeStore.distanceM.value / 1000).toFixed(2) + ' km' : Math.round(routeStore.distanceM.value) + ' m' }}
@@ -1794,6 +1806,16 @@ defineExpose({
   display: flex;
   align-items: center;
 }
+/* Sur mobile, l'indicateur de chargement (tracé / altitude / POI) passe en bas à
+   droite, clairement au-dessus de l'attribution (qui occupe ~10–34px du bas) pour
+   ne pas la recouvrir, et libérer le haut de la carte. */
+@media (max-width: 767px), (max-height: 500px) {
+  .map-overlay-loading {
+    top: auto;
+    right: 8px;
+    bottom: 15px;
+  }
+}
 .mobile-sheet-toggle {
   position: absolute;
   bottom: 14px;
@@ -1808,9 +1830,8 @@ defineExpose({
    la sidebar Stats (masquée sur mobile) gérant déjà le cas sur desktop. */
 .map-overlay-places-error {
   position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
+  bottom: 34px;
+  right: 8px;
   display: none;
   align-items: center;
   gap: 0.6rem;

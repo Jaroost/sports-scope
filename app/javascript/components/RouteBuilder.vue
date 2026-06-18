@@ -340,7 +340,9 @@ async function fetchElevation(token: number) {
     await nextTick()
     chartRef.value?.render()
   } catch (e: any) {
-    if (token === recomputeToken) routeStore.error.value = `${t('routes.error_elevation')}: ${e.message}`
+    // Sur mobile on n'affiche pas l'alerte d'échec d'altitude : elle masque la carte
+    // et le tracé reste utilisable sans le profil. On la conserve sur ordinateur.
+    if (token === recomputeToken && !isMobile.value) routeStore.error.value = `${t('routes.error_elevation')}: ${e.message}`
   } finally {
     if (token === recomputeToken) routeStore.isFetchingElevation.value = false
   }
@@ -375,6 +377,10 @@ async function fetchRoute(id: number) {
     await nextTick()
     chartRef.value?.render()
     if (routeStore.waypoints.value.length >= 2) recomputeRoute()
+    // À l'ouverture d'un itinéraire enregistré (ou au rechargement), on recherche
+    // les lieux sur la géométrie chargée — l'édition, elle, ne déclenche plus la
+    // recherche (réservée à l'enregistrement, voir save()).
+    if (routeStore.geometry.value.length >= 2) fetchImportantPlaces()
   } catch (e: any) {
     routeStore.error.value = e.message
   }
@@ -411,6 +417,9 @@ async function fetchSharedRoute(token: string) {
     mapRef.value?.updateRouteLayer()
     await nextTick()
     chartRef.value?.render()
+    // Itinéraire ouvert via un lien de partage : on recherche aussi les lieux sur
+    // la géométrie chargée.
+    if (routeStore.geometry.value.length >= 2) fetchImportantPlaces()
   } catch (e: any) {
     routeStore.error.value = e.message
   }
@@ -429,6 +438,9 @@ async function save() {
   }
   if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
   await persist()
+  // Les lieux ne sont recherchés qu'à l'enregistrement (et non à chaque édition du
+  // tracé) : on lance la requête Overpass maintenant que l'itinéraire est figé.
+  fetchImportantPlaces()
 }
 
 async function persist() {
@@ -1008,15 +1020,16 @@ watch(isMobile, async (mobile) => {
   if (mobile && !mobileSheetOpen.value) return
   await nextTick(); chartRef.value?.render()
 })
+// La recherche de lieux (Overpass) n'est plus déclenchée à chaque modification du
+// tracé : elle est lancée uniquement à l'enregistrement (voir save()). On se contente
+// ici de purger les lieux quand le tracé devient vide.
 watch(routeStore.geometry, (newGeom) => {
   if (newGeom.length < 2) {
     placesStore.token++
     placesStore.importantPlaces.value = []
     placesStore.isFetchingPlaces.value = false
     placesStore.placesFetchFailed.value = false
-    return
   }
-  fetchImportantPlaces()
 }, { deep: false })
 
 function onWindowResize() {

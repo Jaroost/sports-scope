@@ -3,6 +3,8 @@ import { ref, onMounted, nextTick } from 'vue'
 import { t } from '../i18n'
 import { speedForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
+import { buildNewRouteUrl } from '../routeHelpers'
+import NewRouteModal from './NewRouteModal.vue'
 
 const routes = ref([])
 const loading = ref(true)
@@ -166,14 +168,38 @@ async function shareRoute(route) {
   }
 }
 
+// ─── Modale « nouvel itinéraire » ─────────────────────────────────────────────
+// Partagée entre la création vierge (bouton « Nouveau ») et l'import GPX :
+// récupère le nom + le type avant d'ouvrir le créateur. Quand `pendingGpx`
+// porte des waypoints, la confirmation finalise plutôt l'import.
+const showNewRouteModal = ref(false)
+const newRouteName = ref('')
+const pendingGpx = ref<{ waypoints: unknown[] } | null>(null)
+
 function createNew() {
-  const raw = window.prompt(t('routes.name_prompt'), '')
-  if (raw == null) return // user cancelled
-  const name = raw.trim().slice(0, 80)
-  if (!name) return
-  const url = new URL(`${localePrefix}/routes/new`, window.location.origin)
-  url.searchParams.set('name', name)
-  window.location.href = url.toString()
+  pendingGpx.value = null
+  newRouteName.value = ''
+  showNewRouteModal.value = true
+}
+
+function onNewRouteConfirm({ name, sport }: { name: string; sport: Sport }) {
+  showNewRouteModal.value = false
+  if (pendingGpx.value) {
+    sessionStorage.setItem('sportsScope.gpxImport', JSON.stringify({
+      name,
+      activity: sport,
+      waypoints: pendingGpx.value.waypoints,
+    }))
+    pendingGpx.value = null
+    window.location.href = `${localePrefix}/routes/new?fromGpx=1`
+    return
+  }
+  window.location.href = buildNewRouteUrl({ name, sport })
+}
+
+function onNewRouteClose() {
+  showNewRouteModal.value = false
+  pendingGpx.value = null
 }
 
 // ─── GPX import ──────────────────────────────────────────────────────────────
@@ -219,13 +245,14 @@ async function processGpxFile(file) {
       waypoints = sampled.map((p) => ({ lng: p[0], lat: p[1] }))
     }
     const baseName = file.name.replace(/\.gpx$/i, '').trim().slice(0, 80)
-    sessionStorage.setItem('sportsScope.gpxImport', JSON.stringify({
-      name: baseName,
-      waypoints,
-    }))
-    window.location.href = `${localePrefix}/routes/new?fromGpx=1`
+    // On laisse l'utilisateur confirmer/ajuster le nom (pré-rempli avec le nom
+    // du fichier) et choisir le type avant d'ouvrir le créateur.
+    pendingGpx.value = { waypoints }
+    newRouteName.value = baseName
+    showNewRouteModal.value = true
   } catch (e) {
     error.value = `${t('routes.error_gpx_invalid')}: ${e.message}`
+  } finally {
     importingGpx.value = false
   }
 }
@@ -491,6 +518,13 @@ onMounted(() => fetchRoutes())
         </ul>
       </div>
     </div>
+
+    <NewRouteModal
+      :show="showNewRouteModal"
+      :initial-name="newRouteName"
+      @confirm="onNewRouteConfirm"
+      @close="onNewRouteClose"
+    />
   </div>
 </template>
 

@@ -2,9 +2,21 @@
 // No Vue imports — pure TypeScript.
 
 import { userPreferences } from './userPreferences'
+import type { Sport } from './userPreferences'
 
 export type Coord = [number, number, number | null]
 export type LngLat = [number, number]
+
+// URL du créateur d'itinéraire pré-renseignée avec le nom et le type choisis dans
+// la modale de création. Respecte le préfixe de langue éventuel (/en, /fr).
+export function buildNewRouteUrl({ name, sport }: { name: string; sport: Sport }): string {
+  const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
+  const localePrefix = lang ? `/${lang}` : ''
+  const url = new URL(`${localePrefix}/routes/new`, window.location.origin)
+  if (name) url.searchParams.set('name', name)
+  url.searchParams.set('activity', sport)
+  return url.toString()
+}
 
 export function haversine(a: Coord | LngLat, b: Coord | LngLat): number {
   const R = 6371000

@@ -170,6 +170,8 @@ fr:
     empty: "Aucun itinéraire pour l'instant. Crées-en un en cliquant sur « Nouvel itinéraire »."
     name_placeholder: "Nom de l'itinéraire…"
     name_prompt: "Nom du nouvel itinéraire :"
+    name_label: "Nom de l'itinéraire"
+    create: "Créer"
     click_hint: "Cliquer sur la carte pour ajouter un point"
     search_placeholder: "Rechercher un lieu (ville, adresse…)"
     undo: "Annuler"

@@ -170,6 +170,8 @@ en:
     empty: "No routes yet. Create one by clicking \"New route\"."
     name_placeholder: "Route name…"
     name_prompt: "Name of the new route:"
+    name_label: "Route name"
+    create: "Create"
     click_hint: "Click on the map to add a point"
     search_placeholder: "Search place (city, address…)"
     undo: "Undo"

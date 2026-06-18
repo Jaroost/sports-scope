@@ -927,6 +927,9 @@ function applyPendingGpxImport() {
     const wps = Array.isArray(payload?.waypoints) ? payload.waypoints : []
     if (wps.length < 2) return
     if (payload.name && !routeStore.name.value.trim()) routeStore.name.value = String(payload.name).slice(0, 80)
+    if (payload.activity === 'cycling' || payload.activity === 'mtb' || payload.activity === 'hiking') {
+      routeStore.setSport(payload.activity)
+    }
     routeStore.waypoints.value = wps
     mapRef.value?.refreshWaypointMarkers()
     const lngs = wps.map((w: any) => w.lng), lats = wps.map((w: any) => w.lat)
@@ -999,6 +1002,13 @@ onMounted(async () => {
       if (presetName) {
         routeStore.name.value = presetName.slice(0, 80)
         u.searchParams.delete('name')
+      }
+      const presetActivity = u.searchParams.get('activity')
+      if (presetActivity === 'cycling' || presetActivity === 'mtb' || presetActivity === 'hiking') {
+        routeStore.setSport(presetActivity)
+        u.searchParams.delete('activity')
+      }
+      if (presetName || presetActivity) {
         window.history.replaceState({}, '', u.toString())
       }
     } catch { /* ignore */ }

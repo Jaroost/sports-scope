@@ -170,6 +170,9 @@ async function initMap() {
       installPreviewLayer()
       mapInstance.on('click', (e: any) => {
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
+        // Un point sélectionné (tooltip ouverte) : le clic ne fait que refermer la
+        // tooltip, sans ajouter de nouveau point au trajet.
+        if (selectedWpIdx >= 0) { deselectAll(); return }
         deselectAll()
         if (selectionStore.hoverIdx.value != null) {
           insertWaypointAtGeomIdx(selectionStore.hoverIdx.value)

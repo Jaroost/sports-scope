@@ -11,6 +11,10 @@ class ProfilesController < ApplicationController
   NAV_ZOOM_RANGE = (14.0..40.0)
   NAV_PITCH_RANGE = (0..90)
   NAV_FPS_RANGE = (0.5..60.0)
+  NAV_TURN_ALERT_RANGE = (50..500)
+  NAV_TURN_HINT_RANGE = (50..500)
+  NAV_TURN_URGENT_RANGE = (5..50)
+  NAV_TURN_REPEAT_RANGE = (500..10000)
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
   ALLOWED_OVERLAYS = %w[veloland mountainbikeland wanderland wanderwege].freeze
@@ -65,6 +69,10 @@ class ProfilesController < ApplicationController
         "pitch" => clamp_int(navigation[:pitch], NAV_PITCH_RANGE, 60),
         "terrain" => to_bool(navigation[:terrain], false),
         "nav_fps" => clamp_float(navigation[:nav_fps], NAV_FPS_RANGE, 8),
+        "turn_alert_m" => clamp_int(navigation[:turn_alert_m], NAV_TURN_ALERT_RANGE, 200),
+        "turn_hint_m" => clamp_int(navigation[:turn_hint_m], NAV_TURN_HINT_RANGE, 200),
+        "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, 15),
+        "turn_repeat_ms" => clamp_int(navigation[:turn_repeat_ms], NAV_TURN_REPEAT_RANGE, 2000),
       },
       "display" => {
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),

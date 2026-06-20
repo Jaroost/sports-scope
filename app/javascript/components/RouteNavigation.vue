@@ -24,11 +24,11 @@ const OFF_ROUTE_M = 20          // lateral distance beyond which we warn
 const OFF_ROUTE_ACCURACY_CAP = 35  // most we widen the threshold by for a fuzzy GPS fix
 const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
-const TURN_ALERT_M = 200        // start announcing a turn this far ahead
-const TURN_HINT_M = 200        // show the turn indicator this far ahead
-const TURN_URGENT_M = 15       // switch turn card to orange + warning icon this close
+const TURN_ALERT_M = navPrefs.turn_alert_m
+const TURN_HINT_M = navPrefs.turn_hint_m
+const TURN_URGENT_M = navPrefs.turn_urgent_m
+const TURN_REPEAT_MS = navPrefs.turn_repeat_ms
 const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
-const TURN_REPEAT_MS = 2000    // repeat the turn cue this often until the intersection
 
 const mapEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
@@ -78,7 +78,7 @@ const climbInfo = ref<{
   gradeColor: string                         // grade-bucket colour for the badge background
   gradeText: string                          // contrasting text colour (black/white)
 } | null>(null)
-const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number } | null>(null)
+const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number; exitNumber?: number } | null>(null)
 
 let map: any = null
 let maplibre: any = null
@@ -609,7 +609,7 @@ function updateTurns(): boolean {
   const dist = turn.distM - here
 
   turnHint.value = dist <= TURN_HINT_M && dist > -5
-    ? { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle }
+    ? { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber }
     : null
 
   if (dist <= TURN_ALERT_M && dist > -5) {
@@ -871,6 +871,7 @@ function onVisibilityChange() {
         <div class="nav-turn-sleep-icons">
           <i v-if="turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
           <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
+          <span v-if="turnHint.kind === 'roundabout' && turnHint.exitNumber" class="nav-turn-sleep-exit">{{ turnHint.exitNumber }}</span>
         </div>
         <span class="nav-turn-sleep-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
         <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
@@ -904,16 +905,7 @@ function onVisibilityChange() {
       >
         <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
       </button>
-      <button
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :class="{ active: screenOff }"
-        :title="screenOff ? t('routes.screen_on') : t('routes.screen_off')"
-        :aria-label="screenOff ? t('routes.screen_on') : t('routes.screen_off')"
-        @click="toggleScreenOff"
-      >
-        <i class="fa-solid" :class="screenOff ? 'fa-eye' : 'fa-moon'" aria-hidden="true"></i>
-      </button>
+
       <div class="position-relative">
         <button
           type="button"
@@ -987,6 +979,7 @@ function onVisibilityChange() {
     <div v-if="turnHint && hasFix && !offRoute" class="nav-turn shadow" :class="{ 'nav-turn--urgent': turnHint.distM <= TURN_URGENT_M }">
       <i v-if="turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
       <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
+      <span v-if="turnHint.kind === 'roundabout' && turnHint.exitNumber" class="nav-turn-exit">{{ turnHint.exitNumber }}</span>
       <span class="nav-turn-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
       <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
     </div>
@@ -1158,6 +1151,11 @@ function onVisibilityChange() {
   border-radius: 0.75rem; font-size: 1.6rem; line-height: 1;
 }
 .nav-turn-dist { font-size: 1.1rem; font-weight: 700; }
+.nav-turn-exit {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  background: rgba(255,255,255,0.25); font-size: 0.95rem; font-weight: 700;
+}
 .nav-turn.nav-turn--urgent { background: #f97316; }
 
 .nav-climb {
@@ -1228,6 +1226,11 @@ function onVisibilityChange() {
   font-size: 3.5rem; line-height: 1;
 }
 .nav-turn-sleep-dist { font-size: 2.25rem; font-weight: 700; line-height: 1; }
+.nav-turn-sleep-exit {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.5rem; height: 2.5rem; border-radius: 50%;
+  background: rgba(255,255,255,0.25); font-size: 1.6rem; font-weight: 700;
+}
 .nav-turn-sleep.nav-turn-sleep--urgent { background: #f97316; }
 </style>
 

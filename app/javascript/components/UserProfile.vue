@@ -25,6 +25,10 @@ interface Preferences {
     pitch: number
     terrain: boolean
     nav_fps: number
+    turn_alert_m: number
+    turn_hint_m: number
+    turn_urgent_m: number
+    turn_repeat_ms: number
   }
   display: {
     default_sport: string
@@ -323,6 +327,36 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.nav_fps') }} : <strong>{{ prefs.navigation.nav_fps }} fps</strong>
             </label>
             <input id="nav-fps" v-model.number="prefs.navigation.nav_fps" type="range" class="form-range" min="0.5" max="60" step="0.5">
+          </div>
+        </div>
+        <hr class="my-3">
+        <h3 class="h6 text-muted text-uppercase small fw-semibold mb-3">
+          <i class="fa-solid fa-turn-right me-1" aria-hidden="true"></i>{{ t('profile.navigation.turns_title') }}
+        </h3>
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label for="nav-turn-alert" class="form-label mb-1">
+              {{ t('profile.navigation.turn_alert_m') }} : <strong>{{ prefs.navigation.turn_alert_m }} m</strong>
+            </label>
+            <input id="nav-turn-alert" v-model.number="prefs.navigation.turn_alert_m" type="range" class="form-range" min="50" max="500" step="10">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-hint" class="form-label mb-1">
+              {{ t('profile.navigation.turn_hint_m') }} : <strong>{{ prefs.navigation.turn_hint_m }} m</strong>
+            </label>
+            <input id="nav-turn-hint" v-model.number="prefs.navigation.turn_hint_m" type="range" class="form-range" min="50" max="500" step="10">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-urgent" class="form-label mb-1">
+              {{ t('profile.navigation.turn_urgent_m') }} : <strong>{{ prefs.navigation.turn_urgent_m }} m</strong>
+            </label>
+            <input id="nav-turn-urgent" v-model.number="prefs.navigation.turn_urgent_m" type="range" class="form-range" min="5" max="50" step="1">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-repeat" class="form-label mb-1">
+              {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (prefs.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
+            </label>
+            <input id="nav-turn-repeat" v-model.number="prefs.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500">
           </div>
         </div>
 

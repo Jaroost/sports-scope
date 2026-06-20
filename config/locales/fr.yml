@@ -234,6 +234,8 @@ fr:
     camera_zoom: "Zoom"
     camera_pitch: "Inclinaison"
     camera_3d: "Relief 3D"
+    camera_lock: "Verrouiller la caméra"
+    camera_unlock: "Déverrouiller la caméra"
     turn_left: "Tourner à gauche"
     turn_right: "Tourner à droite"
     climb_in_progress: "Col en cours"

@@ -104,6 +104,18 @@ async function save() {
 // actuelle (repli sur la Suisse si la géoloc échoue ou est refusée).
 const SWITZERLAND_CENTER: [number, number] = [8.23, 46.8]
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+// Même inset haut que la caméra de navigation (cf. RouteNavigation.followPadding) :
+// ancre le coureur dans le tiers inférieur pour que le cadrage — donc le ressenti du
+// zoom et de l'inclinaison — corresponde à ce que l'écran affichera réellement.
+const PREVIEW_TOP_PAD_RATIO = 0.45
+
+// Reporte sur l'aperçu le padding caméra de la navigation. Recalculé sur 'resize'
+// (la preview a un ratio fixe façon téléphone, donc sa hauteur varie avec la largeur).
+function applyPreviewPadding() {
+  if (!previewMap) return
+  const h = previewMap.getContainer()?.clientHeight || 0
+  previewMap.setPadding({ top: Math.round(h * PREVIEW_TOP_PAD_RATIO), bottom: 0, left: 0, right: 0 })
+}
 
 // Active/désactive le relief 3D sur l'aperçu (idempotente : aussi après un setStyle).
 function applyPreviewTerrain() {
@@ -149,7 +161,8 @@ async function initPreview() {
   previewMap.on('styleimagemissing', (e: any) => {
     previewMap.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
-  previewMap.on('load', applyPreviewTerrain)
+  previewMap.on('load', () => { applyPreviewTerrain(); applyPreviewPadding() })
+  previewMap.on('resize', applyPreviewPadding)
 
   // Réagit en direct aux réglages : le zoom, l'inclinaison et le relief s'appliquent
   // à chaud, le changement de style recharge le fond (et replace le marqueur + relief).
@@ -477,10 +490,15 @@ function placePreviewMarker(coords: [number, number]) {
   background: var(--bs-body-bg);
 }
 
+/* Cadre façon téléphone en portrait : même proportions que l'écran de navigation,
+   pour que le réglage du zoom/inclinaison soit représentatif du rendu réel. */
 .nav-preview {
   position: relative;
-  height: 260px;
-  border-radius: 0.5rem;
+  width: 100%;
+  max-width: 240px;
+  margin-inline: auto;
+  aspect-ratio: 9 / 18;
+  border-radius: 1.25rem;
   overflow: hidden;
   border: 1px solid var(--bs-border-color);
 }

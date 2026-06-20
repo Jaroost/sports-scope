@@ -234,6 +234,8 @@ en:
     camera_zoom: "Zoom"
     camera_pitch: "Tilt"
     camera_3d: "3D terrain"
+    camera_lock: "Lock camera"
+    camera_unlock: "Unlock camera"
     turn_left: "Turn left"
     turn_right: "Turn right"
     climb_in_progress: "Climb in progress"

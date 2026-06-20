@@ -34,6 +34,10 @@ const error = ref<string | null>(null)
 const gpsError = ref<string | null>(null)
 const hasFix = ref(false)
 const following = ref(true)
+// Set when the rider deliberately unlocks the camera with the lock button (to pan
+// around and study the map). Unlike a transient drag, this suppresses the
+// automatic snap-back on turn approach so the view stays where they left it.
+const cameraUnlocked = ref(false)
 const soundOn = ref(loadSound())
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
 // on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
@@ -97,6 +101,11 @@ let lastPos: LngLat | null = null
 let currentBearing = 0
 let lastFixTime = 0
 let hasInitialZoom = false
+// True during the first-fix intro easeTo (which applies the profile zoom). While
+// it's running we must NOT start the rAF loop: a jumpTo would interrupt the
+// animation and freeze the zoom at the overview value, so the profile zoom would
+// never take effect until the rider nudges the zoom slider.
+let introPending = false
 let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
 let announcedTurn = -1       // index of the last turn we played a cue for
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
@@ -133,9 +142,9 @@ function toggleSound() {
 
 // ─── Camera controls ──────────────────────────────────────────────────────────
 // Les curseurs ajustent la vue en direct (@input) puis reportent le réglage sur le
-// profil au relâchement (@change). L'inclinaison est appliquée à chaque frame par
-// la boucle (qui lit camPitch) ; on la pousse aussi via setPitch pour le cas hors
-// suivi. Le zoom n'est pas réécrit par la boucle, donc setZoom suffit et persiste.
+// profil au relâchement (@change). Inclinaison et zoom sont réappliqués à chaque
+// frame par la boucle (qui lit camPitch / camZoom) ; on les pousse aussi via
+// setPitch/setZoom pour que le changement soit visible immédiatement hors suivi.
 
 function onPitchInput() {
   if (map) map.setPitch(camPitch.value)
@@ -247,14 +256,19 @@ async function initMap() {
   map.on('styleimagemissing', (e: any) => {
     map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
-  // The user took manual control of the map → stop auto-following. Guard on
-  // `originalEvent`: our own follow animations change the bearing and fire
-  // `rotatestart` programmatically (no originalEvent), and must NOT disable it —
-  // that bug forced the rider to keep tapping "recenter".
-  map.on('dragstart', (e: any) => { if (e.originalEvent) following.value = false })
-  map.on('rotatestart', (e: any) => { if (e.originalEvent) following.value = false })
-  // Garde le curseur de zoom du panneau caméra aligné sur un pinch manuel.
-  map.on('zoom', (e: any) => { if (e.originalEvent) camZoom.value = Math.round(map.getZoom() * 2) / 2 })
+  // The user took manual control of the map → stop auto-following AND treat it as
+  // a deliberate unlock (so the view won't snap back on the next turn) — moving the
+  // map by hand means they want to study it. Guard on `originalEvent`: our own
+  // follow animations change the bearing and fire `rotatestart` programmatically
+  // (no originalEvent), and must NOT disable it — that bug forced the rider to keep
+  // tapping "recenter".
+  const onManualMove = (e: any) => { if (e.originalEvent) { following.value = false; cameraUnlocked.value = true } }
+  map.on('dragstart', onManualMove)
+  map.on('rotatestart', onManualMove)
+  // Garde camZoom (et donc le curseur du panneau caméra) aligné sur un pinch
+  // manuel. Pas d'arrondi : la boucle réapplique camZoom à chaque frame, donc une
+  // valeur arrondie ferait « sauter » le zoom au pas de 0,5 pendant le pinch.
+  map.on('zoom', (e: any) => { if (e.originalEvent) camZoom.value = map.getZoom() })
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
@@ -348,8 +362,9 @@ function onPosition(pos: GeolocationPosition) {
   const turnApproaching = updateTurns()
   handleOffRouteSound(wasOffRoute)
 
-  // Snap the 3D view back over the rider as they reach an intersection.
-  if (turnApproaching && !following.value) following.value = true
+  // Snap the 3D view back over the rider as they reach an intersection — unless
+  // they've deliberately unlocked the camera to study the map.
+  if (turnApproaching && !following.value && !cameraUnlocked.value) following.value = true
 
   if (!hasInitialZoom) {
     // First fix: a smooth intro that also applies the profile zoom & pitch once,
@@ -357,8 +372,9 @@ function onPosition(pos: GeolocationPosition) {
     updateLocationMarker(here)
     if (locationMarker) locationMarker.setRotation(currentBearing)
     displayBearing = currentBearing
+    introPending = true
     map.easeTo(followOptions(here))
-    map.once('moveend', startAnimation)
+    map.once('moveend', () => { introPending = false; startAnimation() })
   } else {
     startAnimation()
   }
@@ -366,9 +382,9 @@ function onPosition(pos: GeolocationPosition) {
 
 // Camera framing used whenever we follow the rider. The rider is anchored in the
 // lower third of the screen (via padding) so the look-ahead distance stays
-// constant frame to frame; the tilt comes from the profile, and the zoom (also
-// from the profile) is only applied once, on the first fix, so following never
-// fights a manual pinch-zoom afterwards.
+// constant frame to frame; the tilt and zoom come from the profile. The render
+// loop re-applies camZoom every frame, and a manual pinch writes its result back
+// into camZoom, so following tracks the pinch instead of fighting it.
 function followOptions(center: LngLat): any {
   const h = map?.getContainer()?.clientHeight || 0
   const opts: any = {
@@ -408,7 +424,7 @@ function moveLngLat([lng, lat]: LngLat, bearingDeg: number, distM: number): LngL
 // heading. The camera is jumped (not animated) each frame — smoothness now comes
 // from the extrapolation, so a per-fix easeTo would only fight it and lag.
 function startAnimation() {
-  if (rafId != null || !map) return
+  if (rafId != null || !map || introPending) return
   const tick = () => {
     rafId = requestAnimationFrame(tick)
     if (!anchorPos) return
@@ -425,7 +441,7 @@ function startAnimation() {
     if (following.value) {
       const h = map.getContainer()?.clientHeight || 0
       displayBottomPad += (bottomPadTarget(h) - displayBottomPad) * PAD_SMOOTH
-      map.jumpTo({ center: pos, bearing: displayBearing, pitch: camPitch.value, padding: followPadding(h) })
+      map.jumpTo({ center: pos, bearing: displayBearing, zoom: camZoom.value, pitch: camPitch.value, padding: followPadding(h) })
     }
   }
   rafId = requestAnimationFrame(tick)
@@ -627,8 +643,21 @@ function updateLocationMarker(coords: LngLat) {
   }
 }
 
+// Lock button: unlock the camera for free panning/zooming/rotating, or re-lock
+// (and recenter) if already unlocked. An explicit unlock keeps the view fixed
+// even through turns, so the rider can study the map ahead at their own pace.
+function toggleFollow() {
+  if (following.value) {
+    following.value = false
+    cameraUnlocked.value = true
+  } else {
+    recenter()
+  }
+}
+
 function recenter() {
   following.value = true
+  cameraUnlocked.value = false
   if (!lastPos) return
   // Pause the loop so it doesn't jump-cancel the glide back; keep the rider's
   // current zoom — only re-center, re-orient and restore the 3D tilt — then
@@ -736,6 +765,17 @@ function onVisibilityChange() {
     </div>
     <div class="nav-top-right">
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
+      <button
+        v-if="hasFix"
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :class="{ active: cameraUnlocked }"
+        :title="following ? t('routes.camera_unlock') : t('routes.camera_lock')"
+        :aria-label="following ? t('routes.camera_unlock') : t('routes.camera_lock')"
+        @click="toggleFollow"
+      >
+        <i class="fa-solid" :class="following ? 'fa-lock' : 'fa-lock-open'" aria-hidden="true"></i>
+      </button>
     </div>
 
     <!-- Instantaneous speed -->
@@ -860,7 +900,10 @@ function onVisibilityChange() {
 }
 
 .nav-top-left { position: absolute; top: 0.75rem; left: 0.75rem; z-index: 4; }
-.nav-top-right { position: absolute; top: 0.75rem; right: 0.75rem; z-index: 4; }
+.nav-top-right {
+  position: absolute; top: 0.75rem; right: 0.75rem; z-index: 4;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;
+}
 
 /* Small camera-settings popover anchored under its toggle button. */
 .nav-cam-panel {

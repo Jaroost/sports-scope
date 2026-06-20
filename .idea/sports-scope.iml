@@ -25,6 +25,7 @@
       <excludeFolder url="file://$MODULE_DIR$/tmp" />
       <excludeFolder url="file://$MODULE_DIR$/vendor/bundle" />
       <excludeFolder url="file://$MODULE_DIR$/vendor/cache" />
+      <excludeFolder url="file://$MODULE_DIR$/public/vite/assets" />
     </content>
     <orderEntry type="jdk" jdkName="Remote: ruby-3.3.11-p205" jdkType="RUBY_SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

@@ -24,9 +24,10 @@ const OFF_ROUTE_M = 20          // lateral distance beyond which we warn
 const OFF_ROUTE_ACCURACY_CAP = 35  // most we widen the threshold by for a fuzzy GPS fix
 const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
-const TURN_ALERT_M = 60        // start announcing a turn this far ahead
+const TURN_ALERT_M = 200        // start announcing a turn this far ahead
 const TURN_HINT_M = 200        // show the turn indicator this far ahead
 const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
+const TURN_REPEAT_MS = 2000    // repeat the turn cue this often until the intersection
 
 const mapEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
@@ -108,6 +109,7 @@ let hasInitialZoom = false
 let introPending = false
 let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
 let announcedTurn = -1       // index of the last turn we played a cue for
+let lastTurnReminderMs = 0   // timestamp of the last repeated turn cue
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 
 // ─── Position extrapolation (dead-reckoning between GPS fixes) ────────────────
@@ -525,10 +527,17 @@ function updateTurns(): boolean {
     ? { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle }
     : null
 
-  if (dist <= TURN_ALERT_M && dist > -5 && announcedTurn !== nextTurnPtr) {
-    announcedTurn = nextTurnPtr
-    if (soundOn.value) playManeuver(turn.kind, turn.direction)
-    return true
+  if (dist <= TURN_ALERT_M && dist > -5) {
+    const now = Date.now()
+    if (announcedTurn !== nextTurnPtr) {
+      announcedTurn = nextTurnPtr
+      lastTurnReminderMs = now
+      if (soundOn.value) playManeuver(turn.kind, turn.direction)
+      return true
+    } else if (soundOn.value && now - lastTurnReminderMs >= TURN_REPEAT_MS) {
+      lastTurnReminderMs = now
+      playManeuver(turn.kind, turn.direction)
+    }
   }
   return false
 }

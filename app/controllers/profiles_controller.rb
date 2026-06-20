@@ -64,7 +64,7 @@ class ProfilesController < ApplicationController
         "overlays" => sanitize_overlays(map[:overlays]),
       },
       "navigation" => {
-        "default_style" => allowed(navigation[:default_style], ALLOWED_MAP_STYLES, "cyclosm"),
+        "default_style" => allowed(navigation[:default_style], ALLOWED_MAP_STYLES, "swissgrau"),
         "zoom" => clamp_float(navigation[:zoom], NAV_ZOOM_RANGE, 19.5),
         "pitch" => clamp_int(navigation[:pitch], NAV_PITCH_RANGE, 60),
         "terrain" => to_bool(navigation[:terrain], false),

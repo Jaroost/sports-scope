@@ -36,9 +36,9 @@ const error = ref<string | null>(null)
 const gpsError = ref<string | null>(null)
 const hasFix = ref(false)
 const following = ref(true)
-// Set when the rider deliberately unlocks the camera with the lock button (to pan
-// around and study the map). Unlike a transient drag, this suppresses the
-// automatic snap-back on turn approach so the view stays where they left it.
+// Set when the rider pans/zooms/rotates the map by hand (to study it). This
+// suppresses the automatic snap-back on turn approach so the view stays where
+// they left it; tapping "recenter" clears it and resumes following.
 const cameraUnlocked = ref(false)
 const soundOn = ref(loadSound())
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
@@ -796,18 +796,6 @@ function updateLocationMarker(coords: LngLat) {
   }
 }
 
-// Lock button: unlock the camera for free panning/zooming/rotating, or re-lock
-// (and recenter) if already unlocked. An explicit unlock keeps the view fixed
-// even through turns, so the rider can study the map ahead at their own pace.
-function toggleFollow() {
-  if (following.value) {
-    following.value = false
-    cameraUnlocked.value = true
-  } else {
-    recenter()
-  }
-}
-
 function recenter() {
   following.value = true
   cameraUnlocked.value = false
@@ -956,17 +944,6 @@ function onVisibilityChange() {
           </label>
         </div>
       </div>
-      <button
-        v-if="hasFix"
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :class="{ active: cameraUnlocked }"
-        :title="following ? t('routes.camera_unlock') : t('routes.camera_lock')"
-        :aria-label="following ? t('routes.camera_unlock') : t('routes.camera_lock')"
-        @click="toggleFollow"
-      >
-        <i class="fa-solid" :class="following ? 'fa-lock' : 'fa-lock-open'" aria-hidden="true"></i>
-      </button>
     </div>
 
     <!-- Instantaneous speed -->
@@ -1095,7 +1072,18 @@ function onVisibilityChange() {
 .nav-top-left { position: absolute; top: 0.75rem; left: 0.75rem; z-index: 4; }
 .nav-top-right {
   position: absolute; top: 0.75rem; right: 0.75rem; z-index: 4;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 0.6rem;
+}
+
+/* Larger touch targets: these controls are tapped one-handed on a phone while
+   riding. Min dimensions keep the icon-only buttons a comfortable ~3.25rem
+   square while the map-style dropdown (which carries a text label on desktop)
+   can still grow past it. */
+.nav-top-left :deep(.btn),
+.nav-top-right :deep(.btn) {
+  min-width: 3.25rem; min-height: 3.25rem; padding: 0.5rem 0.75rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 1.35rem; border-radius: 0.7rem;
 }
 
 /* Small camera-settings popover anchored under its toggle button. The toggle now
@@ -1103,16 +1091,20 @@ function onVisibilityChange() {
    keep it from overflowing off the right side of the screen. */
 .nav-cam-panel {
   position: absolute; top: calc(100% + 0.4rem); right: 0; left: auto;
-  z-index: 5; width: 14rem;
-  background: #fff; border-radius: 0.6rem; padding: 0.6rem 0.75rem;
+  z-index: 5; width: 18rem;
+  background: #fff; border-radius: 0.7rem; padding: 0.9rem 1rem;
 }
 .nav-cam-row {
-  display: flex; align-items: center; gap: 0.5rem; margin: 0;
+  display: flex; align-items: center; gap: 0.65rem; margin: 0;
 }
-.nav-cam-row + .nav-cam-row { margin-top: 0.45rem; }
-.nav-cam-label { font-size: 0.78rem; font-weight: 600; color: #495057; width: 4.5rem; }
-.nav-cam-row .form-range { flex: 1; margin: 0; }
-.nav-cam-val { font-size: 0.78rem; font-weight: 700; width: 2.6rem; text-align: right; }
+.nav-cam-row + .nav-cam-row { margin-top: 0.85rem; }
+.nav-cam-label { font-size: 0.95rem; font-weight: 600; color: #495057; width: 5.5rem; }
+.nav-cam-row .form-range { flex: 1; margin: 0; height: 1.6rem; }
+.nav-cam-val { font-size: 0.95rem; font-weight: 700; width: 3rem; text-align: right; }
+/* Bigger thumb so the sliders are easy to drag with a thumb on the road. */
+.nav-cam-row .form-range::-webkit-slider-thumb { width: 1.5rem; height: 1.5rem; }
+.nav-cam-row .form-range::-moz-range-thumb { width: 1.5rem; height: 1.5rem; }
+.nav-cam-row--switch .form-check-input { width: 3rem; height: 1.5rem; }
 
 .nav-banner {
   position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
@@ -1133,6 +1125,7 @@ function onVisibilityChange() {
 .nav-recenter {
   position: absolute; bottom: 8.5rem; right: 0.75rem; z-index: 4;
   border-radius: 999px; font-weight: 600;
+  font-size: 1.1rem; padding: 0.6rem 1.1rem;
 }
 
 .nav-speed {

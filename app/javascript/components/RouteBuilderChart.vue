@@ -534,13 +534,25 @@ function attachInteractionOnce(canvas: HTMLCanvasElement) {
       const km1 = xScale.getValueForPixel(Math.min(startPx, finalX))
       const km2 = xScale.getValueForPixel(Math.max(startPx, finalX))
       chartDrag = null
-      selectionStore.selectionRange.value = dragged ? { startKm: km1, endKm: km2 } : null
-      selectionStore.selectionPinned.value = dragged
-      chartInstance.update('none')
-      if (dragged) emit('fit-to-selection')
-      else {
-        const pt = routeStore.geometry.value[geomIdxForKm(km1, selectionStore.cumDistKm)]
-        if (pt) emit('zoom-to', pt[0], pt[1])
+      if (dragged) {
+        selectionStore.selectionRange.value = { startKm: km1, endKm: km2 }
+        selectionStore.selectionPinned.value = true
+        chartInstance.update('none')
+        emit('fit-to-selection')
+      } else {
+        const col = routeStore.detectedClimbs.value.find((c) => km1 >= c.startKm && km1 <= c.endKm)
+        if (col) {
+          selectionStore.selectionRange.value = { startKm: col.startKm, endKm: col.endKm }
+          selectionStore.selectionPinned.value = true
+          chartInstance.update('none')
+          emit('fit-to-selection')
+        } else {
+          selectionStore.selectionRange.value = null
+          selectionStore.selectionPinned.value = false
+          chartInstance.update('none')
+          const pt = routeStore.geometry.value[geomIdxForKm(km1, selectionStore.cumDistKm)]
+          if (pt) emit('zoom-to', pt[0], pt[1])
+        }
       }
     }
     window.addEventListener('mousemove', onMove)

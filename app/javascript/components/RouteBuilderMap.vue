@@ -199,6 +199,13 @@ async function initMap() {
         // Un point sélectionné (tooltip ouverte) : le clic ne fait que refermer la
         // tooltip, sans ajouter de nouveau point au trajet.
         if (selectedWpIdx >= 0) { deselectAll(); return }
+        // Col épinglé : le clic désélectionne sans ajouter de point au trajet.
+        if (selectionStore.selectionPinned.value) {
+          selectionStore.selectionRange.value = null
+          selectionStore.selectionPinned.value = false
+          updateSelectionLayer()
+          return
+        }
         deselectAll()
         if (selectionStore.hoverIdx.value != null) {
           insertWaypointAtGeomIdx(selectionStore.hoverIdx.value)
@@ -291,6 +298,16 @@ function updateRouteLayer() {
   const baseSrc = mapInstance.getSource('builder-route')
   if (baseSrc) {
     baseSrc.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: routeStore.geometry.value.map(([lng, lat]) => [lng, lat]) } })
+  }
+  // Tient selectionStore.cumDistKm à jour même quand le chart n'est pas monté (mobile).
+  const geom = routeStore.geometry.value
+  if (geom.length >= 2) {
+    const cumDistKm = [0]
+    let d = 0
+    for (let i = 1; i < geom.length; i++) { d += haversine(geom[i - 1], geom[i]); cumDistKm.push(d / 1000) }
+    selectionStore.cumDistKm = cumDistKm
+  } else {
+    selectionStore.cumDistKm = []
   }
   applyColorMode()
 }

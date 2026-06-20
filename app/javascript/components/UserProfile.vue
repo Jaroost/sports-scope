@@ -24,6 +24,7 @@ interface Preferences {
     zoom: number
     pitch: number
     terrain: boolean
+    nav_fps: number
   }
   display: {
     default_sport: string
@@ -316,6 +317,12 @@ function placePreviewMarker(coords: [number, number]) {
               <input id="nav-terrain" v-model="prefs.navigation.terrain" class="form-check-input" type="checkbox" role="switch">
               <label for="nav-terrain" class="form-check-label">{{ t('profile.navigation.terrain') }}</label>
             </div>
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-fps" class="form-label mb-1">
+              {{ t('profile.navigation.nav_fps') }} : <strong>{{ prefs.navigation.nav_fps }} fps</strong>
+            </label>
+            <input id="nav-fps" v-model.number="prefs.navigation.nav_fps" type="range" class="form-range" min="0.5" max="60" step="0.5">
           </div>
         </div>
 

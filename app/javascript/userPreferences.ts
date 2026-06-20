@@ -18,7 +18,7 @@ export interface UserPreferences {
     radius_m: number
   }
   map: { default_style: MapStyleId; overlays: string[] }
-  navigation: { default_style: MapStyleId; zoom: number; pitch: number; terrain: boolean }
+  navigation: { default_style: MapStyleId; zoom: number; pitch: number; terrain: boolean; nav_fps: number }
   display: {
     default_sport: Sport
     show_grade_colors: boolean
@@ -41,7 +41,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     radius_m: 1500,
   },
   map: { default_style: 'cyclosm', overlays: [] },
-  navigation: { default_style: 'liberty', zoom: 19.5, pitch: 60, terrain: false },
+  navigation: { default_style: 'liberty', zoom: 19.5, pitch: 60, terrain: false, nav_fps: 8 },
   display: {
     default_sport: 'cycling',
     show_grade_colors: true,

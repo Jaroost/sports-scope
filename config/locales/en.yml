@@ -356,6 +356,7 @@ en:
       zoom: "Camera zoom"
       pitch: "Camera tilt"
       terrain: "3D terrain relief"
+      nav_fps: "Camera smoothness"
       preview: "Preview"
       preview_help: "Live preview centred on your current location."
       locating: "Locating…"

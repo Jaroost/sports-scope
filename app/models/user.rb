@@ -20,6 +20,7 @@ class User < ApplicationRecord
       "zoom" => 19.5,      # zoom de la caméra de suivi
       "pitch" => 60,       # inclinaison 3D (0 = vue du dessus, 70 = très rasante)
       "terrain" => false,  # relief 3D (terrain MNT) sous le tracé
+      "nav_fps" => 8,      # fréquence de la boucle d'animation (0.5–60 fps)
     },
     "display" => {
       "default_sport" => "cycling",   # cycling | mtb | hiking

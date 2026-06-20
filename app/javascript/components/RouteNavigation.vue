@@ -132,11 +132,12 @@ let displayBottomPad = 0               // smoothed bottom padding actually rende
 
 // Économie de batterie : la boucle d'animation s'auto-termine dès que tout est
 // stabilisé (immobile / cap convergé / padding réglé) et se relance au prochain fix.
-// On la plafonne aussi à ~30 fps et on met la hauteur du conteneur en cache pour
-// éviter un reflow par frame.
+// On la plafonne au FPS configuré dans le profil et on met la hauteur du conteneur
+// en cache pour éviter un reflow par frame.
 const BEARING_EPS = 0.1                // ° — en dessous, le cap est « convergé »
 const PAD_EPS = 0.5                    // px — en dessous, le padding est « stabilisé »
-const FRAME_MIN_MS = 120               // plafond ~30 fps dans la boucle rAF
+// Intervalle minimum entre deux frames, calculé depuis la préférence nav_fps (0,5–60 fps).
+const FRAME_MIN_MS = Math.round(1000 / (navPrefs.nav_fps ?? 8))
 let containerH = 0                     // hauteur du conteneur carte, rafraîchie au resize
 let lastTickT = 0                      // performance.now() de la dernière frame rendue
 
@@ -457,7 +458,7 @@ function moveLngLat([lng, lat]: LngLat, bearingDeg: number, distM: number): LngL
 function startAnimation() {
   if (rafId != null || !map || introPending) return
   const tick = () => {
-    // Plafond ~30 fps : une frame trop rapprochée se contente de se reprogrammer.
+    // Plafond FPS : une frame trop rapprochée se contente de se reprogrammer.
     // Elle ne doit JAMAIS terminer la boucle (on n'a pas calculé `idle` sans le corps).
     const now = performance.now()
     if (now - lastTickT < FRAME_MIN_MS) { rafId = requestAnimationFrame(tick); return }

@@ -356,6 +356,7 @@ fr:
       zoom: "Zoom de la caméra"
       pitch: "Inclinaison de la caméra"
       terrain: "Relief 3D du terrain"
+      nav_fps: "Fluidité de la caméra"
       preview: "Aperçu"
       preview_help: "Aperçu en direct centré sur votre position actuelle."
       locating: "Localisation en cours…"

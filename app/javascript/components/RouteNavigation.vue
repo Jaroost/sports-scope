@@ -130,6 +130,16 @@ const CLIMB_LIFT_RATIO = 0.33          // extra bottom padding (× height) while
 const PAD_SMOOTH = 0.12                // per-frame easing toward the target padding
 let displayBottomPad = 0               // smoothed bottom padding actually rendered
 
+// Économie de batterie : la boucle d'animation s'auto-termine dès que tout est
+// stabilisé (immobile / cap convergé / padding réglé) et se relance au prochain fix.
+// On la plafonne aussi à ~30 fps et on met la hauteur du conteneur en cache pour
+// éviter un reflow par frame.
+const BEARING_EPS = 0.1                // ° — en dessous, le cap est « convergé »
+const PAD_EPS = 0.5                    // px — en dessous, le padding est « stabilisé »
+const FRAME_MIN_MS = 33               // plafond ~30 fps dans la boucle rAF
+let containerH = 0                     // hauteur du conteneur carte, rafraîchie au resize
+let lastTickT = 0                      // performance.now() de la dernière frame rendue
+
 const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
 function loadSound(): boolean {
@@ -206,6 +216,7 @@ onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   stopAnimation()
   window.removeEventListener('pointerdown', onFirstGesture)
+  window.removeEventListener('resize', refreshContainerH)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   releaseWakeLock()
   if (map) { map.remove(); map = null }
@@ -241,6 +252,8 @@ async function fetchRoute() {
 
 // ─── Map ──────────────────────────────────────────────────────────────────────
 
+function refreshContainerH() { containerH = map?.getContainer()?.clientHeight || 0 }
+
 async function initMap() {
   maplibre = (await import('maplibre-gl')).default
   await import('maplibre-gl/dist/maplibre-gl.css')
@@ -258,6 +271,12 @@ async function initMap() {
   map.on('styleimagemissing', (e: any) => {
     map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
+  // Met la hauteur du conteneur en cache : la boucle la lisait chaque frame via
+  // clientHeight, ce qui force un reflow de layout synchrone. On ne la rafraîchit
+  // qu'au redimensionnement (carte et fenêtre).
+  map.on('resize', refreshContainerH)
+  map.on('load', refreshContainerH)
+  window.addEventListener('resize', refreshContainerH)
   // The user took manual control of the map → stop auto-following AND treat it as
   // a deliberate unlock (so the view won't snap back on the next turn) — moving the
   // map by hand means they want to study it. Guard on `originalEvent`: our own
@@ -318,7 +337,10 @@ function startTracking() {
   watchId = navigator.geolocation.watchPosition(
     onPosition,
     () => { gpsError.value = t('routes.gps_error') },
-    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
+    // maximumAge 1 s : autorise la réutilisation d'un point récent au lieu d'imposer
+    // un calcul GNSS frais à chaque rappel. Le dead-reckoning (MAX_EXTRAP_S) masque la
+    // latence ; les fixes arrivent déjà à ~1 Hz, donc le débit effectif est préservé.
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 },
   )
 }
 
@@ -394,7 +416,7 @@ function onPosition(pos: GeolocationPosition) {
 // loop re-applies camZoom every frame, and a manual pinch writes its result back
 // into camZoom, so following tracks the pinch instead of fighting it.
 function followOptions(center: LngLat): any {
-  const h = map?.getContainer()?.clientHeight || 0
+  const h = containerH || map?.getContainer()?.clientHeight || 0
   const opts: any = {
     center,
     bearing: currentBearing,
@@ -434,9 +456,13 @@ function moveLngLat([lng, lat]: LngLat, bearingDeg: number, distM: number): LngL
 function startAnimation() {
   if (rafId != null || !map || introPending) return
   const tick = () => {
-    rafId = requestAnimationFrame(tick)
-    if (!anchorPos) return
-    const dt = Math.min((performance.now() - anchorTime) / 1000, MAX_EXTRAP_S)
+    // Plafond ~30 fps : une frame trop rapprochée se contente de se reprogrammer.
+    // Elle ne doit JAMAIS terminer la boucle (on n'a pas calculé `idle` sans le corps).
+    const now = performance.now()
+    if (now - lastTickT < FRAME_MIN_MS) { rafId = requestAnimationFrame(tick); return }
+    lastTickT = now
+    if (!anchorPos) { rafId = requestAnimationFrame(tick); return }
+    const dt = Math.min((now - anchorTime) / 1000, MAX_EXTRAP_S)
     let pos = anchorPos
     if (extrapSpeedMs > MIN_SPEED_MS) {
       // Sur le tracé : avancer la distance le long de la polyligne (la flèche reste
@@ -448,15 +474,33 @@ function startAnimation() {
     let d = extrapBearing - displayBearing
     while (d > 180) d -= 360
     while (d < -180) d += 360
-    displayBearing += d * BEARING_SMOOTH
+
+    // Économie de batterie : on arrête la boucle dès que ses trois sorties ont atteint
+    // leur valeur finale — position (immobile ou extrapolation plafonnée), cap convergé,
+    // et padding stabilisé (ou non appliqué hors suivi). Le prochain fix GPS rappelle
+    // startAnimation() et relance la boucle (garde rafId != null).
+    const posSettled = extrapSpeedMs <= MIN_SPEED_MS || dt >= MAX_EXTRAP_S
+    const bearingSettled = Math.abs(d) < BEARING_EPS
+    const h = containerH
+    const padSettled = !following.value
+      || Math.abs(bottomPadTarget(h) - displayBottomPad) < PAD_EPS
+    const idle = posSettled && bearingSettled && padSettled
+
+    // Sur la frame terminale on fige exactement sur la cible (l'easing n'y arrive jamais).
+    displayBearing = idle ? extrapBearing : displayBearing + d * BEARING_SMOOTH
     updateLocationMarker(pos)
     if (locationMarker) locationMarker.setRotation(displayBearing)
     if (following.value) {
-      const h = map.getContainer()?.clientHeight || 0
-      displayBottomPad += (bottomPadTarget(h) - displayBottomPad) * PAD_SMOOTH
+      displayBottomPad = idle
+        ? bottomPadTarget(h)
+        : displayBottomPad + (bottomPadTarget(h) - displayBottomPad) * PAD_SMOOTH
       map.jumpTo({ center: pos, bearing: displayBearing, zoom: camZoom.value, pitch: camPitch.value, padding: followPadding(h) })
     }
+
+    if (idle) { rafId = null; return }   // arrêt ; le prochain fix relance la boucle
+    rafId = requestAnimationFrame(tick)
   }
+  lastTickT = 0   // la première frame après (re)lancement s'exécute sans attendre le plafond
   rafId = requestAnimationFrame(tick)
 }
 

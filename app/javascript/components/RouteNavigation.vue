@@ -718,6 +718,9 @@ function onVisibilityChange() {
       <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
       </a>
+    </div>
+    <div class="nav-top-right">
+      <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
       <button
         type="button"
         class="btn btn-sm btn-light shadow-sm"
@@ -777,9 +780,6 @@ function onVisibilityChange() {
           </label>
         </div>
       </div>
-    </div>
-    <div class="nav-top-right">
-      <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
       <button
         v-if="hasFix"
         type="button"
@@ -920,9 +920,11 @@ function onVisibilityChange() {
   display: flex; flex-direction: column; align-items: flex-end; gap: 0.5rem;
 }
 
-/* Small camera-settings popover anchored under its toggle button. */
+/* Small camera-settings popover anchored under its toggle button. The toggle now
+   lives in the top-right column, so anchor the panel to the button's right edge to
+   keep it from overflowing off the right side of the screen. */
 .nav-cam-panel {
-  position: absolute; top: calc(100% + 0.4rem); left: 0;
+  position: absolute; top: calc(100% + 0.4rem); right: 0; left: auto;
   z-index: 5; width: 14rem;
   background: #fff; border-radius: 0.6rem; padding: 0.6rem 0.75rem;
 }

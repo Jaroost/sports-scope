@@ -16,7 +16,7 @@ function onConfirm({ name, sport }: { name: string; sport: Sport }) {
 </script>
 
 <template>
-  <button type="button" class="btn btn-warning btn-lg" @click="showModal = true">
+  <button type="button" class="btn btn-warning btn-lg home-button" @click="showModal = true">
     <i class="fa-solid fa-map-location-dot me-2" aria-hidden="true"></i>{{ t('pages.feature_builder_cta') }}
   </button>
   <NewRouteModal :show="showModal" @confirm="onConfirm" @close="showModal = false" />

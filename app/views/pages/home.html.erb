@@ -10,17 +10,17 @@
 
   <% if user_signed_in? %>
     <p class="d-flex flex-wrap justify-content-center gap-2">
-      <%= link_to dashboard_path, class: "btn btn-primary btn-lg" do %>
+      <%= link_to dashboard_path, class: "btn btn-primary btn-lg home-button" do %>
         <i class="fa-solid fa-gauge-high me-2" aria-hidden="true"></i><%= t("nav.dashboard") %>
       <% end %>
-      <%= link_to routes_index_path, class: "btn btn-outline-secondary btn-lg" do %>
+      <%= link_to routes_index_path, class: "btn btn-outline-secondary btn-lg home-button" do %>
         <i class="fa-solid fa-route me-2" aria-hidden="true"></i><%= t("pages.home_nav_routes") %>
       <% end %>
       <span data-vue-component="NewRouteButton"></span>
     </p>
   <% else %>
     <p>
-      <%= button_to "/auth/keycloak", method: :post, class: "btn btn-primary btn-lg", data: { turbo: false } do %>
+      <%= button_to "/auth/keycloak", method: :post, class: "btn btn-primary btn-lg home-button", data: { turbo: false } do %>
         <i class="fa-solid fa-right-to-bracket me-2" aria-hidden="true"></i><%= t("nav.login") %>
       <% end %>
     </p>

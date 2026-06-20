@@ -52,6 +52,7 @@ const camZoom = ref(navPrefs.zoom)
 const camPitch = ref(navPrefs.pitch)
 const terrain3d = ref(navPrefs.terrain)
 const showCamPanel = ref(false)
+const screenOff = ref(false)
 const CAM_PITCH_MIN = 0
 const CAM_PITCH_MAX = 75
 const CAM_ZOOM_MIN = 14
@@ -296,6 +297,9 @@ async function initMap() {
   // manuel. Pas d'arrondi : la boucle réapplique camZoom à chaque frame, donc une
   // valeur arrondie ferait « sauter » le zoom au pas de 0,5 pendant le pinch.
   map.on('zoom', (e: any) => { if (e.originalEvent) camZoom.value = map.getZoom() })
+  // Tap simple sur la carte → mode veille (la boucle rAF s'arrête, le wake lock est libéré).
+  // L'overlay noir capte le tap de réveil ; pas de conflit car il est au z-index 20.
+  map.on('click', () => { if (!screenOff.value) toggleScreenOff() })
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
@@ -538,7 +542,7 @@ function moveLngLat([lng, lat]: LngLat, bearingDeg: number, distM: number): LngL
 // heading. The camera is jumped (not animated) each frame — smoothness now comes
 // from the extrapolation, so a per-fix easeTo would only fight it and lag.
 function startAnimation() {
-  if (rafId != null || !map || introPending) return
+  if (rafId != null || !map || introPending || screenOff.value) return
   const tick = () => {
     // Plafond FPS : une frame trop rapprochée se contente de se reprogrammer.
     // Elle ne doit JAMAIS terminer la boucle (on n'a pas calculé `idle` sans le corps).
@@ -818,6 +822,21 @@ function recenter() {
   map.once('moveend', startAnimation)
 }
 
+// ─── Screen-off / battery saver ───────────────────────────────────────────────
+// Stops the rAF loop (no more WebGL/tile rendering) and shows a black screen.
+// The wake lock stays active so l'écran reste allumé et les indicateurs de virage restent visibles.
+// GPS and turn detection keep running via onPosition() — sounds still fire.
+// Tapping the black overlay (or pressing the button again) resumes everything.
+
+function toggleScreenOff() {
+  screenOff.value = !screenOff.value
+  if (screenOff.value) {
+    stopAnimation()
+  } else {
+    if (located) startAnimation()
+  }
+}
+
 // ─── Wake lock ────────────────────────────────────────────────────────────────
 
 async function requestWakeLock() {
@@ -840,6 +859,22 @@ function onVisibilityChange() {
 <template>
   <div class="nav-page">
     <div ref="mapEl" class="nav-map"></div>
+
+    <!-- Battery saver: black screen — GPS and turn sounds still active -->
+    <div v-if="screenOff" class="nav-screen-off" @click="toggleScreenOff">
+      <div v-if="hasFix" class="nav-speed shadow">
+        <span class="nav-speed-value">{{ Math.round(speedKmh) }}</span>
+        <span class="nav-speed-unit">km/h</span>
+      </div>
+      <div v-if="turnHint && hasFix && !offRoute" class="nav-turn-sleep shadow">
+        <i class="fa-solid fa-2xl" :class="turnIcon(turnHint)" aria-hidden="true"></i>
+        <span class="nav-turn-sleep-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
+        <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
+      </div>
+      <div class="nav-screen-off-hint">
+        <i class="fa-solid fa-eye me-2" aria-hidden="true"></i>{{ t('routes.tap_to_resume') }}
+      </div>
+    </div>
 
     <div v-if="loading" class="nav-overlay-center text-muted">
       <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('routes.computing_route') }}
@@ -864,6 +899,16 @@ function onVisibilityChange() {
         @click="toggleSound"
       >
         <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
+      </button>
+      <button
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :class="{ active: screenOff }"
+        :title="screenOff ? t('routes.screen_on') : t('routes.screen_off')"
+        :aria-label="screenOff ? t('routes.screen_on') : t('routes.screen_off')"
+        @click="toggleScreenOff"
+      >
+        <i class="fa-solid" :class="screenOff ? 'fa-eye' : 'fa-moon'" aria-hidden="true"></i>
       </button>
       <div class="position-relative">
         <button
@@ -1153,6 +1198,26 @@ function onVisibilityChange() {
 .nav-stat-value { font-size: 1.25rem; font-weight: 700; line-height: 1.1; }
 .nav-stat-label { font-size: 0.72rem; color: #6c757d; text-transform: uppercase; letter-spacing: 0.02em; }
 .nav-progress { height: 0.5rem; border-radius: 999px; }
+
+.nav-screen-off {
+  position: absolute; inset: 0; z-index: 20;
+  background: #000;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 3rem;
+  cursor: pointer;
+}
+.nav-screen-off-hint {
+  position: absolute; bottom: 2.5rem;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 0.85rem;
+}
+.nav-turn-sleep {
+  display: flex; flex-direction: column; align-items: center; gap: 1rem;
+  background: #7c3aed; color: #fff;
+  padding: 2.5rem 4rem; border-radius: 1.5rem;
+}
+.nav-turn-sleep-dist { font-size: 2.25rem; font-weight: 700; line-height: 1; }
 </style>
 
 <style>

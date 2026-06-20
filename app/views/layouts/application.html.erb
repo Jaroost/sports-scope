@@ -2,7 +2,7 @@
 <html lang="<%= I18n.locale %>">
   <head>
     <title><%= content_for(:title) || t("app.title") %></title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
     <meta name="i18n-locale" content="<%= I18n.locale %>">
     <% if user_signed_in? %>
       <meta name="user-preferences" content="<%= current_user.preferences_with_defaults.to_json %>">

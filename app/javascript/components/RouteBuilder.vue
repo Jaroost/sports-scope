@@ -1052,12 +1052,25 @@ function onWindowResize() {
 // Mesure la hauteur réelle de la navbar fixe et l'expose en variable CSS : sur
 // mobile elle est plus basse que les 4rem réservés par défaut, ce qui laissait un
 // vide au-dessus de la carte (voir le media query .route-builder-page).
+// En mode PWA standalone, 100dvh inclut les zones système (barre maison iOS,
+// barre de geste Android) qui masquent le bouton de profil en bas de carte.
+// On pose --rb-available-h depuis window.visualViewport.height, qui reflète la
+// hauteur réellement visible sans ces zones — et qu'on utilise à la place de 100dvh.
 function updateNavbarHeight() {
   const nav = document.querySelector('nav.navbar') as HTMLElement | null
   // offsetHeight peut valoir 0 avant la mise en page : on retombe alors sur 64px
   // (4rem) plutôt que de poser une hauteur nulle qui casserait le calc() mobile.
   const h = nav?.offsetHeight || 64
   document.body.style.setProperty('--rb-navbar-h', `${h}px`)
+
+  const isStandalone =
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as any).standalone === true
+  if (isStandalone && window.visualViewport) {
+    document.body.style.setProperty('--rb-available-h', `${window.visualViewport.height}px`)
+  } else {
+    document.body.style.removeProperty('--rb-available-h')
+  }
 }
 
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
@@ -1087,6 +1100,10 @@ onMounted(async () => {
   }
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('beforeunload', onBeforeUnload)
+  // En mode PWA standalone, le visual viewport peut changer sans déclencher
+  // window.resize (ex. clavier virtuel). On s'y abonne pour garder --rb-available-h
+  // à jour et éviter que le bouton de profil disparaisse sous la barre maison.
+  window.visualViewport?.addEventListener('resize', updateNavbarHeight)
 
   // Mode lecture seule (lien de partage) : on charge l'itinéraire via le jeton
   // public, sans brancher la sauvegarde ni lire les paramètres de pré-remplissage.
@@ -1133,6 +1150,8 @@ onBeforeUnmount(() => {
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   if (savedTimer) clearTimeout(savedTimer)
   document.body.style.removeProperty('--rb-navbar-h')
+  document.body.style.removeProperty('--rb-available-h')
+  window.visualViewport?.removeEventListener('resize', updateNavbarHeight)
   placesStore.reset()
   selectionStore.clear()
 })
@@ -1394,9 +1413,12 @@ onBeforeUnmount(() => {
     gap: 0;
     /* La navbar mobile est plus basse que le `padding-top: 4rem` réservé sur le
        body : on remonte la page de l'écart mesuré (--rb-navbar-h, posé en JS) pour
-       que la carte affleure sous la navbar, et on ajuste la hauteur en conséquence. */
+       que la carte affleure sous la navbar, et on ajuste la hauteur en conséquence.
+       En mode PWA standalone, --rb-available-h est posé par JS depuis
+       window.visualViewport.height (hauteur réellement visible, hors barre maison
+       et barre de geste Android) ; en navigateur classique, 100dvh s'applique. */
     margin-top: calc(var(--rb-navbar-h, 4rem) - 4rem);
-    height: calc(100dvh - var(--rb-navbar-h, 4rem));
+    height: calc(var(--rb-available-h, 100dvh) - var(--rb-navbar-h, 4rem));
   }
   /* La poignée de redimensionnement du panneau stats n'a pas lieu d'être quand le
      panneau est masqué (mobile / paysage) : sinon elle laisse une colonne de 8px. */

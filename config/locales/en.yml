@@ -325,6 +325,7 @@ en:
       unlink: "Disconnect Strava"
       unlink_confirm: "Disconnect your Strava account?"
       unlinked: "Strava account disconnected."
+      not_allowed: "Linking a Strava account is not available for your account."
     poi:
       title: "Points of interest"
       help: "Choose which points of interest are detected along your routes and their search radius."

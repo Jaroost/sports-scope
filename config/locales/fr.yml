@@ -325,6 +325,7 @@ fr:
       unlink: "Délier Strava"
       unlink_confirm: "Délier votre compte Strava ?"
       unlinked: "Compte Strava délié."
+      not_allowed: "La liaison d'un compte Strava n'est pas disponible pour votre compte."
     poi:
       title: "Points d'intérêt"
       help: "Choisissez les points d'intérêt détectés le long de vos itinéraires et leur rayon de recherche."

@@ -55,8 +55,21 @@ class User < ApplicationRecord
     user = find_or_initialize_by(keycloak_uid: auth.uid)
     user.email = auth.info.email
     user.display_name = auth.info.name.presence || auth.info.email
+    user.roles = roles_from_token(auth.credentials.token)
     user.save!
     user
+  end
+
+  # Extrait les rôles de realm Keycloak de l'access token JWT. Le token vient de
+  # Keycloak via le flow OIDC code (TLS) ; on décode simplement le payload.
+  def self.roles_from_token(access_token)
+    payload = access_token.to_s.split(".")[1]
+    return [] unless payload
+
+    claims = JSON.parse(Base64.urlsafe_decode64(payload + "=" * (-payload.length % 4)))
+    Array(claims.dig("realm_access", "roles"))
+  rescue StandardError
+    []
   end
 
   def attach_strava!(auth)

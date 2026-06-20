@@ -20,6 +20,7 @@ class SessionsController < ApplicationController
       unless current_user
         redirect_to root_path, alert: t("auth.login_first") and return
       end
+      authorize! :link, :strava
       current_user.attach_strava!(auth)
       redirect_to root_path, notice: t("auth.strava_linked")
     else

@@ -1,0 +1,5 @@
+{
+  "Administrator": ["all"],
+  "Athlete": ["route:manage", "imported_activity:manage", "chart_layout:manage"],
+  "Premium": ["strava:link"]
+}

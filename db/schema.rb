@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_18_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_20_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -93,6 +93,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_18_000003) do
     t.string "keycloak_uid", null: false
     t.bigint "last_chart_layout_id"
     t.jsonb "preferences", default: {}, null: false
+    t.jsonb "roles", default: [], null: false
     t.string "strava_access_token"
     t.datetime "strava_expires_at"
     t.string "strava_refresh_token"

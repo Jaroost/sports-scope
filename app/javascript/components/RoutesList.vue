@@ -515,66 +515,63 @@ onMounted(() => fetchRoutes())
                 >
                   <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
                 </a>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  :title="sharedId === r.id ? t('routes.share_copied') : t('routes.share')"
-                  :aria-label="t('routes.share')"
-                  @click="shareRoute(r)"
-                >
-                  <i
-                    :class="sharedId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-share-nodes'"
-                    aria-hidden="true"
-                  ></i>
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  :title="sharedViewId === r.id ? t('routes.share_copied') : t('routes.share_view')"
-                  :aria-label="t('routes.share_view')"
-                  @click="shareViewRoute(r)"
-                >
-                  <i
-                    :class="sharedViewId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-eye'"
-                    aria-hidden="true"
-                  ></i>
-                </button>
-                <a
-                  :href="`/api/routes/${r.id}/gpx`"
-                  class="btn btn-sm btn-outline-secondary"
-                  :title="t('routes.export_gpx')"
-                  download
-                >
-                  <i class="fa-solid fa-download" aria-hidden="true"></i>
-                </a>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  :title="sharingGpxId === r.id ? t('routes.share_copied') : t('routes.share_gpx')"
-                  :aria-label="t('routes.share_gpx')"
-                  @click="shareGpxFile(r)"
-                >
-                  <i
-                    :class="sharingGpxId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-file-export'"
-                    aria-hidden="true"
-                  ></i>
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  :title="t('routes.rename')"
-                  @click="startEdit(r)"
-                >
-                  <i class="fa-solid fa-pen" aria-hidden="true"></i>
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  :title="t('routes.duplicate')"
-                  @click="duplicateRoute(r)"
-                >
-                  <i class="fa-solid fa-copy" aria-hidden="true"></i>
-                </button>
+
+                <div class="dropdown">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    data-bs-toggle="dropdown"
+                    data-bs-auto-close="true"
+                    aria-expanded="false"
+                    :aria-label="t('routes.more_actions')"
+                  >
+                    <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+                  </button>
+                  <ul class="dropdown-menu dropdown-menu-end">
+                    <li><h6 class="dropdown-header">{{ t('routes.group_share') }}</h6></li>
+                    <li>
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="shareRoute(r)">
+                        <i class="" :class="sharedId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-location-arrow'" aria-hidden="true"></i>
+                        <span>{{ sharedId === r.id ? t('routes.share_copied') : t('routes.share') }}</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="shareViewRoute(r)">
+                        <i :class="sharedViewId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-eye'" aria-hidden="true"></i>
+                        <span>{{ sharedViewId === r.id ? t('routes.share_copied') : t('routes.share_view') }}</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="shareGpxFile(r)">
+                        <i :class="sharingGpxId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-file-export'" aria-hidden="true"></i>
+                        <span>{{ sharingGpxId === r.id ? t('routes.share_copied') : t('routes.share_gpx') }}</span>
+                      </button>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">{{ t('routes.group_export') }}</h6></li>
+                    <li>
+                      <a :href="`/api/routes/${r.id}/gpx`" class="dropdown-item d-flex align-items-center gap-2" download>
+                        <i class="fa-solid fa-download" aria-hidden="true"></i>
+                        <span>{{ t('routes.export_gpx') }}</span>
+                      </a>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><h6 class="dropdown-header">{{ t('routes.group_edit') }}</h6></li>
+                    <li>
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="startEdit(r)">
+                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                        <span>{{ t('routes.rename') }}</span>
+                      </button>
+                    </li>
+                    <li>
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="duplicateRoute(r)">
+                        <i class="fa-solid fa-copy" aria-hidden="true"></i>
+                        <span>{{ t('routes.duplicate') }}</span>
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+
                 <button
                   type="button"
                   class="btn btn-sm btn-outline-danger"
@@ -615,6 +612,7 @@ onMounted(() => fetchRoutes())
   flex-shrink: 0;
 }
 
+
 /* On phones the row is too cramped to keep the name + 5 actions on one line,
    so the action cluster wraps onto its own full-width line below the name and
    spreads the buttons out for easier tapping. */
@@ -624,11 +622,11 @@ onMounted(() => fetchRoutes())
   }
   .route-row-actions {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-end;
     margin-top: 0.5rem;
   }
-  .route-row-actions .btn {
-    flex: 1;
+  .route-row-actions > .btn,
+  .route-row-actions > .dropdown > .btn {
     padding-top: 0.4rem;
     padding-bottom: 0.4rem;
   }

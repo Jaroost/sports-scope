@@ -79,11 +79,13 @@ body.fullscreen-page {
 .activity-row {
   border-radius: 0.5rem;
   padding: 0.5rem 0.75rem;
-  transition: background-color 0.15s ease, transform 0.15s ease;
+  position: relative;
+  left: 0;
+  transition: background-color 0.15s ease, left 0.15s ease;
 
   &:hover {
     background-color: rgba(252, 76, 2, 0.08);
-    transform: translateX(2px);
+    left: 2px;
   }
 }
 

@@ -10,7 +10,7 @@ import {
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
-import { userPreferences, persistNavCamera } from '../userPreferences'
+import { userPreferences, persistNavCamera, persistDefaultMapStyle } from '../userPreferences'
 
 const props = defineProps<{ shareToken: string }>()
 
@@ -136,7 +136,7 @@ let displayBottomPad = 0               // smoothed bottom padding actually rende
 // éviter un reflow par frame.
 const BEARING_EPS = 0.1                // ° — en dessous, le cap est « convergé »
 const PAD_EPS = 0.5                    // px — en dessous, le padding est « stabilisé »
-const FRAME_MIN_MS = 33               // plafond ~30 fps dans la boucle rAF
+const FRAME_MIN_MS = 120               // plafond ~30 fps dans la boucle rAF
 let containerH = 0                     // hauteur du conteneur carte, rafraîchie au resize
 let lastTickT = 0                      // performance.now() de la dernière frame rendue
 
@@ -321,6 +321,7 @@ function lineFeature(coords: number[][]) {
 function setMapStyle(id: string) {
   if (!map || id === mapStyleId.value) return
   mapStyleId.value = id
+  persistDefaultMapStyle(id as any)
   map.setStyle(mapStyleFor(id), { diff: false })
   map.once('style.load', () => {
     installRouteLayers()

@@ -860,7 +860,7 @@ function onVisibilityChange() {
         <span class="nav-speed-value">{{ Math.round(speedKmh) }}</span>
         <span class="nav-speed-unit">km/h</span>
       </div>
-      <div v-if="turnHint && hasFix && !offRoute" class="nav-turn-sleep shadow" :class="{ 'nav-turn-sleep--urgent': turnHint.distM <= TURN_URGENT_M }">
+      <div v-if="turnHint && hasFix && !offRoute" class="nav-turn-sleep shadow" :class="{ 'nav-turn-sleep--urgent': turnHint.distM <= TURN_URGENT_M, 'nav-turn-sleep--climb': climbInfo }">
         <div class="nav-turn-sleep-icons">
           <i v-if="turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
           <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
@@ -1254,6 +1254,7 @@ function onVisibilityChange() {
   display: flex; flex-direction: column; align-items: center; gap: 1rem;
   background: #7c3aed; color: #fff;
   padding: 2.5rem 4rem; border-radius: 1.5rem;
+  width: calc(100% - 1.5rem); box-sizing: border-box;
 }
 .nav-turn-sleep-icons {
   display: flex; align-items: center; gap: 0.75rem;
@@ -1266,6 +1267,9 @@ function onVisibilityChange() {
   background: rgba(255,255,255,0.25); font-size: 1.6rem; font-weight: 700;
 }
 .nav-turn-sleep.nav-turn-sleep--urgent { background: #f97316; }
+/* Pendant un col en veille, la carte du col occupe le bas : on remonte l'indicateur
+   de virage en haut (sous le badge de vitesse) pour qu'il ne soit pas masqué. */
+.nav-turn-sleep--climb { position: absolute; top: 3.75rem; left: 50%; transform: translateX(-50%); }
 </style>
 
 <style>

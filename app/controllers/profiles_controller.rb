@@ -62,6 +62,7 @@ class ProfilesController < ApplicationController
         "default_style" => allowed(navigation[:default_style], ALLOWED_MAP_STYLES, "cyclosm"),
         "zoom" => clamp_float(navigation[:zoom], NAV_ZOOM_RANGE, 19.5),
         "pitch" => clamp_int(navigation[:pitch], NAV_PITCH_RANGE, 60),
+        "terrain" => to_bool(navigation[:terrain], false),
       },
       "display" => {
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),

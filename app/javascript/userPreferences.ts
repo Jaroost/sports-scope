@@ -18,7 +18,7 @@ export interface UserPreferences {
     radius_m: number
   }
   map: { default_style: MapStyleId; overlays: string[] }
-  navigation: { default_style: MapStyleId; zoom: number; pitch: number }
+  navigation: { default_style: MapStyleId; zoom: number; pitch: number; terrain: boolean }
   display: {
     default_sport: Sport
     show_grade_colors: boolean
@@ -41,7 +41,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     radius_m: 1500,
   },
   map: { default_style: 'cyclosm', overlays: [] },
-  navigation: { default_style: 'liberty', zoom: 19.5, pitch: 60 },
+  navigation: { default_style: 'liberty', zoom: 19.5, pitch: 60, terrain: false },
   display: {
     default_sport: 'cycling',
     show_grade_colors: true,
@@ -89,6 +89,19 @@ export function persistDefaultMapStyle(styleId: MapStyleId): void {
   const prefs = userPreferences()
   if (prefs.map.default_style === styleId) return
   prefs.map.default_style = styleId
+  patchPreferences(prefs)
+}
+
+// Reporte sur le profil le zoom, l'inclinaison et le relief 3D de la caméra réglés
+// en cours de navigation : ils deviennent les réglages par défaut du compte (même
+// contrat best-effort que persistDefaultMapStyle).
+export function persistNavCamera(zoom: number, pitch: number, terrain: boolean): void {
+  if (!isLoggedIn()) return
+  const prefs = userPreferences()
+  if (prefs.navigation.zoom === zoom && prefs.navigation.pitch === pitch && prefs.navigation.terrain === terrain) return
+  prefs.navigation.zoom = zoom
+  prefs.navigation.pitch = pitch
+  prefs.navigation.terrain = terrain
   patchPreferences(prefs)
 }
 

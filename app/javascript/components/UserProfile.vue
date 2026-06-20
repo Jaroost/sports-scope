@@ -23,6 +23,7 @@ interface Preferences {
     default_style: string
     zoom: number
     pitch: number
+    terrain: boolean
   }
   display: {
     default_sport: string
@@ -102,6 +103,20 @@ async function save() {
 // Navigation (style, zoom, inclinaison) et se centre sur la position GPS
 // actuelle (repli sur la Suisse si la géoloc échoue ou est refusée).
 const SWITZERLAND_CENTER: [number, number] = [8.23, 46.8]
+const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
+
+// Active/désactive le relief 3D sur l'aperçu (idempotente : aussi après un setStyle).
+function applyPreviewTerrain() {
+  if (!previewMap) return
+  if (prefs.navigation.terrain) {
+    if (!previewMap.getSource('terrain-dem')) {
+      previewMap.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
+    }
+    previewMap.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
+  } else {
+    previewMap.setTerrain(null)
+  }
+}
 
 const previewEl = ref<HTMLElement | null>(null)
 const previewLocating = ref(true)
@@ -134,13 +149,16 @@ async function initPreview() {
   previewMap.on('styleimagemissing', (e: any) => {
     previewMap.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
+  previewMap.on('load', applyPreviewTerrain)
 
-  // Réagit en direct aux réglages : le zoom et l'inclinaison s'appliquent à chaud,
-  // le changement de style recharge le fond (et replace le marqueur de position).
+  // Réagit en direct aux réglages : le zoom, l'inclinaison et le relief s'appliquent
+  // à chaud, le changement de style recharge le fond (et replace le marqueur + relief).
   watch(() => prefs.navigation.zoom, (z) => previewMap?.setZoom(z))
   watch(() => prefs.navigation.pitch, (p) => previewMap?.setPitch(p))
+  watch(() => prefs.navigation.terrain, applyPreviewTerrain)
   watch(() => prefs.navigation.default_style, (id) => {
     previewMap?.setStyle(mapStyleFor(id), { diff: false })
+    previewMap?.once('style.load', applyPreviewTerrain)
   })
 
   locatePreview()
@@ -279,6 +297,12 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.pitch') }} : <strong>{{ prefs.navigation.pitch }}°</strong>
             </label>
             <input id="nav-pitch" v-model.number="prefs.navigation.pitch" type="range" class="form-range" min="0" max="90" step="5">
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input id="nav-terrain" v-model="prefs.navigation.terrain" class="form-check-input" type="checkbox" role="switch">
+              <label for="nav-terrain" class="form-check-label">{{ t('profile.navigation.terrain') }}</label>
+            </div>
           </div>
         </div>
 

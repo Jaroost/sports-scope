@@ -10,11 +10,13 @@ import {
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
-import { userPreferences } from '../userPreferences'
+import { userPreferences, persistNavCamera } from '../userPreferences'
 
 const props = defineProps<{ shareToken: string }>()
 
 const SOUND_KEY = 'sportsScope.navSound'
+// Tuiles MNT (terrarium) pour le relief 3D — mêmes sources que le créateur d'itinéraire.
+const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
 // Réglages caméra issus du profil (section Navigation), indépendants du créateur.
 const navPrefs = userPreferences().navigation
@@ -37,13 +39,25 @@ const soundOn = ref(loadSound())
 // on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
 const mapStyleId = ref(navPrefs.default_style as string)
 
+// Réglages caméra ajustables en séance. On part des valeurs du profil ; les régler
+// ici met à jour la vue immédiatement puis reporte le réglage sur le profil. La
+// boucle d'animation et followOptions lisent ces refs (et non plus navPrefs) pour
+// que toute modification prenne effet à la frame suivante.
+const camZoom = ref(navPrefs.zoom)
+const camPitch = ref(navPrefs.pitch)
+const terrain3d = ref(navPrefs.terrain)
+const showCamPanel = ref(false)
+const CAM_PITCH_MIN = 0
+const CAM_PITCH_MAX = 75
+const CAM_ZOOM_MIN = 14
+const CAM_ZOOM_MAX = 20
+
 // Live navigation state (reactive, drives the UI overlays)
 const remainingM = ref(0)
 const remainingGainM = ref(0)
 const doneRatio = ref(0)
 const speedKmh = ref(0)
 const offRoute = ref(false)
-const offRouteDistM = ref(0)        // distance to the nearest point on the route
 const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" arrow
 const climbInfo = ref<{
   climb: Climb
@@ -117,6 +131,46 @@ function toggleSound() {
   if (soundOn.value) unlockAudio()
 }
 
+// ─── Camera controls ──────────────────────────────────────────────────────────
+// Les curseurs ajustent la vue en direct (@input) puis reportent le réglage sur le
+// profil au relâchement (@change). L'inclinaison est appliquée à chaque frame par
+// la boucle (qui lit camPitch) ; on la pousse aussi via setPitch pour le cas hors
+// suivi. Le zoom n'est pas réécrit par la boucle, donc setZoom suffit et persiste.
+
+function onPitchInput() {
+  if (map) map.setPitch(camPitch.value)
+}
+
+function onZoomInput() {
+  if (!map) return
+  hasInitialZoom = true  // l'utilisateur prend la main sur le zoom
+  map.setZoom(camZoom.value)
+}
+
+// Active/désactive le relief 3D (terrain MNT) sous le tracé. Idempotente : aussi
+// appelée après un setStyle, qui efface terrain et sources.
+function applyTerrain() {
+  if (!map) return
+  if (terrain3d.value) {
+    if (!map.getSource('terrain-dem')) {
+      map.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
+    }
+    map.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
+  } else {
+    map.setTerrain(null)
+  }
+}
+
+function toggleTerrain() {
+  terrain3d.value = !terrain3d.value
+  applyTerrain()
+  persistCamera()
+}
+
+function persistCamera() {
+  persistNavCamera(camZoom.value, camPitch.value, terrain3d.value)
+}
+
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -186,7 +240,8 @@ async function initMap() {
     style: mapStyleFor(mapStyleId.value) as any,
     center: coords[0],
     zoom: 14,
-    pitch: navPrefs.pitch,
+    pitch: camPitch.value,
+    maxPitch: CAM_PITCH_MAX,
     attributionControl: false,
   })
   map.on('styleimagemissing', (e: any) => {
@@ -198,14 +253,17 @@ async function initMap() {
   // that bug forced the rider to keep tapping "recenter".
   map.on('dragstart', (e: any) => { if (e.originalEvent) following.value = false })
   map.on('rotatestart', (e: any) => { if (e.originalEvent) following.value = false })
+  // Garde le curseur de zoom du panneau caméra aligné sur un pinch manuel.
+  map.on('zoom', (e: any) => { if (e.originalEvent) camZoom.value = Math.round(map.getZoom() * 2) / 2 })
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
       installRouteLayers()
+      applyTerrain()
       // Fit the whole route before the first GPS fix arrives.
       const b = new maplibre.LngLatBounds(coords[0], coords[0])
       coords.forEach((c) => b.extend(c))
-      map.fitBounds(b, { padding: 60, duration: 0, pitch: navPrefs.pitch })
+      map.fitBounds(b, { padding: 60, duration: 0, pitch: camPitch.value })
       resolve()
     })
   })
@@ -231,6 +289,7 @@ function setMapStyle(id: string) {
   map.setStyle(mapStyleFor(id), { diff: false })
   map.once('style.load', () => {
     installRouteLayers()
+    applyTerrain()
     if (lastPos) updateLocationMarker(lastPos)
     refreshRemaining()
   })
@@ -273,7 +332,7 @@ function onPosition(pos: GeolocationPosition) {
 
   // Heading: trust the GPS heading when moving fast enough, otherwise derive it.
   updateBearing(pos, here)
-  updateOffRoute(here, idx, distM)
+  updateOffRoute(here, idx)
 
   updateSpeed(pos, here)
   lastPos = here
@@ -315,11 +374,11 @@ function followOptions(center: LngLat): any {
   const opts: any = {
     center,
     bearing: currentBearing,
-    pitch: navPrefs.pitch,
+    pitch: camPitch.value,
     duration: 500,
     padding: followPadding(h),
   }
-  if (!hasInitialZoom) { opts.zoom = navPrefs.zoom; hasInitialZoom = true }
+  if (!hasInitialZoom) { opts.zoom = camZoom.value; hasInitialZoom = true }
   return opts
 }
 
@@ -366,7 +425,7 @@ function startAnimation() {
     if (following.value) {
       const h = map.getContainer()?.clientHeight || 0
       displayBottomPad += (bottomPadTarget(h) - displayBottomPad) * PAD_SMOOTH
-      map.jumpTo({ center: pos, bearing: displayBearing, pitch: navPrefs.pitch, padding: followPadding(h) })
+      map.jumpTo({ center: pos, bearing: displayBearing, pitch: camPitch.value, padding: followPadding(h) })
     }
   }
   rafId = requestAnimationFrame(tick)
@@ -437,9 +496,8 @@ function updateSpeed(pos: GeolocationPosition, here: LngLat) {
 // When off route, point an arrow back to the nearest vertex of the route. The
 // map is rotated so its bearing is "up", so the on-screen angle is the absolute
 // bearing-to-route minus the map's bearing.
-function updateOffRoute(here: LngLat, idx: number, distM: number) {
+function updateOffRoute(here: LngLat, idx: number) {
   if (!offRoute.value) return
-  offRouteDistM.value = distM
   const toRoute = bearingBetween(here, geometry[idx])
   const mapBearing = map ? map.getBearing() : currentBearing
   let rel = toRoute - mapBearing
@@ -625,13 +683,63 @@ function onVisibilityChange() {
       >
         <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
       </button>
+      <div class="position-relative">
+        <button
+          type="button"
+          class="btn btn-sm btn-light shadow-sm"
+          :class="{ active: showCamPanel }"
+          :title="t('routes.camera_settings')"
+          :aria-label="t('routes.camera_settings')"
+          @click="showCamPanel = !showCamPanel"
+        >
+          <i class="fa-solid fa-video" aria-hidden="true"></i>
+        </button>
+        <div v-if="showCamPanel" class="nav-cam-panel shadow">
+          <label class="nav-cam-row">
+            <span class="nav-cam-label">{{ t('routes.camera_pitch') }}</span>
+            <input
+              type="range"
+              class="form-range"
+              :min="CAM_PITCH_MIN" :max="CAM_PITCH_MAX" step="1"
+              v-model.number="camPitch"
+              @input="onPitchInput"
+              @change="persistCamera"
+            />
+            <span class="nav-cam-val">{{ Math.round(camPitch) }}°</span>
+          </label>
+          <label class="nav-cam-row">
+            <span class="nav-cam-label">{{ t('routes.camera_zoom') }}</span>
+            <input
+              type="range"
+              class="form-range"
+              :min="CAM_ZOOM_MIN" :max="CAM_ZOOM_MAX" step="0.5"
+              v-model.number="camZoom"
+              @input="onZoomInput"
+              @change="persistCamera"
+            />
+            <span class="nav-cam-val">{{ camZoom.toFixed(1) }}</span>
+          </label>
+          <label class="nav-cam-row nav-cam-row--switch">
+            <span class="nav-cam-label">{{ t('routes.camera_3d') }}</span>
+            <span class="form-check form-switch m-0">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                role="switch"
+                :checked="terrain3d"
+                @change="toggleTerrain"
+              />
+            </span>
+          </label>
+        </div>
+      </div>
     </div>
     <div class="nav-top-right">
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
     </div>
 
     <!-- Instantaneous speed -->
-    <div v-if="hasFix && !offRoute" class="nav-speed shadow">
+    <div v-if="hasFix" class="nav-speed shadow">
       <span class="nav-speed-value">{{ Math.round(speedKmh) }}</span>
       <span class="nav-speed-unit">km/h</span>
     </div>
@@ -649,13 +757,6 @@ function onVisibilityChange() {
     </div>
     <div v-else-if="!hasFix && !loading" class="nav-banner nav-banner--info">
       <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('routes.gps_waiting') }}
-    </div>
-    <div v-else-if="offRoute" class="nav-banner nav-banner--danger">
-      <i
-        class="fa-solid fa-arrow-up nav-offroute-arrow me-2"
-        :style="{ transform: `rotate(${offRouteRelBearing}deg)` }"
-        aria-hidden="true"
-      ></i>{{ t('routes.off_route') }} · {{ formatDistanceShort(offRouteDistM) }}
     </div>
 
     <!-- Big centered arrow pointing back to the route when off-route -->
@@ -761,14 +862,26 @@ function onVisibilityChange() {
 .nav-top-left { position: absolute; top: 0.75rem; left: 0.75rem; z-index: 4; }
 .nav-top-right { position: absolute; top: 0.75rem; right: 0.75rem; z-index: 4; }
 
+/* Small camera-settings popover anchored under its toggle button. */
+.nav-cam-panel {
+  position: absolute; top: calc(100% + 0.4rem); left: 0;
+  z-index: 5; width: 14rem;
+  background: #fff; border-radius: 0.6rem; padding: 0.6rem 0.75rem;
+}
+.nav-cam-row {
+  display: flex; align-items: center; gap: 0.5rem; margin: 0;
+}
+.nav-cam-row + .nav-cam-row { margin-top: 0.45rem; }
+.nav-cam-label { font-size: 0.78rem; font-weight: 600; color: #495057; width: 4.5rem; }
+.nav-cam-row .form-range { flex: 1; margin: 0; }
+.nav-cam-val { font-size: 0.78rem; font-weight: 700; width: 2.6rem; text-align: right; }
+
 .nav-banner {
   position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
   z-index: 3; padding: 0.45rem 0.9rem; border-radius: 999px;
   font-weight: 600; font-size: 0.9rem; white-space: nowrap;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
-.nav-banner--danger { background: #dc3545; color: #fff; }
-.nav-offroute-arrow { display: inline-block; transition: transform 0.4s ease; }
 .nav-offroute-bigarrow {
   position: absolute; top: 50%; left: 50%;
   z-index: 6; pointer-events: none;

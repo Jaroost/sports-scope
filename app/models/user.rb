@@ -17,8 +17,9 @@ class User < ApplicationRecord
     # fond de carte, zoom et inclinaison (pitch) de la caméra qui suit le coureur.
     "navigation" => {
       "default_style" => "liberty",
-      "zoom" => 19.5,   # zoom de la caméra de suivi
-      "pitch" => 60,    # inclinaison 3D (0 = vue du dessus, 70 = très rasante)
+      "zoom" => 19.5,      # zoom de la caméra de suivi
+      "pitch" => 60,       # inclinaison 3D (0 = vue du dessus, 70 = très rasante)
+      "terrain" => false,  # relief 3D (terrain MNT) sous le tracé
     },
     "display" => {
       "default_sport" => "cycling",   # cycling | mtb | hiking

@@ -1,7 +1,7 @@
 class RoutesController < ApplicationController
   # `shared` is public (token-based) so a shared navigation link works without
   # an account. Every other action stays scoped to the signed-in owner.
-  before_action :require_login!, except: :shared
+  before_action :require_login!, except: %i[shared export_gpx_shared]
 
   MAX_WAYPOINTS = 500
   MAX_GEOMETRY_POINTS = 10_000
@@ -64,9 +64,14 @@ class RoutesController < ApplicationController
   def export_gpx
     route = current_user.routes.find_by(id: params[:id])
     return head :not_found unless route
-    send_data build_gpx(route),
-              filename: "#{route.name.parameterize.presence || 'route'}.gpx",
-              type: "application/gpx+xml"
+    send_gpx(route)
+  end
+
+  # GET /api/routes/shared/:token/gpx — public, no login required
+  def export_gpx_shared
+    route = Route.find_by(share_token: params[:token])
+    return head :not_found unless route
+    send_gpx(route)
   end
 
   # POST /api/routes/:id/duplicate
@@ -172,6 +177,12 @@ class RoutesController < ApplicationController
       geometry: route.geometry || [],
       voice_hints: route.voice_hints || [],
     )
+  end
+
+  def send_gpx(route)
+    send_data build_gpx(route),
+              filename: "#{route.name.parameterize.presence || 'route'}.gpx",
+              type: "application/gpx+xml"
   end
 
   # Namespace de l'extension propriétaire embarquée dans le GPX. Les apps tierces

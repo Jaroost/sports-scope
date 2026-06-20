@@ -40,6 +40,7 @@ Rails.application.routes.draw do
   get "/api/routes", to: "routes#index"
   post "/api/routes", to: "routes#create"
   get "/api/routes/shared/:token", to: "routes#shared"
+  get "/api/routes/shared/:token/gpx", to: "routes#export_gpx_shared"
   get "/api/routes/:id", to: "routes#show", constraints: { id: /\d+/ }
   patch "/api/routes/:id", to: "routes#update", constraints: { id: /\d+/ }
   delete "/api/routes/:id", to: "routes#destroy", constraints: { id: /\d+/ }

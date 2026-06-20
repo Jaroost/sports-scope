@@ -193,33 +193,25 @@ async function shareViewRoute(route) {
   }
 }
 
-// Share the GPX file itself using the Web Share API (Level 2, file sharing).
-// Falls back to the direct download link when the browser doesn't support it.
+// Share a public GPX download URL via the Web Share API (Level 1 — works on
+// all mobile browsers without file-type restrictions or user-gesture issues).
+// Falls back to clipboard copy, then a prompt on desktop.
 async function shareGpxFile(route) {
-  sharingGpxId.value = route.id
+  const url = `${window.location.origin}/api/routes/shared/${route.share_token}/gpx`
   try {
-    const res = await fetch(`/api/routes/${route.id}/gpx`, { credentials: 'same-origin' })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const blob = await res.blob()
-    const safeName = (route.name || 'route').replace(/[^a-zA-Z0-9_\-À-ɏ]/g, '_').slice(0, 60)
-    const file = new File([blob], `${safeName}.gpx`, { type: 'application/gpx+xml' })
-    if (navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: route.name })
-        return
-      } catch (e) {
-        if (e?.name === 'AbortError') return
-        // Share failed — fall through to download
-      }
+    if (navigator.share) {
+      await navigator.share({ title: route.name, url })
+      return
     }
-    const link = document.createElement('a')
-    link.href = `/api/routes/${route.id}/gpx`
-    link.download = ''
-    link.click()
   } catch (e) {
-    error.value = t('routes.share_gpx_error')
-  } finally {
-    sharingGpxId.value = null
+    if (e?.name === 'AbortError') return
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    sharingGpxId.value = route.id
+    setTimeout(() => { if (sharingGpxId.value === route.id) sharingGpxId.value = null }, 2000)
+  } catch {
+    window.prompt(t('routes.share_gpx'), url)
   }
 }
 
@@ -558,13 +550,14 @@ onMounted(() => fetchRoutes())
                 <button
                   type="button"
                   class="btn btn-sm btn-outline-secondary"
-                  :title="t('routes.share_gpx')"
+                  :title="sharingGpxId === r.id ? t('routes.share_copied') : t('routes.share_gpx')"
                   :aria-label="t('routes.share_gpx')"
-                  :disabled="sharingGpxId === r.id"
                   @click="shareGpxFile(r)"
                 >
-                  <span v-if="sharingGpxId === r.id" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                  <i v-else class="fa-solid fa-file-export" aria-hidden="true"></i>
+                  <i
+                    :class="sharingGpxId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-file-export'"
+                    aria-hidden="true"
+                  ></i>
                 </button>
                 <button
                   type="button"

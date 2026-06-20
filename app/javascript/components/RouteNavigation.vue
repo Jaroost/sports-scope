@@ -26,6 +26,7 @@ const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
 const TURN_ALERT_M = 200        // start announcing a turn this far ahead
 const TURN_HINT_M = 200        // show the turn indicator this far ahead
+const TURN_URGENT_M = 15       // switch turn card to orange + warning icon this close
 const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
 const TURN_REPEAT_MS = 2000    // repeat the turn cue this often until the intersection
 
@@ -866,8 +867,11 @@ function onVisibilityChange() {
         <span class="nav-speed-value">{{ Math.round(speedKmh) }}</span>
         <span class="nav-speed-unit">km/h</span>
       </div>
-      <div v-if="turnHint && hasFix && !offRoute" class="nav-turn-sleep shadow">
-        <i class="fa-solid fa-2xl" :class="turnIcon(turnHint)" aria-hidden="true"></i>
+      <div v-if="turnHint && hasFix && !offRoute" class="nav-turn-sleep shadow" :class="{ 'nav-turn-sleep--urgent': turnHint.distM <= TURN_URGENT_M }">
+        <div class="nav-turn-sleep-icons">
+          <i v-if="turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
+        </div>
         <span class="nav-turn-sleep-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
         <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
       </div>
@@ -980,7 +984,8 @@ function onVisibilityChange() {
     </div>
 
     <!-- Upcoming turn indicator -->
-    <div v-if="turnHint && hasFix && !offRoute" class="nav-turn shadow">
+    <div v-if="turnHint && hasFix && !offRoute" class="nav-turn shadow" :class="{ 'nav-turn--urgent': turnHint.distM <= TURN_URGENT_M }">
+      <i v-if="turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
       <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
       <span class="nav-turn-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
       <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
@@ -1153,6 +1158,7 @@ function onVisibilityChange() {
   border-radius: 0.75rem; font-size: 1.6rem; line-height: 1;
 }
 .nav-turn-dist { font-size: 1.1rem; font-weight: 700; }
+.nav-turn.nav-turn--urgent { background: #f97316; }
 
 .nav-climb {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6.25rem;
@@ -1217,7 +1223,12 @@ function onVisibilityChange() {
   background: #7c3aed; color: #fff;
   padding: 2.5rem 4rem; border-radius: 1.5rem;
 }
+.nav-turn-sleep-icons {
+  display: flex; align-items: center; gap: 0.75rem;
+  font-size: 3.5rem; line-height: 1;
+}
 .nav-turn-sleep-dist { font-size: 2.25rem; font-weight: 700; line-height: 1; }
+.nav-turn-sleep.nav-turn-sleep--urgent { background: #f97316; }
 </style>
 
 <style>

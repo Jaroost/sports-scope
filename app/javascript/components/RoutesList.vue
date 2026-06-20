@@ -37,6 +37,8 @@ function sportIcon(s: Sport) {
 const sharedId = ref(null)
 // Même mécanique pour le partage du lien « vue en lecture seule » (créateur).
 const sharedViewId = ref(null)
+// Share GPX file state: holds the id of the route currently being fetched/shared.
+const sharingGpxId = ref(null)
 
 // Inline rename state
 const editingId = ref(null)
@@ -188,6 +190,36 @@ async function shareViewRoute(route) {
     setTimeout(() => { if (sharedViewId.value === route.id) sharedViewId.value = null }, 2000)
   } catch {
     window.prompt(t('routes.share_view'), url)
+  }
+}
+
+// Share the GPX file itself using the Web Share API (Level 2, file sharing).
+// Falls back to the direct download link when the browser doesn't support it.
+async function shareGpxFile(route) {
+  sharingGpxId.value = route.id
+  try {
+    const res = await fetch(`/api/routes/${route.id}/gpx`, { credentials: 'same-origin' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    const safeName = (route.name || 'route').replace(/[^a-zA-Z0-9_\-À-ɏ]/g, '_').slice(0, 60)
+    const file = new File([blob], `${safeName}.gpx`, { type: 'application/gpx+xml' })
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: route.name })
+        return
+      } catch (e) {
+        if (e?.name === 'AbortError') return
+        // Share failed — fall through to download
+      }
+    }
+    const link = document.createElement('a')
+    link.href = `/api/routes/${route.id}/gpx`
+    link.download = ''
+    link.click()
+  } catch (e) {
+    error.value = t('routes.share_gpx_error')
+  } finally {
+    sharingGpxId.value = null
   }
 }
 
@@ -523,6 +555,17 @@ onMounted(() => fetchRoutes())
                 >
                   <i class="fa-solid fa-download" aria-hidden="true"></i>
                 </a>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :title="t('routes.share_gpx')"
+                  :aria-label="t('routes.share_gpx')"
+                  :disabled="sharingGpxId === r.id"
+                  @click="shareGpxFile(r)"
+                >
+                  <span v-if="sharingGpxId === r.id" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                  <i v-else class="fa-solid fa-file-export" aria-hidden="true"></i>
+                </button>
                 <button
                   type="button"
                   class="btn btn-sm btn-outline-secondary"

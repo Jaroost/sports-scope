@@ -223,6 +223,8 @@ fr:
     share: "Partager le lien de navigation"
     share_view: "Partager le lien (lecture seule)"
     share_copied: "Lien copié !"
+    share_gpx: "Partager le fichier GPX"
+    share_gpx_error: "Impossible de partager le fichier GPX"
     recenter: "Recentrer"
     remaining_distance: "Distance restante"
     remaining_elevation: "Dénivelé restant"

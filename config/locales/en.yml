@@ -223,6 +223,8 @@ en:
     share: "Share navigation link"
     share_view: "Share link (read-only)"
     share_copied: "Link copied!"
+    share_gpx: "Share GPX file"
+    share_gpx_error: "Could not share GPX file"
     recenter: "Recenter"
     remaining_distance: "Distance left"
     remaining_elevation: "Elevation left"

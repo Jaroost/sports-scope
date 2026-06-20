@@ -396,6 +396,30 @@ export function projectOnRoute(
   return { point: best.point, nextIdx: best.nextIdx, distAlongM: best.distAlongM }
 }
 
+// Lng/lat à `distM` le long de la polyligne (recherche binaire sur cumDistM puis
+// interpolation linéaire dans le tronçon). Réciproque de projectOnRoute.distAlongM :
+// sert à faire avancer la flèche LE LONG du tracé entre deux fixes GPS.
+export function lngLatAtDistanceM(geometry: Coord[], cumDistM: number[], distM: number): LngLat {
+  const n = cumDistM.length
+  if (n === 0) return [0, 0]
+  const total = cumDistM[n - 1]
+  const d = Math.max(0, Math.min(total, distM))
+  let lo = 0
+  let hi = n - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (cumDistM[mid] < d) lo = mid + 1
+    else hi = mid
+  }
+  // `lo` est le premier sommet dont la distance cumulée >= d : le tronçon est [lo-1, lo].
+  if (lo === 0) return [geometry[0][0], geometry[0][1]]
+  const a = geometry[lo - 1]
+  const b = geometry[lo]
+  const segLen = cumDistM[lo] - cumDistM[lo - 1]
+  const s = segLen > 0 ? (d - cumDistM[lo - 1]) / segLen : 0
+  return [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])]
+}
+
 // Index of the geometry vertex closest to `pos`, plus the lateral distance (m).
 // The distance is measured to the nearest point on the polyline (the two segments
 // adjacent to the nearest vertex), not to the vertex itself — so a position

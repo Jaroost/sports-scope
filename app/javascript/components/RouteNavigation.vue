@@ -6,7 +6,7 @@ import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
   formatDistanceShort, haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
-  progressFor, activeClimb, gradeForIndex, colorForGrade,
+  lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
@@ -115,8 +115,10 @@ let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 // we advance the displayed position forward from the last fix using the carried
 // speed and heading, recaling on every new fix. This keeps the rider gliding.
 let rafId: number | null = null
-let anchorPos: LngLat | null = null   // last real GPS position
+let anchorPos: LngLat | null = null   // position d'ancrage affichée (snappée ou brute)
 let anchorTime = 0                     // performance.now() of that fix
+let anchorOnRoute = false              // true → l'ancre est snappée sur le tracé
+let anchorDistM = 0                    // distance le long du tracé à l'ancre (si snappée)
 let extrapSpeedMs = 0                  // speed carried forward between fixes
 let extrapBearing = 0                  // travel heading (target)
 let displayBearing = 0                 // smoothed bearing actually rendered
@@ -353,8 +355,13 @@ function onPosition(pos: GeolocationPosition) {
 
   // Hand the fresh fix to the extrapolation loop: it owns the marker and camera
   // from here, projecting the rider forward every frame so the view glides
-  // instead of jumping once per second.
-  anchorPos = here
+  // instead of jumping once per second. Tant qu'on est sur le tracé, on ancre la
+  // flèche sur la position projetée (snapPoint) et on extrapolera LE LONG du tracé,
+  // pour qu'elle reste collée à la ligne au lieu de suivre un GPS qui dérive. Hors
+  // trajet, on retombe sur le GPS brut pour montrer qu'on a quitté l'itinéraire.
+  anchorOnRoute = !offRoute.value && snapPoint != null
+  anchorPos = anchorOnRoute ? snapPoint : here
+  anchorDistM = snapDistAlongM
   anchorTime = performance.now()
   extrapSpeedMs = speedKmh.value / 3.6
   extrapBearing = currentBearing
@@ -368,12 +375,13 @@ function onPosition(pos: GeolocationPosition) {
 
   if (!hasInitialZoom) {
     // First fix: a smooth intro that also applies the profile zoom & pitch once,
-    // then the rAF loop takes over the camera.
-    updateLocationMarker(here)
+    // then the rAF loop takes over the camera. On affiche directement l'ancre
+    // (snappée sur le tracé si on est dessus) plutôt que le GPS brut.
+    updateLocationMarker(anchorPos ?? here)
     if (locationMarker) locationMarker.setRotation(currentBearing)
     displayBearing = currentBearing
     introPending = true
-    map.easeTo(followOptions(here))
+    map.easeTo(followOptions(anchorPos ?? here))
     map.once('moveend', () => { introPending = false; startAnimation() })
   } else {
     startAnimation()
@@ -429,9 +437,14 @@ function startAnimation() {
     rafId = requestAnimationFrame(tick)
     if (!anchorPos) return
     const dt = Math.min((performance.now() - anchorTime) / 1000, MAX_EXTRAP_S)
-    const pos = extrapSpeedMs > MIN_SPEED_MS
-      ? moveLngLat(anchorPos, extrapBearing, extrapSpeedMs * dt)
-      : anchorPos
+    let pos = anchorPos
+    if (extrapSpeedMs > MIN_SPEED_MS) {
+      // Sur le tracé : avancer la distance le long de la polyligne (la flèche reste
+      // collée à la ligne, virages compris). Hors trajet : extrapolation libre au cap.
+      pos = anchorOnRoute
+        ? lngLatAtDistanceM(geometry, cumDistM, anchorDistM + extrapSpeedMs * dt)
+        : moveLngLat(anchorPos, extrapBearing, extrapSpeedMs * dt)
+    }
     let d = extrapBearing - displayBearing
     while (d > 180) d -= 360
     while (d < -180) d += 360
@@ -664,7 +677,9 @@ function recenter() {
   // hand the camera back to the loop once we're settled over the rider.
   stopAnimation()
   displayBearing = currentBearing
-  map.easeTo(followOptions(lastPos))
+  // Recentrer sur l'ancre affichée (snappée sur le tracé si on est dessus) pour que
+  // caméra et flèche coïncident — la boucle recentre déjà sur la position affichée.
+  map.easeTo(followOptions(anchorPos ?? lastPos))
   map.once('moveend', startAnimation)
 }
 

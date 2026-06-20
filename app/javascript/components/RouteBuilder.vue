@@ -292,7 +292,7 @@ async function recomputeRoute() {
     routeStore.voiceHints.value = rawHints
       .map((h: number[]) => {
         const c = coords[h[0]]
-        return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0 } : null
+        return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0, exit_number: h[2] ?? 0 } : null
       })
       .filter(Boolean) as VoiceHint[]
     // Les tronçons droits (points libres) ne contiennent que leurs extrémités : on les

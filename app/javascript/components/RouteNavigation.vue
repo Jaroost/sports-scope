@@ -90,6 +90,7 @@ let alts: (number | null)[] = []
 let cumDistM: number[] = []
 let climbs: Climb[] = []
 let turns: TurnPoint[] = []
+let turnsFromBRouter = false
 const routeName = ref('')
 
 // Tracking helpers
@@ -246,7 +247,9 @@ async function fetchRoute() {
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
   const hints = (route.voice_hints || []) as VoiceHint[]
-  turns = hints.length
+  turnsFromBRouter = hints.length > 0
+  console.log('turns from brouter:', turnsFromBRouter)
+  turns = turnsFromBRouter
     ? turnsFromVoiceHints(hints, geometry, cumDistM)
     : detectTurns(geometry, cumDistM)
   remainingM.value = cumDistM[cumDistM.length - 1] || 0
@@ -313,8 +316,85 @@ function installRouteLayers() {
   map.addSource('nav-remaining', { type: 'geojson', data: lineFeature(line) })
 
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
-  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': 5 } })
-  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': 5 } })
+  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': 8 } })
+  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': 8 } })
+
+  if (turnsFromBRouter && turns.length) {
+    if (!map.hasImage('nav-turn-arrow')) map.addImage('nav-turn-arrow', createArrowImage())
+    const features = turns.map((tp) => {
+      let b = tp.idx + 1
+      while (b < geometry.length - 1 && cumDistM[b] - cumDistM[tp.idx] < 18) b++
+      const bearing = bearingBetween(geometry[tp.idx], geometry[b])
+      return {
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [geometry[tp.idx][0], geometry[tp.idx][1]] },
+        properties: { bearing, kind: tp.kind, exitNumber: tp.exitNumber ?? 0 },
+      }
+    })
+    map.addSource('nav-turns', { type: 'geojson', data: { type: 'FeatureCollection' as const, features } })
+    map.addLayer({
+      id: 'nav-turns-dots',
+      type: 'circle',
+      source: 'nav-turns',
+      paint: {
+        'circle-radius': 11,
+        'circle-color': '#f97316',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff',
+      },
+    })
+    // Flèche directionnelle pour les virages normaux
+    map.addLayer({
+      id: 'nav-turns-arrows',
+      type: 'symbol',
+      source: 'nav-turns',
+      filter: ['!=', ['get', 'kind'], 'roundabout'],
+      layout: {
+        'icon-image': 'nav-turn-arrow',
+        'icon-rotate': ['get', 'bearing'],
+        'icon-rotation-alignment': 'map',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'icon-size': 1,
+      },
+    })
+    // Numéro de sortie pour les ronds-points
+    map.addLayer({
+      id: 'nav-turns-exit',
+      type: 'symbol',
+      source: 'nav-turns',
+      filter: ['==', ['get', 'kind'], 'roundabout'],
+      layout: {
+        'text-field': ['to-string', ['get', 'exitNumber']],
+        'text-size': 13,
+        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
+        'text-allow-overlap': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': '#ffffff',
+        'text-halo-color': '#f97316',
+        'text-halo-width': 1,
+      },
+    })
+  }
+}
+
+function createArrowImage(): ImageData {
+  const size = 22
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.fillStyle = 'white'
+  ctx.beginPath()
+  ctx.moveTo(size / 2, 1)        // pointe haute
+  ctx.lineTo(size - 2, size - 2) // coin bas droit
+  ctx.lineTo(size / 2, size - 7) // encoche basse
+  ctx.lineTo(2, size - 2)        // coin bas gauche
+  ctx.closePath()
+  ctx.fill()
+  return ctx.getImageData(0, 0, size, size)
 }
 
 function lineFeature(coords: number[][]) {

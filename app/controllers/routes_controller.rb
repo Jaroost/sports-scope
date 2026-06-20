@@ -153,9 +153,10 @@ class RoutesController < ApplicationController
       lat = hh["lat"] || hh[:lat]
       cmd = hh["cmd"] || hh[:cmd]
       angle = hh["angle"] || hh[:angle]
+      exit_number = hh["exit_number"] || hh[:exit_number]
       next nil unless lng.is_a?(Numeric) && lat.is_a?(Numeric)
       next nil if lat.abs > 90 || lng.abs > 180
-      { "lng" => lng.to_f, "lat" => lat.to_f, "cmd" => cmd.to_i, "angle" => angle.to_f }
+      { "lng" => lng.to_f, "lat" => lat.to_f, "cmd" => cmd.to_i, "angle" => angle.to_f, "exit_number" => exit_number.to_i }
     end.compact
   end
 

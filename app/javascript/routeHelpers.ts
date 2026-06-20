@@ -480,6 +480,7 @@ export interface TurnPoint {
   angle: number            // signed turn angle (deg): + = right, − = left
   direction: 'left' | 'right'
   kind: Maneuver
+  exitNumber?: number      // roundabout exit number (undefined for non-roundabouts)
 }
 
 // Classify a BRouter voice-hint command (and its angle as a tie-breaker) into a
@@ -519,6 +520,7 @@ export interface VoiceHint {
   lat: number
   cmd: number              // BRouter command id (2=TL, 3=TSLL, 5=TR, 6=TSLR, 14=roundabout…)
   angle: number            // signed turn angle (deg): + = right, − = left
+  exit_number?: number     // roundabout exit number (BRouter h[2])
 }
 
 // BRouter command ids that carry no actionable turn for our cues:
@@ -535,10 +537,13 @@ export function turnsFromVoiceHints(
 ): TurnPoint[] {
   const out: TurnPoint[] = []
   for (const h of hints) {
-    if (VOICE_HINT_SKIP.has(h.cmd)) continue
+    const isRoundabout = (h.exit_number ?? 0) > 0
+    if (VOICE_HINT_SKIP.has(h.cmd) && !isRoundabout) continue
     const { idx } = nearestGeomIndex([h.lng, h.lat], geometry)
-    const { kind, direction } = maneuverFromCmd(h.cmd, h.angle)
-    out.push({ idx, distM: cumDistM[idx] || 0, angle: h.angle, direction, kind })
+    const { kind: baseKind, direction } = maneuverFromCmd(h.cmd, h.angle)
+    const kind: Maneuver = isRoundabout ? 'roundabout' : baseKind
+    const exitNumber = isRoundabout ? (h.exit_number ?? 0) : undefined
+    out.push({ idx, distM: cumDistM[idx] || 0, angle: h.angle, direction, kind, exitNumber })
   }
   return out.sort((a, b) => a.distM - b.distM)
 }

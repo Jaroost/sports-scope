@@ -18,12 +18,20 @@ class PagesController < ApplicationController
   def route_navigation
     # No login required: navigation links are addressed by share_token and can
     # be shared with anyone.
-    @share_token = params[:token]
+    token = params[:token]
+    unless Route.exists?(share_token: token)
+      redirect_to root_path, alert: t("routes.error_shared_not_found") and return
+    end
+    @share_token = token
   end
 
   def route_view
     # No login required: read-only builder view addressed by share_token, meant
     # to be shared with anyone (signed-out recipients included).
-    @share_token = params[:token]
+    token = params[:token]
+    unless Route.exists?(share_token: token)
+      redirect_to root_path, alert: t("routes.error_shared_not_found") and return
+    end
+    @share_token = token
   end
 end

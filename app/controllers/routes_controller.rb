@@ -70,7 +70,9 @@ class RoutesController < ApplicationController
   # GET /api/routes/shared/:token/gpx — public, no login required
   def export_gpx_shared
     route = Route.find_by(share_token: params[:token])
-    return head :not_found unless route
+    unless route
+      redirect_to root_path, alert: t("routes.error_shared_not_found") and return
+    end
     send_gpx(route)
   end
 

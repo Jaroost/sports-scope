@@ -992,8 +992,14 @@ function onVisibilityChange() {
       <i class="fa-solid fa-location-arrow me-1" aria-hidden="true"></i>{{ t('routes.recenter') }}
     </button>
 
-    <!-- Climb card: full graded elevation profile with a position cursor -->
-    <div v-if="climbInfo" class="nav-climb shadow">
+    <!-- Climb card: full graded elevation profile with a position cursor.
+         Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
+    <div
+      v-if="climbInfo"
+      class="nav-climb shadow"
+      :class="{ 'nav-climb--sleep': screenOff }"
+      @click="screenOff && toggleScreenOff()"
+    >
       <div class="d-flex align-items-center justify-content-between mb-1">
         <span class="fw-semibold">
           <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
@@ -1176,6 +1182,9 @@ function onVisibilityChange() {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6.25rem;
   z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.6rem 0.85rem;
 }
+/* Mode veille : la carte du col passe au-dessus du voile noir (z 20). On garde sa
+   position par défaut pour laisser l'indice « tap pour reprendre » visible dessous. */
+.nav-climb--sleep { z-index: 21; }
 .nav-climb-grade {
   font-weight: 700; font-size: 1.1rem; line-height: 1;
   padding: 0.15rem 0.45rem; border-radius: 0.4rem;

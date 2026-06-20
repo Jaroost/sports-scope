@@ -96,11 +96,36 @@ export const GRADE_BUCKETS = [
   { max: Infinity, color: '#7f1d1d' },
 ]
 
-export function gradeForIndex(i: number, altitudes: (number | null)[], distances: number[]): number {
-  if (!altitudes || !distances || i + 1 >= altitudes.length || i + 1 >= distances.length) return 0
-  const da = (altitudes[i + 1] ?? 0) - (altitudes[i] ?? 0)
-  const dd = distances[i + 1] - distances[i]
-  return dd > 0 ? (da / dd) * 100 : 0
+// Fenêtre de lissage de la pente (m), réglable dans le profil utilisateur. Repli sur
+// 40 m hors page connectée. Source unique pour gradeForIndex / computeSegmentGrades.
+export function gradeSmoothingM(): number {
+  const v = userPreferences().climb_detection.grade_smoothing_m
+  return Number.isFinite(v) && v > 0 ? v : 40
+}
+
+// Pente au sommet i, lissée sur une fenêtre horizontale d'au moins windowM mètres.
+// Sans lissage, l'altitude quantifiée au mètre produit des pentes aberrantes entre
+// sommets voisins (cf. computeSegmentGrades). Sert à la fois à la coloration de la
+// carte et à la détection de cols, pour rester cohérent avec le profil d'altitude.
+export function gradeForIndex(
+  i: number,
+  altitudes: (number | null)[],
+  distances: number[],
+  windowM = gradeSmoothingM(),
+): number {
+  if (!altitudes || !distances) return 0
+  const n = Math.min(altitudes.length, distances.length)
+  if (i + 1 >= n) return 0
+  const half = windowM / 2
+  const mid = (distances[i] + distances[i + 1]) / 2
+  let lo = i
+  while (lo > 0 && (mid - distances[lo] < half || altitudes[lo] == null)) lo--
+  let hi = i + 1
+  while (hi < n - 1 && (distances[hi] - mid < half || altitudes[hi] == null)) hi++
+  const elo = altitudes[lo]
+  const ehi = altitudes[hi]
+  const dd = distances[hi] - distances[lo]
+  return elo != null && ehi != null && dd > 0 ? ((ehi - elo) / dd) * 100 : 0
 }
 
 export function bucketGrade(g: number): number {
@@ -246,6 +271,25 @@ export function computeGainLoss(coords: Coord[]): { gain: number; loss: number }
     else loss += -d
   }
   return { gain, loss }
+}
+
+// Pente lissée, un élément par tronçon (longueur coords.length - 1).
+// L'altitude (BRouter/SRTM, open-meteo) est quantifiée au mètre : calculer la pente
+// entre deux sommets voisins distants de ~1–2 m fait apparaître des valeurs absurdes
+// (un saut d'1 m sur 1,5 m horizontal = ~67 %). On calcule donc la pente sur une
+// fenêtre horizontale d'au moins windowM mètres centrée sur le tronçon, en n'utilisant
+// que des sommets cotés (altitude non nulle).
+export function computeSegmentGrades(coords: Coord[], windowM = gradeSmoothingM()): (number | null)[] {
+  const n = coords.length
+  const grades: (number | null)[] = []
+  if (n < 2) return grades
+  const altitudes = coords.map((c) => c[2])
+  const distances = buildDistancesM(coords)
+  for (let i = 1; i < n; i++) {
+    if (altitudes[i - 1] == null || altitudes[i] == null) { grades.push(null); continue }
+    grades.push(gradeForIndex(i - 1, altitudes, distances, windowM))
+  }
+  return grades
 }
 
 export function geomIdxForKm(km: number, cumDistKm: number[]): number {

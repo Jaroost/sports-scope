@@ -6,6 +6,7 @@ class ProfilesController < ApplicationController
   MIN_GRADE_RANGE = (0.0..15.0)
   MIN_GAIN_RANGE = (0..1000)
   MIN_LENGTH_RANGE = (50..5000)
+  GRADE_SMOOTHING_RANGE = (10..200)
   SPEED_RANGE = (3.0..80.0)
   NAV_ZOOM_RANGE = (14.0..40.0)
   NAV_PITCH_RANGE = (0..90)
@@ -71,6 +72,7 @@ class ProfilesController < ApplicationController
         "min_grade" => clamp_float(climb[:min_grade], MIN_GRADE_RANGE, 2),
         "min_gain_m" => clamp_int(climb[:min_gain_m], MIN_GAIN_RANGE, 60),
         "min_length_m" => clamp_int(climb[:min_length_m], MIN_LENGTH_RANGE, 500),
+        "grade_smoothing_m" => clamp_int(climb[:grade_smoothing_m], GRADE_SMOOTHING_RANGE, 40),
       },
       "speeds" => sanitize_speeds(speeds),
     }

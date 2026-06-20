@@ -360,6 +360,8 @@ fr:
       min_grade: "Pente moyenne min."
       min_gain: "Dénivelé positif min."
       min_length: "Longueur min."
+      grade_smoothing: "Lissage de la pente"
+      grade_smoothing_help: "Fenêtre de calcul de la pente. Une valeur plus élevée lisse le bruit du relief (altitude arrondie au mètre) ; une valeur plus faible conserve les pentes courtes mais peut afficher des valeurs aberrantes."
     speeds:
       title: "Vitesses moyennes"
       help: "Vitesse moyenne par activité, utilisée pour estimer le temps de parcours d'un itinéraire. Le créateur et la liste choisissent la vitesse correspondant à l'activité sélectionnée."

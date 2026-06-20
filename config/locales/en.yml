@@ -360,6 +360,8 @@ en:
       min_grade: "Min. average grade"
       min_gain: "Min. elevation gain"
       min_length: "Min. length"
+      grade_smoothing: "Grade smoothing"
+      grade_smoothing_help: "Window used to compute the grade. A higher value smooths terrain noise (elevation rounded to the metre); a lower value keeps short slopes but may show spurious values."
     speeds:
       title: "Average speeds"
       help: "Average speed per activity, used to estimate ride time on a route. The route builder and list pick the speed matching the selected activity."

@@ -33,6 +33,7 @@ interface Preferences {
     min_grade: number
     min_gain_m: number
     min_length_m: number
+    grade_smoothing_m: number
   }
   speeds: {
     cycling: number
@@ -356,6 +357,12 @@ function placePreviewMarker(coords: [number, number]) {
             </div>
           </div>
         </div>
+        <hr class="my-3">
+        <label for="climb-smoothing" class="form-label mb-1">
+          {{ t('profile.climb.grade_smoothing') }} : <strong>{{ prefs.climb_detection.grade_smoothing_m }} m</strong>
+        </label>
+        <input id="climb-smoothing" v-model.number="prefs.climb_detection.grade_smoothing_m" type="range" class="form-range" min="10" max="200" step="5">
+        <p class="text-muted small mb-0">{{ t('profile.climb.grade_smoothing_help') }}</p>
       </div>
     </section>
 

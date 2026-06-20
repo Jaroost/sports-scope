@@ -6,7 +6,7 @@ import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import {
   haversine, colorForGrade, geomIdxForKm,
-  formatDuration,
+  computeSegmentGrades, formatDuration,
 } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 
@@ -77,20 +77,8 @@ const chartStats = computed(() => {
 // ─── Segment colours ──────────────────────────────────────────────────────────
 
 function recomputeSegmentColors() {
-  const g = routeStore.geometry.value
-  const cols: string[] = []
-  const grades: (number | null)[] = []
-  for (let i = 1; i < g.length; i++) {
-    const a = g[i - 1]
-    const b = g[i]
-    const ea = a[2], eb = b[2]
-    if (ea == null || eb == null) { cols.push('#9ca3af'); grades.push(null); continue }
-    const d = haversine(a, b)
-    const grade = d > 0 ? ((eb - ea) / d) * 100 : 0
-    grades.push(grade)
-    cols.push(colorForGrade(grade))
-  }
-  segmentColors = cols
+  const grades = computeSegmentGrades(routeStore.geometry.value)
+  segmentColors = grades.map((g) => (g == null ? '#9ca3af' : colorForGrade(g)))
   segmentGrades = grades
 }
 

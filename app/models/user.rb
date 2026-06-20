@@ -36,6 +36,9 @@ class User < ApplicationRecord
       "min_grade" => 2,        # pente moyenne minimale (%)
       "min_gain_m" => 60,      # dénivelé positif minimal (m)
       "min_length_m" => 500,   # longueur minimale (m)
+      # Fenêtre horizontale (m) de lissage de la pente : l'altitude est quantifiée au
+      # mètre, sans lissage la pente entre sommets voisins devient aberrante (cf. front).
+      "grade_smoothing_m" => 40,
     },
   }.freeze
 

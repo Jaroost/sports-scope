@@ -28,6 +28,7 @@ export interface UserPreferences {
     min_grade: number
     min_gain_m: number
     min_length_m: number
+    grade_smoothing_m: number
   }
   speeds: Record<Sport, number>
 }
@@ -50,6 +51,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     min_grade: 2,
     min_gain_m: 60,
     min_length_m: 500,
+    grade_smoothing_m: 40,
   },
   speeds: {
     cycling: 18,

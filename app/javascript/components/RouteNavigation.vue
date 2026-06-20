@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
-  formatDistanceShort, haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
+  formatDistanceShort, formatDistancePrecise, haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
@@ -71,6 +71,7 @@ const climbInfo = ref<{
   ratio: number
   remainingGainM: number
   segments: { d: string; color: string }[]  // graded elevation profile of the climb
+  areaD: string                              // filled area path of the whole profile (for the grey "done" overlay)
   posX: number                               // cursor x (% of profile width)
   posY: number                               // cursor y (% of profile height)
   topY: number                               // summit y (% of profile height)
@@ -129,18 +130,27 @@ let extrapBearing = 0                  // travel heading (target)
 let displayBearing = 0                 // smoothed bearing actually rendered
 const MAX_EXTRAP_S = 2.5               // stop predicting if fixes stop arriving
 const BEARING_SMOOTH = 0.18            // per-frame easing toward the target bearing
-// Bottom camera padding lifts the rider's anchor up the screen so the climb card
-// (which overlays the lower map) doesn't hide the position arrow. Eased per frame.
-const CLIMB_LIFT_RATIO = 0.33          // extra bottom padding (× height) while climbing
-const PAD_SMOOTH = 0.12                // per-frame easing toward the target padding
-let displayBottomPad = 0               // smoothed bottom padding actually rendered
+// Pendant un col, la carte est rétrécie (classe nav-map--climbing) pour libérer le
+// bas de l'écran à la carte du col : la flèche reste donc dans la carte visible sans
+// qu'on ait à décaler la caméra. On signale juste le rétrécissement à MapLibre.
+const isClimbing = computed(() => climbInfo.value != null)
+// Quand on entre/sort d'un col, la carte change de taille (CSS) : on attend le
+// reflow puis on prévient MapLibre et on rafraîchit la hauteur mise en cache, sinon
+// le canvas garde ses anciennes dimensions et la vue paraît étirée.
+watch(isClimbing, () => {
+  nextTick(() => {
+    if (!map) return
+    map.resize()
+    refreshContainerH()
+    if (following.value) startAnimation()  // recadre la flèche dans la carte redimensionnée
+  })
+})
 
 // Économie de batterie : la boucle d'animation s'auto-termine dès que tout est
-// stabilisé (immobile / cap convergé / padding réglé) et se relance au prochain fix.
+// stabilisé (immobile / cap convergé) et se relance au prochain fix.
 // On la plafonne au FPS configuré dans le profil et on met la hauteur du conteneur
 // en cache pour éviter un reflow par frame.
 const BEARING_EPS = 0.1                // ° — en dessous, le cap est « convergé »
-const PAD_EPS = 0.5                    // px — en dessous, le padding est « stabilisé »
 // Intervalle minimum entre deux frames, calculé depuis la préférence nav_fps (0,5–60 fps).
 const FRAME_MIN_MS = Math.round(1000 / (navPrefs.nav_fps ?? 8))
 let containerH = 0                     // hauteur du conteneur carte, rafraîchie au resize
@@ -517,15 +527,10 @@ function followOptions(center: LngLat): any {
   return opts
 }
 
-// Extra bottom padding so the rider sits above the climb card when it's shown.
-function bottomPadTarget(h: number): number {
-  return climbInfo.value ? Math.round(h * CLIMB_LIFT_RATIO) : 0
-}
-
-// Camera padding: a fixed top inset keeps the look-ahead constant; the bottom
-// inset (smoothed) lifts the rider clear of the climb card overlay.
+// Camera padding: a fixed top inset keeps the look-ahead constant. The climb card
+// no longer overlaps the map (the map is shrunk while climbing), so no bottom lift.
 function followPadding(h: number): { top: number; bottom: number; left: number; right: number } {
-  return { top: Math.round(h * 0.45), bottom: Math.round(displayBottomPad), left: 0, right: 0 }
+  return { top: Math.round(h * 0.45), bottom: 0, left: 0, right: 0 }
 }
 
 // Move a lng/lat by `distM` along `bearingDeg` (equirectangular — accurate to a
@@ -564,25 +569,19 @@ function startAnimation() {
     while (d > 180) d -= 360
     while (d < -180) d += 360
 
-    // Économie de batterie : on arrête la boucle dès que ses trois sorties ont atteint
-    // leur valeur finale — position (immobile ou extrapolation plafonnée), cap convergé,
-    // et padding stabilisé (ou non appliqué hors suivi). Le prochain fix GPS rappelle
-    // startAnimation() et relance la boucle (garde rafId != null).
+    // Économie de batterie : on arrête la boucle dès que ses deux sorties ont atteint
+    // leur valeur finale — position (immobile ou extrapolation plafonnée) et cap convergé.
+    // Le prochain fix GPS rappelle startAnimation() et relance la boucle (garde rafId != null).
     const posSettled = extrapSpeedMs <= MIN_SPEED_MS || dt >= MAX_EXTRAP_S
     const bearingSettled = Math.abs(d) < BEARING_EPS
     const h = containerH
-    const padSettled = !following.value
-      || Math.abs(bottomPadTarget(h) - displayBottomPad) < PAD_EPS
-    const idle = posSettled && bearingSettled && padSettled
+    const idle = posSettled && bearingSettled
 
     // Sur la frame terminale on fige exactement sur la cible (l'easing n'y arrive jamais).
     displayBearing = idle ? extrapBearing : displayBearing + d * BEARING_SMOOTH
     updateLocationMarker(pos)
     if (locationMarker) locationMarker.setRotation(displayBearing)
     if (following.value) {
-      displayBottomPad = idle
-        ? bottomPadTarget(h)
-        : displayBottomPad + (bottomPadTarget(h) - displayBottomPad) * PAD_SMOOTH
       map.jumpTo({ center: pos, bearing: displayBearing, zoom: camZoom.value, pitch: camPitch.value, padding: followPadding(h) })
     }
 
@@ -702,6 +701,7 @@ function updateProgress(idx: number) {
       ratio: ac.ratio,
       remainingGainM: rem,
       segments: profileSegments,
+      areaD: profileAreaD,
       posX,
       posY: profileYAt(posX),
       topY: profileTopY,
@@ -721,6 +721,7 @@ function updateProgress(idx: number) {
 // x spans the climb's distance, y is the altitude normalised to the climb's range.
 let profileForStart = -1
 let profileSegments: { d: string; color: string }[] = []
+let profileAreaD = ''   // filled area path of the whole profile (greyed for the done section)
 let profilePts: { x: number; y: number }[] = []
 let profileTopY = 4   // y of the highest point of the climb (summit)
 
@@ -739,6 +740,10 @@ function buildClimbProfile(climb: Climb) {
   profilePts = []
   for (let i = s; i <= e; i++) profilePts.push({ x: xOf(i), y: yOf(i) })
   profileTopY = Math.min(...profilePts.map((p) => p.y))
+  // Filled area under the whole altitude line — reused (clipped) for the grey done overlay.
+  profileAreaD = `M${profilePts[0].x},100`
+  for (const p of profilePts) profileAreaD += ` L${p.x},${p.y}`
+  profileAreaD += ` L${profilePts[profilePts.length - 1].x},100 Z`
   profileSegments = []
   for (let i = s; i < e; i++) {
     const x1 = xOf(i)
@@ -847,7 +852,7 @@ function onVisibilityChange() {
 
 <template>
   <div class="nav-page">
-    <div ref="mapEl" class="nav-map"></div>
+    <div ref="mapEl" class="nav-map" :class="{ 'nav-map--climbing': isClimbing }"></div>
 
     <!-- Battery saver: black screen — GPS and turn sounds still active -->
     <div v-if="screenOff" class="nav-screen-off" @click="toggleScreenOff">
@@ -991,14 +996,24 @@ function onVisibilityChange() {
     <div v-if="climbInfo" class="nav-climb shadow">
       <div class="d-flex align-items-center justify-content-between mb-1">
         <span class="fw-semibold">
-          <i class="fa-solid fa-mountain text-warning me-1" aria-hidden="true"></i>{{ t('routes.climb_in_progress') }}
-          <span v-if="climbInfo.climb.category" class="badge bg-dark ms-1">{{ climbInfo.climb.category }}</span>
+          <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
         </span>
-        <span class="nav-climb-grade" :style="{ background: climbInfo.gradeColor, color: climbInfo.gradeText }">{{ Math.round(climbInfo.grade) }} %</span>
+        <span class="d-flex align-items-center gap-2">
+          <!-- Distance restante du col, mise en avant. -->
+          <span class="nav-climb-remaining-dist">{{ formatDistancePrecise(climbInfo.climb.lengthM * (1 - climbInfo.ratio)) }}</span>
+          <span class="nav-climb-grade" :style="{ background: climbInfo.gradeColor, color: climbInfo.gradeText }">{{ Math.round(climbInfo.grade) }} %</span>
+        </span>
       </div>
       <div class="nav-climb-graph">
         <svg class="nav-climb-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <clipPath id="nav-climb-done-clip">
+              <rect x="0" y="0" :width="climbInfo.posX" height="100" />
+            </clipPath>
+          </defs>
           <path v-for="(seg, i) in climbInfo.segments" :key="i" :d="seg.d" :fill="seg.color" />
+          <!-- Done section: the profile redrawn in a flat grey, clipped up to the rider. -->
+          <path :d="climbInfo.areaD" fill="#9ca3af" clip-path="url(#nav-climb-done-clip)" />
         </svg>
         <div class="nav-climb-cursor" :style="{ left: `${climbInfo.posX}%` }">
           <!-- Remaining vertical gain: from the rider's altitude up to the summit. -->
@@ -1006,15 +1021,16 @@ function onVisibilityChange() {
             class="nav-climb-remain"
             :style="{ top: `${climbInfo.topY}%`, height: `${Math.max(0, climbInfo.posY - climbInfo.topY)}%` }"
           ></span>
-          <span class="nav-climb-remain-label" :style="{ top: `${(climbInfo.topY + climbInfo.posY) / 2}%` }">
-            +{{ Math.round(climbInfo.remainingGainM) }} m
+          <span
+            class="nav-climb-remain-label"
+            :class="{ 'nav-climb-remain-label--left': climbInfo.posX > 50 }"
+            :style="{ top: `${(climbInfo.topY + climbInfo.posY) / 2}%` }"
+          >
+            <span class="nav-climb-remain-gain">+{{ Math.round(climbInfo.remainingGainM) }} m</span>
+            <span class="nav-climb-remain-pct">{{ Math.round(climbInfo.ratio * 100) }} %</span>
           </span>
           <span class="nav-climb-dot" :style="{ top: `${climbInfo.posY}%` }"></span>
         </div>
-      </div>
-      <div class="d-flex justify-content-between mt-1">
-        <small class="text-muted">{{ formatDistanceShort(climbInfo.climb.lengthM) }}</small>
-        <small class="text-muted">{{ formatDistanceShort(climbInfo.climb.lengthM * (1 - climbInfo.ratio)) }}</small>
       </div>
     </div>
 
@@ -1045,6 +1061,8 @@ function onVisibilityChange() {
 .nav-page {
   position: relative;
   width: 100%;
+  /* Fond visible sous la carte rétrécie pendant un col (autour des panneaux). */
+  background: #e9ecef;
   /* svh = smallest visible viewport (browser chrome expanded). The page never
      scrolls, so the chrome stays put and svh matches the visible area exactly —
      unlike dvh, which some mobile browsers mis-compute on first paint and only
@@ -1054,6 +1072,9 @@ function onVisibilityChange() {
   overflow: hidden;
 }
 .nav-map { position: absolute; inset: 0; }
+/* Pendant un col, la carte se rétrécit pour laisser le bas de l'écran à la carte du
+   col (bottom: 6.25rem, hauteur ≈ 12rem) : la flèche reste dans la carte visible. */
+.nav-map--climbing { bottom: 18.75rem; }
 
 /* Anchor the map-style menu to the button's right edge so it never overflows
    the screen on this full-width page. */
@@ -1159,8 +1180,12 @@ function onVisibilityChange() {
   font-weight: 700; font-size: 1.1rem; line-height: 1;
   padding: 0.15rem 0.45rem; border-radius: 0.4rem;
 }
+/* Distance restante du col, mise en avant dans l'en-tête. */
+.nav-climb-remaining-dist {
+  font-weight: 800; font-size: 1.5rem; line-height: 1; color: #111827;
+}
 .nav-climb-graph {
-  position: relative; height: 64px; width: 100%;
+  position: relative; height: 145px; width: 100%;
 }
 .nav-climb-svg {
   position: absolute; inset: 0; width: 100%; height: 100%;
@@ -1183,10 +1208,17 @@ function onVisibilityChange() {
   border-left: 2px dashed #f97316; transform: translateX(-1px);
 }
 .nav-climb-remain-label {
-  position: absolute; left: 6px; transform: translateY(-50%);
-  font-size: 0.7rem; font-weight: 700; color: #c2410c; white-space: nowrap;
-  background: rgba(255, 255, 255, 0.85); padding: 0 0.2rem; border-radius: 0.25rem;
+  position: absolute; left: 8px; transform: translateY(-50%);
+  display: flex; flex-direction: column; align-items: flex-start;
+  white-space: nowrap; line-height: 1.1;
+  background: rgba(255, 255, 255, 0.9); padding: 0.1rem 0.35rem; border-radius: 0.3rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
+.nav-climb-remain-gain { font-size: 1.05rem; font-weight: 800; color: #c2410c; }
+.nav-climb-remain-pct { font-size: 0.8rem; font-weight: 700; color: #6c757d; }
+/* Passé la moitié du graphique, on bascule le label à gauche de la ligne pour
+   qu'il ne soit pas coupé par le bord droit. */
+.nav-climb-remain-label--left { left: auto; right: 8px; align-items: flex-end; }
 
 .nav-stats {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 0.75rem;

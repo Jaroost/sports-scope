@@ -44,6 +44,11 @@ export function formatDistanceShort(m: number): string {
   return m < 1000 ? `${Math.round(m)} m` : `${Math.round(m / 1000)} km`
 }
 
+// Comme formatDistanceShort mais avec 2 décimales en km (m < 1 km reste en mètres).
+export function formatDistancePrecise(m: number): string {
+  return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`
+}
+
 export function formatDuration(totalSec: number): string {
   if (!totalSec || totalSec < 0) return '–'
   const h = Math.floor(totalSec / 3600)

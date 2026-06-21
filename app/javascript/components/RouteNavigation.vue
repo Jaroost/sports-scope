@@ -175,6 +175,9 @@ let announcedTurn = -1       // index of the last turn we played a cue for
 let reachedTurn: { direction: 'left' | 'right'; kind: Maneuver; angle: number; exitNumber?: number } | null = null
 let reachedAt = 0
 const GREEN_HOLD_MS = 4000
+// Vrai quand l'écran a été rallumé AUTOMATIQUEMENT à l'approche d'un virage : on ne
+// remet en veille de soi-même que dans ce cas (un réveil manuel reste éveillé).
+let autoWoken = false
 let lastTurnReminderMs = 0   // timestamp of the last repeated turn cue
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 // Virage en cours d'annonce (dans la zone d'alerte) : la répétition du son est
@@ -645,7 +648,7 @@ async function initMap() {
   map.on('click', () => {
     // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
     if (placePopup) { closePlacePopup(); return }
-    if (!screenOff.value) toggleScreenOff()
+    if (!screenOff.value) toggleScreenOffManual()
   })
 
   await new Promise<void>((resolve) => {
@@ -1015,7 +1018,25 @@ function updateTurns(): boolean {
   } else {
     turnHint.value = null
   }
+
+  autoWakeForTurns(turnHint.value?.state ?? null)
   return fired
+}
+
+// Veille automatique pilotée par les virages :
+//   • à l'approche d'un virage (état « near », violet/orange), si on est en veille,
+//     on rallume l'écran pour montrer l'instruction ;
+//   • à la fin du maintien vert (« now »), si c'est nous qui avions rallumé, on se
+//     rendort — SAUF si un autre virage est déjà proche (état « near »), auquel cas
+//     on reste éveillé.
+function autoWakeForTurns(state: 'far' | 'near' | 'now' | null) {
+  if (state === 'near' && screenOff.value) {
+    autoWoken = true
+    toggleScreenOff()       // sort de veille (et relance la boucle d'animation)
+  } else if (autoWoken && !screenOff.value && state !== 'near' && state !== 'now') {
+    autoWoken = false
+    toggleScreenOff()       // remet en veille (plus de virage proche)
+  }
 }
 
 // Mémorise un virage franchi (et (re)démarre son maintien vert).
@@ -1258,6 +1279,14 @@ function toggleScreenOff() {
   }
 }
 
+// Bascule manuelle (tap utilisateur) : on annule l'état « réveil automatique » pour
+// ne pas re-endormir de soi-même un écran que l'utilisateur a lui-même rallumé (ni
+// re-réveiller un écran qu'il vient d'éteindre).
+function toggleScreenOffManual() {
+  autoWoken = false
+  toggleScreenOff()
+}
+
 // ─── Wake lock ────────────────────────────────────────────────────────────────
 
 async function requestWakeLock() {
@@ -1282,7 +1311,7 @@ function onVisibilityChange() {
     <div ref="mapEl" class="nav-map" :class="{ 'nav-map--climbing': isClimbing }"></div>
 
     <!-- Battery saver: black screen — GPS and turn sounds still active -->
-    <div v-if="screenOff" class="nav-screen-off" @click="toggleScreenOff">
+    <div v-if="screenOff" class="nav-screen-off" @click="toggleScreenOffManual">
       <div v-if="hasFix" class="nav-speed shadow">
         <span class="nav-speed-value">{{ speedKmh.toFixed(1) }}</span>
         <span class="nav-speed-unit">km/h</span>
@@ -1512,7 +1541,7 @@ function onVisibilityChange() {
       v-if="climbInfo"
       class="nav-climb shadow"
       :class="{ 'nav-climb--sleep': screenOff }"
-      @click="screenOff && toggleScreenOff()"
+      @click="screenOff && toggleScreenOffManual()"
     >
       <div class="d-flex align-items-center justify-content-between mb-1">
         <span class="fw-semibold">

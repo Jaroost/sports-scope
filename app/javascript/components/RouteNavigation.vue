@@ -712,11 +712,18 @@ function renderTurnMarkers() {
   applyMarkerScale()
 }
 
-// Tailles de base (px) à l'échelle 1 (= zoom de référence). Pour les POI on respecte
-// la taille responsive du CSS (.place-marker) : 32 px sur mobile, 26 px sinon.
+// Tailles de base (px) des POI à l'échelle 1. Relevées par rapport au CSS d'origine
+// (32/26) car les POI paraissaient trop petits une fois mis à l'échelle.
 const POI_MOBILE = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
-const POI_DOT_BASE = POI_MOBILE ? 32 : 26
-const POI_ICON_BASE = POI_MOBILE ? 14.7 : 12.5   // ≈ 0.92rem / 0.78rem
+const POI_DOT_BASE = POI_MOBILE ? 38 : 30
+const POI_ICON_BASE = POI_MOBILE ? 17 : 14
+
+// Échelle des POI : plus douce que celle du tracé/des virages. Un point d'intérêt doit
+// rester lisible et tapable, donc plancher relevé (et plafond) pour qu'il ne devienne ni
+// minuscule en dézoom ni démesuré en zoom.
+function poiScale(z: number): number {
+  return Math.min(1.8, Math.max(0.75, zoomWidthScale(z)))
+}
 
 // Met TOUS les marqueurs DOM (pastilles de virage + POI) à l'échelle du zoom, selon
 // la même loi que le tracé (zoomWidthScale) : gros en zoom, fins en dézoom — comme un
@@ -726,24 +733,28 @@ const POI_ICON_BASE = POI_MOBILE ? 14.7 : 12.5   // ≈ 0.92rem / 0.78rem
 // dimensionnés en % (flèche SVG) ou en em suivent automatiquement.
 function applyMarkerScale() {
   if (!map) return
-  const s = zoomWidthScale(map.getZoom())
-  // Pastilles de virage : on scale le corps interne via --ts (transform: scale), ce qui
-  // contourne le plancher de taille du conteneur flex et scale d'un bloc cercle, liseré,
-  // flèche et numéro.
-  const ts = String(s)
+  const z = map.getZoom()
+  const s = zoomWidthScale(z)
+  // Pastilles de virage : on scale le corps interne via `transform: scale`, posé
+  // directement sur l'élément (le premier enfant de la racine) — ça contourne le
+  // plancher de taille du conteneur flex et scale d'un bloc cercle, liseré, flèche et
+  // numéro.
   for (const m of turnMarkers) {
-    (m.getElement() as HTMLElement).style.setProperty('--ts', ts)
+    const body = (m.getElement() as HTMLElement).firstElementChild as HTMLElement | null
+    if (body) body.style.transform = `scale(${s})`
   }
-  // POI : la boîte se redimensionne directement (pas de plancher : l'icône en police suit).
-  const poiSize = POI_DOT_BASE * s
-  const poiBorder = `${Math.max(1, 2 * s)}px`
+  // POI : la boîte se redimensionne directement (l'icône en police suit), avec une
+  // échelle plus douce pour rester lisible.
+  const ps = poiScale(z)
+  const poiSize = POI_DOT_BASE * ps
+  const poiBorder = `${Math.max(1, 2 * ps)}px`
   for (const m of placeMarkers) {
     const el = m.getElement() as HTMLElement
     el.style.width = `${poiSize}px`
     el.style.height = `${poiSize}px`
     el.style.borderWidth = poiBorder
     const icon = el.querySelector<HTMLElement>('i')
-    if (icon) icon.style.fontSize = `${POI_ICON_BASE * s}px`
+    if (icon) icon.style.fontSize = `${POI_ICON_BASE * ps}px`
   }
 }
 
@@ -1752,7 +1763,8 @@ function onVisibilityChange() {
   /* content-box : le liseré blanc s'ajoute autour de la pastille (comme circle-stroke),
      pour reproduire le rendu de l'ancienne couche canvas malgré le reset Bootstrap. */
   box-sizing: content-box;
-  transform: scale(var(--ts, 1));
+  /* Échelle posée en JS (applyMarkerScale) ; défaut neutre avant le premier calcul. */
+  transform: scale(1);
   transform-origin: center;
 }
 .nav-turn-marker-arrow { width: 73%; height: 73%; display: block; }

@@ -857,7 +857,7 @@ function onVisibilityChange() {
     <!-- Battery saver: black screen — GPS and turn sounds still active -->
     <div v-if="screenOff" class="nav-screen-off" @click="toggleScreenOff">
       <div v-if="hasFix" class="nav-speed shadow">
-        <span class="nav-speed-value">{{ Math.round(speedKmh) }}</span>
+        <span class="nav-speed-value">{{ speedKmh.toFixed(1) }}</span>
         <span class="nav-speed-unit">km/h</span>
       </div>
       <div v-if="turnHint && hasFix && !offRoute" class="nav-turn-sleep shadow" :class="{ 'nav-turn-sleep--urgent': turnHint.distM <= TURN_URGENT_M, 'nav-turn-sleep--climb': climbInfo }">
@@ -953,7 +953,7 @@ function onVisibilityChange() {
 
     <!-- Instantaneous speed -->
     <div v-if="hasFix" class="nav-speed shadow">
-      <span class="nav-speed-value">{{ Math.round(speedKmh) }}</span>
+      <span class="nav-speed-value">{{ speedKmh.toFixed(1) }}</span>
       <span class="nav-speed-unit">km/h</span>
     </div>
 

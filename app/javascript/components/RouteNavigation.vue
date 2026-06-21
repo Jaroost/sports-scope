@@ -87,6 +87,9 @@ let locationMarker: any = null
 let watchId: number | null = null
 let wakeLock: any = null
 let placeMarkers: any[] = []   // marqueurs POI (cimetières/boulangeries) issus du profil
+let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
+let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
+const svCache = new Map<string, boolean>()     // cache « Street View dispo ? » par POI
 
 // Route data (non-reactive: large arrays, only read inside callbacks)
 let geometry: Coord[] = []
@@ -296,6 +299,8 @@ async function fetchRoute() {
 // le créateur d'itinéraire. Mêmes catégories, même rayon (points_of_interest) et
 // même rendu de marqueur. Best-effort : un échec Overpass est silencieux, les POI
 // ne sont qu'un complément à la navigation.
+interface NavPlace { name: string; type: string; lng: number; lat: number }
+
 async function fetchPlaces() {
   const poi = userPreferences().points_of_interest
   const types: string[] = []
@@ -322,7 +327,7 @@ async function fetchPlaces() {
     const nodes = await res.json()
 
     const seen = new Set<string>()
-    const places: { name: string; type: string; lng: number; lat: number }[] = []
+    const places: NavPlace[] = []
     for (const node of nodes) {
       if (node.type !== 'cemetery' && node.type !== 'bakery') continue
       const key = `${node.type}:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
@@ -344,8 +349,9 @@ async function fetchPlaces() {
 // Marqueur HTML persistant par POI (même look que le créateur). Les marqueurs
 // MapLibre sont des overlays DOM, ils survivent à un setStyle — pas besoin de les
 // réinstaller au changement de fond de carte.
-function installPlaceMarkers(places: { name: string; type: string; lng: number; lat: number }[]) {
+function installPlaceMarkers(places: NavPlace[]) {
   if (!map || !maplibre) return
+  closePlacePopup()
   for (const m of placeMarkers) m.remove()
   placeMarkers = []
   for (const place of places) {
@@ -354,11 +360,97 @@ function installPlaceMarkers(places: { name: string; type: string; lng: number; 
     el.className = `place-marker place-marker--${place.type}`
     el.title = place.name
     el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
+    // Clic = popup Google Maps / Street View. stopPropagation pour ne pas
+    // déclencher la mise en veille (tap carte) ni un déplacement de carte.
+    el.addEventListener('click', (ev) => { ev.stopPropagation(); showPlacePopup(place, el) })
+    el.addEventListener('pointerdown', (ev) => ev.stopPropagation())
     const marker = new maplibre.Marker({ element: el, anchor: 'bottom' })
       .setLngLat([place.lng, place.lat])
       .addTo(map)
     placeMarkers.push(marker)
   }
+}
+
+// Popup proposant d'ouvrir le POI sur Google Maps et en Street View — repris du
+// créateur d'itinéraire (même format d'URL `maps?q=lat,lng`). Le lien Street View
+// est grisé quand aucune imagerie n'est disponible à proximité.
+function showPlacePopup(place: NavPlace, el: HTMLElement) {
+  if (!maplibre || !map) return
+  closePlacePopup()
+  // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
+  // le POI. On vise juste à côté pour le laisser visible/cliquable.
+  const OFFSET = 0.00008
+  const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
+  const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${place.lat},${place.lng}`
+  const wrap = document.createElement('div')
+  wrap.className = 'place-popup'
+  wrap.innerHTML = `
+    <div class="place-popup-header">
+      <span class="place-popup-name">${escapeHtml(place.name)}</span>
+      <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
+    </div>
+    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-brands fa-google" aria-hidden="true"></i>
+      <span>Google Maps</span>
+    </a>
+    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.street_view'))}</span>
+    </a>`
+  // closeOnClick désactivé : un tap carte met l'écran en veille ; la fermeture du
+  // popup sur tap carte est gérée explicitement dans le handler de clic de la carte.
+  placePopup = new maplibre.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([place.lng, place.lat])
+    .setDOMContent(wrap)
+    .addTo(map)
+  // Remplit le marqueur tant que son popup est ouvert.
+  activePlaceEl = el
+  el.classList.add('place-marker--active')
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', closePlacePopup)
+  const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
+  if (svLink) {
+    checkSV(place.lat, place.lng).then((ok) => {
+      svLink.classList.toggle('place-popup-link--disabled', !ok)
+      if (!ok) svLink.setAttribute('aria-disabled', 'true')
+      else svLink.removeAttribute('aria-disabled')
+    })
+  }
+}
+
+// Ferme le popup de POI et retire le surlignage « actif » de son marqueur.
+function closePlacePopup() {
+  if (placePopup) { placePopup.remove(); placePopup = null }
+  if (activePlaceEl) { activePlaceEl.classList.remove('place-marker--active'); activePlaceEl = null }
+}
+
+function escapeHtml(s: string) {
+  const div = document.createElement('div')
+  div.textContent = s
+  return div.innerHTML
+}
+
+// Interroge le service d'imagerie Google : true si une vue Street View existe près
+// du point. Repris du créateur (JSONP best-effort, repli optimiste sur erreur/timeout).
+function svCacheKey(lat: number, lng: number) { return `${lat.toFixed(4)},${lng.toFixed(4)}` }
+
+function checkSV(lat: number, lng: number): Promise<boolean> {
+  const key = svCacheKey(lat, lng)
+  if (svCache.has(key)) return Promise.resolve(svCache.get(key)!)
+  return new Promise<boolean>((resolve) => {
+    const cb = `_sv${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+    const s = document.createElement('script')
+    let settled = false
+    const finish = (v: boolean) => {
+      if (settled) return; settled = true
+      clearTimeout(timer); delete (window as any)[cb]; s.remove()
+      svCache.set(key, v); resolve(v)
+    }
+    const timer = setTimeout(() => finish(true), 4000)
+    ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
+    s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
+    s.onerror = () => finish(true)
+    document.head.appendChild(s)
+  })
 }
 
 // ─── Map ──────────────────────────────────────────────────────────────────────
@@ -403,7 +495,11 @@ async function initMap() {
   map.on('zoom', (e: any) => { if (e.originalEvent) camZoom.value = map.getZoom() })
   // Tap simple sur la carte → mode veille (la boucle rAF s'arrête, le wake lock est libéré).
   // L'overlay noir capte le tap de réveil ; pas de conflit car il est au z-index 20.
-  map.on('click', () => { if (!screenOff.value) toggleScreenOff() })
+  map.on('click', () => {
+    // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
+    if (placePopup) { closePlacePopup(); return }
+    if (!screenOff.value) toggleScreenOff()
+  })
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
@@ -1397,14 +1493,75 @@ function onVisibilityChange() {
   background: #fff;
   border: 2px solid currentColor;
   box-shadow: 0 3px 8px -2px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
   user-select: none;
   transform-origin: bottom center;
+  transition: box-shadow 0.1s ease;
 }
 .place-marker i { font-size: 0.78rem; }
+.place-marker:hover { box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.5); }
+/* Popup ouvert : le marqueur se remplit de sa couleur, icône en blanc. */
+.place-marker--active { background: currentColor; box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.5); }
+.place-marker--active i { color: #fff; }
 .place-marker--cemetery { color: #6b7280; }
 .place-marker--bakery   { color: #b45309; }
 @media (max-width: 767px) {
   .place-marker { width: 32px; height: 32px; }
   .place-marker i { font-size: 0.92rem; }
 }
+
+/* Popup POI (Google Maps / Street View) — repris du créateur d'itinéraire. */
+.place-popup-container .maplibregl-popup-content {
+  padding: 4px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18), 0 1px 4px rgba(0, 0, 0, 0.10);
+}
+.place-popup { display: flex; flex-direction: column; gap: 2px; min-width: 180px; }
+.place-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.2rem 0.65rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  margin-bottom: 2px;
+}
+.place-popup-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6b7280;
+  max-width: 14rem;
+}
+.place-popup-close {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.07);
+  color: #6b7280;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.place-popup-close:hover { background: rgba(0, 0, 0, 0.14); color: #111827; }
+.place-popup-link {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #212529;
+  text-decoration: none;
+}
+.place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
+.place-popup-link:hover { background: rgba(0, 0, 0, 0.06); color: #212529; text-decoration: none; }
+.place-popup-link--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
 </style>

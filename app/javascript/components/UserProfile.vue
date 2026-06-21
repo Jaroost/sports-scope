@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS, mapStyleFor } from '../mapStyles'
+import { POI_CATEGORIES } from '../poiCategories'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -14,6 +15,11 @@ interface Preferences {
     show_cemeteries: boolean
     show_bakeries: boolean
     show_localities: boolean
+    show_water: boolean
+    show_food: boolean
+    show_viewpoints: boolean
+    show_toilets: boolean
+    show_picnic: boolean
     radius_m: number
   }
   map: {
@@ -320,25 +326,17 @@ function placePreviewMarker(coords: [number, number]) {
       </div>
       <div class="card-body">
         <p class="text-muted small mb-3">{{ t('profile.poi.help') }}</p>
-        <div class="form-check form-switch mb-2">
-          <input id="poi-bakeries" v-model="prefs.points_of_interest.show_bakeries" class="form-check-input" type="checkbox">
-          <label class="form-check-label" for="poi-bakeries">
-            <i class="fa-solid fa-bread-slice me-1 text-muted" aria-hidden="true"></i>{{ t('profile.poi.bakeries') }}
+        <div
+          v-for="cat in POI_CATEGORIES"
+          :key="cat.key"
+          class="form-check form-switch mb-2"
+        >
+          <input :id="`poi-${cat.key}`" v-model="prefs.points_of_interest[cat.prefField]" class="form-check-input" type="checkbox">
+          <label class="form-check-label" :for="`poi-${cat.key}`">
+            <i class="fa-solid me-1" :class="cat.icon" :style="{ color: cat.color }" aria-hidden="true"></i>{{ t(`profile.poi.${cat.labelKey}`) }}
           </label>
         </div>
-        <div class="form-check form-switch mb-2">
-          <input id="poi-cemeteries" v-model="prefs.points_of_interest.show_cemeteries" class="form-check-input" type="checkbox">
-          <label class="form-check-label" for="poi-cemeteries">
-            <i class="fa-solid fa-cross me-1 text-muted" aria-hidden="true"></i>{{ t('profile.poi.cemeteries') }}
-          </label>
-        </div>
-        <div class="form-check form-switch mb-3">
-          <input id="poi-localities" v-model="prefs.points_of_interest.show_localities" class="form-check-input" type="checkbox">
-          <label class="form-check-label" for="poi-localities">
-            <i class="fa-solid fa-city me-1 text-muted" aria-hidden="true"></i>{{ t('profile.poi.localities') }}
-          </label>
-        </div>
-        <label for="poi-radius" class="form-label mb-1">
+        <label for="poi-radius" class="form-label mb-1 mt-2">
           {{ t('profile.poi.radius') }} : <strong>{{ prefs.points_of_interest.radius_m }} m</strong>
         </label>
         <input id="poi-radius" v-model.number="prefs.points_of_interest.radius_m" type="range" class="form-range" min="200" max="5000" step="100">

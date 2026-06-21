@@ -7,6 +7,11 @@ class User < ApplicationRecord
       "show_cemeteries" => true,
       "show_bakeries" => true,
       "show_localities" => false,
+      "show_water" => true,
+      "show_food" => false,
+      "show_viewpoints" => false,
+      "show_toilets" => false,
+      "show_picnic" => false,
       "radius_m" => 1500,
     },
     "map" => {

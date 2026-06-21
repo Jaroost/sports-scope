@@ -14,6 +14,7 @@ import type { MapStyleId } from '../userPreferences'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import type { Place } from '../stores/placesStore'
+import { categoryForType } from '../poiCategories'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
 } from '../routeHelpers'
@@ -534,13 +535,15 @@ function escapeHtml(s: string) {
   return div.innerHTML
 }
 
-// Rend une icône persistante et cliquable pour chaque cimetière/boulangerie filtré.
-// Réutilise le pattern des marqueurs de cols (observateur de scale au zoom).
+// Rend une icône persistante et cliquable pour chaque POI ponctuel filtré (eau,
+// boulangeries, cimetières…). Réutilise le pattern des marqueurs de cols
+// (observateur de scale au zoom). Les localités n'ont pas de marqueur (liste seule).
 function installPlaceMarkers() {
   if (!_maplibregl || !mapInstance) return
   clearPlaceMarkers()
   for (const place of placesStore.filteredPlaces.value) {
-    if (place.type !== 'cemetery' && place.type !== 'bakery') continue
+    const cat = categoryForType(place.type)
+    if (!cat || !cat.point) continue
     const el = buildPlaceMarkerEl(place)
     const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
       .setLngLat([place.markerLng, place.markerLat])
@@ -553,8 +556,11 @@ function installPlaceMarkers() {
 
 function buildPlaceMarkerEl(place: Place) {
   const el = document.createElement('div')
-  const icon = place.type === 'cemetery' ? 'fa-cross' : 'fa-bread-slice'
-  el.className = `place-marker place-marker--${place.type}`
+  const cat = categoryForType(place.type)
+  const icon = cat?.icon ?? 'fa-location-dot'
+  el.className = 'place-marker'
+  // Couleur pilotée par le registre (currentColor → bordure et remplissage au survol).
+  el.style.color = cat?.color ?? '#6b7280'
   el.title = place.name
   el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
   el.addEventListener('click', (ev) => {
@@ -2131,15 +2137,16 @@ defineExpose({
   transition: box-shadow 0.1s ease;
 }
 .place-marker i { font-size: 0.78rem; }
-.place-marker:hover { box-shadow: 0 6px 14px -3px rgba(0,0,0,0.5); }
-/* Survol (carte ou liste) ou popup ouvert : le marqueur se remplit de sa couleur,
-   icône en blanc. */
+/* Survol souris, surbrillance synchronisée (carte ou liste) ou popup ouvert : le
+   marqueur s'inverse — le fond se remplit de sa couleur, l'icône passe en blanc. */
+.place-marker:hover,
 .place-marker--hover,
 .place-marker--active { background: currentColor; box-shadow: 0 6px 14px -3px rgba(0,0,0,0.5); }
+.place-marker:hover i,
 .place-marker--hover i,
 .place-marker--active i { color: #fff; }
-.place-marker--cemetery { color: #6b7280; }
-.place-marker--bakery   { color: #b45309; }
+/* La couleur de chaque marqueur est posée en inline depuis le registre POI
+   (poiCategories.ts) ; currentColor pilote la bordure et le remplissage au survol. */
 /* Sur petit écran tactile, on agrandit légèrement les marqueurs (points POI et points du
    tracé) pour offrir une cible de clic plus généreuse et éviter les clics au mauvais endroit. */
 @media (max-width: 767px) {

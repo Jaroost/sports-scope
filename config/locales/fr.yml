@@ -340,7 +340,12 @@ fr:
     poi:
       title: "Points d'intérêt"
       help: "Choisissez les points d'intérêt détectés le long de vos itinéraires et leur rayon de recherche."
+      water: "Fontaines / eau potable"
       bakeries: "Boulangeries"
+      food: "Cafés et restaurants"
+      viewpoints: "Points de vue, sommets et cols"
+      picnic: "Aires de pique-nique"
+      toilets: "Toilettes"
       cemeteries: "Cimetières (points d'eau)"
       localities: "Localités traversées"
       radius: "Rayon de détection"

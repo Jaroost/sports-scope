@@ -11,6 +11,7 @@ import {
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
 import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
+import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 
 const props = defineProps<{ shareToken: string }>()
 
@@ -325,17 +326,16 @@ async function fetchRoute() {
 }
 
 // ─── Points d'intérêt (POI du profil) ─────────────────────────────────────────
-// Pose autour du tracé les cimetières / boulangeries cochés dans le profil, comme
-// le créateur d'itinéraire. Mêmes catégories, même rayon (points_of_interest) et
-// même rendu de marqueur. Best-effort : un échec Overpass est silencieux, les POI
-// ne sont qu'un complément à la navigation.
+// Pose autour du tracé les POI ponctuels cochés dans le profil, comme le créateur
+// d'itinéraire. Mêmes catégories, même rayon (points_of_interest) et même rendu de
+// marqueur. Best-effort : un échec Overpass est silencieux, les POI ne sont qu'un
+// complément à la navigation. (Les localités n'ont pas de marqueur, on ne les
+// recherche pas ici.)
 interface NavPlace { name: string; type: string; lng: number; lat: number }
 
 async function fetchPlaces() {
   const poi = userPreferences().points_of_interest
-  const types: string[] = []
-  if (poi.show_cemeteries) types.push('cemeteries')
-  if (poi.show_bakeries) types.push('bakeries')
+  const types = POI_CATEGORIES.filter((c) => c.point && poi[c.prefField]).map((c) => c.key)
   if (types.length === 0 || geometry.length < 2) return
 
   let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
@@ -359,7 +359,7 @@ async function fetchPlaces() {
     const seen = new Set<string>()
     const places: NavPlace[] = []
     for (const node of nodes) {
-      if (node.type !== 'cemetery' && node.type !== 'bakery') continue
+      if (!categoryForType(node.type)?.point) continue
       const key = `${node.type}:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
       if (seen.has(key)) continue
       // Filtre par le rayon configurable : distance du POI au point le plus proche du tracé.
@@ -386,8 +386,11 @@ function installPlaceMarkers(places: NavPlace[]) {
   placeMarkers = []
   for (const place of places) {
     const el = document.createElement('div')
-    const icon = place.type === 'cemetery' ? 'fa-cross' : 'fa-bread-slice'
-    el.className = `place-marker place-marker--${place.type}`
+    const cat = categoryForType(place.type)
+    const icon = cat?.icon ?? 'fa-location-dot'
+    el.className = 'place-marker'
+    // Couleur pilotée par le registre POI (currentColor → bordure / remplissage).
+    el.style.color = cat?.color ?? '#6b7280'
     el.title = place.name
     el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
     // Clic = popup Google Maps / Street View. stopPropagation pour ne pas
@@ -1544,12 +1547,14 @@ function onVisibilityChange() {
   z-index: 1;
 }
 .place-marker i { font-size: 0.78rem; }
-.place-marker:hover { box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.5); }
-/* Popup ouvert : le marqueur se remplit de sa couleur, icône en blanc. */
+/* Survol souris ou popup ouvert : le marqueur s'inverse — le fond se remplit de sa
+   couleur, l'icône passe en blanc. */
+.place-marker:hover,
 .place-marker--active { background: currentColor; box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.5); }
+.place-marker:hover i,
 .place-marker--active i { color: #fff; }
-.place-marker--cemetery { color: #6b7280; }
-.place-marker--bakery   { color: #b45309; }
+/* La couleur de chaque marqueur est posée en inline depuis le registre POI
+   (poiCategories.ts) ; currentColor pilote la bordure et le remplissage. */
 @media (max-width: 767px) {
   .place-marker { width: 32px; height: 32px; }
   .place-marker i { font-size: 0.92rem; }

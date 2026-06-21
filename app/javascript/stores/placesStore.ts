@@ -1,5 +1,6 @@
-import { ref, computed } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { userPreferences } from '../userPreferences'
+import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 
 export interface Place {
   name: string
@@ -18,20 +19,15 @@ class PlacesStore {
   // Passe à true quand la recherche Overpass échoue (réseau / serveur). Permet
   // d'afficher un message d'erreur et un bouton « réessayer » dans le créateur.
   readonly placesFetchFailed = ref(false)
-  // Préférences du profil : pilotent à la fois la recherche Overpass (on ne
-  // requête que les catégories cochées) et l'affichage du filtre correspondant
-  // dans le créateur d'itinéraire. Statiques pour la durée de la page.
-  readonly searchCemeteries = userPreferences().points_of_interest.show_cemeteries
-  readonly searchBakeries = userPreferences().points_of_interest.show_bakeries
-  readonly searchLocalities = userPreferences().points_of_interest.show_localities
-  // État du filtre dans le créateur d'itinéraire (actif par défaut quand la
-  // catégorie est recherchée).
-  readonly placeShowCemeteries = ref(this.searchCemeteries)
-  readonly placeShowBakeries = ref(this.searchBakeries)
-  readonly placeShowLocalities = ref(this.searchLocalities)
+  // Recherche activée par catégorie (depuis le profil) : pilote les catégories
+  // qu'on interroge sur Overpass. Statique pour la durée de la page.
+  readonly search: Record<string, boolean> = {}
+  // État du filtre d'affichage par catégorie dans le créateur (réactif). Actif par
+  // défaut quand la catégorie est recherchée.
+  readonly show = reactive<Record<string, boolean>>({})
   readonly placesExpanded = ref(true)
-  // Rayon de détection (m) des cimetières et boulangeries — piloté uniquement par
-  // les préférences du profil (plus de réglage dans le créateur d'itinéraire).
+  // Rayon de détection (m) des POI ponctuels — piloté uniquement par les
+  // préférences du profil (plus de réglage dans le créateur d'itinéraire).
   readonly placeRadiusM = ref(userPreferences().points_of_interest.radius_m)
 
   // Non-reactive — read synchronously by Chart.js plugins
@@ -39,20 +35,27 @@ class PlacesStore {
   placeHoverKm: number | null = null
   placeSelectedKm: number | null = null
 
-  readonly hasCemeteryPlaces = computed(() =>
-    this.importantPlaces.value.some((p) => p.type === 'cemetery'),
+  constructor() {
+    const poi = userPreferences().points_of_interest
+    for (const cat of POI_CATEGORIES) {
+      const on = !!poi[cat.prefField]
+      this.search[cat.key] = on
+      this.show[cat.key] = on
+    }
+  }
+
+  // Catégories effectivement présentes dans les résultats — pour n'afficher que
+  // les boutons de filtre pertinents (dans l'ordre du registre).
+  readonly presentCategories = computed(() =>
+    POI_CATEGORIES.filter((cat) =>
+      this.importantPlaces.value.some((p) => cat.serverTypes.includes(p.type)),
+    ),
   )
-  readonly hasBakeryPlaces = computed(() =>
-    this.importantPlaces.value.some((p) => p.type === 'bakery'),
-  )
-  readonly hasLocalityPlaces = computed(() =>
-    this.importantPlaces.value.some((p) => p.type !== 'cemetery' && p.type !== 'bakery'),
-  )
+
   readonly filteredPlaces = computed(() =>
     this.importantPlaces.value.filter((p) => {
-      if (p.type === 'cemetery') return this.placeShowCemeteries.value
-      if (p.type === 'bakery') return this.placeShowBakeries.value
-      return this.placeShowLocalities.value
+      const cat = categoryForType(p.type)
+      return cat ? this.show[cat.key] : true
     }),
   )
 

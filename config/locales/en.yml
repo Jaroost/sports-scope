@@ -340,7 +340,12 @@ en:
     poi:
       title: "Points of interest"
       help: "Choose which points of interest are detected along your routes and their search radius."
+      water: "Fountains / drinking water"
       bakeries: "Bakeries"
+      food: "Cafés and restaurants"
+      viewpoints: "Viewpoints, peaks and passes"
+      picnic: "Picnic areas"
+      toilets: "Toilets"
       cemeteries: "Cemeteries (water points)"
       localities: "Localities along the way"
       radius: "Detection radius"

@@ -6,6 +6,7 @@ import { placesStore } from '../stores/placesStore'
 import { formatKm, formatDistanceShort, formatDuration } from '../routeHelpers'
 import type { Climb } from '../routeHelpers'
 import type { Place } from '../stores/placesStore'
+import { categoryForType } from '../poiCategories'
 import type { Sport } from '../userPreferences'
 
 // Catégories d'activité — pilotent la vitesse moyenne (via le profil) et sont
@@ -152,31 +153,16 @@ const climbsExpanded = ref(true)
           </div>
           <div class="places-filter-bar">
             <button
-              v-if="placesStore.hasLocalityPlaces.value"
+              v-for="cat in placesStore.presentCategories.value"
+              :key="cat.key"
               type="button"
               class="places-filter-btn"
-              :class="{ active: placesStore.placeShowLocalities.value }"
-              @click="placesStore.placeShowLocalities.value = !placesStore.placeShowLocalities.value"
+              :class="{ active: placesStore.show[cat.key] }"
+              :style="placesStore.show[cat.key] ? { color: cat.color } : undefined"
+              :title="t(`profile.poi.${cat.labelKey}`)"
+              @click="placesStore.show[cat.key] = !placesStore.show[cat.key]"
             >
-              <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-            </button>
-            <button
-              v-if="placesStore.hasCemeteryPlaces.value"
-              type="button"
-              class="places-filter-btn"
-              :class="{ active: placesStore.placeShowCemeteries.value }"
-              @click="placesStore.placeShowCemeteries.value = !placesStore.placeShowCemeteries.value"
-            >
-              <i class="fa-solid fa-cross" aria-hidden="true"></i>
-            </button>
-            <button
-              v-if="placesStore.hasBakeryPlaces.value"
-              type="button"
-              class="places-filter-btn"
-              :class="{ active: placesStore.placeShowBakeries.value }"
-              @click="placesStore.placeShowBakeries.value = !placesStore.placeShowBakeries.value"
-            >
-              <i class="fa-solid fa-bread-slice" aria-hidden="true"></i>
+              <i class="fa-solid" :class="cat.icon" aria-hidden="true"></i>
             </button>
           </div>
           <div
@@ -190,10 +176,15 @@ const climbsExpanded = ref(true)
             @click="emit('select-place', place)"
           >
             <span class="place-pill-dist">{{ formatDistanceShort(place.distanceM) }}</span>
-            <i v-if="place.type === 'cemetery'" class="fa-solid fa-cross place-pill-icon" aria-hidden="true"></i>
-            <i v-else-if="place.type === 'bakery'" class="fa-solid fa-bread-slice place-pill-icon" aria-hidden="true"></i>
+            <i
+              v-if="categoryForType(place.type)"
+              class="fa-solid place-pill-icon"
+              :class="categoryForType(place.type)!.icon"
+              :style="{ color: categoryForType(place.type)!.color }"
+              aria-hidden="true"
+            ></i>
             <span class="place-pill-name">{{ place.name }}</span>
-            <span v-if="(place.type === 'cemetery' || place.type === 'bakery') && place.distFromRouteM > 0" class="place-pill-route-dist">
+            <span v-if="categoryForType(place.type)?.point && place.distFromRouteM > 0" class="place-pill-route-dist">
               {{ formatDistanceShort(place.distFromRouteM) }}
             </span>
           </div>

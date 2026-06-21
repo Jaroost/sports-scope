@@ -15,6 +15,11 @@ export interface UserPreferences {
     show_cemeteries: boolean
     show_bakeries: boolean
     show_localities: boolean
+    show_water: boolean
+    show_food: boolean
+    show_viewpoints: boolean
+    show_toilets: boolean
+    show_picnic: boolean
     radius_m: number
   }
   map: { default_style: MapStyleId; overlays: string[] }
@@ -38,6 +43,11 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     show_cemeteries: true,
     show_bakeries: true,
     show_localities: false,
+    show_water: true,
+    show_food: false,
+    show_viewpoints: false,
+    show_toilets: false,
+    show_picnic: false,
     radius_m: 1500,
   },
   map: { default_style: 'cyclosm', overlays: [] },

@@ -59,6 +59,11 @@ class ProfilesController < ApplicationController
         "show_cemeteries" => to_bool(poi[:show_cemeteries], true),
         "show_bakeries" => to_bool(poi[:show_bakeries], true),
         "show_localities" => to_bool(poi[:show_localities], false),
+        "show_water" => to_bool(poi[:show_water], true),
+        "show_food" => to_bool(poi[:show_food], false),
+        "show_viewpoints" => to_bool(poi[:show_viewpoints], false),
+        "show_toilets" => to_bool(poi[:show_toilets], false),
+        "show_picnic" => to_bool(poi[:show_picnic], false),
         "radius_m" => clamp_int(poi[:radius_m], RADIUS_RANGE, 1500),
       },
       "map" => {

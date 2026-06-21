@@ -6,6 +6,7 @@ import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
+import { POI_CATEGORIES, isPointType } from '../poiCategories'
 import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration } from '../routeHelpers'
 import type { Coord, VoiceHint } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
@@ -148,10 +149,7 @@ async function fetchImportantPlaces() {
 
   // On ne recherche que les catégories cochées dans le profil. Si aucune n'est
   // activée, on n'interroge pas Overpass du tout.
-  const types: string[] = []
-  if (placesStore.searchLocalities) types.push('localities')
-  if (placesStore.searchCemeteries) types.push('cemeteries')
-  if (placesStore.searchBakeries) types.push('bakeries')
+  const types = POI_CATEGORIES.filter((c) => placesStore.search[c.key]).map((c) => c.key)
   if (types.length === 0) {
     placesStore.importantPlaces.value = []
     placesStore.isFetchingPlaces.value = false
@@ -185,11 +183,12 @@ async function fetchImportantPlaces() {
     const seen = new Set<string>()
     const results: any[] = []
 
-    // Cimetières et boulangeries : POI ponctuels filtrés par le rayon configurable,
-    // marqueur posé sur le lieu. Localités : accrochées au point le plus proche du tracé.
+    // POI ponctuels (eau, boulangeries, cimetières…) : filtrés par le rayon
+    // configurable, marqueur posé sur le lieu. Localités : accrochées au point le
+    // plus proche du tracé.
     const radiusM = placesStore.placeRadiusM.value
     for (const node of nodes) {
-      const isPoi = node.type === 'cemetery' || node.type === 'bakery'
+      const isPoi = isPointType(node.type)
       const seenKey = isPoi
         ? `${node.type}:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
         : `${node.type ?? ''}:${node.name}`

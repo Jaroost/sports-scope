@@ -75,14 +75,15 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.6rem;
+  gap: 0.75rem;
   /* Marge horizontale pour que le contenu centré ne passe pas sous les boutons
      d'angle. */
-  padding: 0.55rem 4rem;
+  padding: 0.85rem 4rem;
   border-bottom-left-radius: 1rem;
   border-bottom-right-radius: 1rem;
   font-weight: 700;
   line-height: 1;
+  font-size: 1.2rem;
   pointer-events: none;
 }
 /* En veille : au-dessus du voile noir (.nav-screen-off, z-index 20) pour rester visible. */
@@ -104,7 +105,7 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
 }
 /* L'icône d'alerte « Attention » clignote doucement pour attirer l'œil. */
 .radar-alert-icon {
-  font-size: 1.25rem;
+  font-size: 1.65rem;
   animation: radar-blink 0.9s ease-in-out infinite;
 }
 @keyframes radar-blink {
@@ -113,23 +114,23 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
 .radar-alert-text {
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  font-size: 1rem;
+  font-size: 1.3rem;
 }
 .radar-cars {
   display: inline-flex;
   align-items: center;
-  gap: 0.2rem;
-  font-size: 1.1rem;
+  gap: 0.25rem;
+  font-size: 1.5rem;
 }
 .radar-cars-more {
-  font-size: 0.95rem;
+  font-size: 1.25rem;
   margin-left: 0.1rem;
 }
 .radar-dist {
-  font-size: 1.25rem;
+  font-size: 1.7rem;
 }
 .radar-dist small {
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   opacity: 0.85;
   margin-left: 1px;
 }

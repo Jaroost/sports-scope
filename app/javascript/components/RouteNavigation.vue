@@ -1864,7 +1864,7 @@ function onVisibilityChange() {
 .nav-speed-value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
 .nav-speed-unit { font-size: 0.8rem; color: #6c757d; font-weight: 600; }
 /* Bandeau radar visible : on descend la vitesse pour la dégager du tout-haut. */
-.nav-speed--radar { top: 3.5rem; }
+.nav-speed--radar { top: 5rem; }
 
 .nav-turn {
   position: absolute; top: 4.25rem; left: 50%; transform: translateX(-50%);
@@ -1873,7 +1873,7 @@ function onVisibilityChange() {
   border-radius: 0.75rem; font-size: 1.6rem; line-height: 1;
 }
 /* Bandeau radar visible : on descend aussi le virage, sous la vitesse décalée. */
-.nav-turn--radar { top: 7rem; }
+.nav-turn--radar { top: 8rem; }
 /* Distance (en avant) + temps estimé (en dessous, plus discret) du prochain virage. */
 .nav-turn-info { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
 .nav-turn-dist { font-size: 1.1rem; font-weight: 700; }

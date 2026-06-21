@@ -24,6 +24,9 @@ interface BluetoothDevice extends EventTarget {
   readonly id: string
   readonly name?: string
   readonly gatt?: BluetoothRemoteGATTServer
+  // Révoque l'autorisation accordée à ce site pour l'appareil (le retire de
+  // getDevices()). Présent dans Chrome récent ; absent ailleurs → optionnel.
+  forget?(): Promise<void>
 }
 
 interface RequestDeviceOptions {
@@ -35,6 +38,10 @@ interface RequestDeviceOptions {
 interface Bluetooth {
   getAvailability(): Promise<boolean>
   requestDevice(options?: RequestDeviceOptions): Promise<BluetoothDevice>
+  // Appareils déjà autorisés par l'utilisateur lors d'une session précédente.
+  // Permet de se reconnecter sans rouvrir le sélecteur. Peut être absent selon
+  // la version du navigateur (parfois derrière un flag) → optionnel.
+  getDevices?(): Promise<BluetoothDevice[]>
 }
 
 interface Navigator {

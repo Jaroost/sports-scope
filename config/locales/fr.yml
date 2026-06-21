@@ -238,6 +238,7 @@ fr:
     sound_off: "Activer le son"
     camera_settings: "Réglages caméra"
     radar_connect: "Connecter le radar"
+    radar_reconnect: "Reconnecter le radar"
     radar_disconnect: "Déconnecter le radar"
     radar_connecting: "Connexion au radar…"
     radar_unsupported: "Radar non disponible sur ce navigateur (essayez Chrome sur Android)"

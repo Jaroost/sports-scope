@@ -12,7 +12,7 @@ import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../ro
 import { unlockAudio, playManeuver, playOffRoute, playRadarThreat, playRadarClose } from '../navAudio'
 import RadarOverlay from './RadarOverlay.vue'
 import { radarStore } from '../stores/radarStore'
-import { connectRadar, disconnectRadar, radarSupported } from '../variaRadar'
+import { connectRadar, disconnectRadar, radarSupported, hasKnownRadar } from '../variaRadar'
 import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 
@@ -242,6 +242,12 @@ function toggleSound() {
 // ─── Radar arrière (Garmin Varia, POC) ──────────────────────────────────────────
 // État exposé au template via le store. Le clic est un geste utilisateur, requis
 // par Web Bluetooth pour ouvrir le sélecteur d'appareil.
+//
+// Si un Varia a déjà été appairé lors d'une session précédente, le clic le
+// reconnecte directement (sans sélecteur) ; on l'indique dans le libellé.
+const radarKnown = ref(false)
+void hasKnownRadar().then((known) => { radarKnown.value = known })
+
 function toggleRadar() {
   if (radarStore.isConnected.value || radarStore.status.value === 'connecting') {
     disconnectRadar()
@@ -1373,8 +1379,8 @@ function onVisibilityChange() {
         class="btn btn-sm btn-light shadow-sm"
         :class="{ active: radarStore.isConnected.value, 'text-danger': radarStore.status.value === 'error' }"
         :disabled="radarStore.status.value === 'connecting'"
-        :title="radarStore.isConnected.value ? t('routes.radar_disconnect') : t('routes.radar_connect')"
-        :aria-label="radarStore.isConnected.value ? t('routes.radar_disconnect') : t('routes.radar_connect')"
+        :title="radarStore.isConnected.value ? t('routes.radar_disconnect') : radarKnown ? t('routes.radar_reconnect') : t('routes.radar_connect')"
+        :aria-label="radarStore.isConnected.value ? t('routes.radar_disconnect') : radarKnown ? t('routes.radar_reconnect') : t('routes.radar_connect')"
         @click="toggleRadar"
       >
         <i

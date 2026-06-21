@@ -2,121 +2,138 @@
 import { computed } from 'vue'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences } from '../userPreferences'
+import { t } from '../i18n'
 
-// `climbing` : un col est affiché (panneau bas pleine largeur). On raccourcit alors
-// la barre pour ne jamais la recouvrir.
-const props = defineProps<{ climbing?: boolean }>()
-
-// Portée affichée : au-delà, on ne montre pas encore le véhicule. Le Varia détecte
-// jusqu'à ~140 m ; on cale la barre dessus.
-const RANGE_M = 140
-
-// Option de profil : garder la barre visible en permanence (radar connecté) plutôt
-// que de ne l'afficher qu'à l'approche d'un véhicule.
+// Option de profil : garder le bandeau visible en permanence (radar connecté) plutôt
+// que de ne l'afficher qu'à l'approche d'un véhicule. Sans voiture, on affiche alors
+// un témoin discret « voie dégagée ».
 const alwaysVisible = userPreferences().navigation.radar_always_visible
-// Seuil (m) de l'alerte rapprochée : sous cette distance le point passe au rouge
-// (cohérent avec le bip insistant déclenché par la navigation).
+// Seuil (m) de l'alerte rapprochée : sous cette distance le bandeau passe au rouge
+// avec « Attention » (cohérent avec le bip insistant déclenché par la navigation).
 const closeM = userPreferences().navigation.radar_close_m
 
+// Élevé au-dessus du voile de veille : en mode veille, le bandeau radar doit rester
+// visible (info de sécurité — véhicules approchant par l'arrière) alors que le voile
+// noir recouvre tout le reste.
+const props = defineProps<{ elevated?: boolean }>()
+
+// Nombre maximal d'icônes voiture affichées ; au-delà on ajoute « ·N ».
+const MAX_ICONS = 4
+
 const targets = computed(() => radarStore.targets.value)
-const active = computed(() =>
-  radarStore.isConnected.value && (alwaysVisible || targets.value.length > 0),
-)
+const count = computed(() => targets.value.length)
 const nearest = computed(() => radarStore.nearest.value)
+const active = computed(
+  () => radarStore.isConnected.value && (alwaysVisible || count.value > 0),
+)
 
-// Position verticale du point : le cycliste est en haut. 0 % = haut (collé au
-// cycliste, distance nulle), 100 % = bas (à portée maximale). Le point monte donc
-// vers le cycliste à mesure que la voiture se rapproche.
-function topPct(distanceM: number): number {
-  const clamped = Math.min(Math.max(distanceM, 0), RANGE_M)
-  return (clamped / RANGE_M) * 100
-}
-
-// Couleur selon la proximité — vert (loin) → orange → rouge (collé).
-function color(distanceM: number): string {
-  if (distanceM <= closeM) return '#dc3545'
-  if (distanceM <= closeM + 40) return '#fd7e14'
-  return '#ffc107'
-}
+// Voiture proche → bandeau rouge « Attention ».
+const close = computed(() => !!nearest.value && nearest.value.distanceM <= closeM)
+// Combien d'icônes voiture afficher (plafonnées), et faut-il un compteur « ·N ».
+const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
 </script>
 
 <template>
-  <div v-if="active" class="radar-bar shadow" :class="{ 'radar-bar--climb': props.climbing }" aria-hidden="true">
-    <!-- Le cycliste, en haut -->
-    <i class="fa-solid fa-person-biking radar-rider"></i>
-    <div class="radar-track">
-      <!-- Un point par véhicule, positionné par sa distance -->
-      <span
-        v-for="tgt in targets"
-        :key="tgt.id"
-        class="radar-dot"
-        :style="{ top: topPct(tgt.distanceM) + '%', background: color(tgt.distanceM) }"
-      ></span>
-    </div>
-    <div v-if="nearest" class="radar-readout" :style="{ color: color(nearest.distanceM) }">
-      {{ Math.round(nearest.distanceM) }}<small>m</small>
-    </div>
-    <i v-else class="fa-solid fa-tower-broadcast radar-idle" aria-hidden="true"></i>
+  <div
+    v-if="active"
+    class="radar-banner shadow"
+    :class="[
+      close ? 'radar-banner--danger' : count > 0 ? 'radar-banner--warn' : 'radar-banner--clear',
+      { 'radar-banner--elevated': props.elevated },
+    ]"
+    role="status"
+    aria-live="polite"
+  >
+    <template v-if="count > 0">
+      <i v-if="close" class="fa-solid fa-triangle-exclamation radar-alert-icon" aria-hidden="true"></i>
+      <span v-if="close" class="radar-alert-text">{{ t('routes.radar_warning') }}</span>
+      <span class="radar-cars" aria-hidden="true">
+        <i v-for="n in iconCount" :key="n" class="fa-solid fa-car"></i>
+        <span v-if="count > MAX_ICONS" class="radar-cars-more">·{{ count }}</span>
+      </span>
+      <span class="radar-dist">
+        {{ Math.round(nearest!.distanceM) }}<small>m</small>
+      </span>
+    </template>
+    <!-- Voie dégagée (radar connecté, aucune voiture, mode « toujours visible »). -->
+    <template v-else>
+      <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
+      <span>{{ t('routes.radar_clear') }}</span>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.radar-bar {
+.radar-banner {
   position: absolute;
-  left: 0.75rem;
-  /* Un peu sous le bouton « retour » (top 0.75rem + hauteur du bouton + marge). */
-  top: 4.75rem;
-  width: 34px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 4px;
-  background: rgba(33, 37, 41, 0.82);
-  border-radius: 18px;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Au-dessus de la carte et des indicateurs (vitesse/virage), sous les boutons
+     d'angle (retour / réglages) qui restent cliquables par-dessus les extrémités. */
   z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  /* Marge horizontale pour que le contenu centré ne passe pas sous les boutons
+     d'angle. */
+  padding: 0.55rem 4rem;
+  border-bottom-left-radius: 1rem;
+  border-bottom-right-radius: 1rem;
+  font-weight: 700;
+  line-height: 1;
   pointer-events: none;
 }
-.radar-track {
-  position: relative;
-  width: 10px;
-  /* Allongée par rapport au POC initial ; bornée en vh pour rester dans le haut de
-     l'écran. Les points sont positionnés en % donc s'adaptent à la hauteur. */
-  height: min(46vh, 300px);
-  border-radius: 6px;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.18));
+/* En veille : au-dessus du voile noir (.nav-screen-off, z-index 20) pour rester visible. */
+.radar-banner--elevated {
+  z-index: 25;
 }
-/* Un col occupe le bas de l'écran : on raccourcit la barre pour ne pas le recouvrir. */
-.radar-bar--climb .radar-track {
-  height: min(30vh, 190px);
-}
-.radar-rider {
+.radar-banner--danger {
+  background: #dc3545;
   color: #fff;
-  font-size: 14px;
 }
-.radar-dot {
-  position: absolute;
-  left: 50%;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 0 8px currentColor;
-  transition: top 0.4s linear;
+.radar-banner--warn {
+  background: #fd7e14;
+  color: #fff;
 }
-.radar-readout {
-  font-weight: 700;
-  font-size: 13px;
-  line-height: 1;
-}
-.radar-readout small {
-  font-size: 9px;
-  opacity: 0.8;
-}
-/* Voie dégagée (radar connecté, aucune voiture) — petit témoin discret. */
-.radar-idle {
+.radar-banner--clear {
+  background: rgba(33, 37, 41, 0.82);
   color: #20c997;
-  font-size: 13px;
-  opacity: 0.7;
+  font-weight: 600;
+}
+/* L'icône d'alerte « Attention » clignote doucement pour attirer l'œil. */
+.radar-alert-icon {
+  font-size: 1.25rem;
+  animation: radar-blink 0.9s ease-in-out infinite;
+}
+@keyframes radar-blink {
+  50% { opacity: 0.35; }
+}
+.radar-alert-text {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 1rem;
+}
+.radar-cars {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 1.1rem;
+}
+.radar-cars-more {
+  font-size: 0.95rem;
+  margin-left: 0.1rem;
+}
+.radar-dist {
+  font-size: 1.25rem;
+}
+.radar-dist small {
+  font-size: 0.7rem;
+  opacity: 0.85;
+  margin-left: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .radar-alert-icon { animation: none; }
 }
 </style>

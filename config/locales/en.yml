@@ -243,6 +243,8 @@ en:
     radar_connecting: "Connecting to radar…"
     radar_unsupported: "Radar not available on this browser (try Chrome on Android)"
     radar_error: "Radar connection failed"
+    radar_warning: "Watch out"
+    radar_clear: "Clear road"
     poi_settings: "Points of interest"
     camera_zoom: "Zoom"
     camera_pitch: "Tilt"

@@ -338,6 +338,15 @@ watch(() => radarStore.targets.value, (targets) => {
   )
 })
 
+// Le bandeau radar (RadarOverlay) occupe le tout-haut de l'écran. Quand il est
+// visible, on descend la vitesse/le virage pour ne pas passer dessous. Même
+// condition d'affichage que le composant.
+const radarBannerVisible = computed(
+  () =>
+    radarStore.isConnected.value &&
+    (navPrefs.radar_always_visible || radarStore.targets.value.length > 0),
+)
+
 // ─── Camera controls ──────────────────────────────────────────────────────────
 // Les curseurs ajustent la vue en direct (@input). Inclinaison et zoom sont
 // réappliqués à chaque frame par la boucle (qui lit camPitch / camZoom) ; on les
@@ -1378,7 +1387,7 @@ function onVisibilityChange() {
 
     <!-- Battery saver: black screen — GPS and turn sounds still active -->
     <div v-if="screenOff" class="nav-screen-off" @click="toggleScreenOffManual">
-      <div v-if="hasFix" class="nav-speed shadow">
+      <div v-if="hasFix" class="nav-speed shadow" :class="{ 'nav-speed--radar': radarBannerVisible }">
         <span class="nav-speed-value">{{ speedKmh.toFixed(1) }}</span>
         <span class="nav-speed-unit">km/h</span>
       </div>
@@ -1564,11 +1573,12 @@ function onVisibilityChange() {
       </div>
     </div>
 
-    <!-- Radar arrière (Garmin Varia) -->
-    <RadarOverlay :climbing="isClimbing" />
+    <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
+         visible en mode veille (info de sécurité). -->
+    <RadarOverlay :elevated="screenOff" />
 
     <!-- Instantaneous speed -->
-    <div v-if="hasFix" class="nav-speed shadow">
+    <div v-if="hasFix" class="nav-speed shadow" :class="{ 'nav-speed--radar': radarBannerVisible }">
       <span class="nav-speed-value">{{ speedKmh.toFixed(1) }}</span>
       <span class="nav-speed-unit">km/h</span>
     </div>
@@ -1581,6 +1591,7 @@ function onVisibilityChange() {
         'nav-turn--urgent': turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M,
         'nav-turn--far': turnHint.state === 'far',
         'nav-turn--now': turnHint.state === 'now',
+        'nav-turn--radar': radarBannerVisible,
       }"
     >
       <i v-if="turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
@@ -1728,9 +1739,11 @@ function onVisibilityChange() {
   z-index: 5; font-weight: 500;
 }
 
-.nav-top-left { position: absolute; top: 0.75rem; left: 0.75rem; z-index: 4; }
+/* z-index 6 : restent cliquables par-dessus le bandeau radar (z-index 5) qui
+   s'étend sur toute la largeur du tout-haut. */
+.nav-top-left { position: absolute; top: 0.75rem; left: 0.75rem; z-index: 6; }
 .nav-top-right {
-  position: absolute; top: 0.75rem; right: 0.75rem; z-index: 4;
+  position: absolute; top: 0.75rem; right: 0.75rem; z-index: 6;
   display: flex; flex-direction: column; align-items: flex-end; gap: 0.6rem;
 }
 
@@ -1752,11 +1765,12 @@ function onVisibilityChange() {
 .nav-reveal-zone {
   position: absolute; top: 0; left: 0; right: 0; height: 4.5rem;
   z-index: 6; touch-action: none;
-  display: flex; justify-content: center; align-items: flex-start;
+  display: flex; justify-content: flex-end; align-items: flex-start;
 }
-/* Petit chevron discret indiquant qu'on peut faire glisser vers le bas. */
+/* Petit chevron discret indiquant qu'on peut faire glisser vers le bas. Aligné en
+   haut à droite, là où réapparaissent les boutons de commande. */
 .nav-reveal-grabber {
-  margin-top: 0.35rem;
+  margin-top: 0.35rem; margin-right: 0.6rem;
   display: inline-flex; align-items: center; justify-content: center;
   width: 2.4rem; height: 1.3rem; border-radius: 999px;
   background: rgba(0, 0, 0, 0.28); color: #fff; font-size: 0.7rem;
@@ -1849,6 +1863,8 @@ function onVisibilityChange() {
 }
 .nav-speed-value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
 .nav-speed-unit { font-size: 0.8rem; color: #6c757d; font-weight: 600; }
+/* Bandeau radar visible : on descend la vitesse pour la dégager du tout-haut. */
+.nav-speed--radar { top: 3.5rem; }
 
 .nav-turn {
   position: absolute; top: 4.25rem; left: 50%; transform: translateX(-50%);
@@ -1856,6 +1872,8 @@ function onVisibilityChange() {
   background: #7c3aed; color: #fff; padding: 0.5rem 1rem;
   border-radius: 0.75rem; font-size: 1.6rem; line-height: 1;
 }
+/* Bandeau radar visible : on descend aussi le virage, sous la vitesse décalée. */
+.nav-turn--radar { top: 7rem; }
 /* Distance (en avant) + temps estimé (en dessous, plus discret) du prochain virage. */
 .nav-turn-info { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
 .nav-turn-dist { font-size: 1.1rem; font-weight: 700; }

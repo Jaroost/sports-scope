@@ -243,6 +243,8 @@ fr:
     radar_connecting: "Connexion au radar…"
     radar_unsupported: "Radar non disponible sur ce navigateur (essayez Chrome sur Android)"
     radar_error: "Échec de connexion au radar"
+    radar_warning: "Attention"
+    radar_clear: "Voie dégagée"
     poi_settings: "Points d'intérêt"
     camera_zoom: "Zoom"
     camera_pitch: "Inclinaison"

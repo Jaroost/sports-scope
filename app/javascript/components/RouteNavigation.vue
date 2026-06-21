@@ -9,7 +9,10 @@ import {
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
-import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
+import { unlockAudio, playManeuver, playOffRoute, playRadarThreat } from '../navAudio'
+import RadarOverlay from './RadarOverlay.vue'
+import { radarStore } from '../stores/radarStore'
+import { connectRadar, disconnectRadar, radarSupported } from '../variaRadar'
 import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 
@@ -200,6 +203,30 @@ function toggleSound() {
   if (soundOn.value) unlockAudio()
 }
 
+// ─── Radar arrière (Garmin Varia, POC) ──────────────────────────────────────────
+// État exposé au template via le store. Le clic est un geste utilisateur, requis
+// par Web Bluetooth pour ouvrir le sélecteur d'appareil.
+function toggleRadar() {
+  if (radarStore.isConnected.value || radarStore.status.value === 'connecting') {
+    disconnectRadar()
+  } else {
+    void connectRadar()
+  }
+}
+
+// Alerte sonore quand une *nouvelle* voiture entre dans la portée. On compare les
+// ids de cible d'une trame à l'autre : un id absent du jeu précédent = un véhicule
+// qui vient d'apparaître. On ne re-bipe donc pas tant que la même voiture est
+// suivie, et le watchdog du store remet la liste à zéro une fois la voie dégagée.
+let knownThreatIds = new Set<number>()
+watch(() => radarStore.targets.value, (targets) => {
+  const ids = new Set(targets.map((t) => t.id))
+  if (soundOn.value && targets.some((t) => !knownThreatIds.has(t.id))) {
+    playRadarThreat()
+  }
+  knownThreatIds = ids
+})
+
 // ─── Camera controls ──────────────────────────────────────────────────────────
 // Les curseurs ajustent la vue en direct (@input). Inclinaison et zoom sont
 // réappliqués à chaque frame par la boucle (qui lit camPitch / camZoom) ; on les
@@ -303,6 +330,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', refreshContainerH)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   releaseWakeLock()
+  disconnectRadar()
   if (map) { map.remove(); map = null }
 })
 
@@ -1142,6 +1170,23 @@ function onVisibilityChange() {
         <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
       </button>
 
+      <button
+        v-if="radarSupported()"
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :class="{ active: radarStore.isConnected.value, 'text-danger': radarStore.status.value === 'error' }"
+        :disabled="radarStore.status.value === 'connecting'"
+        :title="radarStore.isConnected.value ? t('routes.radar_disconnect') : t('routes.radar_connect')"
+        :aria-label="radarStore.isConnected.value ? t('routes.radar_disconnect') : t('routes.radar_connect')"
+        @click="toggleRadar"
+      >
+        <i
+          class="fa-solid"
+          :class="radarStore.status.value === 'connecting' ? 'fa-spinner fa-spin' : 'fa-tower-broadcast'"
+          aria-hidden="true"
+        ></i>
+      </button>
+
       <div class="position-relative">
         <button
           type="button"
@@ -1232,6 +1277,9 @@ function onVisibilityChange() {
         </div>
       </div>
     </div>
+
+    <!-- Radar arrière (Garmin Varia) -->
+    <RadarOverlay />
 
     <!-- Instantaneous speed -->
     <div v-if="hasFix" class="nav-speed shadow">

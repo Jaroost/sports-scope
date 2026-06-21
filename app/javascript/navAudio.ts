@@ -78,3 +78,12 @@ export function playOffRoute(): void {
   beep(360, 0, 0.2, 0.22)
   beep(280, 0.24, 0.3, 0.22)
 }
+
+// Two quick rising notes — a car has just entered radar range behind you. Kept
+// distinct from the turn cues (which carry a left/right pitch direction) so it
+// reads clearly as "vehicle approaching", not a maneuver.
+export function playRadarThreat(): void {
+  unlockAudio()
+  beep(880, 0, 0.09, 0.16)
+  beep(1180, 0.1, 0.14, 0.16)
+}

@@ -83,6 +83,31 @@ const CAM_PITCH_MAX = 75
 const CAM_ZOOM_MIN = 14
 const CAM_ZOOM_MAX = 20
 
+// ─── Échelle largeur tracé / pastilles selon le zoom ───────────────────────────
+// Tracé et indicateurs de virage doivent se comporter comme un ruban posé au sol :
+// épais quand on zoome, fin quand on dézoome (et non l'inverse, ce que donnait une
+// largeur fixe en pixels). On suit donc une loi base 2 (chaque niveau de zoom
+// double l'échelle, soit une largeur au sol constante), ancrée sur le zoom par
+// défaut du profil pour que l'aspect à ce zoom soit identique à l'ancien réglage.
+// Les extrêmes sont clampés pour éviter un trait ridicule en zoom max / invisible
+// en dézoom total.
+const WIDTH_REF_ZOOM = navPrefs.zoom ?? 16.5
+const WIDTH_MIN_SCALE = 0.4
+const WIDTH_MAX_SCALE = 2.4
+function zoomWidthScale(z: number): number {
+  return Math.min(WIDTH_MAX_SCALE, Math.max(WIDTH_MIN_SCALE, 2 ** (z - WIDTH_REF_ZOOM)))
+}
+// Expression MapLibre `line-width` : stops à chaque niveau de zoom entier (clampés
+// aux bornes du suivi), interpolés linéairement. MapLibre clampe hors plage sur le
+// premier/dernier stop, ce qui borne naturellement la largeur.
+function zoomWidthExpr(base: number): any {
+  const stops: number[] = []
+  for (let z = CAM_ZOOM_MIN; z <= CAM_ZOOM_MAX; z++) {
+    stops.push(z, Math.round(base * zoomWidthScale(z) * 100) / 100)
+  }
+  return ['interpolate', ['linear'], ['zoom'], ...stops]
+}
+
 // Live navigation state (reactive, drives the UI overlays)
 const remainingM = ref(0)
 const remainingGainM = ref(0)
@@ -457,6 +482,7 @@ function installPlaceMarkers(places: NavPlace[]) {
       .addTo(map)
     placeMarkers.push(marker)
   }
+  applyMarkerScale()
   applyPoiVisibility()
 }
 
@@ -602,6 +628,10 @@ async function initMap() {
   // manuel. Pas d'arrondi : la boucle réapplique camZoom à chaque frame, donc une
   // valeur arrondie ferait « sauter » le zoom au pas de 0,5 pendant le pinch.
   map.on('zoom', (e: any) => { if (e.originalEvent) camZoom.value = map.getZoom() })
+  // Met les marqueurs (pastilles de virage + POI) à l'échelle du zoom, comme le tracé.
+  // Sur 'render' (et non 'zoom') avec garde sur le delta : fiable pour toute origine
+  // de zoom, sans coût notable à zoom constant.
+  map.on('render', maybeApplyMarkerScale)
   // Tap simple sur la carte → mode veille (la boucle rAF s'arrête, le wake lock est libéré).
   // L'overlay noir capte le tap de réveil ; pas de conflit car il est au z-index 20.
   map.on('click', () => {
@@ -629,9 +659,9 @@ function installRouteLayers() {
   map.addSource('nav-route', { type: 'geojson', data: lineFeature(line) })
   map.addSource('nav-remaining', { type: 'geojson', data: lineFeature(line) })
 
-  map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': ROUTE_BORDER_WIDTH } })
-  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': ROUTE_LINE_WIDTH } })
-  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': ROUTE_LINE_WIDTH } })
+  map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(ROUTE_BORDER_WIDTH) } })
+  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH) } })
+  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH) } })
 }
 
 // Indicateurs de virage en marqueurs DOM (et non en couches canvas) : les
@@ -651,12 +681,17 @@ function renderTurnMarkers() {
     const bearing = bearingBetween(geometry[tp.idx], geometry[b])
     const el = document.createElement('div')
     el.className = 'nav-turn-marker'
+    // La racine garde la taille de base (pour le centrage MapLibre via translate -50%) ;
+    // le corps interne porte le visuel et est mis à l'échelle via --ts.
     el.style.width = `${dot}px`
     el.style.height = `${dot}px`
+    const body = document.createElement('div')
+    body.className = 'nav-turn-marker-body'
     if (tp.kind === 'roundabout') {
       // Rond-point : numéro de sortie, texte maintenu droit (pas d'alignement carte).
       const exitFont = TURN_MARKER_SIZE / 11 * 13   // 13 px à la taille par défaut (rayon 11)
-      el.innerHTML = `<span class="nav-turn-marker-exit" style="font-size:${exitFont}px">${tp.exitNumber ?? 0}</span>`
+      body.innerHTML = `<span class="nav-turn-marker-exit" style="font-size:${exitFont}px">${tp.exitNumber ?? 0}</span>`
+      el.appendChild(body)
       const marker = new maplibre.Marker({ element: el, anchor: 'center' })
         .setLngLat([geometry[tp.idx][0], geometry[tp.idx][1]])
         .addTo(map)
@@ -664,8 +699,9 @@ function renderTurnMarkers() {
     } else {
       // Virage normal : flèche directionnelle couchée sur le plan de la carte
       // (rotationAlignment + pitchAlignment 'map') et orientée selon le cap.
-      el.innerHTML = '<svg class="nav-turn-marker-arrow" viewBox="0 0 22 22" aria-hidden="true">'
+      body.innerHTML = '<svg class="nav-turn-marker-arrow" viewBox="0 0 22 22" aria-hidden="true">'
         + '<path d="M11 1 L20 20 L11 15 L2 20 Z" fill="#fff"/></svg>'
+      el.appendChild(body)
       const marker = new maplibre.Marker({ element: el, anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' })
         .setLngLat([geometry[tp.idx][0], geometry[tp.idx][1]])
         .addTo(map)
@@ -673,6 +709,55 @@ function renderTurnMarkers() {
       turnMarkers.push(marker)
     }
   }
+  applyMarkerScale()
+}
+
+// Tailles de base (px) à l'échelle 1 (= zoom de référence). Pour les POI on respecte
+// la taille responsive du CSS (.place-marker) : 32 px sur mobile, 26 px sinon.
+const POI_MOBILE = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+const POI_DOT_BASE = POI_MOBILE ? 32 : 26
+const POI_ICON_BASE = POI_MOBILE ? 14.7 : 12.5   // ≈ 0.92rem / 0.78rem
+
+// Met TOUS les marqueurs DOM (pastilles de virage + POI) à l'échelle du zoom, selon
+// la même loi que le tracé (zoomWidthScale) : gros en zoom, fins en dézoom — comme un
+// ruban posé au sol. Les marqueurs MapLibre portent leur propre transform (position +
+// rotation pour les flèches), donc on ne touche PAS à `transform` ; on redimensionne
+// la boîte (largeur/hauteur/liseré) et la police/icône. Les éléments internes
+// dimensionnés en % (flèche SVG) ou en em suivent automatiquement.
+function applyMarkerScale() {
+  if (!map) return
+  const s = zoomWidthScale(map.getZoom())
+  // Pastilles de virage : on scale le corps interne via --ts (transform: scale), ce qui
+  // contourne le plancher de taille du conteneur flex et scale d'un bloc cercle, liseré,
+  // flèche et numéro.
+  const ts = String(s)
+  for (const m of turnMarkers) {
+    (m.getElement() as HTMLElement).style.setProperty('--ts', ts)
+  }
+  // POI : la boîte se redimensionne directement (pas de plancher : l'icône en police suit).
+  const poiSize = POI_DOT_BASE * s
+  const poiBorder = `${Math.max(1, 2 * s)}px`
+  for (const m of placeMarkers) {
+    const el = m.getElement() as HTMLElement
+    el.style.width = `${poiSize}px`
+    el.style.height = `${poiSize}px`
+    el.style.borderWidth = poiBorder
+    const icon = el.querySelector<HTMLElement>('i')
+    if (icon) icon.style.fontSize = `${POI_ICON_BASE * s}px`
+  }
+}
+
+// Déclenché à chaque frame rendue, mais ne fait le travail DOM que si le zoom a
+// réellement changé (garde sur le delta) : robuste quelle que soit l'origine du zoom
+// (pinch, curseur, recadrage automatique), là où un simple écouteur 'zoom' pouvait
+// passer à côté. Le coût d'une frame à zoom constant se limite à un getZoom + compare.
+let lastScaleZoom = -1
+function maybeApplyMarkerScale() {
+  if (!map) return
+  const z = map.getZoom()
+  if (Math.abs(z - lastScaleZoom) < 0.01) return
+  lastScaleZoom = z
+  applyMarkerScale()
 }
 
 function lineFeature(coords: number[][]) {
@@ -1643,8 +1728,21 @@ function onVisibilityChange() {
 }
 
 /* Indicateurs de virage (pastille orange + flèche / numéro de sortie). Marqueurs
-   DOM placés au-dessus des POI (z-index 2 > 1) pour ne jamais être masqués par eux. */
+   DOM placés au-dessus des POI (z-index 2 > 1) pour ne jamais être masqués par eux.
+   La racine ne sert qu'au positionnement (MapLibre y pose son transform : position +
+   rotation pour les flèches) ; le visuel est porté par .nav-turn-marker-body, qu'on met
+   à l'échelle du zoom via `transform: scale()`. On scale le corps plutôt que de
+   redimensionner la boîte parce que la largeur CSS d'un conteneur flex est plancher-
+   née par la taille intrinsèque de son contenu (la flèche SVG) : la pastille refusait
+   de descendre sous sa taille de base en dézoom. `transform` ignore cette contrainte
+   et scale d'un bloc le cercle, le liseré, la flèche et le numéro. */
 .nav-turn-marker {
+  pointer-events: none;
+  z-index: 2;
+}
+.nav-turn-marker-body {
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1654,8 +1752,8 @@ function onVisibilityChange() {
   /* content-box : le liseré blanc s'ajoute autour de la pastille (comme circle-stroke),
      pour reproduire le rendu de l'ancienne couche canvas malgré le reset Bootstrap. */
   box-sizing: content-box;
-  pointer-events: none;
-  z-index: 2;
+  transform: scale(var(--ts, 1));
+  transform-origin: center;
 }
 .nav-turn-marker-arrow { width: 73%; height: 73%; display: block; }
 .nav-turn-marker-exit { color: #fff; font-weight: 700; line-height: 1; }

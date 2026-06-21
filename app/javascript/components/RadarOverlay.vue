@@ -3,6 +3,10 @@ import { computed } from 'vue'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences } from '../userPreferences'
 
+// `climbing` : un col est affiché (panneau bas pleine largeur). On raccourcit alors
+// la barre pour ne jamais la recouvrir.
+const props = defineProps<{ climbing?: boolean }>()
+
 // Portée affichée : au-delà, on ne montre pas encore le véhicule. Le Varia détecte
 // jusqu'à ~140 m ; on cale la barre dessus.
 const RANGE_M = 140
@@ -20,10 +24,12 @@ const active = computed(() =>
 )
 const nearest = computed(() => radarStore.nearest.value)
 
-// Position verticale du point : 0 % = haut (loin), 100 % = bas (près du cycliste).
+// Position verticale du point : le cycliste est en haut. 0 % = haut (collé au
+// cycliste, distance nulle), 100 % = bas (à portée maximale). Le point monte donc
+// vers le cycliste à mesure que la voiture se rapproche.
 function topPct(distanceM: number): number {
   const clamped = Math.min(Math.max(distanceM, 0), RANGE_M)
-  return (1 - clamped / RANGE_M) * 100
+  return (clamped / RANGE_M) * 100
 }
 
 // Couleur selon la proximité — vert (loin) → orange → rouge (collé).
@@ -35,10 +41,10 @@ function color(distanceM: number): string {
 </script>
 
 <template>
-  <div v-if="active" class="radar-bar shadow" aria-hidden="true">
+  <div v-if="active" class="radar-bar shadow" :class="{ 'radar-bar--climb': props.climbing }" aria-hidden="true">
+    <!-- Le cycliste, en haut -->
+    <i class="fa-solid fa-person-biking radar-rider"></i>
     <div class="radar-track">
-      <!-- Le cycliste, en bas -->
-      <i class="fa-solid fa-person-biking radar-rider"></i>
       <!-- Un point par véhicule, positionné par sa distance -->
       <span
         v-for="tgt in targets"
@@ -58,8 +64,8 @@ function color(distanceM: number): string {
 .radar-bar {
   position: absolute;
   left: 0.75rem;
-  /* Juste sous le bouton « retour » (top 0.75rem + hauteur du bouton + marge). */
-  top: 3.75rem;
+  /* Un peu sous le bouton « retour » (top 0.75rem + hauteur du bouton + marge). */
+  top: 4.75rem;
   width: 34px;
   display: flex;
   flex-direction: column;
@@ -74,15 +80,17 @@ function color(distanceM: number): string {
 .radar-track {
   position: relative;
   width: 10px;
-  height: 180px;
+  /* Allongée par rapport au POC initial ; bornée en vh pour rester dans le haut de
+     l'écran. Les points sont positionnés en % donc s'adaptent à la hauteur. */
+  height: min(46vh, 300px);
   border-radius: 6px;
   background: linear-gradient(to bottom, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.18));
 }
+/* Un col occupe le bas de l'écran : on raccourcit la barre pour ne pas le recouvrir. */
+.radar-bar--climb .radar-track {
+  height: min(30vh, 190px);
+}
 .radar-rider {
-  position: absolute;
-  bottom: -22px;
-  left: 50%;
-  transform: translateX(-50%);
   color: #fff;
   font-size: 14px;
 }

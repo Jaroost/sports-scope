@@ -1291,7 +1291,7 @@ function onVisibilityChange() {
     </div>
 
     <!-- Radar arrière (Garmin Varia) -->
-    <RadarOverlay />
+    <RadarOverlay :climbing="isClimbing" />
 
     <!-- Instantaneous speed -->
     <div v-if="hasFix" class="nav-speed shadow">

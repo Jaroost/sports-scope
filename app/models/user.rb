@@ -32,6 +32,8 @@ class User < ApplicationRecord
       "turn_urgent_m" => 15,   # distance (m) à laquelle la card passe en orange
       "turn_repeat_ms" => 2000, # intervalle (ms) entre deux répétitions du son de virage
       "turn_marker_size" => 11, # rayon (px) des pastilles orange de changement de direction
+      "radar_always_visible" => false, # afficher l'overlay radar en permanence (sinon seulement en présence d'un véhicule)
+      "radar_close_m" => 30, # distance (m) sous laquelle le radar passe en alerte rapprochée (rouge + bip insistant)
     },
     "display" => {
       "default_sport" => "cycling",   # cycling | mtb | hiking

@@ -1,13 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { radarStore } from '../stores/radarStore'
+import { userPreferences } from '../userPreferences'
 
 // Portée affichée : au-delà, on ne montre pas encore le véhicule. Le Varia détecte
 // jusqu'à ~140 m ; on cale la barre dessus.
 const RANGE_M = 140
 
+// Option de profil : garder la barre visible en permanence (radar connecté) plutôt
+// que de ne l'afficher qu'à l'approche d'un véhicule.
+const alwaysVisible = userPreferences().navigation.radar_always_visible
+// Seuil (m) de l'alerte rapprochée : sous cette distance le point passe au rouge
+// (cohérent avec le bip insistant déclenché par la navigation).
+const closeM = userPreferences().navigation.radar_close_m
+
 const targets = computed(() => radarStore.targets.value)
-const active = computed(() => radarStore.isConnected.value && targets.value.length > 0)
+const active = computed(() =>
+  radarStore.isConnected.value && (alwaysVisible || targets.value.length > 0),
+)
+const nearest = computed(() => radarStore.nearest.value)
 
 // Position verticale du point : 0 % = haut (loin), 100 % = bas (près du cycliste).
 function topPct(distanceM: number): number {
@@ -17,8 +28,8 @@ function topPct(distanceM: number): number {
 
 // Couleur selon la proximité — vert (loin) → orange → rouge (collé).
 function color(distanceM: number): string {
-  if (distanceM <= 30) return '#dc3545'
-  if (distanceM <= 70) return '#fd7e14'
+  if (distanceM <= closeM) return '#dc3545'
+  if (distanceM <= closeM + 40) return '#fd7e14'
   return '#ffc107'
 }
 </script>
@@ -36,9 +47,10 @@ function color(distanceM: number): string {
         :style="{ top: topPct(tgt.distanceM) + '%', background: color(tgt.distanceM) }"
       ></span>
     </div>
-    <div class="radar-readout" :style="{ color: color(radarStore.nearest.value?.distanceM ?? RANGE_M) }">
-      {{ Math.round(radarStore.nearest.value?.distanceM ?? 0) }}<small>m</small>
+    <div v-if="nearest" class="radar-readout" :style="{ color: color(nearest.distanceM) }">
+      {{ Math.round(nearest.distanceM) }}<small>m</small>
     </div>
+    <i v-else class="fa-solid fa-tower-broadcast radar-idle" aria-hidden="true"></i>
   </div>
 </template>
 
@@ -92,5 +104,11 @@ function color(distanceM: number): string {
 .radar-readout small {
   font-size: 9px;
   opacity: 0.8;
+}
+/* Voie dégagée (radar connecté, aucune voiture) — petit témoin discret. */
+.radar-idle {
+  color: #20c997;
+  font-size: 13px;
+  opacity: 0.7;
 }
 </style>

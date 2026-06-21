@@ -221,7 +221,7 @@ function toggleRadar() {
 // On ne re-bipe pas tant que la même voiture reste dans le même état ; le watchdog
 // du store vide la liste une fois la voie dégagée, donc une nouvelle approche
 // re-déclenche bien les alertes.
-const RADAR_CLOSE_M = 30
+const RADAR_CLOSE_M = navPrefs.radar_close_m
 let knownThreatIds = new Set<number>()
 let closeAlertedIds = new Set<number>()
 watch(() => radarStore.targets.value, (targets) => {

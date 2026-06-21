@@ -37,6 +37,8 @@ interface Preferences {
     turn_urgent_m: number
     turn_repeat_ms: number
     turn_marker_size: number
+    radar_always_visible: boolean
+    radar_close_m: number
   }
   display: {
     default_sport: string
@@ -422,6 +424,20 @@ function placePreviewMarker(coords: [number, number]) {
               <input id="nav-terrain" v-model="prefs.navigation.terrain" class="form-check-input" type="checkbox" role="switch">
               <label for="nav-terrain" class="form-check-label">{{ t('profile.navigation.terrain') }}</label>
             </div>
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input id="nav-radar-always" v-model="prefs.navigation.radar_always_visible" class="form-check-input" type="checkbox" role="switch">
+              <label for="nav-radar-always" class="form-check-label">{{ t('profile.navigation.radar_always_visible') }}</label>
+            </div>
+            <p class="text-muted small mb-0">{{ t('profile.navigation.radar_always_visible_help') }}</p>
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-radar-close" class="form-label mb-1">
+              {{ t('profile.navigation.radar_close_m') }} : <strong>{{ prefs.navigation.radar_close_m }} m</strong>
+            </label>
+            <input id="nav-radar-close" v-model.number="prefs.navigation.radar_close_m" type="range" class="form-range" min="10" max="100" step="5">
+            <p class="text-muted small mb-0">{{ t('profile.navigation.radar_close_m_help') }}</p>
           </div>
           <div class="col-sm-6">
             <label for="nav-fps" class="form-label mb-1">

@@ -128,7 +128,9 @@ const climbInfo = ref<{
   gradeColor: string                         // grade-bucket colour for the badge background
   gradeText: string                          // contrasting text colour (black/white)
 } | null>(null)
-const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number; exitNumber?: number } | null>(null)
+// state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
+// 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
+const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number; exitNumber?: number; state: 'far' | 'near' | 'now' } | null>(null)
 
 let map: any = null
 let maplibre: any = null
@@ -167,6 +169,12 @@ let hasInitialZoom = false
 let introPending = false
 let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
 let announcedTurn = -1       // index of the last turn we played a cue for
+// Virage tout juste atteint, conservé pour le maintenir affiché en vert quelques
+// secondes (confirmation « tournez ici » même à l'arrêt à un carrefour). On le garde
+// tant qu'on est dessus (timer rafraîchi) puis on décompte GREEN_HOLD_MS une fois reparti.
+let reachedTurn: { direction: 'left' | 'right'; kind: Maneuver; angle: number; exitNumber?: number } | null = null
+let reachedAt = 0
+const GREEN_HOLD_MS = 4000
 let lastTurnReminderMs = 0   // timestamp of the last repeated turn cue
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 // Virage en cours d'annonce (dans la zone d'alerte) : la répétition du son est
@@ -959,18 +967,21 @@ function stopAnimation() {
 // the view), and surface a visual hint within TURN_HINT_M. Returns true on the
 // frame a turn alert fires.
 function updateTurns(): boolean {
-  if (!turns.length) { turnHint.value = null; activeTurn = null; return false }
+  if (!turns.length) { turnHint.value = null; activeTurn = null; reachedTurn = null; return false }
   const here = snapDistAlongM
-  while (nextTurnPtr < turns.length && turns[nextTurnPtr].distM < here - 5) nextTurnPtr++
-  const turn = turns[nextTurnPtr]
-  if (!turn) { turnHint.value = null; activeTurn = null; return false }
-  const dist = turn.distM - here
+  // Avance le pointeur sur les virages dépassés (>5 m derrière), en mémorisant chacun
+  // pour le maintien vert. Le décompte ne démarre donc qu'une fois le virage vraiment
+  // laissé derrière soi.
+  while (nextTurnPtr < turns.length && turns[nextTurnPtr].distM < here - 5) {
+    rememberReached(turns[nextTurnPtr])
+    nextTurnPtr++
+  }
+  const turn = turns[nextTurnPtr] as TurnPoint | undefined
+  const dist = turn ? turn.distM - here : Infinity
 
-  turnHint.value = dist <= TURN_HINT_M && dist > -5
-    ? { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber }
-    : null
-
-  if (dist <= TURN_ALERT_M && dist > -5) {
+  // Son / répétition : armé tant que le prochain virage est dans la zone d'alerte.
+  let fired = false
+  if (turn && dist <= TURN_ALERT_M && dist > -5) {
     // Le virage est dans la zone d'alerte : on l'arme pour la répétition cadencée
     // par le timer (tickTurnRepeat), indépendante de la fréquence des fixes GPS.
     activeTurn = { kind: turn.kind, direction: turn.direction }
@@ -978,14 +989,39 @@ function updateTurns(): boolean {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()
       if (soundOn.value) playManeuver(turn.kind, turn.direction)
-      return true
+      fired = true
     }
   } else {
     // Hors zone d'alerte (pas encore assez proche, ou virage franchi) : on coupe
     // la répétition jusqu'au prochain virage.
     activeTurn = null
   }
-  return false
+
+  // Virage courant atteint (dist ≤ 0) mais pointeur pas encore avancé (on est dessus,
+  // potentiellement à l'arrêt à un carrefour) : on rafraîchit le maintien vert pour
+  // qu'il ne disparaisse pas tant qu'on n'est pas reparti.
+  if (turn && dist <= 0) rememberReached(turn)
+
+  // Choix de l'affichage. Priorité au prochain virage s'il est proche (« sauf s'il y a
+  // une autre instruction plus proche »). Sinon, on maintient le virage tout juste
+  // franchi en vert pendant GREEN_HOLD_MS. Sinon, le prochain virage en mode lointain.
+  const greenActive = reachedTurn != null && Date.now() - reachedAt < GREEN_HOLD_MS
+  if (turn && dist > 0 && dist <= TURN_HINT_M) {
+    turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
+  } else if (greenActive && reachedTurn) {
+    turnHint.value = { direction: reachedTurn.direction, distM: 0, kind: reachedTurn.kind, angle: reachedTurn.angle, exitNumber: reachedTurn.exitNumber, state: 'now' }
+  } else if (turn && dist > 0) {
+    turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'far' }
+  } else {
+    turnHint.value = null
+  }
+  return fired
+}
+
+// Mémorise un virage franchi (et (re)démarre son maintien vert).
+function rememberReached(turn: TurnPoint) {
+  reachedTurn = { direction: turn.direction, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber }
+  reachedAt = Date.now()
 }
 
 // Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.
@@ -1007,6 +1043,18 @@ function turnIcon(h: { direction: 'left' | 'right'; kind: Maneuver; angle: numbe
   if (h.kind === 'uturn') return 'fa-arrow-down'
   if (Math.abs(h.angle) < 20) return 'fa-arrow-up'
   return h.direction === 'left' ? 'fa-arrow-left' : 'fa-arrow-right'
+}
+
+// Temps estimé jusqu'au prochain virage, à la vitesse actuelle. Renvoie null tant
+// qu'on est quasi à l'arrêt (vitesse < 1 km/h) : l'estimation exploserait et n'aurait
+// aucun sens. Format horloge m:ss au-delà d'une minute, « N s » en deçà.
+function turnEta(distM: number): string | null {
+  if (speedKmh.value < 1) return null
+  const sec = distM / (speedKmh.value / 3.6)
+  if (sec < 60) return `${Math.round(sec)} s`
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m}:${String(s).padStart(2, '0')}`
 }
 
 function handleOffRouteSound(wasOffRoute: boolean) {
@@ -1239,13 +1287,24 @@ function onVisibilityChange() {
         <span class="nav-speed-value">{{ speedKmh.toFixed(1) }}</span>
         <span class="nav-speed-unit">km/h</span>
       </div>
-      <div v-if="turnHint && hasFix && !offRoute" class="nav-turn-sleep shadow" :class="{ 'nav-turn-sleep--urgent': turnHint.distM <= TURN_URGENT_M, 'nav-turn-sleep--climb': climbInfo }">
+      <div
+        v-if="turnHint && hasFix && !offRoute"
+        class="nav-turn-sleep shadow"
+        :class="{
+          'nav-turn-sleep--urgent': turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M,
+          'nav-turn-sleep--now': turnHint.state === 'now',
+          'nav-turn-sleep--climb': climbInfo,
+        }"
+      >
         <div class="nav-turn-sleep-icons">
-          <i v-if="turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+          <i v-if="turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
           <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
           <span v-if="turnHint.kind === 'roundabout' && turnHint.exitNumber" class="nav-turn-sleep-exit">{{ turnHint.exitNumber }}</span>
         </div>
-        <span class="nav-turn-sleep-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
+        <span class="nav-turn-sleep-dist">{{ turnHint.state === 'now' ? t('routes.turn_now') : formatDistancePrecise(turnHint.distM) }}</span>
+        <span v-if="turnHint.state !== 'now' && turnEta(turnHint.distM)" class="nav-turn-sleep-eta">
+          <i class="fa-solid fa-clock me-2" aria-hidden="true"></i>{{ turnEta(turnHint.distM) }}
+        </span>
         <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
       </div>
       <div class="nav-screen-off-hint">
@@ -1396,11 +1455,27 @@ function onVisibilityChange() {
     </div>
 
     <!-- Upcoming turn indicator -->
-    <div v-if="turnHint && hasFix && !offRoute" class="nav-turn shadow" :class="{ 'nav-turn--urgent': turnHint.distM <= TURN_URGENT_M }">
-      <i v-if="turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+    <div
+      v-if="turnHint && hasFix && !offRoute"
+      class="nav-turn shadow"
+      :class="{
+        'nav-turn--urgent': turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M,
+        'nav-turn--far': turnHint.state === 'far',
+        'nav-turn--now': turnHint.state === 'now',
+      }"
+    >
+      <i v-if="turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
       <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
       <span v-if="turnHint.kind === 'roundabout' && turnHint.exitNumber" class="nav-turn-exit">{{ turnHint.exitNumber }}</span>
-      <span class="nav-turn-dist">{{ formatDistanceShort(turnHint.distM) }}</span>
+      <span class="nav-turn-info">
+        <span v-if="turnHint.state === 'now'" class="nav-turn-dist">{{ t('routes.turn_now') }}</span>
+        <template v-else>
+          <span class="nav-turn-dist">{{ formatDistancePrecise(turnHint.distM) }}</span>
+          <span v-if="turnEta(turnHint.distM)" class="nav-turn-eta">
+            <i class="fa-solid fa-clock" aria-hidden="true"></i>{{ turnEta(turnHint.distM) }}
+          </span>
+        </template>
+      </span>
       <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
     </div>
 
@@ -1628,13 +1703,25 @@ function onVisibilityChange() {
   background: #7c3aed; color: #fff; padding: 0.5rem 1rem;
   border-radius: 0.75rem; font-size: 1.6rem; line-height: 1;
 }
+/* Distance (en avant) + temps estimé (en dessous, plus discret) du prochain virage. */
+.nav-turn-info { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
 .nav-turn-dist { font-size: 1.1rem; font-weight: 700; }
+.nav-turn-eta {
+  display: flex; align-items: center; gap: 0.25rem;
+  font-size: 0.8rem; font-weight: 600; opacity: 0.85;
+}
+.nav-turn-eta i { font-size: 0.7rem; }
 .nav-turn-exit {
   display: inline-flex; align-items: center; justify-content: center;
   width: 1.5rem; height: 1.5rem; border-radius: 50%;
   background: rgba(255,255,255,0.25); font-size: 0.95rem; font-weight: 700;
 }
 .nav-turn.nav-turn--urgent { background: #f97316; }
+/* Virage encore lointain (au-delà de turn_hint_m) : bandeau gris-bleu plus discret,
+   pour qu'il reste informatif sans dominer la carte comme le virage rapproché (violet). */
+.nav-turn.nav-turn--far { background: rgba(51, 65, 85, 0.92); }
+/* Virage atteint : maintenu en vert quelques secondes comme confirmation « tournez ici ». */
+.nav-turn.nav-turn--now { background: #16a34a; }
 
 .nav-climb {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6.25rem;
@@ -1719,12 +1806,19 @@ function onVisibilityChange() {
   font-size: 3.5rem; line-height: 1;
 }
 .nav-turn-sleep-dist { font-size: 2.25rem; font-weight: 700; line-height: 1; }
+.nav-turn-sleep-eta {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.4rem; font-weight: 600; opacity: 0.85; line-height: 1;
+}
+.nav-turn-sleep-eta i { font-size: 1.1rem; }
 .nav-turn-sleep-exit {
   display: inline-flex; align-items: center; justify-content: center;
   width: 2.5rem; height: 2.5rem; border-radius: 50%;
   background: rgba(255,255,255,0.25); font-size: 1.6rem; font-weight: 700;
 }
 .nav-turn-sleep.nav-turn-sleep--urgent { background: #f97316; }
+/* Virage atteint (veille) : maintenu en vert quelques secondes comme confirmation. */
+.nav-turn-sleep.nav-turn-sleep--now { background: #16a34a; }
 /* Pendant un col en veille, la carte du col occupe le bas : on remonte l'indicateur
    de virage en haut (sous le badge de vitesse) pour qu'il ne soit pas masqué. */
 .nav-turn-sleep--climb { position: absolute; top: 3.75rem; left: 50%; transform: translateX(-50%); }

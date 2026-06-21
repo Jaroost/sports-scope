@@ -255,6 +255,7 @@ fr:
     tap_to_resume: "Appuyer pour reprendre"
     turn_left: "Tourner à gauche"
     turn_right: "Tourner à droite"
+    turn_now: "Maintenant"
     climb_in_progress: "Col en cours"
     gps_error: "Position GPS indisponible"
     gps_waiting: "Recherche du signal GPS…"

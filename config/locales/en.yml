@@ -255,6 +255,7 @@ en:
     tap_to_resume: "Tap to resume"
     turn_left: "Turn left"
     turn_right: "Turn right"
+    turn_now: "Now"
     climb_in_progress: "Climb in progress"
     gps_error: "GPS position unavailable"
     gps_waiting: "Acquiring GPS signal…"

@@ -45,9 +45,9 @@ function color(distanceM: number): string {
 <style scoped>
 .radar-bar {
   position: absolute;
-  right: 12px;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 0.75rem;
+  /* Juste sous le bouton « retour » (top 0.75rem + hauteur du bouton + marge). */
+  top: 3.75rem;
   width: 34px;
   display: flex;
   flex-direction: column;

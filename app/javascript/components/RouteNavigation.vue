@@ -1293,6 +1293,7 @@ function onVisibilityChange() {
         :class="{
           'nav-turn-sleep--urgent': turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M,
           'nav-turn-sleep--now': turnHint.state === 'now',
+          'nav-turn-sleep--far': turnHint.state === 'far',
           'nav-turn-sleep--climb': climbInfo,
         }"
       >
@@ -1819,6 +1820,9 @@ function onVisibilityChange() {
 .nav-turn-sleep.nav-turn-sleep--urgent { background: #f97316; }
 /* Virage atteint (veille) : maintenu en vert quelques secondes comme confirmation. */
 .nav-turn-sleep.nav-turn-sleep--now { background: #16a34a; }
+/* Virage lointain (veille) : même gris-bleu discret qu'en navigation, pour distinguer
+   d'un coup d'œil un virage encore loin (gris) d'un virage en approche (violet). */
+.nav-turn-sleep.nav-turn-sleep--far { background: rgba(51, 65, 85, 0.92); }
 /* Pendant un col en veille, la carte du col occupe le bas : on remonte l'indicateur
    de virage en haut (sous le badge de vitesse) pour qu'il ne soit pas masqué. */
 .nav-turn-sleep--climb { position: absolute; top: 3.75rem; left: 50%; transform: translateX(-50%); }

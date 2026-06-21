@@ -86,6 +86,7 @@ let maplibre: any = null
 let locationMarker: any = null
 let watchId: number | null = null
 let wakeLock: any = null
+let placeMarkers: any[] = []   // marqueurs POI (cimetières/boulangeries) issus du profil
 
 // Route data (non-reactive: large arrays, only read inside callbacks)
 let geometry: Coord[] = []
@@ -221,6 +222,9 @@ onMounted(async () => {
     await fetchRoute()
     await initMap()
     startTracking()
+    // Recherche Overpass des POI du profil (best-effort, non bloquant) : les
+    // marqueurs apparaissent dès que la réponse arrive, la carte est déjà prête.
+    void fetchPlaces()
     turnRepeatId = window.setInterval(tickTurnRepeat, 250)
     requestWakeLock()
     // The screen wake lock and the audio context both need a user gesture to be
@@ -285,6 +289,76 @@ async function fetchRoute() {
     : detectTurns(geometry, cumDistM)
   remainingM.value = cumDistM[cumDistM.length - 1] || 0
   remainingGainM.value = computeGainLoss(geometry).gain
+}
+
+// ─── Points d'intérêt (POI du profil) ─────────────────────────────────────────
+// Pose autour du tracé les cimetières / boulangeries cochés dans le profil, comme
+// le créateur d'itinéraire. Mêmes catégories, même rayon (points_of_interest) et
+// même rendu de marqueur. Best-effort : un échec Overpass est silencieux, les POI
+// ne sont qu'un complément à la navigation.
+async function fetchPlaces() {
+  const poi = userPreferences().points_of_interest
+  const types: string[] = []
+  if (poi.show_cemeteries) types.push('cemeteries')
+  if (poi.show_bakeries) types.push('bakeries')
+  if (types.length === 0 || geometry.length < 2) return
+
+  let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
+  for (const [lng, lat] of geometry) {
+    if (lat < south) south = lat
+    if (lat > north) north = lat
+    if (lng < west) west = lng
+    if (lng > east) east = lng
+  }
+  // La bbox doit englober le rayon de détection, sinon les POI au-delà de ~2 km
+  // ne seraient pas remontés par Overpass.
+  const radiusM = poi.radius_m
+  const BUFFER = Math.max(0.02, (radiusM + 200) / 111000)
+  south -= BUFFER; north += BUFFER; west -= BUFFER; east += BUFFER
+
+  try {
+    const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}&types=${types.join(',')}`)
+    if (!res.ok) return
+    const nodes = await res.json()
+
+    const seen = new Set<string>()
+    const places: { name: string; type: string; lng: number; lat: number }[] = []
+    for (const node of nodes) {
+      if (node.type !== 'cemetery' && node.type !== 'bakery') continue
+      const key = `${node.type}:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
+      if (seen.has(key)) continue
+      // Filtre par le rayon configurable : distance du POI au point le plus proche du tracé.
+      let minD = Infinity
+      for (let i = 0; i < geometry.length; i++) {
+        const d = haversine(geometry[i], [node.lng, node.lat])
+        if (d < minD) minD = d
+      }
+      if (minD > radiusM) continue
+      seen.add(key)
+      places.push({ name: node.name, type: node.type, lng: node.lng, lat: node.lat })
+    }
+    installPlaceMarkers(places)
+  } catch { /* réseau / serveur Overpass — silencieux */ }
+}
+
+// Marqueur HTML persistant par POI (même look que le créateur). Les marqueurs
+// MapLibre sont des overlays DOM, ils survivent à un setStyle — pas besoin de les
+// réinstaller au changement de fond de carte.
+function installPlaceMarkers(places: { name: string; type: string; lng: number; lat: number }[]) {
+  if (!map || !maplibre) return
+  for (const m of placeMarkers) m.remove()
+  placeMarkers = []
+  for (const place of places) {
+    const el = document.createElement('div')
+    const icon = place.type === 'cemetery' ? 'fa-cross' : 'fa-bread-slice'
+    el.className = `place-marker place-marker--${place.type}`
+    el.title = place.name
+    el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
+    const marker = new maplibre.Marker({ element: el, anchor: 'bottom' })
+      .setLngLat([place.lng, place.lat])
+      .addTo(map)
+    placeMarkers.push(marker)
+  }
 }
 
 // ─── Map ──────────────────────────────────────────────────────────────────────
@@ -1309,5 +1383,28 @@ function onVisibilityChange() {
 .nav-position-arrow {
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
   pointer-events: none;
+}
+
+/* Marqueurs POI (cimetières / boulangeries) — même rendu que le créateur d'itinéraire.
+   Créés en JS (maplibre.Marker), donc placés dans le bloc de style non-scoped. */
+.place-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid currentColor;
+  box-shadow: 0 3px 8px -2px rgba(0, 0, 0, 0.4);
+  user-select: none;
+  transform-origin: bottom center;
+}
+.place-marker i { font-size: 0.78rem; }
+.place-marker--cemetery { color: #6b7280; }
+.place-marker--bakery   { color: #b45309; }
+@media (max-width: 767px) {
+  .place-marker { width: 32px; height: 32px; }
+  .place-marker i { font-size: 0.92rem; }
 }
 </style>

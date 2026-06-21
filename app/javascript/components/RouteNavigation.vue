@@ -115,6 +115,12 @@ let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
 let announcedTurn = -1       // index of the last turn we played a cue for
 let lastTurnReminderMs = 0   // timestamp of the last repeated turn cue
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
+// Virage en cours d'annonce (dans la zone d'alerte) : la répétition du son est
+// cadencée par un timer dédié (turnRepeatId) et non par les fixes GPS, sinon
+// l'intervalle réel serait plafonné par la fréquence du GPS (souvent plusieurs
+// secondes) au lieu de suivre la préférence turn_repeat_ms.
+let activeTurn: { kind: Maneuver; direction: 'left' | 'right' } | null = null
+let turnRepeatId: number | null = null
 
 // ─── Position extrapolation (dead-reckoning between GPS fixes) ────────────────
 // GPS fixes land ~once per second; rather than jumping the marker on each fix,
@@ -215,11 +221,22 @@ onMounted(async () => {
     await fetchRoute()
     await initMap()
     startTracking()
+    turnRepeatId = window.setInterval(tickTurnRepeat, 250)
     requestWakeLock()
     // The screen wake lock and the audio context both need a user gesture to be
     // granted reliably; the page load itself doesn't count, so (re)arm them on the
     // first touch/click anywhere on the page.
-    window.addEventListener('pointerdown', onFirstGesture)
+    //
+    // Au lancement depuis la liste (clic sur un lien), Chrome propage la « user
+    // activation » à la nouvelle page : l'AudioContext démarre « running » et le
+    // son marche d'emblée. Au rafraîchissement, aucune activation n'est propagée :
+    // il faut un vrai geste. Or le canvas MapLibre recouvre tout l'écran (.nav-map
+    // inset:0) et avale les pointerdown avant qu'ils n'atteignent window en phase
+    // bubbling — d'où un déverrouillage qui ne se déclenchait jamais au tap. On
+    // écoute donc en phase CAPTURE (avant MapLibre) et on ajoute touchstart, le
+    // plus fiable sur mobile.
+    window.addEventListener('pointerdown', onFirstGesture, true)
+    window.addEventListener('touchstart', onFirstGesture, true)
     document.addEventListener('visibilitychange', onVisibilityChange)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
@@ -230,8 +247,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
+  if (turnRepeatId != null) { clearInterval(turnRepeatId); turnRepeatId = null }
   stopAnimation()
-  window.removeEventListener('pointerdown', onFirstGesture)
+  window.removeEventListener('pointerdown', onFirstGesture, true)
+  window.removeEventListener('touchstart', onFirstGesture, true)
   window.removeEventListener('resize', refreshContainerH)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   releaseWakeLock()
@@ -600,11 +619,11 @@ function stopAnimation() {
 // the view), and surface a visual hint within TURN_HINT_M. Returns true on the
 // frame a turn alert fires.
 function updateTurns(): boolean {
-  if (!turns.length) { turnHint.value = null; return false }
+  if (!turns.length) { turnHint.value = null; activeTurn = null; return false }
   const here = snapDistAlongM
   while (nextTurnPtr < turns.length && turns[nextTurnPtr].distM < here - 5) nextTurnPtr++
   const turn = turns[nextTurnPtr]
-  if (!turn) { turnHint.value = null; return false }
+  if (!turn) { turnHint.value = null; activeTurn = null; return false }
   const dist = turn.distM - here
 
   turnHint.value = dist <= TURN_HINT_M && dist > -5
@@ -612,18 +631,32 @@ function updateTurns(): boolean {
     : null
 
   if (dist <= TURN_ALERT_M && dist > -5) {
-    const now = Date.now()
+    // Le virage est dans la zone d'alerte : on l'arme pour la répétition cadencée
+    // par le timer (tickTurnRepeat), indépendante de la fréquence des fixes GPS.
+    activeTurn = { kind: turn.kind, direction: turn.direction }
     if (announcedTurn !== nextTurnPtr) {
       announcedTurn = nextTurnPtr
-      lastTurnReminderMs = now
+      lastTurnReminderMs = Date.now()
       if (soundOn.value) playManeuver(turn.kind, turn.direction)
       return true
-    } else if (soundOn.value && now - lastTurnReminderMs >= TURN_REPEAT_MS) {
-      lastTurnReminderMs = now
-      playManeuver(turn.kind, turn.direction)
     }
+  } else {
+    // Hors zone d'alerte (pas encore assez proche, ou virage franchi) : on coupe
+    // la répétition jusqu'au prochain virage.
+    activeTurn = null
   }
   return false
+}
+
+// Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.
+// Un poll court (250 ms) suffit : la préférence est plafonnée à 500 ms mini.
+function tickTurnRepeat() {
+  if (!activeTurn || !soundOn.value) return
+  const now = Date.now()
+  if (now - lastTurnReminderMs >= TURN_REPEAT_MS) {
+    lastTurnReminderMs = now
+    playManeuver(activeTurn.kind, activeTurn.direction)
+  }
 }
 
 // FontAwesome icon for the visual turn indicator: plain directional arrows for

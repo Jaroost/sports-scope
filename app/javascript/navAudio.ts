@@ -16,17 +16,25 @@ export function unlockAudio(): void {
   } catch { /* unsupported or blocked */ }
 }
 
+// Global loudness multiplier applied to every cue. A web app can't request the
+// OS to "duck" (lower) the music the user is playing, so the cues are mixed on
+// top of it at full music volume — they have to be loud and bright to cut
+// through. Raise/lower this single value to retune all cues at once.
+const MASTER_GAIN = 3.2
+
 // One short note. `start` and `durationS` are seconds; the gain envelope keeps
-// it soft and click-free.
+// it click-free. A `triangle` wave (richer in harmonics than a pure sine)
+// carries much better over music than a sine at the same level.
 function beep(freq: number, start: number, durationS: number, gainPeak = 0.18): void {
   if (!ctx || ctx.state !== 'running') return
   const osc = ctx.createOscillator()
   const gain = ctx.createGain()
-  osc.type = 'sine'
+  osc.type = 'triangle'
   osc.frequency.value = freq
+  const peak = Math.min(gainPeak * MASTER_GAIN, 0.95)
   const t0 = ctx.currentTime + start
   gain.gain.setValueAtTime(0.0001, t0)
-  gain.gain.exponentialRampToValueAtTime(gainPeak, t0 + 0.02)
+  gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.02)
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + durationS)
   osc.connect(gain).connect(ctx.destination)
   osc.start(t0)

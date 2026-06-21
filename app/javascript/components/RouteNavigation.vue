@@ -9,7 +9,7 @@ import {
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
-import { unlockAudio, playManeuver, playOffRoute, playRadarThreat } from '../navAudio'
+import { unlockAudio, playManeuver, playOffRoute, playRadarThreat, playRadarClose } from '../navAudio'
 import RadarOverlay from './RadarOverlay.vue'
 import { radarStore } from '../stores/radarStore'
 import { connectRadar, disconnectRadar, radarSupported } from '../variaRadar'
@@ -214,17 +214,29 @@ function toggleRadar() {
   }
 }
 
-// Alerte sonore quand une *nouvelle* voiture entre dans la portée. On compare les
-// ids de cible d'une trame à l'autre : un id absent du jeu précédent = un véhicule
-// qui vient d'apparaître. On ne re-bipe donc pas tant que la même voiture est
-// suivie, et le watchdog du store remet la liste à zéro une fois la voie dégagée.
+// Alertes sonores du radar. Deux niveaux, chacun déclenché une seule fois par
+// véhicule (suivi par son id de cible) :
+//   • entrée dans la portée  → bip d'avertissement (playRadarThreat)
+//   • passage sous 30 m      → bip insistant (playRadarClose)
+// On ne re-bipe pas tant que la même voiture reste dans le même état ; le watchdog
+// du store vide la liste une fois la voie dégagée, donc une nouvelle approche
+// re-déclenche bien les alertes.
+const RADAR_CLOSE_M = 30
 let knownThreatIds = new Set<number>()
+let closeAlertedIds = new Set<number>()
 watch(() => radarStore.targets.value, (targets) => {
-  const ids = new Set(targets.map((t) => t.id))
-  if (soundOn.value && targets.some((t) => !knownThreatIds.has(t.id))) {
-    playRadarThreat()
+  if (soundOn.value) {
+    if (targets.some((t) => !knownThreatIds.has(t.id))) playRadarThreat()
+    if (targets.some((t) => t.distanceM <= RADAR_CLOSE_M && !closeAlertedIds.has(t.id))) {
+      playRadarClose()
+    }
   }
-  knownThreatIds = ids
+  knownThreatIds = new Set(targets.map((t) => t.id))
+  // On ne garde l'état « déjà alerté de près » que pour les cibles encore présentes,
+  // pour qu'une voiture qui repart puis se rapproche à nouveau re-bipe.
+  closeAlertedIds = new Set(
+    targets.filter((t) => t.distanceM <= RADAR_CLOSE_M).map((t) => t.id),
+  )
 })
 
 // ─── Camera controls ──────────────────────────────────────────────────────────

@@ -87,3 +87,12 @@ export function playRadarThreat(): void {
   beep(880, 0, 0.09, 0.16)
   beep(1180, 0.1, 0.14, 0.16)
 }
+
+// Three fast, louder notes — the car has closed in (under ~30 m). More insistent
+// than the entry cue so it stands out as "it's right behind you now".
+export function playRadarClose(): void {
+  unlockAudio()
+  beep(1180, 0, 0.08, 0.24)
+  beep(1180, 0.1, 0.08, 0.24)
+  beep(1180, 0.2, 0.16, 0.24)
+}

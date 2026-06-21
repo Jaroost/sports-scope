@@ -237,6 +237,7 @@ fr:
     sound_on: "Couper le son"
     sound_off: "Activer le son"
     camera_settings: "Réglages caméra"
+    poi_settings: "Points d'intérêt"
     camera_zoom: "Zoom"
     camera_pitch: "Inclinaison"
     camera_3d: "Relief 3D"

@@ -237,6 +237,7 @@ en:
     sound_on: "Mute sound"
     sound_off: "Enable sound"
     camera_settings: "Camera settings"
+    poi_settings: "Points of interest"
     camera_zoom: "Zoom"
     camera_pitch: "Tilt"
     camera_3d: "3D terrain"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import MapStyleDropdown from './MapStyleDropdown.vue'
@@ -61,6 +61,17 @@ const terrain3d = ref(navPrefs.terrain)
 const showCamPanel = ref(false)
 // Confirmation éphémère affichée sur le bouton « enregistrer le zoom ».
 const zoomSaved = ref(false)
+
+// ─── Filtres POI (panneau de séance) ──────────────────────────────────────────
+// Catégories de POI ponctuels affichables en navigation (eau, restos, points de
+// vue…). Le panneau permet de les masquer/afficher en séance ; l'état initial
+// vient des préférences du profil. On récupère toutes les catégories sur Overpass
+// (pas seulement celles cochées au profil) pour que les bascules soient instantanées.
+const POI_CATS = POI_CATEGORIES.filter((c) => c.point)
+const poiVisible = reactive<Record<string, boolean>>(
+  Object.fromEntries(POI_CATS.map((c) => [c.key, !!userPreferences().points_of_interest[c.prefField]])),
+)
+const showPoiPanel = ref(false)
 // Le bouton n'a de sens que pour un compte (persistNavCamera est un no-op hors-ligne).
 const loggedIn = isLoggedIn()
 const screenOff = ref(false)
@@ -96,7 +107,7 @@ let maplibre: any = null
 let locationMarker: any = null
 let watchId: number | null = null
 let wakeLock: any = null
-let placeMarkers: any[] = []   // marqueurs POI (cimetières/boulangeries) issus du profil
+let placeMarkers: any[] = []   // marqueurs POI ponctuels (filtrés par le panneau de séance)
 let turnMarkers: any[] = []    // marqueurs DOM des indicateurs de virage (au-dessus des POI)
 let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
 let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
@@ -335,7 +346,9 @@ interface NavPlace { name: string; type: string; lng: number; lat: number }
 
 async function fetchPlaces() {
   const poi = userPreferences().points_of_interest
-  const types = POI_CATEGORIES.filter((c) => c.point && poi[c.prefField]).map((c) => c.key)
+  // Toutes les catégories ponctuelles : l'affichage est ensuite filtré par le
+  // panneau (poiVisible), dont l'état initial reflète les préférences du profil.
+  const types = POI_CATS.map((c) => c.key)
   if (types.length === 0 || geometry.length < 2) return
 
   let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
@@ -391,6 +404,8 @@ function installPlaceMarkers(places: NavPlace[]) {
     el.className = 'place-marker'
     // Couleur pilotée par le registre POI (currentColor → bordure / remplissage).
     el.style.color = cat?.color ?? '#6b7280'
+    // Clé de catégorie : sert au filtrage d'affichage par le panneau de séance.
+    if (cat) el.dataset.poiKey = cat.key
     el.title = place.name
     el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
     // Clic = popup Google Maps / Street View. stopPropagation pour ne pas
@@ -402,6 +417,23 @@ function installPlaceMarkers(places: NavPlace[]) {
       .addTo(map)
     placeMarkers.push(marker)
   }
+  applyPoiVisibility()
+}
+
+// Affiche/masque les marqueurs POI selon les bascules du panneau de séance.
+function applyPoiVisibility() {
+  for (const m of placeMarkers) {
+    const el = m.getElement() as HTMLElement
+    const key = el.dataset.poiKey
+    el.style.display = key && poiVisible[key] === false ? 'none' : ''
+  }
+}
+
+function togglePoi(key: string) {
+  poiVisible[key] = !poiVisible[key]
+  // Si le POI dont le popup est ouvert vient d'être masqué, on ferme le popup.
+  if (!poiVisible[key] && activePlaceEl?.dataset.poiKey === key) closePlacePopup()
+  applyPoiVisibility()
 }
 
 // Popup proposant d'ouvrir le POI sur Google Maps et en Street View — repris du
@@ -1169,6 +1201,36 @@ function onVisibilityChange() {
           </label>
         </div>
       </div>
+
+      <div class="position-relative">
+        <button
+          type="button"
+          class="btn btn-sm btn-light shadow-sm"
+          :class="{ active: showPoiPanel }"
+          :title="t('routes.poi_settings')"
+          :aria-label="t('routes.poi_settings')"
+          @click="showPoiPanel = !showPoiPanel"
+        >
+          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+        </button>
+        <div v-if="showPoiPanel" class="nav-cam-panel nav-poi-panel shadow">
+          <label v-for="cat in POI_CATS" :key="cat.key" class="nav-cam-row nav-cam-row--switch">
+            <span class="nav-cam-label nav-poi-label">
+              <i class="fa-solid" :class="cat.icon" :style="{ color: cat.color }" aria-hidden="true"></i>
+              {{ t(`profile.poi.${cat.labelKey}`) }}
+            </span>
+            <span class="form-check form-switch m-0">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                role="switch"
+                :checked="poiVisible[cat.key]"
+                @change="togglePoi(cat.key)"
+              />
+            </span>
+          </label>
+        </div>
+      </div>
     </div>
 
     <!-- Instantaneous speed -->
@@ -1361,6 +1423,17 @@ function onVisibilityChange() {
 }
 .nav-cam-savezoom:hover { background: #f3effd; }
 .nav-cam-savezoom--done { background: #198754; border-color: #198754; color: #fff; }
+
+/* Panneau des filtres POI : même boîte que la caméra, lignes icône + libellé +
+   interrupteur. Le libellé occupe la largeur disponible (textes longs : « Points
+   de vue, sommets et cols »). */
+.nav-poi-panel { width: 16rem; }
+.nav-poi-panel .nav-cam-row + .nav-cam-row { margin-top: 0.6rem; }
+.nav-poi-label {
+  display: flex; align-items: center; gap: 0.55rem;
+  width: auto; flex: 1; font-size: 0.9rem; line-height: 1.15;
+}
+.nav-poi-label i { width: 1.2rem; text-align: center; flex-shrink: 0; }
 
 .nav-banner {
   position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
@@ -1561,6 +1634,9 @@ function onVisibilityChange() {
 }
 
 /* Popup POI (Google Maps / Street View) — repris du créateur d'itinéraire. */
+/* Toujours au-dessus des autres marqueurs (POI z-index 1, virages 2, position 3) :
+   sans z-index explicite, le popup maplibre (auto = 0) passe sous les marqueurs. */
+.place-popup-container { z-index: 10; }
 .place-popup-container .maplibregl-popup-content {
   padding: 4px;
   border-radius: 10px;

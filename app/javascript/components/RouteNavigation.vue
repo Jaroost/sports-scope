@@ -10,7 +10,7 @@ import {
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
-import { userPreferences, persistNavCamera, persistDefaultMapStyle } from '../userPreferences'
+import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 
 const props = defineProps<{ shareToken: string }>()
 
@@ -53,6 +53,10 @@ const camZoom = ref(navPrefs.zoom)
 const camPitch = ref(navPrefs.pitch)
 const terrain3d = ref(navPrefs.terrain)
 const showCamPanel = ref(false)
+// Confirmation éphémère affichée sur le bouton « enregistrer le zoom ».
+const zoomSaved = ref(false)
+// Le bouton n'a de sens que pour un compte (persistNavCamera est un no-op hors-ligne).
+const loggedIn = isLoggedIn()
 const screenOff = ref(false)
 const CAM_PITCH_MIN = 0
 const CAM_PITCH_MAX = 75
@@ -179,10 +183,13 @@ function toggleSound() {
 }
 
 // ─── Camera controls ──────────────────────────────────────────────────────────
-// Les curseurs ajustent la vue en direct (@input) puis reportent le réglage sur le
-// profil au relâchement (@change). Inclinaison et zoom sont réappliqués à chaque
-// frame par la boucle (qui lit camPitch / camZoom) ; on les pousse aussi via
-// setPitch/setZoom pour que le changement soit visible immédiatement hors suivi.
+// Les curseurs ajustent la vue en direct (@input). Inclinaison et zoom sont
+// réappliqués à chaque frame par la boucle (qui lit camPitch / camZoom) ; on les
+// pousse aussi via setPitch/setZoom pour que le changement soit visible
+// immédiatement hors suivi. L'inclinaison/le relief sont reportés sur le profil au
+// relâchement (@change → persistPitchTerrain) ; le zoom, lui, ne l'est QUE
+// manuellement via le bouton dédié (saveZoomToProfile), pour ne pas écraser le
+// réglage par défaut par un zoom ponctuel de la séance.
 
 function onPitchInput() {
   if (map) map.setPitch(camPitch.value)
@@ -192,6 +199,10 @@ function onZoomInput() {
   if (!map) return
   hasInitialZoom = true  // l'utilisateur prend la main sur le zoom
   map.setZoom(camZoom.value)
+  // Comme un pinch : le curseur détache la caméra du suivi (le bouton recentrer
+  // apparaît). setZoom étant programmatique, on bascule l'état ici à la main.
+  following.value = false
+  cameraUnlocked.value = true
 }
 
 // Active/désactive le relief 3D (terrain MNT) sous le tracé. Idempotente : aussi
@@ -211,11 +222,24 @@ function applyTerrain() {
 function toggleTerrain() {
   terrain3d.value = !terrain3d.value
   applyTerrain()
-  persistCamera()
+  persistPitchTerrain()
 }
 
-function persistCamera() {
+// Persiste l'inclinaison et le relief sur le profil. Le zoom n'est PAS capturé ici :
+// on réécrit la valeur déjà enregistrée (navPrefs.zoom) pour qu'un réglage
+// d'inclinaison ou de relief n'embarque pas le zoom courant de la séance. Le zoom
+// n'est reporté que manuellement, via saveZoomToProfile.
+function persistPitchTerrain() {
+  persistNavCamera(navPrefs.zoom, camPitch.value, terrain3d.value)
+}
+
+// Reporte le zoom courant de la navigation sur le profil (bouton dédié du panneau
+// caméra). Le zoom ne s'enregistre plus automatiquement au pinch ou au curseur,
+// pour ne pas écraser le zoom par défaut du compte par une vue ponctuelle.
+function saveZoomToProfile() {
   persistNavCamera(camZoom.value, camPitch.value, terrain3d.value)
+  zoomSaved.value = true
+  window.setTimeout(() => { zoomSaved.value = false }, 1800)
 }
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
@@ -489,6 +513,10 @@ async function initMap() {
   const onManualMove = (e: any) => { if (e.originalEvent) { following.value = false; cameraUnlocked.value = true } }
   map.on('dragstart', onManualMove)
   map.on('rotatestart', onManualMove)
+  // Un zoom manuel (pinch / molette) détache lui aussi la caméra du suivi : le
+  // bouton recentrer apparaît et rétablira le zoom du profil. Les zooms
+  // programmatiques de la boucle (jumpTo) n'ont pas d'originalEvent → ignorés.
+  map.on('zoomstart', onManualMove)
   // Garde camZoom (et donc le curseur du panneau caméra) aligné sur un pinch
   // manuel. Pas d'arrondi : la boucle réapplique camZoom à chaque frame, donc une
   // valeur arrondie ferait « sauter » le zoom au pas de 0,5 pendant le pinch.
@@ -1007,15 +1035,21 @@ function updateLocationMarker(coords: LngLat) {
 function recenter() {
   following.value = true
   cameraUnlocked.value = false
+  // Rétablit le zoom PAR DÉFAUT du profil (et non le zoom courant de la séance) :
+  // la boucle réapplique camZoom à chaque frame, donc le remettre ici suffit à
+  // figer la vue au zoom du compte.
+  camZoom.value = navPrefs.zoom
   if (!lastPos) return
-  // Pause the loop so it doesn't jump-cancel the glide back; keep the rider's
-  // current zoom — only re-center, re-orient and restore the 3D tilt — then
-  // hand the camera back to the loop once we're settled over the rider.
+  // Pause the loop so it doesn't jump-cancel the glide back; re-center, re-orient,
+  // restore the 3D tilt AND the profile zoom, then hand the camera back to the loop
+  // once we're settled over the rider.
   stopAnimation()
   displayBearing = currentBearing
   // Recentrer sur l'ancre affichée (snappée sur le tracé si on est dessus) pour que
   // caméra et flèche coïncident — la boucle recentre déjà sur la position affichée.
-  map.easeTo(followOptions(anchorPos ?? lastPos))
+  const opts = followOptions(anchorPos ?? lastPos)
+  opts.zoom = navPrefs.zoom   // followOptions n'ajoute le zoom qu'au tout premier cadrage
+  map.easeTo(opts)
   map.once('moveend', startAnimation)
 }
 
@@ -1122,7 +1156,7 @@ function onVisibilityChange() {
               :min="CAM_PITCH_MIN" :max="CAM_PITCH_MAX" step="1"
               v-model.number="camPitch"
               @input="onPitchInput"
-              @change="persistCamera"
+              @change="persistPitchTerrain"
             />
             <span class="nav-cam-val">{{ Math.round(camPitch) }}°</span>
           </label>
@@ -1134,10 +1168,19 @@ function onVisibilityChange() {
               :min="CAM_ZOOM_MIN" :max="CAM_ZOOM_MAX" step="0.5"
               v-model.number="camZoom"
               @input="onZoomInput"
-              @change="persistCamera"
             />
             <span class="nav-cam-val">{{ camZoom.toFixed(1) }}</span>
           </label>
+          <button
+            v-if="loggedIn"
+            type="button"
+            class="nav-cam-savezoom"
+            :class="{ 'nav-cam-savezoom--done': zoomSaved }"
+            @click="saveZoomToProfile"
+          >
+            <i class="fa-solid" :class="zoomSaved ? 'fa-check' : 'fa-floppy-disk'" aria-hidden="true"></i>
+            {{ zoomSaved ? t('routes.camera_zoom_saved') : t('routes.camera_save_zoom') }}
+          </button>
           <label class="nav-cam-row nav-cam-row--switch">
             <span class="nav-cam-label">{{ t('routes.camera_3d') }}</span>
             <span class="form-check form-switch m-0">
@@ -1335,6 +1378,15 @@ function onVisibilityChange() {
 .nav-cam-row .form-range::-webkit-slider-thumb { width: 1.5rem; height: 1.5rem; }
 .nav-cam-row .form-range::-moz-range-thumb { width: 1.5rem; height: 1.5rem; }
 .nav-cam-row--switch .form-check-input { width: 3rem; height: 1.5rem; }
+.nav-cam-savezoom {
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  width: 100%; margin-top: 0.85rem; padding: 0.5rem 0.75rem;
+  border: 1px solid #7c3aed; border-radius: 0.5rem;
+  background: #fff; color: #7c3aed; font-size: 0.9rem; font-weight: 600;
+  cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
+}
+.nav-cam-savezoom:hover { background: #f3effd; }
+.nav-cam-savezoom--done { background: #198754; border-color: #198754; color: #fff; }
 
 .nav-banner {
   position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);

@@ -242,6 +242,8 @@ fr:
     camera_3d: "Relief 3D"
     camera_lock: "Verrouiller la caméra"
     camera_unlock: "Déverrouiller la caméra"
+    camera_save_zoom: "Enregistrer ce zoom par défaut"
+    camera_zoom_saved: "Zoom enregistré"
     screen_off: "Économiser la batterie (écran noir)"
     screen_on: "Reprendre la navigation"
     tap_to_resume: "Appuyer pour reprendre"

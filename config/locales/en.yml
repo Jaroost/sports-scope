@@ -242,6 +242,8 @@ en:
     camera_3d: "3D terrain"
     camera_lock: "Lock camera"
     camera_unlock: "Unlock camera"
+    camera_save_zoom: "Save this zoom as default"
+    camera_zoom_saved: "Zoom saved"
     screen_off: "Save battery (black screen)"
     screen_on: "Resume navigation"
     tap_to_resume: "Tap to resume"

@@ -24,10 +24,15 @@ const OFF_ROUTE_M = 20          // lateral distance beyond which we warn
 const OFF_ROUTE_ACCURACY_CAP = 35  // most we widen the threshold by for a fuzzy GPS fix
 const MIN_MOVE_M = 4            // movement needed to recompute a heading
 const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
+// Largeur (px) du tracé sur la carte ; la bordure ajoute 4 px de part et d'autre.
+const ROUTE_LINE_WIDTH = navPrefs.line_width ?? 8
+const ROUTE_BORDER_WIDTH = ROUTE_LINE_WIDTH + 4
 const TURN_ALERT_M = navPrefs.turn_alert_m
 const TURN_HINT_M = navPrefs.turn_hint_m
 const TURN_URGENT_M = navPrefs.turn_urgent_m
 const TURN_REPEAT_MS = navPrefs.turn_repeat_ms
+// Rayon (px) des pastilles orange de changement de direction.
+const TURN_MARKER_SIZE = navPrefs.turn_marker_size ?? 11
 const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
 
 const mapEl = ref<HTMLElement | null>(null)
@@ -547,12 +552,12 @@ function installRouteLayers() {
   map.addSource('nav-route', { type: 'geojson', data: lineFeature(line) })
   map.addSource('nav-remaining', { type: 'geojson', data: lineFeature(line) })
 
-  map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
-  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': 8 } })
-  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': 8 } })
+  map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': ROUTE_BORDER_WIDTH } })
+  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': ROUTE_LINE_WIDTH } })
+  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': ROUTE_LINE_WIDTH } })
 
   if (turnsFromBRouter && turns.length) {
-    if (!map.hasImage('nav-turn-arrow')) map.addImage('nav-turn-arrow', createArrowImage())
+    if (!map.hasImage('nav-turn-arrow')) map.addImage('nav-turn-arrow', createArrowImage(), { pixelRatio: ARROW_SCALE })
     const features = turns.map((tp) => {
       let b = tp.idx + 1
       while (b < geometry.length - 1 && cumDistM[b] - cumDistM[tp.idx] < 18) b++
@@ -569,7 +574,7 @@ function installRouteLayers() {
       type: 'circle',
       source: 'nav-turns',
       paint: {
-        'circle-radius': 11,
+        'circle-radius': TURN_MARKER_SIZE,
         'circle-color': '#f97316',
         'circle-stroke-width': 2,
         'circle-stroke-color': '#ffffff',
@@ -587,7 +592,8 @@ function installRouteLayers() {
         'icon-rotation-alignment': 'map',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
-        'icon-size': 1,
+        // Proportionnelle à la pastille, un poil plus petite pour tenir dans le cercle.
+        'icon-size': TURN_MARKER_SIZE / 15,
       },
     })
     // Numéro de sortie pour les ronds-points
@@ -598,7 +604,8 @@ function installRouteLayers() {
       filter: ['==', ['get', 'kind'], 'roundabout'],
       layout: {
         'text-field': ['to-string', ['get', 'exitNumber']],
-        'text-size': 13,
+        // Proportionnel à la pastille (13 px = taille par défaut, rayon 11).
+        'text-size': TURN_MARKER_SIZE / 11 * 13,
         'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
         'text-allow-overlap': true,
         'text-ignore-placement': true,
@@ -612,18 +619,26 @@ function installRouteLayers() {
   }
 }
 
+// Suréchantillonnage de l'image de flèche : on dessine le tracé vectoriel sur un
+// canvas ARROW_SCALE× plus grand et on l'enregistre avec pixelRatio = ARROW_SCALE.
+// La taille logique reste 22 px (donc icon-size inchangé) mais le bitmap reste net
+// quand la pastille — et donc la flèche — est agrandie.
+const ARROW_SCALE = 32
+
 function createArrowImage(): ImageData {
-  const size = 22
+  const base = 22
+  const size = base * ARROW_SCALE
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
   const ctx = canvas.getContext('2d')!
+  ctx.scale(ARROW_SCALE, ARROW_SCALE)
   ctx.fillStyle = 'white'
   ctx.beginPath()
-  ctx.moveTo(size / 2, 1)        // pointe haute
-  ctx.lineTo(size - 2, size - 2) // coin bas droit
-  ctx.lineTo(size / 2, size - 7) // encoche basse
-  ctx.lineTo(2, size - 2)        // coin bas gauche
+  ctx.moveTo(base / 2, 1)        // pointe haute
+  ctx.lineTo(base - 2, base - 2) // coin bas droit
+  ctx.lineTo(base / 2, base - 7) // encoche basse
+  ctx.lineTo(2, base - 2)        // coin bas gauche
   ctx.closePath()
   ctx.fill()
   return ctx.getImageData(0, 0, size, size)

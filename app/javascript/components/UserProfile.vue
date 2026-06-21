@@ -25,10 +25,12 @@ interface Preferences {
     pitch: number
     terrain: boolean
     nav_fps: number
+    line_width: number
     turn_alert_m: number
     turn_hint_m: number
     turn_urgent_m: number
     turn_repeat_ms: number
+    turn_marker_size: number
   }
   display: {
     default_sport: string
@@ -122,6 +124,100 @@ function applyPreviewPadding() {
   previewMap.setPadding({ top: Math.round(h * PREVIEW_TOP_PAD_RATIO), bottom: 0, left: 0, right: 0 })
 }
 
+// Tracé de démonstration sur l'aperçu : une courte ligne centrée sur la position,
+// rendue avec les mêmes couleurs que la navigation (bordure + tracé violet), pour
+// que le réglage de largeur soit représentatif. (Re)pose les couches après un
+// setStyle (qui efface sources et layers).
+function applyPreviewRoute() {
+  if (!previewMap) return
+  const data = previewRouteFeature(previewCenter)
+  if (previewMap.getSource('preview-route')) {
+    previewMap.getSource('preview-route').setData(data)
+    return
+  }
+  previewMap.addSource('preview-route', { type: 'geojson', data })
+  const w = prefs.navigation.line_width
+  previewMap.addLayer({ id: 'preview-route-border', type: 'line', source: 'preview-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'rgba(0,0,0,0.28)', 'line-width': w + 4 } })
+  previewMap.addLayer({ id: 'preview-route-line', type: 'line', source: 'preview-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#7c3aed', 'line-width': w } })
+  applyPreviewTurnMarker()
+}
+
+// Pastille orange de changement de direction posée sur l'aperçu (même rendu que la
+// navigation), pour visualiser en direct le réglage de taille. (Re)pose la couche
+// après un setStyle. La pose au-dessus du tracé.
+function applyPreviewTurnMarker() {
+  if (!previewMap) return
+  // Décalé vers le haut le long du tracé pour ne pas recouvrir la flèche du coureur,
+  // posée pile au centre.
+  const turnCenter: [number, number] = [previewCenter[0], previewCenter[1] + 0.0004]
+  const data = { type: 'Feature' as const, properties: {}, geometry: { type: 'Point' as const, coordinates: turnCenter } }
+  if (previewMap.getSource('preview-turn')) {
+    previewMap.getSource('preview-turn').setData(data)
+    return
+  }
+  previewMap.addSource('preview-turn', { type: 'geojson', data })
+  previewMap.addLayer({ id: 'preview-turn-dot', type: 'circle', source: 'preview-turn', paint: { 'circle-radius': prefs.navigation.turn_marker_size, 'circle-color': '#f97316', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+  // Flèche directionnelle (vers la gauche) par-dessus la pastille — même rendu que la
+  // navigation (taille fixe), pour juger de la lisibilité selon la taille du marqueur.
+  if (!previewMap.hasImage('preview-turn-arrow')) previewMap.addImage('preview-turn-arrow', createArrowImage(), { pixelRatio: ARROW_SCALE })
+  previewMap.addLayer({
+    id: 'preview-turn-arrow',
+    type: 'symbol',
+    source: 'preview-turn',
+    layout: {
+      'icon-image': 'preview-turn-arrow',
+      'icon-rotate': -90, // pointe vers la gauche (l'image pointe vers le haut)
+      'icon-rotation-alignment': 'map',
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      // Proportionnelle à la pastille, un poil plus petite pour tenir dans le cercle.
+      'icon-size': prefs.navigation.turn_marker_size / 15,
+    },
+  })
+}
+
+// Flèche blanche pointant vers le haut, identique à celle de la navigation
+// (RouteNavigation.createArrowImage). Suréchantillonnée (ARROW_SCALE×) et enregistrée
+// avec pixelRatio = ARROW_SCALE : taille logique 22 px, bitmap net une fois agrandie.
+const ARROW_SCALE = 32
+
+function createArrowImage(): ImageData {
+  const base = 22
+  const size = base * ARROW_SCALE
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.scale(ARROW_SCALE, ARROW_SCALE)
+  ctx.fillStyle = 'white'
+  ctx.beginPath()
+  ctx.moveTo(base / 2, 1)
+  ctx.lineTo(base - 2, base - 2)
+  ctx.lineTo(base / 2, base - 7)
+  ctx.lineTo(2, base - 2)
+  ctx.closePath()
+  ctx.fill()
+  return ctx.getImageData(0, 0, size, size)
+}
+
+// Met à jour à chaud la largeur du tracé de l'aperçu (bordure = tracé + 4 px).
+function applyPreviewRouteWidth(w: number) {
+  if (!previewMap?.getLayer('preview-route-line')) return
+  previewMap.setPaintProperty('preview-route-line', 'line-width', w)
+  previewMap.setPaintProperty('preview-route-border', 'line-width', w + 4)
+}
+
+// Courte ligne verticale (~150 m) centrée sur un point, pour visualiser le tracé.
+function previewRouteFeature(center: [number, number]) {
+  const [lng, lat] = center
+  const dLat = 0.0007 // ~78 m de part et d'autre
+  return {
+    type: 'Feature' as const,
+    properties: {},
+    geometry: { type: 'LineString' as const, coordinates: [[lng, lat - dLat], [lng, lat], [lng, lat + dLat]] },
+  }
+}
+
 // Active/désactive le relief 3D sur l'aperçu (idempotente : aussi après un setStyle).
 function applyPreviewTerrain() {
   if (!previewMap) return
@@ -166,17 +262,23 @@ async function initPreview() {
   previewMap.on('styleimagemissing', (e: any) => {
     previewMap.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
-  previewMap.on('load', () => { applyPreviewTerrain(); applyPreviewPadding() })
+  previewMap.on('load', () => { applyPreviewRoute(); applyPreviewTerrain(); applyPreviewPadding() })
   previewMap.on('resize', applyPreviewPadding)
 
-  // Réagit en direct aux réglages : le zoom, l'inclinaison et le relief s'appliquent
-  // à chaud, le changement de style recharge le fond (et replace le marqueur + relief).
+  // Réagit en direct aux réglages : le zoom, l'inclinaison, le relief et la largeur du
+  // tracé s'appliquent à chaud ; le changement de style recharge le fond (et replace
+  // le marqueur, le tracé et le relief).
   watch(() => prefs.navigation.zoom, (z) => previewMap?.setZoom(z))
   watch(() => prefs.navigation.pitch, (p) => previewMap?.setPitch(p))
   watch(() => prefs.navigation.terrain, applyPreviewTerrain)
+  watch(() => prefs.navigation.line_width, applyPreviewRouteWidth)
+  watch(() => prefs.navigation.turn_marker_size, (r) => {
+    if (previewMap?.getLayer('preview-turn-dot')) previewMap.setPaintProperty('preview-turn-dot', 'circle-radius', r)
+    if (previewMap?.getLayer('preview-turn-arrow')) previewMap.setLayoutProperty('preview-turn-arrow', 'icon-size', r / 13)
+  })
   watch(() => prefs.navigation.default_style, (id) => {
     previewMap?.setStyle(mapStyleFor(id), { diff: false })
-    previewMap?.once('style.load', applyPreviewTerrain)
+    previewMap?.once('style.load', () => { applyPreviewRoute(); applyPreviewTerrain() })
   })
 
   locatePreview()
@@ -191,6 +293,7 @@ function locatePreview() {
       previewCenter = [pos.coords.longitude, pos.coords.latitude]
       previewMap?.setCenter(previewCenter)
       placePreviewMarker(previewCenter)
+      applyPreviewRoute()
     },
     () => { previewLocating.value = false; previewLocationError.value = true },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
@@ -328,7 +431,35 @@ function placePreviewMarker(coords: [number, number]) {
             </label>
             <input id="nav-fps" v-model.number="prefs.navigation.nav_fps" type="range" class="form-range" min="0.5" max="60" step="0.5">
           </div>
+          <div class="col-sm-6">
+            <label for="nav-line-width" class="form-label mb-1">
+              {{ t('profile.navigation.line_width') }} : <strong>{{ prefs.navigation.line_width }} px</strong>
+            </label>
+            <input id="nav-line-width" v-model.number="prefs.navigation.line_width" type="range" class="form-range" min="2" max="200" step="1">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-marker-size" class="form-label mb-1">
+              {{ t('profile.navigation.turn_marker_size') }} : <strong>{{ prefs.navigation.turn_marker_size }} px</strong>
+            </label>
+            <input id="nav-turn-marker-size" v-model.number="prefs.navigation.turn_marker_size" type="range" class="form-range" min="5" max="200" step="1">
+          </div>
         </div>
+
+        <!-- Aperçu en direct -->
+        <div class="mt-3">
+          <label class="form-label mb-1">{{ t('profile.navigation.preview') }}</label>
+          <p class="text-muted small mb-2">{{ t('profile.navigation.preview_help') }}</p>
+          <div class="nav-preview">
+            <div ref="previewEl" class="nav-preview-map"></div>
+            <div v-if="previewLocating" class="nav-preview-overlay text-muted">
+              <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('profile.navigation.locating') }}
+            </div>
+            <div v-else-if="previewLocationError" class="nav-preview-badge">
+              <i class="fa-solid fa-location-crosshairs me-1" aria-hidden="true"></i>{{ t('profile.navigation.location_error') }}
+            </div>
+          </div>
+        </div>
+
         <hr class="my-3">
         <h3 class="h6 text-muted text-uppercase small fw-semibold mb-3">
           <i class="fa-solid fa-turn-right me-1" aria-hidden="true"></i>{{ t('profile.navigation.turns_title') }}
@@ -357,21 +488,6 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (prefs.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
             </label>
             <input id="nav-turn-repeat" v-model.number="prefs.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500">
-          </div>
-        </div>
-
-        <!-- Aperçu en direct -->
-        <div class="mt-3">
-          <label class="form-label mb-1">{{ t('profile.navigation.preview') }}</label>
-          <p class="text-muted small mb-2">{{ t('profile.navigation.preview_help') }}</p>
-          <div class="nav-preview">
-            <div ref="previewEl" class="nav-preview-map"></div>
-            <div v-if="previewLocating" class="nav-preview-overlay text-muted">
-              <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('profile.navigation.locating') }}
-            </div>
-            <div v-else-if="previewLocationError" class="nav-preview-badge">
-              <i class="fa-solid fa-location-crosshairs me-1" aria-hidden="true"></i>{{ t('profile.navigation.location_error') }}
-            </div>
           </div>
         </div>
       </div>

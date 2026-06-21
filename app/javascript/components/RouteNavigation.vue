@@ -78,6 +78,63 @@ const showPoiPanel = ref(false)
 // Le bouton n'a de sens que pour un compte (persistNavCamera est un no-op hors-ligne).
 const loggedIn = isLoggedIn()
 const screenOff = ref(false)
+
+// ─── Auto-masquage des boutons (interface épurée en séance) ────────────────────
+// Les commandes (retour, style de carte, son, radar, caméra, POI) encombrent la
+// vue une fois la séance lancée. On les affiche au démarrage (découvrabilité) puis
+// on les estompe après quelques secondes d'inactivité ; un swipe vers le bas depuis
+// le haut de l'écran les rappelle (le tap simple reste dédié à la mise en veille).
+const controlsVisible = ref(true)
+let controlsHideId: number | null = null
+const CONTROLS_HIDE_MS = 4000
+
+function armControlsHide() {
+  if (controlsHideId != null) clearTimeout(controlsHideId)
+  controlsHideId = window.setTimeout(() => {
+    controlsHideId = null
+    // On ne masque pas tant qu'un panneau (caméra / POI) est ouvert : l'utilisateur
+    // est en train de régler quelque chose. On réarme alors le minuteur.
+    if (showCamPanel.value || showPoiPanel.value) { armControlsHide(); return }
+    controlsVisible.value = false
+  }, CONTROLS_HIDE_MS)
+}
+
+function showControls() {
+  controlsVisible.value = true
+  armControlsHide()
+}
+
+// ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
+// Capté par une fine zone transparente en haut de l'écran, active uniquement quand
+// les boutons sont masqués. Un vrai swipe vers le bas les rappelle ; un simple tap
+// (sans déplacement) conserve le comportement « tap carte » → mise en veille.
+const REVEAL_SWIPE_M = 40   // déplacement vertical (px) au-delà duquel on révèle
+let revealStartY = 0
+let revealStartX = 0
+let revealTracking = false
+
+function onRevealDown(e: PointerEvent) {
+  revealStartY = e.clientY
+  revealStartX = e.clientX
+  revealTracking = true
+}
+
+function onRevealMove(e: PointerEvent) {
+  if (!revealTracking) return
+  if (e.clientY - revealStartY > REVEAL_SWIPE_M) {
+    revealTracking = false
+    showControls()
+  }
+}
+
+function onRevealUp(e: PointerEvent) {
+  if (!revealTracking) return
+  revealTracking = false
+  // Tap quasi immobile dans la zone : on garde la sémantique du tap carte (veille).
+  const moved = Math.hypot(e.clientX - revealStartX, e.clientY - revealStartY)
+  if (moved < 10 && !screenOff.value) toggleScreenOffManual()
+}
+
 const CAM_PITCH_MIN = 0
 const CAM_PITCH_MAX = 75
 const CAM_ZOOM_MIN = 14
@@ -353,6 +410,8 @@ onMounted(async () => {
     void fetchPlaces()
     turnRepeatId = window.setInterval(tickTurnRepeat, 250)
     requestWakeLock()
+    // Affiche les boutons quelques secondes au lancement puis les estompe.
+    armControlsHide()
     // The screen wake lock and the audio context both need a user gesture to be
     // granted reliably; the page load itself doesn't count, so (re)arm them on the
     // first touch/click anywhere on the page.
@@ -378,6 +437,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   if (turnRepeatId != null) { clearInterval(turnRepeatId); turnRepeatId = null }
+  if (controlsHideId != null) { clearTimeout(controlsHideId); controlsHideId = null }
   stopAnimation()
   window.removeEventListener('pointerdown', onFirstGesture, true)
   window.removeEventListener('touchstart', onFirstGesture, true)
@@ -1355,13 +1415,36 @@ function onVisibilityChange() {
       <i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>{{ error }}
     </div>
 
+    <!-- Zone de swipe (révèle les boutons masqués) : fine bande transparente en
+         haut, active seulement boutons masqués et écran allumé. -->
+    <div
+      v-if="!controlsVisible && !screenOff"
+      class="nav-reveal-zone"
+      @pointerdown="onRevealDown"
+      @pointermove="onRevealMove"
+      @pointerup="onRevealUp"
+      @pointercancel="revealTracking = false"
+    >
+      <span class="nav-reveal-grabber" aria-hidden="true">
+        <i class="fa-solid fa-chevron-down"></i>
+      </span>
+    </div>
+
     <!-- Top controls -->
-    <div class="nav-top-left d-flex gap-2">
+    <div
+      class="nav-top-left d-flex gap-2"
+      :class="{ 'nav-controls--hidden': !controlsVisible }"
+      @pointerdown="armControlsHide"
+    >
       <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
       </a>
     </div>
-    <div class="nav-top-right">
+    <div
+      class="nav-top-right"
+      :class="{ 'nav-controls--hidden': !controlsVisible }"
+      @pointerdown="armControlsHide"
+    >
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
       <button
         type="button"
@@ -1649,6 +1732,40 @@ function onVisibilityChange() {
 .nav-top-right {
   position: absolute; top: 0.75rem; right: 0.75rem; z-index: 4;
   display: flex; flex-direction: column; align-items: flex-end; gap: 0.6rem;
+}
+
+/* Fondu/repli des commandes quand elles s'auto-masquent. Elles restent dans le DOM
+   mais deviennent invisibles et non cliquables (la zone de swipe prend le relais). */
+.nav-top-left,
+.nav-top-right {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.nav-controls--hidden {
+  opacity: 0;
+  transform: translateY(-0.6rem);
+  pointer-events: none;
+}
+
+/* Zone de geste « swipe vers le bas » : bande transparente en haut de l'écran.
+   touch-action:none pour que le glissement vertical déclenche bien pointermove au
+   lieu d'un scroll. Au-dessus de la carte mais sous le voile de veille (z-index 20). */
+.nav-reveal-zone {
+  position: absolute; top: 0; left: 0; right: 0; height: 4.5rem;
+  z-index: 6; touch-action: none;
+  display: flex; justify-content: center; align-items: flex-start;
+}
+/* Petit chevron discret indiquant qu'on peut faire glisser vers le bas. */
+.nav-reveal-grabber {
+  margin-top: 0.35rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.4rem; height: 1.3rem; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28); color: #fff; font-size: 0.7rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  animation: nav-reveal-pulse 2.4s ease-in-out infinite;
+}
+@keyframes nav-reveal-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.7; }
 }
 
 /* Larger touch targets: these controls are tapped one-handed on a phone while

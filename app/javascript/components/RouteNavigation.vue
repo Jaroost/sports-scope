@@ -96,6 +96,7 @@ let locationMarker: any = null
 let watchId: number | null = null
 let wakeLock: any = null
 let placeMarkers: any[] = []   // marqueurs POI (cimetières/boulangeries) issus du profil
+let turnMarkers: any[] = []    // marqueurs DOM des indicateurs de virage (au-dessus des POI)
 let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
 let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
 const svCache = new Map<string, boolean>()     // cache « Street View dispo ? » par POI
@@ -537,6 +538,7 @@ async function initMap() {
   await new Promise<void>((resolve) => {
     map.on('load', () => {
       installRouteLayers()
+      renderTurnMarkers()
       applyTerrain()
       // Fit the whole route before the first GPS fix arrives.
       const b = new maplibre.LngLatBounds(coords[0], coords[0])
@@ -555,93 +557,47 @@ function installRouteLayers() {
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': ROUTE_BORDER_WIDTH } })
   map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': ROUTE_LINE_WIDTH } })
   map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': ROUTE_LINE_WIDTH } })
-
-  if (turnsFromBRouter && turns.length) {
-    if (!map.hasImage('nav-turn-arrow')) map.addImage('nav-turn-arrow', createArrowImage(), { pixelRatio: ARROW_SCALE })
-    const features = turns.map((tp) => {
-      let b = tp.idx + 1
-      while (b < geometry.length - 1 && cumDistM[b] - cumDistM[tp.idx] < 18) b++
-      const bearing = bearingBetween(geometry[tp.idx], geometry[b])
-      return {
-        type: 'Feature' as const,
-        geometry: { type: 'Point' as const, coordinates: [geometry[tp.idx][0], geometry[tp.idx][1]] },
-        properties: { bearing, kind: tp.kind, exitNumber: tp.exitNumber ?? 0 },
-      }
-    })
-    map.addSource('nav-turns', { type: 'geojson', data: { type: 'FeatureCollection' as const, features } })
-    map.addLayer({
-      id: 'nav-turns-dots',
-      type: 'circle',
-      source: 'nav-turns',
-      paint: {
-        'circle-radius': TURN_MARKER_SIZE,
-        'circle-color': '#f97316',
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#ffffff',
-      },
-    })
-    // Flèche directionnelle pour les virages normaux
-    map.addLayer({
-      id: 'nav-turns-arrows',
-      type: 'symbol',
-      source: 'nav-turns',
-      filter: ['!=', ['get', 'kind'], 'roundabout'],
-      layout: {
-        'icon-image': 'nav-turn-arrow',
-        'icon-rotate': ['get', 'bearing'],
-        'icon-rotation-alignment': 'map',
-        'icon-allow-overlap': true,
-        'icon-ignore-placement': true,
-        // Proportionnelle à la pastille, un poil plus petite pour tenir dans le cercle.
-        'icon-size': TURN_MARKER_SIZE / 15,
-      },
-    })
-    // Numéro de sortie pour les ronds-points
-    map.addLayer({
-      id: 'nav-turns-exit',
-      type: 'symbol',
-      source: 'nav-turns',
-      filter: ['==', ['get', 'kind'], 'roundabout'],
-      layout: {
-        'text-field': ['to-string', ['get', 'exitNumber']],
-        // Proportionnel à la pastille (13 px = taille par défaut, rayon 11).
-        'text-size': TURN_MARKER_SIZE / 11 * 13,
-        'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-        'text-allow-overlap': true,
-        'text-ignore-placement': true,
-      },
-      paint: {
-        'text-color': '#ffffff',
-        'text-halo-color': '#f97316',
-        'text-halo-width': 1,
-      },
-    })
-  }
 }
 
-// Suréchantillonnage de l'image de flèche : on dessine le tracé vectoriel sur un
-// canvas ARROW_SCALE× plus grand et on l'enregistre avec pixelRatio = ARROW_SCALE.
-// La taille logique reste 22 px (donc icon-size inchangé) mais le bitmap reste net
-// quand la pastille — et donc la flèche — est agrandie.
-const ARROW_SCALE = 32
-
-function createArrowImage(): ImageData {
-  const base = 22
-  const size = base * ARROW_SCALE
-  const canvas = document.createElement('canvas')
-  canvas.width = size
-  canvas.height = size
-  const ctx = canvas.getContext('2d')!
-  ctx.scale(ARROW_SCALE, ARROW_SCALE)
-  ctx.fillStyle = 'white'
-  ctx.beginPath()
-  ctx.moveTo(base / 2, 1)        // pointe haute
-  ctx.lineTo(base - 2, base - 2) // coin bas droit
-  ctx.lineTo(base / 2, base - 7) // encoche basse
-  ctx.lineTo(2, base - 2)        // coin bas gauche
-  ctx.closePath()
-  ctx.fill()
-  return ctx.getImageData(0, 0, size, size)
+// Indicateurs de virage en marqueurs DOM (et non en couches canvas) : les
+// marqueurs MapLibre sont des overlays HTML, toujours rendus AU-DESSUS du canvas
+// — donc au-dessus des POI (eux aussi des marqueurs, mais au z-index inférieur).
+// C'est ce qui garantit qu'un POI ne masque jamais un indicateur de virage.
+// Posés une seule fois (les marqueurs survivent à un setStyle).
+function renderTurnMarkers() {
+  if (!map || !maplibre) return
+  for (const m of turnMarkers) m.remove()
+  turnMarkers = []
+  if (!turnsFromBRouter || !turns.length) return
+  const dot = TURN_MARKER_SIZE * 2          // diamètre de la pastille (rayon → diamètre)
+  for (const tp of turns) {
+    let b = tp.idx + 1
+    while (b < geometry.length - 1 && cumDistM[b] - cumDistM[tp.idx] < 18) b++
+    const bearing = bearingBetween(geometry[tp.idx], geometry[b])
+    const el = document.createElement('div')
+    el.className = 'nav-turn-marker'
+    el.style.width = `${dot}px`
+    el.style.height = `${dot}px`
+    if (tp.kind === 'roundabout') {
+      // Rond-point : numéro de sortie, texte maintenu droit (pas d'alignement carte).
+      const exitFont = TURN_MARKER_SIZE / 11 * 13   // 13 px à la taille par défaut (rayon 11)
+      el.innerHTML = `<span class="nav-turn-marker-exit" style="font-size:${exitFont}px">${tp.exitNumber ?? 0}</span>`
+      const marker = new maplibre.Marker({ element: el, anchor: 'center' })
+        .setLngLat([geometry[tp.idx][0], geometry[tp.idx][1]])
+        .addTo(map)
+      turnMarkers.push(marker)
+    } else {
+      // Virage normal : flèche directionnelle couchée sur le plan de la carte
+      // (rotationAlignment + pitchAlignment 'map') et orientée selon le cap.
+      el.innerHTML = '<svg class="nav-turn-marker-arrow" viewBox="0 0 22 22" aria-hidden="true">'
+        + '<path d="M11 1 L20 20 L11 15 L2 20 Z" fill="#fff"/></svg>'
+      const marker = new maplibre.Marker({ element: el, anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' })
+        .setLngLat([geometry[tp.idx][0], geometry[tp.idx][1]])
+        .addTo(map)
+      marker.setRotation(bearing)
+      turnMarkers.push(marker)
+    }
+  }
 }
 
 function lineFeature(coords: number[][]) {
@@ -1546,7 +1502,27 @@ function onVisibilityChange() {
 .nav-position-arrow {
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
   pointer-events: none;
+  /* Position de l'utilisateur : au-dessus des indicateurs de virage et des POI. */
+  z-index: 3;
 }
+
+/* Indicateurs de virage (pastille orange + flèche / numéro de sortie). Marqueurs
+   DOM placés au-dessus des POI (z-index 2 > 1) pour ne jamais être masqués par eux. */
+.nav-turn-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #f97316;
+  border: 2px solid #fff;
+  /* content-box : le liseré blanc s'ajoute autour de la pastille (comme circle-stroke),
+     pour reproduire le rendu de l'ancienne couche canvas malgré le reset Bootstrap. */
+  box-sizing: content-box;
+  pointer-events: none;
+  z-index: 2;
+}
+.nav-turn-marker-arrow { width: 73%; height: 73%; display: block; }
+.nav-turn-marker-exit { color: #fff; font-weight: 700; line-height: 1; }
 
 /* Marqueurs POI (cimetières / boulangeries) — même rendu que le créateur d'itinéraire.
    Créés en JS (maplibre.Marker), donc placés dans le bloc de style non-scoped. */
@@ -1564,6 +1540,8 @@ function onVisibilityChange() {
   user-select: none;
   transform-origin: bottom center;
   transition: box-shadow 0.1s ease;
+  /* Sous les indicateurs de virage (z-index 2) : un POI ne doit jamais les masquer. */
+  z-index: 1;
 }
 .place-marker i { font-size: 0.78rem; }
 .place-marker:hover { box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.5); }

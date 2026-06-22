@@ -97,7 +97,7 @@ function armControlsHide() {
     controlsHideId = null
     // On ne masque pas tant qu'un panneau (caméra / POI) est ouvert : l'utilisateur
     // est en train de régler quelque chose. On réarme alors le minuteur.
-    if (showCamPanel.value || showPoiPanel.value) { armControlsHide(); return }
+    if (showCamPanel.value || showPoiPanel.value || showDebugPanel.value) { armControlsHide(); return }
     controlsVisible.value = false
   }, CONTROLS_HIDE_MS)
 }
@@ -348,6 +348,113 @@ const radarBannerVisible = computed(
     radarStore.isConnected.value &&
     (navPrefs.radar_always_visible || radarStore.targets.value.length > 0),
 )
+
+// ─── Mode débug (preview des overlays) ────────────────────────────────────────
+// Activé via `?debug=1` dans l'URL. Il révèle un bouton « flacon » dans le tiroir
+// de commandes qui ouvre un panneau permettant d'injecter des données factices pour
+// prévisualiser, sans GPS / col réel / radar Varia, les trois overlays clés :
+//   • le radar arrière (RadarOverlay)
+//   • la carte de col (climbInfo)
+//   • la notification de virage (turnHint)
+// Tant qu'une bascule est active, les mises à jour live (updateTurns / updateProgress)
+// ne réécrivent PAS l'overlay correspondant (gardes dbgTurn / dbgClimb), pour qu'un
+// vrai fix GPS ne l'efface pas pendant qu'on l'inspecte.
+const debugMode = (() => {
+  try { return new URLSearchParams(window.location.search).has('debug') } catch { return false }
+})()
+const showDebugPanel = ref(false)
+const dbgRadar = ref(false)
+const dbgClimb = ref(false)
+const dbgTurn = ref(false)
+
+// Scénarios de virage parcourus en boucle (un clic = scénario suivant, puis « off »).
+// Couvre chaque état visuel : lointain (gris), approche (violet), urgent (orange),
+// rond-point (numéro de sortie) et virage atteint (vert).
+const DBG_TURNS: { label: string; state: 'far' | 'near' | 'now'; kind: Maneuver; direction: 'left' | 'right'; angle: number; distM: number; exitNumber?: number }[] = [
+  { label: 'Lointain', state: 'far', kind: 'turn', direction: 'right', angle: 60, distM: 850 },
+  { label: 'Approche', state: 'near', kind: 'turn', direction: 'left', angle: -70, distM: 180 },
+  { label: 'Urgent', state: 'near', kind: 'sharp', direction: 'right', angle: 110, distM: Math.min(TURN_URGENT_M, 40) },
+  { label: 'Rond-point', state: 'near', kind: 'roundabout', direction: 'right', angle: 90, distM: 120, exitNumber: 2 },
+  { label: 'Maintenant', state: 'now', kind: 'turn', direction: 'left', angle: -70, distM: 0 },
+]
+const dbgTurnIdx = ref(0)
+
+function cycleDebugTurn() {
+  dbgTurnIdx.value = dbgTurn.value ? dbgTurnIdx.value + 1 : 0
+  if (dbgTurnIdx.value >= DBG_TURNS.length) {
+    dbgTurn.value = false
+    turnHint.value = null
+    return
+  }
+  dbgTurn.value = true
+  hasFix.value = true
+  const p = DBG_TURNS[dbgTurnIdx.value]
+  turnHint.value = { direction: p.direction, distM: p.distM, kind: p.kind, angle: p.angle, exitNumber: p.exitNumber, state: p.state }
+}
+
+function toggleDebugClimb() {
+  if (dbgClimb.value) { dbgClimb.value = false; climbInfo.value = null; return }
+  dbgClimb.value = true
+  hasFix.value = true
+  climbInfo.value = buildDebugClimb()
+}
+
+// Radar factice : on passe le store en « connecté » sans Bluetooth (pas de watchdog,
+// donc les cibles persistent) et on injecte deux voitures, dont une sous le seuil
+// rapproché → bandeau rouge « Attention » + alertes sonores (via le watch existant).
+function toggleDebugRadar() {
+  if (dbgRadar.value) { dbgRadar.value = false; radarStore.reset(); return }
+  dbgRadar.value = true
+  radarStore.status.value = 'connected'
+  radarStore.setTargets([
+    { id: 1, distanceM: 18, speedMps: 9 },
+    { id: 2, distanceM: 72, speedMps: 6 },
+  ])
+}
+
+// Profil de col synthétique pour la carte de col (climbInfo). Reproduit la forme des
+// données réelles (segments colorés par pente, aire remplie, curseur « vous êtes ici »)
+// sans dépendre de la géométrie de l'itinéraire.
+function buildDebugClimb() {
+  const n = 28
+  const pts: { x: number; y: number }[] = []
+  for (let i = 0; i <= n; i++) {
+    const f = i / n
+    pts.push({ x: f * 100, y: 96 - Math.pow(f, 1.5) * 90 })   // altitude haute = y bas
+  }
+  const segments: { d: string; color: string }[] = []
+  for (let i = 0; i < n; i++) {
+    const g = 3 + (i / n) * 11   // 3 % en bas → 14 % au sommet
+    segments.push({
+      d: `M${pts[i].x},${pts[i].y} L${pts[i + 1].x},${pts[i + 1].y} L${pts[i + 1].x},100 L${pts[i].x},100 Z`,
+      color: colorForGrade(g),
+    })
+  }
+  let areaD = `M${pts[0].x},100`
+  for (const p of pts) areaD += ` L${p.x},${p.y}`
+  areaD += ` L${pts[n].x},100 Z`
+  const ratio = 0.42
+  const posX = ratio * 100
+  // y de la ligne d'altitude au curseur (interpolation linéaire entre points).
+  let posY = pts[pts.length - 1].y
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].x >= posX) {
+      const a = pts[i - 1], b = pts[i]
+      const tt = b.x > a.x ? (posX - a.x) / (b.x - a.x) : 0
+      posY = a.y + tt * (b.y - a.y)
+      break
+    }
+  }
+  const grade = 9
+  const gradeColor = colorForGrade(grade)
+  const climb: Climb = { startIdx: 0, endIdx: 0, gain: 560, lengthM: 8400, avgGrade: 6.7, category: '2', startKm: 0, endKm: 8.4 }
+  return {
+    climb, ratio, remainingGainM: climb.gain * (1 - ratio),
+    segments, areaD, posX, posY,
+    topY: Math.min(...pts.map((p) => p.y)),
+    grade, gradeColor, gradeText: textColorOn(gradeColor),
+  }
+}
 
 // ─── Camera controls ──────────────────────────────────────────────────────────
 // Les curseurs ajustent la vue en direct (@input). Inclinaison et zoom sont
@@ -1049,6 +1156,8 @@ function stopAnimation() {
 // the view), and surface a visual hint within TURN_HINT_M. Returns true on the
 // frame a turn alert fires.
 function updateTurns(): boolean {
+  // Débug : un virage factice est épinglé, on ne le réécrit pas depuis le GPS.
+  if (dbgTurn.value) return false
   if (!turns.length) { turnHint.value = null; activeTurn = null; reachedTurn = null; return false }
   const here = snapDistAlongM
   // Avance le pointeur sur les virages dépassés (>5 m derrière), en mémorisant chacun
@@ -1209,6 +1318,8 @@ function updateProgress(idx: number) {
   remainingM.value = p.remainingM
   remainingGainM.value = p.remainingGainM
   doneRatio.value = p.doneRatio
+  // Débug : une carte de col factice est épinglée, on ne la réécrit pas depuis le GPS.
+  if (dbgClimb.value) { refreshRemaining(); return }
   const ac = activeClimb(idx, climbs, cumDistM, snapDistAlongM)
   if (ac) {
     const rem = computeGainLoss(geometry.slice(idx, ac.climb.endIdx + 1)).gain
@@ -1575,6 +1686,39 @@ function onVisibilityChange() {
           </label>
         </div>
       </div>
+
+      <!-- Panneau de débug (visible uniquement avec ?debug=1 dans l'URL). Injecte des
+           overlays factices pour les prévisualiser sans GPS / col / radar réels. -->
+      <div v-if="debugMode" class="position-relative">
+        <button
+          type="button"
+          class="btn btn-sm btn-light shadow-sm"
+          :class="{ active: showDebugPanel }"
+          title="Débug navigation"
+          aria-label="Débug navigation"
+          @click="showDebugPanel = !showDebugPanel"
+        >
+          <i class="fa-solid fa-flask" aria-hidden="true"></i>
+        </button>
+        <div v-if="showDebugPanel" class="nav-cam-panel nav-debug-panel shadow">
+          <div class="nav-debug-title">Débug navigation</div>
+          <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgRadar }" @click="toggleDebugRadar">
+            <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
+            <span>Radar</span>
+            <span class="nav-debug-state">{{ dbgRadar ? 'on' : 'off' }}</span>
+          </button>
+          <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgClimb }" @click="toggleDebugClimb">
+            <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+            <span>Col</span>
+            <span class="nav-debug-state">{{ dbgClimb ? 'on' : 'off' }}</span>
+          </button>
+          <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgTurn }" @click="cycleDebugTurn">
+            <i class="fa-solid fa-arrow-turn-up" aria-hidden="true"></i>
+            <span>Virage</span>
+            <span class="nav-debug-state">{{ dbgTurn ? DBG_TURNS[dbgTurnIdx].label : 'off' }}</span>
+          </button>
+        </div>
+      </div>
       </div>
     </div>
 
@@ -1835,6 +1979,24 @@ function onVisibilityChange() {
   width: auto; flex: 1; font-size: 0.9rem; line-height: 1.15;
 }
 .nav-poi-label i { width: 1.2rem; text-align: center; flex-shrink: 0; }
+
+/* Panneau de débug : titre + une ligne-bouton par overlay simulable. */
+.nav-debug-panel { width: 14rem; }
+.nav-debug-title {
+  font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  color: #6c757d; margin-bottom: 0.6rem;
+}
+.nav-debug-btn {
+  display: flex; align-items: center; gap: 0.6rem; width: 100%;
+  padding: 0.5rem 0.7rem; border: 1px solid #dee2e6; border-radius: 0.5rem;
+  background: #fff; color: #495057; font-size: 0.95rem; font-weight: 600;
+  cursor: pointer; transition: background 0.12s ease, border-color 0.12s ease;
+}
+.nav-debug-btn + .nav-debug-btn { margin-top: 0.5rem; }
+.nav-debug-btn i { width: 1.2rem; text-align: center; }
+.nav-debug-state { margin-left: auto; font-size: 0.85rem; opacity: 0.7; }
+.nav-debug-btn--on { background: #ede7fb; border-color: #7c3aed; color: #5b21b6; }
+.nav-debug-btn--on .nav-debug-state { opacity: 1; }
 
 .nav-banner {
   position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);

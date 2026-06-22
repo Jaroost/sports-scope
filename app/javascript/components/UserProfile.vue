@@ -46,6 +46,8 @@ interface Preferences {
     default_sport: string
     show_grade_colors: boolean
     show_elevation_chart: boolean
+    route_color: string
+    route_opacity: number
   }
   climb_detection: {
     min_grade: number
@@ -544,6 +546,20 @@ function placePreviewMarker(coords: [number, number]) {
         <div class="form-check form-switch">
           <input id="disp-elev" v-model="prefs.display.show_elevation_chart" class="form-check-input" type="checkbox">
           <label class="form-check-label" for="disp-elev">{{ t('profile.display.show_elevation_chart') }}</label>
+        </div>
+        <hr class="my-3">
+        <div class="row g-3">
+          <div class="col-sm-6">
+            <label for="disp-route-color" class="form-label mb-1">{{ t('profile.display.route_color') }}</label>
+            <input id="disp-route-color" v-model="prefs.display.route_color" type="color" class="form-control form-control-color">
+            <p class="text-muted small mb-0 mt-1">{{ t('profile.display.route_color_help') }}</p>
+          </div>
+          <div class="col-sm-6">
+            <label for="disp-route-opacity" class="form-label mb-1">
+              {{ t('profile.display.route_opacity') }} : <strong>{{ Math.round(prefs.display.route_opacity * 100) }} %</strong>
+            </label>
+            <input id="disp-route-opacity" v-model.number="prefs.display.route_opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
+          </div>
         </div>
       </div>
     </section>

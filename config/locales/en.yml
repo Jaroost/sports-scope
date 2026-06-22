@@ -402,6 +402,9 @@ en:
       sport_hiking: "Hike"
       show_grade_colors: "Show grade colours by default"
       show_elevation_chart: "Show elevation profile by default"
+      route_color: "Route line colour"
+      route_color_help: "Used when grade colours are turned off."
+      route_opacity: "Route line opacity"
     climb:
       title: "Climb detection"
       help: "Thresholds used to detect and categorize the climbs on a route."

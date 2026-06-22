@@ -12,7 +12,7 @@ class ProfilesController < ApplicationController
   NAV_PITCH_RANGE = (0..90)
   NAV_FPS_RANGE = (0.5..60.0)
   NAV_LINE_WIDTH_RANGE = (2..200)
-  NAV_LINE_OPACITY_RANGE = (0.0..1.0)
+  OPACITY_RANGE = (0.0..1.0)
   HEX_COLOR = /\A#[0-9a-fA-F]{6}\z/
   NAV_TURN_ALERT_RANGE = (50..500)
   NAV_TURN_HINT_RANGE = (50..500)
@@ -81,7 +81,7 @@ class ProfilesController < ApplicationController
         "nav_fps" => clamp_float(navigation[:nav_fps], NAV_FPS_RANGE, 8),
         "line_width" => clamp_int(navigation[:line_width], NAV_LINE_WIDTH_RANGE, 8),
         "line_color" => hex_color(navigation[:line_color], "#7c3aed"),
-        "line_opacity" => clamp_float(navigation[:line_opacity], NAV_LINE_OPACITY_RANGE, 0.8),
+        "line_opacity" => clamp_float(navigation[:line_opacity], OPACITY_RANGE, 0.8),
         "turn_alert_m" => clamp_int(navigation[:turn_alert_m], NAV_TURN_ALERT_RANGE, 200),
         "turn_hint_m" => clamp_int(navigation[:turn_hint_m], NAV_TURN_HINT_RANGE, 200),
         "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, 15),
@@ -94,6 +94,8 @@ class ProfilesController < ApplicationController
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),
         "show_grade_colors" => to_bool(display[:show_grade_colors], true),
         "show_elevation_chart" => to_bool(display[:show_elevation_chart], true),
+        "route_color" => hex_color(display[:route_color], "#7c3aed"),
+        "route_opacity" => clamp_float(display[:route_opacity], OPACITY_RANGE, 0.8),
       },
       "climb_detection" => {
         "min_grade" => clamp_float(climb[:min_grade], MIN_GRADE_RANGE, 2),

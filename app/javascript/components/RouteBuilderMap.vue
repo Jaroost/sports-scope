@@ -9,7 +9,7 @@ import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import MapOverlayDropdown from './MapOverlayDropdown.vue'
 import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
-import { persistDefaultMapStyle, persistOverlays } from '../userPreferences'
+import { persistDefaultMapStyle, persistOverlays, userPreferences } from '../userPreferences'
 import type { MapStyleId } from '../userPreferences'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
@@ -29,6 +29,12 @@ const emit = defineEmits<{
 }>()
 
 const mapEl = useTemplateRef('mapEl')
+
+// Couleur (hors mode pente) et opacité du tracé, réglables dans le profil (section
+// Affichage). L'opacité s'applique dans tous les modes ; la couleur ne sert qu'en
+// mode uni (le mode pente garde son dégradé).
+const ROUTE_COLOR = userPreferences().display.route_color ?? '#7c3aed'
+const ROUTE_OPACITY = userPreferences().display.route_opacity ?? 0.8
 
 // Icône FontAwesome du sport courant (même logique que la sidebar Stats).
 function sportIcon() {
@@ -250,14 +256,14 @@ function installRouteLayer() {
   if (!mapInstance.getSource('builder-route-graded')) {
     mapInstance.addSource('builder-route-graded', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     mapInstance.addLayer({ id: 'builder-route-border', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
-    mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5 } })
+    mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5, 'line-opacity': ROUTE_OPACITY } })
   }
   // Tronçons « libres » : tracés en ligne droite (beeline) entre points, rendus en
   // traitillé pour les distinguer du tracé routé. La géométrie droite est exclue de
   // la source graduée (applyColorMode) pour que le pointillé reste lisible.
   if (!mapInstance.getSource('builder-route-straight')) {
     mapInstance.addSource('builder-route-straight', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-    mapInstance.addLayer({ id: 'builder-route-straight-line', type: 'line', source: 'builder-route-straight', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#fc4c02', 'line-width': 4, 'line-dasharray': [1.6, 1.4] } })
+    mapInstance.addLayer({ id: 'builder-route-straight-line', type: 'line', source: 'builder-route-straight', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': ROUTE_COLOR, 'line-width': 4, 'line-dasharray': [1.6, 1.4], 'line-opacity': ROUTE_OPACITY } })
   }
   if (!mapInstance.getSource('builder-divergent')) {
     mapInstance.addSource('builder-divergent', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -345,7 +351,7 @@ function applyColorMode() {
   const gradeMode = props.state.colorMode === 'grade'
   const routedFeatures: any[] = []
   const straightFeatures: any[] = []
-  let paint: any = '#fc4c02'
+  let paint: any = ROUTE_COLOR
 
   if (coords.length >= 2) {
     if (gradeMode) paint = gradePaintExpression()

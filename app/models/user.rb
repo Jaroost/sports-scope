@@ -41,6 +41,8 @@ class User < ApplicationRecord
       "default_sport" => "cycling",   # cycling | mtb | hiking
       "show_grade_colors" => true,
       "show_elevation_chart" => true,
+      "route_color" => "#7c3aed",     # couleur du tracé dans le créateur (hors mode pente)
+      "route_opacity" => 0.8,         # opacité (0–1) du tracé dans le créateur (tous modes)
     },
     # Vitesse moyenne (km/h) par catégorie d'activité, utilisée pour estimer le
     # temps de parcours d'un itinéraire (créateur + liste).

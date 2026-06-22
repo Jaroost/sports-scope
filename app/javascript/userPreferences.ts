@@ -28,6 +28,8 @@ export interface UserPreferences {
     default_sport: Sport
     show_grade_colors: boolean
     show_elevation_chart: boolean
+    route_color: string
+    route_opacity: number
   }
   climb_detection: {
     min_grade: number
@@ -56,6 +58,8 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     default_sport: 'cycling',
     show_grade_colors: true,
     show_elevation_chart: true,
+    route_color: '#7c3aed',
+    route_opacity: 0.8,
   },
   climb_detection: {
     min_grade: 2,

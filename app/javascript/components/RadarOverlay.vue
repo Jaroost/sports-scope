@@ -69,16 +69,16 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
   top: 0;
   left: 0;
   right: 0;
-  /* Au-dessus de la carte et des indicateurs (vitesse/virage), sous les boutons
-     d'angle (retour / réglages) qui restent cliquables par-dessus les extrémités. */
+  /* Au-dessus de la carte et des notifications de virage (z-index 3), sous le tiroir
+     de commandes (z-index 8) qui se déploie par-dessus quand on swipe vers le bas. */
   z-index: 5;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.75rem;
-  /* Marge horizontale pour que le contenu centré ne passe pas sous les boutons
-     d'angle. */
-  padding: 0.85rem 4rem;
+  /* Bandeau pleine largeur : plus aucun bouton d'angle fixe à éviter (ils sont dans
+     le tiroir), on garde juste une marge confortable. */
+  padding: 0.85rem 1.25rem;
   border-bottom-left-radius: 1rem;
   border-bottom-right-radius: 1rem;
   font-weight: 700;

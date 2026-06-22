@@ -1438,26 +1438,26 @@ function onVisibilityChange() {
       </span>
     </div>
 
-    <!-- Top controls -->
+    <!-- Panneau de commandes : glisse depuis le haut au swipe vers le bas. Regroupe
+         TOUS les boutons (retour, profil, style de carte, son, radar, caméra, POI)
+         pour libérer le haut de l'écran aux notifications pleine largeur (virage /
+         radar). Masqué hors séance, rappelé par la zone de swipe. -->
     <div
-      class="nav-top-left d-flex gap-2"
-      :class="{ 'nav-controls--hidden': !controlsVisible }"
+      class="nav-controls-panel"
+      :class="{ 'nav-controls-panel--hidden': !controlsVisible }"
       @pointerdown="armControlsHide"
     >
-      <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
-        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-      </a>
-      <button v-if="loggedIn" type="button" class="btn btn-sm btn-light shadow-sm" data-profile-trigger
-        data-profile-sections="navigation,poi,climb"
-        :title="t('nav.profile')" :aria-label="t('nav.profile')">
-        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-      </button>
-    </div>
-    <div
-      class="nav-top-right"
-      :class="{ 'nav-controls--hidden': !controlsVisible }"
-      @pointerdown="armControlsHide"
-    >
+      <div class="nav-panel-group">
+        <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
+          <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+        </a>
+        <button v-if="loggedIn" type="button" class="btn btn-sm btn-light shadow-sm" data-profile-trigger
+          data-profile-sections="navigation,poi,climb"
+          :title="t('nav.profile')" :aria-label="t('nav.profile')">
+          <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="nav-panel-group nav-panel-group--right">
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
       <button
         type="button"
@@ -1575,6 +1575,7 @@ function onVisibilityChange() {
           </label>
         </div>
       </div>
+      </div>
     </div>
 
     <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
@@ -1590,7 +1591,6 @@ function onVisibilityChange() {
         'nav-turn--far': turnHint.state === 'far',
         'nav-turn--now': turnHint.state === 'now',
         'nav-turn--radar': radarBannerVisible,
-        'nav-turn--wide': !controlsVisible,
       }"
     >
       <i v-if="turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
@@ -1729,7 +1729,7 @@ function onVisibilityChange() {
 
 /* Anchor the map-style menu to the button's right edge so it never overflows
    the screen on this full-width page. */
-.nav-top-right :deep(.dropdown-menu) {
+.nav-controls-panel :deep(.dropdown-menu) {
   right: 0;
   left: auto;
 }
@@ -1741,23 +1741,25 @@ function onVisibilityChange() {
   z-index: 5; font-weight: 500;
 }
 
-/* z-index 6 : restent cliquables par-dessus le bandeau radar (z-index 5) qui
-   s'étend sur toute la largeur du tout-haut. */
-.nav-top-left { position: absolute; top: 0.75rem; left: 0.75rem; z-index: 6; }
-.nav-top-right {
-  position: absolute; top: 0.75rem; right: 0.75rem; z-index: 6;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 0.6rem;
+/* Panneau de commandes en tiroir : barre pleine largeur ancrée en haut, qui glisse
+   depuis le bord supérieur. z-index 8 pour passer au-dessus du bandeau radar (5) et
+   des notifications de virage (3) quand on le déploie. */
+.nav-controls-panel {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 8;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.94);
+  border-bottom-left-radius: 1rem; border-bottom-right-radius: 1rem;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  transition: transform 0.28s ease, opacity 0.28s ease;
 }
-
-/* Fondu/repli des commandes quand elles s'auto-masquent. Elles restent dans le DOM
-   mais deviennent invisibles et non cliquables (la zone de swipe prend le relais). */
-.nav-top-left,
-.nav-top-right {
-  transition: opacity 0.25s ease, transform 0.25s ease;
-}
-.nav-controls--hidden {
+.nav-panel-group { display: flex; align-items: flex-start; gap: 0.6rem; }
+.nav-panel-group--right { flex-wrap: wrap; justify-content: flex-end; }
+/* Replié : le tiroir remonte hors champ et devient non cliquable (la zone de swipe
+   prend le relais pour le rappeler). */
+.nav-controls-panel--hidden {
+  transform: translateY(-110%);
   opacity: 0;
-  transform: translateY(-0.6rem);
   pointer-events: none;
 }
 
@@ -1767,12 +1769,12 @@ function onVisibilityChange() {
 .nav-reveal-zone {
   position: absolute; top: 0; left: 0; right: 0; height: 4.5rem;
   z-index: 6; touch-action: none;
-  display: flex; justify-content: flex-end; align-items: flex-start;
+  display: flex; justify-content: center; align-items: flex-start;
 }
-/* Petit chevron discret indiquant qu'on peut faire glisser vers le bas. Aligné en
-   haut à droite, là où réapparaissent les boutons de commande. */
+/* Petit chevron discret indiquant qu'on peut faire glisser vers le bas pour déployer
+   le tiroir de commandes. Centré sur le bord supérieur. */
 .nav-reveal-grabber {
-  margin-top: 0.35rem; margin-right: 0.6rem;
+  margin-top: 0.35rem;
   display: inline-flex; align-items: center; justify-content: center;
   width: 2.4rem; height: 1.3rem; border-radius: 999px;
   background: rgba(0, 0, 0, 0.28); color: #fff; font-size: 0.7rem;
@@ -1788,16 +1790,15 @@ function onVisibilityChange() {
    riding. Min dimensions keep the icon-only buttons a comfortable ~3.25rem
    square while the map-style dropdown (which carries a text label on desktop)
    can still grow past it. */
-.nav-top-left :deep(.btn),
-.nav-top-right :deep(.btn) {
+.nav-controls-panel :deep(.btn) {
   min-width: 3.25rem; min-height: 3.25rem; padding: 0.5rem 0.75rem;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 1.35rem; border-radius: 0.7rem;
 }
 
-/* Small camera-settings popover anchored under its toggle button. The toggle now
-   lives in the top-right column, so anchor the panel to the button's right edge to
-   keep it from overflowing off the right side of the screen. */
+/* Small camera-settings popover anchored under its toggle button. The toggle lives
+   in the controls drawer near the right edge, so anchor the panel to the button's
+   right edge to keep it from overflowing off the right side of the screen. */
 .nav-cam-panel {
   position: absolute; top: calc(100% + 0.4rem); right: 0; left: auto;
   z-index: 5; width: 18rem;
@@ -1860,36 +1861,28 @@ function onVisibilityChange() {
   font-size: 1.1rem; padding: 0.6rem 1.1rem;
 }
 
+/* Notification de virage : bandeau pleine largeur en haut de l'écran (les boutons
+   sont désormais dans le tiroir, plus rien n'occupe les coins). */
 .nav-turn {
-  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
-  z-index: 3; display: flex; align-items: center; gap: 0.75rem;
-  background: #7c3aed; color: #fff; padding: 0.85rem 1.5rem;
-  border-radius: 1rem; font-size: 2.5rem; line-height: 1;
+  position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem;
+  z-index: 3; display: flex; align-items: center; justify-content: center; gap: 1rem;
+  background: #7c3aed; color: #fff; padding: 1.1rem 1.5rem;
+  border-radius: 1rem; font-size: 3rem; line-height: 1;
 }
-/* Bandeau radar visible : on descend le virage pour le dégager du tout-haut. */
-.nav-turn--radar { top: 5rem; }
-/* Boutons masqués (interface épurée en séance) : la place libérée permet d'étendre
-   le bandeau de virage sur toute la largeur et d'agrandir encore le texte/les icônes. */
-.nav-turn--wide {
-  width: calc(100% - 1.5rem); justify-content: center;
-  padding: 1.1rem 1.5rem; font-size: 3rem; gap: 1rem;
-}
-.nav-turn--wide .nav-turn-dist { font-size: 2.1rem; }
-.nav-turn--wide .nav-turn-eta { font-size: 1.4rem; }
-.nav-turn--wide .nav-turn-eta i { font-size: 1.2rem; }
-.nav-turn--wide .nav-turn-exit { width: 2.75rem; height: 2.75rem; font-size: 1.7rem; }
+/* Bandeau radar visible (pleine largeur en tout-haut) : on descend le virage dessous. */
+.nav-turn--radar { top: 4.5rem; }
 /* Distance (en avant) + temps estimé (en dessous, plus discret) du prochain virage. */
 .nav-turn-info { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
-.nav-turn-dist { font-size: 1.7rem; font-weight: 700; }
+.nav-turn-dist { font-size: 2.1rem; font-weight: 700; }
 .nav-turn-eta {
   display: flex; align-items: center; gap: 0.25rem;
-  font-size: 1.15rem; font-weight: 600; opacity: 0.85;
+  font-size: 1.4rem; font-weight: 600; opacity: 0.85;
 }
-.nav-turn-eta i { font-size: 1rem; }
+.nav-turn-eta i { font-size: 1.2rem; }
 .nav-turn-exit {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 2.25rem; height: 2.25rem; border-radius: 50%;
-  background: rgba(255,255,255,0.25); font-size: 1.4rem; font-weight: 700;
+  width: 2.75rem; height: 2.75rem; border-radius: 50%;
+  background: rgba(255,255,255,0.25); font-size: 1.7rem; font-weight: 700;
 }
 .nav-turn.nav-turn--urgent { background: #f97316; }
 /* Virage encore lointain (au-delà de turn_hint_m) : bandeau gris-bleu plus discret,

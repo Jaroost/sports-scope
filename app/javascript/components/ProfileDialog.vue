@@ -22,6 +22,9 @@ const modalEl = ref<HTMLElement | null>(null)
 // et la carte s'initialise dans un conteneur correctement dimensionné.
 const contentReady = ref(false)
 const changed = ref(false)
+// Sections du profil à afficher, lues sur le déclencheur cliqué via
+// `data-profile-sections="navigation,map,poi"`. undefined ⇒ profil complet.
+const sections = ref<string[] | undefined>(undefined)
 
 let modal: Modal | null = null
 
@@ -29,10 +32,18 @@ function csrfToken(): string {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 }
 
+// Vrai si la section doit être affichée (toutes par défaut quand le périmètre est omis).
+// Couvre aussi la card Strava ('strava'), gérée ici plutôt que dans UserProfile.
+function showSection(key: string): boolean {
+  return !sections.value || sections.value.includes(key)
+}
+
 function onDocClick(e: MouseEvent) {
-  const trigger = (e.target as HTMLElement | null)?.closest('[data-profile-trigger]')
+  const trigger = (e.target as HTMLElement | null)?.closest<HTMLElement>('[data-profile-trigger]')
   if (!trigger) return
   e.preventDefault()
+  const raw = trigger.dataset.profileSections
+  sections.value = raw ? raw.split(',').map(s => s.trim()).filter(Boolean) : undefined
   modal?.show()
 }
 
@@ -80,7 +91,7 @@ onBeforeUnmount(() => {
         </div>
         <div class="modal-body">
           <!-- Compte Strava — mêmes actions que la page /profile (navigation pleine page). -->
-          <section class="card mb-3 shadow-sm">
+          <section v-if="showSection('strava')" class="card mb-3 shadow-sm">
             <div class="card-header d-flex align-items-center gap-2">
               <i class="fa-brands fa-strava text-warning" aria-hidden="true"></i>
               <h2 class="h6 mb-0">{{ t('profile.strava.title') }}</h2>
@@ -115,6 +126,7 @@ onBeforeUnmount(() => {
             v-if="contentReady"
             :preferences="(preferences as any)"
             :defaults="(defaults as any)"
+            :sections="sections"
             @saved="changed = true"
           />
         </div>

@@ -1452,6 +1452,7 @@ function onVisibilityChange() {
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
       </a>
       <button v-if="loggedIn" type="button" class="btn btn-sm btn-light shadow-sm" data-profile-trigger
+        data-profile-sections="navigation,poi,climb"
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
       </button>

@@ -62,7 +62,19 @@ interface Preferences {
   }
 }
 
-const props = defineProps<{ preferences: Preferences; defaults: Preferences }>()
+const props = defineProps<{
+  preferences: Preferences
+  defaults: Preferences
+  // Sections à afficher (clés : poi, map, navigation, display, climb, speeds).
+  // Omis ⇒ profil complet. Permet à ProfileDialog de n'exposer que les réglages
+  // pertinents selon la page d'où il est ouvert.
+  sections?: string[]
+}>()
+
+// Vrai si la section doit être affichée (toutes par défaut quand `sections` est omis).
+function showSection(key: string): boolean {
+  return !props.sections || props.sections.includes(key)
+}
 
 // Émis après chaque sauvegarde réussie : permet à un conteneur (ProfileDialog) de
 // savoir qu'il faut recharger la page à la fermeture pour appliquer les nouvelles
@@ -333,7 +345,7 @@ function placePreviewMarker(coords: [number, number]) {
 <template>
   <form class="user-profile" @submit.prevent="save">
     <!-- Points d'intérêt -->
-    <section class="card mb-3 shadow-sm">
+    <section v-if="showSection('poi')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-location-dot text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.poi.title') }}</h2>
@@ -358,7 +370,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Type de carte -->
-    <section class="card mb-3 shadow-sm">
+    <section v-if="showSection('map')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-map text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.map.title') }}</h2>
@@ -390,7 +402,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Navigation (mode GPS) -->
-    <section class="card mb-3 shadow-sm">
+    <section v-if="showSection('navigation')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-location-arrow text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.navigation.title') }}</h2>
@@ -530,7 +542,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Préférences d'affichage -->
-    <section class="card mb-3 shadow-sm">
+    <section v-if="showSection('display')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-eye text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.display.title') }}</h2>
@@ -571,7 +583,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Détection de cols -->
-    <section class="card mb-3 shadow-sm">
+    <section v-if="showSection('climb')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-mountain text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.climb.title') }}</h2>
@@ -611,7 +623,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Vitesses moyennes -->
-    <section class="card mb-3 shadow-sm">
+    <section v-if="showSection('speeds')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-gauge-high text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.speeds.title') }}</h2>

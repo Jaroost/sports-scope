@@ -16,7 +16,7 @@ import { connectRadar, disconnectRadar, radarSupported, hasKnownRadar } from '..
 import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 
-const props = defineProps<{ shareToken: string }>()
+const props = defineProps<{ shareToken: string; canDebug?: boolean }>()
 
 const SOUND_KEY = 'sportsScope.navSound'
 // Tuiles MNT (terrarium) pour le relief 3D — mêmes sources que le créateur d'itinéraire.
@@ -350,7 +350,8 @@ const radarBannerVisible = computed(
 )
 
 // ─── Mode débug (preview des overlays) ────────────────────────────────────────
-// Activé via `?debug=1` dans l'URL. Il révèle un bouton « flacon » dans le tiroir
+// Réservé aux comptes pouvant tout faire (can? :manage, :all → prop canDebug), ou
+// forçable via `?debug=1` dans l'URL. Il révèle un bouton « flacon » dans le tiroir
 // de commandes qui ouvre un panneau permettant d'injecter des données factices pour
 // prévisualiser, sans GPS / col réel / radar Varia, les trois overlays clés :
 //   • le radar arrière (RadarOverlay)
@@ -359,7 +360,7 @@ const radarBannerVisible = computed(
 // Tant qu'une bascule est active, les mises à jour live (updateTurns / updateProgress)
 // ne réécrivent PAS l'overlay correspondant (gardes dbgTurn / dbgClimb), pour qu'un
 // vrai fix GPS ne l'efface pas pendant qu'on l'inspecte.
-const debugMode = (() => {
+const debugMode = props.canDebug === true || (() => {
   try { return new URLSearchParams(window.location.search).has('debug') } catch { return false }
 })()
 const showDebugPanel = ref(false)

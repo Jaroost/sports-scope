@@ -167,15 +167,7 @@ export function buildDebugClimb(): ClimbInfo {
   const ratio = 0.42
   const posX = ratio * 100
   // y de la ligne d'altitude au curseur (interpolation linéaire entre points).
-  let posY = pts[pts.length - 1].y
-  for (let i = 1; i < pts.length; i++) {
-    if (pts[i].x >= posX) {
-      const a = pts[i - 1], b = pts[i]
-      const tt = b.x > a.x ? (posX - a.x) / (b.x - a.x) : 0
-      posY = a.y + tt * (b.y - a.y)
-      break
-    }
-  }
+  const posY = profileYAt(pts, posX)
   const grade = 9
   const gradeColor = colorForGrade(grade)
   const climb: Climb = { startIdx: 0, endIdx: 0, gain: 560, lengthM: 8400, avgGrade: 6.7, category: '2', startKm: 0, endKm: 8.4 }

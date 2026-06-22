@@ -1,0 +1,263 @@
+import { reactive } from 'vue'
+import { t } from '../i18n'
+import { haversine } from '../routeHelpers'
+import type { Coord } from '../routeHelpers'
+import { userPreferences } from '../userPreferences'
+import { POI_CATEGORIES, categoryForType } from '../poiCategories'
+
+// ─── Points d'intérêt de la navigation (POI ponctuels du profil) ───────────────
+// Sous-système autonome de RouteNavigation.vue : recherche Overpass des POI autour
+// du tracé, pose les marqueurs, gère leur popup (Google Maps / Street View) et leur
+// mise à l'échelle au zoom. Sans aucun lien avec l'état de navigation (GPS, virages,
+// caméra) — d'où l'extraction. L'appelant fournit des accès paresseux à la carte et
+// à la géométrie (non encore prêtes au montage) ainsi que la loi d'échelle du tracé,
+// pour caler la taille des POI sur celle des indicateurs de virage.
+
+interface NavPlace { name: string; type: string; lng: number; lat: number }
+
+export function useNavPois(deps: {
+  getMap: () => any
+  getMaplibre: () => any
+  getGeometry: () => Coord[]
+  zoomWidthScale: (z: number) => number
+}) {
+  const { getMap, getMaplibre, getGeometry, zoomWidthScale } = deps
+
+  // Catégories de POI ponctuels affichables en navigation (eau, restos, points de
+  // vue…). Le panneau de séance permet de les masquer/afficher ; l'état initial vient
+  // des préférences du profil. On récupère toutes les catégories sur Overpass (pas
+  // seulement celles cochées au profil) pour que les bascules soient instantanées.
+  const POI_CATS = POI_CATEGORIES.filter((c) => c.point)
+  const poiVisible = reactive<Record<string, boolean>>(
+    Object.fromEntries(POI_CATS.map((c) => [c.key, !!userPreferences().points_of_interest[c.prefField]])),
+  )
+
+  let placeMarkers: any[] = []   // marqueurs POI ponctuels (filtrés par le panneau de séance)
+  let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
+  let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
+  const svCache = new Map<string, boolean>()     // cache « Street View dispo ? » par POI
+
+  // Tailles de base (px) des POI à l'échelle 1. Relevées par rapport au CSS d'origine
+  // (32/26) car les POI paraissaient trop petits une fois mis à l'échelle.
+  const POI_MOBILE = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+  const POI_DOT_BASE = POI_MOBILE ? 38 : 30
+  const POI_ICON_BASE = POI_MOBILE ? 17 : 14
+
+  // Échelle des POI : plus douce que celle du tracé/des virages. Un point d'intérêt
+  // doit rester lisible et tapable, donc plancher relevé (et plafond) pour qu'il ne
+  // devienne ni minuscule en dézoom ni démesuré en zoom.
+  function poiScale(z: number): number {
+    return Math.min(1.8, Math.max(0.75, zoomWidthScale(z)))
+  }
+
+  // Pose autour du tracé les POI ponctuels, comme le créateur d'itinéraire. Mêmes
+  // catégories, même rayon (points_of_interest) et même rendu de marqueur. Best-effort :
+  // un échec Overpass est silencieux, les POI ne sont qu'un complément à la navigation.
+  // (Les localités n'ont pas de marqueur, on ne les recherche pas ici.)
+  async function fetchPlaces() {
+    const geometry = getGeometry()
+    const poi = userPreferences().points_of_interest
+    // Toutes les catégories ponctuelles : l'affichage est ensuite filtré par le
+    // panneau (poiVisible), dont l'état initial reflète les préférences du profil.
+    const types = POI_CATS.map((c) => c.key)
+    if (types.length === 0 || geometry.length < 2) return
+
+    let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
+    for (const [lng, lat] of geometry) {
+      if (lat < south) south = lat
+      if (lat > north) north = lat
+      if (lng < west) west = lng
+      if (lng > east) east = lng
+    }
+    // La bbox doit englober le rayon de détection, sinon les POI au-delà de ~2 km
+    // ne seraient pas remontés par Overpass.
+    const radiusM = poi.radius_m
+    const BUFFER = Math.max(0.02, (radiusM + 200) / 111000)
+    south -= BUFFER; north += BUFFER; west -= BUFFER; east += BUFFER
+
+    try {
+      const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}&types=${types.join(',')}`)
+      if (!res.ok) return
+      const nodes = await res.json()
+
+      const seen = new Set<string>()
+      const places: NavPlace[] = []
+      for (const node of nodes) {
+        if (!categoryForType(node.type)?.point) continue
+        const key = `${node.type}:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
+        if (seen.has(key)) continue
+        // Filtre par le rayon configurable : distance du POI au point le plus proche du tracé.
+        let minD = Infinity
+        for (let i = 0; i < geometry.length; i++) {
+          const d = haversine(geometry[i], [node.lng, node.lat])
+          if (d < minD) minD = d
+        }
+        if (minD > radiusM) continue
+        seen.add(key)
+        places.push({ name: node.name, type: node.type, lng: node.lng, lat: node.lat })
+      }
+      installPlaceMarkers(places)
+    } catch { /* réseau / serveur Overpass — silencieux */ }
+  }
+
+  // Marqueur HTML persistant par POI (même look que le créateur). Les marqueurs
+  // MapLibre sont des overlays DOM, ils survivent à un setStyle — pas besoin de les
+  // réinstaller au changement de fond de carte.
+  function installPlaceMarkers(places: NavPlace[]) {
+    const map = getMap()
+    const maplibre = getMaplibre()
+    if (!map || !maplibre) return
+    closePlacePopup()
+    for (const m of placeMarkers) m.remove()
+    placeMarkers = []
+    for (const place of places) {
+      const el = document.createElement('div')
+      const cat = categoryForType(place.type)
+      const icon = cat?.icon ?? 'fa-location-dot'
+      el.className = 'place-marker'
+      // Couleur pilotée par le registre POI (currentColor → bordure / remplissage).
+      el.style.color = cat?.color ?? '#6b7280'
+      // Clé de catégorie : sert au filtrage d'affichage par le panneau de séance.
+      if (cat) el.dataset.poiKey = cat.key
+      el.title = place.name
+      el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
+      // Clic = popup Google Maps / Street View. stopPropagation pour ne pas
+      // déclencher la mise en veille (tap carte) ni un déplacement de carte.
+      el.addEventListener('click', (ev) => { ev.stopPropagation(); showPlacePopup(place, el) })
+      el.addEventListener('pointerdown', (ev) => ev.stopPropagation())
+      const marker = new maplibre.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([place.lng, place.lat])
+        .addTo(map)
+      placeMarkers.push(marker)
+    }
+    applyPoiScale(map.getZoom())
+    applyPoiVisibility()
+  }
+
+  // Affiche/masque les marqueurs POI selon les bascules du panneau de séance.
+  function applyPoiVisibility() {
+    for (const m of placeMarkers) {
+      const el = m.getElement() as HTMLElement
+      const key = el.dataset.poiKey
+      el.style.display = key && poiVisible[key] === false ? 'none' : ''
+    }
+  }
+
+  function togglePoi(key: string) {
+    poiVisible[key] = !poiVisible[key]
+    // Si le POI dont le popup est ouvert vient d'être masqué, on ferme le popup.
+    if (!poiVisible[key] && activePlaceEl?.dataset.poiKey === key) closePlacePopup()
+    applyPoiVisibility()
+  }
+
+  // Met les marqueurs POI à l'échelle du zoom (échelle plus douce que le tracé). La
+  // boîte se redimensionne directement, l'icône en police suit. Appelée à l'install
+  // et par la boucle de rendu de l'appelant (au changement de zoom).
+  function applyPoiScale(z: number) {
+    const ps = poiScale(z)
+    const poiSize = POI_DOT_BASE * ps
+    const poiBorder = `${Math.max(1, 2 * ps)}px`
+    for (const m of placeMarkers) {
+      const el = m.getElement() as HTMLElement
+      el.style.width = `${poiSize}px`
+      el.style.height = `${poiSize}px`
+      el.style.borderWidth = poiBorder
+      const icon = el.querySelector<HTMLElement>('i')
+      if (icon) icon.style.fontSize = `${POI_ICON_BASE * ps}px`
+    }
+  }
+
+  // Popup proposant d'ouvrir le POI sur Google Maps et en Street View — repris du
+  // créateur d'itinéraire (même format d'URL `maps?q=lat,lng`). Le lien Street View
+  // est grisé quand aucune imagerie n'est disponible à proximité.
+  function showPlacePopup(place: NavPlace, el: HTMLElement) {
+    const map = getMap()
+    const maplibre = getMaplibre()
+    if (!maplibre || !map) return
+    closePlacePopup()
+    // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
+    // le POI. On vise juste à côté pour le laisser visible/cliquable.
+    const OFFSET = 0.00008
+    const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
+    const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${place.lat},${place.lng}`
+    const wrap = document.createElement('div')
+    wrap.className = 'place-popup'
+    wrap.innerHTML = `
+      <div class="place-popup-header">
+        <span class="place-popup-name">${escapeHtml(place.name)}</span>
+        <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
+      </div>
+      <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
+        <i class="fa-brands fa-google" aria-hidden="true"></i>
+        <span>Google Maps</span>
+      </a>
+      <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
+        <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+        <span>${escapeHtml(t('routes.street_view'))}</span>
+      </a>`
+    // closeOnClick désactivé : un tap carte met l'écran en veille ; la fermeture du
+    // popup sur tap carte est gérée explicitement dans le handler de clic de la carte.
+    placePopup = new maplibre.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+      .setLngLat([place.lng, place.lat])
+      .setDOMContent(wrap)
+      .addTo(map)
+    // Remplit le marqueur tant que son popup est ouvert.
+    activePlaceEl = el
+    el.classList.add('place-marker--active')
+    wrap.querySelector('.place-popup-close')?.addEventListener('click', closePlacePopup)
+    const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
+    if (svLink) {
+      checkSV(place.lat, place.lng).then((ok) => {
+        svLink.classList.toggle('place-popup-link--disabled', !ok)
+        if (!ok) svLink.setAttribute('aria-disabled', 'true')
+        else svLink.removeAttribute('aria-disabled')
+      })
+    }
+  }
+
+  // Ferme le popup de POI et retire le surlignage « actif » de son marqueur.
+  function closePlacePopup() {
+    if (placePopup) { placePopup.remove(); placePopup = null }
+    if (activePlaceEl) { activePlaceEl.classList.remove('place-marker--active'); activePlaceEl = null }
+  }
+
+  function escapeHtml(s: string) {
+    const div = document.createElement('div')
+    div.textContent = s
+    return div.innerHTML
+  }
+
+  // Interroge le service d'imagerie Google : true si une vue Street View existe près
+  // du point. Repris du créateur (JSONP best-effort, repli optimiste sur erreur/timeout).
+  function svCacheKey(lat: number, lng: number) { return `${lat.toFixed(4)},${lng.toFixed(4)}` }
+
+  function checkSV(lat: number, lng: number): Promise<boolean> {
+    const key = svCacheKey(lat, lng)
+    if (svCache.has(key)) return Promise.resolve(svCache.get(key)!)
+    return new Promise<boolean>((resolve) => {
+      const cb = `_sv${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+      const s = document.createElement('script')
+      let settled = false
+      const finish = (v: boolean) => {
+        if (settled) return; settled = true
+        clearTimeout(timer); delete (window as any)[cb]; s.remove()
+        svCache.set(key, v); resolve(v)
+      }
+      const timer = setTimeout(() => finish(true), 4000)
+      ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
+      s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
+      s.onerror = () => finish(true)
+      document.head.appendChild(s)
+    })
+  }
+
+  return {
+    POI_CATS,
+    poiVisible,
+    fetchPlaces,
+    togglePoi,
+    applyPoiScale,
+    closePlacePopup,
+    hasOpenPopup: () => placePopup != null,
+  }
+}

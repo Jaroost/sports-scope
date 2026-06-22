@@ -303,6 +303,7 @@ fr:
     anchor_to_road: "Ancrer sur la route"
     return_via_same_route: "Ajouter à la fin de l'itinéraire"
     street_view: "Street View"
+    close: "Fermer"
     copy_latitude: "Copier la latitude"
     copy_longitude: "Copier la longitude"
     komoot_waypoint_limit: "Votre itinéraire contient %{count} points, mais Komoot n'en accepte que 20 via l'URL. Le tracé sera simplifié en conservant le départ et l'arrivée. Continuer ?"

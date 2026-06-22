@@ -303,6 +303,7 @@ en:
     anchor_to_road: "Anchor to road"
     return_via_same_route: "Add to end of route"
     street_view: "Street View"
+    close: "Close"
     copy_latitude: "Copy latitude"
     copy_longitude: "Copy longitude"
     komoot_waypoint_limit: "Your route has %{count} points, but Komoot only accepts 20 via URL. The route will be simplified while keeping the start and end. Continue?"

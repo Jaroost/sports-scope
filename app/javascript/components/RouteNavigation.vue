@@ -1390,10 +1390,6 @@ function onVisibilityChange() {
 
     <!-- Battery saver: black screen — GPS and turn sounds still active -->
     <div v-if="screenOff" class="nav-screen-off" @click="toggleScreenOffManual">
-      <div v-if="hasFix" class="nav-speed shadow" :class="{ 'nav-speed--radar': radarBannerVisible }">
-        <span class="nav-speed-value">{{ speedKmh.toFixed(1) }}</span>
-        <span class="nav-speed-unit">km/h</span>
-      </div>
       <div
         v-if="turnHint && hasFix && !offRoute"
         class="nav-turn-sleep shadow"
@@ -1585,12 +1581,6 @@ function onVisibilityChange() {
          visible en mode veille (info de sécurité). -->
     <RadarOverlay :elevated="screenOff" />
 
-    <!-- Instantaneous speed -->
-    <div v-if="hasFix" class="nav-speed shadow" :class="{ 'nav-speed--radar': radarBannerVisible }">
-      <span class="nav-speed-value">{{ speedKmh.toFixed(1) }}</span>
-      <span class="nav-speed-unit">km/h</span>
-    </div>
-
     <!-- Upcoming turn indicator -->
     <div
       v-if="turnHint && hasFix && !offRoute"
@@ -1600,6 +1590,7 @@ function onVisibilityChange() {
         'nav-turn--far': turnHint.state === 'far',
         'nav-turn--now': turnHint.state === 'now',
         'nav-turn--radar': radarBannerVisible,
+        'nav-turn--wide': !controlsVisible,
       }"
     >
       <i v-if="turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
@@ -1869,37 +1860,36 @@ function onVisibilityChange() {
   font-size: 1.1rem; padding: 0.6rem 1.1rem;
 }
 
-.nav-speed {
-  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
-  z-index: 3; display: flex; align-items: baseline; gap: 0.3rem;
-  background: rgba(255, 255, 255, 0.92); border-radius: 0.75rem;
-  padding: 0.3rem 0.75rem;
-}
-.nav-speed-value { font-size: 1.6rem; font-weight: 700; line-height: 1; }
-.nav-speed-unit { font-size: 0.8rem; color: #6c757d; font-weight: 600; }
-/* Bandeau radar visible : on descend la vitesse pour la dégager du tout-haut. */
-.nav-speed--radar { top: 5rem; }
-
 .nav-turn {
-  position: absolute; top: 4.25rem; left: 50%; transform: translateX(-50%);
-  z-index: 3; display: flex; align-items: center; gap: 0.5rem;
-  background: #7c3aed; color: #fff; padding: 0.5rem 1rem;
-  border-radius: 0.75rem; font-size: 1.6rem; line-height: 1;
+  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  z-index: 3; display: flex; align-items: center; gap: 0.75rem;
+  background: #7c3aed; color: #fff; padding: 0.85rem 1.5rem;
+  border-radius: 1rem; font-size: 2.5rem; line-height: 1;
 }
-/* Bandeau radar visible : on descend aussi le virage, sous la vitesse décalée. */
-.nav-turn--radar { top: 8rem; }
+/* Bandeau radar visible : on descend le virage pour le dégager du tout-haut. */
+.nav-turn--radar { top: 5rem; }
+/* Boutons masqués (interface épurée en séance) : la place libérée permet d'étendre
+   le bandeau de virage sur toute la largeur et d'agrandir encore le texte/les icônes. */
+.nav-turn--wide {
+  width: calc(100% - 1.5rem); justify-content: center;
+  padding: 1.1rem 1.5rem; font-size: 3rem; gap: 1rem;
+}
+.nav-turn--wide .nav-turn-dist { font-size: 2.1rem; }
+.nav-turn--wide .nav-turn-eta { font-size: 1.4rem; }
+.nav-turn--wide .nav-turn-eta i { font-size: 1.2rem; }
+.nav-turn--wide .nav-turn-exit { width: 2.75rem; height: 2.75rem; font-size: 1.7rem; }
 /* Distance (en avant) + temps estimé (en dessous, plus discret) du prochain virage. */
 .nav-turn-info { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
-.nav-turn-dist { font-size: 1.1rem; font-weight: 700; }
+.nav-turn-dist { font-size: 1.7rem; font-weight: 700; }
 .nav-turn-eta {
   display: flex; align-items: center; gap: 0.25rem;
-  font-size: 0.8rem; font-weight: 600; opacity: 0.85;
+  font-size: 1.15rem; font-weight: 600; opacity: 0.85;
 }
-.nav-turn-eta i { font-size: 0.7rem; }
+.nav-turn-eta i { font-size: 1rem; }
 .nav-turn-exit {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 1.5rem; height: 1.5rem; border-radius: 50%;
-  background: rgba(255,255,255,0.25); font-size: 0.95rem; font-weight: 700;
+  width: 2.25rem; height: 2.25rem; border-radius: 50%;
+  background: rgba(255,255,255,0.25); font-size: 1.4rem; font-weight: 700;
 }
 .nav-turn.nav-turn--urgent { background: #f97316; }
 /* Virage encore lointain (au-delà de turn_hint_m) : bandeau gris-bleu plus discret,
@@ -1981,25 +1971,25 @@ function onVisibilityChange() {
   font-size: 0.85rem;
 }
 .nav-turn-sleep {
-  display: flex; flex-direction: column; align-items: center; gap: 1rem;
+  display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
   background: #7c3aed; color: #fff;
-  padding: 2.5rem 4rem; border-radius: 1.5rem;
+  padding: 3rem 4rem; border-radius: 1.5rem;
   width: calc(100% - 1.5rem); box-sizing: border-box;
 }
 .nav-turn-sleep-icons {
   display: flex; align-items: center; gap: 0.75rem;
-  font-size: 3.5rem; line-height: 1;
+  font-size: 4.5rem; line-height: 1;
 }
-.nav-turn-sleep-dist { font-size: 2.25rem; font-weight: 700; line-height: 1; }
+.nav-turn-sleep-dist { font-size: 3rem; font-weight: 700; line-height: 1; }
 .nav-turn-sleep-eta {
   display: flex; align-items: center; justify-content: center;
-  font-size: 1.4rem; font-weight: 600; opacity: 0.85; line-height: 1;
+  font-size: 1.7rem; font-weight: 600; opacity: 0.85; line-height: 1;
 }
-.nav-turn-sleep-eta i { font-size: 1.1rem; }
+.nav-turn-sleep-eta i { font-size: 1.3rem; }
 .nav-turn-sleep-exit {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 2.5rem; height: 2.5rem; border-radius: 50%;
-  background: rgba(255,255,255,0.25); font-size: 1.6rem; font-weight: 700;
+  width: 3rem; height: 3rem; border-radius: 50%;
+  background: rgba(255,255,255,0.25); font-size: 2rem; font-weight: 700;
 }
 .nav-turn-sleep.nav-turn-sleep--urgent { background: #f97316; }
 /* Virage atteint (veille) : maintenu en vert quelques secondes comme confirmation. */
@@ -2008,8 +1998,8 @@ function onVisibilityChange() {
    d'un coup d'œil un virage encore loin (gris) d'un virage en approche (violet). */
 .nav-turn-sleep.nav-turn-sleep--far { background: rgba(51, 65, 85, 0.92); }
 /* Pendant un col en veille, la carte du col occupe le bas : on remonte l'indicateur
-   de virage en haut (sous le badge de vitesse) pour qu'il ne soit pas masqué. */
-.nav-turn-sleep--climb { position: absolute; top: 3.75rem; left: 50%; transform: translateX(-50%); }
+   de virage en haut pour qu'il ne soit pas masqué. */
+.nav-turn-sleep--climb { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); }
 </style>
 
 <style>

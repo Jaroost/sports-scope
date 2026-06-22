@@ -35,6 +35,10 @@ const mapEl = useTemplateRef('mapEl')
 // mode uni (le mode pente garde son dégradé).
 const ROUTE_COLOR = userPreferences().display.route_color ?? '#7c3aed'
 const ROUTE_OPACITY = userPreferences().display.route_opacity ?? 0.8
+// Épaisseur (px) du tracé, réglable dans le profil (section Affichage). Sert de base
+// aux largeurs des couches du tracé : bordure, ligne, tronçons libres et sélection
+// s'en déduisent pour rester proportionnés (cf. ROUTE_LINE_BASE_WIDTH).
+const ROUTE_WIDTH = userPreferences().display.route_width ?? 5
 
 // Icône FontAwesome du sport courant (même logique que la sidebar Stats).
 function sportIcon() {
@@ -327,10 +331,10 @@ function installRouteLayer() {
 // Épaisseurs natives (px écran) des couches de tracé. Utilisé par l'export image pour
 // élargir le tracé proportionnellement à la résolution, sinon il devient invisible.
 const ROUTE_LINE_BASE_WIDTH: Record<string, number> = {
-  'builder-route-border': 8,
-  'builder-route-line': 5,
-  'builder-route-straight-line': 4,
-  'builder-route-selected-line': 7,
+  'builder-route-border': ROUTE_WIDTH + 3,
+  'builder-route-line': ROUTE_WIDTH,
+  'builder-route-straight-line': Math.max(2, ROUTE_WIDTH - 1),
+  'builder-route-selected-line': ROUTE_WIDTH + 2,
   'builder-divergent-line': 4,
 }
 // Sur petit écran tactile, on élargit légèrement le tracé pour offrir une cible de clic

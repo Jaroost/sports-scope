@@ -50,6 +50,7 @@ interface Preferences {
     show_elevation_chart: boolean
     route_color: string
     route_opacity: number
+    route_width: number
   }
   climb_detection: {
     min_grade: number
@@ -601,6 +602,12 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.display.route_opacity') }} : <strong>{{ Math.round(prefs.display.route_opacity * 100) }} %</strong>
             </label>
             <input id="disp-route-opacity" v-model.number="prefs.display.route_opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
+          </div>
+          <div class="col-sm-6">
+            <label for="disp-route-width" class="form-label mb-1">
+              {{ t('profile.display.route_width') }} : <strong>{{ prefs.display.route_width }} px</strong>
+            </label>
+            <input id="disp-route-width" v-model.number="prefs.display.route_width" type="range" class="form-range" min="2" max="12" step="1">
           </div>
         </div>
       </div>

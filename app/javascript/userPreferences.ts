@@ -30,6 +30,7 @@ export interface UserPreferences {
     show_elevation_chart: boolean
     route_color: string
     route_opacity: number
+    route_width: number
   }
   climb_detection: {
     min_grade: number
@@ -60,6 +61,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     show_elevation_chart: true,
     route_color: '#7c3aed',
     route_opacity: 0.8,
+    route_width: 5,
   },
   climb_detection: {
     min_grade: 2,

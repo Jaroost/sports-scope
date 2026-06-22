@@ -13,6 +13,7 @@ class ProfilesController < ApplicationController
   NAV_FPS_RANGE = (0.5..60.0)
   NAV_LINE_WIDTH_RANGE = (2..200)
   OPACITY_RANGE = (0.0..1.0)
+  ROUTE_WIDTH_RANGE = (2..12)
   HEX_COLOR = /\A#[0-9a-fA-F]{6}\z/
   NAV_TURN_ALERT_RANGE = (50..500)
   NAV_TURN_HINT_RANGE = (50..500)
@@ -98,6 +99,7 @@ class ProfilesController < ApplicationController
         "show_elevation_chart" => to_bool(display[:show_elevation_chart], true),
         "route_color" => hex_color(display[:route_color], "#7c3aed"),
         "route_opacity" => clamp_float(display[:route_opacity], OPACITY_RANGE, 0.8),
+        "route_width" => clamp_int(display[:route_width], ROUTE_WIDTH_RANGE, 5),
       },
       "climb_detection" => {
         "min_grade" => clamp_float(climb[:min_grade], MIN_GRADE_RANGE, 2),

@@ -411,6 +411,7 @@ fr:
       route_color: "Couleur du tracé"
       route_color_help: "Utilisée quand les couleurs de pente sont désactivées."
       route_opacity: "Opacité du tracé"
+      route_width: "Épaisseur du tracé"
     climb:
       title: "Détection de cols"
       help: "Seuils utilisés pour détecter et catégoriser les montées d'un itinéraire."

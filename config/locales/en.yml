@@ -411,6 +411,7 @@ en:
       route_color: "Route line colour"
       route_color_help: "Used when grade colours are turned off."
       route_opacity: "Route line opacity"
+      route_width: "Route line thickness"
     climb:
       title: "Climb detection"
       help: "Thresholds used to detect and categorize the climbs on a route."

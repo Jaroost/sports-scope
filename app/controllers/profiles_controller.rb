@@ -82,7 +82,7 @@ class ProfilesController < ApplicationController
         "line_width" => clamp_int(navigation[:line_width], NAV_LINE_WIDTH_RANGE, 40),
         "line_color" => hex_color(navigation[:line_color], "#7c3aed"),
         "line_opacity" => clamp_float(navigation[:line_opacity], OPACITY_RANGE, 0.8),
-        "turn_alert_m" => clamp_int(navigation[:turn_alert_m], NAV_TURN_ALERT_RANGE, 200),
+        "turn_alert_m" => clamp_int(navigation[:turn_alert_m], NAV_TURN_ALERT_RANGE, 100),
         "turn_hint_m" => clamp_int(navigation[:turn_hint_m], NAV_TURN_HINT_RANGE, 150),
         "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, 50),
         "turn_repeat_ms" => clamp_int(navigation[:turn_repeat_ms], NAV_TURN_REPEAT_RANGE, 2000),

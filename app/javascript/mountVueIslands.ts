@@ -6,6 +6,7 @@ import RouteBuilder from './components/RouteBuilder.vue'
 import RouteNavigation from './components/RouteNavigation.vue'
 import ImportFitActivity from './components/ImportFitActivity.vue'
 import UserProfile from './components/UserProfile.vue'
+import ProfileDialog from './components/ProfileDialog.vue'
 import NewRouteButton from './components/NewRouteButton.vue'
 
 const registry: Record<string, Component> = {
@@ -16,6 +17,7 @@ const registry: Record<string, Component> = {
   RouteNavigation,
   ImportFitActivity,
   UserProfile,
+  ProfileDialog,
   NewRouteButton,
 }
 

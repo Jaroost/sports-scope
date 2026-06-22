@@ -64,6 +64,11 @@ interface Preferences {
 
 const props = defineProps<{ preferences: Preferences; defaults: Preferences }>()
 
+// Émis après chaque sauvegarde réussie : permet à un conteneur (ProfileDialog) de
+// savoir qu'il faut recharger la page à la fermeture pour appliquer les nouvelles
+// préférences. Sans effet sur la page /profile autonome.
+const emit = defineEmits<{ saved: [] }>()
+
 // Copie réactive locale : on n'écrit côté serveur qu'à la sauvegarde explicite.
 const prefs = reactive<Preferences>(JSON.parse(JSON.stringify(props.preferences)))
 
@@ -108,6 +113,7 @@ async function save() {
     // On réaligne sur les valeurs assainies renvoyées par le serveur (clamps).
     Object.assign(prefs, payload.preferences)
     saved.value = true
+    emit('saved')
     if (savedTimer) clearTimeout(savedTimer)
     savedTimer = setTimeout(() => { saved.value = false }, 2500)
   } catch (e) {

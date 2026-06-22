@@ -31,6 +31,9 @@ const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
 // Largeur (px) du tracé sur la carte ; la bordure ajoute 4 px de part et d'autre.
 const ROUTE_LINE_WIDTH = navPrefs.line_width ?? 8
 const ROUTE_BORDER_WIDTH = ROUTE_LINE_WIDTH + 4
+// Couleur et opacité du tracé sur la carte de navigation (réglables dans le profil).
+const ROUTE_LINE_COLOR = navPrefs.line_color ?? '#7c3aed'
+const ROUTE_LINE_OPACITY = navPrefs.line_opacity ?? 0.8
 const TURN_ALERT_M = navPrefs.turn_alert_m
 const TURN_HINT_M = navPrefs.turn_hint_m
 const TURN_URGENT_M = navPrefs.turn_urgent_m
@@ -746,8 +749,8 @@ function installRouteLayers() {
   map.addSource('nav-remaining', { type: 'geojson', data: lineFeature(line) })
 
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(ROUTE_BORDER_WIDTH) } })
-  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH) } })
-  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#7c3aed', 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH) } })
+  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH), 'line-opacity': ROUTE_LINE_OPACITY } })
+  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': ROUTE_LINE_COLOR, 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH), 'line-opacity': ROUTE_LINE_OPACITY } })
 }
 
 // Indicateurs de virage en marqueurs DOM (et non en couches canvas) : les

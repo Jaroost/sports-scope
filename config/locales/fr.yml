@@ -382,6 +382,8 @@ fr:
       radar_close_m_help: "Sous cette distance, le véhicule passe en rouge et un bip plus insistant retentit."
       nav_fps: "Fluidité de la caméra"
       line_width: "Largeur du tracé"
+      line_color: "Couleur du tracé"
+      line_opacity: "Opacité du tracé"
       turns_title: "Virages"
       turn_alert_m: "Distance d'annonce sonore"
       turn_hint_m: "Distance d'affichage de l'indicateur"

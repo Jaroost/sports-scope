@@ -382,6 +382,8 @@ en:
       radar_close_m_help: "Below this distance the vehicle turns red and a more insistent beep sounds."
       nav_fps: "Camera smoothness"
       line_width: "Route line width"
+      line_color: "Route line colour"
+      line_opacity: "Route line opacity"
       turns_title: "Turns"
       turn_alert_m: "Sound alert distance"
       turn_hint_m: "Turn indicator distance"

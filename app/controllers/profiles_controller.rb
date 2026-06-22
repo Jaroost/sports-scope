@@ -12,6 +12,8 @@ class ProfilesController < ApplicationController
   NAV_PITCH_RANGE = (0..90)
   NAV_FPS_RANGE = (0.5..60.0)
   NAV_LINE_WIDTH_RANGE = (2..200)
+  NAV_LINE_OPACITY_RANGE = (0.0..1.0)
+  HEX_COLOR = /\A#[0-9a-fA-F]{6}\z/
   NAV_TURN_ALERT_RANGE = (50..500)
   NAV_TURN_HINT_RANGE = (50..500)
   NAV_TURN_URGENT_RANGE = (5..50)
@@ -78,6 +80,8 @@ class ProfilesController < ApplicationController
         "terrain" => to_bool(navigation[:terrain], false),
         "nav_fps" => clamp_float(navigation[:nav_fps], NAV_FPS_RANGE, 8),
         "line_width" => clamp_int(navigation[:line_width], NAV_LINE_WIDTH_RANGE, 8),
+        "line_color" => hex_color(navigation[:line_color], "#7c3aed"),
+        "line_opacity" => clamp_float(navigation[:line_opacity], NAV_LINE_OPACITY_RANGE, 0.8),
         "turn_alert_m" => clamp_int(navigation[:turn_alert_m], NAV_TURN_ALERT_RANGE, 200),
         "turn_hint_m" => clamp_int(navigation[:turn_hint_m], NAV_TURN_HINT_RANGE, 200),
         "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, 15),
@@ -120,6 +124,11 @@ class ProfilesController < ApplicationController
 
   def allowed(value, list, default)
     list.include?(value.to_s) ? value.to_s : default
+  end
+
+  # Couleur hexadécimale #rrggbb, normalisée en minuscules ; repli sur le défaut sinon.
+  def hex_color(value, default)
+    value.to_s.match?(HEX_COLOR) ? value.to_s.downcase : default
   end
 
   def clamp_int(value, range, default)

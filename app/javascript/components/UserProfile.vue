@@ -32,6 +32,8 @@ interface Preferences {
     terrain: boolean
     nav_fps: number
     line_width: number
+    line_color: string
+    line_opacity: number
     turn_alert_m: number
     turn_hint_m: number
     turn_urgent_m: number
@@ -146,7 +148,7 @@ function applyPreviewRoute() {
   previewMap.addSource('preview-route', { type: 'geojson', data })
   const w = prefs.navigation.line_width
   previewMap.addLayer({ id: 'preview-route-border', type: 'line', source: 'preview-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'rgba(0,0,0,0.28)', 'line-width': w + 4 } })
-  previewMap.addLayer({ id: 'preview-route-line', type: 'line', source: 'preview-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#7c3aed', 'line-width': w } })
+  previewMap.addLayer({ id: 'preview-route-line', type: 'line', source: 'preview-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': prefs.navigation.line_color, 'line-width': w, 'line-opacity': prefs.navigation.line_opacity } })
   applyPreviewTurnMarker()
 }
 
@@ -280,6 +282,8 @@ async function initPreview() {
   watch(() => prefs.navigation.pitch, (p) => previewMap?.setPitch(p))
   watch(() => prefs.navigation.terrain, applyPreviewTerrain)
   watch(() => prefs.navigation.line_width, applyPreviewRouteWidth)
+  watch(() => prefs.navigation.line_color, (c) => previewMap?.getLayer('preview-route-line') && previewMap.setPaintProperty('preview-route-line', 'line-color', c))
+  watch(() => prefs.navigation.line_opacity, (o) => previewMap?.getLayer('preview-route-line') && previewMap.setPaintProperty('preview-route-line', 'line-opacity', o))
   watch(() => prefs.navigation.turn_marker_size, (r) => {
     if (previewMap?.getLayer('preview-turn-dot')) previewMap.setPaintProperty('preview-turn-dot', 'circle-radius', r)
     if (previewMap?.getLayer('preview-turn-arrow')) previewMap.setLayoutProperty('preview-turn-arrow', 'icon-size', r / 13)
@@ -450,6 +454,16 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.line_width') }} : <strong>{{ prefs.navigation.line_width }} px</strong>
             </label>
             <input id="nav-line-width" v-model.number="prefs.navigation.line_width" type="range" class="form-range" min="2" max="200" step="1">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-line-color" class="form-label mb-1">{{ t('profile.navigation.line_color') }}</label>
+            <input id="nav-line-color" v-model="prefs.navigation.line_color" type="color" class="form-control form-control-color">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-line-opacity" class="form-label mb-1">
+              {{ t('profile.navigation.line_opacity') }} : <strong>{{ Math.round(prefs.navigation.line_opacity * 100) }} %</strong>
+            </label>
+            <input id="nav-line-opacity" v-model.number="prefs.navigation.line_opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-marker-size" class="form-label mb-1">

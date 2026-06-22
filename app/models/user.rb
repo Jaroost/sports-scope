@@ -27,6 +27,8 @@ class User < ApplicationRecord
       "terrain" => false,  # relief 3D (terrain MNT) sous le tracé
       "nav_fps" => 8,      # fréquence de la boucle d'animation (0.5–60 fps)
       "line_width" => 8,   # largeur (px) du tracé sur la carte de navigation
+      "line_color" => "#7c3aed",  # couleur du tracé restant sur la carte de navigation
+      "line_opacity" => 0.8,      # opacité (0–1) du tracé sur la carte de navigation
       "turn_alert_m" => 200,   # distance (m) à laquelle l'annonce sonore se déclenche
       "turn_hint_m" => 200,    # distance (m) à laquelle l'indicateur visuel apparaît
       "turn_urgent_m" => 15,   # distance (m) à laquelle la card passe en orange

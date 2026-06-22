@@ -20,7 +20,7 @@ export function unlockAudio(): void {
 // OS to "duck" (lower) the music the user is playing, so the cues are mixed on
 // top of it at full music volume — they have to be loud and bright to cut
 // through. Raise/lower this single value to retune all cues at once.
-const MASTER_GAIN = 3.2
+const MASTER_GAIN = 10
 
 // One short note. `start` and `durationS` are seconds; the gain envelope keeps
 // it click-free. A `triangle` wave (richer in harmonics than a pure sine)
@@ -31,7 +31,7 @@ function beep(freq: number, start: number, durationS: number, gainPeak = 0.18): 
   const gain = ctx.createGain()
   osc.type = 'triangle'
   osc.frequency.value = freq
-  const peak = Math.min(gainPeak * MASTER_GAIN, 0.95)
+  const peak = Math.min(gainPeak * MASTER_GAIN, 2)
   const t0 = ctx.currentTime + start
   gain.gain.setValueAtTime(0.0001, t0)
   gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.02)

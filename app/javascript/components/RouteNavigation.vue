@@ -1625,10 +1625,13 @@ function onVisibilityChange() {
       <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('routes.gps_waiting') }}
     </div>
 
-    <!-- Big centered arrow pointing back to the route when off-route -->
+    <!-- Big centered arrow pointing back to the route when off-route.
+         Reste visible (au-dessus du voile noir) en mode veille : quitter le tracé
+         est une info de sécurité qui doit réveiller l'attention même écran éteint. -->
     <i
       v-if="offRoute && hasFix"
       class="fa-solid fa-arrow-up nav-offroute-bigarrow"
+      :class="{ 'nav-offroute-bigarrow--sleep': screenOff }"
       :style="{ transform: `translate(-50%, -50%) rotate(${offRouteRelBearing}deg)` }"
       aria-hidden="true"
     ></i>
@@ -1646,7 +1649,7 @@ function onVisibilityChange() {
     <!-- Climb card: full graded elevation profile with a position cursor.
          Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
     <div
-      v-if="climbInfo"
+      v-if="climbInfo && !offRoute"
       class="nav-climb shadow"
       :class="{ 'nav-climb--sleep': screenOff }"
       @click="screenOff && toggleScreenOffManual()"
@@ -1854,6 +1857,9 @@ function onVisibilityChange() {
   transition: transform 0.4s ease;
   filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.35));
 }
+/* Mode veille : au-dessus du voile noir (z 20), pleinement opaque pour rester
+   bien lisible sur fond sombre. */
+.nav-offroute-bigarrow--sleep { z-index: 21; opacity: 1; }
 .nav-banner--warn { background: #fff3cd; color: #664d03; }
 .nav-banner--info { background: #cfe2ff; color: #084298; }
 

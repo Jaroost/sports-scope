@@ -39,6 +39,8 @@ interface Preferences {
     turn_urgent_m: number
     turn_repeat_ms: number
     turn_marker_size: number
+    turn_marker_color: string
+    turn_marker_icon_color: string
     radar_always_visible: boolean
     radar_close_m: number
   }
@@ -186,10 +188,20 @@ function applyPreviewTurnMarker() {
     return
   }
   previewMap.addSource('preview-turn', { type: 'geojson', data })
-  previewMap.addLayer({ id: 'preview-turn-dot', type: 'circle', source: 'preview-turn', paint: { 'circle-radius': prefs.navigation.turn_marker_size, 'circle-color': '#f97316', 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+  previewMap.addLayer({ id: 'preview-turn-dot', type: 'circle', source: 'preview-turn', paint: { 'circle-radius': prefs.navigation.turn_marker_size, 'circle-color': prefs.navigation.turn_marker_color, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+  addPreviewArrowLayer()
+}
+
+// (Re)pose l'image de la flèche et sa couche symbole. Idempotente : on retire d'abord
+// l'image et la couche existantes, ce qui permet de recoloriser la flèche à chaud
+// (updateImage ne force pas un re-rendu fiable des symboles déjà placés).
+function addPreviewArrowLayer() {
+  if (!previewMap || !previewMap.getSource('preview-turn')) return
   // Flèche directionnelle (vers la gauche) par-dessus la pastille — même rendu que la
   // navigation (taille fixe), pour juger de la lisibilité selon la taille du marqueur.
-  if (!previewMap.hasImage('preview-turn-arrow')) previewMap.addImage('preview-turn-arrow', createArrowImage(), { pixelRatio: ARROW_SCALE })
+  if (previewMap.getLayer('preview-turn-arrow')) previewMap.removeLayer('preview-turn-arrow')
+  if (previewMap.hasImage('preview-turn-arrow')) previewMap.removeImage('preview-turn-arrow')
+  previewMap.addImage('preview-turn-arrow', createArrowImage(prefs.navigation.turn_marker_icon_color), { pixelRatio: ARROW_SCALE })
   previewMap.addLayer({
     id: 'preview-turn-arrow',
     type: 'symbol',
@@ -211,7 +223,7 @@ function applyPreviewTurnMarker() {
 // avec pixelRatio = ARROW_SCALE : taille logique 22 px, bitmap net une fois agrandie.
 const ARROW_SCALE = 32
 
-function createArrowImage(): ImageData {
+function createArrowImage(color: string): ImageData {
   const base = 22
   const size = base * ARROW_SCALE
   const canvas = document.createElement('canvas')
@@ -219,7 +231,7 @@ function createArrowImage(): ImageData {
   canvas.height = size
   const ctx = canvas.getContext('2d')!
   ctx.scale(ARROW_SCALE, ARROW_SCALE)
-  ctx.fillStyle = 'white'
+  ctx.fillStyle = color
   ctx.beginPath()
   ctx.moveTo(base / 2, 1)
   ctx.lineTo(base - 2, base - 2)
@@ -308,6 +320,10 @@ async function initPreview() {
     if (previewMap?.getLayer('preview-turn-dot')) previewMap.setPaintProperty('preview-turn-dot', 'circle-radius', r)
     if (previewMap?.getLayer('preview-turn-arrow')) previewMap.setLayoutProperty('preview-turn-arrow', 'icon-size', r / 13)
   })
+  watch(() => prefs.navigation.turn_marker_color, (c) => {
+    if (previewMap?.getLayer('preview-turn-dot')) previewMap.setPaintProperty('preview-turn-dot', 'circle-color', c)
+  })
+  watch(() => prefs.navigation.turn_marker_icon_color, () => addPreviewArrowLayer())
   watch(() => prefs.navigation.default_style, (id) => {
     previewMap?.setStyle(mapStyleFor(id), { diff: false })
     previewMap?.once('style.load', () => { applyPreviewRoute(); applyPreviewTerrain() })
@@ -490,6 +506,14 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.turn_marker_size') }} : <strong>{{ prefs.navigation.turn_marker_size }} px</strong>
             </label>
             <input id="nav-turn-marker-size" v-model.number="prefs.navigation.turn_marker_size" type="range" class="form-range" min="5" max="200" step="1">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-marker-color" class="form-label mb-1">{{ t('profile.navigation.turn_marker_color') }}</label>
+            <input id="nav-turn-marker-color" v-model="prefs.navigation.turn_marker_color" type="color" class="form-control form-control-color">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-marker-icon-color" class="form-label mb-1">{{ t('profile.navigation.turn_marker_icon_color') }}</label>
+            <input id="nav-turn-marker-icon-color" v-model="prefs.navigation.turn_marker_icon_color" type="color" class="form-control form-control-color">
           </div>
         </div>
 

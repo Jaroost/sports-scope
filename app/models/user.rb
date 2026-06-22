@@ -34,6 +34,8 @@ class User < ApplicationRecord
       "turn_urgent_m" => 15,   # distance (m) à laquelle la card passe en orange
       "turn_repeat_ms" => 2000, # intervalle (ms) entre deux répétitions du son de virage
       "turn_marker_size" => 11, # rayon (px) des pastilles orange de changement de direction
+      "turn_marker_color" => "#f97316",      # couleur de la pastille de changement de direction
+      "turn_marker_icon_color" => "#ffffff", # couleur de la flèche / du numéro de sortie dans la pastille
       "radar_always_visible" => false, # afficher l'overlay radar en permanence (sinon seulement en présence d'un véhicule)
       "radar_close_m" => 30, # distance (m) sous laquelle le radar passe en alerte rapprochée (rouge + bip insistant)
     },

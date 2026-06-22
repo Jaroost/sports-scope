@@ -776,10 +776,12 @@ function renderTurnMarkers() {
     el.style.height = `${dot}px`
     const body = document.createElement('div')
     body.className = 'nav-turn-marker-body'
+    // Couleurs configurables (profil → navigation) : pastille et icône intérieure.
+    body.style.background = navPrefs.turn_marker_color
     if (tp.kind === 'roundabout') {
       // Rond-point : numéro de sortie, texte maintenu droit (pas d'alignement carte).
       const exitFont = TURN_MARKER_SIZE / 11 * 13   // 13 px à la taille par défaut (rayon 11)
-      body.innerHTML = `<span class="nav-turn-marker-exit" style="font-size:${exitFont}px">${tp.exitNumber ?? 0}</span>`
+      body.innerHTML = `<span class="nav-turn-marker-exit" style="font-size:${exitFont}px;color:${navPrefs.turn_marker_icon_color}">${tp.exitNumber ?? 0}</span>`
       el.appendChild(body)
       const marker = new maplibre.Marker({ element: el, anchor: 'center' })
         .setLngLat([geometry[tp.idx][0], geometry[tp.idx][1]])
@@ -789,7 +791,7 @@ function renderTurnMarkers() {
       // Virage normal : flèche directionnelle couchée sur le plan de la carte
       // (rotationAlignment + pitchAlignment 'map') et orientée selon le cap.
       body.innerHTML = '<svg class="nav-turn-marker-arrow" viewBox="0 0 22 22" aria-hidden="true">'
-        + '<path d="M11 1 L20 20 L11 15 L2 20 Z" fill="#fff"/></svg>'
+        + `<path d="M11 1 L20 20 L11 15 L2 20 Z" fill="${navPrefs.turn_marker_icon_color}"/></svg>`
       el.appendChild(body)
       const marker = new maplibre.Marker({ element: el, anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' })
         .setLngLat([geometry[tp.idx][0], geometry[tp.idx][1]])

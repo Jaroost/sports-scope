@@ -87,6 +87,8 @@ class ProfilesController < ApplicationController
         "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, 15),
         "turn_repeat_ms" => clamp_int(navigation[:turn_repeat_ms], NAV_TURN_REPEAT_RANGE, 2000),
         "turn_marker_size" => clamp_int(navigation[:turn_marker_size], NAV_TURN_MARKER_SIZE_RANGE, 11),
+        "turn_marker_color" => hex_color(navigation[:turn_marker_color], "#f97316"),
+        "turn_marker_icon_color" => hex_color(navigation[:turn_marker_icon_color], "#ffffff"),
         "radar_always_visible" => to_bool(navigation[:radar_always_visible], false),
         "radar_close_m" => clamp_int(navigation[:radar_close_m], NAV_RADAR_CLOSE_RANGE, 30),
       },

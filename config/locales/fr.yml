@@ -390,6 +390,8 @@ fr:
       turn_urgent_m: "Distance d'alerte urgente (orange)"
       turn_repeat_ms: "Répétition de l'annonce sonore"
       turn_marker_size: "Taille des indicateurs de direction"
+      turn_marker_color: "Couleur des indicateurs de direction"
+      turn_marker_icon_color: "Couleur de l'icône des indicateurs"
       preview: "Aperçu"
       preview_help: "Aperçu en direct centré sur votre position actuelle."
       locating: "Localisation en cours…"

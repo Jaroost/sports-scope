@@ -156,6 +156,32 @@ function flagSvg(kind: 'start' | 'end') {
   </svg>`
 }
 
+// Chevron blanc (cerné de noir translucide pour rester lisible sur tout fond de
+// tracé) pointant vers la droite. La couche symbole le fait pivoter pour l'aligner
+// sur le sens de la ligne, indiquant ainsi le sens de parcours.
+function buildArrowImage(size = 28): ImageData {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  const draw = () => {
+    ctx.beginPath()
+    ctx.moveTo(size * 0.34, size * 0.24)
+    ctx.lineTo(size * 0.7, size * 0.5)
+    ctx.lineTo(size * 0.34, size * 0.76)
+    ctx.stroke()
+  }
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+  ctx.lineWidth = size * 0.22
+  draw()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = size * 0.12
+  draw()
+  return ctx.getImageData(0, 0, size, size)
+}
+
 // ─── Grade paint ──────────────────────────────────────────────────────────────
 
 function gradePaintExpression() {
@@ -272,6 +298,27 @@ function installRouteLayer() {
   if (!mapInstance.getSource('builder-route-selected')) {
     mapInstance.addSource('builder-route-selected', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
     mapInstance.addLayer({ id: 'builder-route-selected-line', type: 'line', source: 'builder-route-selected', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#00b4d8', 'line-width': 7 } })
+  }
+  // Flèches de sens de parcours : espacées en pixels écran (constantes au zoom) et
+  // posées au-dessus du tracé, sur la géométrie continue de `builder-route`.
+  if (!mapInstance.hasImage('route-arrow')) {
+    mapInstance.addImage('route-arrow', buildArrowImage(28), { pixelRatio: 2 })
+  }
+  if (!mapInstance.getLayer('builder-route-arrows')) {
+    mapInstance.addLayer({
+      id: 'builder-route-arrows',
+      type: 'symbol',
+      source: 'builder-route',
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 90,
+        'icon-image': 'route-arrow',
+        'icon-size': 0.85,
+        'icon-rotation-alignment': 'map',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+    })
   }
   // Applique l'échelle d'affichage (élargissement mobile) aux largeurs natives ci-dessus.
   setRouteLineScale(1)
@@ -785,6 +832,26 @@ function toggleWaypointFree(idx: number) {
   emit('waypoints-changed')
 }
 
+// Inverse le sens du parcours. Le drapeau `free` d'un point marque son tronçon
+// ENTRANT comme droit (waypoint[i] → waypoint[i+1] droit ssi waypoint[i+1].free) :
+// après inversion, on réaffecte les drapeaux pour que chaque tronçon garde sa nature
+// (droit / routé) et que la géométrie soit préservée à l'identique.
+function reverseWaypoints() {
+  const wps = routeStore.waypoints.value
+  if (wps.length < 2) return
+  const n = wps.length
+  const reversed = wps.slice().reverse().map((w) => ({ lng: w.lng, lat: w.lat })) as Array<{ lng: number; lat: number; free?: boolean }>
+  // Le tronçon j du tableau inversé (reversed[j] → reversed[j+1]) correspond au
+  // tronçon original (n-2-j) ; il est droit ssi l'ancien waypoint[n-1-j] était libre.
+  for (let j = 0; j < n - 1; j++) {
+    if (wps[n - 1 - j]?.free) reversed[j + 1].free = true
+  }
+  routeStore.waypoints.value = reversed
+  deselectAll()
+  refreshWaypointMarkers()
+  emit('waypoints-changed')
+}
+
 function addReturnTo(idx: number) {
   if (atWaypointLimit()) return
   const wps = routeStore.waypoints.value
@@ -955,6 +1022,10 @@ function refreshWaypointMarkers() {
           <span>Komoot</span>
         </a>
         ${returnHtml}
+        <button type="button" class="wp-tooltip-action wp-tooltip-action--reverse">
+          <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+          <span>${t('routes.reverse_route')}</span>
+        </button>
         <button type="button" class="wp-tooltip-action wp-tooltip-action--free">
           <i class="fa-solid fa-bezier-curve" aria-hidden="true"></i>
           <span>${w.free ? t('routes.anchor_to_road') : t('routes.make_free')}</span>
@@ -993,7 +1064,7 @@ function refreshWaypointMarkers() {
       else if (ev.key === 'Escape') { numInput.value = String(idx + 1); numInput.blur() }
     })
     numInput.addEventListener('change', commitNum)
-    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--copy)').forEach((a) => {
+    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--copy):not(.wp-tooltip-action--reverse)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     })
     el.querySelectorAll('.wp-tooltip-action--copy').forEach((btn) => {
@@ -1005,6 +1076,9 @@ function refreshWaypointMarkers() {
     })
     el.querySelector('.wp-tooltip-action--free')!.addEventListener('click', (ev: any) => {
       ev.stopPropagation(); ev.preventDefault(); toggleWaypointFree(idx)
+    })
+    el.querySelector('.wp-tooltip-action--reverse')!.addEventListener('click', (ev: any) => {
+      ev.stopPropagation(); ev.preventDefault(); reverseWaypoints()
     })
     el.querySelector('.wp-tooltip-action--return')?.addEventListener('click', (ev: any) => {
       ev.stopPropagation(); ev.preventDefault(); addReturnTo(idx)

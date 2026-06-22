@@ -304,6 +304,7 @@ en:
     make_free: "Make free (off-road)"
     anchor_to_road: "Anchor to road"
     return_via_same_route: "Add to end of route"
+    reverse_route: "Reverse route"
     street_view: "Street View"
     close: "Close"
     copy_latitude: "Copy latitude"

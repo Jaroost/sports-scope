@@ -304,6 +304,7 @@ fr:
     make_free: "Rendre libre (hors route)"
     anchor_to_road: "Ancrer sur la route"
     return_via_same_route: "Ajouter à la fin de l'itinéraire"
+    reverse_route: "Inverser le parcours"
     street_view: "Street View"
     close: "Fermer"
     copy_latitude: "Copier la latitude"

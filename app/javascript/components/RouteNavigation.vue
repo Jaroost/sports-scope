@@ -274,7 +274,9 @@ const BEARING_SMOOTH = 0.18            // per-frame easing toward the target bea
 // Pendant un col, la carte est rétrécie (classe nav-map--climbing) pour libérer le
 // bas de l'écran à la carte du col : la flèche reste donc dans la carte visible sans
 // qu'on ait à décaler la caméra. On signale juste le rétrécissement à MapLibre.
-const isClimbing = computed(() => climbInfo.value != null)
+// À l'approche d'un virage, la carte de col est masquée (approachingTurn) : la carte
+// reprend alors toute la hauteur, donc on ne la rétrécit pas dans ce cas.
+const isClimbing = computed(() => climbInfo.value != null && !approachingTurn.value)
 // Quand on entre/sort d'un col, la carte change de taille (CSS) : on attend le
 // reflow puis on prévient MapLibre et on rafraîchit la hauteur mise en cache, sinon
 // le canvas garde ses anciennes dimensions et la vue paraît étirée.
@@ -358,6 +360,16 @@ const radarBannerVisible = computed(
   () =>
     radarStore.isConnected.value &&
     (navPrefs.radar_always_visible || radarStore.targets.value.length > 0),
+)
+
+// Vrai à l'approche d'un virage (bandeau violet/orange « near ») et au virage atteint
+// (bandeau vert « now ») : le virage prime alors sur le col, on masque la carte de col
+// pour ne pas encombrer l'écran et laisser toute la place à l'indication de direction.
+const approachingTurn = computed(
+  () =>
+    hasFix.value &&
+    !offRoute.value &&
+    (turnHint.value?.state === 'near' || turnHint.value?.state === 'now'),
 )
 
 // ─── Mode débug (preview des overlays) ────────────────────────────────────────
@@ -1799,7 +1811,7 @@ function onVisibilityChange() {
     <!-- Climb card: full graded elevation profile with a position cursor.
          Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
     <div
-      v-if="climbInfo && !offRoute"
+      v-if="climbInfo && !offRoute && !approachingTurn"
       class="nav-climb shadow"
       :class="{ 'nav-climb--sleep': screenOff }"
       @click="screenOff && toggleScreenOffManual()"
@@ -1883,8 +1895,8 @@ function onVisibilityChange() {
 }
 .nav-map { position: absolute; inset: 0; }
 /* Pendant un col, la carte se rétrécit pour laisser le bas de l'écran à la carte du
-   col (bottom: 6.25rem, hauteur ≈ 12rem) : la flèche reste dans la carte visible. */
-.nav-map--climbing { bottom: 18.75rem; }
+   col (bottom: 6.25rem, hauteur ≈ 16rem) : la flèche reste dans la carte visible. */
+.nav-map--climbing { bottom: 22.75rem; }
 
 /* Anchor the map-style menu to the button's right edge so it never overflows
    the screen on this full-width page. */
@@ -2086,7 +2098,7 @@ function onVisibilityChange() {
   font-weight: 800; font-size: 1.5rem; line-height: 1; color: #111827;
 }
 .nav-climb-graph {
-  position: relative; height: 145px; width: 100%;
+  position: relative; height: 210px; width: 100%;
 }
 .nav-climb-svg {
   position: absolute; inset: 0; width: 100%; height: 100%;

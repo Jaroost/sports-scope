@@ -1174,7 +1174,7 @@ onBeforeUnmount(() => {
         @click="openInKomoot" :title="t('routes.open_in_komoot')" :aria-label="t('routes.open_in_komoot')">
         <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
       </button>
-      <button type="button" class="btn btn-sm btn-outline-light" data-profile-trigger
+      <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-light" data-profile-trigger
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
       </button>
@@ -1229,7 +1229,7 @@ onBeforeUnmount(() => {
             <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">Komoot</span>
           </button>
-          <button type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
             data-profile-trigger :title="t('nav.profile')">
             <i class="fa-solid fa-sliders" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">{{ t('nav.profile') }}</span>

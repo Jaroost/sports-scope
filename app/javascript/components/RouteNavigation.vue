@@ -1451,6 +1451,10 @@ function onVisibilityChange() {
       <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
         <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
       </a>
+      <button v-if="loggedIn" type="button" class="btn btn-sm btn-light shadow-sm" data-profile-trigger
+        :title="t('nav.profile')" :aria-label="t('nav.profile')">
+        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+      </button>
     </div>
     <div
       class="nav-top-right"

@@ -2,17 +2,25 @@
 import { ref, reactive, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
-import MapStyleDropdown from './MapStyleDropdown.vue'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
-  formatDistanceShort, formatDistancePrecise, haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
+  haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
+import {
+  textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
+} from '../navHelpers'
+import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
 import { unlockAudio, playManeuver, playOffRoute, playRadarThreat, playRadarClose } from '../navAudio'
 import RadarOverlay from './RadarOverlay.vue'
+import NavTurnBanner from './NavTurnBanner.vue'
+import NavScreenOff from './NavScreenOff.vue'
+import NavClimbCard from './NavClimbCard.vue'
+import NavStatsBar from './NavStatsBar.vue'
+import NavControlsPanel from './NavControlsPanel.vue'
 import { radarStore } from '../stores/radarStore'
-import { connectRadar, disconnectRadar, radarSupported, hasKnownRadar } from '../variaRadar'
+import { connectRadar, disconnectRadar, hasKnownRadar } from '../variaRadar'
 import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 
@@ -186,22 +194,10 @@ const doneRatio = ref(0)
 const speedKmh = ref(0)
 const offRoute = ref(false)
 const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" arrow
-const climbInfo = ref<{
-  climb: Climb
-  ratio: number
-  remainingGainM: number
-  segments: { d: string; color: string }[]  // graded elevation profile of the climb
-  areaD: string                              // filled area path of the whole profile (for the grey "done" overlay)
-  posX: number                               // cursor x (% of profile width)
-  posY: number                               // cursor y (% of profile height)
-  topY: number                               // summit y (% of profile height)
-  grade: number                              // instantaneous grade at the rider (%)
-  gradeColor: string                         // grade-bucket colour for the badge background
-  gradeText: string                          // contrasting text colour (black/white)
-} | null>(null)
+const climbInfo = ref<ClimbInfo | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
-const turnHint = ref<{ direction: 'left' | 'right'; distM: number; kind: Maneuver; angle: number; exitNumber?: number; state: 'far' | 'near' | 'now' } | null>(null)
+const turnHint = ref<TurnHint | null>(null)
 
 let map: any = null
 let maplibre: any = null
@@ -402,6 +398,8 @@ const DBG_TURNS: { label: string; state: 'far' | 'near' | 'now'; kind: Maneuver;
   { label: 'Maintenant', state: 'now', kind: 'turn', direction: 'left', angle: -70, distM: 0 },
 ]
 const dbgTurnIdx = ref(0)
+// Libellé du scénario de virage débug en cours (null quand off) — passé au tiroir.
+const dbgTurnLabel = computed(() => (dbgTurn.value ? DBG_TURNS[dbgTurnIdx.value].label : null))
 
 function cycleDebugTurn() {
   dbgTurnIdx.value = dbgTurn.value ? dbgTurnIdx.value + 1 : 0
@@ -434,50 +432,6 @@ function toggleDebugRadar() {
     { id: 1, distanceM: 18, speedMps: 9 },
     { id: 2, distanceM: 72, speedMps: 6 },
   ])
-}
-
-// Profil de col synthétique pour la carte de col (climbInfo). Reproduit la forme des
-// données réelles (segments colorés par pente, aire remplie, curseur « vous êtes ici »)
-// sans dépendre de la géométrie de l'itinéraire.
-function buildDebugClimb() {
-  const n = 28
-  const pts: { x: number; y: number }[] = []
-  for (let i = 0; i <= n; i++) {
-    const f = i / n
-    pts.push({ x: f * 100, y: 96 - Math.pow(f, 1.5) * 90 })   // altitude haute = y bas
-  }
-  const segments: { d: string; color: string }[] = []
-  for (let i = 0; i < n; i++) {
-    const g = 3 + (i / n) * 11   // 3 % en bas → 14 % au sommet
-    segments.push({
-      d: `M${pts[i].x},${pts[i].y} L${pts[i + 1].x},${pts[i + 1].y} L${pts[i + 1].x},100 L${pts[i].x},100 Z`,
-      color: colorForGrade(g),
-    })
-  }
-  let areaD = `M${pts[0].x},100`
-  for (const p of pts) areaD += ` L${p.x},${p.y}`
-  areaD += ` L${pts[n].x},100 Z`
-  const ratio = 0.42
-  const posX = ratio * 100
-  // y de la ligne d'altitude au curseur (interpolation linéaire entre points).
-  let posY = pts[pts.length - 1].y
-  for (let i = 1; i < pts.length; i++) {
-    if (pts[i].x >= posX) {
-      const a = pts[i - 1], b = pts[i]
-      const tt = b.x > a.x ? (posX - a.x) / (b.x - a.x) : 0
-      posY = a.y + tt * (b.y - a.y)
-      break
-    }
-  }
-  const grade = 9
-  const gradeColor = colorForGrade(grade)
-  const climb: Climb = { startIdx: 0, endIdx: 0, gain: 560, lengthM: 8400, avgGrade: 6.7, category: '2', startKm: 0, endKm: 8.4 }
-  return {
-    climb, ratio, remainingGainM: climb.gain * (1 - ratio),
-    segments, areaD, posX, posY,
-    topY: Math.min(...pts.map((p) => p.y)),
-    grade, gradeColor, gradeText: textColorOn(gradeColor),
-  }
 }
 
 // ─── Camera controls ──────────────────────────────────────────────────────────
@@ -1116,16 +1070,6 @@ function followPadding(h: number): { top: number; bottom: number; left: number; 
   return { top: Math.round(h * 0.45), bottom: 0, left: 0, right: 0 }
 }
 
-// Move a lng/lat by `distM` along `bearingDeg` (equirectangular — accurate to a
-// few centimetres over the handful of metres we extrapolate between fixes).
-function moveLngLat([lng, lat]: LngLat, bearingDeg: number, distM: number): LngLat {
-  const R = 6371000
-  const br = (bearingDeg * Math.PI) / 180
-  const dLat = (distM * Math.cos(br)) / R
-  const dLng = (distM * Math.sin(br)) / (R * Math.cos((lat * Math.PI) / 180))
-  return [lng + (dLng * 180) / Math.PI, lat + (dLat * 180) / Math.PI]
-}
-
 // Render loop: between GPS fixes, advance the rider from the last fix along its
 // heading at its carried speed, and ease the rendered bearing toward the travel
 // heading. The camera is jumped (not animated) each frame — smoothness now comes
@@ -1270,28 +1214,6 @@ function tickTurnRepeat() {
   }
 }
 
-// FontAwesome icon for the visual turn indicator: plain directional arrows for
-// turns, straight-up when the deviation is negligible, and distinct icons for
-// roundabouts and U-turns.
-function turnIcon(h: { direction: 'left' | 'right'; kind: Maneuver; angle: number }): string {
-  if (h.kind === 'roundabout') return h.direction === 'left' ? 'fa-rotate-left' : 'fa-rotate-right'
-  if (h.kind === 'uturn') return 'fa-arrow-down'
-  if (Math.abs(h.angle) < 20) return 'fa-arrow-up'
-  return h.direction === 'left' ? 'fa-arrow-left' : 'fa-arrow-right'
-}
-
-// Temps estimé jusqu'au prochain virage, à la vitesse actuelle. Renvoie null tant
-// qu'on est quasi à l'arrêt (vitesse < 1 km/h) : l'estimation exploserait et n'aurait
-// aucun sens. Format horloge m:ss au-delà d'une minute, « N s » en deçà.
-function turnEta(distM: number): string | null {
-  if (speedKmh.value < 1) return null
-  const sec = distM / (speedKmh.value / 3.6)
-  if (sec < 60) return `${Math.round(sec)} s`
-  const m = Math.floor(sec / 60)
-  const s = Math.round(sec % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
 function handleOffRouteSound(wasOffRoute: boolean) {
   if (!offRoute.value) { lastOffRouteAlert = 0; return }
   const now = Date.now()
@@ -1350,7 +1272,7 @@ function updateProgress(idx: number) {
   const ac = activeClimb(idx, climbs, cumDistM, snapDistAlongM)
   if (ac) {
     const rem = computeGainLoss(geometry.slice(idx, ac.climb.endIdx + 1)).gain
-    buildClimbProfile(ac.climb)
+    const prof = climbProfileFor(ac.climb)
     const posX = ac.ratio * 100
     const grade = gradeForIndex(idx, alts, cumDistM)
     const gradeColor = colorForGrade(grade)
@@ -1358,11 +1280,11 @@ function updateProgress(idx: number) {
       climb: ac.climb,
       ratio: ac.ratio,
       remainingGainM: rem,
-      segments: profileSegments,
-      areaD: profileAreaD,
+      segments: prof.segments,
+      areaD: prof.areaD,
       posX,
-      posY: profileYAt(posX),
-      topY: profileTopY,
+      posY: profileYAt(prof.pts, posX),
+      topY: prof.topY,
       grade,
       gradeColor,
       gradeText: textColorOn(gradeColor),
@@ -1373,67 +1295,18 @@ function updateProgress(idx: number) {
   refreshRemaining()
 }
 
-// Build the graded elevation profile of a climb once (geometry is static), cached
-// by its start index. Each segment is a filled polygon from the altitude line down
-// to the baseline, coloured by its grade. Coordinates are in a 0–100 viewBox:
-// x spans the climb's distance, y is the altitude normalised to the climb's range.
+// Cache du profil d'altitude gradué du col, par index de départ : la géométrie est
+// statique, on ne reconstruit le profil (buildClimbProfile, dans navHelpers) que
+// lorsqu'on entre dans un nouveau col.
 let profileForStart = -1
-let profileSegments: { d: string; color: string }[] = []
-let profileAreaD = ''   // filled area path of the whole profile (greyed for the done section)
-let profilePts: { x: number; y: number }[] = []
-let profileTopY = 4   // y of the highest point of the climb (summit)
+let profileCache: ClimbProfile | null = null
 
-function buildClimbProfile(climb: Climb) {
-  if (profileForStart === climb.startIdx) return
-  profileForStart = climb.startIdx
-  const { startIdx: s, endIdx: e } = climb
-  const startM = cumDistM[s]
-  const span = (cumDistM[e] - startM) || 1
-  let minA = Infinity
-  let maxA = -Infinity
-  for (let i = s; i <= e; i++) { const a = alts[i] ?? 0; if (a < minA) minA = a; if (a > maxA) maxA = a }
-  const range = (maxA - minA) || 1
-  const xOf = (i: number) => ((cumDistM[i] - startM) / span) * 100
-  const yOf = (i: number) => 96 - (((alts[i] ?? 0) - minA) / range) * 88  // 4–96, peak near the top
-  profilePts = []
-  for (let i = s; i <= e; i++) profilePts.push({ x: xOf(i), y: yOf(i) })
-  profileTopY = Math.min(...profilePts.map((p) => p.y))
-  // Filled area under the whole altitude line — reused (clipped) for the grey done overlay.
-  profileAreaD = `M${profilePts[0].x},100`
-  for (const p of profilePts) profileAreaD += ` L${p.x},${p.y}`
-  profileAreaD += ` L${profilePts[profilePts.length - 1].x},100 Z`
-  profileSegments = []
-  for (let i = s; i < e; i++) {
-    const x1 = xOf(i)
-    const x2 = xOf(i + 1)
-    profileSegments.push({
-      d: `M${x1},${yOf(i)} L${x2},${yOf(i + 1)} L${x2},100 L${x1},100 Z`,
-      color: colorForGrade(gradeForIndex(i, alts, cumDistM)),
-    })
+function climbProfileFor(climb: Climb): ClimbProfile {
+  if (profileForStart !== climb.startIdx || !profileCache) {
+    profileForStart = climb.startIdx
+    profileCache = buildClimbProfile(climb, alts, cumDistM)
   }
-}
-
-// Black or white, whichever reads best on `hex` (perceived luminance, BT.601).
-function textColorOn(hex: string): string {
-  const c = hex.replace('#', '')
-  const r = parseInt(c.slice(0, 2), 16)
-  const g = parseInt(c.slice(2, 4), 16)
-  const b = parseInt(c.slice(4, 6), 16)
-  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#111827' : '#ffffff'
-}
-
-// Altitude-line y at a given x (% of width), interpolated between profile points.
-function profileYAt(x: number): number {
-  if (!profilePts.length) return 100
-  for (let i = 1; i < profilePts.length; i++) {
-    if (profilePts[i].x >= x) {
-      const a = profilePts[i - 1]
-      const b = profilePts[i]
-      const t = b.x > a.x ? (x - a.x) / (b.x - a.x) : 0
-      return a.y + t * (b.y - a.y)
-    }
-  }
-  return profilePts[profilePts.length - 1].y
+  return profileCache
 }
 
 // Redraw the bright "remaining" portion of the route from the projected index.
@@ -1527,32 +1400,16 @@ function onVisibilityChange() {
     <div ref="mapEl" class="nav-map" :class="{ 'nav-map--climbing': isClimbing }"></div>
 
     <!-- Battery saver: black screen — GPS and turn sounds still active -->
-    <div v-if="screenOff" class="nav-screen-off" @click="toggleScreenOffManual">
-      <div
-        v-if="turnHint && hasFix && !offRoute"
-        class="nav-turn-sleep shadow"
-        :class="{
-          'nav-turn-sleep--urgent': turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M,
-          'nav-turn-sleep--now': turnHint.state === 'now',
-          'nav-turn-sleep--far': turnHint.state === 'far',
-          'nav-turn-sleep--climb': climbInfo,
-        }"
-      >
-        <div class="nav-turn-sleep-icons">
-          <i v-if="turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-          <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
-          <span v-if="turnHint.kind === 'roundabout' && turnHint.exitNumber" class="nav-turn-sleep-exit">{{ turnHint.exitNumber }}</span>
-        </div>
-        <span class="nav-turn-sleep-dist">{{ turnHint.state === 'now' ? t('routes.turn_now') : formatDistancePrecise(turnHint.distM) }}</span>
-        <span v-if="turnHint.state !== 'now' && turnEta(turnHint.distM)" class="nav-turn-sleep-eta">
-          <i class="fa-solid fa-clock me-2" aria-hidden="true"></i>{{ turnEta(turnHint.distM) }}
-        </span>
-        <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
-      </div>
-      <div class="nav-screen-off-hint">
-        <i class="fa-solid fa-eye me-2" aria-hidden="true"></i>{{ t('routes.tap_to_resume') }}
-      </div>
-    </div>
+    <NavScreenOff
+      v-if="screenOff"
+      :turn-hint="turnHint"
+      :has-fix="hasFix"
+      :off-route="offRoute"
+      :climb-info="climbInfo"
+      :urgent-m="TURN_URGENT_M"
+      :speed-kmh="speedKmh"
+      @resume="toggleScreenOffManual"
+    />
 
     <div v-if="loading" class="nav-overlay-center text-muted">
       <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('routes.computing_route') }}
@@ -1580,204 +1437,56 @@ function onVisibilityChange() {
          TOUS les boutons (retour, profil, style de carte, son, radar, caméra, POI)
          pour libérer le haut de l'écran aux notifications pleine largeur (virage /
          radar). Masqué hors séance, rappelé par la zone de swipe. -->
-    <div
-      class="nav-controls-panel"
-      :class="{ 'nav-controls-panel--hidden': !controlsVisible }"
-      @pointerdown="armControlsHide"
-    >
-      <div class="nav-panel-group">
-        <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
-          <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-        </a>
-        <button v-if="loggedIn" type="button" class="btn btn-sm btn-light shadow-sm" data-profile-trigger
-          data-profile-sections="navigation,poi,climb"
-          :title="t('nav.profile')" :aria-label="t('nav.profile')">
-          <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-        </button>
-
-        <!-- Panneau de débug (comptes pouvant tout faire, ou ?debug=1). Injecte des
-             overlays factices pour les prévisualiser sans GPS / col / radar réels. -->
-        <div v-if="debugMode" class="position-relative">
-          <button
-            type="button"
-            class="btn btn-sm btn-light shadow-sm"
-            :class="{ active: showDebugPanel }"
-            title="Débug navigation"
-            aria-label="Débug navigation"
-            @click="showDebugPanel = !showDebugPanel"
-          >
-            <i class="fa-solid fa-flask" aria-hidden="true"></i>
-          </button>
-          <div v-if="showDebugPanel" class="nav-cam-panel nav-debug-panel shadow">
-            <div class="nav-debug-title">Débug navigation</div>
-            <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgRadar }" @click="toggleDebugRadar">
-              <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
-              <span>Radar</span>
-              <span class="nav-debug-state">{{ dbgRadar ? 'on' : 'off' }}</span>
-            </button>
-            <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgClimb }" @click="toggleDebugClimb">
-              <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-              <span>Col</span>
-              <span class="nav-debug-state">{{ dbgClimb ? 'on' : 'off' }}</span>
-            </button>
-            <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgTurn }" @click="cycleDebugTurn">
-              <i class="fa-solid fa-arrow-turn-up" aria-hidden="true"></i>
-              <span>Virage</span>
-              <span class="nav-debug-state">{{ dbgTurn ? DBG_TURNS[dbgTurnIdx].label : 'off' }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-      <div class="nav-panel-group nav-panel-group--right">
-      <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
-      <button
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :title="soundOn ? t('routes.sound_on') : t('routes.sound_off')"
-        :aria-label="soundOn ? t('routes.sound_on') : t('routes.sound_off')"
-        @click="toggleSound"
-      >
-        <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
-      </button>
-
-      <button
-        v-if="radarSupported()"
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :class="{ active: radarStore.isConnected.value, 'text-danger': radarStore.status.value === 'error' }"
-        :disabled="radarStore.status.value === 'connecting'"
-        :title="radarStore.isConnected.value ? t('routes.radar_disconnect') : radarKnown ? t('routes.radar_reconnect') : t('routes.radar_connect')"
-        :aria-label="radarStore.isConnected.value ? t('routes.radar_disconnect') : radarKnown ? t('routes.radar_reconnect') : t('routes.radar_connect')"
-        @click="toggleRadar"
-      >
-        <i
-          class="fa-solid"
-          :class="radarStore.status.value === 'connecting' ? 'fa-spinner fa-spin' : 'fa-tower-broadcast'"
-          aria-hidden="true"
-        ></i>
-      </button>
-
-      <div class="position-relative">
-        <button
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          :class="{ active: showCamPanel }"
-          :title="t('routes.camera_settings')"
-          :aria-label="t('routes.camera_settings')"
-          @click="showCamPanel = !showCamPanel"
-        >
-          <i class="fa-solid fa-video" aria-hidden="true"></i>
-        </button>
-        <div v-if="showCamPanel" class="nav-cam-panel shadow">
-          <label class="nav-cam-row">
-            <span class="nav-cam-label">{{ t('routes.camera_pitch') }}</span>
-            <input
-              type="range"
-              class="form-range"
-              :min="CAM_PITCH_MIN" :max="CAM_PITCH_MAX" step="1"
-              v-model.number="camPitch"
-              @input="onPitchInput"
-              @change="persistPitchTerrain"
-            />
-            <span class="nav-cam-val">{{ Math.round(camPitch) }}°</span>
-          </label>
-          <label class="nav-cam-row">
-            <span class="nav-cam-label">{{ t('routes.camera_zoom') }}</span>
-            <input
-              type="range"
-              class="form-range"
-              :min="CAM_ZOOM_MIN" :max="CAM_ZOOM_MAX" step="0.5"
-              v-model.number="camZoom"
-              @input="onZoomInput"
-            />
-            <span class="nav-cam-val">{{ camZoom.toFixed(1) }}</span>
-          </label>
-          <button
-            v-if="loggedIn"
-            type="button"
-            class="nav-cam-savezoom"
-            :class="{ 'nav-cam-savezoom--done': zoomSaved }"
-            @click="saveZoomToProfile"
-          >
-            <i class="fa-solid" :class="zoomSaved ? 'fa-check' : 'fa-floppy-disk'" aria-hidden="true"></i>
-            {{ zoomSaved ? t('routes.camera_zoom_saved') : t('routes.camera_save_zoom') }}
-          </button>
-          <label class="nav-cam-row nav-cam-row--switch">
-            <span class="nav-cam-label">{{ t('routes.camera_3d') }}</span>
-            <span class="form-check form-switch m-0">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                role="switch"
-                :checked="terrain3d"
-                @change="toggleTerrain"
-              />
-            </span>
-          </label>
-        </div>
-      </div>
-
-      <div class="position-relative">
-        <button
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          :class="{ active: showPoiPanel }"
-          :title="t('routes.poi_settings')"
-          :aria-label="t('routes.poi_settings')"
-          @click="showPoiPanel = !showPoiPanel"
-        >
-          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-        </button>
-        <div v-if="showPoiPanel" class="nav-cam-panel nav-poi-panel shadow">
-          <label v-for="cat in POI_CATS" :key="cat.key" class="nav-cam-row nav-cam-row--switch">
-            <span class="nav-cam-label nav-poi-label">
-              <i class="fa-solid" :class="cat.icon" :style="{ color: cat.color }" aria-hidden="true"></i>
-              {{ t(`profile.poi.${cat.labelKey}`) }}
-            </span>
-            <span class="form-check form-switch m-0">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                role="switch"
-                :checked="poiVisible[cat.key]"
-                @change="togglePoi(cat.key)"
-              />
-            </span>
-          </label>
-        </div>
-      </div>
-      </div>
-    </div>
+    <NavControlsPanel
+      :controls-visible="controlsVisible"
+      :logged-in="loggedIn"
+      :debug-mode="debugMode"
+      :map-style-id="mapStyleId"
+      :sound-on="soundOn"
+      :radar-known="radarKnown"
+      v-model:cam-pitch="camPitch"
+      v-model:cam-zoom="camZoom"
+      :terrain3d="terrain3d"
+      :zoom-saved="zoomSaved"
+      :cam-pitch-min="CAM_PITCH_MIN"
+      :cam-pitch-max="CAM_PITCH_MAX"
+      :cam-zoom-min="CAM_ZOOM_MIN"
+      :cam-zoom-max="CAM_ZOOM_MAX"
+      :poi-cats="POI_CATS"
+      :poi-visible="poiVisible"
+      :dbg-radar="dbgRadar"
+      :dbg-climb="dbgClimb"
+      :dbg-turn-label="dbgTurnLabel"
+      v-model:show-cam-panel="showCamPanel"
+      v-model:show-poi-panel="showPoiPanel"
+      v-model:show-debug-panel="showDebugPanel"
+      @arm-controls-hide="armControlsHide"
+      @set-map-style="setMapStyle"
+      @toggle-sound="toggleSound"
+      @toggle-radar="toggleRadar"
+      @pitch-input="onPitchInput"
+      @persist-pitch-terrain="persistPitchTerrain"
+      @zoom-input="onZoomInput"
+      @save-zoom="saveZoomToProfile"
+      @toggle-terrain="toggleTerrain"
+      @toggle-poi="togglePoi"
+      @toggle-debug-radar="toggleDebugRadar"
+      @toggle-debug-climb="toggleDebugClimb"
+      @cycle-debug-turn="cycleDebugTurn"
+    />
 
     <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
          visible en mode veille (info de sécurité). -->
     <RadarOverlay :elevated="screenOff" />
 
     <!-- Upcoming turn indicator -->
-    <div
+    <NavTurnBanner
       v-if="turnHint && hasFix && !offRoute"
-      class="nav-turn shadow"
-      :class="{
-        'nav-turn--urgent': turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M,
-        'nav-turn--far': turnHint.state === 'far',
-        'nav-turn--now': turnHint.state === 'now',
-        'nav-turn--radar': radarBannerVisible,
-      }"
-    >
-      <i v-if="turnHint.state === 'near' && turnHint.distM <= TURN_URGENT_M" class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
-      <i class="fa-solid" :class="turnIcon(turnHint)" aria-hidden="true"></i>
-      <span v-if="turnHint.kind === 'roundabout' && turnHint.exitNumber" class="nav-turn-exit">{{ turnHint.exitNumber }}</span>
-      <span class="nav-turn-info">
-        <span v-if="turnHint.state === 'now'" class="nav-turn-dist">{{ t('routes.turn_now') }}</span>
-        <template v-else>
-          <span class="nav-turn-dist">{{ formatDistancePrecise(turnHint.distM) }}</span>
-          <span v-if="turnEta(turnHint.distM)" class="nav-turn-eta">
-            <i class="fa-solid fa-clock" aria-hidden="true"></i>{{ turnEta(turnHint.distM) }}
-          </span>
-        </template>
-      </span>
-      <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
-    </div>
+      :turn-hint="turnHint"
+      :urgent-m="TURN_URGENT_M"
+      :radar-banner-visible="radarBannerVisible"
+      :speed-kmh="speedKmh"
+    />
 
     <!-- GPS / off-route banners -->
     <div v-if="gpsError" class="nav-banner nav-banner--warn">
@@ -1810,72 +1519,19 @@ function onVisibilityChange() {
 
     <!-- Climb card: full graded elevation profile with a position cursor.
          Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
-    <div
+    <NavClimbCard
       v-if="climbInfo && !offRoute && !approachingTurn"
-      class="nav-climb shadow"
-      :class="{ 'nav-climb--sleep': screenOff }"
-      @click="screenOff && toggleScreenOffManual()"
-    >
-      <div class="d-flex align-items-center justify-content-between mb-1">
-        <span class="fw-semibold">
-          <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
-        </span>
-        <span class="d-flex align-items-center gap-2">
-          <!-- Distance restante du col, mise en avant. -->
-          <span class="nav-climb-remaining-dist">{{ formatDistancePrecise(climbInfo.climb.lengthM * (1 - climbInfo.ratio)) }}</span>
-          <span class="nav-climb-grade" :style="{ background: climbInfo.gradeColor, color: climbInfo.gradeText }">{{ Math.round(climbInfo.grade) }} %</span>
-        </span>
-      </div>
-      <div class="nav-climb-graph">
-        <svg class="nav-climb-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <clipPath id="nav-climb-done-clip">
-              <rect x="0" y="0" :width="climbInfo.posX" height="100" />
-            </clipPath>
-          </defs>
-          <path v-for="(seg, i) in climbInfo.segments" :key="i" :d="seg.d" :fill="seg.color" />
-          <!-- Done section: the profile redrawn in a flat grey, clipped up to the rider. -->
-          <path :d="climbInfo.areaD" fill="#9ca3af" clip-path="url(#nav-climb-done-clip)" />
-        </svg>
-        <div class="nav-climb-cursor" :style="{ left: `${climbInfo.posX}%` }">
-          <!-- Remaining vertical gain: from the rider's altitude up to the summit. -->
-          <span
-            class="nav-climb-remain"
-            :style="{ top: `${climbInfo.topY}%`, height: `${Math.max(0, climbInfo.posY - climbInfo.topY)}%` }"
-          ></span>
-          <span
-            class="nav-climb-remain-label"
-            :class="{ 'nav-climb-remain-label--left': climbInfo.posX > 50 }"
-            :style="{ top: `${(climbInfo.topY + climbInfo.posY) / 2}%` }"
-          >
-            <span class="nav-climb-remain-gain">+{{ Math.round(climbInfo.remainingGainM) }} m</span>
-            <span class="nav-climb-remain-pct">{{ Math.round(climbInfo.ratio * 100) }} %</span>
-          </span>
-          <span class="nav-climb-dot" :style="{ top: `${climbInfo.posY}%` }"></span>
-        </div>
-      </div>
-    </div>
+      :climb-info="climbInfo"
+      :screen-off="screenOff"
+      @resume="toggleScreenOffManual"
+    />
 
     <!-- Bottom stats -->
-    <div class="nav-stats shadow">
-      <div class="d-flex justify-content-around text-center mb-2">
-        <div>
-          <div class="nav-stat-value">{{ formatDistanceShort(remainingM) }}</div>
-          <div class="nav-stat-label">{{ t('routes.remaining_distance') }}</div>
-        </div>
-        <div>
-          <div class="nav-stat-value">+{{ Math.round(remainingGainM) }} m</div>
-          <div class="nav-stat-label">{{ t('routes.remaining_elevation') }}</div>
-        </div>
-        <div>
-          <div class="nav-stat-value">{{ donePercent }} %</div>
-          <div class="nav-stat-label">{{ t('routes.progress') }}</div>
-        </div>
-      </div>
-      <div class="progress nav-progress">
-        <div class="progress-bar bg-primary" :style="{ width: `${donePercent}%` }"></div>
-      </div>
-    </div>
+    <NavStatsBar
+      :remaining-m="remainingM"
+      :remaining-gain-m="remainingGainM"
+      :done-percent="donePercent"
+    />
   </div>
 </template>
 
@@ -1898,40 +1554,11 @@ function onVisibilityChange() {
    col (bottom: 6.25rem, hauteur ≈ 16rem) : la flèche reste dans la carte visible. */
 .nav-map--climbing { bottom: 22.75rem; }
 
-/* Anchor the map-style menu to the button's right edge so it never overflows
-   the screen on this full-width page. */
-.nav-controls-panel :deep(.dropdown-menu) {
-  right: 0;
-  left: auto;
-}
-
 .nav-overlay-center {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
   background: rgba(255, 255, 255, 0.85);
   z-index: 5; font-weight: 500;
-}
-
-/* Panneau de commandes en tiroir : barre pleine largeur ancrée en haut, qui glisse
-   depuis le bord supérieur. z-index 8 pour passer au-dessus du bandeau radar (5) et
-   des notifications de virage (3) quand on le déploie. */
-.nav-controls-panel {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 8;
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem;
-  padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.94);
-  border-bottom-left-radius: 1rem; border-bottom-right-radius: 1rem;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
-  transition: transform 0.28s ease, opacity 0.28s ease;
-}
-.nav-panel-group { display: flex; align-items: flex-start; gap: 0.6rem; }
-.nav-panel-group--right { flex-wrap: wrap; justify-content: flex-end; }
-/* Replié : le tiroir remonte hors champ et devient non cliquable (la zone de swipe
-   prend le relais pour le rappeler). */
-.nav-controls-panel--hidden {
-  transform: translateY(-110%);
-  opacity: 0;
-  pointer-events: none;
 }
 
 /* Zone de geste « swipe vers le bas » : bande transparente en haut de l'écran.
@@ -1957,76 +1584,6 @@ function onVisibilityChange() {
   50% { opacity: 0.7; }
 }
 
-/* Larger touch targets: these controls are tapped one-handed on a phone while
-   riding. Min dimensions keep the icon-only buttons a comfortable ~3.25rem
-   square while the map-style dropdown (which carries a text label on desktop)
-   can still grow past it. */
-.nav-controls-panel :deep(.btn) {
-  min-width: 3.25rem; min-height: 3.25rem; padding: 0.5rem 0.75rem;
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 1.35rem; border-radius: 0.7rem;
-}
-
-/* Small camera-settings popover anchored under its toggle button. The toggle lives
-   in the controls drawer near the right edge, so anchor the panel to the button's
-   right edge to keep it from overflowing off the right side of the screen. */
-.nav-cam-panel {
-  position: absolute; top: calc(100% + 0.4rem); right: 0; left: auto;
-  z-index: 5; width: 18rem;
-  background: #fff; border-radius: 0.7rem; padding: 0.9rem 1rem;
-}
-.nav-cam-row {
-  display: flex; align-items: center; gap: 0.65rem; margin: 0;
-}
-.nav-cam-row + .nav-cam-row { margin-top: 0.85rem; }
-.nav-cam-label { font-size: 0.95rem; font-weight: 600; color: #495057; width: 5.5rem; }
-.nav-cam-row .form-range { flex: 1; margin: 0; height: 1.6rem; }
-.nav-cam-val { font-size: 0.95rem; font-weight: 700; width: 3rem; text-align: right; }
-/* Bigger thumb so the sliders are easy to drag with a thumb on the road. */
-.nav-cam-row .form-range::-webkit-slider-thumb { width: 1.5rem; height: 1.5rem; }
-.nav-cam-row .form-range::-moz-range-thumb { width: 1.5rem; height: 1.5rem; }
-.nav-cam-row--switch .form-check-input { width: 3rem; height: 1.5rem; }
-.nav-cam-savezoom {
-  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
-  width: 100%; margin-top: 0.85rem; padding: 0.5rem 0.75rem;
-  border: 1px solid #7c3aed; border-radius: 0.5rem;
-  background: #fff; color: #7c3aed; font-size: 0.9rem; font-weight: 600;
-  cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
-}
-.nav-cam-savezoom:hover { background: #f3effd; }
-.nav-cam-savezoom--done { background: #198754; border-color: #198754; color: #fff; }
-
-/* Panneau des filtres POI : même boîte que la caméra, lignes icône + libellé +
-   interrupteur. Le libellé occupe la largeur disponible (textes longs : « Points
-   de vue, sommets et cols »). */
-.nav-poi-panel { width: 16rem; }
-.nav-poi-panel .nav-cam-row + .nav-cam-row { margin-top: 0.6rem; }
-.nav-poi-label {
-  display: flex; align-items: center; gap: 0.55rem;
-  width: auto; flex: 1; font-size: 0.9rem; line-height: 1.15;
-}
-.nav-poi-label i { width: 1.2rem; text-align: center; flex-shrink: 0; }
-
-/* Panneau de débug : titre + une ligne-bouton par overlay simulable. Ancré à GAUCHE
-   (le bouton vit dans le groupe de gauche) : il s'ouvre vers la droite pour ne pas
-   déborder du bord gauche de l'écran, contrairement aux autres popovers (caméra/POI). */
-.nav-debug-panel { width: 14rem; left: 0; right: auto; }
-.nav-debug-title {
-  font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
-  color: #6c757d; margin-bottom: 0.6rem;
-}
-.nav-debug-btn {
-  display: flex; align-items: center; gap: 0.6rem; width: 100%;
-  padding: 0.5rem 0.7rem; border: 1px solid #dee2e6; border-radius: 0.5rem;
-  background: #fff; color: #495057; font-size: 0.95rem; font-weight: 600;
-  cursor: pointer; transition: background 0.12s ease, border-color 0.12s ease;
-}
-.nav-debug-btn + .nav-debug-btn { margin-top: 0.5rem; }
-.nav-debug-btn i { width: 1.2rem; text-align: center; }
-.nav-debug-state { margin-left: auto; font-size: 0.85rem; opacity: 0.7; }
-.nav-debug-btn--on { background: #ede7fb; border-color: #7c3aed; color: #5b21b6; }
-.nav-debug-btn--on .nav-debug-state { opacity: 1; }
-
 .nav-banner {
   position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
   z-index: 3; padding: 0.45rem 0.9rem; border-radius: 999px;
@@ -2051,139 +1608,6 @@ function onVisibilityChange() {
   border-radius: 999px; font-weight: 600;
   font-size: 1.1rem; padding: 0.6rem 1.1rem;
 }
-
-/* Notification de virage : bandeau pleine largeur en haut de l'écran (les boutons
-   sont désormais dans le tiroir, plus rien n'occupe les coins). */
-.nav-turn {
-  position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem;
-  z-index: 3; display: flex; align-items: center; justify-content: center; gap: 1rem;
-  background: #7c3aed; color: #fff; padding: 1.1rem 1.5rem;
-  border-radius: 1rem; font-size: 3rem; line-height: 1;
-}
-/* Bandeau radar visible (pleine largeur en tout-haut) : on descend le virage dessous. */
-.nav-turn--radar { top: 4.5rem; }
-/* Distance (en avant) + temps estimé (en dessous, plus discret) du prochain virage. */
-.nav-turn-info { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
-.nav-turn-dist { font-size: 2.1rem; font-weight: 700; }
-.nav-turn-eta {
-  display: flex; align-items: center; gap: 0.25rem;
-  font-size: 1.4rem; font-weight: 600; opacity: 0.85;
-}
-.nav-turn-eta i { font-size: 1.2rem; }
-.nav-turn-exit {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 2.75rem; height: 2.75rem; border-radius: 50%;
-  background: rgba(255,255,255,0.25); font-size: 1.7rem; font-weight: 700;
-}
-.nav-turn.nav-turn--urgent { background: #f97316; }
-/* Virage encore lointain (au-delà de turn_hint_m) : bandeau gris-bleu plus discret,
-   pour qu'il reste informatif sans dominer la carte comme le virage rapproché (violet). */
-.nav-turn.nav-turn--far { background: rgba(51, 65, 85, 0.92); }
-/* Virage atteint : maintenu en vert quelques secondes comme confirmation « tournez ici ». */
-.nav-turn.nav-turn--now { background: #16a34a; }
-
-.nav-climb {
-  position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6.25rem;
-  z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.6rem 0.85rem;
-}
-/* Mode veille : la carte du col passe au-dessus du voile noir (z 20). On garde sa
-   position par défaut pour laisser l'indice « tap pour reprendre » visible dessous. */
-.nav-climb--sleep { z-index: 21; }
-.nav-climb-grade {
-  font-weight: 700; font-size: 1.1rem; line-height: 1;
-  padding: 0.15rem 0.45rem; border-radius: 0.4rem;
-}
-/* Distance restante du col, mise en avant dans l'en-tête. */
-.nav-climb-remaining-dist {
-  font-weight: 800; font-size: 1.5rem; line-height: 1; color: #111827;
-}
-.nav-climb-graph {
-  position: relative; height: 210px; width: 100%;
-}
-.nav-climb-svg {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  border-radius: 0.4rem; background: #f8f9fa;
-}
-/* Vertical "you are here" cursor over the profile; the dot rides the altitude line. */
-.nav-climb-cursor {
-  position: absolute; top: 0; bottom: 0; width: 2px;
-  background: rgba(17, 24, 39, 0.55); transform: translateX(-1px);
-}
-.nav-climb-dot {
-  position: absolute; left: 50%; width: 12px; height: 12px;
-  background: #111827; border: 2px solid #fff; border-radius: 50%;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
-}
-/* Remaining vertical gain: dashed segment from the rider up to the summit. */
-.nav-climb-remain {
-  position: absolute; left: 50%; width: 0;
-  border-left: 2px dashed #f97316; transform: translateX(-1px);
-}
-.nav-climb-remain-label {
-  position: absolute; left: 8px; transform: translateY(-50%);
-  display: flex; flex-direction: column; align-items: flex-start;
-  white-space: nowrap; line-height: 1.1;
-  background: rgba(255, 255, 255, 0.9); padding: 0.1rem 0.35rem; border-radius: 0.3rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-}
-.nav-climb-remain-gain { font-size: 1.05rem; font-weight: 800; color: #c2410c; }
-.nav-climb-remain-pct { font-size: 0.8rem; font-weight: 700; color: #6c757d; }
-/* Passé la moitié du graphique, on bascule le label à gauche de la ligne pour
-   qu'il ne soit pas coupé par le bord droit. */
-.nav-climb-remain-label--left { left: auto; right: 8px; align-items: flex-end; }
-
-.nav-stats {
-  position: absolute; left: 0.75rem; right: 0.75rem; bottom: 0.75rem;
-  z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.7rem 0.85rem;
-}
-.nav-stat-value { font-size: 1.25rem; font-weight: 700; line-height: 1.1; }
-.nav-stat-label { font-size: 0.72rem; color: #6c757d; text-transform: uppercase; letter-spacing: 0.02em; }
-.nav-progress { height: 0.5rem; border-radius: 999px; }
-
-.nav-screen-off {
-  position: absolute; inset: 0; z-index: 20;
-  background: #000;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  gap: 3rem;
-  cursor: pointer;
-}
-.nav-screen-off-hint {
-  position: absolute; bottom: 2.5rem;
-  color: rgba(255, 255, 255, 0.35);
-  font-size: 0.85rem;
-}
-.nav-turn-sleep {
-  display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
-  background: #7c3aed; color: #fff;
-  padding: 3rem 4rem; border-radius: 1.5rem;
-  width: calc(100% - 1.5rem); box-sizing: border-box;
-}
-.nav-turn-sleep-icons {
-  display: flex; align-items: center; gap: 0.75rem;
-  font-size: 4.5rem; line-height: 1;
-}
-.nav-turn-sleep-dist { font-size: 3rem; font-weight: 700; line-height: 1; }
-.nav-turn-sleep-eta {
-  display: flex; align-items: center; justify-content: center;
-  font-size: 1.7rem; font-weight: 600; opacity: 0.85; line-height: 1;
-}
-.nav-turn-sleep-eta i { font-size: 1.3rem; }
-.nav-turn-sleep-exit {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 3rem; height: 3rem; border-radius: 50%;
-  background: rgba(255,255,255,0.25); font-size: 2rem; font-weight: 700;
-}
-.nav-turn-sleep.nav-turn-sleep--urgent { background: #f97316; }
-/* Virage atteint (veille) : maintenu en vert quelques secondes comme confirmation. */
-.nav-turn-sleep.nav-turn-sleep--now { background: #16a34a; }
-/* Virage lointain (veille) : même gris-bleu discret qu'en navigation, pour distinguer
-   d'un coup d'œil un virage encore loin (gris) d'un virage en approche (violet). */
-.nav-turn-sleep.nav-turn-sleep--far { background: rgba(51, 65, 85, 0.92); }
-/* Pendant un col en veille, la carte du col occupe le bas : on remonte l'indicateur
-   de virage en haut pour qu'il ne soit pas masqué. */
-.nav-turn-sleep--climb { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); }
 </style>
 
 <style>

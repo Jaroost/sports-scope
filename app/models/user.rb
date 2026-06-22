@@ -23,17 +23,17 @@ class User < ApplicationRecord
     "navigation" => {
       "default_style" => "swissgrau",
       "zoom" => 19.5,      # zoom de la caméra de suivi
-      "pitch" => 60,       # inclinaison 3D (0 = vue du dessus, 70 = très rasante)
+      "pitch" => 55,       # inclinaison 3D (0 = vue du dessus, 70 = très rasante)
       "terrain" => false,  # relief 3D (terrain MNT) sous le tracé
       "nav_fps" => 8,      # fréquence de la boucle d'animation (0.5–60 fps)
-      "line_width" => 8,   # largeur (px) du tracé sur la carte de navigation
+      "line_width" => 40,  # largeur (px) du tracé sur la carte de navigation
       "line_color" => "#7c3aed",  # couleur du tracé restant sur la carte de navigation
       "line_opacity" => 0.8,      # opacité (0–1) du tracé sur la carte de navigation
       "turn_alert_m" => 200,   # distance (m) à laquelle l'annonce sonore se déclenche
-      "turn_hint_m" => 200,    # distance (m) à laquelle l'indicateur visuel apparaît
-      "turn_urgent_m" => 15,   # distance (m) à laquelle la card passe en orange
+      "turn_hint_m" => 150,    # distance (m) à laquelle l'indicateur visuel apparaît
+      "turn_urgent_m" => 50,   # distance (m) à laquelle la card passe en orange
       "turn_repeat_ms" => 2000, # intervalle (ms) entre deux répétitions du son de virage
-      "turn_marker_size" => 11, # rayon (px) des pastilles orange de changement de direction
+      "turn_marker_size" => 40, # rayon (px) des pastilles orange de changement de direction
       "turn_marker_color" => "#f97316",      # couleur de la pastille de changement de direction
       "turn_marker_icon_color" => "#ffffff", # couleur de la flèche / du numéro de sortie dans la pastille
       "radar_always_visible" => false, # afficher l'overlay radar en permanence (sinon seulement en présence d'un véhicule)

@@ -23,7 +23,7 @@ class User < ApplicationRecord
     "navigation" => {
       "default_style" => "swissgrau",
       "zoom" => 19.5,      # zoom de la caméra de suivi
-      "pitch" => 55,       # inclinaison 3D (0 = vue du dessus, 70 = très rasante)
+      "pitch" => 0,        # inclinaison 3D (0 = vue du dessus, 70 = très rasante) — 0 par défaut pour économiser la batterie
       "terrain" => false,  # relief 3D (terrain MNT) sous le tracé
       "nav_fps" => 8,      # fréquence de la boucle d'animation (0.5–60 fps)
       "line_width" => 40,  # largeur (px) du tracé sur la carte de navigation

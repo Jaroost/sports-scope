@@ -233,6 +233,8 @@ fr:
     remaining_distance: "Distance restante"
     remaining_elevation: "Dénivelé restant"
     progress: "Progression"
+    speed: "Vitesse"
+    arrival: "Arrivée"
     off_route: "Hors itinéraire"
     sound_on: "Couper le son"
     sound_off: "Activer le son"

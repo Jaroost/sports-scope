@@ -233,6 +233,8 @@ en:
     remaining_distance: "Distance left"
     remaining_elevation: "Elevation left"
     progress: "Progress"
+    speed: "Speed"
+    arrival: "ETA"
     off_route: "Off route"
     sound_on: "Mute sound"
     sound_off: "Enable sound"

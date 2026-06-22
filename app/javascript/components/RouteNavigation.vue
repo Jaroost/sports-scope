@@ -13,6 +13,7 @@ import {
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
 import { unlockAudio, playManeuver, playOffRoute, playRadarThreat, playRadarClose } from '../navAudio'
+import { vibrateManeuver, vibrateOffRoute } from '../navHaptics'
 import RadarOverlay from './RadarOverlay.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
 import NavScreenOff from './NavScreenOff.vue'
@@ -200,6 +201,12 @@ const remainingM = ref(0)
 const remainingGainM = ref(0)
 const doneRatio = ref(0)
 const speedKmh = ref(0)
+// Vitesse lissée (EMA) dédiée à l'heure d'arrivée : la vitesse instantanée saute
+// trop pour une ETA stable, et tomber à 0 à chaque feu rouge la ferait exploser.
+// On n'alimente la moyenne qu'en roulant (> ETA_SPEED_FLOOR) pour ignorer les arrêts.
+const avgSpeedKmh = ref(0)
+const ETA_SMOOTH = 0.05
+const ETA_SPEED_FLOOR = 3
 const offRoute = ref(false)
 const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" arrow
 const climbInfo = ref<ClimbInfo | null>(null)
@@ -937,6 +944,8 @@ function updateTurns(): boolean {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()
       if (soundOn.value) playManeuver(turn.kind, turn.direction)
+      // Vibration indépendante du son (perceptible téléphone en poche, vent fort).
+      vibrateManeuver(turn.kind)
       fired = true
     }
   } else {
@@ -1006,6 +1015,7 @@ function handleOffRouteSound(wasOffRoute: boolean) {
   if (!wasOffRoute || now - lastOffRouteAlert > OFF_ROUTE_REALERT_MS) {
     lastOffRouteAlert = now
     if (soundOn.value) playOffRoute()
+    vibrateOffRoute()
   }
 }
 
@@ -1022,7 +1032,15 @@ function updateSpeed(pos: GeolocationPosition, here: LngLat) {
     }
   }
   lastFixTime = pos.timestamp
-  speedKmh.value = Math.max(0, ms * 3.6)
+  const kmh = Math.max(0, ms * 3.6)
+  speedKmh.value = kmh
+  // Moyenne lissée pour l'ETA : seulement en roulant, pour qu'un arrêt n'effondre
+  // pas l'estimation. Amorcée sur la première vitesse exploitable.
+  if (kmh > ETA_SPEED_FLOOR) {
+    avgSpeedKmh.value = avgSpeedKmh.value > 0
+      ? avgSpeedKmh.value + (kmh - avgSpeedKmh.value) * ETA_SMOOTH
+      : kmh
+  }
 }
 
 // When off route, point an arrow back to the nearest vertex of the route. The
@@ -1299,6 +1317,8 @@ function toggleScreenOffManual() {
       :remaining-m="remainingM"
       :remaining-gain-m="remainingGainM"
       :done-percent="donePercent"
+      :speed-kmh="speedKmh"
+      :eta-speed-kmh="avgSpeedKmh"
     />
   </div>
 </template>

@@ -76,6 +76,28 @@ export function turnEta(distM: number, speedKmh: number): string | null {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+// Durée restante estimée (en secondes) à `speedKmh`. Renvoie null sous 1 km/h :
+// l'estimation exploserait à l'arrêt et n'aurait aucun sens. À alimenter avec une
+// vitesse lissée (et non instantanée) pour une ETA stable feu rouge / relance.
+export function remainingSeconds(distM: number, speedKmh: number): number | null {
+  if (speedKmh < 1) return null
+  return distM / (speedKmh / 3.6)
+}
+
+// Format compact d'une durée : « 12 min » en deçà d'une heure, « 1 h 05 » au-delà.
+export function formatDuration(sec: number): string {
+  const totalMin = Math.max(0, Math.round(sec / 60))
+  if (totalMin < 60) return `${totalMin} min`
+  const h = Math.floor(totalMin / 60)
+  return `${h} h ${String(totalMin % 60).padStart(2, '0')}`
+}
+
+// Heure d'arrivée estimée au format horloge « 14:32 », soit maintenant + `sec`.
+export function arrivalClock(sec: number, now: Date = new Date()): string {
+  const d = new Date(now.getTime() + sec * 1000)
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 // ─── Géométrie ────────────────────────────────────────────────────────────────
 
 // Déplace un lng/lat de `distM` selon `bearingDeg` (équirectangulaire — précis au

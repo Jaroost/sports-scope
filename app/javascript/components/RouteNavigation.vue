@@ -107,6 +107,17 @@ function showControls() {
   armControlsHide()
 }
 
+// Referme le tiroir immédiatement (et ses sous-panneaux). Appelé sur un tap hors du
+// tiroir : on n'attend plus l'auto-masquage. On annule le minuteur pour éviter un
+// double déclenchement.
+function hideControls() {
+  if (controlsHideId != null) { clearTimeout(controlsHideId); controlsHideId = null }
+  showCamPanel.value = false
+  showPoiPanel.value = false
+  showDebugPanel.value = false
+  controlsVisible.value = false
+}
+
 // ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
 // Capté par une fine zone transparente en haut de l'écran, active uniquement quand
 // les boutons sont masqués. Un vrai swipe vers le bas les rappelle ; un simple tap
@@ -833,6 +844,9 @@ async function initMap() {
   map.on('click', () => {
     // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
     if (placePopup) { closePlacePopup(); return }
+    // Tiroir de commandes ouvert : un tap hors du tiroir le referme (et ses
+    // sous-panneaux) au lieu de mettre en veille.
+    if (controlsVisible.value) { hideControls(); return }
     if (!screenOff.value) toggleScreenOffManual()
   })
 
@@ -1568,6 +1582,39 @@ function onVisibilityChange() {
           :title="t('nav.profile')" :aria-label="t('nav.profile')">
           <i class="fa-solid fa-sliders" aria-hidden="true"></i>
         </button>
+
+        <!-- Panneau de débug (comptes pouvant tout faire, ou ?debug=1). Injecte des
+             overlays factices pour les prévisualiser sans GPS / col / radar réels. -->
+        <div v-if="debugMode" class="position-relative">
+          <button
+            type="button"
+            class="btn btn-sm btn-light shadow-sm"
+            :class="{ active: showDebugPanel }"
+            title="Débug navigation"
+            aria-label="Débug navigation"
+            @click="showDebugPanel = !showDebugPanel"
+          >
+            <i class="fa-solid fa-flask" aria-hidden="true"></i>
+          </button>
+          <div v-if="showDebugPanel" class="nav-cam-panel nav-debug-panel shadow">
+            <div class="nav-debug-title">Débug navigation</div>
+            <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgRadar }" @click="toggleDebugRadar">
+              <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
+              <span>Radar</span>
+              <span class="nav-debug-state">{{ dbgRadar ? 'on' : 'off' }}</span>
+            </button>
+            <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgClimb }" @click="toggleDebugClimb">
+              <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+              <span>Col</span>
+              <span class="nav-debug-state">{{ dbgClimb ? 'on' : 'off' }}</span>
+            </button>
+            <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgTurn }" @click="cycleDebugTurn">
+              <i class="fa-solid fa-arrow-turn-up" aria-hidden="true"></i>
+              <span>Virage</span>
+              <span class="nav-debug-state">{{ dbgTurn ? DBG_TURNS[dbgTurnIdx].label : 'off' }}</span>
+            </button>
+          </div>
+        </div>
       </div>
       <div class="nav-panel-group nav-panel-group--right">
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="setMapStyle" />
@@ -1685,39 +1732,6 @@ function onVisibilityChange() {
               />
             </span>
           </label>
-        </div>
-      </div>
-
-      <!-- Panneau de débug (visible uniquement avec ?debug=1 dans l'URL). Injecte des
-           overlays factices pour les prévisualiser sans GPS / col / radar réels. -->
-      <div v-if="debugMode" class="position-relative">
-        <button
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          :class="{ active: showDebugPanel }"
-          title="Débug navigation"
-          aria-label="Débug navigation"
-          @click="showDebugPanel = !showDebugPanel"
-        >
-          <i class="fa-solid fa-flask" aria-hidden="true"></i>
-        </button>
-        <div v-if="showDebugPanel" class="nav-cam-panel nav-debug-panel shadow">
-          <div class="nav-debug-title">Débug navigation</div>
-          <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgRadar }" @click="toggleDebugRadar">
-            <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
-            <span>Radar</span>
-            <span class="nav-debug-state">{{ dbgRadar ? 'on' : 'off' }}</span>
-          </button>
-          <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgClimb }" @click="toggleDebugClimb">
-            <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-            <span>Col</span>
-            <span class="nav-debug-state">{{ dbgClimb ? 'on' : 'off' }}</span>
-          </button>
-          <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgTurn }" @click="cycleDebugTurn">
-            <i class="fa-solid fa-arrow-turn-up" aria-hidden="true"></i>
-            <span>Virage</span>
-            <span class="nav-debug-state">{{ dbgTurn ? DBG_TURNS[dbgTurnIdx].label : 'off' }}</span>
-          </button>
         </div>
       </div>
       </div>
@@ -1981,8 +1995,10 @@ function onVisibilityChange() {
 }
 .nav-poi-label i { width: 1.2rem; text-align: center; flex-shrink: 0; }
 
-/* Panneau de débug : titre + une ligne-bouton par overlay simulable. */
-.nav-debug-panel { width: 14rem; }
+/* Panneau de débug : titre + une ligne-bouton par overlay simulable. Ancré à GAUCHE
+   (le bouton vit dans le groupe de gauche) : il s'ouvre vers la droite pour ne pas
+   déborder du bord gauche de l'écran, contrairement aux autres popovers (caméra/POI). */
+.nav-debug-panel { width: 14rem; left: 0; right: auto; }
 .nav-debug-title {
   font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
   color: #6c757d; margin-bottom: 0.6rem;

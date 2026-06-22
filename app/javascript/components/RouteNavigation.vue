@@ -229,12 +229,11 @@ let hasInitialZoom = false
 let introPending = false
 let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
 let announcedTurn = -1       // index of the last turn we played a cue for
-// Virage tout juste atteint, conservé pour le maintenir affiché en vert quelques
-// secondes (confirmation « tournez ici » même à l'arrêt à un carrefour). On le garde
-// tant qu'on est dessus (timer rafraîchi) puis on décompte GREEN_HOLD_MS une fois reparti.
-let reachedTurn: { direction: 'left' | 'right'; kind: Maneuver; angle: number; exitNumber?: number } | null = null
-let reachedAt = 0
-const GREEN_HOLD_MS = 4000
+// Virage tout juste atteint, conservé pour le maintenir affiché en vert (confirmation
+// « tournez ici » même à l'arrêt à un carrefour). On mémorise sa distance le long du
+// tracé : le maintien dure tant qu'on n'a pas parcouru GREEN_HOLD_M après le virage.
+let reachedTurn: { direction: 'left' | 'right'; kind: Maneuver; angle: number; exitNumber?: number; distM: number } | null = null
+const GREEN_HOLD_M = 100
 // Vrai quand l'écran a été rallumé AUTOMATIQUEMENT à l'approche d'un virage : on ne
 // remet en veille de soi-même que dans ce cas (un réveil manuel reste éveillé).
 let autoWoken = false
@@ -1087,8 +1086,8 @@ function updateTurns(): boolean {
 
   // Choix de l'affichage. Priorité au prochain virage s'il est proche (« sauf s'il y a
   // une autre instruction plus proche »). Sinon, on maintient le virage tout juste
-  // franchi en vert pendant GREEN_HOLD_MS. Sinon, le prochain virage en mode lointain.
-  const greenActive = reachedTurn != null && Date.now() - reachedAt < GREEN_HOLD_MS
+  // franchi en vert pendant GREEN_HOLD_M après lui. Sinon, le prochain virage en mode lointain.
+  const greenActive = reachedTurn != null && here - reachedTurn.distM < GREEN_HOLD_M
   if (turn && dist > 0 && dist <= TURN_HINT_M) {
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
   } else if (greenActive && reachedTurn) {
@@ -1119,10 +1118,9 @@ function autoWakeForTurns(state: 'far' | 'near' | 'now' | null) {
   }
 }
 
-// Mémorise un virage franchi (et (re)démarre son maintien vert).
+// Mémorise un virage franchi (avec sa distance le long du tracé) pour le maintien vert.
 function rememberReached(turn: TurnPoint) {
-  reachedTurn = { direction: turn.direction, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber }
-  reachedAt = Date.now()
+  reachedTurn = { direction: turn.direction, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, distM: turn.distM }
 }
 
 // Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.

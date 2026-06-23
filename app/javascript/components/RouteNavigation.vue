@@ -14,7 +14,7 @@ import {
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
 import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
-import { vibrateManeuver, vibrateOffRoute } from '../navHaptics'
+import { vibrateManeuver, vibrateApproach, vibrateOffRoute } from '../navHaptics'
 import RadarOverlay from './RadarOverlay.vue'
 import NavOfflineButton from './NavOfflineButton.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
@@ -254,6 +254,10 @@ let activeTurn: { kind: Maneuver; direction: 'left' | 'right' } | null = null
 // Vrai quand le virage armé est dans la zone orange (≤ TURN_URGENT_M) : la répétition
 // du son passe alors à l'intervalle plus court TURN_REPEAT_URGENT_MS.
 let activeTurnUrgent = false
+// Pointeur du virage pour lequel le double buzz d'entrée en zone orange a déjà été
+// émis : garantit qu'on ne vibre qu'une fois au franchissement du seuil, pas à
+// chaque frame tant qu'on reste dans la zone.
+let urgentBuzzedTurn = -1
 let turnRepeatId: number | null = null
 
 // ─── Position extrapolation (dead-reckoning between GPS fixes) ────────────────
@@ -948,6 +952,11 @@ function updateTurns(): boolean {
     // par le timer (tickTurnRepeat), indépendante de la fréquence des fixes GPS.
     activeTurn = { kind: turn.kind, direction: turn.direction }
     activeTurnUrgent = dist <= TURN_URGENT_M
+    // Entrée dans la zone orange : double buzz distinct, une seule fois par virage.
+    if (activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr) {
+      urgentBuzzedTurn = nextTurnPtr
+      vibrateApproach()
+    }
     if (announcedTurn !== nextTurnPtr) {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()

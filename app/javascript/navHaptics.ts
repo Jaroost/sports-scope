@@ -24,6 +24,13 @@ export function vibrateManeuver(kind: Maneuver): void {
   }
 }
 
+// Deux buzz distincts au passage dans la zone orange (virage imminent, ≤ turn_urgent_m).
+// Motif délibérément simple « buzz – pause – buzz » pour être reconnaissable sans
+// regarder l'écran : ce n'est pas l'annonce initiale du virage mais le « tu y es ».
+export function vibrateApproach(): void {
+  vibrate([220, 150, 220])
+}
+
 // Buzz long et distinct : on a quitté l'itinéraire.
 export function vibrateOffRoute(): void {
   vibrate([400, 120, 400])

@@ -23,26 +23,27 @@ import NavClimbCard from './NavClimbCard.vue'
 import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
 import { radarStore } from '../stores/radarStore'
-import { connectRadar, disconnectRadar, hasKnownRadar } from '../variaRadar'
-import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
+import { userPreferences, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import { useNavPois } from '../composables/useNavPois'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
+import { useNavSound } from '../composables/useNavSound'
+import { useRadarAlerts } from '../composables/useRadarAlerts'
+import {
+  useNavCamera, CAM_PITCH_MIN, CAM_PITCH_MAX, CAM_ZOOM_MIN, CAM_ZOOM_MAX,
+} from '../composables/useNavCamera'
+import { useControlsHide } from '../composables/useControlsHide'
+import { useRevealGesture } from '../composables/useRevealGesture'
+import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS } from '../navConstants'
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineGrauStyle, OFFLINE_DEFAULTS,
 } from '../offline/offlineMaps'
 
 const props = defineProps<{ shareToken: string; canDebug?: boolean }>()
 
-const SOUND_KEY = 'sportsScope.navSound'
-// Tuiles MNT (terrarium) pour le relief 3D — mêmes sources que le créateur d'itinéraire.
-const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
-
 // Réglages caméra issus du profil (section Navigation), indépendants du créateur.
 const navPrefs = userPreferences().navigation
 const OFF_ROUTE_M = 20          // lateral distance beyond which we warn
 const OFF_ROUTE_ACCURACY_CAP = 35  // most we widen the threshold by for a fuzzy GPS fix
-const MIN_MOVE_M = 4            // movement needed to recompute a heading
-const MIN_SPEED_MS = 0.8       // below this we keep the previous bearing
 // Largeur (px) du tracé sur la carte ; la bordure ajoute 4 px de part et d'autre.
 const ROUTE_LINE_WIDTH = navPrefs.line_width ?? 8
 const ROUTE_BORDER_WIDTH = ROUTE_LINE_WIDTH + 4
@@ -67,7 +68,8 @@ const following = ref(true)
 // suppresses the automatic snap-back on turn approach so the view stays where
 // they left it; tapping "recenter" clears it and resumes following.
 const cameraUnlocked = ref(false)
-const soundOn = ref(loadSound())
+// Son de la séance (alertes virage / radar). Voir useNavSound.
+const { soundOn, toggleSound } = useNavSound()
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
 // on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
 const mapStyleId = ref(navPrefs.default_style as string)
@@ -81,16 +83,21 @@ const offlineReady = ref(false)        // archive présente (affichage)
 let offlineRegistered = false          // archive branchée sur le protocole pmtiles://
 let baseIsOffline = false              // le fond actif est-il la version locale ?
 
-// Réglages caméra ajustables en séance. On part des valeurs du profil ; les régler
-// ici met à jour la vue immédiatement puis reporte le réglage sur le profil. La
-// boucle d'animation et followOptions lisent ces refs (et non plus navPrefs) pour
-// que toute modification prenne effet à la frame suivante.
-const camZoom = ref(navPrefs.zoom)
-const camPitch = ref(navPrefs.pitch)
-const terrain3d = ref(navPrefs.terrain)
+// Réglages caméra (inclinaison / zoom / relief 3D), ajustables en séance et reportés
+// sur le profil. La boucle d'animation et followOptions lisent ces refs (et non plus
+// navPrefs) pour que toute modification prenne effet à la frame suivante. onZoomInput
+// détache la caméra du suivi via onManualZoom. Voir useNavCamera.
+const {
+  camZoom, camPitch, terrain3d, zoomSaved,
+  onPitchInput, onZoomInput, applyTerrain, toggleTerrain, persistPitchTerrain, saveZoomToProfile,
+} = useNavCamera({ getMap: () => map, onManualZoom })
+// Curseur zoom pris en main : on détache la caméra du suivi (état local au composant).
+function onManualZoom() {
+  hasInitialZoom = true
+  following.value = false
+  cameraUnlocked.value = true
+}
 const showCamPanel = ref(false)
-// Confirmation éphémère affichée sur le bouton « enregistrer le zoom ».
-const zoomSaved = ref(false)
 
 // ─── Filtres POI (panneau de séance) ──────────────────────────────────────────
 // Le sous-système POI (recherche Overpass, marqueurs, popup, Street View, mise à
@@ -118,72 +125,20 @@ const screenOff = ref(false)
 // vue une fois la séance lancée. On les affiche au démarrage (découvrabilité) puis
 // on les estompe après quelques secondes d'inactivité ; un swipe vers le bas depuis
 // le haut de l'écran les rappelle (le tap simple reste dédié à la mise en veille).
-const controlsVisible = ref(true)
-let controlsHideId: number | null = null
-const CONTROLS_HIDE_MS = 4000
-
-function armControlsHide() {
-  if (controlsHideId != null) clearTimeout(controlsHideId)
-  controlsHideId = window.setTimeout(() => {
-    controlsHideId = null
-    // On ne masque pas tant qu'un panneau (caméra / POI) est ouvert : l'utilisateur
-    // est en train de régler quelque chose. On réarme alors le minuteur.
-    if (showCamPanel.value || showPoiPanel.value || showDebugPanel.value) { armControlsHide(); return }
-    controlsVisible.value = false
-  }, CONTROLS_HIDE_MS)
-}
-
-function showControls() {
-  controlsVisible.value = true
-  armControlsHide()
-}
-
-// Referme le tiroir immédiatement (et ses sous-panneaux). Appelé sur un tap hors du
-// tiroir : on n'attend plus l'auto-masquage. On annule le minuteur pour éviter un
-// double déclenchement.
-function hideControls() {
-  if (controlsHideId != null) { clearTimeout(controlsHideId); controlsHideId = null }
-  showCamPanel.value = false
-  showPoiPanel.value = false
-  showDebugPanel.value = false
-  controlsVisible.value = false
-}
+// On ne masque pas tant qu'un sous-panneau (caméra / POI / débug) est ouvert. Voir
+// useControlsHide.
+const { controlsVisible, armControlsHide, showControls, hideControls } = useControlsHide({
+  isPanelOpen: () => showCamPanel.value || showPoiPanel.value || showDebugPanel.value,
+  closePanels: () => { showCamPanel.value = false; showPoiPanel.value = false; showDebugPanel.value = false },
+})
 
 // ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
-// Capté par une fine zone transparente en haut de l'écran, active uniquement quand
-// les boutons sont masqués. Un vrai swipe vers le bas les rappelle ; un simple tap
-// (sans déplacement) conserve le comportement « tap carte » → mise en veille.
-const REVEAL_SWIPE_M = 40   // déplacement vertical (px) au-delà duquel on révèle
-let revealStartY = 0
-let revealStartX = 0
-let revealTracking = false
-
-function onRevealDown(e: PointerEvent) {
-  revealStartY = e.clientY
-  revealStartX = e.clientX
-  revealTracking = true
-}
-
-function onRevealMove(e: PointerEvent) {
-  if (!revealTracking) return
-  if (e.clientY - revealStartY > REVEAL_SWIPE_M) {
-    revealTracking = false
-    showControls()
-  }
-}
-
-function onRevealUp(e: PointerEvent) {
-  if (!revealTracking) return
-  revealTracking = false
-  // Tap quasi immobile dans la zone : on garde la sémantique du tap carte (veille).
-  const moved = Math.hypot(e.clientX - revealStartX, e.clientY - revealStartY)
-  if (moved < 10 && !screenOff.value) toggleScreenOffManual()
-}
-
-const CAM_PITCH_MIN = 0
-const CAM_PITCH_MAX = 75
-const CAM_ZOOM_MIN = 14
-const CAM_ZOOM_MAX = 20
+// Swipe → rappelle les boutons ; tap quasi immobile → bascule la veille. Voir useRevealGesture.
+const { onRevealDown, onRevealMove, onRevealUp, cancel: cancelReveal } = useRevealGesture({
+  onReveal: showControls,
+  onTap: () => toggleScreenOffManual(),
+  canTap: () => !screenOff.value,
+})
 
 // ─── Échelle largeur tracé / pastilles selon le zoom ───────────────────────────
 // Tracé et indicateurs de virage doivent se comporter comme un ruban posé au sol :
@@ -301,8 +256,6 @@ let anchorDistM = 0                    // distance le long du tracé à l'ancre 
 let extrapSpeedMs = 0                  // speed carried forward between fixes
 let extrapBearing = 0                  // travel heading (target)
 let displayBearing = 0                 // smoothed bearing actually rendered
-const MAX_EXTRAP_S = 2.5               // stop predicting if fixes stop arriving
-const BEARING_SMOOTH = 0.18            // per-frame easing toward the target bearing
 // Pendant un col, la carte est rétrécie (classe nav-map--climbing) pour libérer le
 // bas de l'écran à la carte du col : la flèche reste donc dans la carte visible sans
 // qu'on ait à décaler la caméra. On signale juste le rétrécissement à MapLibre.
@@ -325,7 +278,6 @@ watch(isClimbing, () => {
 // stabilisé (immobile / cap convergé) et se relance au prochain fix.
 // On la plafonne au FPS configuré dans le profil et on met la hauteur du conteneur
 // en cache pour éviter un reflow par frame.
-const BEARING_EPS = 0.1                // ° — en dessous, le cap est « convergé »
 // Intervalle minimum entre deux frames, calculé depuis la préférence nav_fps (0,5–60 fps).
 const FRAME_MIN_MS = Math.round(1000 / (navPrefs.nav_fps ?? 8))
 let containerH = 0                     // hauteur du conteneur carte, rafraîchie au resize
@@ -333,57 +285,9 @@ let lastTickT = 0                      // performance.now() de la dernière fram
 
 const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
-function loadSound(): boolean {
-  try { return localStorage.getItem(SOUND_KEY) !== 'off' } catch { return true }
-}
-
-function toggleSound() {
-  soundOn.value = !soundOn.value
-  try { localStorage.setItem(SOUND_KEY, soundOn.value ? 'on' : 'off') } catch { /* ignore */ }
-  if (soundOn.value) unlockAudio()
-}
-
-// ─── Radar arrière (Garmin Varia, POC) ──────────────────────────────────────────
-// État exposé au template via le store. Le clic est un geste utilisateur, requis
-// par Web Bluetooth pour ouvrir le sélecteur d'appareil.
-//
-// Si un Varia a déjà été appairé lors d'une session précédente, le clic le
-// reconnecte directement (sans sélecteur) ; on l'indique dans le libellé.
-const radarKnown = ref(false)
-void hasKnownRadar().then((known) => { radarKnown.value = known })
-
-function toggleRadar() {
-  if (radarStore.isConnected.value || radarStore.status.value === 'connecting') {
-    disconnectRadar()
-  } else {
-    void connectRadar()
-  }
-}
-
-// Alertes sonores du radar. Deux niveaux, chacun déclenché une seule fois par
-// véhicule (suivi par son id de cible) :
-//   • entrée dans la portée  → bip d'avertissement (playRadarThreat)
-//   • passage sous 30 m      → bip insistant (playRadarClose)
-// On ne re-bipe pas tant que la même voiture reste dans le même état ; le watchdog
-// du store vide la liste une fois la voie dégagée, donc une nouvelle approche
-// re-déclenche bien les alertes.
-const RADAR_CLOSE_M = navPrefs.radar_close_m
-let knownThreatIds = new Set<number>()
-let closeAlertedIds = new Set<number>()
-watch(() => radarStore.targets.value, (targets) => {
-  if (soundOn.value) {
-    if (targets.some((t) => !knownThreatIds.has(t.id))) playRadarThreat()
-    if (targets.some((t) => t.distanceM <= RADAR_CLOSE_M && !closeAlertedIds.has(t.id))) {
-      playRadarClose()
-    }
-  }
-  knownThreatIds = new Set(targets.map((t) => t.id))
-  // On ne garde l'état « déjà alerté de près » que pour les cibles encore présentes,
-  // pour qu'une voiture qui repart puis se rapproche à nouveau re-bipe.
-  closeAlertedIds = new Set(
-    targets.filter((t) => t.distanceM <= RADAR_CLOSE_M).map((t) => t.id),
-  )
-})
+// ─── Radar arrière (Garmin Varia) ─────────────────────────────────────────────
+// Connexion/déconnexion + alertes sonores (une par véhicule). Voir useRadarAlerts.
+const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn })
 
 // Le bandeau radar (RadarOverlay) occupe le tout-haut de l'écran. Quand il est
 // visible, on descend la vitesse/le virage pour ne pas passer dessous. Même
@@ -470,66 +374,6 @@ function toggleDebugRadar() {
   ])
 }
 
-// ─── Camera controls ──────────────────────────────────────────────────────────
-// Les curseurs ajustent la vue en direct (@input). Inclinaison et zoom sont
-// réappliqués à chaque frame par la boucle (qui lit camPitch / camZoom) ; on les
-// pousse aussi via setPitch/setZoom pour que le changement soit visible
-// immédiatement hors suivi. L'inclinaison/le relief sont reportés sur le profil au
-// relâchement (@change → persistPitchTerrain) ; le zoom, lui, ne l'est QUE
-// manuellement via le bouton dédié (saveZoomToProfile), pour ne pas écraser le
-// réglage par défaut par un zoom ponctuel de la séance.
-
-function onPitchInput() {
-  if (map) map.setPitch(camPitch.value)
-}
-
-function onZoomInput() {
-  if (!map) return
-  hasInitialZoom = true  // l'utilisateur prend la main sur le zoom
-  map.setZoom(camZoom.value)
-  // Comme un pinch : le curseur détache la caméra du suivi (le bouton recentrer
-  // apparaît). setZoom étant programmatique, on bascule l'état ici à la main.
-  following.value = false
-  cameraUnlocked.value = true
-}
-
-// Active/désactive le relief 3D (terrain MNT) sous le tracé. Idempotente : aussi
-// appelée après un setStyle, qui efface terrain et sources.
-function applyTerrain() {
-  if (!map) return
-  if (terrain3d.value) {
-    if (!map.getSource('terrain-dem')) {
-      map.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
-    }
-    map.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
-  } else {
-    map.setTerrain(null)
-  }
-}
-
-function toggleTerrain() {
-  terrain3d.value = !terrain3d.value
-  applyTerrain()
-  persistPitchTerrain()
-}
-
-// Persiste l'inclinaison et le relief sur le profil. Le zoom n'est PAS capturé ici :
-// on réécrit la valeur déjà enregistrée (navPrefs.zoom) pour qu'un réglage
-// d'inclinaison ou de relief n'embarque pas le zoom courant de la séance. Le zoom
-// n'est reporté que manuellement, via saveZoomToProfile.
-function persistPitchTerrain() {
-  persistNavCamera(navPrefs.zoom, camPitch.value, terrain3d.value)
-}
-
-// Reporte le zoom courant de la navigation sur le profil (bouton dédié du panneau
-// caméra). Le zoom ne s'enregistre plus automatiquement au pinch ou au curseur,
-// pour ne pas écraser le zoom par défaut du compte par une vue ponctuelle.
-function saveZoomToProfile() {
-  persistNavCamera(camZoom.value, camPitch.value, terrain3d.value)
-  zoomSaved.value = true
-  window.setTimeout(() => { zoomSaved.value = false }, 1800)
-}
-
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -571,14 +415,12 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   if (turnRepeatId != null) { clearInterval(turnRepeatId); turnRepeatId = null }
-  if (controlsHideId != null) { clearTimeout(controlsHideId); controlsHideId = null }
   stopAnimation()
   window.removeEventListener('pointerdown', onFirstGesture, true)
   window.removeEventListener('touchstart', onFirstGesture, true)
   window.removeEventListener('online', refreshBaseMap)
   window.removeEventListener('offline', refreshBaseMap)
   window.removeEventListener('resize', refreshContainerH)
-  disconnectRadar()
   if (map) { map.remove(); map = null }
 })
 
@@ -866,6 +708,39 @@ function onOfflineRemoved() {
   refreshBaseMap()
 }
 
+// ─── Reprise après rechargement (tracés auto-recoupants) ──────────────────────
+// La position GPS seule ne distingue pas les passages d'un tracé qui se recoupe :
+// au même endroit, lng/lat peut appartenir à 2–3 passages. On mémorise donc la
+// progression (le sommet courant le long du tracé) dans localStorage et on s'en
+// sert comme indice au premier fix après un rechargement, pour repartir sur le bon
+// passage au lieu d'une recherche globale ambiguë. L'entrée expire afin de ne pas
+// « téléporter » un rider qui relance la même route un autre jour ; la validité est
+// en plus confirmée par la proximité réelle au fix GPS (sinon repli global).
+const PROGRESS_KEY = `sportsScope.navProgress.${props.shareToken}`
+const RESUME_MAX_AGE_MS = 30 * 60 * 1000
+let lastProgressSaveMs = 0
+
+// Indice de reprise (sommet) si une progression récente est mémorisée, sinon -1.
+function resumeHintIdx(): number {
+  try {
+    const raw = localStorage.getItem(PROGRESS_KEY)
+    if (!raw) return -1
+    const saved = JSON.parse(raw) as { idx: number; t: number }
+    if (!saved || typeof saved.idx !== 'number' || typeof saved.t !== 'number') return -1
+    if (Date.now() - saved.t > RESUME_MAX_AGE_MS) { localStorage.removeItem(PROGRESS_KEY); return -1 }
+    return saved.idx >= 0 && saved.idx < geometry.length ? saved.idx : -1
+  } catch { return -1 }
+}
+
+// Sauvegarde throttlée de la progression (≤ 1 écriture / 3 s). Best-effort : un
+// localStorage indisponible (mode privé, quota) ne doit pas casser la séance.
+function persistProgress() {
+  const now = Date.now()
+  if (now - lastProgressSaveMs < 3000) return
+  lastProgressSaveMs = now
+  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: lastIdx, t: now })) } catch { /* indisponible : best-effort */ }
+}
+
 // ─── GPS tracking ───────────────────────────────────────────────────────────
 
 function startTracking() {
@@ -885,10 +760,18 @@ function onPosition(pos: GeolocationPosition) {
   hasFix.value = true
   const here: LngLat = [pos.coords.longitude, pos.coords.latitude]
 
-  // Project onto the route: global search on the first fix (so we locate
-  // correctly wherever the ride is joined, including mid-loop), then a windowed
-  // search around the last index for perf and to handle self-crossing loops.
-  const { idx, distM } = nearestGeomIndex(here, geometry, located ? lastIdx : -1)
+  // Project onto the route. On the first fix we normally do a global search so we
+  // locate wherever the ride is joined (including mid-loop); after that a windowed
+  // search around the last index keeps perf up and handles self-crossing loops.
+  // Exception : sur un tracé auto-recoupant, une progression récente mémorisée
+  // (rechargement en pleine course) lève l'ambiguïté du passage — on repart de cet
+  // indice. On ne s'y fie que si le rider est effectivement proche de ce passage ;
+  // sinon (entrée périmée ou rider ailleurs) on retombe sur la recherche globale.
+  const hint = located ? lastIdx : resumeHintIdx()
+  let { idx, distM } = nearestGeomIndex(here, geometry, hint)
+  if (!located && hint >= 0 && distM > OFF_ROUTE_M + OFF_ROUTE_ACCURACY_CAP) {
+    ;({ idx, distM } = nearestGeomIndex(here, geometry, -1))
+  }
   lastIdx = idx
   located = true
   // Snap the raw fix onto the polyline so the grey/purple boundary follows the
@@ -903,6 +786,11 @@ function onPosition(pos: GeolocationPosition) {
   const accuracyM = Math.min(pos.coords.accuracy ?? 0, OFF_ROUTE_ACCURACY_CAP)
   offRoute.value = distM > OFF_ROUTE_M + accuracyM
   updateProgress(idx)
+  // Mémorise la progression pour reprendre sur le bon passage après un éventuel
+  // rechargement. On ne sauvegarde que sur le tracé : un point hors-tracé pourrait
+  // figer un mauvais passage. nextTurnPtr et snapDistAlongM se recalent d'eux-mêmes
+  // au premier fix de reprise (pilotés par l'indice restauré), rien d'autre à stocker.
+  if (!offRoute.value) persistProgress()
 
   // Heading: trust the GPS heading when moving fast enough, otherwise derive it.
   updateBearing(pos, here)
@@ -1323,7 +1211,7 @@ function toggleScreenOffManual() {
       @pointerdown="onRevealDown"
       @pointermove="onRevealMove"
       @pointerup="onRevealUp"
-      @pointercancel="revealTracking = false"
+      @pointercancel="cancelReveal"
     >
       <span class="nav-reveal-grabber" aria-hidden="true">
         <i class="fa-solid fa-chevron-down"></i>

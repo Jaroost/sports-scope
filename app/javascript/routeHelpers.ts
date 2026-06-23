@@ -622,19 +622,66 @@ export interface VoiceHint {
 // 1 = continue straight, 13 = off-route marker, 16 = beeline segment.
 const VOICE_HINT_SKIP = new Set([1, 13, 16])
 
+// Premier passage du tracé sur la coordonnée `pos`, en repartant de `fromIdx` :
+// on avance jusqu'au premier groupe de sommets passant à moins de `proximityM`,
+// et on en retient le sommet le plus proche (le minimum local de ce groupe). On
+// s'arrête dès qu'on ressort de la proximité, pour NE PAS sauter à un passage
+// ultérieur (une route qui se recoupe repasse à la même coordonnée plus loin, à
+// ~0 m elle aussi : prendre le minimum global choisirait un passage au hasard).
+// Repli : si aucun sommet n'est assez proche (densification, hint légèrement hors
+// tracé), on prend le plus proche au-delà de `fromIdx`.
+function firstPassFrom(pos: LngLat, geometry: Coord[], fromIdx: number, proximityM = 20): number {
+  let clusterIdx = -1
+  let clusterDist = Infinity
+  for (let i = fromIdx; i < geometry.length; i++) {
+    const d = haversine(pos, geometry[i])
+    if (d <= proximityM) {
+      if (d < clusterDist) { clusterDist = d; clusterIdx = i }
+    } else if (clusterIdx >= 0) {
+      break  // on a quitté le premier groupe proche → c'est le bon passage
+    }
+  }
+  if (clusterIdx >= 0) return clusterIdx
+  let bestIdx = fromIdx
+  let bestDist = Infinity
+  for (let i = fromIdx; i < geometry.length; i++) {
+    const d = haversine(pos, geometry[i])
+    if (d < bestDist) { bestDist = d; bestIdx = i }
+  }
+  return bestIdx
+}
+
 // Map stored BRouter voice hints onto the current geometry, producing the same
 // TurnPoint shape that the navigation cue logic consumes. Each hint is matched to
 // its nearest geometry vertex so the cumulative distance stays correct.
+//
+// BRouter émet les hints DANS L'ORDRE DE PARCOURS. Sur un tracé qui se recoupe
+// (aller-retour, plusieurs boucles), le seul lng/lat d'un hint est ambigu : la même
+// jonction est visitée 2–3 fois et apparaît à ~0 m sur chaque passage. Une recherche
+// du sommet GLOBALEMENT le plus proche écrase alors tous les passages sur celui qui
+// se trouve le plus près, empilant des virages contradictoires au même endroit et
+// perdant les virages des passages suivants. On apparie donc de façon MONOTONE : un
+// curseur avance le long du tracé et chaque hint est ancré au premier passage situé
+// au-delà du hint précédent (avec une petite tolérance arrière pour absorber la
+// densification), si bien que des passages successifs tombent sur des positions
+// successives. Les marqueurs ignorés (continuer / hors-tracé / beeline) font tout de
+// même avancer le curseur, pour ne pas rompre la chaîne.
 export function turnsFromVoiceHints(
   hints: VoiceHint[],
   geometry: Coord[],
   cumDistM: number[],
 ): TurnPoint[] {
+  // Recul autorisé (en sommets) sous le curseur : assez pour absorber la jitter de
+  // densification, mais bien inférieur à l'écart d'index entre deux passages d'une
+  // même jonction, pour ne jamais re-cibler un passage déjà franchi.
+  const BACK_TOL = 10
   const out: TurnPoint[] = []
+  let cursor = 0
   for (const h of hints) {
     const isRoundabout = (h.exit_number ?? 0) > 0
+    const idx = firstPassFrom([h.lng, h.lat], geometry, Math.max(0, cursor - BACK_TOL))
+    cursor = idx
     if (VOICE_HINT_SKIP.has(h.cmd) && !isRoundabout) continue
-    const { idx } = nearestGeomIndex([h.lng, h.lat], geometry)
     const { kind: baseKind, direction } = maneuverFromCmd(h.cmd, h.angle)
     const kind: Maneuver = isRoundabout ? 'roundabout' : baseKind
     const exitNumber = isRoundabout ? (h.exit_number ?? 0) : undefined

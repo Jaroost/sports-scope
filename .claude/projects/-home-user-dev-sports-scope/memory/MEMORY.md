@@ -1,1 +1,2 @@
 - [BRouter profils publics](brouter-public-profiles.md) — quels profils brouter.de a (et n'a pas : les SAC alpins renvoient 500)
+- [Carte hors-ligne nav](offline-maps-navigation.md) — PMTiles swisstopo gris (corridor du trajet) pour la nav sans réseau, et pourquoi ce fond uniquement

@@ -119,6 +119,8 @@ function onZoom(e: Event) {
     </div>
     <div class="nav-panel-group nav-panel-group--right">
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="$emit('set-map-style', $event)" />
+      <!-- Bouton « carte hors-ligne » (fourni par le parent : il a accès au token et à la géométrie). -->
+      <slot name="map-extra" />
       <button
         type="button"
         class="btn btn-sm btn-light shadow-sm"

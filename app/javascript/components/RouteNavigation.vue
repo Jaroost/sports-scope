@@ -16,6 +16,7 @@ import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
 import { unlockAudio, playManeuver, playOffRoute, playRadarThreat, playRadarClose } from '../navAudio'
 import { vibrateManeuver, vibrateOffRoute } from '../navHaptics'
 import RadarOverlay from './RadarOverlay.vue'
+import NavOfflineButton from './NavOfflineButton.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
 import NavScreenOff from './NavScreenOff.vue'
 import NavClimbCard from './NavClimbCard.vue'
@@ -26,6 +27,9 @@ import { connectRadar, disconnectRadar, hasKnownRadar } from '../variaRadar'
 import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import { useNavPois } from '../composables/useNavPois'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
+import {
+  offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineGrauStyle, OFFLINE_DEFAULTS,
+} from '../offline/offlineMaps'
 
 const props = defineProps<{ shareToken: string; canDebug?: boolean }>()
 
@@ -67,6 +71,15 @@ const soundOn = ref(loadSound())
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
 // on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
 const mapStyleId = ref(navPrefs.default_style as string)
+
+// ─── Carte hors-ligne (PMTiles swisstopo gris) ────────────────────────────────
+// Une archive du corridor a-t-elle été téléchargée pour ce trajet ? Le bouton dédié
+// (NavOfflineButton) gère le téléchargement ; ici on ne fait que basculer le fond vers
+// la version locale quand le réseau tombe (cf. resolveBaseStyle / refreshBaseMap).
+const offlineCoords = ref<[number, number][]>([])
+const offlineReady = ref(false)        // archive présente (affichage)
+let offlineRegistered = false          // archive branchée sur le protocole pmtiles://
+let baseIsOffline = false              // le fond actif est-il la version locale ?
 
 // Réglages caméra ajustables en séance. On part des valeurs du profil ; les régler
 // ici met à jour la vue immédiatement puis reporte le réglage sur le profil. La
@@ -545,6 +558,9 @@ onMounted(async () => {
     // plus fiable sur mobile.
     window.addEventListener('pointerdown', onFirstGesture, true)
     window.addEventListener('touchstart', onFirstGesture, true)
+    // Bascule auto vers le fond local quand le réseau tombe (et retour au WMTS au rétablissement).
+    window.addEventListener('online', refreshBaseMap)
+    window.addEventListener('offline', refreshBaseMap)
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -559,6 +575,8 @@ onBeforeUnmount(() => {
   stopAnimation()
   window.removeEventListener('pointerdown', onFirstGesture, true)
   window.removeEventListener('touchstart', onFirstGesture, true)
+  window.removeEventListener('online', refreshBaseMap)
+  window.removeEventListener('offline', refreshBaseMap)
   window.removeEventListener('resize', refreshContainerH)
   disconnectRadar()
   if (map) { map.remove(); map = null }
@@ -578,6 +596,7 @@ async function fetchRoute() {
   const route = data.route || data
   geometry = (route.geometry || []) as Coord[]
   if (geometry.length < 2) throw new Error(t('routes.error_min_points'))
+  offlineCoords.value = geometry.map(([lng, lat]) => [lng, lat])
   routeName.value = route.name || ''
   alts = geometry.map((c) => c[2] ?? null)
   cumDistM = buildDistancesM(geometry)
@@ -602,10 +621,19 @@ async function initMap() {
   maplibre = (await import('maplibre-gl')).default
   await import('maplibre-gl/dist/maplibre-gl.css')
 
+  // Branche l'archive hors-ligne du trajet (si déjà téléchargée) AVANT de construire le
+  // style, pour pouvoir démarrer directement sur le fond local en cas de lancement
+  // sans réseau.
+  if (offlineSupported() && await hasOfflineArchive(props.shareToken)) {
+    offlineReady.value = true
+    try { await registerOfflineArchive(props.shareToken, maplibre); offlineRegistered = true } catch { /* archive illisible : on reste en ligne */ }
+  }
+  baseIsOffline = wantOffline()
+
   const coords = geometry.map(([lng, lat]) => [lng, lat] as LngLat)
   map = new maplibre.Map({
     container: mapEl.value,
-    style: mapStyleFor(mapStyleId.value) as any,
+    style: resolveBaseStyle(mapStyleId.value) as any,
     center: coords[0],
     zoom: 14,
     pitch: camPitch.value,
@@ -787,13 +815,55 @@ function setMapStyle(id: string) {
   if (!map || id === mapStyleId.value) return
   mapStyleId.value = id
   persistDefaultMapStyle(id as any)
-  map.setStyle(mapStyleFor(id), { diff: false })
-  map.once('style.load', () => {
-    installRouteLayers()
-    applyTerrain()
-    if (lastPos) updateLocationMarker(lastPos)
-    refreshRemaining()
-  })
+  baseIsOffline = wantOffline()
+  map.setStyle(resolveBaseStyle(id), { diff: false })
+  map.once('style.load', afterStyleLoad)
+}
+
+function afterStyleLoad() {
+  installRouteLayers()
+  applyTerrain()
+  if (lastPos) updateLocationMarker(lastPos)
+  refreshRemaining()
+}
+
+// ─── Bascule en ligne / hors-ligne ────────────────────────────────────────────
+// On n'utilise le fond local QUE lorsque le réseau est absent : en ligne, le WMTS reste
+// préféré (tuiles fraîches, couverture au-delà du corridor). Limité à swisstopo gris,
+// seul fond dont les CGU autorisent le hors-ligne.
+function wantOffline(): boolean {
+  return offlineRegistered && mapStyleId.value === 'swissgrau' && typeof navigator !== 'undefined' && navigator.onLine === false
+}
+
+function resolveBaseStyle(id: string): string | object {
+  if (id === 'swissgrau' && wantOffline()) return offlineGrauStyle(props.shareToken, OFFLINE_DEFAULTS.maxZoom)
+  return mapStyleFor(id)
+}
+
+// Recharge le fond seulement si la décision en-ligne/hors-ligne a changé (évite un
+// rechargement à chaque scintillement de connectivité).
+function refreshBaseMap() {
+  if (!map) return
+  const want = wantOffline()
+  if (want === baseIsOffline) return
+  baseIsOffline = want
+  map.setStyle(resolveBaseStyle(mapStyleId.value), { diff: false })
+  map.once('style.load', afterStyleLoad)
+}
+
+// Appelé par NavOfflineButton quand une archive vient d'être téléchargée.
+async function onOfflineAvailable() {
+  offlineReady.value = true
+  if (!offlineRegistered && maplibre) {
+    try { await registerOfflineArchive(props.shareToken, maplibre); offlineRegistered = true } catch { /* ignore */ }
+  }
+  refreshBaseMap()
+}
+
+function onOfflineRemoved() {
+  offlineReady.value = false
+  offlineRegistered = false
+  refreshBaseMap()
 }
 
 // ─── GPS tracking ───────────────────────────────────────────────────────────
@@ -1300,7 +1370,16 @@ function toggleScreenOffManual() {
       @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
-    />
+    >
+      <template #map-extra>
+        <NavOfflineButton
+          :share-token="shareToken"
+          :coords="offlineCoords"
+          @available="onOfflineAvailable"
+          @removed="onOfflineRemoved"
+        />
+      </template>
+    </NavControlsPanel>
 
     <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
          visible en mode veille (info de sécurité). -->

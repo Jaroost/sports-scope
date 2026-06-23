@@ -16,6 +16,9 @@
       <%= link_to routes_index_path, class: "btn btn-outline-secondary btn-lg home-button" do %>
         <i class="fa-solid fa-route me-2" aria-hidden="true"></i><%= t("pages.home_nav_routes") %>
       <% end %>
+      <%= link_to free_navigate_path, class: "btn btn-outline-secondary btn-lg home-button" do %>
+        <i class="fa-solid fa-location-crosshairs me-2" aria-hidden="true"></i><%= t("nav.free_navigate") %>
+      <% end %>
       <span data-vue-component="NewRouteButton"></span>
     </p>
   <% else %>

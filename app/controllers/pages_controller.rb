@@ -15,6 +15,11 @@ class PagesController < ApplicationController
     @route_id = params[:id]
   end
 
+  def free_navigation
+    # Mode de roulage libre, sans itinéraire : carte + vitesse + radar + veille.
+    # Public, aucun login requis (rien à charger côté serveur).
+  end
+
   def route_navigation
     # No login required: navigation links are addressed by share_token and can
     # be shared with anyone.

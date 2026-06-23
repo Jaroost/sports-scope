@@ -103,7 +103,7 @@ const pois = useNavPois({
   getGeometry: () => geometry,
   zoomWidthScale,
 })
-const { POI_CATS, poiVisible } = pois
+const { POI_CATS, poiVisible, loading: poiLoading } = pois
 const showPoiPanel = ref(false)
 
 // Garde l'écran allumé pendant la séance (Screen Wake Lock). Le composable gère sa
@@ -1351,6 +1351,7 @@ function toggleScreenOffManual() {
       :cam-zoom-max="CAM_ZOOM_MAX"
       :poi-cats="POI_CATS"
       :poi-visible="poiVisible"
+      :poi-loading="poiLoading"
       :dbg-radar="dbgRadar"
       :dbg-climb="dbgClimb"
       :dbg-turn-label="dbgTurnLabel"
@@ -1367,6 +1368,7 @@ function toggleScreenOffManual() {
       @save-zoom="saveZoomToProfile"
       @toggle-terrain="toggleTerrain"
       @toggle-poi="pois.togglePoi"
+      @search-pois="pois.fetchPlaces({ center: lastPos ?? undefined })"
       @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"

@@ -22,6 +22,8 @@ const props = defineProps<{
   camZoomMax: number
   poiCats: PoiCategory[]
   poiVisible: Record<string, boolean>
+  // Recherche POI « autour de moi » en cours : grise le bouton et affiche un spinner.
+  poiLoading?: boolean
   dbgRadar: boolean
   dbgClimb: boolean
   // Libellé d'état du scénario de virage débug (ex. « Approche »), ou null quand off.
@@ -42,6 +44,7 @@ const emit = defineEmits<{
   (e: 'save-zoom'): void
   (e: 'toggle-terrain'): void
   (e: 'toggle-poi', key: string): void
+  (e: 'search-pois'): void
   (e: 'toggle-debug-radar'): void
   (e: 'toggle-debug-climb'): void
   (e: 'cycle-debug-turn'): void
@@ -220,6 +223,22 @@ function onZoom(e: Event) {
           <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
         </button>
         <div v-if="showPoiPanel" class="nav-cam-panel nav-poi-panel shadow">
+          <!-- Charge les POI autour de la position courante (Overpass). Réutilisé en
+               navigation sur itinéraire (re-recherche) et en mode libre (seul moyen
+               de charger les POI, faute de tracé). -->
+          <button
+            type="button"
+            class="btn btn-sm btn-primary w-100 nav-poi-search"
+            :disabled="poiLoading"
+            @click="$emit('search-pois')"
+          >
+            <i
+              class="fa-solid me-1"
+              :class="poiLoading ? 'fa-spinner fa-spin' : 'fa-location-crosshairs'"
+              aria-hidden="true"
+            ></i>
+            {{ t('routes.poi_search_around') }}
+          </button>
           <label v-for="cat in poiCats" :key="cat.key" class="nav-cam-row nav-cam-row--switch">
             <span class="nav-cam-label nav-poi-label">
               <i class="fa-solid" :class="cat.icon" :style="{ color: cat.color }" aria-hidden="true"></i>
@@ -315,6 +334,8 @@ function onZoom(e: Event) {
    de vue, sommets et cols »). */
 .nav-poi-panel { width: 16rem; }
 .nav-poi-panel .nav-cam-row + .nav-cam-row { margin-top: 0.6rem; }
+/* Bouton « chercher autour de moi » en tête du panneau, séparé de la liste des filtres. */
+.nav-poi-search { margin-bottom: 0.7rem; font-weight: 600; }
 .nav-poi-label {
   display: flex; align-items: center; gap: 0.55rem;
   width: auto; flex: 1; font-size: 0.9rem; line-height: 1.15;

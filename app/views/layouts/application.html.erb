@@ -58,6 +58,12 @@
                 <% end %>
               </li>
             <% end %>
+            <%# Navigation libre : publique, proposée à tous (connectés ou non). %>
+            <li class="nav-item">
+              <%= link_to free_navigate_path, class: "nav-link" do %>
+                <i class="fa-solid fa-location-crosshairs me-1" aria-hidden="true"></i><%= t("nav.free_navigate") %>
+              <% end %>
+            </li>
           </ul>
           <ul class="navbar-nav ">
             <% if user_signed_in? %>

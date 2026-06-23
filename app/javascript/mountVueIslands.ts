@@ -4,6 +4,7 @@ import ActivityDetail from './components/ActivityDetail.vue'
 import RoutesList from './components/RoutesList.vue'
 import RouteBuilder from './components/RouteBuilder.vue'
 import RouteNavigation from './components/RouteNavigation.vue'
+import FreeNavigation from './components/FreeNavigation.vue'
 import ImportFitActivity from './components/ImportFitActivity.vue'
 import UserProfile from './components/UserProfile.vue'
 import ProfileDialog from './components/ProfileDialog.vue'
@@ -15,6 +16,7 @@ const registry: Record<string, Component> = {
   RoutesList,
   RouteBuilder,
   RouteNavigation,
+  FreeNavigation,
   ImportFitActivity,
   UserProfile,
   ProfileDialog,

@@ -1,7 +1,7 @@
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { t } from '../i18n'
 import { haversine } from '../routeHelpers'
-import type { Coord } from '../routeHelpers'
+import type { Coord, LngLat } from '../routeHelpers'
 import { userPreferences } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 
@@ -32,6 +32,10 @@ export function useNavPois(deps: {
     Object.fromEntries(POI_CATS.map((c) => [c.key, !!userPreferences().points_of_interest[c.prefField]])),
   )
 
+  // Recherche Overpass en cours : pilote le retour visuel (spinner) du bouton
+  // « chercher autour de moi » du panneau de séance.
+  const loading = ref(false)
+
   let placeMarkers: any[] = []   // marqueurs POI ponctuels (filtrés par le panneau de séance)
   let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
   let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
@@ -50,20 +54,30 @@ export function useNavPois(deps: {
     return Math.min(1.8, Math.max(0.75, zoomWidthScale(z)))
   }
 
-  // Pose autour du tracé les POI ponctuels, comme le créateur d'itinéraire. Mêmes
-  // catégories, même rayon (points_of_interest) et même rendu de marqueur. Best-effort :
-  // un échec Overpass est silencieux, les POI ne sont qu'un complément à la navigation.
+  // Pose les POI ponctuels, comme le créateur d'itinéraire. Mêmes catégories, même
+  // rayon (points_of_interest) et même rendu de marqueur. Best-effort : un échec
+  // Overpass est silencieux, les POI ne sont qu'un complément à la navigation.
   // (Les localités n'ont pas de marqueur, on ne les recherche pas ici.)
-  async function fetchPlaces() {
+  //
+  // Deux modes selon `opts.center` :
+  //   • sans centre (navigation sur itinéraire) : bbox du tracé, filtre par distance
+  //     au point le plus proche du tracé ;
+  //   • avec centre [lng, lat] (bouton « chercher autour de moi », mode libre) : bbox
+  //     autour du point, filtre par distance au centre.
+  async function fetchPlaces(opts: { center?: [number, number] } = {}) {
     const geometry = getGeometry()
     const poi = userPreferences().points_of_interest
     // Toutes les catégories ponctuelles : l'affichage est ensuite filtré par le
     // panneau (poiVisible), dont l'état initial reflète les préférences du profil.
     const types = POI_CATS.map((c) => c.key)
-    if (types.length === 0 || geometry.length < 2) return
+    const center = opts.center
+    // Anchors : autour du centre fourni, sinon le long du tracé. Sans l'un ni l'autre,
+    // rien à chercher.
+    const anchors: (Coord | LngLat)[] = center ? [center] : geometry
+    if (types.length === 0 || anchors.length < (center ? 1 : 2)) return
 
     let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
-    for (const [lng, lat] of geometry) {
+    for (const [lng, lat] of anchors) {
       if (lat < south) south = lat
       if (lat > north) north = lat
       if (lng < west) west = lng
@@ -75,6 +89,7 @@ export function useNavPois(deps: {
     const BUFFER = Math.max(0.02, (radiusM + 200) / 111000)
     south -= BUFFER; north += BUFFER; west -= BUFFER; east += BUFFER
 
+    loading.value = true
     try {
       const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}&types=${types.join(',')}`)
       if (!res.ok) return
@@ -86,10 +101,11 @@ export function useNavPois(deps: {
         if (!categoryForType(node.type)?.point) continue
         const key = `${node.type}:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
         if (seen.has(key)) continue
-        // Filtre par le rayon configurable : distance du POI au point le plus proche du tracé.
+        // Filtre par le rayon configurable : distance du POI au plus proche des anchors
+        // (point central en mode libre, ou point le plus proche du tracé).
         let minD = Infinity
-        for (let i = 0; i < geometry.length; i++) {
-          const d = haversine(geometry[i], [node.lng, node.lat])
+        for (let i = 0; i < anchors.length; i++) {
+          const d = haversine(anchors[i], [node.lng, node.lat])
           if (d < minD) minD = d
         }
         if (minD > radiusM) continue
@@ -97,7 +113,9 @@ export function useNavPois(deps: {
         places.push({ name: node.name, type: node.type, lng: node.lng, lat: node.lat })
       }
       installPlaceMarkers(places)
-    } catch { /* réseau / serveur Overpass — silencieux */ }
+    } catch { /* réseau / serveur Overpass — silencieux */ } finally {
+      loading.value = false
+    }
   }
 
   // Marqueur HTML persistant par POI (même look que le créateur). Les marqueurs
@@ -254,6 +272,7 @@ export function useNavPois(deps: {
   return {
     POI_CATS,
     poiVisible,
+    loading,
     fetchPlaces,
     togglePoi,
     applyPoiScale,

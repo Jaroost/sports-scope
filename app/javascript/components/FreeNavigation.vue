@@ -1,19 +1,25 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor } from '../mapStyles'
 import { haversine, bearingBetween } from '../routeHelpers'
 import type { LngLat } from '../routeHelpers'
 import { moveLngLat } from '../navHelpers'
-import { unlockAudio, playRadarThreat, playRadarClose } from '../navAudio'
+import { unlockAudio } from '../navAudio'
 import RadarOverlay from './RadarOverlay.vue'
 import NavScreenOff from './NavScreenOff.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
-import { radarStore } from '../stores/radarStore'
-import { connectRadar, disconnectRadar, hasKnownRadar } from '../variaRadar'
-import { userPreferences, persistNavCamera, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
+import { userPreferences, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import { useNavPois } from '../composables/useNavPois'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
+import { useNavSound } from '../composables/useNavSound'
+import { useRadarAlerts } from '../composables/useRadarAlerts'
+import {
+  useNavCamera, CAM_PITCH_MIN, CAM_PITCH_MAX, CAM_ZOOM_MIN, CAM_ZOOM_MAX,
+} from '../composables/useNavCamera'
+import { useControlsHide } from '../composables/useControlsHide'
+import { useRevealGesture } from '../composables/useRevealGesture'
+import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS } from '../navConstants'
 
 // ─── Mode navigation libre (sans itinéraire) ──────────────────────────────────
 // Frère allégé de RouteNavigation.vue : on ne garde que la carte (suivi GPS + caméra
@@ -21,9 +27,6 @@ import { useScreenWakeLock } from '../composables/useScreenWakeLock'
 // de séance (style de carte, caméra, son, POI « autour de moi »). Aucune notion
 // d'itinéraire : pas de tracé, virages, cols, sortie de trajet, distance restante.
 
-const SOUND_KEY = 'sportsScope.navSound'
-// Tuiles MNT (terrarium) pour le relief 3D — mêmes sources que la navigation sur itinéraire.
-const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 // Vue de départ avant le premier fix GPS (centre de la Suisse) — recadrée dès la
 // première position reçue.
 const DEFAULT_CENTER: LngLat = [8.23, 46.82]
@@ -31,8 +34,6 @@ const DEFAULT_ZOOM = 7
 
 // Réglages caméra issus du profil (section Navigation), partagés avec la nav sur itinéraire.
 const navPrefs = userPreferences().navigation
-const MIN_MOVE_M = 4            // déplacement requis pour recalculer un cap
-const MIN_SPEED_MS = 0.8       // en dessous, on garde le cap précédent
 
 const mapEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
@@ -43,18 +44,27 @@ const following = ref(true)
 // Posé quand l'utilisateur déplace/zoome la carte à la main : supprime le recentrage
 // auto ; le bouton « recentrer » le réarme.
 const cameraUnlocked = ref(false)
-const soundOn = ref(loadSound())
 // Fond de carte gouverné par le profil (comme la nav sur itinéraire) : on part du
 // réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
 const mapStyleId = ref(navPrefs.default_style as string)
 
-// Réglages caméra ajustables en séance (curseurs du panneau). On part des valeurs du
-// profil ; la boucle d'animation et followOptions lisent ces refs.
-const camZoom = ref(navPrefs.zoom)
-const camPitch = ref(navPrefs.pitch)
-const terrain3d = ref(navPrefs.terrain)
+// Son de la séance (alertes radar). Voir useNavSound.
+const { soundOn, toggleSound } = useNavSound()
+
+// Réglages caméra (inclinaison / zoom / relief 3D), ajustables en séance et reportés
+// sur le profil. onZoomInput détache la caméra du suivi via onManualZoom. Voir useNavCamera.
+const {
+  camZoom, camPitch, terrain3d, zoomSaved,
+  onPitchInput, onZoomInput, applyTerrain, toggleTerrain, persistPitchTerrain, saveZoomToProfile,
+} = useNavCamera({ getMap: () => map, onManualZoom })
+// Curseur zoom pris en main : on détache la caméra du suivi (état local au composant).
+function onManualZoom() {
+  hasInitialZoom = true
+  following.value = false
+  cameraUnlocked.value = true
+}
+// État d'ouverture du sous-panneau caméra (lié en v-model à NavControlsPanel).
 const showCamPanel = ref(false)
-const zoomSaved = ref(false)
 
 // ─── Filtres POI (panneau de séance) ──────────────────────────────────────────
 // Même sous-système que la nav sur itinéraire. Sans tracé, on lui passe une géométrie
@@ -78,62 +88,19 @@ const loggedIn = isLoggedIn()
 const screenOff = ref(false)
 
 // ─── Auto-masquage des boutons (interface épurée en séance) ────────────────────
-const controlsVisible = ref(true)
-let controlsHideId: number | null = null
-const CONTROLS_HIDE_MS = 4000
-
-function armControlsHide() {
-  if (controlsHideId != null) clearTimeout(controlsHideId)
-  controlsHideId = window.setTimeout(() => {
-    controlsHideId = null
-    if (showCamPanel.value || showPoiPanel.value) { armControlsHide(); return }
-    controlsVisible.value = false
-  }, CONTROLS_HIDE_MS)
-}
-
-function showControls() {
-  controlsVisible.value = true
-  armControlsHide()
-}
-
-function hideControls() {
-  if (controlsHideId != null) { clearTimeout(controlsHideId); controlsHideId = null }
-  showCamPanel.value = false
-  showPoiPanel.value = false
-  controlsVisible.value = false
-}
+// On ne masque pas tant qu'un sous-panneau (caméra / POI) est ouvert. Voir useControlsHide.
+const { controlsVisible, armControlsHide, showControls, hideControls } = useControlsHide({
+  isPanelOpen: () => showCamPanel.value || showPoiPanel.value,
+  closePanels: () => { showCamPanel.value = false; showPoiPanel.value = false },
+})
 
 // ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
-const REVEAL_SWIPE_M = 40
-let revealStartY = 0
-let revealStartX = 0
-let revealTracking = false
-
-function onRevealDown(e: PointerEvent) {
-  revealStartY = e.clientY
-  revealStartX = e.clientX
-  revealTracking = true
-}
-
-function onRevealMove(e: PointerEvent) {
-  if (!revealTracking) return
-  if (e.clientY - revealStartY > REVEAL_SWIPE_M) {
-    revealTracking = false
-    showControls()
-  }
-}
-
-function onRevealUp(e: PointerEvent) {
-  if (!revealTracking) return
-  revealTracking = false
-  const moved = Math.hypot(e.clientX - revealStartX, e.clientY - revealStartY)
-  if (moved < 10 && !screenOff.value) toggleScreenOffManual()
-}
-
-const CAM_PITCH_MIN = 0
-const CAM_PITCH_MAX = 75
-const CAM_ZOOM_MIN = 14
-const CAM_ZOOM_MAX = 20
+// Swipe → rappelle les boutons ; tap quasi immobile → bascule la veille. Voir useRevealGesture.
+const { onRevealDown, onRevealMove, onRevealUp, cancel: cancelReveal } = useRevealGesture({
+  onReveal: showControls,
+  onTap: () => toggleScreenOffManual(),
+  canTap: () => !screenOff.value,
+})
 
 // ─── Échelle des POI selon le zoom ─────────────────────────────────────────────
 // Même loi que la nav sur itinéraire (base 2 ancrée sur le zoom par défaut), utilisée
@@ -170,95 +137,13 @@ let anchorTime = 0
 let extrapSpeedMs = 0
 let extrapBearing = 0
 let displayBearing = 0
-const MAX_EXTRAP_S = 2.5
-const BEARING_SMOOTH = 0.18
-const BEARING_EPS = 0.1
 const FRAME_MIN_MS = Math.round(1000 / (navPrefs.nav_fps ?? 8))
 let containerH = 0
 let lastTickT = 0
 
-function loadSound(): boolean {
-  try { return localStorage.getItem(SOUND_KEY) !== 'off' } catch { return true }
-}
-
-function toggleSound() {
-  soundOn.value = !soundOn.value
-  try { localStorage.setItem(SOUND_KEY, soundOn.value ? 'on' : 'off') } catch { /* ignore */ }
-  if (soundOn.value) unlockAudio()
-}
-
 // ─── Radar arrière (Garmin Varia) ─────────────────────────────────────────────
-const radarKnown = ref(false)
-void hasKnownRadar().then((known) => { radarKnown.value = known })
-
-function toggleRadar() {
-  if (radarStore.isConnected.value || radarStore.status.value === 'connecting') {
-    disconnectRadar()
-  } else {
-    void connectRadar()
-  }
-}
-
-// Alertes sonores du radar : bip d'avertissement à l'entrée en portée, bip insistant
-// sous le seuil rapproché. Une seule fois par véhicule (suivi par id). Identique à la
-// nav sur itinéraire.
-const RADAR_CLOSE_M = navPrefs.radar_close_m
-let knownThreatIds = new Set<number>()
-let closeAlertedIds = new Set<number>()
-watch(() => radarStore.targets.value, (targets) => {
-  if (soundOn.value) {
-    if (targets.some((tg) => !knownThreatIds.has(tg.id))) playRadarThreat()
-    if (targets.some((tg) => tg.distanceM <= RADAR_CLOSE_M && !closeAlertedIds.has(tg.id))) {
-      playRadarClose()
-    }
-  }
-  knownThreatIds = new Set(targets.map((tg) => tg.id))
-  closeAlertedIds = new Set(
-    targets.filter((tg) => tg.distanceM <= RADAR_CLOSE_M).map((tg) => tg.id),
-  )
-})
-
-// ─── Camera controls ──────────────────────────────────────────────────────────
-
-function onPitchInput() {
-  if (map) map.setPitch(camPitch.value)
-}
-
-function onZoomInput() {
-  if (!map) return
-  hasInitialZoom = true
-  map.setZoom(camZoom.value)
-  following.value = false
-  cameraUnlocked.value = true
-}
-
-function applyTerrain() {
-  if (!map) return
-  if (terrain3d.value) {
-    if (!map.getSource('terrain-dem')) {
-      map.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
-    }
-    map.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
-  } else {
-    map.setTerrain(null)
-  }
-}
-
-function toggleTerrain() {
-  terrain3d.value = !terrain3d.value
-  applyTerrain()
-  persistPitchTerrain()
-}
-
-function persistPitchTerrain() {
-  persistNavCamera(navPrefs.zoom, camPitch.value, terrain3d.value)
-}
-
-function saveZoomToProfile() {
-  persistNavCamera(camZoom.value, camPitch.value, terrain3d.value)
-  zoomSaved.value = true
-  window.setTimeout(() => { zoomSaved.value = false }, 1800)
-}
+// Connexion/déconnexion + alertes sonores (une par véhicule). Voir useRadarAlerts.
+const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn })
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
 
@@ -281,12 +166,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
-  if (controlsHideId != null) { clearTimeout(controlsHideId); controlsHideId = null }
   stopAnimation()
   window.removeEventListener('pointerdown', onFirstGesture, true)
   window.removeEventListener('touchstart', onFirstGesture, true)
   window.removeEventListener('resize', refreshContainerH)
-  disconnectRadar()
   if (map) { map.remove(); map = null }
 })
 
@@ -576,7 +459,7 @@ function toggleScreenOffManual() {
       @pointerdown="onRevealDown"
       @pointermove="onRevealMove"
       @pointerup="onRevealUp"
-      @pointercancel="revealTracking = false"
+      @pointercancel="cancelReveal"
     >
       <span class="nav-reveal-grabber" aria-hidden="true">
         <i class="fa-solid fa-chevron-down"></i>

@@ -13,7 +13,7 @@ import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
-import { unlockAudio, playManeuver, playOffRoute, playRadarThreat, playRadarClose } from '../navAudio'
+import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
 import { vibrateManeuver, vibrateOffRoute } from '../navHaptics'
 import RadarOverlay from './RadarOverlay.vue'
 import NavOfflineButton from './NavOfflineButton.vue'

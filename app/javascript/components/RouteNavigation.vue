@@ -512,20 +512,41 @@ function rebuildRouteState(newGeometry: Coord[], hints: VoiceHint[]) {
 // puis on épisse ce détour devant la suite inchangée de l'itinéraire planifié. On
 // préserve ainsi l'itinéraire choisi à la main (cols, routes) au lieu de le remplacer.
 
-// Raccord visé un peu en avant du sommet le plus proche, pour ne pas viser un point
-// qu'on s'apprête déjà à dépasser.
+// Raccord visé un peu en avant du sommet retenu, pour ne pas viser un point qu'on
+// s'apprête déjà à dépasser.
 const REJOIN_LOOKAHEAD_M = 30
+// Demi-angle (deg) autour du cap dans lequel un point du tracé est considéré « devant »
+// le coureur. Au-delà, le rejoindre imposerait de faire demi-tour.
+const REJOIN_FORWARD_ARC = 85
+// Distance minimale (m) au point de raccord : on ne raccorde pas juste à côté de soi.
+const REJOIN_MIN_AHEAD_M = 40
 let rerouteToken = 0
 
-// Sommet du tracé où raccorder : le plus proche de `pos` à partir de `fromIdx` (la
-// progression courante, pour ne jamais raccorder en arrière), décalé d'un court
-// look-ahead en distance.
-function rejoinIndexAhead(pos: LngLat, fromIdx: number): number {
-  let best = fromIdx
+// Sommet du tracé restant où raccorder. On privilégie le sommet le plus proche situé
+// DEVANT le coureur (dans l'arc autour de son cap) : BRouter en tire alors un détour qui
+// repart vers l'avant, donc continuer tout droit raccroche le tracé plus loin — au lieu
+// de raccorder derrière soi (point le plus proche après un virage manqué) et de ressortir
+// aussitôt. À défaut de point exploitable devant (cap peu fiable à l'arrêt, ou tracé
+// entièrement derrière), on retombe sur le sommet le plus proche depuis la progression.
+function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number {
+  let best = -1
   let bestD = Infinity
   for (let i = fromIdx; i < geometry.length; i++) {
     const d = haversine(pos, [geometry[i][0], geometry[i][1]])
+    if (d < REJOIN_MIN_AHEAD_M) continue
+    let rel = bearingBetween(pos, [geometry[i][0], geometry[i][1]]) - heading
+    while (rel > 180) rel -= 360
+    while (rel < -180) rel += 360
+    if (Math.abs(rel) > REJOIN_FORWARD_ARC) continue
     if (d < bestD) { bestD = d; best = i }
+  }
+  if (best < 0) {
+    best = fromIdx
+    bestD = Infinity
+    for (let i = fromIdx; i < geometry.length; i++) {
+      const d = haversine(pos, [geometry[i][0], geometry[i][1]])
+      if (d < bestD) { bestD = d; best = i }
+    }
   }
   let j = best
   while (j < geometry.length - 1 && cumDistM[j] - cumDistM[best] < REJOIN_LOOKAHEAD_M) j++
@@ -544,7 +565,7 @@ async function recalcRoute() {
   const from = lastPos
   try {
     const fromIdx = Math.max(0, Math.min(lastIdx, geometry.length - 1))
-    const rejoinIdx = rejoinIndexAhead(from, fromIdx)
+    const rejoinIdx = rejoinIndexAhead(from, currentBearing, fromIdx)
     const target = geometry[rejoinIdx]
     const lonlats = `${from[0]},${from[1]}|${target[0]},${target[1]}`
     const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${brouterProfile(routeSport)}&alternativeidx=0&format=geojson&timode=2`

@@ -6,6 +6,7 @@ import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
   haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
+  buildOffsetDisplayLine,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import {
@@ -188,10 +189,14 @@ function zoomWidthScale(z: number): number {
 // Expression MapLibre `line-width` : stops à chaque niveau de zoom entier (clampés
 // aux bornes du suivi), interpolés linéairement. MapLibre clampe hors plage sur le
 // premier/dernier stop, ce qui borne naturellement la largeur.
-function zoomWidthExpr(base: number): any {
-  const stops: number[] = []
+// `perFeature` : si vrai, chaque palier est multiplié par la propriété `wscale` de la feature
+// (largeur réduite sur les recouvrements). On garde `zoom` en entrée de l'interpolation de plus
+// haut niveau — seule forme acceptée par MapLibre pour une expression zoom + data-driven.
+function zoomWidthExpr(base: number, perFeature = false): any {
+  const stops: any[] = []
   for (let z = CAM_ZOOM_MIN; z <= CAM_ZOOM_MAX; z++) {
-    stops.push(z, Math.round(base * zoomWidthScale(z) * 100) / 100)
+    const w = Math.round(base * zoomWidthScale(z) * 100) / 100
+    stops.push(z, perFeature ? ['*', w, ['get', 'wscale']] : w)
   }
   return ['interpolate', ['linear'], ['zoom'], ...stops]
 }
@@ -222,6 +227,14 @@ let turnMarkers: any[] = []    // marqueurs DOM des indicateurs de virage (au-de
 
 // Route data (non-reactive: large arrays, only read inside callbacks)
 let geometry: Coord[] = []
+// Polyligne d'AFFICHAGE alignée index-pour-index sur `geometry` : décalée latéralement
+// uniquement sur les portions où l'itinéraire se superpose à lui-même, pour différencier
+// les deux passages. `geometry` reste la vérité (snapping, distances) ; voir
+// buildOffsetDisplayLine. C'est elle qu'on envoie aux sources MapLibre.
+let displayLine: LngLat[] = []
+// Facteur de largeur par sommet (∈ [0.7, 1]) : abaissé sur les recouvrements pour amincir le
+// tracé dédoublé. Piloté côté MapLibre via la propriété `wscale` des features (line-width).
+let displayWScale: number[] = []
 let alts: (number | null)[] = []
 let cumDistM: number[] = []
 let climbs: Climb[] = []
@@ -568,6 +581,7 @@ async function fetchRoute() {
   routeName.value = route.name || ''
   alts = geometry.map((c) => c[2] ?? null)
   cumDistM = buildDistancesM(geometry)
+  ;({ line: displayLine, wscale: displayWScale } = buildOffsetDisplayLine(geometry, cumDistM))
   climbs = detectClimbs(alts, cumDistM)
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
@@ -654,13 +668,16 @@ async function initMap() {
 }
 
 function installRouteLayers() {
-  const line = geometry.map(([lng, lat]) => [lng, lat])
-  map.addSource('nav-route', { type: 'geojson', data: lineFeature(line) })
-  map.addSource('nav-remaining', { type: 'geojson', data: lineFeature(line) })
+  // displayLine porte déjà le décalage des portions superposées (baked dans la géométrie),
+  // donc plus de `line-offset` paint : il s'appliquerait uniformément à tout le tracé.
+  // La largeur, elle, varie via la propriété `wscale` des features (tracé aminci sur les
+  // recouvrements) → sources en FeatureCollection découpée par paliers de largeur.
+  map.addSource('nav-route', { type: 'geojson', data: widthRunsCollection(displayLine, displayWScale) })
+  map.addSource('nav-remaining', { type: 'geojson', data: widthRunsCollection(displayLine, displayWScale) })
 
-  map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(ROUTE_BORDER_WIDTH) } })
-  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH), 'line-opacity': ROUTE_LINE_OPACITY } })
-  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': ROUTE_LINE_COLOR, 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH), 'line-opacity': ROUTE_LINE_OPACITY } })
+  map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(ROUTE_BORDER_WIDTH, true) } })
+  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH, true), 'line-opacity': ROUTE_LINE_OPACITY } })
+  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': ROUTE_LINE_COLOR, 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH, true), 'line-opacity': ROUTE_LINE_OPACITY } })
 }
 
 // Indicateurs de virage en marqueurs DOM (et non en couches canvas) : les
@@ -742,8 +759,28 @@ function maybeApplyMarkerScale() {
   pois.applyPoiScale(z)
 }
 
-function lineFeature(coords: number[][]) {
-  return { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: coords }, properties: {} }
+// Une LineString a une largeur uniforme : pour faire varier `wscale` le long du tracé, on le
+// découpe en tronçons de wscale ~constant (quantifié par paliers) et on porte la valeur en
+// propriété de feature, lue par line-width. Les tronçons partagent leur sommet frontière pour
+// rester jointifs. `scales` est aligné index-pour-index sur `coords`.
+function widthRunsCollection(coords: number[][], scales: number[]) {
+  const q = (w: number) => Math.round(w / 0.05) * 0.05   // paliers de 0.05 → peu de features
+  const seg = (c: number[][], wscale: number) =>
+    ({ type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: c }, properties: { wscale } })
+  const features: ReturnType<typeof seg>[] = []
+  if (coords.length < 2) return { type: 'FeatureCollection' as const, features }
+  let start = 0
+  let cur = q(scales[0] ?? 1)
+  for (let i = 1; i < coords.length; i++) {
+    const w = q(scales[i] ?? 1)
+    if (w !== cur) {
+      features.push(seg(coords.slice(start, i + 1), cur))   // inclut le sommet frontière i
+      start = i
+      cur = w
+    }
+  }
+  features.push(seg(coords.slice(start), cur))
+  return { type: 'FeatureCollection' as const, features }
 }
 
 function setMapStyle(id: string) {
@@ -1117,10 +1154,14 @@ function climbProfileFor(climb: Climb): ClimbProfile {
 function refreshRemaining() {
   const src = map?.getSource('nav-remaining')
   if (!src) return
-  const rest = geometry.slice(snapPoint ? snapNextIdx : lastIdx).map(([lng, lat]) => [lng, lat])
+  // displayLine / displayWScale sont indexés comme geometry : on tranche au même index pour
+  // garder le décalage ET l'amincissement des portions superposées sur la partie restante.
+  const from = snapPoint ? snapNextIdx : lastIdx
+  const rest = displayLine.slice(from).map(([lng, lat]) => [lng, lat])
+  const restW = displayWScale.slice(from)
   // Start the remaining line exactly at the rider's projected position.
-  if (snapPoint) rest.unshift([snapPoint[0], snapPoint[1]])
-  src.setData(lineFeature(rest))
+  if (snapPoint) { rest.unshift([snapPoint[0], snapPoint[1]]); restW.unshift(restW[0] ?? 1) }
+  src.setData(widthRunsCollection(rest, restW))
 }
 
 function updateLocationMarker(coords: LngLat) {

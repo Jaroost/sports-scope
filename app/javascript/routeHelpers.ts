@@ -337,6 +337,96 @@ export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
   return (Math.atan2(y, x) * 180) / Math.PI
 }
 
+// Construit une polyligne d'AFFICHAGE alignée index-pour-index sur `geom` : identique au
+// tracé réel, SAUF là où l'itinéraire se superpose à lui-même (portion empruntée ≥ 2 fois),
+// où les sommets sont décalés perpendiculairement à droite du sens de parcours. Comme aller
+// et retour vont en sens opposés, ils se séparent en deux « voies ». Le décalage est lissé
+// (fenêtre glissante) pour éviter un saut à l'entrée/sortie des zones de recouvrement.
+//
+// `geom` reste la vérité géométrique (snapping, distances…) ; seul l'affichage est décalé.
+// Renvoie, alignés index-pour-index sur `geom` :
+//  - `line`   : la polyligne d'affichage (décalée sur les recouvrements) ;
+//  - `wscale` : un facteur de largeur ∈ [1−narrowFrac, 1], abaissé sur les recouvrements
+//               pour amincir le tracé là où il se dédouble (deux voies serrées plus lisibles).
+export function buildOffsetDisplayLine(
+  geom: Array<Coord | LngLat>,
+  cumDistM: number[],
+  opts: { offsetM?: number; proximityM?: number; minSeparationM?: number; rampM?: number; narrowFrac?: number } = {},
+): { line: LngLat[]; wscale: number[] } {
+  const offsetM = opts.offsetM ?? 5          // décalage latéral appliqué aux portions superposées
+  const proximityM = opts.proximityM ?? 12   // en deçà, deux points sont « au même endroit »
+  const minSeparationM = opts.minSeparationM ?? 50  // écart le long du parcours au-delà duquel un rapprochement est un vrai recouvrement (et non de simples voisins)
+  const rampM = opts.rampM ?? 18             // longueur de transition pour lisser le décalage
+  const narrowFrac = opts.narrowFrac ?? 0.3  // amincissement max du tracé sur les recouvrements (30 %)
+  const n = geom.length
+  const pts: LngLat[] = geom.map((c) => [c[0], c[1]])
+  if (n < 3) return { line: pts, wscale: new Array(n).fill(1) }
+
+  // 1) Détection du recouvrement via grille de hachage spatiale (≈ O(n)). On indexe chaque
+  // sommet dans une cellule de ~proximityM, puis on ne compare qu'aux 8 cellules voisines.
+  const latRef = geom[0][1]
+  const mPerDegLat = 111320
+  const mPerDegLng = 111320 * Math.cos((latRef * Math.PI) / 180) || 1
+  const cellLat = proximityM / mPerDegLat
+  const cellLng = proximityM / mPerDegLng
+  const grid = new Map<string, number[]>()
+  const cellKey = (gx: number, gy: number) => `${gx},${gy}`
+  const cellOf = (i: number): [number, number] => [Math.floor(geom[i][0] / cellLng), Math.floor(geom[i][1] / cellLat)]
+  for (let i = 0; i < n; i++) {
+    const [gx, gy] = cellOf(i)
+    const k = cellKey(gx, gy)
+    const bucket = grid.get(k)
+    if (bucket) bucket.push(i)
+    else grid.set(k, [i])
+  }
+  const overlapping = new Array<boolean>(n).fill(false)
+  for (let i = 0; i < n; i++) {
+    const [gx, gy] = cellOf(i)
+    for (let dx = -1; dx <= 1 && !overlapping[i]; dx++) {
+      for (let dy = -1; dy <= 1 && !overlapping[i]; dy++) {
+        const bucket = grid.get(cellKey(gx + dx, gy + dy))
+        if (!bucket) continue
+        for (const j of bucket) {
+          if (j === i) continue
+          if (Math.abs(cumDistM[i] - cumDistM[j]) < minSeparationM) continue  // simples voisins le long du tracé
+          if (haversine(geom[i], geom[j]) <= proximityM) { overlapping[i] = true; break }
+        }
+      }
+    }
+  }
+
+  // 2) Lissage : moyenne glissante (en distance) de la cible binaire 0/offsetM → rampes douces
+  // à l'entrée/sortie au lieu de marches d'escalier. Deux pointeurs monotones → O(n).
+  const target = overlapping.map((o) => (o ? offsetM : 0))
+  const off = new Array<number>(n)
+  let lo = 0, hi = 0, sum = 0
+  for (let i = 0; i < n; i++) {
+    while (hi < n && cumDistM[hi] - cumDistM[i] <= rampM) { sum += target[hi]; hi++ }
+    while (lo < hi && cumDistM[i] - cumDistM[lo] > rampM) { sum -= target[lo]; lo++ }
+    off[i] = sum / Math.max(1, hi - lo)
+  }
+
+  // 3) Application : on pousse chaque sommet de off[i] mètres à droite de la tangente locale
+  // (tangente = cap du sommet précédent au suivant ; bord = cap du segment adjacent).
+  const out: LngLat[] = new Array(n)
+  for (let i = 0; i < n; i++) {
+    if (off[i] < 1e-3) { out[i] = pts[i]; continue }
+    const a = geom[Math.max(0, i - 1)]
+    const b = geom[Math.min(n - 1, i + 1)]
+    const tangent = bearingBetween(a, b)              // degrés, 0 = nord
+    const right = ((tangent + 90) * Math.PI) / 180    // perpendiculaire droite, en radians
+    const dLat = (off[i] * Math.cos(right)) / mPerDegLat
+    const lngScale = Math.cos((geom[i][1] * Math.PI) / 180) || 1
+    const dLng = (off[i] * Math.sin(right)) / (111320 * lngScale)
+    out[i] = [pts[i][0] + dLng, pts[i][1] + dLat]
+  }
+
+  // Largeur : on amincit proportionnellement au décalage déjà lissé (off/offsetM ∈ [0,1]),
+  // donc le tracé maigrit exactement là où il se dédouble, avec les mêmes rampes douces.
+  const wscale = off.map((o) => 1 - narrowFrac * (o / offsetM))
+  return { line: out, wscale }
+}
+
 // Closest point on the segment [a, b] to `p`, using an equirectangular
 // projection centred on `p` (accurate over the short spans between adjacent
 // route vertices). `p` is the origin (0,0) in that projection, so we clamp its

@@ -11,6 +11,9 @@ const props = defineProps<{
   debugMode: boolean
   mapStyleId: string
   soundOn: boolean
+  // Visibilité du profil des cols : undefined en mode libre (pas d'itinéraire → pas de
+  // cols), auquel cas le bouton de bascule n'est pas affiché.
+  climbCardVisible?: boolean
   radarKnown: boolean
   camPitch: number
   camZoom: number
@@ -37,6 +40,7 @@ const emit = defineEmits<{
   (e: 'arm-controls-hide'): void
   (e: 'set-map-style', id: string): void
   (e: 'toggle-sound'): void
+  (e: 'toggle-climb-card'): void
   (e: 'toggle-radar'): void
   (e: 'pitch-input'): void
   (e: 'persist-pitch-terrain'): void
@@ -132,6 +136,20 @@ function onZoom(e: Event) {
         @click="$emit('toggle-sound')"
       >
         <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
+      </button>
+
+      <!-- Affiche / masque le profil des cols (carte d'altitude en bas d'écran). Activé
+           par défaut ; certains préfèrent dégager le bas de l'écran. -->
+      <button
+        v-if="climbCardVisible !== undefined"
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :class="{ active: climbCardVisible }"
+        :title="climbCardVisible ? t('routes.climb_card_hide') : t('routes.climb_card_show')"
+        :aria-label="climbCardVisible ? t('routes.climb_card_hide') : t('routes.climb_card_show')"
+        @click="$emit('toggle-climb-card')"
+      >
+        <i class="fa-solid fa-mountain" aria-hidden="true"></i>
       </button>
 
       <button

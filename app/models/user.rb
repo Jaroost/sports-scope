@@ -40,6 +40,7 @@ class User < ApplicationRecord
       "turn_marker_size" => 40, # rayon (px) des pastilles orange de changement de direction
       "turn_marker_color" => "#f97316",      # couleur de la pastille de changement de direction
       "turn_marker_icon_color" => "#ffffff", # couleur de la flèche / du numéro de sortie dans la pastille
+      "show_climb_card" => true, # afficher le profil des cols (graphique d'altitude) pendant la navigation
       "radar_always_visible" => false, # afficher l'overlay radar en permanence (sinon seulement en présence d'un véhicule)
       "radar_close_m" => 30, # distance (m) sous laquelle le radar passe en alerte rapprochée (rouge + bip insistant)
     },

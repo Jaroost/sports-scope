@@ -98,6 +98,7 @@ class ProfilesController < ApplicationController
         "turn_marker_size" => clamp_int(navigation[:turn_marker_size], NAV_TURN_MARKER_SIZE_RANGE, 40),
         "turn_marker_color" => hex_color(navigation[:turn_marker_color], "#f97316"),
         "turn_marker_icon_color" => hex_color(navigation[:turn_marker_icon_color], "#ffffff"),
+        "show_climb_card" => to_bool(navigation[:show_climb_card], true),
         "radar_always_visible" => to_bool(navigation[:radar_always_visible], false),
         "radar_close_m" => clamp_int(navigation[:radar_close_m], NAV_RADAR_CLOSE_RANGE, 30),
       },

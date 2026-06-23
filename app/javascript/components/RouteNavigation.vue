@@ -277,7 +277,11 @@ let displayBearing = 0                 // smoothed bearing actually rendered
 // qu'on ait à décaler la caméra. On signale juste le rétrécissement à MapLibre.
 // À l'approche d'un virage, la carte de col est masquée (approachingTurn) : la carte
 // reprend alors toute la hauteur, donc on ne la rétrécit pas dans ce cas.
-const isClimbing = computed(() => climbInfo.value != null && !approachingTurn.value)
+// Affichage du profil des cols (carte d'altitude en bas d'écran), basculable depuis
+// le tiroir de commandes. Valeur initiale issue du profil (section Navigation) ;
+// masqué, la carte n'est plus rétrécie et le bas de l'écran est dégagé.
+const showClimbCard = ref(navPrefs.show_climb_card ?? true)
+const isClimbing = computed(() => showClimbCard.value && climbInfo.value != null && !approachingTurn.value)
 // Quand on entre/sort d'un col, la carte change de taille (CSS) : on attend le
 // reflow puis on prévient MapLibre et on rafraîchit la hauteur mise en cache, sinon
 // le canvas garde ses anciennes dimensions et la vue paraît étirée.
@@ -1220,7 +1224,7 @@ function toggleScreenOffManual() {
       :turn-hint="turnHint"
       :has-fix="hasFix"
       :off-route="offRoute"
-      :climb-info="climbInfo"
+      :climb-info="showClimbCard ? climbInfo : null"
       :urgent-m="TURN_URGENT_M"
       :speed-kmh="speedKmh"
       @resume="toggleScreenOffManual"
@@ -1258,6 +1262,7 @@ function toggleScreenOffManual() {
       :debug-mode="debugMode"
       :map-style-id="mapStyleId"
       :sound-on="soundOn"
+      :climb-card-visible="showClimbCard"
       :radar-known="radarKnown"
       v-model:cam-pitch="camPitch"
       v-model:cam-zoom="camZoom"
@@ -1279,6 +1284,7 @@ function toggleScreenOffManual() {
       @arm-controls-hide="armControlsHide"
       @set-map-style="setMapStyle"
       @toggle-sound="toggleSound"
+      @toggle-climb-card="showClimbCard = !showClimbCard"
       @toggle-radar="toggleRadar"
       @pitch-input="onPitchInput"
       @persist-pitch-terrain="persistPitchTerrain"
@@ -1346,7 +1352,7 @@ function toggleScreenOffManual() {
     <!-- Climb card: full graded elevation profile with a position cursor.
          Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
     <NavClimbCard
-      v-if="climbInfo && !offRoute && !approachingTurn"
+      v-if="showClimbCard && climbInfo && !offRoute && !approachingTurn"
       :climb-info="climbInfo"
       :screen-off="screenOff"
       @resume="toggleScreenOffManual"

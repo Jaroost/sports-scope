@@ -45,6 +45,7 @@ interface Preferences {
     turn_marker_size: number
     turn_marker_color: string
     turn_marker_icon_color: string
+    show_climb_card: boolean
     radar_always_visible: boolean
     radar_close_m: number
   }
@@ -469,6 +470,13 @@ function placePreviewMarker(coords: [number, number]) {
               <input id="nav-terrain" v-model="prefs.navigation.terrain" class="form-check-input" type="checkbox" role="switch">
               <label for="nav-terrain" class="form-check-label">{{ t('profile.navigation.terrain') }}</label>
             </div>
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input id="nav-show-climb-card" v-model="prefs.navigation.show_climb_card" class="form-check-input" type="checkbox" role="switch">
+              <label for="nav-show-climb-card" class="form-check-label">{{ t('profile.navigation.show_climb_card') }}</label>
+            </div>
+            <p class="text-muted small mb-0">{{ t('profile.navigation.show_climb_card_help') }}</p>
           </div>
           <div class="col-12">
             <div class="form-check form-switch">

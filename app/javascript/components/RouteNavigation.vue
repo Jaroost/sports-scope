@@ -244,6 +244,17 @@ const GREEN_HOLD_MS = (navPrefs.turn_green_hold_s ?? 10) * 1000
 // Vrai quand l'écran a été rallumé AUTOMATIQUEMENT à l'approche d'un virage : on ne
 // remet en veille de soi-même que dans ce cas (un réveil manuel reste éveillé).
 let autoWoken = false
+// Zoom de découverte du prochain virage : quand l'écran sort de veille à l'approche
+// d'un virage, on dézoome juste ce qu'il faut pour que ce virage apparaisse à l'écran,
+// puis on resserre vers le zoom du profil à mesure qu'on s'en rapproche. null = pas de
+// surcharge → la boucle d'animation reprend le zoom du profil (camZoom). On ne descend
+// JAMAIS sous camZoom (on ne fait que dézoomer, jamais zoomer au-delà du profil). Voir
+// updateRevealZoom.
+let revealZoom: number | null = null
+// Index (dans `turns` / `turnMarkers`) du virage mis en évidence sur la carte quand
+// l'écran sort de veille à son approche, pour qu'on identifie d'un coup d'œil DE QUEL
+// virage il s'agit. -1 = aucun. Voir updateTurnSelection.
+let selectedTurnIdx = -1
 let lastTurnReminderMs = 0   // timestamp of the last repeated turn cue
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 // Virage en cours d'annonce (dans la zone d'alerte) : la répétition du son est
@@ -878,6 +889,46 @@ function followPadding(h: number): { top: number; bottom: number; left: number; 
   return { top: Math.round(h * 0.45), bottom: 0, left: 0, right: 0 }
 }
 
+// Zoom effectivement appliqué par la boucle : le zoom de découverte du virage s'il est
+// actif (sortie de veille à l'approche), sinon le zoom du profil.
+function effectiveZoom(): number {
+  return revealZoom != null ? revealZoom : camZoom.value
+}
+
+// Position (lng/lat) du virage à révéler quand on vient de sortir de veille pour lui.
+// On ne révèle que dans ce cas précis : réveil automatique (autoWoken) ET virage en
+// approche (état « near »), caméra en suivi. Sinon null → pas de surcharge de zoom.
+function revealTurnLngLat(): LngLat | null {
+  if (!autoWoken || !following.value) return null
+  if (turnHint.value?.state !== 'near') return null
+  const tp = turns[nextTurnPtr]
+  if (!tp) return null
+  return [geometry[tp.idx][0], geometry[tp.idx][1]]
+}
+
+// Ajuste le zoom de découverte pour garder le prochain virage visible à l'écran, sans
+// jamais zoomer au-delà du zoom du profil. On projette le virage dans la vue courante
+// (ce qui tient compte de l'inclinaison 3D, contrairement à un calcul analytique) : s'il
+// est trop haut (proche du bord supérieur, voire hors champ), on dézoome d'un cran ; s'il
+// laisse trop d'espace vide devant, on resserre vers le profil. Une bande morte large
+// entre les deux seuils évite toute oscillation. Appelé à chaque frame de suivi, juste
+// avant le jumpTo : le pas par frame se cumule en un dézoom progressif et fluide.
+function updateRevealZoom() {
+  const target = revealTurnLngLat()
+  if (!target) { revealZoom = null; return }
+  const h = containerH || map?.getContainer()?.clientHeight || 0
+  if (!h) { revealZoom = null; return }
+  const y = map.project(target).y
+  const topSafe = h * 0.18    // au-dessus → virage trop haut / hors champ : dézoomer
+  const comfyMax = h * 0.30   // en dessous → trop d'espace devant : resserrer vers le profil
+  const base = revealZoom ?? camZoom.value
+  let z = base
+  if (y < topSafe) z = base - 0.2
+  else if (y > comfyMax) z = base + 0.2
+  // Borné : on ne dépasse jamais le zoom du profil (dézoom seulement) ni le plancher caméra.
+  revealZoom = Math.min(camZoom.value, Math.max(CAM_ZOOM_MIN, z))
+}
+
 // Render loop: between GPS fixes, advance the rider from the last fix along its
 // heading at its carried speed, and ease the rendered bearing toward the travel
 // heading. The camera is jumped (not animated) each frame — smoothness now comes
@@ -917,7 +968,10 @@ function startAnimation() {
     updateLocationMarker(pos)
     if (locationMarker) locationMarker.setRotation(displayBearing)
     if (following.value) {
-      map.jumpTo({ center: pos, bearing: displayBearing, zoom: camZoom.value, pitch: camPitch.value, padding: followPadding(h) })
+      // Dézoom de découverte du prochain virage (sortie de veille) : ajusté avant le
+      // jumpTo, borné au zoom du profil. Hors de ce cas, effectiveZoom() == camZoom.
+      updateRevealZoom()
+      map.jumpTo({ center: pos, bearing: displayBearing, zoom: effectiveZoom(), pitch: camPitch.value, padding: followPadding(h) })
     }
 
     if (idle) { rafId = null; return }   // arrêt ; le prochain fix relance la boucle
@@ -998,7 +1052,23 @@ function updateTurns(): boolean {
   }
 
   autoWakeForTurns(turnHint.value?.state ?? null)
+  updateTurnSelection()
   return fired
+}
+
+// Met en évidence sur la carte la pastille du prochain virage quand l'écran vient de
+// sortir de veille pour lui (autoWoken) et qu'on est en approche (état « near ») — même
+// fenêtre que le dézoom de découverte. `turnMarkers` est aligné index-pour-index sur
+// `turns` (renderTurnMarkers en pose un par virage, dans l'ordre), donc le marqueur du
+// prochain virage est turnMarkers[nextTurnPtr]. No-op si la détection géométrique n'a
+// posé aucun marqueur (turnMarkers vide).
+function updateTurnSelection() {
+  const sel = autoWoken && turnHint.value?.state === 'near' ? nextTurnPtr : -1
+  if (sel === selectedTurnIdx) return
+  selectedTurnIdx = sel
+  turnMarkers.forEach((m, i) => {
+    (m.getElement() as HTMLElement).classList.toggle('nav-turn-marker--selected', i === sel)
+  })
 }
 
 // Veille automatique pilotée par les virages :
@@ -1483,6 +1553,23 @@ function toggleScreenOffManual() {
 }
 .nav-turn-marker-arrow { width: 73%; height: 73%; display: block; }
 .nav-turn-marker-exit { color: #fff; font-weight: 700; line-height: 1; }
+
+/* Virage « sélectionné » : mis en évidence quand l'écran sort de veille à son approche,
+   pour repérer d'un coup d'œil le virage concerné sur la carte. Halo pulsé porté par le
+   corps (qui subit déjà le scale du zoom), donc il grossit/rétrécit avec la pastille. Le
+   halo combine un liseré blanc et un liseré sombre pour rester visible sur fond clair
+   comme sombre, indépendamment de la couleur configurée de la pastille. */
+.nav-turn-marker--selected .nav-turn-marker-body {
+  animation: nav-turn-pulse 1.2s ease-in-out infinite;
+}
+@keyframes nav-turn-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.25), 0 0 10px 3px rgba(255, 255, 255, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 1), 0 0 0 7px rgba(0, 0, 0, 0.3), 0 0 22px 9px rgba(255, 255, 255, 0.85);
+  }
+}
 
 /* Marqueurs POI (cimetières / boulangeries) — même rendu que le créateur d'itinéraire.
    Créés en JS (maplibre.Marker), donc placés dans le bloc de style non-scoped. */

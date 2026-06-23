@@ -23,7 +23,7 @@ export interface UserPreferences {
     radius_m: number
   }
   map: { default_style: MapStyleId; overlays: string[] }
-  navigation: { default_style: MapStyleId; zoom: number; pitch: number; terrain: boolean; nav_fps: number; line_width: number; line_color: string; line_opacity: number; turn_alert_m: number; turn_hint_m: number; turn_urgent_m: number; turn_repeat_ms: number; turn_marker_size: number; turn_marker_color: string; turn_marker_icon_color: string; radar_always_visible: boolean; radar_close_m: number }
+  navigation: { default_style: MapStyleId; zoom: number; pitch: number; terrain: boolean; nav_fps: number; line_width: number; line_color: string; line_opacity: number; turn_alert_m: number; turn_hint_m: number; turn_urgent_m: number; turn_repeat_ms: number; turn_repeat_urgent_ms: number; turn_marker_size: number; turn_marker_color: string; turn_marker_icon_color: string; radar_always_visible: boolean; radar_close_m: number }
   display: {
     default_sport: Sport
     show_grade_colors: boolean
@@ -54,7 +54,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     radius_m: 1500,
   },
   map: { default_style: 'cyclosm', overlays: [] },
-  navigation: { default_style: 'liberty', zoom: 19.5, pitch: 0, terrain: false, nav_fps: 8, line_width: 40, line_color: '#7c3aed', line_opacity: 0.8, turn_alert_m: 100, turn_hint_m: 150, turn_urgent_m: 50, turn_repeat_ms: 2000, turn_marker_size: 40, turn_marker_color: '#f97316', turn_marker_icon_color: '#ffffff', radar_always_visible: false, radar_close_m: 30 },
+  navigation: { default_style: 'liberty', zoom: 19.5, pitch: 0, terrain: false, nav_fps: 8, line_width: 40, line_color: '#7c3aed', line_opacity: 0.8, turn_alert_m: 100, turn_hint_m: 150, turn_urgent_m: 50, turn_repeat_ms: 2000, turn_repeat_urgent_ms: 1000, turn_marker_size: 40, turn_marker_color: '#f97316', turn_marker_icon_color: '#ffffff', radar_always_visible: false, radar_close_m: 30 },
   display: {
     default_sport: 'cycling',
     show_grade_colors: true,

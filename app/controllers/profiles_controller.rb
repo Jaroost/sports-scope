@@ -19,6 +19,7 @@ class ProfilesController < ApplicationController
   NAV_TURN_HINT_RANGE = (50..500)
   NAV_TURN_URGENT_RANGE = (5..50)
   NAV_TURN_REPEAT_RANGE = (500..10000)
+  NAV_TURN_REPEAT_URGENT_RANGE = (500..10000)
   NAV_TURN_MARKER_SIZE_RANGE = (5..200)
   NAV_RADAR_CLOSE_RANGE = (10..100)
 
@@ -87,6 +88,7 @@ class ProfilesController < ApplicationController
         "turn_hint_m" => clamp_int(navigation[:turn_hint_m], NAV_TURN_HINT_RANGE, 150),
         "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, 50),
         "turn_repeat_ms" => clamp_int(navigation[:turn_repeat_ms], NAV_TURN_REPEAT_RANGE, 2000),
+        "turn_repeat_urgent_ms" => clamp_int(navigation[:turn_repeat_urgent_ms], NAV_TURN_REPEAT_URGENT_RANGE, 1000),
         "turn_marker_size" => clamp_int(navigation[:turn_marker_size], NAV_TURN_MARKER_SIZE_RANGE, 40),
         "turn_marker_color" => hex_color(navigation[:turn_marker_color], "#f97316"),
         "turn_marker_icon_color" => hex_color(navigation[:turn_marker_icon_color], "#ffffff"),

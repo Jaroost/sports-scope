@@ -33,6 +33,7 @@ class User < ApplicationRecord
       "turn_hint_m" => 150,    # distance (m) à laquelle l'indicateur visuel apparaît
       "turn_urgent_m" => 50,   # distance (m) à laquelle la card passe en orange
       "turn_repeat_ms" => 2000, # intervalle (ms) entre deux répétitions du son de virage
+      "turn_repeat_urgent_ms" => 1000, # intervalle (ms) entre deux répétitions du son quand le virage est proche (zone orange)
       "turn_marker_size" => 40, # rayon (px) des pastilles orange de changement de direction
       "turn_marker_color" => "#f97316",      # couleur de la pastille de changement de direction
       "turn_marker_icon_color" => "#ffffff", # couleur de la flèche / du numéro de sortie dans la pastille

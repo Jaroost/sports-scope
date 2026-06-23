@@ -54,6 +54,8 @@ const TURN_ALERT_M = navPrefs.turn_alert_m
 const TURN_HINT_M = navPrefs.turn_hint_m
 const TURN_URGENT_M = navPrefs.turn_urgent_m
 const TURN_REPEAT_MS = navPrefs.turn_repeat_ms
+// Intervalle de répétition plus court une fois le virage proche (zone orange, ≤ turn_urgent_m).
+const TURN_REPEAT_URGENT_MS = navPrefs.turn_repeat_urgent_ms
 // Rayon (px) des pastilles orange de changement de direction.
 const TURN_MARKER_SIZE = navPrefs.turn_marker_size ?? 11
 const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
@@ -242,6 +244,9 @@ let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
 // l'intervalle réel serait plafonné par la fréquence du GPS (souvent plusieurs
 // secondes) au lieu de suivre la préférence turn_repeat_ms.
 let activeTurn: { kind: Maneuver; direction: 'left' | 'right' } | null = null
+// Vrai quand le virage armé est dans la zone orange (≤ TURN_URGENT_M) : la répétition
+// du son passe alors à l'intervalle plus court TURN_REPEAT_URGENT_MS.
+let activeTurnUrgent = false
 let turnRepeatId: number | null = null
 
 // ─── Position extrapolation (dead-reckoning between GPS fixes) ────────────────
@@ -935,6 +940,7 @@ function updateTurns(): boolean {
     // Le virage est dans la zone d'alerte : on l'arme pour la répétition cadencée
     // par le timer (tickTurnRepeat), indépendante de la fréquence des fixes GPS.
     activeTurn = { kind: turn.kind, direction: turn.direction }
+    activeTurnUrgent = dist <= TURN_URGENT_M
     if (announcedTurn !== nextTurnPtr) {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()
@@ -947,6 +953,7 @@ function updateTurns(): boolean {
     // Hors zone d'alerte (pas encore assez proche, ou virage franchi) : on coupe
     // la répétition jusqu'au prochain virage.
     activeTurn = null
+    activeTurnUrgent = false
   }
 
   // Virage courant atteint (dist ≤ 0) mais pointeur pas encore avancé (on est dessus,
@@ -998,7 +1005,8 @@ function rememberReached(turn: TurnPoint) {
 function tickTurnRepeat() {
   if (!activeTurn || !soundOn.value) return
   const now = Date.now()
-  if (now - lastTurnReminderMs >= TURN_REPEAT_MS) {
+  const interval = activeTurnUrgent ? TURN_REPEAT_URGENT_MS : TURN_REPEAT_MS
+  if (now - lastTurnReminderMs >= interval) {
     lastTurnReminderMs = now
     playManeuver(activeTurn.kind, activeTurn.direction)
   }

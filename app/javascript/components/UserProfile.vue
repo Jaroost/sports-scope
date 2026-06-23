@@ -38,6 +38,7 @@ interface Preferences {
     turn_hint_m: number
     turn_urgent_m: number
     turn_repeat_ms: number
+    turn_repeat_urgent_ms: number
     turn_marker_size: number
     turn_marker_color: string
     turn_marker_icon_color: string
@@ -561,6 +562,12 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (prefs.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
             </label>
             <input id="nav-turn-repeat" v-model.number="prefs.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-repeat-urgent" class="form-label mb-1">
+              {{ t('profile.navigation.turn_repeat_urgent_ms') }} : <strong>{{ (prefs.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
+            </label>
+            <input id="nav-turn-repeat-urgent" v-model.number="prefs.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500">
           </div>
         </div>
       </div>

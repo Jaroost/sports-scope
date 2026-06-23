@@ -403,6 +403,7 @@ en:
       turn_hint_m: "Turn indicator distance"
       turn_urgent_m: "Urgent alert distance (orange)"
       turn_repeat_ms: "Sound alert repeat interval"
+      turn_repeat_urgent_ms: "Repeat interval when close (orange)"
       turn_marker_size: "Direction marker size"
       turn_marker_color: "Direction marker color"
       turn_marker_icon_color: "Marker icon color"

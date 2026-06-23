@@ -1,5 +1,6 @@
 import { ref } from 'vue'
-import { unlockAudio } from '../navAudio'
+import { unlockAudio, setSoundVolume } from '../navAudio'
+import { userPreferences } from '../userPreferences'
 
 // Son de la séance de navigation (alertes virage / radar). L'état est persisté en
 // localStorage pour survivre d'une séance à l'autre, et l'AudioContext est
@@ -13,6 +14,11 @@ function loadSound(): boolean {
 
 export function useNavSound() {
   const soundOn = ref(loadSound())
+
+  // Applique le volume général choisi dans le profil (virages + radar) dès l'entrée
+  // en navigation. La valeur est figée pour la séance : changer la préférence
+  // nécessite de rouvrir la navigation (cohérent avec les autres réglages nav).
+  setSoundVolume(userPreferences().navigation.sound_volume ?? 100)
 
   function toggleSound() {
     soundOn.value = !soundOn.value

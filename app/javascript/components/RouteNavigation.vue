@@ -233,7 +233,14 @@ let announcedTurn = -1       // index of the last turn we played a cue for
 // « tournez ici » même à l'arrêt à un carrefour). On mémorise sa distance le long du
 // tracé : le maintien dure tant qu'on n'a pas parcouru GREEN_HOLD_M après le virage.
 let reachedTurn: { direction: 'left' | 'right'; kind: Maneuver; angle: number; exitNumber?: number; distM: number } | null = null
-const GREEN_HOLD_M = 100
+// Horodatage du moment où le virage courant a été atteint : sert à la limite de temps
+// du maintien vert (cf. GREEN_HOLD_MS), indépendante de la distance parcourue.
+let reachedAtMs = 0
+// La confirmation verte (« maintenant ») disparaît au PREMIER des deux seuils atteints :
+// distance parcourue après le virage (GREEN_HOLD_M) ou temps écoulé (GREEN_HOLD_MS).
+// Les deux sont réglables dans le profil de navigation.
+const GREEN_HOLD_M = navPrefs.turn_green_hold_m ?? 100
+const GREEN_HOLD_MS = (navPrefs.turn_green_hold_s ?? 10) * 1000
 // Vrai quand l'écran a été rallumé AUTOMATIQUEMENT à l'approche d'un virage : on ne
 // remet en veille de soi-même que dans ce cas (un réveil manuel reste éveillé).
 let autoWoken = false
@@ -964,7 +971,9 @@ function updateTurns(): boolean {
   // Choix de l'affichage. Priorité au prochain virage s'il est proche (« sauf s'il y a
   // une autre instruction plus proche »). Sinon, on maintient le virage tout juste
   // franchi en vert pendant GREEN_HOLD_M après lui. Sinon, le prochain virage en mode lointain.
-  const greenActive = reachedTurn != null && here - reachedTurn.distM < GREEN_HOLD_M
+  const greenActive = reachedTurn != null
+    && here - reachedTurn.distM < GREEN_HOLD_M
+    && Date.now() - reachedAtMs < GREEN_HOLD_MS
   if (turn && dist > 0 && dist <= TURN_HINT_M) {
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
   } else if (greenActive && reachedTurn) {
@@ -996,7 +1005,11 @@ function autoWakeForTurns(state: 'far' | 'near' | 'now' | null) {
 }
 
 // Mémorise un virage franchi (avec sa distance le long du tracé) pour le maintien vert.
+// Le chrono (reachedAtMs) ne démarre qu'au premier passage sur ce virage, et non à
+// chaque rafraîchissement tant qu'on est dessus (sinon la limite de temps ne
+// s'écoulerait jamais à l'arrêt à un carrefour).
 function rememberReached(turn: TurnPoint) {
+  if (!reachedTurn || reachedTurn.distM !== turn.distM) reachedAtMs = Date.now()
   reachedTurn = { direction: turn.direction, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, distM: turn.distM }
 }
 

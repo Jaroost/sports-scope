@@ -138,7 +138,7 @@ function onZoom(e: Event) {
         v-if="radarSupported()"
         type="button"
         class="btn btn-sm btn-light shadow-sm"
-        :class="{ active: radarStore.isConnected.value, 'text-danger': radarStore.status.value === 'error' }"
+        :class="{ 'nav-radar-btn--connected': radarStore.isConnected.value, 'text-danger': radarStore.status.value === 'error' }"
         :disabled="radarStore.status.value === 'connecting'"
         :title="radarStore.isConnected.value ? t('routes.radar_disconnect') : radarKnown ? t('routes.radar_reconnect') : t('routes.radar_connect')"
         :aria-label="radarStore.isConnected.value ? t('routes.radar_disconnect') : radarKnown ? t('routes.radar_reconnect') : t('routes.radar_connect')"
@@ -298,6 +298,18 @@ function onZoom(e: Event) {
   min-width: 3.25rem; min-height: 3.25rem; padding: 0.5rem 0.75rem;
   display: inline-flex; align-items: center; justify-content: center;
   font-size: 1.35rem; border-radius: 0.7rem;
+}
+
+/* Radar connecté : bouton vert (au lieu du gris « active » de Bootstrap) pour
+   signaler d'un coup d'œil que le flux de menaces est actif. !important pour
+   l'emporter sur les états :hover/:focus de .btn-light. */
+.nav-radar-btn--connected,
+.nav-radar-btn--connected:hover,
+.nav-radar-btn--connected:focus,
+.nav-radar-btn--connected:active {
+  background-color: #198754 !important;
+  border-color: #198754 !important;
+  color: #fff !important;
 }
 
 /* Small camera-settings popover anchored under its toggle button. The toggle lives

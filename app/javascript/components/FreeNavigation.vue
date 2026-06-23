@@ -506,8 +506,9 @@ function toggleScreenOffManual() {
     />
 
     <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
-         visible en mode veille (info de sécurité). -->
-    <RadarOverlay :elevated="screenOff" />
+         visible en mode veille (info de sécurité). En veille, on l'agrandit (expanded) :
+         sans indication de virage à afficher, il occupe l'espace libre au centre. -->
+    <RadarOverlay :elevated="screenOff" :expanded="screenOff" />
 
     <!-- GPS banners -->
     <div v-if="gpsError" class="nav-banner nav-banner--warn">

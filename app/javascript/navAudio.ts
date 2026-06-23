@@ -19,8 +19,23 @@ export function unlockAudio(): void {
 // Global loudness multiplier applied to every cue. A web app can't request the
 // OS to "duck" (lower) the music the user is playing, so the cues are mixed on
 // top of it at full music volume — they have to be loud and bright to cut
-// through. Raise/lower this single value to retune all cues at once.
-const MASTER_GAIN = 10
+// through. This base value is then scaled by the user's volume preference
+// (`setSoundVolume`, 0–100 %), so every cue — turns and radar — is retuned at once.
+const BASE_GAIN = 10
+let MASTER_GAIN = BASE_GAIN
+// Facteur de volume courant (1 = 100 %). Mémorisé à part pour faire monter aussi le
+// plafond d'écrêtage au-delà de 100 % : sans ça, les bips forts saturent déjà le
+// plafond à 100 % et l'augmentation du pourcentage resterait inaudible pour eux.
+let volumeFactor = 1
+
+// Règle le volume général des alertes (virages + radar), en pourcentage du volume
+// de base (100 % = comportement par défaut). Piloté par la préférence du profil
+// `navigation.sound_volume`. Borné à [0, 200] %.
+export function setSoundVolume(percent: number): void {
+  const clamped = Math.min(200, Math.max(0, percent))
+  volumeFactor = clamped / 100
+  MASTER_GAIN = BASE_GAIN * volumeFactor
+}
 
 // One short note. `start` and `durationS` are seconds; the gain envelope keeps
 // it click-free. A `triangle` wave (richer in harmonics than a pure sine)
@@ -31,7 +46,10 @@ function beep(freq: number, start: number, durationS: number, gainPeak = 0.18): 
   const gain = ctx.createGain()
   osc.type = 'triangle'
   osc.frequency.value = freq
-  const peak = Math.min(gainPeak * MASTER_GAIN, 2)
+  // Plafond d'écrêtage : 2 jusqu'à 100 % (comportement d'origine inchangé), puis relevé
+  // proportionnellement au-dessus, pour que le réglage > 100 % pousse réellement les
+  // bips déjà forts (écrêtage plus marqué = onde plus carrée = perçue plus forte).
+  const peak = Math.min(gainPeak * MASTER_GAIN, 2 * Math.max(1, volumeFactor))
   const t0 = ctx.currentTime + start
   gain.gain.setValueAtTime(0.0001, t0)
   gain.gain.exponentialRampToValueAtTime(peak, t0 + 0.02)

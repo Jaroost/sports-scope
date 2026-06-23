@@ -15,7 +15,10 @@ const closeM = userPreferences().navigation.radar_close_m
 // Élevé au-dessus du voile de veille : en mode veille, le bandeau radar doit rester
 // visible (info de sécurité — véhicules approchant par l'arrière) alors que le voile
 // noir recouvre tout le reste.
-const props = defineProps<{ elevated?: boolean }>()
+// expanded — en navigation libre et en veille, il n'y a aucune indication de virage à
+// afficher : le bandeau radar s'agrandit en une grande carte centrée pour occuper
+// l'espace libéré et rester lisible d'un coup d'œil.
+const props = defineProps<{ elevated?: boolean; expanded?: boolean }>()
 
 // Nombre maximal d'icônes voiture affichées ; au-delà on ajoute « ·N ».
 const MAX_ICONS = 4
@@ -39,7 +42,7 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
     class="radar-banner shadow"
     :class="[
       close ? 'radar-banner--danger' : count > 0 ? 'radar-banner--warn' : 'radar-banner--clear',
-      { 'radar-banner--elevated': props.elevated },
+      { 'radar-banner--elevated': props.elevated, 'radar-banner--expanded': props.expanded },
     ]"
     role="status"
     aria-live="polite"
@@ -90,6 +93,25 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
 .radar-banner--elevated {
   z-index: 25;
 }
+/* Navigation libre en veille : aucune indication de virage à afficher, on transforme le
+   bandeau en grande carte centrée qui occupe l'espace libre — lisible d'un coup d'œil. */
+.radar-banner--expanded {
+  top: 50%;
+  left: 0.75rem;
+  right: 0.75rem;
+  transform: translateY(-50%);
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 3rem 2rem;
+  border-radius: 1.5rem;
+  font-size: 2rem;
+}
+.radar-banner--expanded .radar-alert-icon { font-size: 5rem; }
+.radar-banner--expanded .radar-alert-text { font-size: 2.4rem; }
+.radar-banner--expanded .radar-cars { font-size: 4rem; }
+.radar-banner--expanded .radar-cars-more { font-size: 2.5rem; }
+.radar-banner--expanded .radar-dist { font-size: 5.5rem; }
+.radar-banner--expanded .radar-dist small { font-size: 2rem; }
 .radar-banner--danger {
   background: #dc3545;
   color: #fff;

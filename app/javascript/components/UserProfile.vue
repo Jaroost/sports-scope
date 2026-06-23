@@ -39,6 +39,9 @@ interface Preferences {
     turn_urgent_m: number
     turn_repeat_ms: number
     turn_repeat_urgent_ms: number
+    turn_green_hold_m: number
+    turn_green_hold_s: number
+    sound_volume: number
     turn_marker_size: number
     turn_marker_color: string
     turn_marker_icon_color: string
@@ -482,6 +485,12 @@ function placePreviewMarker(coords: [number, number]) {
             <p class="text-muted small mb-0">{{ t('profile.navigation.radar_close_m_help') }}</p>
           </div>
           <div class="col-sm-6">
+            <label for="nav-sound-volume" class="form-label mb-1">
+              <i class="fa-solid fa-volume-high me-1" aria-hidden="true"></i>{{ t('profile.navigation.sound_volume') }} : <strong>{{ prefs.navigation.sound_volume }} %</strong>
+            </label>
+            <input id="nav-sound-volume" v-model.number="prefs.navigation.sound_volume" type="range" class="form-range" min="0" max="200" step="5">
+          </div>
+          <div class="col-sm-6">
             <label for="nav-fps" class="form-label mb-1">
               {{ t('profile.navigation.nav_fps') }} : <strong>{{ prefs.navigation.nav_fps }} fps</strong>
             </label>
@@ -568,6 +577,18 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.turn_repeat_urgent_ms') }} : <strong>{{ (prefs.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
             </label>
             <input id="nav-turn-repeat-urgent" v-model.number="prefs.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-green-hold" class="form-label mb-1">
+              {{ t('profile.navigation.turn_green_hold_m') }} : <strong>{{ prefs.navigation.turn_green_hold_m }} m</strong>
+            </label>
+            <input id="nav-turn-green-hold" v-model.number="prefs.navigation.turn_green_hold_m" type="range" class="form-range" min="0" max="500" step="10">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-green-hold-s" class="form-label mb-1">
+              {{ t('profile.navigation.turn_green_hold_s') }} : <strong>{{ prefs.navigation.turn_green_hold_s }} s</strong>
+            </label>
+            <input id="nav-turn-green-hold-s" v-model.number="prefs.navigation.turn_green_hold_s" type="range" class="form-range" min="2" max="60" step="1">
           </div>
         </div>
       </div>

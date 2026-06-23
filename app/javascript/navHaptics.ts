@@ -18,13 +18,13 @@ function vibrate(pattern: number | number[]): void {
 // ressente sans regarder l'écran.
 export function vibrateManeuver(kind: Maneuver): void {
   if (kind === 'sharp' || kind === 'uturn') {
-    vibrate([90, 60, 90, 60, 160])
+    vibrate([250, 70, 250, 70, 400])
   } else {
-    vibrate([60, 80, 120])
+    vibrate([200, 80, 300])
   }
 }
 
 // Buzz long et distinct : on a quitté l'itinéraire.
 export function vibrateOffRoute(): void {
-  vibrate([200, 100, 200])
+  vibrate([400, 120, 400])
 }

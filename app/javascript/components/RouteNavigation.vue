@@ -1078,6 +1078,18 @@ function updateTurnSelection() {
 //     rendort — SAUF si un autre virage est déjà proche (état « near »), auquel cas
 //     on reste éveillé.
 function autoWakeForTurns(state: 'far' | 'near' | 'now' | null) {
+  // Hors-tracé : il n'y a plus de virage à anticiper, et la flèche de retour reste
+  // visible au-dessus du voile de veille. Si on s'était réveillé tout seul pour un
+  // virage, on se rendort (un virage encore « proche » géométriquement ne doit pas
+  // garder l'écran allumé une fois qu'on a quitté le tracé). Un réveil manuel reste
+  // éveillé.
+  if (offRoute.value) {
+    if (autoWoken && !screenOff.value) {
+      autoWoken = false
+      toggleScreenOff()     // remet en veille (on a quitté le tracé)
+    }
+    return
+  }
   if (state === 'near' && screenOff.value) {
     autoWoken = true
     toggleScreenOff()       // sort de veille (et relance la boucle d'animation)

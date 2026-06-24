@@ -9,7 +9,7 @@ import {
   buildOffsetDisplayLine, densifyGeometry,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
-import { fetchRouteToPlace, GUIDED_ROUTE_KEY } from '../navRoute'
+import { fetchRouteToPlace } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
 } from '../navHelpers'
@@ -24,6 +24,7 @@ import NavClimbCard from './NavClimbCard.vue'
 import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
+import NavRoutePicker from './NavRoutePicker.vue'
 import type { PlaceResult } from '../composables/usePlaceSearch'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
@@ -42,10 +43,28 @@ import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineGrauStyle, OFFLINE_DEFAULTS,
 } from '../offline/offlineMaps'
 
-// shareToken : navigation d'un itinéraire sauvegardé (lien partageable).
-// sessionRoute : navigation libre vers un lieu — l'itinéraire est lu depuis
-// sessionStorage (aucune route serveur), donc shareToken est absent.
-const props = defineProps<{ shareToken?: string; sessionRoute?: boolean; canDebug?: boolean }>()
+// Page de navigation unifiée : démarre en mode libre (carte + GPS + vitesse, sans
+// tracé) et peut charger/décharger un itinéraire à chaud. shareToken : si présent
+// (lien partageable /routes/:token/navigate), l'itinéraire est chargé automatiquement
+// au montage. Absent → on démarre en navigation libre.
+const props = defineProps<{ shareToken?: string; canDebug?: boolean }>()
+
+// Vrai dès qu'un itinéraire est chargé (≥ 2 points) : bascule entre la navigation
+// libre (suivi GPS brut, vitesse seule) et la navigation sur itinéraire (tracé,
+// virages, cols, hors-trajet, progression).
+const hasRoute = ref(false)
+// Token du trajet actif (lien partagé ou itinéraire sauvegardé chargé depuis la
+// dialogue), null en mode libre. Pilote la clé de reprise de progression et la carte
+// hors-ligne, autrefois figés sur props.shareToken.
+const routeToken = ref<string | null>(props.shareToken ?? null)
+// Dialogue de chargement d'un itinéraire (liste des itinéraires sauvegardés + bouton
+// « naviguer vers un lieu »).
+const showRoutePicker = ref(false)
+
+// Vue de départ avant le premier fix GPS en mode libre (centre de la Suisse) —
+// recadrée dès la première position reçue. En mode itinéraire, on cadre sur le tracé.
+const DEFAULT_CENTER: LngLat = [8.23, 46.82]
+const DEFAULT_ZOOM = 7
 
 // Réglages caméra issus du profil (section Navigation), indépendants du créateur.
 const navPrefs = userPreferences().navigation
@@ -445,12 +464,17 @@ function toggleDebugRadar() {
 
 onMounted(async () => {
   try {
-    await fetchRoute()
+    // Lien partagé : on charge l'itinéraire AVANT la carte pour qu'initMap cadre
+    // directement sur le tracé. Sans token, on démarre en navigation libre.
+    if (props.shareToken) {
+      try { await loadSharedRouteData(props.shareToken) } catch { /* tracé introuvable : on reste en libre */ }
+    }
     await initMap()
     startTracking()
     // Recherche Overpass des POI du profil (best-effort, non bloquant) : les
     // marqueurs apparaissent dès que la réponse arrive, la carte est déjà prête.
-    void pois.fetchPlaces()
+    // Sans tracé (mode libre), les POI ne se chargent qu'à la demande (« autour de moi »).
+    if (hasRoute.value) void pois.fetchPlaces()
     turnRepeatId = window.setInterval(tickTurnRepeat, 250)
     screenWake.acquire()
     // Affiche les boutons quelques secondes au lancement puis les estompe.
@@ -498,31 +522,22 @@ function onFirstGesture() {
 
 // ─── Data ───────────────────────────────────────────────────────────────────
 
-async function fetchRoute() {
-  // Mode session (navigation libre vers un lieu) : l'itinéraire a déjà été calculé et
-  // déposé dans sessionStorage par FreeNavigation ; on le lit au lieu d'interroger le
-  // serveur. Aucune sauvegarde n'est nécessaire (fonctionne pour les visiteurs anonymes).
-  const route = props.sessionRoute ? readSessionRoute() : await fetchSharedRoute()
+// Charge un itinéraire partagé par token AVANT que la carte ne soit prête (montage
+// d'un lien partagé) : on ne fait qu'alimenter l'état (rebuildRouteState) ; initMap
+// installera les couches et cadrera sur le tracé. Lève si le tracé est introuvable
+// ou trop court → l'appelant retombe sur le mode libre.
+async function loadSharedRouteData(token: string) {
+  const res = await fetch(`/api/routes/shared/${token}`, { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error(t('routes.error_routing'))
+  const data = await res.json()
+  const route = data.route || data
   const geom = (route.geometry || []) as Coord[]
   if (geom.length < 2) throw new Error(t('routes.error_min_points'))
+  routeToken.value = token
   routeName.value = route.name || ''
   routeSport = (route.activity as Sport) || 'cycling'
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
-}
-
-async function fetchSharedRoute(): Promise<any> {
-  const res = await fetch(`/api/routes/shared/${props.shareToken}`, { headers: { Accept: 'application/json' } })
-  if (!res.ok) throw new Error(t('routes.error_routing'))
-  const data = await res.json()
-  return data.route || data
-}
-
-function readSessionRoute(): any {
-  try {
-    const raw = sessionStorage.getItem(GUIDED_ROUTE_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* sessionStorage indisponible / JSON invalide */ }
-  throw new Error(t('routes.error_routing'))
+  hasRoute.value = true
 }
 
 // Recompute everything derived from `geometry` + raw voicehints: altitudes, distances,
@@ -653,16 +668,14 @@ async function recalcRoute() {
   }
 }
 
-// Remplace la géométrie de navigation par l'itinéraire rerouté et réinitialise le suivi.
-function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
-  rebuildRouteState(newGeometry, hints)
-  // Un tracé rerouté part TOUJOURS de la position du coureur (détour calculé depuis
-  // lastPos) : on l'ancre à l'index 0 et on reste « localisé », pour que les fix suivants
-  // fassent une recherche FENÊTRÉE vers l'avant. Une recherche globale s'accrocherait au
-  // mauvais passage quand le tracé se recoupe près du départ — typiquement l'élan d'un
-  // demi-tour, qui longe la même route à l'aller et au retour. On repart des premiers
-  // virages : les pointeurs de l'ancien tracé n'ont plus de sens.
-  located = true
+// Réinitialise tout l'état de suivi d'un nouveau tracé (pointeurs de virage, snapping,
+// hors-trajet, sourdines). `atStart` : vrai quand le tracé part de la position du
+// coureur (reroutage, « naviguer ici ») → on l'ancre à l'index 0 et on reste « localisé »
+// pour des recherches fenêtrées vers l'avant. Faux pour un itinéraire chargé tel quel
+// (lien partagé, dialogue) → `located = false` force une recherche globale du point le
+// plus proche au prochain fix, le coureur pouvant être n'importe où sur le tracé.
+function resetRouteTracking(atStart: boolean) {
+  located = atStart
   lastIdx = 0
   snapPoint = null
   displaySnapPoint = null
@@ -679,12 +692,93 @@ function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   // Recalculé au prochain fix ; remis à faux pour que le bandeau hors-tracé disparaisse.
   offRoute.value = false
   // La progression mémorisée pointe un passage de l'ancien tracé : on l'efface.
-  try { localStorage.removeItem(PROGRESS_KEY) } catch { /* quota / private mode */ }
-  // Re-render carte : nouvelle polyligne complète + marqueurs de virage.
-  const src = map?.getSource('nav-route')
+  try { localStorage.removeItem(progressKey()) } catch { /* quota / private mode */ }
+}
+
+// Installe (ou met à jour) les couches du tracé sur la carte. En mode libre, aucune
+// source n'existe encore : on les crée. Si elles existent déjà (reroutage en séance),
+// on se contente de remplacer les données. Puis on (re)pose les marqueurs de virage.
+function ensureRouteInstalled() {
+  if (!map) return
+  const src = map.getSource('nav-route')
   if (src) src.setData(widthRunsCollection(displayLine, displayWScale))
-  refreshRemaining()
+  else installRouteLayers()
   renderTurnMarkers()
+}
+
+// Remplace la géométrie de navigation par l'itinéraire rerouté et réinitialise le suivi.
+// Le tracé part TOUJOURS de la position du coureur (détour calculé depuis lastPos).
+function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
+  rebuildRouteState(newGeometry, hints)
+  resetRouteTracking(true)
+  hasRoute.value = true
+  ensureRouteInstalled()
+  refreshRemaining()
+}
+
+// ─── Chargement / déchargement d'un itinéraire (page unifiée) ──────────────────
+// Charge un itinéraire complet (lien partagé ou itinéraire sauvegardé choisi dans la
+// dialogue) et passe en navigation sur itinéraire. Le coureur peut être n'importe où
+// sur le tracé → recherche globale au prochain fix (resetRouteTracking(false)). On
+// cadre la vue sur l'ensemble du tracé, puis le suivi reprend dès le premier fix.
+function loadRoute(route: any) {
+  const geom = (route.geometry || []) as Coord[]
+  if (geom.length < 2) { navError.value = t('routes.error_min_points'); return }
+  routeToken.value = (route.share_token as string) || null
+  routeName.value = route.name || t('routes.destination')
+  routeSport = (route.activity as Sport) || 'cycling'
+  rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
+  resetRouteTracking(false)
+  hasRoute.value = true
+  showRoutePicker.value = false
+  ensureRouteInstalled()
+  refreshRemaining()
+  // Cadre sur l'ensemble du tracé puis rend la caméra au suivi.
+  if (map && maplibre) {
+    const coords = geom.map(([lng, lat]) => [lng, lat] as LngLat)
+    const b = new maplibre.LngLatBounds(coords[0], coords[0])
+    coords.forEach((c) => b.extend(c))
+    map.fitBounds(b, { padding: 60, duration: 600, pitch: camPitch.value })
+  }
+  following.value = true
+  cameraUnlocked.value = false
+  void pois.fetchPlaces()
+}
+
+// Décharge l'itinéraire courant et revient à la navigation libre : on retire les
+// couches du tracé, les marqueurs de virage, et on remet à zéro l'état d'itinéraire.
+// Le suivi GPS continue (le prochain fix s'ancre sur la position brute).
+function unloadRoute() {
+  hasRoute.value = false
+  routeToken.value = null
+  routeName.value = ''
+  geometry = []
+  displayLine = []
+  displayWScale = []
+  alts = []
+  cumDistM = []
+  climbs = []
+  turns = []
+  rawHints = []
+  turnHint.value = null
+  climbInfo.value = null
+  offRoute.value = false
+  remainingM.value = 0
+  remainingGainM.value = 0
+  doneRatio.value = 0
+  for (const m of turnMarkers) m.remove()
+  turnMarkers = []
+  if (map) {
+    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining']) {
+      if (map.getLayer(id)) map.removeLayer(id)
+    }
+    for (const id of ['nav-route', 'nav-remaining']) {
+      if (map.getSource(id)) map.removeSource(id)
+    }
+  }
+  // L'ancre repart sur le GPS brut ; on relance la boucle pour figer la flèche.
+  anchorOnRoute = false
+  if (lastPos) { anchorPos = lastPos; anchorTime = performance.now() }
 }
 
 // ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
@@ -748,8 +842,13 @@ async function navigateTo(name: string, dest: LngLat) {
   navStarting.value = true
   navError.value = null
   try {
-    const { geometry: geom, hints } = await fetchRouteToPlace(lastPos, dest, routeSport)
+    // Sur un tracé : on garde son profil d'activité ; en mode libre : le sport par défaut du profil.
+    const sport = hasRoute.value ? routeSport : userPreferences().display.default_sport
+    const { geometry: geom, hints } = await fetchRouteToPlace(lastPos, dest, sport)
     routeName.value = name || t('routes.destination')
+    // Destination ad hoc (non sauvegardée) : pas de token → ni hors-ligne ni reprise.
+    routeToken.value = null
+    routeSport = sport
     applyReroute(geom, hints)
     cancelPlaceNav()
     following.value = true
@@ -778,10 +877,10 @@ async function initMap() {
   // Branche l'archive hors-ligne du trajet (si déjà téléchargée) AVANT de construire le
   // style, pour pouvoir démarrer directement sur le fond local en cas de lancement
   // sans réseau.
-  // Hors-ligne indisponible en mode session (pas de token de trajet à archiver).
-  if (props.shareToken && offlineSupported() && await hasOfflineArchive(props.shareToken)) {
+  // Hors-ligne indisponible en mode libre (aucun token de trajet à archiver).
+  if (routeToken.value && offlineSupported() && await hasOfflineArchive(routeToken.value)) {
     offlineReady.value = true
-    try { await registerOfflineArchive(props.shareToken, maplibre); offlineRegistered = true } catch { /* archive illisible : on reste en ligne */ }
+    try { await registerOfflineArchive(routeToken.value, maplibre); offlineRegistered = true } catch { /* archive illisible : on reste en ligne */ }
   }
   baseIsOffline = wantOffline()
 
@@ -789,8 +888,10 @@ async function initMap() {
   map = new maplibre.Map({
     container: mapEl.value,
     style: resolveBaseStyle(mapStyleId.value) as any,
-    center: coords[0],
-    zoom: 14,
+    // Mode itinéraire : on part du départ du tracé (recadré sur l'ensemble au load).
+    // Mode libre : vue d'ensemble de la Suisse jusqu'au premier fix GPS.
+    center: hasRoute.value ? coords[0] : DEFAULT_CENTER,
+    zoom: hasRoute.value ? 14 : DEFAULT_ZOOM,
     pitch: camPitch.value,
     maxPitch: CAM_PITCH_MAX,
     attributionControl: false,
@@ -841,13 +942,16 @@ async function initMap() {
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
-      installRouteLayers()
-      renderTurnMarkers()
       applyTerrain()
-      // Fit the whole route before the first GPS fix arrives.
-      const b = new maplibre.LngLatBounds(coords[0], coords[0])
-      coords.forEach((c) => b.extend(c))
-      map.fitBounds(b, { padding: 60, duration: 0, pitch: camPitch.value })
+      // Mode itinéraire (lien partagé chargé avant la carte) : installe le tracé et
+      // cadre dessus avant le premier fix GPS. Mode libre : rien à installer.
+      if (hasRoute.value && coords.length) {
+        installRouteLayers()
+        renderTurnMarkers()
+        const b = new maplibre.LngLatBounds(coords[0], coords[0])
+        coords.forEach((c) => b.extend(c))
+        map.fitBounds(b, { padding: 60, duration: 0, pitch: camPitch.value })
+      }
       resolve()
     })
   })
@@ -998,7 +1102,8 @@ function setMapStyle(id: string) {
 }
 
 function afterStyleLoad() {
-  installRouteLayers()
+  // Pas de couches de tracé à réinstaller en mode libre.
+  if (hasRoute.value) installRouteLayers()
   applyTerrain()
   // Replace le marqueur sur la position AFFICHÉE (snappée et décalée sur sa voie si on est
   // sur le tracé), pas sur le GPS brut, pour rester cohérent avec la boucle d'animation.
@@ -1016,7 +1121,7 @@ function wantOffline(): boolean {
 }
 
 function resolveBaseStyle(id: string): string | object {
-  if (id === 'swissgrau' && wantOffline()) return offlineGrauStyle(props.shareToken!, OFFLINE_DEFAULTS.maxZoom)
+  if (id === 'swissgrau' && wantOffline()) return offlineGrauStyle(routeToken.value!, OFFLINE_DEFAULTS.maxZoom)
   return mapStyleFor(id)
 }
 
@@ -1034,8 +1139,8 @@ function refreshBaseMap() {
 // Appelé par NavOfflineButton quand une archive vient d'être téléchargée.
 async function onOfflineAvailable() {
   offlineReady.value = true
-  if (!offlineRegistered && maplibre) {
-    try { await registerOfflineArchive(props.shareToken, maplibre); offlineRegistered = true } catch { /* ignore */ }
+  if (!offlineRegistered && maplibre && routeToken.value) {
+    try { await registerOfflineArchive(routeToken.value, maplibre); offlineRegistered = true } catch { /* ignore */ }
   }
   refreshBaseMap()
 }
@@ -1054,18 +1159,23 @@ function onOfflineRemoved() {
 // passage au lieu d'une recherche globale ambiguë. L'entrée expire afin de ne pas
 // « téléporter » un rider qui relance la même route un autre jour ; la validité est
 // en plus confirmée par la proximité réelle au fix GPS (sinon repli global).
-const PROGRESS_KEY = `sportsScope.navProgress.${props.shareToken ?? 'session'}`
+// Clé de reprise dérivée du trajet actif (token), ou 'none' en mode libre. Dynamique
+// (et non figée au montage) car l'itinéraire peut être chargé/changé en séance.
+function progressKey(): string {
+  return `sportsScope.navProgress.${routeToken.value ?? 'none'}`
+}
 const RESUME_MAX_AGE_MS = 30 * 60 * 1000
 let lastProgressSaveMs = 0
 
 // Indice de reprise (sommet) si une progression récente est mémorisée, sinon -1.
 function resumeHintIdx(): number {
   try {
-    const raw = localStorage.getItem(PROGRESS_KEY)
+    const key = progressKey()
+    const raw = localStorage.getItem(key)
     if (!raw) return -1
     const saved = JSON.parse(raw) as { idx: number; t: number }
     if (!saved || typeof saved.idx !== 'number' || typeof saved.t !== 'number') return -1
-    if (Date.now() - saved.t > RESUME_MAX_AGE_MS) { localStorage.removeItem(PROGRESS_KEY); return -1 }
+    if (Date.now() - saved.t > RESUME_MAX_AGE_MS) { localStorage.removeItem(key); return -1 }
     return saved.idx >= 0 && saved.idx < geometry.length ? saved.idx : -1
   } catch { return -1 }
 }
@@ -1076,7 +1186,7 @@ function persistProgress() {
   const now = Date.now()
   if (now - lastProgressSaveMs < 3000) return
   lastProgressSaveMs = now
-  try { localStorage.setItem(PROGRESS_KEY, JSON.stringify({ idx: lastIdx, t: now })) } catch { /* indisponible : best-effort */ }
+  try { localStorage.setItem(progressKey(), JSON.stringify({ idx: lastIdx, t: now })) } catch { /* indisponible : best-effort */ }
 }
 
 // ─── GPS tracking ───────────────────────────────────────────────────────────
@@ -1093,11 +1203,9 @@ function startTracking() {
   )
 }
 
-function onPosition(pos: GeolocationPosition) {
-  gpsError.value = null
-  hasFix.value = true
-  const here: LngLat = [pos.coords.longitude, pos.coords.latitude]
-
+// Navigation sur itinéraire : projection sur le tracé, hors-trajet, virages, cols,
+// progression. L'ancre suit la position projetée (snappée) le long du tracé.
+function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   // Project onto the route. On the first fix we normally do a global search so we
   // locate wherever the ride is joined (including mid-loop); after that a windowed
   // search around the last index keeps perf up and handles self-crossing loops.
@@ -1161,6 +1269,33 @@ function onPosition(pos: GeolocationPosition) {
   // Snap the 3D view back over the rider as they reach an intersection — unless
   // they've deliberately unlocked the camera to study the map.
   if (turnApproaching && !following.value && !cameraUnlocked.value) following.value = true
+}
+
+// Navigation libre (sans tracé) : aucun snapping ni virage. L'ancre est le GPS brut ;
+// la boucle d'animation extrapole librement au cap. On ne tient que la vitesse et le cap.
+function onPositionFree(pos: GeolocationPosition, here: LngLat) {
+  updateBearing(pos, here)
+  updateSpeed(pos, here)
+  anchorPos = here
+  anchorOnRoute = false
+  anchorDistM = 0
+  anchorTime = performance.now()
+  extrapSpeedMs = speedKmh.value / 3.6
+  extrapBearing = currentBearing
+  located = true
+  lastPos = here
+}
+
+function onPosition(pos: GeolocationPosition) {
+  gpsError.value = null
+  hasFix.value = true
+  const here: LngLat = [pos.coords.longitude, pos.coords.latitude]
+
+  if (hasRoute.value) {
+    onPositionRoute(pos, here)
+  } else {
+    onPositionFree(pos, here)
+  }
 
   if (!hasInitialZoom) {
     // First fix: a smooth intro that also applies the profile zoom & pitch once,
@@ -1633,7 +1768,7 @@ function toggleScreenOffManual() {
     />
 
     <div v-if="loading" class="nav-overlay-center text-muted">
-      <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('routes.computing_route') }}
+      <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ hasRoute ? t('routes.computing_route') : t('routes.gps_waiting') }}
     </div>
     <div v-else-if="error" class="nav-overlay-center text-danger">
       <i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>{{ error }}
@@ -1664,7 +1799,8 @@ function toggleScreenOffManual() {
       :debug-mode="debugMode"
       :map-style-id="mapStyleId"
       :sound-on="soundOn"
-      :climb-card-visible="showClimbCard"
+      :route-loaded="hasRoute"
+      :climb-card-visible="hasRoute ? showClimbCard : undefined"
       :radar-known="radarKnown"
       v-model:cam-pitch="camPitch"
       v-model:cam-zoom="camZoom"
@@ -1677,7 +1813,7 @@ function toggleScreenOffManual() {
       :poi-cats="POI_CATS"
       :poi-visible="poiVisible"
       :poi-loading="poiLoading"
-      :route-search="true"
+      :route-search="hasRoute"
       :dbg-radar="dbgRadar"
       :dbg-climb="dbgClimb"
       :dbg-turn-label="dbgTurnLabel"
@@ -1685,6 +1821,8 @@ function toggleScreenOffManual() {
       v-model:show-poi-panel="showPoiPanel"
       v-model:show-debug-panel="showDebugPanel"
       @arm-controls-hide="armControlsHide"
+      @open-route-picker="showRoutePicker = true"
+      @unload-route="unloadRoute"
       @start-place-nav="startPlaceNav"
       @set-map-style="setMapStyle"
       @toggle-sound="toggleSound"
@@ -1703,16 +1841,27 @@ function toggleScreenOffManual() {
       @cycle-debug-turn="cycleDebugTurn"
     >
       <template #map-extra>
-        <!-- Pas de carte hors-ligne en mode session (aucun token de trajet à archiver). -->
+        <!-- Carte hors-ligne réservée à un itinéraire identifié par token (lien partagé
+             ou itinéraire sauvegardé). Absente en mode libre / destination ad hoc. -->
         <NavOfflineButton
-          v-if="shareToken"
-          :share-token="shareToken"
+          v-if="routeToken"
+          :share-token="routeToken"
           :coords="offlineCoords"
           @available="onOfflineAvailable"
           @removed="onOfflineRemoved"
         />
       </template>
     </NavControlsPanel>
+
+    <!-- Dialogue de chargement d'un itinéraire (itinéraires sauvegardés + « naviguer
+         vers un lieu »). Bascule la page de la navigation libre vers le suivi de tracé. -->
+    <NavRoutePicker
+      v-if="showRoutePicker"
+      :logged-in="loggedIn"
+      @load="loadRoute"
+      @navigate-place="() => { showRoutePicker = false; startPlaceNav() }"
+      @close="showRoutePicker = false"
+    />
 
     <!-- Mode « cible » : recherche d'un lieu (recadrage carte) + consigne, puis un tap
          sur la carte fixe la destination ; « Naviguer ici » lance le guidage. -->
@@ -1815,14 +1964,20 @@ function toggleScreenOffManual() {
       @resume="toggleScreenOffManual"
     />
 
-    <!-- Bottom stats -->
+    <!-- Bottom stats : barre complète (distance / D+ / ETA / progression) en navigation
+         sur itinéraire ; en navigation libre, carte réduite à la vitesse. -->
     <NavStatsBar
+      v-if="hasRoute"
       :remaining-m="remainingM"
       :remaining-gain-m="remainingGainM"
       :done-percent="donePercent"
       :speed-kmh="speedKmh"
       :eta-speed-kmh="avgSpeedKmh"
     />
+    <div v-else class="nav-stats nav-stats--free shadow">
+      <div class="nav-stat-value">{{ Math.round(speedKmh) }}<span class="nav-stat-unit"> km/h</span></div>
+      <div class="nav-stat-label">{{ t('routes.speed') }}</div>
+    </div>
   </div>
 </template>
 
@@ -1951,6 +2106,17 @@ function toggleScreenOffManual() {
   padding: 0.3rem 0.8rem; font-size: 0.85rem; font-weight: 600;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
+
+/* Barre du bas en navigation libre : réduite à la vitesse (reprend l'allure de
+   NavStatsBar), centrée. Affichée tant qu'aucun itinéraire n'est chargé. */
+.nav-stats {
+  position: absolute; left: 0.75rem; right: 0.75rem; bottom: 0.75rem;
+  z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.7rem 0.85rem;
+}
+.nav-stats--free { text-align: center; }
+.nav-stat-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; white-space: nowrap; }
+.nav-stat-unit { font-size: 0.8rem; font-weight: 600; color: #6c757d; }
+.nav-stat-label { font-size: 0.72rem; color: #6c757d; text-transform: uppercase; letter-spacing: 0.02em; }
 </style>
 
 <style>

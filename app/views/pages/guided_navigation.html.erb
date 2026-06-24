@@ -1,5 +1,0 @@
-<% content_for :title, t("routes.navigate_title") %>
-<% content_for :container_class, "container-fluid p-0" %>
-<% content_for :hide_navbar, true %>
-<% content_for :body_class, "fullscreen-page" %>
-<div data-vue-component="RouteNavigation" data-vue-props='<%= { sessionRoute: true, canDebug: can?(:manage, :all) }.to_json %>'></div>

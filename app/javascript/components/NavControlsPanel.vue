@@ -14,6 +14,8 @@ const props = defineProps<{
   // Visibilité du profil des cols : undefined en mode libre (pas d'itinéraire → pas de
   // cols), auquel cas le bouton de bascule n'est pas affiché.
   climbCardVisible?: boolean
+  // Vrai quand un itinéraire est chargé : affiche le bouton « ne plus suivre l'itinéraire ».
+  routeLoaded?: boolean
   radarKnown: boolean
   camPitch: number
   camZoom: number
@@ -41,6 +43,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'arm-controls-hide'): void
+  (e: 'open-route-picker'): void
+  (e: 'unload-route'): void
   (e: 'start-place-nav'): void
   (e: 'set-map-style', id: string): void
   (e: 'toggle-sound'): void
@@ -94,6 +98,30 @@ function onZoom(e: Event) {
         data-profile-sections="navigation,search,poi,climb"
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+      </button>
+
+      <!-- Ouvre la dialogue de chargement d'un itinéraire (itinéraires sauvegardés +
+           « naviguer vers un lieu »). Passe la page en navigation sur itinéraire. -->
+      <button
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :title="t('routes.load_route')"
+        :aria-label="t('routes.load_route')"
+        @click="$emit('open-route-picker')"
+      >
+        <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+      </button>
+
+      <!-- Revient à la navigation libre : ne plus suivre l'itinéraire courant. -->
+      <button
+        v-if="routeLoaded"
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :title="t('routes.unload_route')"
+        :aria-label="t('routes.unload_route')"
+        @click="$emit('unload-route')"
+      >
+        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
       </button>
 
       <!-- Lance le choix d'une destination sur la carte (recherche d'un lieu pour

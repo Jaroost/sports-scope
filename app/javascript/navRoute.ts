@@ -2,10 +2,6 @@ import { BROUTER_URL, brouterProfile } from './brouter'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
 import type { Sport } from './userPreferences'
 
-// Clé sessionStorage où la navigation libre dépose l'itinéraire calculé vers un lieu
-// avant de rediriger vers la page de guidage (RouteNavigation en mode session).
-export const GUIDED_ROUTE_KEY = 'sportsScope.guidedRoute'
-
 // Calcule un itinéraire BRouter entre deux points et renvoie sa géométrie + les
 // indications de virage (voicehints). Partagé par le reroutage en séance
 // (RouteNavigation) et le lancement d'une navigation vers un lieu choisi sur la

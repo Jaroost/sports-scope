@@ -1,5 +1,5 @@
-// Constantes partagées par les deux écrans de navigation (FreeNavigation.vue et
-// RouteNavigation.vue). Regroupées ici pour qu'un seul réglage gouverne les deux
+// Constantes partagées par la navigation (RouteNavigation.vue, modes libre et sur
+// itinéraire). Regroupées ici pour qu'un seul réglage gouverne les deux
 // modes — historiquement ces valeurs étaient copiées à l'identique dans chaque
 // composant. Les constantes propres à un sous-système (son, caméra, contrôles,
 // geste) vivent dans le composable correspondant ; ne restent ici que celles encore

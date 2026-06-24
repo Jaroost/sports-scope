@@ -16,14 +16,8 @@ class PagesController < ApplicationController
   end
 
   def free_navigation
-    # Mode de roulage libre, sans itinéraire : carte + vitesse + radar + veille.
-    # Public, aucun login requis (rien à charger côté serveur).
-  end
-
-  def guided_navigation
-    # Guidage vers un lieu choisi en navigation libre. L'itinéraire est calculé côté
-    # client et lu depuis sessionStorage (RouteNavigation en mode session) : rien à
-    # charger côté serveur, aucun login requis.
+    # Page de navigation unifiée : démarre en navigation libre (carte + vitesse + radar
+    # + veille) et peut charger un itinéraire à la volée. Public, aucun login requis.
   end
 
   def route_navigation

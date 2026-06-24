@@ -52,7 +52,12 @@ const eta = computed(() => {
 <style scoped>
 .nav-stats {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 0.75rem;
-  z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.7rem 0.85rem;
+  /* z-index 6 : au-dessus de TOUTE la couche de marqueurs de la carte. Les marqueurs
+     MapLibre (POI z1, pastilles de virage z2-4, destination z4, flèche du coureur z5)
+     sont des overlays DOM qui remontent dans le contexte d'empilement racine ; à z3,
+     ce bandeau se faisait recouvrir par la pastille de virage atteint, le marqueur de
+     destination et la flèche du coureur. 6 dépasse le plus haut marqueur (5). */
+  z-index: 6; background: #fff; border-radius: 0.75rem; padding: 0.7rem 0.85rem;
 }
 .nav-stat-value { font-size: 1.25rem; font-weight: 700; line-height: 1.1; white-space: nowrap; }
 /* Unité accolée à la vitesse, plus discrète que le chiffre. */

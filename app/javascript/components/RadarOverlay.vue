@@ -72,8 +72,10 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
   top: 0;
   left: 0;
   right: 0;
-  /* Au-dessus de la carte et des notifications de virage (z-index 3), sous le tiroir
-     de commandes (z-index 8) qui se déploie par-dessus quand on swipe vers le bas. */
+  /* Au-dessus de la carte, sous le tiroir de commandes qui se déploie par-dessus
+     quand on swipe vers le bas. La notification de virage (.nav-turn, z-index 7) ne
+     chevauche pas ce bandeau : quand le radar est visible, elle descend en dessous
+     (.nav-turn--radar { top: 4.5rem }). */
   z-index: 5;
   display: flex;
   align-items: center;

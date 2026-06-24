@@ -55,11 +55,17 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
 <style scoped>
 /* Notification de virage : bandeau pleine largeur en haut de l'écran (les boutons
    sont désormais dans le tiroir, plus rien n'occupe les coins). */
-/* Pas de z-index explicite pour ne pas créer de stacking context : le bouton mute
-   enfant peut ainsi avoir son propre z-index (7) dans le contexte racine, au-dessus
-   de la nav-reveal-zone (z-index 6) qui intercepterait sinon tous les taps. */
+/* z-index 7 : indispensable pour passer AU-DESSUS des marqueurs POI de la carte
+   (.place-marker, z-index 1). Ceux-ci sont des marqueurs DOM MapLibre : .nav-map ne
+   crée pas de stacking context, donc ils remontent dans le contexte racine et, sans
+   z-index ici, recouvraient le bandeau. En posant le contexte d'empilement à 7, tout
+   le sous-arbre (bandeau + bouton mute) passe aussi au-dessus de la nav-reveal-zone
+   (z-index 6) — le mute reste donc tapable — tout en restant sous le tiroir de
+   commandes (z-index 9). pointer-events: none laisse les taps/swipes traverser le
+   bandeau (veille / révélation des boutons) ; seul le mute capte les siens. */
 .nav-turn {
   position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem;
+  z-index: 7;
   display: flex; align-items: center; justify-content: center; gap: 1rem;
   background: #7c3aed; color: #fff; padding: 1.1rem 1.5rem;
   border-radius: 1rem; font-size: 3rem; line-height: 1;
@@ -87,12 +93,13 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
 /* Virage atteint : maintenu en vert quelques secondes comme confirmation « tournez ici ». */
 .nav-turn.nav-turn--now { background: #16a34a; }
 /* Bouton de sourdine des alertes sonores/haptiques du virage courant. */
-/* z-index: 7 dans le contexte racine (parent sans stacking context) — au-dessus de
-   la nav-reveal-zone (6). pointer-events: auto pour capturer les taps malgré le
-   pointer-events: none du parent .nav-turn. */
+/* pointer-events: auto pour capturer les taps malgré le pointer-events: none du
+   parent .nav-turn. z-index local pour rester au-dessus du fond du bandeau ; c'est le
+   stacking context du parent (.nav-turn, z-index 7) qui le place au-dessus de la
+   nav-reveal-zone (6). */
 .nav-turn-mute {
   position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%);
-  z-index: 7; pointer-events: auto;
+  z-index: 1; pointer-events: auto;
   background: rgba(255,255,255,0.2); border: none; border-radius: 0.5rem;
   color: #fff; padding: 0.45rem 0.6rem; font-size: 1.3rem; cursor: pointer;
   line-height: 1; touch-action: manipulation;

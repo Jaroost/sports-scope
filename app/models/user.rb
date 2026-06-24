@@ -49,10 +49,7 @@ class User < ApplicationRecord
     # à Nominatim et utilisée pour trier les résultats. Si aucun résultat dans ces
     # pays, le front retombe sur une recherche mondiale (cf. RouteBuilderMap).
     "search" => {
-      "country_codes" => %w[
-        ch fr at be bg cy cz de dk ee es fi gr hr hu ie it lt lu lv mt nl pl
-        pt ro se si sk al ba gb li me mk no rs xk
-      ],
+      "country_codes" => %w[ch fr it at de],
     },
     "display" => {
       "default_sport" => "cycling",   # cycling | mtb | hiking

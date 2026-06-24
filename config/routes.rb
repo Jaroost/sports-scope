@@ -7,6 +7,9 @@ Rails.application.routes.draw do
     get "/routes", to: "pages#routes_index", as: :routes_index
     # Navigation libre (sans itinéraire) : carte + vitesse + radar + veille. Publique.
     get "/navigate", to: "pages#free_navigation", as: :free_navigate
+    # Guidage vers un lieu choisi en navigation libre : l'itinéraire est calculé côté
+    # client et passé via sessionStorage (aucune route sauvegardée). Publique.
+    get "/navigate/guided", to: "pages#guided_navigation", as: :guided_navigate
     get "/routes/new", to: "pages#route_builder", as: :new_route
     get "/routes/:id/edit", to: "pages#route_builder", as: :edit_route, constraints: { id: /\d+/ }
     # Navigation is addressed by share_token (not id) so the link is shareable

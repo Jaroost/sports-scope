@@ -17,8 +17,11 @@ import { userPreferences } from '../userPreferences'
 // seuil rapproché → bip insistant. On ne re-bipe pas tant que la même voiture reste
 // dans le même état ; le watchdog du store vide la liste une fois la voie dégagée,
 // donc une nouvelle approche re-déclenche bien les alertes.
-export function useRadarAlerts(deps: { soundOn: Ref<boolean> }) {
-  const { soundOn } = deps
+// `muted` (optionnel) coupe ponctuellement toutes les alertes radar sans toucher au
+// réglage son — p.ex. pendant la recherche d'un nouvel itinéraire, où l'utilisateur a
+// la tête dans la carte et pas sur la route.
+export function useRadarAlerts(deps: { soundOn: Ref<boolean>; muted?: Ref<boolean> }) {
+  const { soundOn, muted } = deps
   const RADAR_CLOSE_M = userPreferences().navigation.radar_close_m
 
   const radarKnown = ref(false)
@@ -35,7 +38,7 @@ export function useRadarAlerts(deps: { soundOn: Ref<boolean> }) {
   let knownThreatIds = new Set<number>()
   let closeAlertedIds = new Set<number>()
   watch(() => radarStore.targets.value, (targets) => {
-    if (soundOn.value) {
+    if (soundOn.value && !muted?.value) {
       if (targets.some((tg) => !knownThreatIds.has(tg.id))) playRadarThreat()
       if (targets.some((tg) => tg.distanceM <= RADAR_CLOSE_M && !closeAlertedIds.has(tg.id))) {
         playRadarClose()

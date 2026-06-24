@@ -11,9 +11,10 @@ const props = defineProps<{
   climbInfo: ClimbInfo | null
   urgentM: number
   speedKmh: number
+  muted?: boolean
 }>()
 
-defineEmits<{ (e: 'resume'): void }>()
+defineEmits<{ (e: 'resume'): void; (e: 'mute'): void }>()
 
 const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM <= props.urgentM
 </script>
@@ -40,6 +41,15 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
       <span v-if="turnHint.state !== 'now' && turnEta(turnHint.distM, speedKmh)" class="nav-turn-sleep-eta">
         <i class="fa-solid fa-clock me-2" aria-hidden="true"></i>{{ turnEta(turnHint.distM, speedKmh) }}
       </span>
+      <button
+        v-if="turnHint.state === 'near'"
+        class="nav-turn-sleep-mute"
+        :aria-label="muted ? t('routes.unmute_turn_alerts') : t('routes.mute_turn_alerts')"
+        :title="muted ? t('routes.unmute_turn_alerts') : t('routes.mute_turn_alerts')"
+        @click.stop="$emit('mute')"
+      >
+        <i class="fa-solid" :class="muted ? 'fa-bell' : 'fa-bell-slash'" aria-hidden="true"></i>
+      </button>
       <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
     </div>
     <div class="nav-screen-off-hint">
@@ -67,6 +77,7 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
   background: #7c3aed; color: #fff;
   padding: 3rem 4rem; border-radius: 1.5rem;
   width: calc(100% - 1.5rem); box-sizing: border-box;
+  position: relative;
 }
 .nav-turn-sleep-icons {
   display: flex; align-items: center; gap: 0.75rem;
@@ -92,4 +103,11 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
 /* Pendant un col en veille, la carte du col occupe le bas : on remonte l'indicateur
    de virage en haut pour qu'il ne soit pas masqué. */
 .nav-turn-sleep--climb { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); }
+/* Bouton de sourdine dans l'écran de veille. */
+.nav-turn-sleep-mute {
+  background: rgba(255,255,255,0.2); border: none; border-radius: 0.75rem;
+  color: #fff; padding: 0.6rem 1rem; font-size: 1.7rem; cursor: pointer;
+  line-height: 1; touch-action: manipulation;
+}
+.nav-turn-sleep-mute:active { background: rgba(255,255,255,0.4); }
 </style>

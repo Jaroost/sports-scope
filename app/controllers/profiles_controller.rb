@@ -107,6 +107,7 @@ class ProfilesController < ApplicationController
       },
       "search" => {
         "country_codes" => sanitize_country_codes(search[:country_codes]),
+        "worldwide_fallback" => to_bool(search[:worldwide_fallback], false),
       },
       "display" => {
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),

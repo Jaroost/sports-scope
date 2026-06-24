@@ -23,7 +23,7 @@ export interface UserPreferences {
     radius_m: number
   }
   map: { default_style: MapStyleId; overlays: string[] }
-  search: { country_codes: string[] }
+  search: { country_codes: string[]; worldwide_fallback: boolean }
   navigation: { default_style: MapStyleId; zoom: number; pitch: number; terrain: boolean; nav_fps: number; line_width: number; line_color: string; line_opacity: number; turn_alert_m: number; turn_hint_m: number; turn_urgent_m: number; turn_repeat_ms: number; turn_repeat_urgent_ms: number; turn_green_hold_m: number; turn_green_hold_s: number; sound_volume: number; turn_marker_size: number; turn_marker_color: string; turn_marker_icon_color: string; show_climb_card: boolean; radar_always_visible: boolean; radar_close_m: number }
   display: {
     default_sport: Sport
@@ -58,6 +58,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   map: { default_style: 'cyclosm', overlays: [] },
   search: {
     country_codes: ['ch', 'fr', 'it', 'at', 'de'],
+    worldwide_fallback: false,
   },
   navigation: { default_style: 'liberty', zoom: 19.5, pitch: 0, terrain: false, nav_fps: 8, line_width: 40, line_color: '#7c3aed', line_opacity: 0.8, turn_alert_m: 100, turn_hint_m: 150, turn_urgent_m: 50, turn_repeat_ms: 2000, turn_repeat_urgent_ms: 1000, turn_green_hold_m: 100, turn_green_hold_s: 10, sound_volume: 100, turn_marker_size: 40, turn_marker_color: '#f97316', turn_marker_icon_color: '#ffffff', show_climb_card: true, radar_always_visible: false, radar_close_m: 30 },
   display: {
@@ -170,6 +171,9 @@ function parse(): UserPreferences {
         country_codes: Array.isArray(incoming.search?.country_codes)
           ? incoming.search.country_codes
           : d.search.country_codes,
+        worldwide_fallback: typeof incoming.search?.worldwide_fallback === 'boolean'
+          ? incoming.search.worldwide_fallback
+          : d.search.worldwide_fallback,
       },
       navigation: { ...d.navigation, ...incoming.navigation },
       display: { ...d.display, ...incoming.display },

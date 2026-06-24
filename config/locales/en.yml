@@ -396,7 +396,8 @@ en:
       add_placeholder: "Add a country…"
       remove: "Remove"
       empty: "No preferred countries: search runs worldwide directly."
-      worldwide_note: "If no result is found in these countries, the search extends worldwide."
+      worldwide_fallback: "Worldwide search as fallback"
+      worldwide_help: "When enabled, if no result is found in the countries above, the search extends worldwide. Otherwise, only those countries are queried."
     navigation:
       title: "Navigation"
       help: "Map type and camera used during guided (GPS) navigation, independent of the route builder."

@@ -396,7 +396,8 @@ fr:
       add_placeholder: "Ajouter un pays…"
       remove: "Retirer"
       empty: "Aucun pays privilégié : la recherche porte directement sur le monde entier."
-      worldwide_note: "Si aucun résultat n'est trouvé dans ces pays, la recherche s'étend au monde entier."
+      worldwide_fallback: "Recherche mondiale en secours"
+      worldwide_help: "Si activé, lorsqu'aucun résultat n'est trouvé dans les pays ci-dessus, la recherche s'étend au monde entier. Sinon, seuls ces pays sont consultés."
     navigation:
       title: "Navigation"
       help: "Type de carte et caméra utilisés pendant la navigation guidée (GPS), indépendants du créateur d'itinéraire."

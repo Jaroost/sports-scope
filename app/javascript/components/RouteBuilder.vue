@@ -43,6 +43,11 @@ const dirty = ref(false)
 // « sale » les mutations programmatiques de reset/fetchRoute.
 let trackDirty = false
 const exporting = ref(false)
+// Jeton de partage de l'itinéraire courant : sert à construire le lien de
+// navigation (/routes/:token/navigate). En lecture seule on le tient du prop ;
+// en édition il vient de l'itinéraire chargé/enregistré (null tant qu'il n'est
+// pas sauvegardé, donc pas de navigation possible avant l'enregistrement).
+const routeShareToken = ref<string | null>(null)
 const showExportDialog = ref(false)
 const exportStyleId = ref('')
 const exportShowGrade = ref(false)
@@ -349,6 +354,7 @@ async function fetchRoute(id: number) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     const r = payload.route
+    routeShareToken.value = r.share_token || null
     routeStore.name.value = r.name || ''
     // Réaligne la catégorie d'activité (et donc la vitesse moyenne) sur celle
     // enregistrée avec l'itinéraire.
@@ -463,6 +469,9 @@ async function persist() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     const r = payload.route
+    // Mémorise le jeton de partage renvoyé pour activer le bouton de navigation
+    // dès le premier enregistrement (un itinéraire neuf n'en avait pas encore).
+    if (r?.share_token) routeShareToken.value = r.share_token
     if (!isEditMode() && r?.id) {
       routeStore.currentId.value = r.id
       window.history.replaceState({}, '', `${localePrefix}/routes/${r.id}/edit`)
@@ -492,6 +501,22 @@ function exportGpx() {
   }
   if (!isEditMode()) return
   window.location.href = `/api/routes/${routeStore.currentId.value}/gpx`
+}
+
+// ─── Navigation ─────────────────────────────────────────────────────────────────
+
+// Le jeton de navigation : prop de partage en lecture seule, sinon celui de
+// l'itinéraire chargé/enregistré. Null tant que l'itinéraire n'a pas de jeton
+// (création non encore sauvegardée).
+const navigateToken = computed(() => (readOnly.value ? props.shareToken : routeShareToken.value))
+
+// La navigation n'est proposée qu'une fois l'itinéraire enregistré (jeton présent)
+// et tracé : elle s'appuie sur la géométrie publiée via le lien de partage.
+const canNavigate = computed(() => !!navigateToken.value && routeStore.hasGeometry.value)
+
+function navigateRoute() {
+  if (!navigateToken.value) return
+  window.location.href = `${localePrefix}/routes/${encodeURIComponent(navigateToken.value)}/navigate`
 }
 
 // ─── Komoot ───────────────────────────────────────────────────────────────────
@@ -1169,6 +1194,10 @@ onBeforeUnmount(() => {
         @click="openInKomoot" :title="t('routes.open_in_komoot')" :aria-label="t('routes.open_in_komoot')">
         <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
       </button>
+      <button v-if="canNavigate" type="button" class="btn btn-sm btn-light"
+        @click="navigateRoute" :title="t('routes.navigate')" :aria-label="t('routes.navigate')">
+        <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
+      </button>
       <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-light" data-profile-trigger
         data-profile-sections="display,map,search,climb,speeds,poi"
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
@@ -1224,6 +1253,11 @@ onBeforeUnmount(() => {
             @click="openInKomoot" :title="t('routes.open_in_komoot')">
             <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">Komoot</span>
+          </button>
+          <button v-if="canNavigate" type="button" class="btn btn-sm btn-primary d-flex align-items-center gap-1"
+            @click="navigateRoute" :title="t('routes.navigate')">
+            <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
+            <span class="d-none d-lg-inline">{{ t('routes.navigate') }}</span>
           </button>
           <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
             data-profile-trigger data-profile-sections="display,map,search,climb,speeds,poi" :title="t('nav.profile')">

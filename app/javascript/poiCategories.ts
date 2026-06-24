@@ -39,13 +39,13 @@ export interface PoiCategory {
 }
 
 export const POI_CATEGORIES: PoiCategory[] = [
-  { key: 'water',       prefField: 'show_water',      serverTypes: ['water'],     icon: 'fa-faucet-drip', color: '#2563eb', point: true,  labelKey: 'water' },
+  { key: 'cemeteries',  prefField: 'show_cemeteries', serverTypes: ['cemetery'],  icon: 'fa-cross',       color: '#6b7280', point: true,  labelKey: 'cemeteries' },
   { key: 'bakeries',    prefField: 'show_bakeries',   serverTypes: ['bakery'],    icon: 'fa-bread-slice', color: '#b45309', point: true,  labelKey: 'bakeries' },
+  { key: 'water',       prefField: 'show_water',      serverTypes: ['water'],     icon: 'fa-faucet-drip', color: '#2563eb', point: true,  labelKey: 'water' },
   { key: 'food',        prefField: 'show_food',       serverTypes: ['food'],      icon: 'fa-utensils',    color: '#dc2626', point: true,  labelKey: 'food' },
   { key: 'viewpoints',  prefField: 'show_viewpoints', serverTypes: ['viewpoint'], icon: 'fa-binoculars',  color: '#7c3aed', point: true,  labelKey: 'viewpoints' },
   { key: 'picnic',      prefField: 'show_picnic',     serverTypes: ['picnic'],    icon: 'fa-tree',        color: '#15803d', point: true,  labelKey: 'picnic' },
   { key: 'toilets',     prefField: 'show_toilets',    serverTypes: ['toilets'],   icon: 'fa-restroom',    color: '#0891b2', point: true,  labelKey: 'toilets' },
-  { key: 'cemeteries',  prefField: 'show_cemeteries', serverTypes: ['cemetery'],  icon: 'fa-cross',       color: '#6b7280', point: true,  labelKey: 'cemeteries' },
   { key: 'localities',  prefField: 'show_localities', serverTypes: ['city', 'town', 'village', 'hamlet'], icon: 'fa-location-dot', color: '#475569', point: false, labelKey: 'localities' },
 ]
 

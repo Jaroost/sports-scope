@@ -28,6 +28,7 @@ interface Preferences {
   }
   search: {
     country_codes: string[]
+    worldwide_fallback: boolean
   }
   navigation: {
     default_style: string
@@ -525,8 +526,12 @@ function placePreviewMarker(coords: [number, number]) {
           </select>
         </div>
 
+        <div class="form-check form-switch mb-1">
+          <input id="search-worldwide" v-model="prefs.search.worldwide_fallback" class="form-check-input" type="checkbox">
+          <label class="form-check-label" for="search-worldwide">{{ t('profile.search.worldwide_fallback') }}</label>
+        </div>
         <p class="text-muted small mb-0">
-          <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>{{ t('profile.search.worldwide_note') }}
+          <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>{{ t('profile.search.worldwide_help') }}
         </p>
       </div>
     </section>

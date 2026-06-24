@@ -50,6 +50,7 @@ class User < ApplicationRecord
     # pays, le front retombe sur une recherche mondiale (cf. RouteBuilderMap).
     "search" => {
       "country_codes" => %w[ch fr it at de],
+      "worldwide_fallback" => false, # étendre au monde entier si aucun résultat dans les pays ci-dessus
     },
     "display" => {
       "default_sport" => "cycling",   # cycling | mtb | hiking

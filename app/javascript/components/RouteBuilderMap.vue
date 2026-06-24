@@ -1471,6 +1471,9 @@ function wtHidePreview() {
 // en `countrycodes` à Nominatim pour qu'il ne renvoie d'abord que ces pays.
 const PREFERRED_COUNTRIES = userPreferences().search.country_codes
 const PREFERRED_COUNTRY_CODES = PREFERRED_COUNTRIES.join(',')
+// Étendre la recherche au monde entier quand aucun résultat n'est trouvé dans les
+// pays privilégiés (réglage du profil ; false par défaut).
+const WORLDWIDE_FALLBACK = userPreferences().search.worldwide_fallback
 
 // Rang de priorité d'un pays = sa position dans la liste du profil ; les pays
 // hors liste (repli mondial) passent après tous les autres.
@@ -1492,10 +1495,10 @@ async function searchPlaces(q: string) {
   searching.value = true
   try {
     // On restreint d'abord aux pays privilégiés ; si Nominatim ne renvoie rien
-    // (lieu hors zone), on refait une recherche mondiale en repli. Liste vide ⇒
-    // recherche mondiale d'emblée (pas de second appel inutile).
+    // (lieu hors zone) et que le repli mondial est activé, on refait une recherche
+    // mondiale. Liste vide ⇒ recherche mondiale d'emblée (pas de second appel).
     let data = await fetchPlaces(q, PREFERRED_COUNTRY_CODES)
-    if (data.length === 0 && PREFERRED_COUNTRY_CODES) data = await fetchPlaces(q)
+    if (data.length === 0 && PREFERRED_COUNTRY_CODES && WORLDWIDE_FALLBACK) data = await fetchPlaces(q)
     searchResults.value = data
       .sort((a, b) => searchCountryPriority(a.address?.country_code ?? '') - searchCountryPriority(b.address?.country_code ?? ''))
       .slice(0, 6)

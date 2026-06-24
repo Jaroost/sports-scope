@@ -674,6 +674,12 @@ function cancelPlaceNav() {
 function onLocate(p: PlaceResult) {
   destName.value = p.display_name.split(',')[0]
   if (!map) return
+  // On débraye le suivi caméra (comme un déplacement manuel) : sinon la boucle
+  // d'animation rejette aussitôt la caméra sur la position GPS et annule le recadrage
+  // sur le lieu cherché. cameraUnlocked empêche aussi le réarmement auto à l'approche
+  // d'un virage. Le suivi reprend à la validation (confirmPlaceNav) ou via « recentrer ».
+  following.value = false
+  cameraUnlocked.value = true
   if (p.boundingbox?.length === 4) {
     const [minLat, maxLat, minLng, maxLng] = p.boundingbox.map(parseFloat)
     map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800, maxZoom: 14 })
@@ -1680,9 +1686,10 @@ function toggleScreenOffManual() {
          visible en mode veille (info de sécurité). -->
     <RadarOverlay :elevated="screenOff" />
 
-    <!-- Upcoming turn indicator -->
+    <!-- Upcoming turn indicator. Masqué en mode recherche : l'utilisateur a la tête
+         dans la carte pour choisir une nouvelle destination, pas sur le tracé courant. -->
     <NavTurnBanner
-      v-if="turnHint && hasFix && !offRoute"
+      v-if="turnHint && hasFix && !offRoute && !placeNavActive"
       :turn-hint="turnHint"
       :urgent-m="TURN_URGENT_M"
       :radar-banner-visible="radarBannerVisible"
@@ -1701,7 +1708,7 @@ function toggleScreenOffManual() {
          Reste visible (au-dessus du voile noir) en mode veille : quitter le tracé
          est une info de sécurité qui doit réveiller l'attention même écran éteint. -->
     <i
-      v-if="offRoute && hasFix"
+      v-if="offRoute && hasFix && !placeNavActive"
       class="fa-solid fa-arrow-up nav-offroute-bigarrow"
       :class="{ 'nav-offroute-bigarrow--sleep': screenOff }"
       :style="{ transform: `translate(-50%, -50%) rotate(${offRouteRelBearing}deg)` }"
@@ -1711,7 +1718,7 @@ function toggleScreenOffManual() {
     <!-- Reroutage manuel : recalcule un chemin BRouter de la position vers le tracé.
          Reste visible en veille (au-dessus du voile noir) : quitter le tracé est une
          info de sécurité ; l'erreur éventuelle s'affiche sous le bouton. -->
-    <div v-if="offRoute && hasFix" class="nav-reroute" :class="{ 'nav-reroute--sleep': screenOff }">
+    <div v-if="offRoute && hasFix && !placeNavActive" class="nav-reroute" :class="{ 'nav-reroute--sleep': screenOff }">
       <button
         type="button"
         class="btn btn-warning shadow nav-reroute-btn"
@@ -1725,9 +1732,10 @@ function toggleScreenOffManual() {
       <div v-if="rerouteError" class="nav-reroute-error">{{ rerouteError }}</div>
     </div>
 
-    <!-- Recenter button -->
+    <!-- Recenter button. Masqué en mode recherche : recentrer sur l'utilisateur
+         annulerait la vue sur le lieu cherché et chevaucherait « Naviguer ici ». -->
     <button
-      v-if="!following && hasFix"
+      v-if="!following && hasFix && !placeNavActive"
       type="button"
       class="btn btn-warning shadow nav-recenter"
       @click="recenter"

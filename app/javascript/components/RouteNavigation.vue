@@ -287,6 +287,9 @@ let announcedTurn = -1       // index of the last turn we played a cue for
 // « tournez ici » même à l'arrêt à un carrefour). On mémorise sa distance le long du
 // tracé : le maintien dure tant qu'on n'a pas parcouru GREEN_HOLD_M après le virage.
 let reachedTurn: { direction: 'left' | 'right'; kind: Maneuver; angle: number; exitNumber?: number; distM: number } | null = null
+// Index (dans `turns`) du virage tout juste atteint : sert à colorer en vert SA pastille
+// sur la carte pendant le maintien « now ». -1 quand aucun virage n'est en maintien vert.
+let reachedTurnIdx = -1
 // Horodatage du moment où le virage courant a été atteint : sert à la limite de temps
 // du maintien vert (cf. GREEN_HOLD_MS), indépendante de la distance parcourue.
 let reachedAtMs = 0
@@ -366,6 +369,12 @@ watch(isClimbing, () => {
 // en cache pour éviter un reflow par frame.
 // Intervalle minimum entre deux frames, calculé depuis la préférence nav_fps (0,5–60 fps).
 const FRAME_MIN_MS = Math.round(1000 / (navPrefs.nav_fps ?? 8))
+// Interpolation GPS (dead-reckoning + lissage du cap) entre deux fixes. Désactivée en
+// dur : le marqueur et la caméra se posent directement sur chaque fix (position snappée
+// sur le tracé si on y est, sinon GPS brut), et la flèche prend le cap du fix sans
+// transition — la position ne « glisse » plus entre les fixes. Le snapping sur le tracé
+// reste actif (il ne relève pas de l'interpolation). Repasser à true rétablit le glissé.
+const GPS_INTERPOLATION = false
 let containerH = 0                     // hauteur du conteneur carte, rafraîchie au resize
 let lastTickT = 0                      // performance.now() de la dernière frame rendue
 
@@ -685,6 +694,7 @@ function resetRouteTracking(atStart: boolean) {
   announcedTurn = -1
   urgentBuzzedTurn = -1
   reachedTurn = null
+  reachedTurnIdx = -1
   activeTurn = null
   turnHint.value = null
   turnAlertMuted.value = false
@@ -995,6 +1005,8 @@ function renderTurnMarkers() {
     body.className = 'nav-turn-marker-body'
     // Couleurs configurables (profil → navigation) : pastille et icône intérieure.
     body.style.background = navPrefs.turn_marker_color
+    // Couleur de la pulsation du prochain virage (halo) = couleur de fond de la pastille.
+    body.style.setProperty('--turn-pulse-color', navPrefs.turn_marker_color)
     if (tp.kind === 'roundabout') {
       // Rond-point : numéro de sortie, texte maintenu droit (pas d'alignement carte).
       const exitFont = TURN_MARKER_SIZE / 11 * 13   // 13 px à la taille par défaut (rayon 11)
@@ -1019,14 +1031,15 @@ function renderTurnMarkers() {
   }
   applyMarkerScale()
   visibleTurnIdx = -1   // force le recalcul : les marqueurs neufs sont visibles par défaut
+  greenTurnIdx = -1     // marqueurs recréés : aucune pastille verte en cours
   updateTurnVisibility()
 }
 
-// En suivi d'itinéraire, la carte ne montre que le prochain virage : une seule pastille
-// à la fois (celle de nextTurnPtr). Les virages déjà franchis comme ceux encore loin
-// devant sont masqués pour ne pas encombrer la route. La pastille visible pulse en
-// permanence (halo « selected ») pour attirer l'œil sur le virage à venir. `turnMarkers`
-// est aligné index-pour-index sur `turns`, donc le marqueur du prochain virage est
+// En suivi d'itinéraire, toutes les pastilles restent visibles sur le tracé, mais seul
+// le PROCHAIN virage est en couleur et pulse (halo « selected ») pour attirer l'œil ;
+// les virages déjà franchis comme ceux encore loin devant sont grisés (« inactive »),
+// comme désactivés, pour rester discrets sans disparaître. `turnMarkers` est aligné
+// index-pour-index sur `turns`, donc le marqueur du prochain virage est
 // turnMarkers[nextTurnPtr]. Idempotent via le garde sur visibleTurnIdx.
 let visibleTurnIdx = -1
 function updateTurnVisibility() {
@@ -1034,9 +1047,36 @@ function updateTurnVisibility() {
   visibleTurnIdx = nextTurnPtr
   turnMarkers.forEach((m, i) => {
     const el = m.getElement() as HTMLElement
-    el.classList.toggle('nav-turn-marker--hidden', i !== nextTurnPtr)
+    el.classList.toggle('nav-turn-marker--inactive', i !== nextTurnPtr)
     el.classList.toggle('nav-turn-marker--selected', i === nextTurnPtr)
   })
+}
+
+// Couleur verte du virage atteint, alignée sur le bandeau « now » (NavTurnBanner).
+const TURN_NOW_COLOR = '#16a34a'
+
+// Colore en vert la pastille du virage atteint pendant le maintien « now » (et la
+// restaure ensuite). On force la couleur en inline (la couleur de base est posée en
+// inline, donc une classe ne suffirait pas) ; la classe `--now` gère le halo, l'échelle
+// et la priorité d'empilement. Idempotent via le garde sur greenTurnIdx.
+let greenTurnIdx = -1
+function setGreenTurn(idx: number) {
+  if (greenTurnIdx === idx) return
+  const paint = (i: number, green: boolean) => {
+    const m = turnMarkers[i]
+    if (!m) return
+    const el = m.getElement() as HTMLElement
+    const body = el.firstElementChild as HTMLElement | null
+    const color = green ? TURN_NOW_COLOR : navPrefs.turn_marker_color
+    if (body) {
+      body.style.background = color
+      body.style.setProperty('--turn-pulse-color', color)
+    }
+    el.classList.toggle('nav-turn-marker--now', green)
+  }
+  if (greenTurnIdx >= 0) paint(greenTurnIdx, false)
+  greenTurnIdx = idx
+  if (idx >= 0) paint(idx, true)
 }
 
 // Met les pastilles de virage à l'échelle du zoom, selon la même loi que le tracé
@@ -1391,7 +1431,7 @@ function startAnimation() {
     if (!anchorPos) { rafId = requestAnimationFrame(tick); return }
     const dt = Math.min((now - anchorTime) / 1000, MAX_EXTRAP_S)
     let pos = anchorPos
-    if (extrapSpeedMs > MIN_SPEED_MS) {
+    if (GPS_INTERPOLATION && extrapSpeedMs > MIN_SPEED_MS) {
       // Sur le tracé : avancer la distance le long de la polyligne (la flèche reste
       // collée à la ligne, virages compris). Hors trajet : extrapolation libre au cap.
       pos = anchorOnRoute
@@ -1405,10 +1445,11 @@ function startAnimation() {
     // Économie de batterie : on arrête la boucle dès que ses deux sorties ont atteint
     // leur valeur finale — position (immobile ou extrapolation plafonnée) et cap convergé.
     // Le prochain fix GPS rappelle startAnimation() et relance la boucle (garde rafId != null).
+    // Interpolation désactivée : rien n'évolue entre deux fixes, la frame est terminale.
     const posSettled = extrapSpeedMs <= MIN_SPEED_MS || dt >= MAX_EXTRAP_S
     const bearingSettled = Math.abs(d) < BEARING_EPS
     const h = containerH
-    const idle = posSettled && bearingSettled
+    const idle = !GPS_INTERPOLATION || (posSettled && bearingSettled)
 
     // Sur la frame terminale on fige exactement sur la cible (l'easing n'y arrive jamais).
     displayBearing = idle ? extrapBearing : displayBearing + d * BEARING_SMOOTH
@@ -1444,7 +1485,7 @@ function updateTurns(): boolean {
   // pour le maintien vert. Le décompte ne démarre donc qu'une fois le virage vraiment
   // laissé derrière soi.
   while (nextTurnPtr < turns.length && turns[nextTurnPtr].distM < here - 5) {
-    rememberReached(turns[nextTurnPtr])
+    rememberReached(turns[nextTurnPtr], nextTurnPtr)
     nextTurnPtr++
   }
   // Virage franchi → la pastille suivante devient la seule visible sur la carte.
@@ -1486,7 +1527,7 @@ function updateTurns(): boolean {
   // Virage courant atteint (dist ≤ 0) mais pointeur pas encore avancé (on est dessus,
   // potentiellement à l'arrêt à un carrefour) : on rafraîchit le maintien vert pour
   // qu'il ne disparaisse pas tant qu'on n'est pas reparti.
-  if (turn && dist <= 0) rememberReached(turn)
+  if (turn && dist <= 0) rememberReached(turn, nextTurnPtr)
 
   // Choix de l'affichage. Priorité au prochain virage s'il est proche (« sauf s'il y a
   // une autre instruction plus proche »). Sinon, on maintient le virage tout juste
@@ -1503,6 +1544,10 @@ function updateTurns(): boolean {
   } else {
     turnHint.value = null
   }
+
+  // Confirmation verte (« now ») : on colore en vert SA pastille sur la carte, en
+  // cohérence avec le bandeau. Sinon, aucune pastille n'est verte.
+  setGreenTurn(turnHint.value?.state === 'now' ? reachedTurnIdx : -1)
 
   autoWakeForTurns(turnHint.value?.state ?? null)
   return fired
@@ -1549,9 +1594,10 @@ function autoWakeForTurns(state: 'far' | 'near' | 'now' | null) {
 // Le chrono (reachedAtMs) ne démarre qu'au premier passage sur ce virage, et non à
 // chaque rafraîchissement tant qu'on est dessus (sinon la limite de temps ne
 // s'écoulerait jamais à l'arrêt à un carrefour).
-function rememberReached(turn: TurnPoint) {
+function rememberReached(turn: TurnPoint, idx: number) {
   if (!reachedTurn || reachedTurn.distM !== turn.distM) reachedAtMs = Date.now()
   reachedTurn = { direction: turn.direction, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, distM: turn.distM }
+  reachedTurnIdx = idx
 }
 
 function muteTurnAlert() {
@@ -2122,8 +2168,9 @@ function toggleScreenOffManual() {
 .nav-position-arrow {
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.4));
   pointer-events: none;
-  /* Position de l'utilisateur : au-dessus des indicateurs de virage et des POI. */
-  z-index: 3;
+  /* Position de l'utilisateur : au-dessus de tous les autres marqueurs (POI, virages
+     inactifs/actif, destination). */
+  z-index: 5;
 }
 
 /* Marqueur de destination posé au tap en mode « cible » (créé en JS, donc style
@@ -2148,8 +2195,11 @@ function toggleScreenOffManual() {
    et scale d'un bloc le cercle, le liseré, la flèche et le numéro. */
 .nav-turn-marker {
   pointer-events: none;
+  /* Au-dessus des POI (z 1). Le prochain virage (--selected) passe encore au-dessus
+     des virages inactifs voisins (z 3) pour ne jamais être recouvert. */
   z-index: 2;
 }
+.nav-turn-marker--selected { z-index: 3; }
 .nav-turn-marker-body {
   width: 100%;
   height: 100%;
@@ -2169,25 +2219,40 @@ function toggleScreenOffManual() {
 .nav-turn-marker-arrow { width: 73%; height: 73%; display: block; }
 .nav-turn-marker-exit { color: #fff; font-weight: 700; line-height: 1; }
 
-/* Suivi d'itinéraire : on ne montre que le prochain virage. Les autres pastilles
-   restent posées sur le tracé (rotation/position MapLibre) mais sont masquées. */
-.nav-turn-marker--hidden { display: none; }
+/* Suivi d'itinéraire : toutes les pastilles restent posées sur le tracé. Les virages
+   autres que le prochain sont grisés (désaturés + estompés) comme désactivés, pour
+   rester discrets sans disparaître. Le grisage porte sur le corps (la racine garde la
+   rotation/position MapLibre). */
+.nav-turn-marker--inactive .nav-turn-marker-body {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
 
-/* Virage « sélectionné » : mis en évidence quand l'écran sort de veille à son approche,
-   pour repérer d'un coup d'œil le virage concerné sur la carte. Halo pulsé porté par le
-   corps (qui subit déjà le scale du zoom), donc il grossit/rétrécit avec la pastille. Le
-   halo combine un liseré blanc et un liseré sombre pour rester visible sur fond clair
-   comme sombre, indépendamment de la couleur configurée de la pastille. */
+/* Prochain virage : pastille en couleur qui pulse pour attirer l'œil. Le halo reprend
+   la couleur de fond de l'indicateur (--turn-pulse-color, posée en JS) et un fin liseré
+   blanc le détache du fond. Porté par le corps (qui subit déjà le scale du zoom), donc
+   il grossit/rétrécit avec la pastille. */
 .nav-turn-marker--selected .nav-turn-marker-body {
   animation: nav-turn-pulse 1.2s ease-in-out infinite;
 }
 @keyframes nav-turn-pulse {
   0%, 100% {
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95), 0 0 0 5px rgba(0, 0, 0, 0.25), 0 0 10px 3px rgba(255, 255, 255, 0.55);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 6px 2px var(--turn-pulse-color, #f97316);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(255, 255, 255, 1), 0 0 0 7px rgba(0, 0, 0, 0.3), 0 0 22px 9px rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 1), 0 0 20px 8px var(--turn-pulse-color, #f97316);
   }
+}
+
+/* Virage atteint (« now ») : la pastille passe en vert (couleur posée en inline par
+   setGreenTurn) et pulse en vert pour confirmer « tournez ici », en cohérence avec le
+   bandeau vert. filter/opacity annulent un éventuel grisage (le virage atteint est
+   souvent déjà « inactive », derrière le coureur). Au-dessus des autres pastilles. */
+.nav-turn-marker--now { z-index: 4; }
+.nav-turn-marker--now .nav-turn-marker-body {
+  filter: none;
+  opacity: 1;
+  animation: nav-turn-pulse 1.2s ease-in-out infinite;
 }
 
 /* Marqueurs POI (cimetières / boulangeries) — même rendu que le créateur d'itinéraire.
@@ -2224,8 +2289,8 @@ function toggleScreenOffManual() {
 }
 
 /* Popup POI (Google Maps / Street View) — repris du créateur d'itinéraire. */
-/* Toujours au-dessus des autres marqueurs (POI z-index 1, virages 2, position 3) :
-   sans z-index explicite, le popup maplibre (auto = 0) passe sous les marqueurs. */
+/* Toujours au-dessus des autres marqueurs (POI z 1, virages 2/3, destination 4,
+   position 5) : sans z-index explicite, le popup maplibre (auto = 0) passe dessous. */
 .place-popup-container { z-index: 10; }
 .place-popup-container .maplibregl-popup-content {
   padding: 4px;

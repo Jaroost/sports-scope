@@ -1651,7 +1651,7 @@ defineExpose({
           <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
         </button>
       </div>
-      <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+      <div v-if="!routeStore.readOnly.value" class="btn-group-vertical btn-group-sm shadow-sm" role="group">
         <button type="button" class="btn map-ctrl-btn"
           :class="wtExpanded ? 'btn-primary active' : 'btn-light'"
           @click="wtExpanded = !wtExpanded"
@@ -1663,7 +1663,7 @@ defineExpose({
     </div>
 
     <!-- Search -->
-    <div class="map-search" :class="{ 'map-search--expanded': searchExpanded }">
+    <div v-if="!routeStore.readOnly.value" class="map-search" :class="{ 'map-search--expanded': searchExpanded }">
       <button v-if="!searchExpanded" type="button" class="btn btn-light btn-sm shadow-sm map-search-toggle" @click="openSearch" :title="t('routes.search_placeholder')">
         <i class="fa-solid fa-magnifying-glass"></i>
       </button>

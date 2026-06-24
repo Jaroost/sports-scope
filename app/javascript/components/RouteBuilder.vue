@@ -410,9 +410,8 @@ async function fetchSharedRoute(token: string) {
     mapRef.value?.updateRouteLayer()
     await nextTick()
     chartRef.value?.render()
-    // Itinéraire ouvert via un lien de partage : on recherche aussi les lieux sur
-    // la géométrie chargée.
-    if (routeStore.geometry.value.length >= 2) fetchImportantPlaces()
+    // Pas de recherche de POI dans le visionneur partagé : le proxy Overpass
+    // exige une session (visiteur déconnecté), donc on n'interroge pas les lieux.
   } catch (e: any) {
     routeStore.error.value = e.message
   }
@@ -478,7 +477,18 @@ async function persist() {
   }
 }
 
+// Téléchargement GPX : en mode partage (lecture seule), on passe par l'endpoint
+// public adressé par le jeton ; sinon par l'itinéraire enregistré (édition).
+function canExportGpx() {
+  return readOnly.value ? !!props.shareToken : isEditMode()
+}
+
 function exportGpx() {
+  if (readOnly.value) {
+    if (!props.shareToken) return
+    window.location.href = `/api/routes/shared/${encodeURIComponent(props.shareToken)}/gpx`
+    return
+  }
   if (!isEditMode()) return
   window.location.href = `/api/routes/${routeStore.currentId.value}/gpx`
 }
@@ -1150,7 +1160,7 @@ onBeforeUnmount(() => {
         <span v-if="exporting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
         <i v-else class="fa-solid fa-image" aria-hidden="true"></i>
       </button>
-      <button v-if="isEditMode()" type="button" class="btn btn-sm btn-outline-light"
+      <button v-if="canExportGpx()" type="button" class="btn btn-sm btn-outline-light"
         @click="exportGpx" :title="t('routes.export_gpx')" :aria-label="t('routes.export_gpx')">
         <i class="fa-solid fa-download" aria-hidden="true"></i>
       </button>
@@ -1204,7 +1214,7 @@ onBeforeUnmount(() => {
             <i v-else class="fa-solid fa-image" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">Image</span>
           </button>
-          <button v-if="isEditMode()" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          <button v-if="canExportGpx()" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
             @click="exportGpx" :title="t('routes.export_gpx')">
             <i class="fa-solid fa-download" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">GPX</span>

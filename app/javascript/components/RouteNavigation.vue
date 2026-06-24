@@ -6,7 +6,7 @@ import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
   haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
-  buildOffsetDisplayLine,
+  buildOffsetDisplayLine, densifyGeometry,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { fetchRouteToPlace, GUIDED_ROUTE_KEY } from '../navRoute'
@@ -564,6 +564,12 @@ const REJOIN_LOOKAHEAD_M = 30
 const REJOIN_FORWARD_ARC = 85
 // Distance minimale (m) au point de raccord : on ne raccorde pas juste à côté de soi.
 const REJOIN_MIN_AHEAD_M = 40
+// Élan (m) laissé devant le coureur avant un demi-tour imposé par le reroutage. BRouter
+// place toujours le demi-tour au tout début du détour ; calculé depuis la position, il
+// tomberait à ~0 m (« demi-tour maintenant »), trop tard pour réagir. On route donc
+// depuis un point situé à cette distance droit devant, et on préfixe le tronçon parcouru :
+// le demi-tour tombe alors au bout de cet élan et s'annonce normalement (cf. TURN_HINT_M).
+const REROUTE_UTURN_LEAD_M = 300
 let rerouteToken = 0
 
 // Sommet du tracé restant où raccorder. On privilégie le sommet le plus proche situé
@@ -572,7 +578,10 @@ let rerouteToken = 0
 // de raccorder derrière soi (point le plus proche après un virage manqué) et de ressortir
 // aussitôt. À défaut de point exploitable devant (cap peu fiable à l'arrêt, ou tracé
 // entièrement derrière), on retombe sur le sommet le plus proche depuis la progression.
-function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number {
+// Renvoie aussi `uTurn` : vrai quand AUCUN point exploitable n'a été trouvé devant le
+// coureur (tracé entièrement derrière, dans l'arc) et qu'on est retombé sur le point le
+// plus proche — le raccord impose alors de revenir en arrière, donc un demi-tour.
+function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): { idx: number; uTurn: boolean } {
   let best = -1
   let bestD = Infinity
   for (let i = fromIdx; i < geometry.length; i++) {
@@ -584,7 +593,8 @@ function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number
     if (Math.abs(rel) > REJOIN_FORWARD_ARC) continue
     if (d < bestD) { bestD = d; best = i }
   }
-  if (best < 0) {
+  const uTurn = best < 0
+  if (uTurn) {
     best = fromIdx
     bestD = Infinity
     for (let i = fromIdx; i < geometry.length; i++) {
@@ -594,7 +604,7 @@ function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number
   }
   let j = best
   while (j < geometry.length - 1 && cumDistM[j] - cumDistM[best] < REJOIN_LOOKAHEAD_M) j++
-  return j
+  return { idx: j, uTurn }
 }
 
 async function recalcRoute() {
@@ -609,21 +619,37 @@ async function recalcRoute() {
   const from = lastPos
   try {
     const fromIdx = Math.max(0, Math.min(lastIdx, geometry.length - 1))
-    const rejoinIdx = rejoinIndexAhead(from, currentBearing, fromIdx)
+    const { idx: rejoinIdx, uTurn } = rejoinIndexAhead(from, currentBearing, fromIdx)
     const target = geometry[rejoinIdx]
-    const { geometry: detour, hints: detourHints } = await fetchRouteToPlace(from, [target[0], target[1]], routeSport)
+    // Demi-tour imposé : on route depuis un point d'élan droit devant, pour que le
+    // demi-tour de BRouter (toujours en tête du détour) tombe au bout de cet élan et non
+    // collé au coureur. Sinon, on route directement depuis la position.
+    const start = uTurn ? moveLngLat(from, currentBearing, REROUTE_UTURN_LEAD_M) : from
+    const { geometry: detour, hints: detourHints } = await fetchRouteToPlace(start, [target[0], target[1]], routeSport)
     // Réponse périmée (clic plus récent) ou composant démonté : on n'écrase rien.
     if (token !== rerouteToken) return
 
-    // Épissage : détour (position → raccord) + suite inchangée du tracé original.
+    // Tronçon d'élan : la portion droite [position → départ du détour] que le coureur
+    // parcourt avant le demi-tour, densifiée pour un tracé et une progression lisses. On
+    // raccorde au premier sommet réel du détour (BRouter recale `start` sur la route).
+    const lead = uTurn ? densifyGeometry([[from[0], from[1], null], detour[0]]).slice(0, -1) : []
+    // Épissage : élan + détour (départ → raccord) + suite inchangée du tracé original.
     const tail = geometry.slice(rejoinIdx)
-    const newGeometry = detour.concat(tail)
+    const newGeometry = lead.concat(detour).concat(tail)
+    // Demi-tour synthétique au raccord élan→détour : routant depuis un point sans cap
+    // d'arrivée, BRouter n'émet aucun demi-tour, alors que le tracé y fait bien un ~180°
+    // (élan vers l'avant, puis détour vers l'arrière). On l'injecte explicitement (cmd 11
+    // = TU, angle 180) pour que le coureur soit prévenu. En tête de liste pour que
+    // l'appariement monotone de turnsFromVoiceHints l'ancre avant les hints du détour.
+    const uTurnHint: VoiceHint[] = uTurn
+      ? [{ lng: detour[0][0], lat: detour[0][1], cmd: 11, angle: 180, exit_number: 0 }]
+      : []
     // On ne garde des hints originaux que ceux du tronçon restant : leurs coordonnées
     // (ancrées à l'identique sur les sommets du tracé sauvegardé) existent encore dans
     // `tail`. turnsFromVoiceHints les ré-attache au bon passage du nouveau tracé.
     const tailKeys = new Set(tail.map((c) => `${c[0]},${c[1]}`))
     const tailHints = rawHints.filter((h) => tailKeys.has(`${h.lng},${h.lat}`))
-    applyReroute(newGeometry, detourHints.concat(tailHints))
+    applyReroute(newGeometry, uTurnHint.concat(detourHints).concat(tailHints))
   } catch {
     if (token === rerouteToken) rerouteError.value = t('routes.reroute_failed')
   } finally {
@@ -634,9 +660,13 @@ async function recalcRoute() {
 // Remplace la géométrie de navigation par l'itinéraire rerouté et réinitialise le suivi.
 function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   rebuildRouteState(newGeometry, hints)
-  // Force une re-localisation globale au prochain fix (nouvelle géométrie) et repart des
-  // premiers virages — les pointeurs de l'ancien tracé n'ont plus de sens.
-  located = false
+  // Un tracé rerouté part TOUJOURS de la position du coureur (détour calculé depuis
+  // lastPos) : on l'ancre à l'index 0 et on reste « localisé », pour que les fix suivants
+  // fassent une recherche FENÊTRÉE vers l'avant. Une recherche globale s'accrocherait au
+  // mauvais passage quand le tracé se recoupe près du départ — typiquement l'élan d'un
+  // demi-tour, qui longe la même route à l'aller et au retour. On repart des premiers
+  // virages : les pointeurs de l'ancien tracé n'ont plus de sens.
+  located = true
   lastIdx = 0
   snapPoint = null
   displaySnapPoint = null

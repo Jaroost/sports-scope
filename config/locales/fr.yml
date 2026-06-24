@@ -200,6 +200,7 @@ fr:
     save_name: "Enregistrer le nom"
     cancel: "Annuler"
     export_gpx: "Exporter en GPX"
+    export_gpx_dense: "Exporter en GPX dense (5 m)"
     export_image: "Exporter en image"
     export_style: "Style de carte"
     export_grade_color: "Couleurs de pente"

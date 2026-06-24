@@ -6,6 +6,11 @@ import type { Sport } from '../userPreferences'
 import { buildNewRouteUrl } from '../routeHelpers'
 import NewRouteModal from './NewRouteModal.vue'
 
+// canDense : réservé aux admins (can :manage, :all). Débloque l'export d'un GPX
+// densifié (1 point / 5 m) — utile pour les simulateurs de position GPS, à éviter
+// pour les vraies montres (limite de points). Voir routes_controller#gpx (?step).
+const props = defineProps<{ canDense?: boolean }>()
+
 const routes = ref([])
 const loading = ref(true)
 const error = ref(null)
@@ -553,6 +558,12 @@ onMounted(() => fetchRoutes())
                       <a :href="`/api/routes/${r.id}/gpx`" class="dropdown-item d-flex align-items-center gap-2" download>
                         <i class="fa-solid fa-download" aria-hidden="true"></i>
                         <span>{{ t('routes.export_gpx') }}</span>
+                      </a>
+                    </li>
+                    <li v-if="props.canDense">
+                      <a :href="`/api/routes/${r.id}/gpx?step=5`" class="dropdown-item d-flex align-items-center gap-2" download>
+                        <i class="fa-solid fa-download" aria-hidden="true"></i>
+                        <span>{{ t('routes.export_gpx_dense') }}</span>
                       </a>
                     </li>
                     <li><hr class="dropdown-divider"></li>

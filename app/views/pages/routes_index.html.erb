@@ -1,2 +1,2 @@
 <% content_for :title, t("routes.list_title") %>
-<div data-vue-component="RoutesList"></div>
+<div data-vue-component="RoutesList" data-vue-props='<%= { canDense: can?(:manage, :all) }.to_json %>'></div>

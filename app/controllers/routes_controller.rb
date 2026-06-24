@@ -183,9 +183,28 @@ class RoutesController < ApplicationController
   end
 
   def send_gpx(route)
-    send_data build_gpx(route),
+    send_data build_gpx(route, step: gpx_densify_step),
               filename: "#{route.name.parameterize.presence || 'route'}.gpx",
               type: "application/gpx+xml"
+  end
+
+  # Pas de ré-échantillonnage (en mètres) pour l'export GPX, ou nil pour laisser
+  # la géométrie native. Utile pour les simulateurs de position GPS (extensions
+  # « location override ») qui téléportent d'un trackpoint au suivant : sans
+  # points intermédiaires, les longs tronçons (surtout les segments « libres »
+  # tracés en ligne droite) provoquent de gros sauts. À ne PAS activer pour un
+  # export vers une montre (limite de points sur certains GPS).
+  #   ?dense=1   → pas par défaut de 10 m
+  #   ?step=5    → pas personnalisé (borné à [1, 1000] m)
+  # Réservé aux admins (can :manage, :all) : un GPX dense est inadapté aux vraies
+  # montres (limite de points), on ne l'expose donc pas au tout-venant. Pour un
+  # export partagé (non connecté), current_ability n'accorde rien → toujours nil.
+  def gpx_densify_step
+    return nil unless can?(:manage, :all)
+    return params[:step].to_f.clamp(1.0, 1000.0) if params[:step].present?
+    return 10.0 if ActiveModel::Type::Boolean.new.cast(params[:dense])
+
+    nil
   end
 
   # Namespace de l'extension propriétaire embarquée dans le GPX. Les apps tierces
@@ -194,8 +213,9 @@ class RoutesController < ApplicationController
   # sert pour ré-importer les waypoints d'origine avec leur flag « libre ».
   GPX_NS = "https://sports-scope.app/gpx/1"
 
-  def build_gpx(route)
+  def build_gpx(route, step: nil)
     pts = Array(route.geometry)
+    pts = densify_geometry(pts, step) if step
     wps = Array(route.waypoints)
     name = ERB::Util.html_escape(route.name)
     parts = []
@@ -233,5 +253,44 @@ class RoutesController < ApplicationController
     end
     return [] if rows.empty?
     ["  <extensions>", "    <ss:waypoints>", *rows, "    </ss:waypoints>", "  </extensions>"]
+  end
+
+  # Ré-échantillonne la polyligne à pas ~constant (`step` mètres) par interpolation
+  # linéaire. Seules lat/lng/ele sont interpolées — c'est exactement ce qu'attend un
+  # simulateur de position (la position intermédiaire est bien ~sur la droite entre
+  # deux points). Les points d'origine sont conservés ; on n'insère qu'entre eux.
+  def densify_geometry(pts, step)
+    pts = pts.select { |lng, lat, _| lng && lat }
+    return pts if pts.size < 2
+
+    out = [pts.first]
+    pts.each_cons(2) do |a, b|
+      d = haversine(a, b)
+      n = (d / step).floor
+      (1...n).each do |i|
+        t = i.to_f / n
+        out << lerp_point(a, b, t)
+      end
+      out << b
+    end
+    out
+  end
+
+  def lerp_point(a, b, t)
+    lng = a[0] + (b[0] - a[0]) * t
+    lat = a[1] + (b[1] - a[1]) * t
+    ele = (a[2] && b[2]) ? a[2] + (b[2] - a[2]) * t : (a[2] || b[2])
+    [lng, lat, ele]
+  end
+
+  # Distance en mètres entre deux points [lng, lat, ...].
+  def haversine(a, b)
+    r = 6_371_000.0
+    lat1 = a[1] * Math::PI / 180
+    lat2 = b[1] * Math::PI / 180
+    dlat = lat2 - lat1
+    dlng = (b[0] - a[0]) * Math::PI / 180
+    h = Math.sin(dlat / 2)**2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dlng / 2)**2
+    2 * r * Math.asin(Math.sqrt(h))
   end
 end

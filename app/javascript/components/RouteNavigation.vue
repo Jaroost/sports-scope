@@ -1823,7 +1823,6 @@ function toggleScreenOffManual() {
       @arm-controls-hide="armControlsHide"
       @open-route-picker="showRoutePicker = true"
       @unload-route="unloadRoute"
-      @start-place-nav="startPlaceNav"
       @set-map-style="setMapStyle"
       @toggle-sound="toggleSound"
       @toggle-climb-card="showClimbCard = !showClimbCard"

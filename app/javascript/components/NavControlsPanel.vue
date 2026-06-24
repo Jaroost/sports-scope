@@ -45,7 +45,6 @@ const emit = defineEmits<{
   (e: 'arm-controls-hide'): void
   (e: 'open-route-picker'): void
   (e: 'unload-route'): void
-  (e: 'start-place-nav'): void
   (e: 'set-map-style', id: string): void
   (e: 'toggle-sound'): void
   (e: 'toggle-climb-card'): void
@@ -122,18 +121,6 @@ function onZoom(e: Event) {
         @click="$emit('unload-route')"
       >
         <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-      </button>
-
-      <!-- Lance le choix d'une destination sur la carte (recherche d'un lieu pour
-           recadrer, puis tap pour fixer le point) → itinéraire depuis la position GPS. -->
-      <button
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :title="t('routes.navigate_to_place')"
-        :aria-label="t('routes.navigate_to_place')"
-        @click="$emit('start-place-nav')"
-      >
-        <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
       </button>
 
       <!-- Panneau de débug (comptes pouvant tout faire, ou ?debug=1). Injecte des
@@ -354,15 +341,19 @@ function onZoom(e: Event) {
    des notifications de virage (3) quand on le déploie. */
 .nav-controls-panel {
   position: absolute; top: 0; left: 0; right: 0; z-index: 8;
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 0.6rem;
+  /* flex-wrap : sur un écran étroit (téléphone), le groupe de droite passe sous celui
+     de gauche au lieu d'être poussé hors champ et masqué. */
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 0.6rem;
   padding: 0.75rem;
   background: rgba(255, 255, 255, 0.94);
   border-bottom-left-radius: 1rem; border-bottom-right-radius: 1rem;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
   transition: transform 0.28s ease, opacity 0.28s ease;
 }
-.nav-panel-group { display: flex; align-items: flex-start; gap: 0.6rem; }
-.nav-panel-group--right { flex-wrap: wrap; justify-content: flex-end; }
+/* Les deux groupes enveloppent leurs boutons ; le groupe de droite occupe la largeur
+   restante et reste aligné à droite (sur la même ligne ou rejeté sur la suivante). */
+.nav-panel-group { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.6rem; }
+.nav-panel-group--right { flex: 1 1 auto; justify-content: flex-end; }
 /* Replié : le tiroir remonte hors champ et devient non cliquable (la zone de swipe
    prend le relais pour le rappeler). */
 .nav-controls-panel--hidden {

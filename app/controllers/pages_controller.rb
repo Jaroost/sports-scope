@@ -20,6 +20,12 @@ class PagesController < ApplicationController
     # Public, aucun login requis (rien à charger côté serveur).
   end
 
+  def guided_navigation
+    # Guidage vers un lieu choisi en navigation libre. L'itinéraire est calculé côté
+    # client et lu depuis sessionStorage (RouteNavigation en mode session) : rien à
+    # charger côté serveur, aucun login requis.
+  end
+
   def route_navigation
     # No login required: navigation links are addressed by share_token and can
     # be shared with anyone.

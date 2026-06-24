@@ -38,6 +38,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'arm-controls-hide'): void
+  (e: 'start-place-nav'): void
   (e: 'set-map-style', id: string): void
   (e: 'toggle-sound'): void
   (e: 'toggle-climb-card'): void
@@ -89,6 +90,18 @@ function onZoom(e: Event) {
         data-profile-sections="navigation,poi,climb"
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+      </button>
+
+      <!-- Lance le choix d'une destination sur la carte (recherche d'un lieu pour
+           recadrer, puis tap pour fixer le point) → itinéraire depuis la position GPS. -->
+      <button
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :title="t('routes.navigate_to_place')"
+        :aria-label="t('routes.navigate_to_place')"
+        @click="$emit('start-place-nav')"
+      >
+        <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
       </button>
 
       <!-- Panneau de débug (comptes pouvant tout faire, ou ?debug=1). Injecte des

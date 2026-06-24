@@ -9,7 +9,7 @@ import {
   buildOffsetDisplayLine,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
-import { BROUTER_URL, brouterProfile } from '../brouter'
+import { fetchRouteToPlace, GUIDED_ROUTE_KEY } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
 } from '../navHelpers'
@@ -23,6 +23,8 @@ import NavScreenOff from './NavScreenOff.vue'
 import NavClimbCard from './NavClimbCard.vue'
 import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
+import NavPlaceSearch from './NavPlaceSearch.vue'
+import type { PlaceResult } from '../composables/usePlaceSearch'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import type { Sport } from '../userPreferences'
@@ -40,7 +42,10 @@ import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineGrauStyle, OFFLINE_DEFAULTS,
 } from '../offline/offlineMaps'
 
-const props = defineProps<{ shareToken: string; canDebug?: boolean }>()
+// shareToken : navigation d'un itinéraire sauvegardé (lien partageable).
+// sessionRoute : navigation libre vers un lieu — l'itinéraire est lu depuis
+// sessionStorage (aucune route serveur), donc shareToken est absent.
+const props = defineProps<{ shareToken?: string; sessionRoute?: boolean; canDebug?: boolean }>()
 
 // Réglages caméra issus du profil (section Navigation), indépendants du créateur.
 const navPrefs = userPreferences().navigation
@@ -190,6 +195,16 @@ const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" ar
 // message d'erreur. Voir recalcRoute.
 const rerouting = ref(false)
 const rerouteError = ref<string | null>(null)
+// ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
+// Mode « cible » : on affiche une recherche (recadrage carte) + une consigne, puis un
+// tap sur la carte fixe le point de destination ; « Naviguer ici » calcule un
+// itinéraire depuis la position GPS et remplace le tracé courant (applyReroute).
+const placeNavActive = ref(false)
+const destPoint = ref<LngLat | null>(null)
+const destName = ref('')
+const navStarting = ref(false)
+const navError = ref<string | null>(null)
+let destMarker: any = null
 const climbInfo = ref<ClimbInfo | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
@@ -475,15 +490,30 @@ function onFirstGesture() {
 // ─── Data ───────────────────────────────────────────────────────────────────
 
 async function fetchRoute() {
-  const res = await fetch(`/api/routes/shared/${props.shareToken}`, { headers: { Accept: 'application/json' } })
-  if (!res.ok) throw new Error(t('routes.error_routing'))
-  const data = await res.json()
-  const route = data.route || data
+  // Mode session (navigation libre vers un lieu) : l'itinéraire a déjà été calculé et
+  // déposé dans sessionStorage par FreeNavigation ; on le lit au lieu d'interroger le
+  // serveur. Aucune sauvegarde n'est nécessaire (fonctionne pour les visiteurs anonymes).
+  const route = props.sessionRoute ? readSessionRoute() : await fetchSharedRoute()
   const geom = (route.geometry || []) as Coord[]
   if (geom.length < 2) throw new Error(t('routes.error_min_points'))
   routeName.value = route.name || ''
   routeSport = (route.activity as Sport) || 'cycling'
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
+}
+
+async function fetchSharedRoute(): Promise<any> {
+  const res = await fetch(`/api/routes/shared/${props.shareToken}`, { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error(t('routes.error_routing'))
+  const data = await res.json()
+  return data.route || data
+}
+
+function readSessionRoute(): any {
+  try {
+    const raw = sessionStorage.getItem(GUIDED_ROUTE_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch { /* sessionStorage indisponible / JSON invalide */ }
+  throw new Error(t('routes.error_routing'))
 }
 
 // Recompute everything derived from `geometry` + raw voicehints: altitudes, distances,
@@ -568,25 +598,9 @@ async function recalcRoute() {
     const fromIdx = Math.max(0, Math.min(lastIdx, geometry.length - 1))
     const rejoinIdx = rejoinIndexAhead(from, currentBearing, fromIdx)
     const target = geometry[rejoinIdx]
-    const lonlats = `${from[0]},${from[1]}|${target[0]},${target[1]}`
-    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${brouterProfile(routeSport)}&alternativeidx=0&format=geojson&timode=2`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
-    const data = await res.json()
+    const { geometry: detour, hints: detourHints } = await fetchRouteToPlace(from, [target[0], target[1]], routeSport)
     // Réponse périmée (clic plus récent) ou composant démonté : on n'écrase rien.
     if (token !== rerouteToken) return
-    const feature = data?.features?.[0]
-    const coords = feature?.geometry?.coordinates
-    if (!Array.isArray(coords) || coords.length < 2) throw new Error('no detour')
-    const detour = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null]) as Coord[]
-    // Voicehints BRouter du détour : [indexInTrack, command, exitNumber, distToNext, angle].
-    const rawDetour = Array.isArray(feature.properties?.voicehints) ? feature.properties.voicehints : []
-    const detourHints = rawDetour
-      .map((h: number[]) => {
-        const c = coords[h[0]]
-        return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0, exit_number: h[2] ?? 0 } : null
-      })
-      .filter(Boolean) as VoiceHint[]
 
     // Épissage : détour (position → raccord) + suite inchangée du tracé original.
     const tail = geometry.slice(rejoinIdx)
@@ -632,6 +646,73 @@ function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   renderTurnMarkers()
 }
 
+// ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
+
+function startPlaceNav() {
+  placeNavActive.value = true
+  navError.value = null
+  // Le tiroir de commandes et la recherche se disputent le haut de l'écran : on
+  // referme le tiroir pour laisser la barre de recherche seule en tête.
+  hideControls()
+}
+
+function cancelPlaceNav() {
+  placeNavActive.value = false
+  navError.value = null
+  destPoint.value = null
+  destName.value = ''
+  if (destMarker) { destMarker.remove(); destMarker = null }
+}
+
+// Recadre la carte sur le lieu recherché (sans fixer de destination) : l'utilisateur
+// ajuste ensuite la vue et touche le point exact. Repris de RouteBuilderMap.pickPlace.
+function onLocate(p: PlaceResult) {
+  destName.value = p.display_name.split(',')[0]
+  if (!map) return
+  if (p.boundingbox?.length === 4) {
+    const [minLat, maxLat, minLng, maxLng] = p.boundingbox.map(parseFloat)
+    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800, maxZoom: 14 })
+  } else {
+    const lat = parseFloat(p.lat), lng = parseFloat(p.lon)
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) map.flyTo({ center: [lng, lat], zoom: 13, duration: 800 })
+  }
+}
+
+// Pose (ou déplace) le marqueur de destination au point cliqué.
+function setDestPoint(lngLat: LngLat) {
+  destPoint.value = lngLat
+  navError.value = null
+  if (!map || !maplibre) return
+  if (destMarker) {
+    destMarker.setLngLat(lngLat)
+  } else {
+    const el = document.createElement('div')
+    el.className = 'nav-dest-marker'
+    el.innerHTML = '<i class="fa-solid fa-location-dot"></i>'
+    destMarker = new maplibre.Marker({ element: el, anchor: 'bottom' }).setLngLat(lngLat).addTo(map)
+  }
+}
+
+// « Naviguer ici » : itinéraire BRouter depuis la position GPS jusqu'au point choisi,
+// qui remplace le tracé courant (applyReroute réinitialise tout le suivi).
+async function confirmPlaceNav() {
+  if (navStarting.value || !destPoint.value || !lastPos) return
+  navStarting.value = true
+  navError.value = null
+  try {
+    const { geometry: geom, hints } = await fetchRouteToPlace(lastPos, destPoint.value, routeSport)
+    routeName.value = destName.value || t('routes.destination')
+    applyReroute(geom, hints)
+    cancelPlaceNav()
+    following.value = true
+    cameraUnlocked.value = false
+  } catch {
+    navError.value = t('routes.error_routing')
+  } finally {
+    navStarting.value = false
+  }
+}
+
 // ─── Map ──────────────────────────────────────────────────────────────────────
 
 function refreshContainerH() { containerH = map?.getContainer()?.clientHeight || 0 }
@@ -643,7 +724,8 @@ async function initMap() {
   // Branche l'archive hors-ligne du trajet (si déjà téléchargée) AVANT de construire le
   // style, pour pouvoir démarrer directement sur le fond local en cas de lancement
   // sans réseau.
-  if (offlineSupported() && await hasOfflineArchive(props.shareToken)) {
+  // Hors-ligne indisponible en mode session (pas de token de trajet à archiver).
+  if (props.shareToken && offlineSupported() && await hasOfflineArchive(props.shareToken)) {
     offlineReady.value = true
     try { await registerOfflineArchive(props.shareToken, maplibre); offlineRegistered = true } catch { /* archive illisible : on reste en ligne */ }
   }
@@ -691,7 +773,10 @@ async function initMap() {
   map.on('render', maybeApplyMarkerScale)
   // Tap simple sur la carte → mode veille (la boucle rAF s'arrête, le wake lock est libéré).
   // L'overlay noir capte le tap de réveil ; pas de conflit car il est au z-index 20.
-  map.on('click', () => {
+  map.on('click', (e: any) => {
+    // Mode « cible » : le tap fixe (ou déplace) le point de destination au lieu de
+    // mettre en veille.
+    if (placeNavActive.value) { setDestPoint([e.lngLat.lng, e.lngLat.lat]); return }
     // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
     if (pois.hasOpenPopup()) { pois.closePlacePopup(); return }
     // Tiroir de commandes ouvert : un tap hors du tiroir le referme (et ses
@@ -858,7 +943,7 @@ function wantOffline(): boolean {
 }
 
 function resolveBaseStyle(id: string): string | object {
-  if (id === 'swissgrau' && wantOffline()) return offlineGrauStyle(props.shareToken, OFFLINE_DEFAULTS.maxZoom)
+  if (id === 'swissgrau' && wantOffline()) return offlineGrauStyle(props.shareToken!, OFFLINE_DEFAULTS.maxZoom)
   return mapStyleFor(id)
 }
 
@@ -896,7 +981,7 @@ function onOfflineRemoved() {
 // passage au lieu d'une recherche globale ambiguë. L'entrée expire afin de ne pas
 // « téléporter » un rider qui relance la même route un autre jour ; la validité est
 // en plus confirmée par la proximité réelle au fix GPS (sinon repli global).
-const PROGRESS_KEY = `sportsScope.navProgress.${props.shareToken}`
+const PROGRESS_KEY = `sportsScope.navProgress.${props.shareToken ?? 'session'}`
 const RESUME_MAX_AGE_MS = 30 * 60 * 1000
 let lastProgressSaveMs = 0
 
@@ -1519,6 +1604,7 @@ function toggleScreenOffManual() {
       v-model:show-poi-panel="showPoiPanel"
       v-model:show-debug-panel="showDebugPanel"
       @arm-controls-hide="armControlsHide"
+      @start-place-nav="startPlaceNav"
       @set-map-style="setMapStyle"
       @toggle-sound="toggleSound"
       @toggle-climb-card="showClimbCard = !showClimbCard"
@@ -1535,7 +1621,9 @@ function toggleScreenOffManual() {
       @cycle-debug-turn="cycleDebugTurn"
     >
       <template #map-extra>
+        <!-- Pas de carte hors-ligne en mode session (aucun token de trajet à archiver). -->
         <NavOfflineButton
+          v-if="shareToken"
           :share-token="shareToken"
           :coords="offlineCoords"
           @available="onOfflineAvailable"
@@ -1543,6 +1631,35 @@ function toggleScreenOffManual() {
         />
       </template>
     </NavControlsPanel>
+
+    <!-- Mode « cible » : recherche d'un lieu (recadrage carte) + consigne, puis un tap
+         sur la carte fixe la destination ; « Naviguer ici » lance le guidage. -->
+    <div v-if="placeNavActive" class="nav-place-picker">
+      <div class="nav-place-bar">
+        <NavPlaceSearch @locate="onLocate" />
+        <button type="button" class="btn btn-light nav-place-cancel shadow" :title="t('routes.cancel')" :aria-label="t('routes.cancel')" @click="cancelPlaceNav">
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="nav-place-hint">
+        <i class="fa-solid fa-circle-info me-2" aria-hidden="true"></i>{{ t('routes.navigate_pick_hint') }}
+      </div>
+    </div>
+
+    <!-- Confirmation : itinéraire depuis la position GPS vers le point choisi. -->
+    <div v-if="placeNavActive && destPoint" class="nav-place-confirm-wrap">
+      <button
+        type="button"
+        class="btn btn-primary shadow nav-place-confirm"
+        :disabled="navStarting || !hasFix"
+        @click="confirmPlaceNav"
+      >
+        <i v-if="navStarting" class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>
+        <i v-else class="fa-solid fa-diamond-turn-right me-1" aria-hidden="true"></i>
+        {{ navStarting ? t('routes.computing_route') : (hasFix ? t('routes.navigate_here') : t('routes.gps_waiting')) }}
+      </button>
+      <div v-if="navError" class="nav-place-error">{{ navError }}</div>
+    </div>
 
     <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
          visible en mode veille (info de sécurité). -->
@@ -1715,6 +1832,39 @@ function toggleScreenOffManual() {
   padding: 0.3rem 0.8rem; font-size: 0.85rem; font-weight: 600;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
+
+/* Mode « cible » : barre de recherche centrée en haut + consigne ; au-dessus du
+   tiroir de commandes (z 8) car il est replié pendant ce mode. */
+.nav-place-picker {
+  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  z-index: 9; width: min(440px, calc(100% - 1.5rem));
+  display: flex; flex-direction: column; align-items: stretch; gap: 0.5rem;
+}
+.nav-place-bar { display: flex; align-items: flex-start; gap: 0.5rem; }
+.nav-place-bar :deep(.nav-search) { flex: 1; }
+.nav-place-cancel {
+  flex-shrink: 0; width: 2.6rem; height: 2.6rem; border-radius: 0.5rem;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem;
+}
+.nav-place-hint {
+  align-self: center; max-width: 100%;
+  background: rgba(8, 66, 152, 0.95); color: #fff;
+  padding: 0.45rem 0.9rem; border-radius: 0.6rem;
+  font-size: 0.85rem; font-weight: 500; text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+.nav-place-confirm-wrap {
+  position: absolute; bottom: 8rem; left: 50%; transform: translateX(-50%);
+  z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+}
+.nav-place-confirm {
+  border-radius: 999px; font-weight: 600; font-size: 1.1rem; padding: 0.6rem 1.4rem;
+}
+.nav-place-error {
+  background: #fff3cd; color: #664d03; border-radius: 999px;
+  padding: 0.3rem 0.8rem; font-size: 0.85rem; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
 </style>
 
 <style>
@@ -1723,6 +1873,17 @@ function toggleScreenOffManual() {
   pointer-events: none;
   /* Position de l'utilisateur : au-dessus des indicateurs de virage et des POI. */
   z-index: 3;
+}
+
+/* Marqueur de destination posé au tap en mode « cible » (créé en JS, donc style
+   global, hors scope). */
+.nav-dest-marker {
+  color: #dc2626;
+  font-size: 2rem;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 4;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
 }
 
 /* Indicateurs de virage (pastille orange + flèche / numéro de sortie). Marqueurs

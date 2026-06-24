@@ -20,8 +20,11 @@ export function useNavPois(deps: {
   getMaplibre: () => any
   getGeometry: () => Coord[]
   zoomWidthScale: (z: number) => number
+  // Optionnel : si fourni, le popup d'un POI propose « Naviguer ici » qui lance la
+  // navigation guidée vers ce POI (seulement en mode libre, où la destination est libre).
+  onNavigateTo?: (place: NavPlace) => void
 }) {
-  const { getMap, getMaplibre, getGeometry, zoomWidthScale } = deps
+  const { getMap, getMaplibre, getGeometry, zoomWidthScale, onNavigateTo } = deps
 
   // Catégories de POI ponctuels affichables en navigation (eau, restos, points de
   // vue…). Le panneau de séance permet de les masquer/afficher ; l'état initial vient
@@ -200,11 +203,20 @@ export function useNavPois(deps: {
     const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${place.lat},${place.lng}`
     const wrap = document.createElement('div')
     wrap.className = 'place-popup'
+    // « Naviguer ici » en tête (action principale) : lance la navigation guidée vers le
+    // POI. Présent seulement quand l'appelant fournit onNavigateTo (mode libre).
+    const navAction = onNavigateTo
+      ? `<button type="button" class="place-popup-link place-popup-link--navigate">
+        <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
+        <span>${escapeHtml(t('routes.navigate_here'))}</span>
+      </button>`
+      : ''
     wrap.innerHTML = `
       <div class="place-popup-header">
         <span class="place-popup-name">${escapeHtml(place.name)}</span>
         <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
       </div>
+      ${navAction}
       <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
         <i class="fa-brands fa-google" aria-hidden="true"></i>
         <span>Google Maps</span>
@@ -223,6 +235,10 @@ export function useNavPois(deps: {
     activePlaceEl = el
     el.classList.add('place-marker--active')
     wrap.querySelector('.place-popup-close')?.addEventListener('click', closePlacePopup)
+    wrap.querySelector('.place-popup-link--navigate')?.addEventListener('click', () => {
+      closePlacePopup()
+      onNavigateTo?.(place)
+    })
     const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
     if (svLink) {
       checkSV(place.lat, place.lng).then((ok) => {

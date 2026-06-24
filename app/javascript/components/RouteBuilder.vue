@@ -23,9 +23,9 @@ const props = defineProps({
   shareToken: { type: String, default: null },
 })
 
-// Lecture seule dès qu'on est arrivé par un lien de partage : aucune édition,
-// aucune sauvegarde.
-const readOnly = computed(() => !!props.shareToken)
+// Lecture seule effective : pilotée par le store. Activée d'office par un lien de
+// partage (verrou permanent), ou basculée manuellement via le toggle de la carte.
+const readOnly = computed(() => routeStore.readOnly.value)
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
@@ -490,12 +490,11 @@ async function persist() {
 // Téléchargement GPX : en mode partage (lecture seule), on passe par l'endpoint
 // public adressé par le jeton ; sinon par l'itinéraire enregistré (édition).
 function canExportGpx() {
-  return readOnly.value ? !!props.shareToken : isEditMode()
+  return props.shareToken ? true : isEditMode()
 }
 
 function exportGpx() {
-  if (readOnly.value) {
-    if (!props.shareToken) return
+  if (props.shareToken) {
     window.location.href = `/api/routes/shared/${encodeURIComponent(props.shareToken)}/gpx`
     return
   }
@@ -508,7 +507,7 @@ function exportGpx() {
 // Le jeton de navigation : prop de partage en lecture seule, sinon celui de
 // l'itinéraire chargé/enregistré. Null tant que l'itinéraire n'a pas de jeton
 // (création non encore sauvegardée).
-const navigateToken = computed(() => (readOnly.value ? props.shareToken : routeShareToken.value))
+const navigateToken = computed(() => props.shareToken ?? routeShareToken.value)
 
 // La navigation n'est proposée qu'une fois l'itinéraire enregistré (jeton présent)
 // et tracé : elle s'appuie sur la géométrie publiée via le lien de partage.
@@ -1098,7 +1097,7 @@ function updateNavbarHeight() {
 // sortante) tant que des modifications n'ont pas été enregistrées. En lecture
 // seule (lien de partage), aucune édition possible : pas d'avertissement.
 function onBeforeUnload(e: BeforeUnloadEvent) {
-  if (readOnly.value || !dirty.value) return
+  if (!dirty.value) return
   e.preventDefault()
   e.returnValue = ''
 }
@@ -1106,7 +1105,10 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 onMounted(async () => {
   state.load()
   routeStore.reset()
-  routeStore.readOnly.value = readOnly.value
+  // Un lien de partage verrouille la lecture seule (non débrayable) ; en édition
+  // normale on démarre déverrouillé, l'utilisateur peut basculer via le toggle.
+  routeStore.shareLocked.value = !!props.shareToken
+  routeStore.readOnly.value = !!props.shareToken
   routeStore.currentId.value = props.routeId ? Number(props.routeId) : null
   updateNavbarHeight()
   // Re-mesure dès que la navbar prend sa taille définitive (polices, layout) puis à
@@ -1126,7 +1128,10 @@ onMounted(async () => {
 
   // Mode lecture seule (lien de partage) : on charge l'itinéraire via le jeton
   // public, sans brancher la sauvegarde ni lire les paramètres de pré-remplissage.
-  if (readOnly.value) {
+  if (props.shareToken) {
+    // En lecture seule, les points sont affichés par défaut (le bouton reste là
+    // pour les masquer), sans tenir compte d'un éventuel réglage de session.
+    state.showWaypoints = true
     await mapRef.value?.initMap()
     await fetchSharedRoute(props.shareToken as string)
     return

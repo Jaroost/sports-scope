@@ -78,6 +78,8 @@ const pois = useNavPois({
   getMaplibre: () => maplibre,
   getGeometry: () => [],
   zoomWidthScale,
+  // « Naviguer ici » depuis le popup d'un POI : lance la navigation guidée vers lui.
+  onNavigateTo: (place) => navigateTo(place.name, [place.lng, place.lat]),
 })
 const { POI_CATS, poiVisible, loading: poiLoading } = pois
 const showPoiPanel = ref(false)
@@ -172,16 +174,17 @@ function setDestPoint(lngLat: LngLat) {
   }
 }
 
-// « Naviguer ici » : itinéraire BRouter depuis la position GPS jusqu'au point choisi,
-// déposé dans sessionStorage, puis bascule vers la page de guidage.
-async function confirmPlaceNav() {
-  if (navStarting.value || !destPoint.value || !lastPos) return
+// Itinéraire BRouter depuis la position GPS jusqu'à un point cible, déposé dans
+// sessionStorage, puis bascule vers la page de guidage. Cœur partagé entre la
+// destination choisie sur la carte (« Naviguer ici ») et un POI tapé sur la carte.
+async function navigateTo(name: string, dest: LngLat) {
+  if (navStarting.value || !lastPos) return
   navStarting.value = true
   navError.value = null
   try {
     const sport = userPreferences().display.default_sport
-    const { geometry, hints } = await fetchRouteToPlace(lastPos, destPoint.value, sport)
-    const payload = { name: destName.value || t('routes.destination'), activity: sport, geometry, voice_hints: hints }
+    const { geometry, hints } = await fetchRouteToPlace(lastPos, dest, sport)
+    const payload = { name: name || t('routes.destination'), activity: sport, geometry, voice_hints: hints }
     sessionStorage.setItem(GUIDED_ROUTE_KEY, JSON.stringify(payload))
     // Conserve l'éventuel préfixe de langue (/fr/navigate → /fr/navigate/guided).
     const base = window.location.pathname.replace(/\/$/, '')
@@ -191,6 +194,12 @@ async function confirmPlaceNav() {
     navError.value = t('routes.error_routing')
     navStarting.value = false
   }
+}
+
+// « Naviguer ici » : navigue vers le point de destination posé sur la carte.
+function confirmPlaceNav() {
+  if (!destPoint.value) return
+  navigateTo(destName.value, destPoint.value)
 }
 
 let map: any = null
@@ -840,4 +849,14 @@ function toggleScreenOffManual() {
 .place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
 .place-popup-link:hover { background: rgba(0, 0, 0, 0.06); color: #212529; text-decoration: none; }
 .place-popup-link--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
+.place-popup-link--navigate {
+  border: none;
+  cursor: pointer;
+  background: #fc4c02;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.place-popup-link--navigate:hover { background: #e34602; color: #fff; }
 </style>

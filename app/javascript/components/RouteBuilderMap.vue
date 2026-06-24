@@ -1422,6 +1422,22 @@ function toggleGrade() {
   applyColorMode()
 }
 
+// Bascule la lecture seule manuelle. En l'activant, on referme les outils
+// d'édition ouverts (sélection, survol, tooltips) puis on reconstruit les
+// marqueurs de points et le curseur dans leur variante non éditable.
+function toggleReadOnly() {
+  if (routeStore.shareLocked.value) return
+  routeStore.readOnly.value = !routeStore.readOnly.value
+  if (routeStore.readOnly.value) {
+    deselectAll()
+    hideHoverMarker()
+    closePlacePopup()
+    closeRoutePointPopup()
+  }
+  refreshWaypointMarkers()
+  if (mapInstance) mapInstance.getCanvas().style.cursor = routeStore.readOnly.value ? '' : 'crosshair'
+}
+
 // ─── Waymarked Trails preview ─────────────────────────────────────────────────
 
 function installPreviewLayer() {
@@ -1682,7 +1698,7 @@ defineExpose({
       <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
       <MapOverlayDropdown :model-value="state.overlays" @update:model-value="setOverlays" />
       <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
-        <button v-if="!routeStore.readOnly.value" type="button" class="btn map-ctrl-btn"
+        <button type="button" class="btn map-ctrl-btn"
           :class="state.showWaypoints ? 'btn-warning text-dark active' : 'btn-light'"
           @click="toggleWaypoints"
           :title="state.showWaypoints ? t('routes.hide_waypoints') : t('routes.show_waypoints')"
@@ -1702,6 +1718,13 @@ defineExpose({
           :title="state.showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
           :aria-pressed="state.showGrade">
           <i class="fa-solid fa-palette" aria-hidden="true"></i>
+        </button>
+        <button v-if="!routeStore.shareLocked.value" type="button" class="btn map-ctrl-btn"
+          :class="routeStore.readOnly.value ? 'btn-warning text-dark active' : 'btn-light'"
+          @click="toggleReadOnly"
+          :title="routeStore.readOnly.value ? t('routes.disable_readonly') : t('routes.enable_readonly')"
+          :aria-pressed="routeStore.readOnly.value">
+          <i class="fa-solid" :class="routeStore.readOnly.value ? 'fa-lock' : 'fa-lock-open'" aria-hidden="true"></i>
         </button>
       </div>
       <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">

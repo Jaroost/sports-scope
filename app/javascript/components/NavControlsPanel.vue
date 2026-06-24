@@ -27,6 +27,9 @@ const props = defineProps<{
   poiVisible: Record<string, boolean>
   // Recherche POI « autour de moi » en cours : grise le bouton et affiche un spinner.
   poiLoading?: boolean
+  // Vrai en navigation sur itinéraire (un tracé existe) : ajoute un bouton de recherche
+  // POI le long du trajet, en plus de « autour de moi ». Absent en mode libre (pas de tracé).
+  routeSearch?: boolean
   dbgRadar: boolean
   dbgClimb: boolean
   // Libellé d'état du scénario de virage débug (ex. « Approche »), ou null quand off.
@@ -50,6 +53,7 @@ const emit = defineEmits<{
   (e: 'toggle-terrain'): void
   (e: 'toggle-poi', key: string): void
   (e: 'search-pois'): void
+  (e: 'search-pois-route'): void
   (e: 'toggle-debug-radar'): void
   (e: 'toggle-debug-climb'): void
   (e: 'cycle-debug-turn'): void
@@ -254,12 +258,30 @@ function onZoom(e: Event) {
           <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
         </button>
         <div v-if="showPoiPanel" class="nav-cam-panel nav-poi-panel shadow">
+          <!-- Recherche le long du tracé (rayon / catégories du profil), seulement en
+               navigation sur itinéraire où une géométrie existe. Action principale,
+               donc en tête du panneau. -->
+          <button
+            v-if="routeSearch"
+            type="button"
+            class="btn btn-sm btn-primary w-100 nav-poi-search"
+            :disabled="poiLoading"
+            @click="$emit('search-pois-route')"
+          >
+            <i
+              class="fa-solid me-1"
+              :class="poiLoading ? 'fa-spinner fa-spin' : 'fa-route'"
+              aria-hidden="true"
+            ></i>
+            {{ t('routes.poi_search_route') }}
+          </button>
           <!-- Charge les POI autour de la position courante (Overpass). Réutilisé en
                navigation sur itinéraire (re-recherche) et en mode libre (seul moyen
                de charger les POI, faute de tracé). -->
           <button
             type="button"
-            class="btn btn-sm btn-primary w-100 nav-poi-search"
+            class="btn btn-sm w-100 nav-poi-search"
+            :class="routeSearch ? 'btn-outline-primary' : 'btn-primary'"
             :disabled="poiLoading"
             @click="$emit('search-pois')"
           >

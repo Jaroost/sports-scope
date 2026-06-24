@@ -118,6 +118,9 @@ const pois = useNavPois({
   getMaplibre: () => maplibre,
   getGeometry: () => geometry,
   zoomWidthScale,
+  // « Naviguer ici » depuis le popup d'un POI : recalcule le tracé vers lui (remplace
+  // l'itinéraire courant, comme une destination posée sur la carte).
+  onNavigateTo: (place) => navigateTo(place.name, [place.lng, place.lat]),
 })
 const { POI_CATS, poiVisible, loading: poiLoading } = pois
 const showPoiPanel = ref(false)
@@ -711,15 +714,16 @@ function setDestPoint(lngLat: LngLat) {
   }
 }
 
-// « Naviguer ici » : itinéraire BRouter depuis la position GPS jusqu'au point choisi,
-// qui remplace le tracé courant (applyReroute réinitialise tout le suivi).
-async function confirmPlaceNav() {
-  if (navStarting.value || !destPoint.value || !lastPos) return
+// Itinéraire BRouter depuis la position GPS jusqu'à un point cible, qui remplace le
+// tracé courant (applyReroute réinitialise tout le suivi). Cœur partagé entre la
+// destination choisie sur la carte (« Naviguer ici ») et un POI tapé sur la carte.
+async function navigateTo(name: string, dest: LngLat) {
+  if (navStarting.value || !lastPos) return
   navStarting.value = true
   navError.value = null
   try {
-    const { geometry: geom, hints } = await fetchRouteToPlace(lastPos, destPoint.value, routeSport)
-    routeName.value = destName.value || t('routes.destination')
+    const { geometry: geom, hints } = await fetchRouteToPlace(lastPos, dest, routeSport)
+    routeName.value = name || t('routes.destination')
     applyReroute(geom, hints)
     cancelPlaceNav()
     following.value = true
@@ -729,6 +733,12 @@ async function confirmPlaceNav() {
   } finally {
     navStarting.value = false
   }
+}
+
+// « Naviguer ici » : navigue vers le point de destination posé sur la carte.
+function confirmPlaceNav() {
+  if (!destPoint.value) return
+  navigateTo(destName.value, destPoint.value)
 }
 
 // ─── Map ──────────────────────────────────────────────────────────────────────
@@ -1636,6 +1646,7 @@ function toggleScreenOffManual() {
       :poi-cats="POI_CATS"
       :poi-visible="poiVisible"
       :poi-loading="poiLoading"
+      :route-search="true"
       :dbg-radar="dbgRadar"
       :dbg-climb="dbgClimb"
       :dbg-turn-label="dbgTurnLabel"
@@ -1655,6 +1666,7 @@ function toggleScreenOffManual() {
       @toggle-terrain="toggleTerrain"
       @toggle-poi="pois.togglePoi"
       @search-pois="pois.fetchPlaces({ center: lastPos ?? undefined })"
+      @search-pois-route="pois.fetchPlaces()"
       @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
@@ -2068,4 +2080,14 @@ function toggleScreenOffManual() {
 .place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
 .place-popup-link:hover { background: rgba(0, 0, 0, 0.06); color: #212529; text-decoration: none; }
 .place-popup-link--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
+.place-popup-link--navigate {
+  border: none;
+  cursor: pointer;
+  background: #fc4c02;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.place-popup-link--navigate:hover { background: #e34602; color: #fff; }
 </style>

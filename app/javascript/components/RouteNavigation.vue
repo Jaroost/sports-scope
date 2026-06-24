@@ -200,6 +200,11 @@ const rerouteError = ref<string | null>(null)
 // tap sur la carte fixe le point de destination ; « Naviguer ici » calcule un
 // itinéraire depuis la position GPS et remplace le tracé courant (applyReroute).
 const placeNavActive = ref(false)
+// Mode recherche (cible) : tant que l'utilisateur cherche un nouveau lieu / itinéraire,
+// on neutralise TOUTES les alertes — sons (virage, hors-trace, radar) ET vibrations. Il a
+// la tête dans la carte et le clavier, pas sur la route : bipper ou vibrer pour un virage
+// du tracé qu'il s'apprête à abandonner ne serait que du bruit parasite.
+const alertsMuted = computed(() => placeNavActive.value)
 const destPoint = ref<LngLat | null>(null)
 const destName = ref('')
 const navStarting = ref(false)
@@ -345,7 +350,7 @@ const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
 // ─── Radar arrière (Garmin Varia) ─────────────────────────────────────────────
 // Connexion/déconnexion + alertes sonores (une par véhicule). Voir useRadarAlerts.
-const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn })
+const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn, muted: alertsMuted })
 
 // Le bandeau radar (RadarOverlay) occupe le tout-haut de l'écran. Quand il est
 // visible, on descend la vitesse/le virage pour ne pas passer dessous. Même
@@ -1252,14 +1257,14 @@ function updateTurns(): boolean {
     // Entrée dans la zone orange : double buzz distinct, une seule fois par virage.
     if (activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr) {
       urgentBuzzedTurn = nextTurnPtr
-      vibrateApproach()
+      if (!alertsMuted.value) vibrateApproach()
     }
     if (announcedTurn !== nextTurnPtr) {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()
-      if (soundOn.value) playManeuver(turn.kind, turn.direction)
+      if (soundOn.value && !alertsMuted.value) playManeuver(turn.kind, turn.direction)
       // Vibration indépendante du son (perceptible téléphone en poche, vent fort).
-      vibrateManeuver(turn.kind)
+      if (!alertsMuted.value) vibrateManeuver(turn.kind)
       fired = true
     }
   } else {
@@ -1317,6 +1322,15 @@ function updateTurnSelection() {
 //     rendort — SAUF si un autre virage est déjà proche (état « near »), auquel cas
 //     on reste éveillé.
 function autoWakeForTurns(state: 'far' | 'near' | 'now' | null) {
+  // Mode recherche : on ne réveille pas l'écran ni ne dézoome pour un virage du tracé que
+  // l'utilisateur s'apprête à changer. Si on s'était réveillé automatiquement, on se rendort.
+  if (alertsMuted.value) {
+    if (autoWoken && !screenOff.value) {
+      autoWoken = false
+      toggleScreenOff()
+    }
+    return
+  }
   // Hors-tracé : il n'y a plus de virage à anticiper, et la flèche de retour reste
   // visible au-dessus du voile de veille. Si on s'était réveillé tout seul pour un
   // virage, on se rendort (un virage encore « proche » géométriquement ne doit pas
@@ -1350,7 +1364,7 @@ function rememberReached(turn: TurnPoint) {
 // Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.
 // Un poll court (250 ms) suffit : la préférence est plafonnée à 500 ms mini.
 function tickTurnRepeat() {
-  if (!activeTurn || !soundOn.value) return
+  if (!activeTurn || !soundOn.value || alertsMuted.value) return
   const now = Date.now()
   const interval = activeTurnUrgent ? TURN_REPEAT_URGENT_MS : TURN_REPEAT_MS
   if (now - lastTurnReminderMs >= interval) {
@@ -1362,6 +1376,7 @@ function tickTurnRepeat() {
 function handleOffRouteSound(wasOffRoute: boolean) {
   if (!offRoute.value) { lastOffRouteAlert = 0; return }
   const now = Date.now()
+  if (alertsMuted.value) return
   if (!wasOffRoute || now - lastOffRouteAlert > OFF_ROUTE_REALERT_MS) {
     lastOffRouteAlert = now
     if (soundOn.value) playOffRoute()

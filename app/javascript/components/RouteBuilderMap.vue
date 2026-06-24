@@ -76,6 +76,9 @@ const placeMarkerEls = new Map<string, HTMLElement>()
 let hoveredPlaceEl: HTMLElement | null = null
 let selectedPlaceEl: HTMLElement | null = null
 let placePopup: any = null
+// Popup informatif d'un point quelconque du tracé (lecture seule) : mêmes liens
+// qu'un point d'itinéraire (coordonnées, Google Maps, Street View, Komoot).
+let routePointPopup: any = null
 let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
 const svCache = new Map<string, boolean>()
@@ -222,9 +225,19 @@ async function initMap() {
       installOverlays()
       mapInstance.on('click', (e: any) => {
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
-        // Lecture seule : le clic ne sert qu'à refermer une éventuelle tooltip de
-        // POI, jamais à modifier le tracé.
-        if (routeStore.readOnly.value) { if (placePopup) closePlacePopup(); return }
+        // Lecture seule : le clic ne modifie jamais le tracé. Il referme une tooltip
+        // ouverte (POI ou point du trajet), ou — si l'on clique sur le tracé — ouvre
+        // une tooltip informative sur le point du trajet le plus proche.
+        if (routeStore.readOnly.value) {
+          if (placePopup) { closePlacePopup(); return }
+          if (routePointPopup) { closeRoutePointPopup(); return }
+          const idx = nearestGeomIndexAt(e.point)
+          if (idx != null) {
+            const [lng, lat] = routeStore.geometry.value[idx]
+            showRoutePointPopup(lng, lat)
+          }
+          return
+        }
         // Tooltip de POI (cimetière/boulangerie) ouverte : le clic ne fait que la
         // refermer, sans ajouter de point au trajet.
         if (placePopup) { closePlacePopup(); return }
@@ -246,7 +259,12 @@ async function initMap() {
         }
       })
       mapInstance.on('mousemove', (e: any) => {
-        if (routeStore.readOnly.value) { hideHoverMarker(); return }
+        if (routeStore.readOnly.value) {
+          hideHoverMarker()
+          // Curseur « pointer » au survol du tracé pour signaler qu'il est cliquable.
+          mapInstance.getCanvas().style.cursor = nearestGeomIndexAt(e.point) != null ? 'pointer' : ''
+          return
+        }
         if (overClimbMarker) { hideHoverMarker(); return }
         if (routeStore.waypoints.value.length < 2) { hideHoverMarker(); return }
         const idx = nearestGeomIndexAt(e.point)
@@ -348,6 +366,9 @@ function setRouteLineScale(factor: number) {
 
 function updateRouteLayer() {
   if (!mapInstance) return
+  // Le tracé a changé : une éventuelle tooltip de point du trajet pointe désormais
+  // sur une géométrie obsolète, on la referme.
+  closeRoutePointPopup()
   const baseSrc = mapInstance.getSource('builder-route')
   if (baseSrc) {
     baseSrc.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: routeStore.geometry.value.map(([lng, lat]) => [lng, lat]) } })
@@ -585,6 +606,70 @@ function escapeHtml(s: string) {
   const div = document.createElement('div')
   div.textContent = s
   return div.innerHTML
+}
+
+function closeRoutePointPopup() {
+  if (routePointPopup) { routePointPopup.remove(); routePointPopup = null }
+}
+
+// Popup informatif pour un point quelconque du tracé (lecture seule). Reprend le
+// même contenu que la tooltip d'un point d'itinéraire — coordonnées copiables,
+// Google Maps, Street View, Komoot — mais ancré sur le point cliqué du tracé.
+function showRoutePointPopup(lng: number, lat: number) {
+  if (!_maplibregl || !mapInstance) return
+  closeRoutePointPopup()
+  const komootUrl = `https://www.komoot.com/plan/@${lat},${lng},13z?sport=touringbicycle&p[0][loc]=${lat},${lng}`
+  const wrap = document.createElement('div')
+  wrap.className = 'place-popup'
+  wrap.innerHTML = `
+    <div class="place-popup-header">
+      <span class="place-popup-name">${t('routes.route_point')}</span>
+      <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
+    </div>
+    <div class="wp-tooltip-coords-row">
+      <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${lat.toFixed(6)}" title="${t('routes.copy_latitude')}">
+        <i class="fa-regular fa-copy" aria-hidden="true"></i>
+        <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lat</span>${lat.toFixed(6)}</span>
+      </button>
+      <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${lng.toFixed(6)}" title="${t('routes.copy_longitude')}">
+        <i class="fa-regular fa-copy" aria-hidden="true"></i>
+        <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lng</span>${lng.toFixed(6)}</span>
+      </button>
+    </div>
+    <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-brands fa-google" aria-hidden="true"></i>
+      <span>Google Maps</span>
+    </a>
+    <a class="wp-tooltip-action wp-tooltip-action--streetview" href="https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+      <span>${t('routes.street_view')}</span>
+    </a>
+    <a class="wp-tooltip-action wp-tooltip-action--komoot" href="${komootUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+      <span>Komoot</span>
+    </a>`
+  // closeOnClick désactivé : la fermeture sur clic carte est gérée dans le handler
+  // de clic, pour qu'un clic ne fasse que fermer la tooltip (cf. handler lecture seule).
+  routePointPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([lng, lat])
+    .setDOMContent(wrap)
+    .addTo(mapInstance)
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', closeRoutePointPopup)
+  wrap.querySelectorAll('.wp-tooltip-action--copy').forEach((btn) => {
+    btn.addEventListener('click', (ev: any) => {
+      ev.stopPropagation(); ev.preventDefault()
+      const el = ev.currentTarget as HTMLElement
+      copyCoords(el, el.dataset.coord || '')
+    })
+  })
+  const svLink = wrap.querySelector<HTMLElement>('.wp-tooltip-action--streetview')
+  if (svLink) {
+    checkSV(lat, lng).then((ok) => {
+      svLink.classList.toggle('wp-tooltip-action--disabled', !ok)
+      if (!ok) svLink.setAttribute('aria-disabled', 'true')
+      else svLink.removeAttribute('aria-disabled')
+    })
+  }
 }
 
 // Rend une icône persistante et cliquable pour chaque POI ponctuel filtré (eau,
@@ -1555,6 +1640,7 @@ onBeforeUnmount(() => {
   climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
   climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
   clearPlaceMarkers()
+  closeRoutePointPopup()
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
   if (locationMarker) { locationMarker.remove(); locationMarker = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }

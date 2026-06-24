@@ -327,6 +327,7 @@ en:
     anchor_to_road: "Anchor to road"
     return_via_same_route: "Add to end of route"
     reverse_route: "Reverse route"
+    route_point: "Route point"
     street_view: "Street View"
     close: "Close"
     copy_latitude: "Copy latitude"

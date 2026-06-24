@@ -9,6 +9,7 @@ import {
   buildOffsetDisplayLine,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
+import { BROUTER_URL, brouterProfile } from '../brouter'
 import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
 } from '../navHelpers'
@@ -24,6 +25,7 @@ import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
+import type { Sport } from '../userPreferences'
 import { useNavPois } from '../composables/useNavPois'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
 import { useNavSound } from '../composables/useNavSound'
@@ -184,6 +186,10 @@ const ETA_SMOOTH = 0.05
 const ETA_SPEED_FLOOR = 3
 const offRoute = ref(false)
 const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" arrow
+// Reroutage manuel (bouton du bandeau hors-tracé) : appel BRouter en cours et dernier
+// message d'erreur. Voir recalcRoute.
+const rerouting = ref(false)
+const rerouteError = ref<string | null>(null)
 const climbInfo = ref<ClimbInfo | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
@@ -210,6 +216,11 @@ let cumDistM: number[] = []
 let climbs: Climb[] = []
 let turns: TurnPoint[] = []
 let turnsFromBRouter = false
+// Voicehints bruts du tracé (lng/lat/cmd/angle) conservés pour reconstruire les virages
+// après un reroutage : on ré-épissera ceux du tronçon restant aux hints du détour.
+let rawHints: VoiceHint[] = []
+// Catégorie d'activité du tracé (Route#activity) → profil BRouter du reroutage.
+let routeSport: Sport = 'cycling'
 const routeName = ref('')
 
 // Tracking helpers
@@ -467,23 +478,156 @@ async function fetchRoute() {
   if (!res.ok) throw new Error(t('routes.error_routing'))
   const data = await res.json()
   const route = data.route || data
-  geometry = (route.geometry || []) as Coord[]
-  if (geometry.length < 2) throw new Error(t('routes.error_min_points'))
-  offlineCoords.value = geometry.map(([lng, lat]) => [lng, lat])
+  const geom = (route.geometry || []) as Coord[]
+  if (geom.length < 2) throw new Error(t('routes.error_min_points'))
   routeName.value = route.name || ''
+  routeSport = (route.activity as Sport) || 'cycling'
+  rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
+}
+
+// Recompute everything derived from `geometry` + raw voicehints: altitudes, distances,
+// display line, climbs, turns, totals. Partagé par le chargement initial (fetchRoute) et
+// le reroutage (applyReroute), qui remplacent tous deux la géométrie entière.
+function rebuildRouteState(newGeometry: Coord[], hints: VoiceHint[]) {
+  geometry = newGeometry
+  rawHints = hints
+  offlineCoords.value = geometry.map(([lng, lat]) => [lng, lat])
   alts = geometry.map((c) => c[2] ?? null)
   cumDistM = buildDistancesM(geometry)
   ;({ line: displayLine, wscale: displayWScale } = buildOffsetDisplayLine(geometry, cumDistM))
   climbs = detectClimbs(alts, cumDistM)
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
-  const hints = (route.voice_hints || []) as VoiceHint[]
   turnsFromBRouter = hints.length > 0
   turns = turnsFromBRouter
     ? turnsFromVoiceHints(hints, geometry, cumDistM)
     : detectTurns(geometry, cumDistM)
   remainingM.value = cumDistM[cumDistM.length - 1] || 0
   remainingGainM.value = computeGainLoss(geometry).gain
+}
+
+// ─── Reroutage manuel ───────────────────────────────────────────────────────────
+// Hors-tracé, un bouton « Recalculer » appelle BRouter pour tracer un chemin depuis la
+// position GPS jusqu'au point du tracé original le plus proche EN AVANT (le raccord),
+// puis on épisse ce détour devant la suite inchangée de l'itinéraire planifié. On
+// préserve ainsi l'itinéraire choisi à la main (cols, routes) au lieu de le remplacer.
+
+// Raccord visé un peu en avant du sommet retenu, pour ne pas viser un point qu'on
+// s'apprête déjà à dépasser.
+const REJOIN_LOOKAHEAD_M = 30
+// Demi-angle (deg) autour du cap dans lequel un point du tracé est considéré « devant »
+// le coureur. Au-delà, le rejoindre imposerait de faire demi-tour.
+const REJOIN_FORWARD_ARC = 85
+// Distance minimale (m) au point de raccord : on ne raccorde pas juste à côté de soi.
+const REJOIN_MIN_AHEAD_M = 40
+let rerouteToken = 0
+
+// Sommet du tracé restant où raccorder. On privilégie le sommet le plus proche situé
+// DEVANT le coureur (dans l'arc autour de son cap) : BRouter en tire alors un détour qui
+// repart vers l'avant, donc continuer tout droit raccroche le tracé plus loin — au lieu
+// de raccorder derrière soi (point le plus proche après un virage manqué) et de ressortir
+// aussitôt. À défaut de point exploitable devant (cap peu fiable à l'arrêt, ou tracé
+// entièrement derrière), on retombe sur le sommet le plus proche depuis la progression.
+function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number {
+  let best = -1
+  let bestD = Infinity
+  for (let i = fromIdx; i < geometry.length; i++) {
+    const d = haversine(pos, [geometry[i][0], geometry[i][1]])
+    if (d < REJOIN_MIN_AHEAD_M) continue
+    let rel = bearingBetween(pos, [geometry[i][0], geometry[i][1]]) - heading
+    while (rel > 180) rel -= 360
+    while (rel < -180) rel += 360
+    if (Math.abs(rel) > REJOIN_FORWARD_ARC) continue
+    if (d < bestD) { bestD = d; best = i }
+  }
+  if (best < 0) {
+    best = fromIdx
+    bestD = Infinity
+    for (let i = fromIdx; i < geometry.length; i++) {
+      const d = haversine(pos, [geometry[i][0], geometry[i][1]])
+      if (d < bestD) { bestD = d; best = i }
+    }
+  }
+  let j = best
+  while (j < geometry.length - 1 && cumDistM[j] - cumDistM[best] < REJOIN_LOOKAHEAD_M) j++
+  return j
+}
+
+async function recalcRoute() {
+  if (rerouting.value || !offRoute.value || !lastPos || geometry.length < 2) return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    rerouteError.value = t('routes.reroute_offline')
+    return
+  }
+  rerouting.value = true
+  rerouteError.value = null
+  const token = ++rerouteToken
+  const from = lastPos
+  try {
+    const fromIdx = Math.max(0, Math.min(lastIdx, geometry.length - 1))
+    const rejoinIdx = rejoinIndexAhead(from, currentBearing, fromIdx)
+    const target = geometry[rejoinIdx]
+    const lonlats = `${from[0]},${from[1]}|${target[0]},${target[1]}`
+    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${brouterProfile(routeSport)}&alternativeidx=0&format=geojson&timode=2`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
+    const data = await res.json()
+    // Réponse périmée (clic plus récent) ou composant démonté : on n'écrase rien.
+    if (token !== rerouteToken) return
+    const feature = data?.features?.[0]
+    const coords = feature?.geometry?.coordinates
+    if (!Array.isArray(coords) || coords.length < 2) throw new Error('no detour')
+    const detour = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null]) as Coord[]
+    // Voicehints BRouter du détour : [indexInTrack, command, exitNumber, distToNext, angle].
+    const rawDetour = Array.isArray(feature.properties?.voicehints) ? feature.properties.voicehints : []
+    const detourHints = rawDetour
+      .map((h: number[]) => {
+        const c = coords[h[0]]
+        return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0, exit_number: h[2] ?? 0 } : null
+      })
+      .filter(Boolean) as VoiceHint[]
+
+    // Épissage : détour (position → raccord) + suite inchangée du tracé original.
+    const tail = geometry.slice(rejoinIdx)
+    const newGeometry = detour.concat(tail)
+    // On ne garde des hints originaux que ceux du tronçon restant : leurs coordonnées
+    // (ancrées à l'identique sur les sommets du tracé sauvegardé) existent encore dans
+    // `tail`. turnsFromVoiceHints les ré-attache au bon passage du nouveau tracé.
+    const tailKeys = new Set(tail.map((c) => `${c[0]},${c[1]}`))
+    const tailHints = rawHints.filter((h) => tailKeys.has(`${h.lng},${h.lat}`))
+    applyReroute(newGeometry, detourHints.concat(tailHints))
+  } catch {
+    if (token === rerouteToken) rerouteError.value = t('routes.reroute_failed')
+  } finally {
+    if (token === rerouteToken) rerouting.value = false
+  }
+}
+
+// Remplace la géométrie de navigation par l'itinéraire rerouté et réinitialise le suivi.
+function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
+  rebuildRouteState(newGeometry, hints)
+  // Force une re-localisation globale au prochain fix (nouvelle géométrie) et repart des
+  // premiers virages — les pointeurs de l'ancien tracé n'ont plus de sens.
+  located = false
+  lastIdx = 0
+  snapPoint = null
+  snapNextIdx = 0
+  snapDistAlongM = 0
+  nextTurnPtr = 0
+  announcedTurn = -1
+  urgentBuzzedTurn = -1
+  reachedTurn = null
+  activeTurn = null
+  turnHint.value = null
+  // Recalculé au prochain fix ; remis à faux pour que le bandeau hors-tracé disparaisse.
+  offRoute.value = false
+  // La progression mémorisée pointe un passage de l'ancien tracé : on l'efface.
+  try { localStorage.removeItem(PROGRESS_KEY) } catch { /* quota / private mode */ }
+  // Re-render carte : nouvelle polyligne complète + marqueurs de virage.
+  const src = map?.getSource('nav-route')
+  if (src) src.setData(widthRunsCollection(displayLine, displayWScale))
+  refreshRemaining()
+  renderTurnMarkers()
 }
 
 // ─── Map ──────────────────────────────────────────────────────────────────────
@@ -1421,6 +1565,23 @@ function toggleScreenOffManual() {
       aria-hidden="true"
     ></i>
 
+    <!-- Reroutage manuel : recalcule un chemin BRouter de la position vers le tracé.
+         Reste visible en veille (au-dessus du voile noir) : quitter le tracé est une
+         info de sécurité ; l'erreur éventuelle s'affiche sous le bouton. -->
+    <div v-if="offRoute && hasFix" class="nav-reroute" :class="{ 'nav-reroute--sleep': screenOff }">
+      <button
+        type="button"
+        class="btn btn-warning shadow nav-reroute-btn"
+        :disabled="rerouting"
+        @click="recalcRoute"
+      >
+        <i v-if="rerouting" class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>
+        <i v-else class="fa-solid fa-route me-1" aria-hidden="true"></i>
+        {{ rerouting ? t('routes.rerouting') : t('routes.reroute') }}
+      </button>
+      <div v-if="rerouteError" class="nav-reroute-error">{{ rerouteError }}</div>
+    </div>
+
     <!-- Recenter button -->
     <button
       v-if="!following && hasFix"
@@ -1523,6 +1684,25 @@ function toggleScreenOffManual() {
   position: absolute; bottom: 8.5rem; right: 0.75rem; z-index: 4;
   border-radius: 999px; font-weight: 600;
   font-size: 1.1rem; padding: 0.6rem 1.1rem;
+}
+
+/* Bouton de reroutage : centré sous la grande flèche hors-tracé, au-dessus du
+   bandeau de stats. z-index 7 pour rester cliquable au-dessus de la flèche (z 6). */
+.nav-reroute {
+  position: absolute; bottom: 12rem; left: 50%; transform: translateX(-50%);
+  z-index: 7; display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+}
+/* Mode veille : au-dessus du voile noir (z 20) pour rester cliquable écran éteint,
+   comme la grande flèche hors-tracé. */
+.nav-reroute--sleep { z-index: 21; }
+.nav-reroute-btn {
+  border-radius: 999px; font-weight: 600;
+  font-size: 1.1rem; padding: 0.6rem 1.4rem;
+}
+.nav-reroute-error {
+  background: #fff3cd; color: #664d03; border-radius: 999px;
+  padding: 0.3rem 0.8rem; font-size: 0.85rem; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 </style>
 

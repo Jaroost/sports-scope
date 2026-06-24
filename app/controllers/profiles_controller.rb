@@ -7,6 +7,7 @@ class ProfilesController < ApplicationController
   MIN_GAIN_RANGE = (0..1000)
   MIN_LENGTH_RANGE = (50..5000)
   GRADE_SMOOTHING_RANGE = (10..200)
+  MERGE_GAP_RANGE = (0..2000)
   SPEED_RANGE = (3.0..80.0)
   NAV_ZOOM_RANGE = (14.0..40.0)
   NAV_PITCH_RANGE = (0..90)
@@ -25,6 +26,7 @@ class ProfilesController < ApplicationController
   NAV_SOUND_VOLUME_RANGE = (0..200)
   NAV_TURN_MARKER_SIZE_RANGE = (5..200)
   NAV_RADAR_CLOSE_RANGE = (10..100)
+  COUNTRY_CODES_MAX = 100
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
   ALLOWED_OVERLAYS = %w[veloland mountainbikeland wanderland wanderwege].freeze
@@ -58,6 +60,7 @@ class ProfilesController < ApplicationController
     poi = incoming[:points_of_interest] || {}
     map = incoming[:map] || {}
     navigation = incoming[:navigation] || {}
+    search = incoming[:search] || {}
     display = incoming[:display] || {}
     climb = incoming[:climb_detection] || {}
     speeds = incoming[:speeds] || {}
@@ -102,6 +105,9 @@ class ProfilesController < ApplicationController
         "radar_always_visible" => to_bool(navigation[:radar_always_visible], false),
         "radar_close_m" => clamp_int(navigation[:radar_close_m], NAV_RADAR_CLOSE_RANGE, 30),
       },
+      "search" => {
+        "country_codes" => sanitize_country_codes(search[:country_codes]),
+      },
       "display" => {
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),
         "show_grade_colors" => to_bool(display[:show_grade_colors], true),
@@ -115,6 +121,7 @@ class ProfilesController < ApplicationController
         "min_gain_m" => clamp_int(climb[:min_gain_m], MIN_GAIN_RANGE, 60),
         "min_length_m" => clamp_int(climb[:min_length_m], MIN_LENGTH_RANGE, 500),
         "grade_smoothing_m" => clamp_int(climb[:grade_smoothing_m], GRADE_SMOOTHING_RANGE, 40),
+        "merge_gap_m" => clamp_int(climb[:merge_gap_m], MERGE_GAP_RANGE, 350),
       },
       "speeds" => sanitize_speeds(speeds),
     }
@@ -124,6 +131,16 @@ class ProfilesController < ApplicationController
   def sanitize_overlays(value)
     return [] unless value.is_a?(Array)
     value.map(&:to_s).uniq.select { |id| ALLOWED_OVERLAYS.include?(id) }
+  end
+
+  # Codes pays (ISO 3166-1 alpha-2) de la priorisation de recherche : on conserve
+  # l'ordre reçu (= priorité), normalisé en minuscules, dédoublonné, en ne gardant
+  # que les codes bien formés (2 lettres) et borné en longueur. La liste peut être
+  # vide (recherche directement mondiale) ; on ne réinjecte pas les défauts ici,
+  # sans quoi l'utilisateur ne pourrait jamais tout retirer.
+  def sanitize_country_codes(value)
+    return User::DEFAULT_PREFERENCES.dig("search", "country_codes") unless value.is_a?(Array)
+    value.map { |c| c.to_s.downcase }.uniq.select { |c| c.match?(/\A[a-z]{2}\z/) }.first(COUNTRY_CODES_MAX)
   end
 
   def sanitize_speeds(speeds)

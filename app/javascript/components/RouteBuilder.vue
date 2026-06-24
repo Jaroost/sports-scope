@@ -381,8 +381,8 @@ async function fetchRoute(id: number) {
 
 // Chargement public en lecture seule via le jeton de partage. Contrairement à
 // fetchRoute, on ne relance pas BRouter (recomputeRoute) : on affiche la
-// géométrie enregistrée telle quelle, et on ne pose pas de marqueurs de points
-// d'étape (édition désactivée).
+// géométrie enregistrée telle quelle. Les marqueurs de points d'étape sont posés
+// en version lecture seule (numéro + tooltip informatif, sans actions d'édition).
 async function fetchSharedRoute(token: string) {
   try {
     const res = await fetch(`/api/routes/shared/${encodeURIComponent(token)}`, {
@@ -407,6 +407,7 @@ async function fetchSharedRoute(token: string) {
     }
     mapRef.value?.applyColorMode()
     mapRef.value?.installClimbMarkers()
+    mapRef.value?.refreshWaypointMarkers()
     mapRef.value?.updateRouteLayer()
     await nextTick()
     chartRef.value?.render()
@@ -1169,7 +1170,7 @@ onBeforeUnmount(() => {
         <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
       </button>
       <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-light" data-profile-trigger
-        data-profile-sections="display,map,climb,speeds,poi"
+        data-profile-sections="display,map,search,climb,speeds,poi"
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
       </button>
@@ -1225,7 +1226,7 @@ onBeforeUnmount(() => {
             <span class="d-none d-lg-inline">Komoot</span>
           </button>
           <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            data-profile-trigger data-profile-sections="display,map,climb,speeds,poi" :title="t('nav.profile')">
+            data-profile-trigger data-profile-sections="display,map,search,climb,speeds,poi" :title="t('nav.profile')">
             <i class="fa-solid fa-sliders" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">{{ t('nav.profile') }}</span>
           </button>

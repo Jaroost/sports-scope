@@ -225,7 +225,8 @@ const routeName = ref('')
 
 // Tracking helpers
 let lastIdx = 0
-let snapPoint: LngLat | null = null   // rider position projected onto the route
+let snapPoint: LngLat | null = null   // rider position projected onto the TRUE route (geometry)
+let displaySnapPoint: LngLat | null = null  // même position reportée sur la polyligne d'AFFICHAGE (décalée sur les recouvrements) — c'est elle qu'on affiche pour que la flèche colle à SA voie, pas au centre des deux
 let snapNextIdx = 0                   // first original vertex ahead of snapPoint
 let snapDistAlongM = 0                // distance covered along the route at snapPoint
 let located = false
@@ -611,6 +612,7 @@ function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   located = false
   lastIdx = 0
   snapPoint = null
+  displaySnapPoint = null
   snapNextIdx = 0
   snapDistAlongM = 0
   nextTurnPtr = 0
@@ -840,7 +842,10 @@ function setMapStyle(id: string) {
 function afterStyleLoad() {
   installRouteLayers()
   applyTerrain()
-  if (lastPos) updateLocationMarker(lastPos)
+  // Replace le marqueur sur la position AFFICHÉE (snappée et décalée sur sa voie si on est
+  // sur le tracé), pas sur le GPS brut, pour rester cohérent avec la boucle d'animation.
+  const restore = anchorPos ?? lastPos
+  if (restore) updateLocationMarker(restore)
   refreshRemaining()
 }
 
@@ -955,6 +960,11 @@ function onPosition(pos: GeolocationPosition) {
   snapPoint = snap.point
   snapNextIdx = snap.nextIdx
   snapDistAlongM = snap.distAlongM
+  // Position reportée sur la polyligne d'affichage (décalée sur les recouvrements) : la
+  // flèche et le tracé restant sont rendus dessus pour coller à LA voie parcourue, pas au
+  // centre des deux passages superposés. `displayLine` est indexée comme `geometry` et
+  // partage `cumDistM`, donc l'interpolation par distance le long donne le point décalé.
+  displaySnapPoint = lngLatAtDistanceM(displayLine, cumDistM, snapDistAlongM)
   const wasOffRoute = offRoute.value
   // Widen the threshold by the reported GPS accuracy (capped) so an imprecise fix
   // doesn't get flagged off-route while the rider is actually on the line.
@@ -980,8 +990,8 @@ function onPosition(pos: GeolocationPosition) {
   // flèche sur la position projetée (snapPoint) et on extrapolera LE LONG du tracé,
   // pour qu'elle reste collée à la ligne au lieu de suivre un GPS qui dérive. Hors
   // trajet, on retombe sur le GPS brut pour montrer qu'on a quitté l'itinéraire.
-  anchorOnRoute = !offRoute.value && snapPoint != null
-  anchorPos = anchorOnRoute ? snapPoint : here
+  anchorOnRoute = !offRoute.value && displaySnapPoint != null
+  anchorPos = anchorOnRoute ? displaySnapPoint : here
   anchorDistM = snapDistAlongM
   anchorTime = performance.now()
   extrapSpeedMs = speedKmh.value / 3.6
@@ -1092,7 +1102,7 @@ function startAnimation() {
       // Sur le tracé : avancer la distance le long de la polyligne (la flèche reste
       // collée à la ligne, virages compris). Hors trajet : extrapolation libre au cap.
       pos = anchorOnRoute
-        ? lngLatAtDistanceM(geometry, cumDistM, anchorDistM + extrapSpeedMs * dt)
+        ? lngLatAtDistanceM(displayLine, cumDistM, anchorDistM + extrapSpeedMs * dt)
         : moveLngLat(anchorPos, extrapBearing, extrapSpeedMs * dt)
     }
     let d = extrapBearing - displayBearing
@@ -1377,8 +1387,9 @@ function refreshRemaining() {
   const from = snapPoint ? snapNextIdx : lastIdx
   const rest = displayLine.slice(from).map(([lng, lat]) => [lng, lat])
   const restW = displayWScale.slice(from)
-  // Start the remaining line exactly at the rider's projected position.
-  if (snapPoint) { rest.unshift([snapPoint[0], snapPoint[1]]); restW.unshift(restW[0] ?? 1) }
+  // Start the remaining line exactly at the rider's projected position — sur la voie
+  // d'AFFICHAGE (décalée), pour qu'elle se raccorde sans cassure au tracé restant décalé.
+  if (displaySnapPoint) { rest.unshift([displaySnapPoint[0], displaySnapPoint[1]]); restW.unshift(restW[0] ?? 1) }
   src.setData(widthRunsCollection(rest, restW))
 }
 

@@ -172,13 +172,14 @@ export interface ClimbDetectionOptions {
   minGrade: number
   minGainM: number
   minLengthM: number
+  mergeGapM: number
 }
 
 // Seuils par défaut issus des préférences du profil (cf. userPreferences). Tombe
 // sur les valeurs par défaut sûres hors page connectée (navigation partagée…).
 function defaultClimbOptions(): ClimbDetectionOptions {
   const c = userPreferences().climb_detection
-  return { minGrade: c.min_grade, minGainM: c.min_gain_m, minLengthM: c.min_length_m }
+  return { minGrade: c.min_grade, minGainM: c.min_gain_m, minLengthM: c.min_length_m, mergeGapM: c.merge_gap_m }
 }
 
 export function detectClimbs(
@@ -187,11 +188,10 @@ export function detectClimbs(
   options?: Partial<ClimbDetectionOptions>,
 ): Climb[] {
   if (!altitudes?.length || !distances?.length) return []
-  const { minGrade: MIN_GRADE, minGainM: MIN_GAIN_M, minLengthM: MIN_LENGTH_M } = {
+  const { minGrade: MIN_GRADE, minGainM: MIN_GAIN_M, minLengthM: MIN_LENGTH_M, mergeGapM: MERGE_GAP_M } = {
     ...defaultClimbOptions(),
     ...options,
   }
-  const MERGE_GAP_M = 250
   const len = Math.min(altitudes.length, distances.length)
   const raw: { startIdx: number; endIdx: number }[] = []
   let startIdx = -1
@@ -353,7 +353,7 @@ export function buildOffsetDisplayLine(
   cumDistM: number[],
   opts: { offsetM?: number; proximityM?: number; minSeparationM?: number; rampM?: number; narrowFrac?: number } = {},
 ): { line: LngLat[]; wscale: number[] } {
-  const offsetM = opts.offsetM ?? 5          // décalage latéral appliqué aux portions superposées
+  const offsetM = opts.offsetM ?? 3          // décalage latéral appliqué aux portions superposées (aller et retour s'écartent du double : ~6 m)
   const proximityM = opts.proximityM ?? 12   // en deçà, deux points sont « au même endroit »
   const minSeparationM = opts.minSeparationM ?? 50  // écart le long du parcours au-delà duquel un rapprochement est un vrai recouvrement (et non de simples voisins)
   const rampM = opts.rampM ?? 18             // longueur de transition pour lisser le décalage
@@ -494,7 +494,7 @@ export function projectOnRoute(
 // Lng/lat à `distM` le long de la polyligne (recherche binaire sur cumDistM puis
 // interpolation linéaire dans le tronçon). Réciproque de projectOnRoute.distAlongM :
 // sert à faire avancer la flèche LE LONG du tracé entre deux fixes GPS.
-export function lngLatAtDistanceM(geometry: Coord[], cumDistM: number[], distM: number): LngLat {
+export function lngLatAtDistanceM(geometry: Array<Coord | LngLat>, cumDistM: number[], distM: number): LngLat {
   const n = cumDistM.length
   if (n === 0) return [0, 0]
   const total = cumDistM[n - 1]

@@ -390,6 +390,13 @@ fr:
       style_swissgrau: "SwissTopo - Gris"
       style_swissimage: "Satellite"
       style_liberty: "Standard"
+    search:
+      title: "Recherche de lieux"
+      help: "Pays privilégiés dans la barre de recherche du créateur d'itinéraire. Glissez pour changer l'ordre : les pays en haut apparaissent en premier dans les résultats."
+      add_placeholder: "Ajouter un pays…"
+      remove: "Retirer"
+      empty: "Aucun pays privilégié : la recherche porte directement sur le monde entier."
+      worldwide_note: "Si aucun résultat n'est trouvé dans ces pays, la recherche s'étend au monde entier."
     navigation:
       title: "Navigation"
       help: "Type de carte et caméra utilisés pendant la navigation guidée (GPS), indépendants du créateur d'itinéraire."
@@ -440,6 +447,8 @@ fr:
       min_grade: "Pente moyenne min."
       min_gain: "Dénivelé positif min."
       min_length: "Longueur min."
+      merge_gap: "Fusion des montées"
+      merge_gap_help: "Deux montées séparées par un replat plus court que cette distance sont fusionnées en un seul col."
       grade_smoothing: "Lissage de la pente"
       grade_smoothing_help: "Fenêtre de calcul de la pente. Une valeur plus élevée lisse le bruit du relief (altitude arrondie au mètre) ; une valeur plus faible conserve les pentes courtes mais peut afficher des valeurs aberrantes."
     speeds:

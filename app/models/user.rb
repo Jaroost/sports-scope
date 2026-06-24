@@ -44,6 +44,16 @@ class User < ApplicationRecord
       "radar_always_visible" => false, # afficher l'overlay radar en permanence (sinon seulement en présence d'un véhicule)
       "radar_close_m" => 30, # distance (m) sous laquelle le radar passe en alerte rapprochée (rouge + bip insistant)
     },
+    # Recherche de lieux (barre de recherche du créateur d'itinéraire) : liste
+    # ordonnée de pays privilégiés (ISO 3166-1 alpha-2). Passée en `countrycodes`
+    # à Nominatim et utilisée pour trier les résultats. Si aucun résultat dans ces
+    # pays, le front retombe sur une recherche mondiale (cf. RouteBuilderMap).
+    "search" => {
+      "country_codes" => %w[
+        ch fr at be bg cy cz de dk ee es fi gr hr hu ie it lt lu lv mt nl pl
+        pt ro se si sk al ba gb li me mk no rs xk
+      ],
+    },
     "display" => {
       "default_sport" => "cycling",   # cycling | mtb | hiking
       "show_grade_colors" => true,
@@ -66,6 +76,8 @@ class User < ApplicationRecord
       # Fenêtre horizontale (m) de lissage de la pente : l'altitude est quantifiée au
       # mètre, sans lissage la pente entre sommets voisins devient aberrante (cf. front).
       "grade_smoothing_m" => 40,
+      # Écart (m) en deçà duquel deux montées consécutives sont fusionnées en un seul col.
+      "merge_gap_m" => 350,
     },
   }.freeze
 

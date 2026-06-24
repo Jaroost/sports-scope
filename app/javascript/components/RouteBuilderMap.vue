@@ -104,11 +104,6 @@ const wtSport = routeStore.sport
 const WT_BASE = computed(() => `https://${wtSport.value}.waymarkedtrails.org/api/v1`)
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
-const EU_COUNTRY_CODES = new Set([
-  'at','be','bg','cy','cz','de','dk','ee','es','fi','gr','hr','hu','ie',
-  'it','lt','lu','lv','mt','nl','pl','pt','ro','se','si','sk',
-  'al','ba','gb','li','me','mk','no','rs','xk',
-])
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
@@ -977,14 +972,15 @@ function refreshWaypointMarkers() {
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
   selectedWpIdx = -1
   if (!props.state.showWaypoints) return
-  // Lecture seule : on n'affiche pas les marqueurs de points d'étape (déplaçables
-  // et porteurs des actions d'édition) — seul le tracé reste visible.
-  if (routeStore.readOnly.value) return
+  // Lecture seule (vue partagée) : on affiche les mêmes marqueurs numérotés et leur
+  // tooltip informatif (coordonnées, Google Maps, Street View, Komoot), mais sans les
+  // éléments d'édition (déplacement, réordonnancement, inversion, libération, suppression).
+  const ro = routeStore.readOnly.value
   routeStore.waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
     el.className = w.free ? 'wp-marker wp-marker--free' : 'wp-marker'
     const isLast = idx === routeStore.waypoints.value.length - 1
-    const returnHtml = !isLast
+    const returnHtml = !ro && !isLast
       ? `<button type="button" class="wp-tooltip-action wp-tooltip-action--return">
            <i class="fa-solid fa-right-left" aria-hidden="true"></i>
            <span>${t('routes.return_via_same_route')}</span>
@@ -1000,7 +996,7 @@ function refreshWaypointMarkers() {
     el.innerHTML = `
       <div class="wp-tooltip">
         <div class="wp-tooltip-header">
-          <span class="wp-tooltip-title">Point&nbsp;<input type="number" class="wp-tooltip-num-input" min="1" max="${routeStore.waypoints.value.length}" value="${idx + 1}" title="${t('routes.reorder_waypoint')}" /></span>
+          <span class="wp-tooltip-title">Point&nbsp;${ro ? (idx + 1) : `<input type="number" class="wp-tooltip-num-input" min="1" max="${routeStore.waypoints.value.length}" value="${idx + 1}" title="${t('routes.reorder_waypoint')}" />`}</span>
           <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
         </div>
         <div class="wp-tooltip-coords-row">
@@ -1026,6 +1022,7 @@ function refreshWaypointMarkers() {
           <span>Komoot</span>
         </a>
         ${returnHtml}
+        ${ro ? '' : `
         <button type="button" class="wp-tooltip-action wp-tooltip-action--reverse">
           <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
           <span>${t('routes.reverse_route')}</span>
@@ -1037,13 +1034,13 @@ function refreshWaypointMarkers() {
         <button type="button" class="wp-tooltip-action wp-tooltip-action--delete">
           <i class="fa-solid fa-trash" aria-hidden="true"></i>
           <span>${t('routes.remove_waypoint')}</span>
-        </button>
+        </button>`}
         <div class="wp-tooltip-arrow"></div>
       </div>
       <span class="wp-marker-num">${idx + 1}</span>
     `
     const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([w.lng, w.lat]).addTo(mapInstance)
-    attachWaypointDrag(el, marker, idx)
+    if (!ro) attachWaypointDrag(el, marker, idx)
     el.addEventListener('click', (ev: any) => {
       ev.stopPropagation()
       if (suppressNextWpClick) { suppressNextWpClick = false; return }
@@ -1051,23 +1048,7 @@ function refreshWaypointMarkers() {
       selectWaypoint(idx)
     })
     el.querySelector('.wp-tooltip-close')!.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
-    const numInput = el.querySelector('.wp-tooltip-num-input') as HTMLInputElement
-    const commitNum = () => {
-      const v = parseInt(numInput.value, 10)
-      const total = routeStore.waypoints.value.length
-      if (!Number.isFinite(v)) { numInput.value = String(idx + 1); return }
-      const target = Math.max(1, Math.min(total, v)) - 1
-      if (target === idx) { numInput.value = String(idx + 1); return }
-      moveWaypoint(idx, target)
-    }
-    numInput.addEventListener('click', (ev) => ev.stopPropagation())
-    numInput.addEventListener('mousedown', (ev) => ev.stopPropagation())
-    numInput.addEventListener('keydown', (ev: KeyboardEvent) => {
-      ev.stopPropagation()
-      if (ev.key === 'Enter') { ev.preventDefault(); numInput.blur() }
-      else if (ev.key === 'Escape') { numInput.value = String(idx + 1); numInput.blur() }
-    })
-    numInput.addEventListener('change', commitNum)
+    // Actions purement informatives : présentes aussi en lecture seule (vue partagée).
     el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--copy):not(.wp-tooltip-action--reverse)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     })
@@ -1078,19 +1059,39 @@ function refreshWaypointMarkers() {
         copyCoords(el, el.dataset.coord || '')
       })
     })
-    el.querySelector('.wp-tooltip-action--free')!.addEventListener('click', (ev: any) => {
-      ev.stopPropagation(); ev.preventDefault(); toggleWaypointFree(idx)
-    })
-    el.querySelector('.wp-tooltip-action--reverse')!.addEventListener('click', (ev: any) => {
-      ev.stopPropagation(); ev.preventDefault(); reverseWaypoints()
-    })
-    el.querySelector('.wp-tooltip-action--return')?.addEventListener('click', (ev: any) => {
-      ev.stopPropagation(); ev.preventDefault(); addReturnTo(idx)
-    })
-    el.querySelector('.wp-tooltip-action--delete')!.addEventListener('click', (ev: any) => {
-      ev.stopPropagation(); ev.preventDefault(); removeWaypoint(idx)
-    })
-    el.addEventListener('contextmenu', (ev: any) => { ev.preventDefault(); ev.stopPropagation(); removeWaypoint(idx) })
+    if (!ro) {
+      // Réordonnancement et actions d'édition : uniquement dans l'éditeur.
+      const numInput = el.querySelector('.wp-tooltip-num-input') as HTMLInputElement
+      const commitNum = () => {
+        const v = parseInt(numInput.value, 10)
+        const total = routeStore.waypoints.value.length
+        if (!Number.isFinite(v)) { numInput.value = String(idx + 1); return }
+        const target = Math.max(1, Math.min(total, v)) - 1
+        if (target === idx) { numInput.value = String(idx + 1); return }
+        moveWaypoint(idx, target)
+      }
+      numInput.addEventListener('click', (ev) => ev.stopPropagation())
+      numInput.addEventListener('mousedown', (ev) => ev.stopPropagation())
+      numInput.addEventListener('keydown', (ev: KeyboardEvent) => {
+        ev.stopPropagation()
+        if (ev.key === 'Enter') { ev.preventDefault(); numInput.blur() }
+        else if (ev.key === 'Escape') { numInput.value = String(idx + 1); numInput.blur() }
+      })
+      numInput.addEventListener('change', commitNum)
+      el.querySelector('.wp-tooltip-action--free')!.addEventListener('click', (ev: any) => {
+        ev.stopPropagation(); ev.preventDefault(); toggleWaypointFree(idx)
+      })
+      el.querySelector('.wp-tooltip-action--reverse')!.addEventListener('click', (ev: any) => {
+        ev.stopPropagation(); ev.preventDefault(); reverseWaypoints()
+      })
+      el.querySelector('.wp-tooltip-action--return')?.addEventListener('click', (ev: any) => {
+        ev.stopPropagation(); ev.preventDefault(); addReturnTo(idx)
+      })
+      el.querySelector('.wp-tooltip-action--delete')!.addEventListener('click', (ev: any) => {
+        ev.stopPropagation(); ev.preventDefault(); removeWaypoint(idx)
+      })
+      el.addEventListener('contextmenu', (ev: any) => { ev.preventDefault(); ev.stopPropagation(); removeWaypoint(idx) })
+    }
     waypointMarkers.push(marker)
   })
 }
@@ -1465,21 +1466,36 @@ function wtHidePreview() {
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
+// Liste ordonnée des pays privilégiés, configurée dans le profil
+// (search.country_codes). L'ordre = la priorité d'affichage ; on la passe aussi
+// en `countrycodes` à Nominatim pour qu'il ne renvoie d'abord que ces pays.
+const PREFERRED_COUNTRIES = userPreferences().search.country_codes
+const PREFERRED_COUNTRY_CODES = PREFERRED_COUNTRIES.join(',')
+
+// Rang de priorité d'un pays = sa position dans la liste du profil ; les pays
+// hors liste (repli mondial) passent après tous les autres.
 function searchCountryPriority(cc: string): number {
-  if (cc === 'ch') return 0
-  if (cc === 'fr') return 1
-  if (EU_COUNTRY_CODES.has(cc)) return 2
-  return 3
+  const i = PREFERRED_COUNTRIES.indexOf(cc)
+  return i === -1 ? PREFERRED_COUNTRIES.length : i
+}
+
+async function fetchPlaces(q: string, countrycodes?: string): Promise<any[]> {
+  let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=10&addressdetails=1`
+  if (countrycodes) url += `&countrycodes=${countrycodes}`
+  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!res.ok) return []
+  const raw = await res.json()
+  return Array.isArray(raw) ? raw : []
 }
 
 async function searchPlaces(q: string) {
   searching.value = true
   try {
-    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=10&addressdetails=1`
-    const res = await fetch(url, { headers: { Accept: 'application/json' } })
-    if (!res.ok) return
-    const raw = await res.json()
-    const data: any[] = Array.isArray(raw) ? raw : []
+    // On restreint d'abord aux pays privilégiés ; si Nominatim ne renvoie rien
+    // (lieu hors zone), on refait une recherche mondiale en repli. Liste vide ⇒
+    // recherche mondiale d'emblée (pas de second appel inutile).
+    let data = await fetchPlaces(q, PREFERRED_COUNTRY_CODES)
+    if (data.length === 0 && PREFERRED_COUNTRY_CODES) data = await fetchPlaces(q)
     searchResults.value = data
       .sort((a, b) => searchCountryPriority(a.address?.country_code ?? '') - searchCountryPriority(b.address?.country_code ?? ''))
       .slice(0, 6)

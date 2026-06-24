@@ -390,6 +390,13 @@ en:
       style_swissgrau: "SwissTopo - Grayscale"
       style_swissimage: "Satellite"
       style_liberty: "Standard"
+    search:
+      title: "Place search"
+      help: "Countries given priority in the route builder's search bar. Drag to reorder: countries at the top appear first in the results."
+      add_placeholder: "Add a country…"
+      remove: "Remove"
+      empty: "No preferred countries: search runs worldwide directly."
+      worldwide_note: "If no result is found in these countries, the search extends worldwide."
     navigation:
       title: "Navigation"
       help: "Map type and camera used during guided (GPS) navigation, independent of the route builder."
@@ -440,6 +447,8 @@ en:
       min_grade: "Min. average grade"
       min_gain: "Min. elevation gain"
       min_length: "Min. length"
+      merge_gap: "Climb merge gap"
+      merge_gap_help: "Two climbs separated by a flat shorter than this distance are merged into a single climb."
       grade_smoothing: "Grade smoothing"
       grade_smoothing_help: "Window used to compute the grade. A higher value smooths terrain noise (elevation rounded to the metre); a lower value keeps short slopes but may show spurious values."
     speeds:

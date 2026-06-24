@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS, mapStyleFor } from '../mapStyles'
 import { POI_CATEGORIES } from '../poiCategories'
+import { ALL_COUNTRY_CODES, countryName, countryFlag } from '../countries'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -24,6 +25,9 @@ interface Preferences {
   }
   map: {
     default_style: string
+  }
+  search: {
+    country_codes: string[]
   }
   navigation: {
     default_style: string
@@ -62,6 +66,7 @@ interface Preferences {
     min_gain_m: number
     min_length_m: number
     grade_smoothing_m: number
+    merge_gap_m: number
   }
   speeds: {
     cycling: number
@@ -108,6 +113,56 @@ const SPORTS = ['cycling', 'mtb', 'hiking'] as const
 
 function sportIcon(s: (typeof SPORTS)[number]): string {
   return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
+
+// ─── Recherche de lieux : pays privilégiés (ordre = priorité) ───────────────
+// Liste réordonnable par glisser-déposer ; chaque pays peut être retiré, et on
+// peut en ajouter depuis le sélecteur (pays absents de la liste, triés par nom).
+const countryToAdd = ref('')
+const dragCountryIndex = ref<number | null>(null)
+const dragOverCountryIndex = ref<number | null>(null)
+
+// Pays sélectionnables = tous ceux pas encore dans la liste, triés par nom localisé.
+const availableCountries = computed(() => {
+  const chosen = new Set(prefs.search.country_codes)
+  return ALL_COUNTRY_CODES
+    .filter((cc) => !chosen.has(cc))
+    .map((cc) => ({ cc, name: countryName(cc) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+})
+
+function addCountry() {
+  const cc = countryToAdd.value
+  if (cc && !prefs.search.country_codes.includes(cc)) prefs.search.country_codes.push(cc)
+  countryToAdd.value = ''
+}
+
+function removeCountry(cc: string) {
+  const i = prefs.search.country_codes.indexOf(cc)
+  if (i !== -1) prefs.search.country_codes.splice(i, 1)
+}
+
+function onCountryDragStart(i: number) {
+  dragCountryIndex.value = i
+}
+
+function onCountryDragOver(i: number) {
+  dragOverCountryIndex.value = i
+}
+
+function onCountryDrop(to: number) {
+  const from = dragCountryIndex.value
+  if (from !== null && from !== to) {
+    const arr = prefs.search.country_codes
+    const [moved] = arr.splice(from, 1)
+    arr.splice(to, 0, moved)
+  }
+  onCountryDragEnd()
+}
+
+function onCountryDragEnd() {
+  dragCountryIndex.value = null
+  dragOverCountryIndex.value = null
 }
 
 function csrfToken(): string {
@@ -423,6 +478,59 @@ function placePreviewMarker(coords: [number, number]) {
       </div>
     </section>
 
+    <!-- Recherche de lieux : pays privilégiés -->
+    <section v-if="showSection('search')" class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-magnifying-glass text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.search.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">{{ t('profile.search.help') }}</p>
+
+        <ul v-if="prefs.search.country_codes.length" class="country-list list-unstyled mb-3">
+          <li
+            v-for="(cc, i) in prefs.search.country_codes"
+            :key="cc"
+            class="country-item"
+            :class="{ dragging: dragCountryIndex === i, dragover: dragOverCountryIndex === i && dragCountryIndex !== i }"
+            draggable="true"
+            @dragstart="onCountryDragStart(i)"
+            @dragover.prevent="onCountryDragOver(i)"
+            @drop.prevent="onCountryDrop(i)"
+            @dragend="onCountryDragEnd"
+          >
+            <i class="fa-solid fa-grip-vertical country-grip" aria-hidden="true"></i>
+            <span class="country-rank">{{ i + 1 }}</span>
+            <span class="country-flag" aria-hidden="true">{{ countryFlag(cc) }}</span>
+            <span class="country-name">{{ countryName(cc) }}</span>
+            <button
+              type="button"
+              class="btn btn-sm btn-link text-danger country-remove p-0"
+              :aria-label="t('profile.search.remove')"
+              :title="t('profile.search.remove')"
+              @click="removeCountry(cc)"
+            >
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            </button>
+          </li>
+        </ul>
+        <p v-else class="text-muted small fst-italic mb-3">{{ t('profile.search.empty') }}</p>
+
+        <div class="d-flex align-items-center gap-2 mb-3" style="max-width: 360px;">
+          <select v-model="countryToAdd" class="form-select form-select-sm" @change="addCountry">
+            <option value="">{{ t('profile.search.add_placeholder') }}</option>
+            <option v-for="c in availableCountries" :key="c.cc" :value="c.cc">
+              {{ countryFlag(c.cc) }} {{ c.name }}
+            </option>
+          </select>
+        </div>
+
+        <p class="text-muted small mb-0">
+          <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>{{ t('profile.search.worldwide_note') }}
+        </p>
+      </div>
+    </section>
+
     <!-- Navigation (mode GPS) -->
     <section v-if="showSection('navigation')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
@@ -679,6 +787,14 @@ function placePreviewMarker(coords: [number, number]) {
               <span class="input-group-text">m</span>
             </div>
           </div>
+          <div class="col-sm-4">
+            <label for="climb-merge-gap" class="form-label">{{ t('profile.climb.merge_gap') }}</label>
+            <div class="input-group">
+              <input id="climb-merge-gap" v-model.number="prefs.climb_detection.merge_gap_m" type="number" class="form-control" min="0" max="2000" step="50">
+              <span class="input-group-text">m</span>
+            </div>
+            <div class="form-text">{{ t('profile.climb.merge_gap_help') }}</div>
+          </div>
         </div>
         <hr class="my-3">
         <label for="climb-smoothing" class="form-label mb-1">
@@ -775,6 +891,44 @@ function placePreviewMarker(coords: [number, number]) {
 .sticky-bottom {
   background: var(--bs-body-bg);
 }
+
+/* Liste réordonnable des pays privilégiés (recherche de lieux) */
+.country-list {
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.country-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: var(--bs-body-bg);
+  cursor: grab;
+  transition: border-color 0.15s, background-color 0.15s, opacity 0.15s;
+}
+
+.country-item:active { cursor: grabbing; }
+.country-item.dragging { opacity: 0.45; }
+.country-item.dragover { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+
+.country-grip { color: var(--bs-secondary-color); cursor: grab; }
+
+.country-rank {
+  min-width: 1.4rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--bs-secondary-color);
+}
+
+.country-flag { font-size: 1.1rem; line-height: 1; }
+.country-name { flex: 1; font-size: 0.9rem; }
+.country-remove { line-height: 1; }
 
 /* Cadre façon téléphone en portrait : même proportions que l'écran de navigation,
    pour que le réglage du zoom/inclinaison soit représentatif du rendu réel. */

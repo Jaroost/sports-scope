@@ -22,7 +22,7 @@ class User < ApplicationRecord
     # fond de carte, zoom et inclinaison (pitch) de la caméra qui suit le coureur.
     "navigation" => {
       "default_style" => "swissgrau",
-      "zoom" => 19.5,      # zoom de la caméra de suivi
+      "zoom" => 17,      # zoom de la caméra de suivi
       "pitch" => 0,        # inclinaison 3D (0 = vue du dessus, 70 = très rasante) — 0 par défaut pour économiser la batterie
       "terrain" => false,  # relief 3D (terrain MNT) sous le tracé
       "nav_fps" => 8,      # fréquence de la boucle d'animation (0.5–60 fps)
@@ -37,7 +37,7 @@ class User < ApplicationRecord
       "turn_green_hold_m" => 100, # distance (m) parcourue après un virage pendant laquelle la confirmation verte (« maintenant ») reste affichée
       "turn_green_hold_s" => 10, # durée max (s) d'affichage de la confirmation verte (« maintenant ») — elle disparaît au premier des deux : distance ou temps
       "sound_volume" => 100, # volume général des alertes sonores (virages + radar), en % du volume de base
-      "turn_marker_size" => 40, # rayon (px) des pastilles orange de changement de direction
+      "turn_marker_size" => 25, # rayon (px) des pastilles orange de changement de direction
       "turn_marker_color" => "#f97316",      # couleur de la pastille de changement de direction
       "turn_marker_icon_color" => "#ffffff", # couleur de la flèche / du numéro de sortie dans la pastille
       "show_climb_card" => true, # afficher le profil des cols (graphique d'altitude) pendant la navigation

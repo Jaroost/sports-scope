@@ -302,6 +302,11 @@ let activeTurnUrgent = false
 // chaque frame tant qu'on reste dans la zone.
 let urgentBuzzedTurn = -1
 let turnRepeatId: number | null = null
+// Sourdine du virage courant : l'utilisateur a demandé à ne plus être alerté
+// (son + vibration) pour le virage actuellement en approche. Remis à false
+// automatiquement dès que nextTurnPtr avance (nouveau virage).
+const turnAlertMuted = ref(false)
+let mutedTurnPtr = -1
 
 // ─── Position extrapolation (dead-reckoning between GPS fixes) ────────────────
 // GPS fixes land ~once per second; rather than jumping the marker on each fix,
@@ -640,6 +645,8 @@ function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   reachedTurn = null
   activeTurn = null
   turnHint.value = null
+  turnAlertMuted.value = false
+  mutedTurnPtr = -1
   // Recalculé au prochain fix ; remis à faux pour que le bandeau hors-tracé disparaisse.
   offRoute.value = false
   // La progression mémorisée pointe un passage de l'ancien tracé : on l'efface.
@@ -1250,6 +1257,10 @@ function updateTurns(): boolean {
     rememberReached(turns[nextTurnPtr])
     nextTurnPtr++
   }
+  // Nouveau virage : on lève automatiquement la sourdine posée sur le précédent.
+  if (turnAlertMuted.value && mutedTurnPtr !== nextTurnPtr) {
+    turnAlertMuted.value = false
+  }
   const turn = turns[nextTurnPtr] as TurnPoint | undefined
   const dist = turn ? turn.distM - here : Infinity
 
@@ -1263,14 +1274,14 @@ function updateTurns(): boolean {
     // Entrée dans la zone orange : double buzz distinct, une seule fois par virage.
     if (activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr) {
       urgentBuzzedTurn = nextTurnPtr
-      if (!alertsMuted.value) vibrateApproach()
+      if (!alertsMuted.value && !turnAlertMuted.value) vibrateApproach()
     }
     if (announcedTurn !== nextTurnPtr) {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()
-      if (soundOn.value && !alertsMuted.value) playManeuver(turn.kind, turn.direction)
+      if (soundOn.value && !alertsMuted.value && !turnAlertMuted.value) playManeuver(turn.kind, turn.direction)
       // Vibration indépendante du son (perceptible téléphone en poche, vent fort).
-      if (!alertsMuted.value) vibrateManeuver(turn.kind)
+      if (!alertsMuted.value && !turnAlertMuted.value) vibrateManeuver(turn.kind)
       fired = true
     }
   } else {
@@ -1367,10 +1378,15 @@ function rememberReached(turn: TurnPoint) {
   reachedTurn = { direction: turn.direction, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, distM: turn.distM }
 }
 
+function muteTurnAlert() {
+  turnAlertMuted.value = !turnAlertMuted.value
+  mutedTurnPtr = turnAlertMuted.value ? nextTurnPtr : -1
+}
+
 // Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.
 // Un poll court (250 ms) suffit : la préférence est plafonnée à 500 ms mini.
 function tickTurnRepeat() {
-  if (!activeTurn || !soundOn.value || alertsMuted.value) return
+  if (!activeTurn || !soundOn.value || alertsMuted.value || turnAlertMuted.value) return
   const now = Date.now()
   const interval = activeTurnUrgent ? TURN_REPEAT_URGENT_MS : TURN_REPEAT_MS
   if (now - lastTurnReminderMs >= interval) {
@@ -1570,7 +1586,9 @@ function toggleScreenOffManual() {
       :climb-info="showClimbCard ? climbInfo : null"
       :urgent-m="TURN_URGENT_M"
       :speed-kmh="speedKmh"
+      :muted="turnAlertMuted"
       @resume="toggleScreenOffManual"
+      @mute="muteTurnAlert"
     />
 
     <div v-if="loading" class="nav-overlay-center text-muted">
@@ -1694,6 +1712,8 @@ function toggleScreenOffManual() {
       :urgent-m="TURN_URGENT_M"
       :radar-banner-visible="radarBannerVisible"
       :speed-kmh="speedKmh"
+      :muted="turnAlertMuted"
+      @mute="muteTurnAlert"
     />
 
     <!-- GPS / off-route banners -->
@@ -1793,7 +1813,7 @@ function toggleScreenOffManual() {
    touch-action:none pour que le glissement vertical déclenche bien pointermove au
    lieu d'un scroll. Au-dessus de la carte mais sous le voile de veille (z-index 20). */
 .nav-reveal-zone {
-  position: absolute; top: 0; left: 0; right: 0; height: 4.5rem;
+  position: absolute; top: 0; left: 0; right: 0; height: 6rem;
   z-index: 6; touch-action: none;
   display: flex; justify-content: center; align-items: flex-start;
 }

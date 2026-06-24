@@ -9,7 +9,10 @@ const props = defineProps<{
   urgentM: number
   radarBannerVisible: boolean
   speedKmh: number
+  muted?: boolean
 }>()
+
+defineEmits<{ (e: 'mute'): void }>()
 
 const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <= props.urgentM
 </script>
@@ -36,6 +39,15 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
         </span>
       </template>
     </span>
+    <button
+      v-if="turnHint.state === 'near'"
+      class="nav-turn-mute"
+      :aria-label="muted ? t('routes.unmute_turn_alerts') : t('routes.mute_turn_alerts')"
+      :title="muted ? t('routes.unmute_turn_alerts') : t('routes.mute_turn_alerts')"
+      @click.stop="$emit('mute')"
+    >
+      <i class="fa-solid" :class="muted ? 'fa-bell' : 'fa-bell-slash'" aria-hidden="true"></i>
+    </button>
     <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
   </div>
 </template>
@@ -43,11 +55,15 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
 <style scoped>
 /* Notification de virage : bandeau pleine largeur en haut de l'écran (les boutons
    sont désormais dans le tiroir, plus rien n'occupe les coins). */
+/* Pas de z-index explicite pour ne pas créer de stacking context : le bouton mute
+   enfant peut ainsi avoir son propre z-index (7) dans le contexte racine, au-dessus
+   de la nav-reveal-zone (z-index 6) qui intercepterait sinon tous les taps. */
 .nav-turn {
   position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem;
-  z-index: 3; display: flex; align-items: center; justify-content: center; gap: 1rem;
+  display: flex; align-items: center; justify-content: center; gap: 1rem;
   background: #7c3aed; color: #fff; padding: 1.1rem 1.5rem;
   border-radius: 1rem; font-size: 3rem; line-height: 1;
+  pointer-events: none;
 }
 /* Bandeau radar visible (pleine largeur en tout-haut) : on descend le virage dessous. */
 .nav-turn--radar { top: 4.5rem; }
@@ -70,4 +86,16 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
 .nav-turn.nav-turn--far { background: rgba(51, 65, 85, 0.92); }
 /* Virage atteint : maintenu en vert quelques secondes comme confirmation « tournez ici ». */
 .nav-turn.nav-turn--now { background: #16a34a; }
+/* Bouton de sourdine des alertes sonores/haptiques du virage courant. */
+/* z-index: 7 dans le contexte racine (parent sans stacking context) — au-dessus de
+   la nav-reveal-zone (6). pointer-events: auto pour capturer les taps malgré le
+   pointer-events: none du parent .nav-turn. */
+.nav-turn-mute {
+  position: absolute; right: 0.75rem; top: 50%; transform: translateY(-50%);
+  z-index: 7; pointer-events: auto;
+  background: rgba(255,255,255,0.2); border: none; border-radius: 0.5rem;
+  color: #fff; padding: 0.45rem 0.6rem; font-size: 1.3rem; cursor: pointer;
+  line-height: 1; touch-action: manipulation;
+}
+.nav-turn-mute:active { background: rgba(255,255,255,0.4); }
 </style>

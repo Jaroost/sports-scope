@@ -665,7 +665,7 @@ function toggleScreenOffManual() {
 }
 
 .nav-reveal-zone {
-  position: absolute; top: 0; left: 0; right: 0; height: 4.5rem;
+  position: absolute; top: 0; left: 0; right: 0; height: 6rem;
   z-index: 6; touch-action: none;
   display: flex; justify-content: center; align-items: flex-start;
 }

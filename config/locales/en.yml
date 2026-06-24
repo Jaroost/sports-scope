@@ -281,6 +281,8 @@ en:
     turn_left: "Turn left"
     turn_right: "Turn right"
     turn_now: "Now"
+    mute_turn_alerts: "Mute turn alerts"
+    unmute_turn_alerts: "Unmute turn alerts"
     climb_in_progress: "Climb in progress"
     gps_error: "GPS position unavailable"
     gps_waiting: "Acquiring GPS signal…"

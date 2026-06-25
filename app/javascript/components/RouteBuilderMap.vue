@@ -19,6 +19,7 @@ import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
 } from '../routeHelpers'
 import type { Climb } from '../routeHelpers'
+import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 
 const props = defineProps<{ state: RouteBuilderState }>()
 const emit = defineEmits<{
@@ -79,6 +80,10 @@ let placePopup: any = null
 // Popup informatif d'un point quelconque du tracé (lecture seule) : mêmes liens
 // qu'un point d'itinéraire (coordonnées, Google Maps, Street View, Komoot).
 let routePointPopup: any = null
+// Popup d'un point quelconque de la carte (clic droit / appui long n'importe où) :
+// coordonnées copiables, Google Maps, Street View. Voir mapCoordPopup.
+let coordPopup: any = null
+let detachLongPress: (() => void) | null = null
 let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
 const svCache = new Map<string, boolean>()
@@ -225,6 +230,9 @@ async function initMap() {
       installOverlays()
       mapInstance.on('click', (e: any) => {
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
+        // Tooltip « point quelconque » (clic droit / appui long) ouverte : un clic ne
+        // fait que la refermer, sans ajouter de point au tracé.
+        if (coordPopup) { closeCoordPopup(); return }
         // Lecture seule : le clic ne modifie jamais le tracé. Il referme une tooltip
         // ouverte (POI ou point du trajet), ou — si l'on clique sur le tracé — ouvre
         // une tooltip informative sur le point du trajet le plus proche.
@@ -274,6 +282,22 @@ async function initMap() {
         showHoverMarker(routeStore.geometry.value[idx])
       })
       mapInstance.on('mouseout', hideHoverMarker)
+      // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View.
+      mapInstance.on('contextmenu', (e: any) => {
+        e.preventDefault?.()
+        showCoordPopup(e.lngLat.lng, e.lngLat.lat)
+      })
+      // Appui long (mobile) : même tooltip. On supprime le clic synthétique de relâchement
+      // pour qu'il n'ajoute pas un point au tracé (suppressNextMapClick), avec garde temporelle
+      // au cas où aucun clic ne serait émis. Voir attachLongPress.
+      detachLongPress = attachLongPress(mapInstance.getCanvas(), (clientX, clientY) => {
+        const rect = mapInstance.getContainer().getBoundingClientRect()
+        const ll = mapInstance.unproject([clientX - rect.left, clientY - rect.top])
+        showCoordPopup(ll.lng, ll.lat)
+        suppressNextMapClick = true
+        suppressNextWpClick = true
+        setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 500)
+      })
       mapInstance.on('moveend', () => { if (!routeStore.currentId.value) saveMapView() })
       const applyMarkerScale = () => {
         const z = mapInstance.getZoom()
@@ -610,6 +634,21 @@ function escapeHtml(s: string) {
 
 function closeRoutePointPopup() {
   if (routePointPopup) { routePointPopup.remove(); routePointPopup = null }
+}
+
+function closeCoordPopup() {
+  if (coordPopup) { coordPopup.remove(); coordPopup = null }
+}
+
+// Tooltip d'un point quelconque de la carte (clic droit / appui long). Lecture seule :
+// n'ajoute jamais de point au tracé, propose juste les coordonnées et les liens carto.
+function showCoordPopup(lng: number, lat: number) {
+  if (!_maplibregl || !mapInstance) return
+  closeCoordPopup()
+  coordPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([lng, lat])
+    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup))
+    .addTo(mapInstance)
 }
 
 // Popup informatif pour un point quelconque du tracé (lecture seule). Reprend le
@@ -1657,6 +1696,8 @@ onBeforeUnmount(() => {
   climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
   clearPlaceMarkers()
   closeRoutePointPopup()
+  closeCoordPopup()
+  if (detachLongPress) { detachLongPress(); detachLongPress = null }
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
   if (locationMarker) { locationMarker.remove(); locationMarker = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
@@ -2420,6 +2461,18 @@ defineExpose({
 .place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
 .place-popup-link:hover { background: rgba(0,0,0,0.06); color: #212529; text-decoration: none; }
 .place-popup-link--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
+.place-popup-link--copy {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.place-popup-coords-row { display: flex; gap: 0.25rem; }
+.place-popup-coords-row .place-popup-link { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; }
+.place-popup-coords-row .place-popup-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .route-insert-marker {
   width: 22px;
   height: 22px;

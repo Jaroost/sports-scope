@@ -42,6 +42,7 @@ import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS } f
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineGrauStyle, OFFLINE_DEFAULTS,
 } from '../offline/offlineMaps'
+import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 
 // Page de navigation unifiée : démarre en mode libre (carte + GPS + vitesse, sans
 // tracé) et peut charger/décharger un itinéraire à chaud. shareToken : si présent
@@ -242,6 +243,12 @@ let maplibre: any = null
 let locationMarker: any = null
 let watchId: number | null = null
 let turnMarkers: any[] = []    // marqueurs DOM des indicateurs de virage (au-dessus des POI)
+// Tooltip d'un point quelconque de la carte (clic droit / appui long) : coordonnées
+// copiables, Google Maps, Street View. Voir mapCoordPopup. suppressNextMapClick neutralise
+// le clic synthétique de relâchement d'un appui long (sinon il basculerait la veille).
+let coordPopup: any = null
+let detachCoordLongPress: (() => void) | null = null
+let suppressNextMapClick = false
 
 // Route data (non-reactive: large arrays, only read inside callbacks)
 let geometry: Coord[] = []
@@ -521,6 +528,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('online', refreshBaseMap)
   window.removeEventListener('offline', refreshBaseMap)
   window.removeEventListener('resize', refreshContainerH)
+  if (detachCoordLongPress) { detachCoordLongPress(); detachCoordLongPress = null }
+  closeCoordPopup()
   if (map) { map.remove(); map = null }
 })
 
@@ -880,6 +889,21 @@ function confirmPlaceNav() {
 
 function refreshContainerH() { containerH = map?.getContainer()?.clientHeight || 0 }
 
+function closeCoordPopup() {
+  if (coordPopup) { coordPopup.remove(); coordPopup = null }
+}
+
+// Tooltip d'un point quelconque de la carte (clic droit / appui long n'importe où) :
+// coordonnées copiables, Google Maps, Street View. Sans effet sur la navigation.
+function showCoordPopup(lng: number, lat: number) {
+  if (!maplibre || !map) return
+  closeCoordPopup()
+  coordPopup = new maplibre.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([lng, lat])
+    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup))
+    .addTo(map)
+}
+
 async function initMap() {
   maplibre = (await import('maplibre-gl')).default
   await import('maplibre-gl/dist/maplibre-gl.css')
@@ -939,6 +963,10 @@ async function initMap() {
   // Tap simple sur la carte → mode veille (la boucle rAF s'arrête, le wake lock est libéré).
   // L'overlay noir capte le tap de réveil ; pas de conflit car il est au z-index 20.
   map.on('click', (e: any) => {
+    // Clic synthétique de relâchement d'un appui long : déjà traité (tooltip coordonnées).
+    if (suppressNextMapClick) { suppressNextMapClick = false; return }
+    // Tooltip « point quelconque » ouverte : un tap ne fait que la refermer.
+    if (coordPopup) { closeCoordPopup(); return }
     // Mode « cible » : le tap fixe (ou déplace) le point de destination au lieu de
     // mettre en veille.
     if (placeNavActive.value) { setDestPoint([e.lngLat.lng, e.lngLat.lat]); return }
@@ -948,6 +976,20 @@ async function initMap() {
     // sous-panneaux) au lieu de mettre en veille.
     if (controlsVisible.value) { hideControls(); return }
     if (!screenOff.value) toggleScreenOffManual()
+  })
+  // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View.
+  map.on('contextmenu', (e: any) => {
+    e.preventDefault?.()
+    showCoordPopup(e.lngLat.lng, e.lngLat.lat)
+  })
+  // Appui long (mobile) : même tooltip. On neutralise le clic synthétique de relâchement
+  // (suppressNextMapClick) pour qu'il ne bascule pas la veille. Voir attachLongPress.
+  detachCoordLongPress = attachLongPress(map.getCanvas(), (clientX, clientY) => {
+    const rect = map.getContainer().getBoundingClientRect()
+    const ll = map.unproject([clientX - rect.left, clientY - rect.top])
+    showCoordPopup(ll.lng, ll.lat)
+    suppressNextMapClick = true
+    setTimeout(() => { suppressNextMapClick = false }, 500)
   })
 
   await new Promise<void>((resolve) => {
@@ -2156,7 +2198,11 @@ function toggleScreenOffManual() {
    NavStatsBar), centrée. Affichée tant qu'aucun itinéraire n'est chargé. */
 .nav-stats {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 0.75rem;
-  z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.7rem 0.85rem;
+  /* z-index 6 : au-dessus de TOUTE la couche de marqueurs de la carte (POI z1,
+     pastilles de virage z2-4, destination z4, flèche du coureur z5), qui sont des
+     overlays DOM MapLibre remontant dans le contexte d'empilement racine. Cf. le
+     même choix dans NavStatsBar.vue. */
+  z-index: 6; background: #fff; border-radius: 0.75rem; padding: 0.7rem 0.85rem;
 }
 .nav-stats--free { text-align: center; }
 .nav-stat-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; white-space: nowrap; }
@@ -2345,6 +2391,18 @@ function toggleScreenOffManual() {
 .place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
 .place-popup-link:hover { background: rgba(0, 0, 0, 0.06); color: #212529; text-decoration: none; }
 .place-popup-link--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
+.place-popup-link--copy {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.place-popup-coords-row { display: flex; gap: 0.25rem; }
+.place-popup-coords-row .place-popup-link { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; }
+.place-popup-coords-row .place-popup-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .place-popup-link--navigate {
   border: none;
   cursor: pointer;

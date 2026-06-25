@@ -58,7 +58,12 @@ defineEmits<{ (e: 'resume'): void }>()
 <style scoped>
 .nav-climb {
   position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6.25rem;
-  z-index: 3; background: #fff; border-radius: 0.75rem; padding: 0.6rem 0.85rem;
+  /* z-index 6 : au-dessus de TOUTE la couche de marqueurs de la carte (POI z1,
+     pastilles de virage z2-4, destination z4, flèche du coureur z5), qui sont des
+     overlays DOM MapLibre remontant dans le contexte d'empilement racine. Sans ça,
+     à z3, la flèche du coureur et le marqueur de destination recouvraient la carte
+     du col. Même choix que NavStatsBar.vue. */
+  z-index: 6; background: #fff; border-radius: 0.75rem; padding: 0.6rem 0.85rem;
 }
 /* Mode veille : la carte du col passe au-dessus du voile noir (z 20). On garde sa
    position par défaut pour laisser l'indice « tap pour reprendre » visible dessous. */

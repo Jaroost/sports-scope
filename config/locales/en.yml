@@ -438,6 +438,7 @@ en:
       turn_urgent_m: "Urgent alert distance (orange)"
       turn_repeat_ms: "Sound alert repeat interval"
       turn_repeat_urgent_ms: "Repeat interval when close (orange)"
+      turn_now_m: "Switch to green before turn"
       turn_green_hold_m: "Confirmation hold distance (green)"
       turn_green_hold_s: "Confirmation max duration (green)"
       sound_volume: "Sound alert volume (turns + radar)"

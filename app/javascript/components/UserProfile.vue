@@ -44,6 +44,7 @@ interface Preferences {
     turn_urgent_m: number
     turn_repeat_ms: number
     turn_repeat_urgent_ms: number
+    turn_now_m: number
     turn_green_hold_m: number
     turn_green_hold_s: number
     sound_volume: number
@@ -698,6 +699,12 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.turn_repeat_urgent_ms') }} : <strong>{{ (prefs.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
             </label>
             <input id="nav-turn-repeat-urgent" v-model.number="prefs.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500">
+          </div>
+          <div class="col-sm-6">
+            <label for="nav-turn-now" class="form-label mb-1">
+              {{ t('profile.navigation.turn_now_m') }} : <strong>{{ prefs.navigation.turn_now_m }} m</strong>
+            </label>
+            <input id="nav-turn-now" v-model.number="prefs.navigation.turn_now_m" type="range" class="form-range" min="0" max="50" step="1">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-green-hold" class="form-label mb-1">

@@ -312,6 +312,10 @@ let reachedAtMs = 0
 // Les deux sont réglables dans le profil de navigation.
 const GREEN_HOLD_M = navPrefs.turn_green_hold_m ?? 100
 const GREEN_HOLD_MS = (navPrefs.turn_green_hold_s ?? 10) * 1000
+// Distance AVANT le virage à partir de laquelle on bascule en confirmation verte
+// (« maintenant ») : la pastille passe au vert dès qu'on est à TURN_NOW_M, sans
+// attendre de l'avoir franchi.
+const TURN_NOW_M = navPrefs.turn_now_m ?? 15
 // Vrai quand l'écran a été rallumé AUTOMATIQUEMENT à l'approche d'un virage : on ne
 // remet en veille de soi-même que dans ce cas (un réveil manuel reste éveillé).
 let autoWoken = false
@@ -1634,10 +1638,10 @@ function updateTurns(): boolean {
     activeTurnUrgent = false
   }
 
-  // Virage courant atteint (dist ≤ 0) mais pointeur pas encore avancé (on est dessus,
-  // potentiellement à l'arrêt à un carrefour) : on rafraîchit le maintien vert pour
-  // qu'il ne disparaisse pas tant qu'on n'est pas reparti.
-  if (turn && dist <= 0) rememberReached(turn, nextTurnPtr)
+  // Virage atteint dès qu'on est à TURN_NOW_M (15 m) devant — et tant que le pointeur
+  // n'a pas avancé (on est dessus, potentiellement à l'arrêt à un carrefour) : on
+  // rafraîchit le maintien vert pour qu'il ne disparaisse pas tant qu'on n'est pas reparti.
+  if (turn && dist <= TURN_NOW_M) rememberReached(turn, nextTurnPtr)
 
   // Choix de l'affichage. Priorité au prochain virage s'il est proche (« sauf s'il y a
   // une autre instruction plus proche »). Sinon, on maintient le virage tout juste
@@ -1645,7 +1649,7 @@ function updateTurns(): boolean {
   const greenActive = reachedTurn != null
     && here - reachedTurn.distM < GREEN_HOLD_M
     && Date.now() - reachedAtMs < GREEN_HOLD_MS
-  if (turn && dist > 0 && dist <= TURN_HINT_M) {
+  if (turn && dist > TURN_NOW_M && dist <= TURN_HINT_M) {
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
   } else if (greenActive && reachedTurn) {
     turnHint.value = { direction: reachedTurn.direction, distM: 0, kind: reachedTurn.kind, angle: reachedTurn.angle, exitNumber: reachedTurn.exitNumber, state: 'now' }

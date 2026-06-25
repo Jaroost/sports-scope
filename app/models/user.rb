@@ -34,6 +34,7 @@ class User < ApplicationRecord
       "turn_urgent_m" => 50,   # distance (m) à laquelle la card passe en orange
       "turn_repeat_ms" => 2000, # intervalle (ms) entre deux répétitions du son de virage
       "turn_repeat_urgent_ms" => 1000, # intervalle (ms) entre deux répétitions du son quand le virage est proche (zone orange)
+      "turn_now_m" => 15, # distance (m) avant un virage à partir de laquelle la pastille bascule en confirmation verte (« maintenant »)
       "turn_green_hold_m" => 100, # distance (m) parcourue après un virage pendant laquelle la confirmation verte (« maintenant ») reste affichée
       "turn_green_hold_s" => 10, # durée max (s) d'affichage de la confirmation verte (« maintenant ») — elle disparaît au premier des deux : distance ou temps
       "sound_volume" => 100, # volume général des alertes sonores (virages + radar), en % du volume de base

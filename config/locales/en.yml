@@ -338,6 +338,7 @@ en:
     reverse_route: "Reverse route"
     route_point: "Route point"
     map_point: "Map point"
+    add_to_route: "Add to route"
     street_view: "Street View"
     close: "Close"
     copy_latitude: "Copy latitude"

@@ -65,17 +65,32 @@ async function copyText(text: string, btn: HTMLElement) {
 }
 
 // Construit le contenu DOM de la tooltip d'un point quelconque. `onClose` est appelé
-// par la croix de fermeture (le composant ferme alors son popup MapLibre).
-export function buildCoordPopupContent(lng: number, lat: number, onClose: () => void): HTMLElement {
+// par la croix de fermeture (le composant ferme alors son popup MapLibre). `onAddToRoute`,
+// s'il est fourni, ajoute un bouton « Ajouter à l'itinéraire » en tête : le créateur y
+// insère un waypoint au plus proche du tracé, la navigation y épisse un détour. Absent
+// (lecture seule, navigation libre sans tracé), le bouton n'apparaît pas.
+export function buildCoordPopupContent(
+  lng: number,
+  lat: number,
+  onClose: () => void,
+  onAddToRoute?: (lng: number, lat: number) => void,
+): HTMLElement {
   const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`
   const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
+  const addAction = onAddToRoute
+    ? `<button type="button" class="place-popup-link place-popup-link--add-route">
+        <i class="fa-solid fa-circle-plus" aria-hidden="true"></i>
+        <span>${escapeHtml(t('routes.add_to_route'))}</span>
+      </button>`
+    : ''
   wrap.innerHTML = `
     <div class="place-popup-header">
       <span class="place-popup-name">${escapeHtml(t('routes.map_point'))}</span>
       <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
     </div>
+    ${addAction}
     <div class="place-popup-coords-row">
       <button type="button" class="place-popup-link place-popup-link--copy" data-coord="${lat.toFixed(6)}" title="${escapeHtml(t('routes.copy_latitude'))}">
         <i class="fa-regular fa-copy" aria-hidden="true"></i>
@@ -95,6 +110,10 @@ export function buildCoordPopupContent(lng: number, lat: number, onClose: () => 
       <span>${escapeHtml(t('routes.street_view'))}</span>
     </a>`
   wrap.querySelector('.place-popup-close')?.addEventListener('click', onClose)
+  wrap.querySelector('.place-popup-link--add-route')?.addEventListener('click', (ev) => {
+    ev.stopPropagation(); ev.preventDefault()
+    onAddToRoute?.(lng, lat)
+  })
   wrap.querySelectorAll<HTMLElement>('.place-popup-link--copy').forEach((btn) => {
     btn.addEventListener('click', (ev) => {
       ev.stopPropagation(); ev.preventDefault()

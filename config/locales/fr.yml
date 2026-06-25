@@ -338,6 +338,7 @@ fr:
     reverse_route: "Inverser le parcours"
     route_point: "Point du trajet"
     map_point: "Point sur la carte"
+    add_to_route: "Ajouter à l'itinéraire"
     street_view: "Street View"
     close: "Fermer"
     copy_latitude: "Copier la latitude"

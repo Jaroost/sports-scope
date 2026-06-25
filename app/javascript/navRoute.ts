@@ -11,7 +11,18 @@ export async function fetchRouteToPlace(
   to: LngLat,
   sport: Sport,
 ): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
-  const lonlats = `${from[0]},${from[1]}|${to[0]},${to[1]}`
+  return fetchRouteVia([from, to], sport)
+}
+
+// Calcule un itinéraire BRouter passant par une suite de points (≥ 2). Sert à insérer
+// un point intermédiaire en navigation : on route depuis un ancrage du tracé, à travers
+// le nouveau point, jusqu'à un ancrage situé un peu plus loin. Même format de retour que
+// fetchRouteToPlace (géométrie + voicehints).
+export async function fetchRouteVia(
+  points: LngLat[],
+  sport: Sport,
+): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
+  const lonlats = points.map((p) => `${p[0]},${p[1]}`).join('|')
   const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${brouterProfile(sport)}&alternativeidx=0&format=geojson&timode=2`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)

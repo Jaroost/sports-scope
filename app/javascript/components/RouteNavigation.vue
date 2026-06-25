@@ -9,7 +9,7 @@ import {
   buildOffsetDisplayLine, densifyGeometry,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
-import { fetchRouteToPlace } from '../navRoute'
+import { fetchRouteToPlace, fetchRouteVia } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
 } from '../navHelpers'
@@ -141,6 +141,10 @@ const pois = useNavPois({
   // « Naviguer ici » depuis le popup d'un POI : recalcule le tracé vers lui (remplace
   // l'itinéraire courant, comme une destination posée sur la carte).
   onNavigateTo: (place) => navigateTo(place.name, [place.lng, place.lat]),
+  // « Ajouter à l'itinéraire » : insère le POI dans le tracé courant (au plus proche),
+  // sans le remplacer. N'apparaît que lorsqu'un itinéraire est chargé.
+  onInsertVia: (place) => insertViaIntoRoute(place.lng, place.lat),
+  hasRoute: () => hasRoute.value,
 })
 const { POI_CATS, poiVisible, loading: poiLoading } = pois
 const showPoiPanel = ref(false)
@@ -232,6 +236,9 @@ const destPoint = ref<LngLat | null>(null)
 const destName = ref('')
 const navStarting = ref(false)
 const navError = ref<string | null>(null)
+// Insertion d'un point intermédiaire dans le tracé en cours (POI / clic droit) : appel
+// BRouter du détour en cours. Évite un double déclenchement et neutralise le bouton.
+const viaInserting = ref(false)
 let destMarker: any = null
 const climbInfo = ref<ClimbInfo | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
@@ -885,6 +892,62 @@ function confirmPlaceNav() {
   navigateTo(destName.value, destPoint.value)
 }
 
+// ─── Insertion d'un point intermédiaire dans le tracé ──────────────────────────
+// Contrairement à « Naviguer ici » (qui remplace tout par un trajet depuis la position
+// GPS), on insère le point dans l'itinéraire courant au plus proche : on repère le
+// sommet du tracé le plus proche, on route un détour [ancrage amont → point → ancrage
+// aval] via BRouter, et on l'épisse entre les portions inchangées (tête + queue). Les
+// voicehints des portions conservées sont réutilisés, ceux du détour insérés au milieu.
+const VIA_ANCHOR_GAP_M = 40
+
+async function insertViaIntoRoute(lng: number, lat: number) {
+  if (!hasRoute.value || geometry.length < 2 || viaInserting.value) return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    navError.value = t('routes.reroute_offline')
+    return
+  }
+  viaInserting.value = true
+  navError.value = null
+  try {
+    // Sommet du tracé le plus proche du point à insérer.
+    let nearIdx = 0, bestDist = Infinity
+    for (let i = 0; i < geometry.length; i++) {
+      const d = haversine([lng, lat], [geometry[i][0], geometry[i][1]])
+      if (d < bestDist) { bestDist = d; nearIdx = i }
+    }
+    // Ancrages du détour, ~40 m de part et d'autre du sommet le plus proche, pour
+    // laisser BRouter raccorder proprement le passage par le nouveau point.
+    let a = nearIdx
+    while (a > 0 && cumDistM[nearIdx] - cumDistM[a] < VIA_ANCHOR_GAP_M) a--
+    let b = nearIdx
+    while (b < geometry.length - 1 && cumDistM[b] - cumDistM[nearIdx] < VIA_ANCHOR_GAP_M) b++
+    const { geometry: detour, hints: detourHints } = await fetchRouteVia(
+      [[geometry[a][0], geometry[a][1]], [lng, lat], [geometry[b][0], geometry[b][1]]],
+      routeSport,
+    )
+    const head = geometry.slice(0, a)
+    const tail = geometry.slice(b + 1)
+    const newGeometry = head.concat(detour).concat(tail)
+    // Voicehints des portions inchangées : leurs coordonnées (ancrées sur les sommets
+    // conservés) existent encore. On les garde dans l'ordre tête → détour → queue, comme
+    // l'attend turnsFromVoiceHints (appariement monotone le long du tracé).
+    const headKeys = new Set(head.map((c) => `${c[0]},${c[1]}`))
+    const tailKeys = new Set(tail.map((c) => `${c[0]},${c[1]}`))
+    const headHints = rawHints.filter((h) => headKeys.has(`${h.lng},${h.lat}`))
+    const tailHints = rawHints.filter((h) => tailKeys.has(`${h.lng},${h.lat}`))
+    rebuildRouteState(newGeometry, headHints.concat(detourHints).concat(tailHints))
+    // Le tracé a changé : on relocalise au prochain fix (le coureur peut être n'importe
+    // où dessus) plutôt que de repartir du début.
+    resetRouteTracking(false)
+    ensureRouteInstalled()
+    refreshRemaining()
+  } catch {
+    navError.value = t('routes.error_routing')
+  } finally {
+    viaInserting.value = false
+  }
+}
+
 // ─── Map ──────────────────────────────────────────────────────────────────────
 
 function refreshContainerH() { containerH = map?.getContainer()?.clientHeight || 0 }
@@ -898,9 +961,14 @@ function closeCoordPopup() {
 function showCoordPopup(lng: number, lat: number) {
   if (!maplibre || !map) return
   closeCoordPopup()
+  // Avec un tracé chargé, le popup propose d'y insérer ce point (au plus proche). En
+  // navigation libre (sans tracé), pas d'insertion possible : tooltip informative seule.
+  const onAdd = hasRoute.value
+    ? (plng: number, plat: number) => { closeCoordPopup(); void insertViaIntoRoute(plng, plat) }
+    : undefined
   coordPopup = new maplibre.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([lng, lat])
-    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup))
+    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup, onAdd))
     .addTo(map)
 }
 
@@ -2413,4 +2481,16 @@ function toggleScreenOffManual() {
   text-align: left;
 }
 .place-popup-link--navigate:hover { background: #e34602; color: #fff; }
+/* « Ajouter à l'itinéraire » (insertion, ne remplace pas) : violet pour le distinguer
+   de l'orange « Naviguer ici » (remplacement). */
+.place-popup-link--add-route {
+  border: none;
+  cursor: pointer;
+  background: #7c3aed;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.place-popup-link--add-route:hover { background: #6d28d9; color: #fff; }
 </style>

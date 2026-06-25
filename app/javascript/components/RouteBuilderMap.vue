@@ -593,11 +593,20 @@ function showPlacePopup(place: Place) {
   const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${place.lat},${place.lng}`
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
+  // En édition, on propose d'insérer le POI dans le tracé (au plus proche). En lecture
+  // seule, le popup reste informatif (Google Maps / Street View seulement).
+  const addAction = routeStore.readOnly.value
+    ? ''
+    : `<button type="button" class="place-popup-link place-popup-link--add-route">
+        <i class="fa-solid fa-circle-plus" aria-hidden="true"></i>
+        <span>${escapeHtml(t('routes.add_to_route'))}</span>
+      </button>`
   wrap.innerHTML = `
     <div class="place-popup-header">
       <span class="place-popup-name">${escapeHtml(place.name)}</span>
       <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
     </div>
+    ${addAction}
     <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
       <i class="fa-brands fa-google" aria-hidden="true"></i>
       <span>Google Maps</span>
@@ -616,6 +625,10 @@ function showPlacePopup(place: Place) {
   selectedPlaceEl = placeMarkerEls.get(placeMarkerKey(place.markerLng, place.markerLat)) ?? null
   if (selectedPlaceEl) selectedPlaceEl.classList.add('place-marker--active')
   wrap.querySelector('.place-popup-close')?.addEventListener('click', closePlacePopup)
+  wrap.querySelector('.place-popup-link--add-route')?.addEventListener('click', () => {
+    insertWaypointSmart(place.lng, place.lat)
+    closePlacePopup()
+  })
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
   if (svLink) {
     checkSV(place.lat, place.lng).then((ok) => {
@@ -645,9 +658,14 @@ function closeCoordPopup() {
 function showCoordPopup(lng: number, lat: number) {
   if (!_maplibregl || !mapInstance) return
   closeCoordPopup()
+  // En édition, le popup propose d'insérer ce point dans le tracé (au plus proche).
+  // En lecture seule, pas d'action d'ajout : tooltip purement informative.
+  const onAdd = routeStore.readOnly.value
+    ? undefined
+    : (plng: number, plat: number) => { insertWaypointSmart(plng, plat); closeCoordPopup() }
   coordPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([lng, lat])
-    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup))
+    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup, onAdd))
     .addTo(mapInstance)
 }
 
@@ -998,6 +1016,35 @@ function insertWaypointAtGeomIdx(geomIdx: number) {
   next.splice(insertAt, 0, { lng: pt[0], lat: pt[1] })
   routeStore.waypoints.value = next
   hideHoverMarker()
+  refreshWaypointMarkers()
+  emit('waypoints-changed')
+}
+
+// Insère un point quelconque (POI ou clic droit) dans le tracé, au plus proche : on
+// repère le sommet de la géométrie routée le plus proche du point, puis le tronçon de
+// waypoints auquel il appartient, et on insère le nouveau point dans ce tronçon. Sans
+// tracé encore routé (moins de deux points, ou index pas à jour), on ajoute à la fin.
+function insertWaypointSmart(lng: number, lat: number) {
+  if (atWaypointLimit()) return
+  const wps = routeStore.waypoints.value
+  const geom = routeStore.geometry.value
+  if (wps.length < 2 || geom.length < 2 || waypointGeomIndices.length !== wps.length) {
+    addWaypoint(lng, lat)
+    return
+  }
+  let nearIdx = 0, bestDist = Infinity
+  for (let i = 0; i < geom.length; i++) {
+    const d = haversine([lng, lat], geom[i])
+    if (d < bestDist) { bestDist = d; nearIdx = i }
+  }
+  let insertAt = wps.length
+  for (let i = 0; i < waypointGeomIndices.length - 1; i++) {
+    if (nearIdx >= waypointGeomIndices[i] && nearIdx <= waypointGeomIndices[i + 1]) { insertAt = i + 1; break }
+  }
+  const next = wps.slice()
+  next.splice(insertAt, 0, { lng, lat })
+  routeStore.waypoints.value = next
+  deselectAll()
   refreshWaypointMarkers()
   emit('waypoints-changed')
 }
@@ -2470,6 +2517,18 @@ defineExpose({
   text-align: left;
   font-variant-numeric: tabular-nums;
 }
+/* « Ajouter à l'itinéraire » : action d'insertion d'un point (POI / clic droit) dans
+   le tracé, mise en avant en violet (couleur du tracé). */
+.place-popup-link--add-route {
+  border: none;
+  cursor: pointer;
+  background: #7c3aed;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.place-popup-link--add-route:hover { background: #6d28d9; color: #fff; }
 .place-popup-coords-row { display: flex; gap: 0.25rem; }
 .place-popup-coords-row .place-popup-link { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; }
 .place-popup-coords-row .place-popup-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

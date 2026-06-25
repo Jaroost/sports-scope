@@ -23,8 +23,12 @@ export function useNavPois(deps: {
   // Optionnel : si fourni, le popup d'un POI propose « Naviguer ici » qui lance la
   // navigation guidée vers ce POI (seulement en mode libre, où la destination est libre).
   onNavigateTo?: (place: NavPlace) => void
+  // Optionnel : insère le POI dans l'itinéraire courant (au plus proche), sans le
+  // remplacer. Le bouton n'apparaît que quand un tracé est chargé (hasRoute).
+  onInsertVia?: (place: NavPlace) => void
+  hasRoute?: () => boolean
 }) {
-  const { getMap, getMaplibre, getGeometry, zoomWidthScale, onNavigateTo } = deps
+  const { getMap, getMaplibre, getGeometry, zoomWidthScale, onNavigateTo, onInsertVia, hasRoute } = deps
 
   // Catégories de POI ponctuels affichables en navigation (eau, restos, points de
   // vue…). Le panneau de séance permet de les masquer/afficher ; l'état initial vient
@@ -211,12 +215,21 @@ export function useNavPois(deps: {
         <span>${escapeHtml(t('routes.navigate_here'))}</span>
       </button>`
       : ''
+    // « Ajouter à l'itinéraire » : insère le POI dans le tracé courant (au plus proche),
+    // sans le remplacer. Présent seulement quand un itinéraire est chargé.
+    const insertAction = onInsertVia && hasRoute?.()
+      ? `<button type="button" class="place-popup-link place-popup-link--add-route">
+        <i class="fa-solid fa-circle-plus" aria-hidden="true"></i>
+        <span>${escapeHtml(t('routes.add_to_route'))}</span>
+      </button>`
+      : ''
     wrap.innerHTML = `
       <div class="place-popup-header">
         <span class="place-popup-name">${escapeHtml(place.name)}</span>
         <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
       </div>
       ${navAction}
+      ${insertAction}
       <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
         <i class="fa-brands fa-google" aria-hidden="true"></i>
         <span>Google Maps</span>
@@ -238,6 +251,10 @@ export function useNavPois(deps: {
     wrap.querySelector('.place-popup-link--navigate')?.addEventListener('click', () => {
       closePlacePopup()
       onNavigateTo?.(place)
+    })
+    wrap.querySelector('.place-popup-link--add-route')?.addEventListener('click', () => {
+      closePlacePopup()
+      onInsertVia?.(place)
     })
     const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
     if (svLink) {

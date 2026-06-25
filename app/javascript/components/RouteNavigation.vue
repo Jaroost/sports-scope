@@ -232,14 +232,24 @@ const placeNavActive = ref(false)
 // la tête dans la carte et le clavier, pas sur la route : bipper ou vibrer pour un virage
 // du tracé qu'il s'apprête à abandonner ne serait que du bruit parasite.
 const alertsMuted = computed(() => placeNavActive.value)
-const destPoint = ref<LngLat | null>(null)
+// Points d'étape posés au tap avant de valider : la navigation passera par chacun
+// dans l'ordre, depuis la position GPS. Un seul point = destination directe.
+const destPoints = ref<LngLat[]>([])
 const destName = ref('')
+// Libellé du bouton de validation : « Naviguer ici » pour un point, « Naviguer (N
+// points) » dès qu'on a posé plusieurs étapes.
+const confirmLabel = computed(() =>
+  destPoints.value.length > 1
+    ? t('routes.navigate_via_points', { count: destPoints.value.length })
+    : t('routes.navigate_here'),
+)
 const navStarting = ref(false)
 const navError = ref<string | null>(null)
 // Insertion d'un point intermédiaire dans le tracé en cours (POI / clic droit) : appel
 // BRouter du détour en cours. Évite un double déclenchement et neutralise le bouton.
 const viaInserting = ref(false)
-let destMarker: any = null
+// Marqueurs (numérotés) des points d'étape posés au tap, alignés sur destPoints.
+let destMarkers: any[] = []
 const climbInfo = ref<ClimbInfo | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
@@ -824,9 +834,10 @@ function startPlaceNav() {
 function cancelPlaceNav() {
   placeNavActive.value = false
   navError.value = null
-  destPoint.value = null
+  destPoints.value = []
   destName.value = ''
-  if (destMarker) { destMarker.remove(); destMarker = null }
+  for (const m of destMarkers) m.remove()
+  destMarkers = []
 }
 
 // Recadre la carte sur le lieu recherché (sans fixer de destination) : l'utilisateur
@@ -849,32 +860,39 @@ function onLocate(p: PlaceResult) {
   }
 }
 
-// Pose (ou déplace) le marqueur de destination au point cliqué.
-function setDestPoint(lngLat: LngLat) {
-  destPoint.value = lngLat
+// Ajoute un point d'étape au tap. Les points s'accumulent (marqueurs numérotés)
+// jusqu'à la validation ; la navigation passera par chacun dans l'ordre de pose.
+function addDestPoint(lngLat: LngLat) {
+  destPoints.value.push(lngLat)
   navError.value = null
   if (!map || !maplibre) return
-  if (destMarker) {
-    destMarker.setLngLat(lngLat)
-  } else {
-    const el = document.createElement('div')
-    el.className = 'nav-dest-marker'
-    el.innerHTML = '<i class="fa-solid fa-location-dot"></i>'
-    destMarker = new maplibre.Marker({ element: el, anchor: 'bottom' }).setLngLat(lngLat).addTo(map)
-  }
+  const el = document.createElement('div')
+  el.className = 'nav-dest-marker'
+  el.innerHTML = `<i class="fa-solid fa-location-dot"></i><span class="nav-dest-num">${destPoints.value.length}</span>`
+  const marker = new maplibre.Marker({ element: el, anchor: 'bottom' }).setLngLat(lngLat).addTo(map)
+  destMarkers.push(marker)
 }
 
-// Itinéraire BRouter depuis la position GPS jusqu'à un point cible, qui remplace le
-// tracé courant (applyReroute réinitialise tout le suivi). Cœur partagé entre la
-// destination choisie sur la carte (« Naviguer ici ») et un POI tapé sur la carte.
-async function navigateTo(name: string, dest: LngLat) {
-  if (navStarting.value || !lastPos) return
+// Retire le dernier point d'étape posé (et son marqueur).
+function removeLastDestPoint() {
+  destPoints.value.pop()
+  const m = destMarkers.pop()
+  if (m) m.remove()
+  navError.value = null
+}
+
+// Itinéraire BRouter depuis la position GPS, passant par une suite de points d'étape
+// (au moins un), qui remplace le tracé courant (applyReroute réinitialise tout le
+// suivi). Cœur partagé entre la destination choisie sur la carte (« Naviguer ici »,
+// éventuellement avec plusieurs étapes) et un POI tapé sur la carte (point unique).
+async function navigateVia(name: string, vias: LngLat[]) {
+  if (navStarting.value || !lastPos || vias.length === 0) return
   navStarting.value = true
   navError.value = null
   try {
     // Sur un tracé : on garde son profil d'activité ; en mode libre : le sport par défaut du profil.
     const sport = hasRoute.value ? routeSport : userPreferences().display.default_sport
-    const { geometry: geom, hints } = await fetchRouteToPlace(lastPos, dest, sport)
+    const { geometry: geom, hints } = await fetchRouteVia([lastPos, ...vias], sport)
     routeName.value = name || t('routes.destination')
     // Destination ad hoc (non sauvegardée) : pas de token → ni hors-ligne ni reprise.
     routeToken.value = null
@@ -890,10 +908,15 @@ async function navigateTo(name: string, dest: LngLat) {
   }
 }
 
-// « Naviguer ici » : navigue vers le point de destination posé sur la carte.
+// « Naviguer ici » depuis un POI : trajet direct vers un point unique.
+function navigateTo(name: string, dest: LngLat) {
+  navigateVia(name, [dest])
+}
+
+// Lance la navigation par les points d'étape posés sur la carte (un ou plusieurs).
 function confirmPlaceNav() {
-  if (!destPoint.value) return
-  navigateTo(destName.value, destPoint.value)
+  if (destPoints.value.length === 0) return
+  navigateVia(destName.value, destPoints.value)
 }
 
 // ─── Insertion d'un point intermédiaire dans le tracé ──────────────────────────
@@ -1039,9 +1062,9 @@ async function initMap() {
     if (suppressNextMapClick) { suppressNextMapClick = false; return }
     // Tooltip « point quelconque » ouverte : un tap ne fait que la refermer.
     if (coordPopup) { closeCoordPopup(); return }
-    // Mode « cible » : le tap fixe (ou déplace) le point de destination au lieu de
-    // mettre en veille.
-    if (placeNavActive.value) { setDestPoint([e.lngLat.lng, e.lngLat.lat]); return }
+    // Mode « cible » : le tap ajoute un point d'étape (numéroté) au lieu de mettre en
+    // veille. Les points s'accumulent jusqu'à la validation.
+    if (placeNavActive.value) { addDestPoint([e.lngLat.lng, e.lngLat.lat]); return }
     // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
     if (pois.hasOpenPopup()) { pois.closePlacePopup(); return }
     // Tiroir de commandes ouvert : un tap hors du tiroir le referme (et ses
@@ -2036,18 +2059,32 @@ function toggleScreenOffManual() {
       </div>
     </div>
 
-    <!-- Confirmation : itinéraire depuis la position GPS vers le point choisi. -->
-    <div v-if="placeNavActive && destPoint" class="nav-place-confirm-wrap">
-      <button
-        type="button"
-        class="btn btn-primary shadow nav-place-confirm"
-        :disabled="navStarting || !hasFix"
-        @click="confirmPlaceNav"
-      >
-        <i v-if="navStarting" class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>
-        <i v-else class="fa-solid fa-diamond-turn-right me-1" aria-hidden="true"></i>
-        {{ navStarting ? t('routes.computing_route') : (hasFix ? t('routes.navigate_here') : t('routes.gps_waiting')) }}
-      </button>
+    <!-- Confirmation : itinéraire depuis la position GPS passant par les points posés.
+         Un bouton « annuler le dernier point » permet de corriger une étape avant de
+         lancer le guidage. -->
+    <div v-if="placeNavActive && destPoints.length" class="nav-place-confirm-wrap">
+      <div class="nav-place-actions">
+        <button
+          type="button"
+          class="btn btn-light shadow nav-place-undo"
+          :title="t('routes.undo_point')"
+          :aria-label="t('routes.undo_point')"
+          :disabled="navStarting"
+          @click="removeLastDestPoint"
+        >
+          <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary shadow nav-place-confirm"
+          :disabled="navStarting || !hasFix"
+          @click="confirmPlaceNav"
+        >
+          <i v-if="navStarting" class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>
+          <i v-else class="fa-solid fa-diamond-turn-right me-1" aria-hidden="true"></i>
+          {{ navStarting ? t('routes.computing_route') : (hasFix ? confirmLabel : t('routes.gps_waiting')) }}
+        </button>
+      </div>
       <div v-if="navError" class="nav-place-error">{{ navError }}</div>
     </div>
 
@@ -2257,6 +2294,11 @@ function toggleScreenOffManual() {
   position: absolute; bottom: 8rem; left: 50%; transform: translateX(-50%);
   z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
 }
+.nav-place-actions { display: flex; align-items: center; gap: 0.5rem; }
+.nav-place-undo {
+  flex-shrink: 0; width: 3rem; height: 3rem; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 1.1rem;
+}
 .nav-place-confirm {
   border-radius: 999px; font-weight: 600; font-size: 1.1rem; padding: 0.6rem 1.4rem;
 }
@@ -2294,12 +2336,20 @@ function toggleScreenOffManual() {
 /* Marqueur de destination posé au tap en mode « cible » (créé en JS, donc style
    global, hors scope). */
 .nav-dest-marker {
+  position: relative;
   color: #dc2626;
   font-size: 2rem;
   line-height: 1;
   pointer-events: none;
   z-index: 4;
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
+}
+/* Numéro d'ordre du point d'étape, posé dans le rond de la goutte. */
+.nav-dest-num {
+  position: absolute;
+  top: 0.18em; left: 50%; transform: translateX(-50%);
+  font-size: 0.5em; font-weight: 700; line-height: 1;
+  color: #fff;
 }
 
 /* Indicateurs de virage (pastille orange + flèche / numéro de sortie). Marqueurs

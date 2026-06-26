@@ -1630,7 +1630,7 @@ function ensurePlacePreviewLayer() {
     source: 'nav-place-preview',
     layout: ROUTE_LINE_LAYOUT,
     paint: {
-      'line-color': ROUTE_LINE_COLOR,
+      'line-color': '#2563eb',
       'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH),
       'line-opacity': 0.55,
       'line-dasharray': [1.4, 1.1],

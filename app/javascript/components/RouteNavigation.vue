@@ -1628,6 +1628,13 @@ async function initMap() {
     pitch: camPitch.value,
     maxPitch: CAM_PITCH_MAX,
     attributionControl: false,
+    // Tap plus tolérant : on conduit d'un pouce, en mouvement, et un appui « simple »
+    // dérive souvent de quelques pixels. Au seuil par défaut (3 px), MapLibre prend ce
+    // micro-déplacement pour un déplacement de carte et n'émet PAS l'événement `click` —
+    // d'où le tiroir de commandes qui ne se ferme qu'après plusieurs essais. On élargit
+    // la tolérance pour fiabiliser tous les taps (fermeture du tiroir, veille, pose de
+    // points en édition / cible).
+    clickTolerance: 10,
   })
   map.on('styleimagemissing', (e: any) => {
     map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })

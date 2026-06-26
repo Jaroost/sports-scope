@@ -494,6 +494,9 @@ let routeId: number | null = null
 // ajoute un (au plus proche du tracé), un tap sur un point ouvre sa suppression. Toute
 // modification re-route l'itinéraire entier via BRouter (mêmes règles qu'au créateur).
 const editMode = ref(false)
+// Bandeau d'aide de l'édition : visible à l'entrée, masqué dès qu'on tape dessus
+// (il recouvre la poignée du tiroir de commandes en haut au centre).
+const editHintVisible = ref(false)
 // Recalcul BRouter d'une édition en cours : neutralise les actions concurrentes.
 const editBusy = ref(false)
 // Vrai dès qu'un point a été modifié : pilote l'enregistrement à la sortie du mode.
@@ -1569,6 +1572,7 @@ function removeEditWaypoint(idx: number) {
 function enterEditMode() {
   if (!canEditRoute.value) return
   editMode.value = true
+  editHintVisible.value = true
   editError.value = null
   editDirty.value = false
   // L'édition se fait carte en main : on débraye le suivi caméra et on referme le tiroir.
@@ -1725,6 +1729,9 @@ async function initMap() {
     if (suppressNextMapClick) { suppressNextMapClick = false; return }
     // Tooltip « point quelconque » ouverte : un tap ne fait que la refermer.
     if (coordPopup) { closeCoordPopup(); return }
+    // Tiroir de commandes ouvert : un tap carte le referme d'abord (sans poser de point
+    // ni mettre en veille), y compris en mode édition / cible. Priorité sur tout le reste.
+    if (controlsVisible.value) { hideControls(); return }
     // Mode édition : un tap pose un nouveau point d'ancrage (ou referme la tooltip d'un
     // point ouverte) au lieu de mettre en veille.
     if (editMode.value) {
@@ -1746,9 +1753,6 @@ async function initMap() {
     }
     // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
     if (pois.hasOpenPopup()) { pois.closePlacePopup(); return }
-    // Tiroir de commandes ouvert : un tap hors du tiroir le referme (et ses
-    // sous-panneaux) au lieu de mettre en veille.
-    if (controlsVisible.value) { hideControls(); return }
     if (!screenOff.value) toggleScreenOffManual()
   })
   // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View.
@@ -2889,7 +2893,7 @@ function toggleScreenOffManual() {
 
     <!-- Mode édition de l'itinéraire : bandeau de consigne en haut + barre d'actions en
          bas. Les points d'ancrage déplaçables sont posés sur la carte (marqueurs JS). -->
-    <div v-if="editMode" class="nav-edit-banner shadow">
+    <div v-if="editMode && editHintVisible" class="nav-edit-banner shadow" @click="editHintVisible = false">
       <i class="fa-solid fa-circle-info me-2" aria-hidden="true"></i>{{ t('routes.edit_hint') }}
     </div>
     <div v-if="editMode" class="nav-edit-bar">
@@ -3221,11 +3225,15 @@ function toggleScreenOffManual() {
 /* Mode édition : bandeau de consigne en haut (au-dessus de la carte, sous le tiroir
    replié z 8) + barre d'actions ancrée en bas, au-dessus du bandeau de stats. */
 .nav-edit-banner {
-  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 2.5rem; left: 50%; transform: translateX(-50%);
   z-index: 7; width: min(440px, calc(100% - 1.5rem));
   background: rgba(124, 58, 237, 0.96); color: #fff;
   padding: 0.5rem 0.9rem; border-radius: 0.6rem;
   font-size: 0.85rem; font-weight: 500; text-align: center;
+  /* Descendu sous la poignée de déploiement du tiroir (.nav-reveal-grabber, en haut
+     au centre) pour ne pas la recouvrir. Un tap masque l'aide (cf. editHintVisible),
+     ce qui libère complètement l'accès au tiroir de commandes. */
+  cursor: pointer;
 }
 .nav-edit-bar {
   position: absolute; bottom: 8rem; left: 50%; transform: translateX(-50%);

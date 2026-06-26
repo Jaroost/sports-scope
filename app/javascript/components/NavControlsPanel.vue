@@ -27,6 +27,9 @@ const props = defineProps<{
   camZoomMax: number
   poiCats: PoiCategory[]
   poiVisible: Record<string, boolean>
+  // Nombre de lieux trouvés par catégorie à la dernière recherche (clé → compte).
+  // Affiché à côté de chaque catégorie ; vide tant qu'aucune recherche n'a abouti.
+  poiCounts: Record<string, number>
   // Recherche POI « autour de moi » en cours : grise le bouton et affiche un spinner.
   poiLoading?: boolean
   // Vrai en navigation sur itinéraire (un tracé existe) : ajoute un bouton de recherche
@@ -311,6 +314,11 @@ function onZoom(e: Event) {
             <span class="nav-cam-label nav-poi-label">
               <i class="fa-solid" :class="cat.icon" :style="{ color: cat.color }" aria-hidden="true"></i>
               {{ t(`profile.poi.${cat.labelKey}`) }}
+              <span
+                v-if="poiCounts[cat.key] != null"
+                class="nav-poi-count"
+                :class="{ 'nav-poi-count--zero': poiCounts[cat.key] === 0 }"
+              >{{ poiCounts[cat.key] }}</span>
             </span>
             <span class="form-check form-switch m-0">
               <input
@@ -425,6 +433,14 @@ function onZoom(e: Event) {
   width: auto; flex: 1; font-size: 0.9rem; line-height: 1.15;
 }
 .nav-poi-label i { width: 1.2rem; text-align: center; flex-shrink: 0; }
+/* Compteur de lieux trouvés, collé à droite du libellé (avant l'interrupteur). */
+.nav-poi-count {
+  margin-left: auto; flex-shrink: 0;
+  min-width: 1.5rem; padding: 0.05rem 0.4rem;
+  border-radius: 999px; background: #e9ecef; color: #495057;
+  font-size: 0.78rem; font-weight: 600; text-align: center;
+}
+.nav-poi-count--zero { opacity: 0.5; }
 
 /* Panneau de débug : titre + une ligne-bouton par overlay simulable. Ancré à GAUCHE
    (le bouton vit dans le groupe de gauche) : il s'ouvre vers la droite pour ne pas

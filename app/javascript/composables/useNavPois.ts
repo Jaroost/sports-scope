@@ -15,6 +15,11 @@ import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 
 interface NavPlace { name: string; type: string; lng: number; lat: number }
 
+// Résultat d'une recherche POI, remonté à l'appelant pour un retour visuel (toast) :
+// `ok` faux signale un échec réseau / serveur Overpass ; sinon `count` est le nombre
+// de lieux trouvés dans le rayon (0 = recherche aboutie mais vide).
+export type PoiSearchResult = { ok: true; count: number } | { ok: false }
+
 export function useNavPois(deps: {
   getMap: () => any
   getMaplibre: () => any
@@ -42,6 +47,11 @@ export function useNavPois(deps: {
   // Recherche Overpass en cours : pilote le retour visuel (spinner) du bouton
   // « chercher autour de moi » du panneau de séance.
   const loading = ref(false)
+
+  // Nombre de lieux trouvés par catégorie lors de la dernière recherche aboutie
+  // (clé de catégorie → compte, 0 inclus). Affiché à côté de chaque catégorie dans le
+  // panneau POI. Vide tant qu'aucune recherche n'a abouti (aucun nombre affiché).
+  const poiCounts = reactive<Record<string, number>>({})
 
   let placeMarkers: any[] = []   // marqueurs POI ponctuels (filtrés par le panneau de séance)
   let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
@@ -71,7 +81,7 @@ export function useNavPois(deps: {
   //     au point le plus proche du tracé ;
   //   • avec centre [lng, lat] (bouton « chercher autour de moi », mode libre) : bbox
   //     autour du point, filtre par distance au centre.
-  async function fetchPlaces(opts: { center?: [number, number] } = {}) {
+  async function fetchPlaces(opts: { center?: [number, number] } = {}): Promise<PoiSearchResult> {
     const geometry = getGeometry()
     const poi = userPreferences().points_of_interest
     // Toutes les catégories ponctuelles : l'affichage est ensuite filtré par le
@@ -81,7 +91,7 @@ export function useNavPois(deps: {
     // Anchors : autour du centre fourni, sinon le long du tracé. Sans l'un ni l'autre,
     // rien à chercher.
     const anchors: (Coord | LngLat)[] = center ? [center] : geometry
-    if (types.length === 0 || anchors.length < (center ? 1 : 2)) return
+    if (types.length === 0 || anchors.length < (center ? 1 : 2)) return { ok: true, count: 0 }
 
     let south = Infinity, north = -Infinity, west = Infinity, east = -Infinity
     for (const [lng, lat] of anchors) {
@@ -99,7 +109,7 @@ export function useNavPois(deps: {
     loading.value = true
     try {
       const res = await fetch(`/api/geocode/places?south=${south}&west=${west}&north=${north}&east=${east}&types=${types.join(',')}`)
-      if (!res.ok) return
+      if (!res.ok) return { ok: false }
       const nodes = await res.json()
 
       const seen = new Set<string>()
@@ -119,8 +129,17 @@ export function useNavPois(deps: {
         seen.add(key)
         places.push({ name: node.name, type: node.type, lng: node.lng, lat: node.lat })
       }
+      // Compte par catégorie (0 inclus pour celles sans résultat) pour l'afficher
+      // à côté de chaque catégorie dans le panneau.
+      const counts: Record<string, number> = Object.fromEntries(POI_CATS.map((c) => [c.key, 0]))
+      for (const p of places) {
+        const k = categoryForType(p.type)?.key
+        if (k && k in counts) counts[k]++
+      }
+      Object.assign(poiCounts, counts)
       installPlaceMarkers(places)
-    } catch { /* réseau / serveur Overpass — silencieux */ } finally {
+      return { ok: true, count: places.length }
+    } catch { /* réseau / serveur Overpass */ return { ok: false } } finally {
       loading.value = false
     }
   }
@@ -305,6 +324,7 @@ export function useNavPois(deps: {
   return {
     POI_CATS,
     poiVisible,
+    poiCounts,
     loading,
     fetchPlaces,
     togglePoi,

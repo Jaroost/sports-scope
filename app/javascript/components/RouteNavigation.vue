@@ -146,8 +146,28 @@ const pois = useNavPois({
   onInsertVia: (place) => insertViaIntoRoute(place.lng, place.lat),
   hasRoute: () => hasRoute.value,
 })
-const { POI_CATS, poiVisible, loading: poiLoading } = pois
+const { POI_CATS, poiVisible, poiCounts, loading: poiLoading } = pois
 const showPoiPanel = ref(false)
+
+// Toast transitoire du résultat d'une recherche POI manuelle (boutons « autour de moi »
+// / « sur le trajet ») : nombre de lieux trouvés, ou échec de la recherche. Auto-effacé.
+const poiToast = ref<{ ok: boolean; text: string } | null>(null)
+let poiToastTimer: number | null = null
+function showPoiToast(ok: boolean, text: string) {
+  poiToast.value = { ok, text }
+  if (poiToastTimer != null) clearTimeout(poiToastTimer)
+  poiToastTimer = window.setTimeout(() => { poiToast.value = null; poiToastTimer = null }, 3000)
+}
+
+// Lance une recherche POI depuis le panneau de séance et affiche un toast de résultat.
+// Les recherches automatiques (montage, chargement de tracé) restent silencieuses.
+async function searchPois(opts: { center?: [number, number] } = {}) {
+  const res = await pois.fetchPlaces(opts)
+  if (!res.ok) { showPoiToast(false, t('routes.poi_search_error')); return }
+  if (res.count === 0) { showPoiToast(true, t('routes.poi_search_none')); return }
+  const key = res.count === 1 ? 'routes.poi_search_found_one' : 'routes.poi_search_found_other'
+  showPoiToast(true, t(key, { count: res.count }))
+}
 
 // Garde l'écran allumé pendant la séance (Screen Wake Lock). Le composable gère sa
 // propre reprise au retour au premier plan et sa libération au démontage.
@@ -232,6 +252,12 @@ const placeNavActive = ref(false)
 // la tête dans la carte et le clavier, pas sur la route : bipper ou vibrer pour un virage
 // du tracé qu'il s'apprête à abandonner ne serait que du bruit parasite.
 const alertsMuted = computed(() => placeNavActive.value)
+// Sourdine AUDIO = sourdine globale (mode recherche) OU tiroir de commandes affiché.
+// Tant que le panneau de boutons est visible (l'utilisateur le consulte / ajuste un
+// réglage), on coupe les alertes SONORES (virage, hors-trace, radar) — un bip par-dessus
+// le menu serait du bruit parasite. Les vibrations, elles, restent pilotées par
+// alertsMuted, donc actives. controlsVisible est fourni par useControlsHide ci-dessus.
+const audioMuted = computed(() => alertsMuted.value || controlsVisible.value)
 // Points d'étape posés au tap avant de valider : la navigation passera par chacun
 // dans l'ordre, depuis la position GPS. Un seul point = destination directe.
 const destPoints = ref<LngLat[]>([])
@@ -421,7 +447,7 @@ const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
 // ─── Radar arrière (Garmin Varia) ─────────────────────────────────────────────
 // Connexion/déconnexion + alertes sonores (une par véhicule). Voir useRadarAlerts.
-const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn, muted: alertsMuted })
+const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn, muted: audioMuted })
 
 // Le bandeau radar (RadarOverlay) occupe le tout-haut de l'écran. Quand il est
 // visible, on descend la vitesse/le virage pour ne pas passer dessous. Même
@@ -554,6 +580,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   if (turnRepeatId != null) { clearInterval(turnRepeatId); turnRepeatId = null }
+  if (poiToastTimer != null) { clearTimeout(poiToastTimer); poiToastTimer = null }
   stopAnimation()
   window.removeEventListener('pointerdown', onFirstGesture, true)
   window.removeEventListener('touchstart', onFirstGesture, true)
@@ -812,6 +839,19 @@ function unloadRoute() {
   turns = []
   rawHints = []
   turnHint.value = null
+  // État de suivi des virages : sans ça, `activeTurn` reste pointé sur le dernier
+  // virage et le timer de répétition (tickTurnRepeat) continue de jouer l'alerte sonore
+  // indéfiniment après l'effacement du tracé (typiquement quand on efface à un carrefour,
+  // alerte en cours). On remet aussi à zéro les pointeurs/anti-rejeu pour repartir propre.
+  nextTurnPtr = 0
+  announcedTurn = -1
+  urgentBuzzedTurn = -1
+  reachedTurn = null
+  reachedTurnIdx = -1
+  activeTurn = null
+  activeTurnUrgent = false
+  turnAlertMuted.value = false
+  mutedTurnPtr = -1
   climbInfo.value = null
   offRoute.value = false
   remainingM.value = 0
@@ -1850,7 +1890,7 @@ function updateTurns(): boolean {
     if (announcedTurn !== nextTurnPtr) {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()
-      if (soundOn.value && !alertsMuted.value && !turnAlertMuted.value) playManeuver(turn.kind, turn.direction)
+      if (soundOn.value && !audioMuted.value && !turnAlertMuted.value) playManeuver(turn.kind, turn.direction)
       // Vibration indépendante du son (perceptible téléphone en poche, vent fort).
       if (!alertsMuted.value && !turnAlertMuted.value) vibrateManeuver(turn.kind)
       fired = true
@@ -1946,7 +1986,7 @@ function muteTurnAlert() {
 // Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.
 // Un poll court (250 ms) suffit : la préférence est plafonnée à 500 ms mini.
 function tickTurnRepeat() {
-  if (!activeTurn || !soundOn.value || alertsMuted.value || turnAlertMuted.value) return
+  if (!activeTurn || !soundOn.value || audioMuted.value || turnAlertMuted.value) return
   const now = Date.now()
   const interval = activeTurnUrgent ? TURN_REPEAT_URGENT_MS : TURN_REPEAT_MS
   if (now - lastTurnReminderMs >= interval) {
@@ -1961,7 +2001,9 @@ function handleOffRouteSound(wasOffRoute: boolean) {
   if (alertsMuted.value) return
   if (!wasOffRoute || now - lastOffRouteAlert > OFF_ROUTE_REALERT_MS) {
     lastOffRouteAlert = now
-    if (soundOn.value) playOffRoute()
+    // audioMuted (et non alertsMuted, déjà filtré plus haut) : coupe le son si le menu
+    // déroulant est ouvert, tout en laissant la vibration prévenir le coureur.
+    if (soundOn.value && !audioMuted.value) playOffRoute()
     vibrateOffRoute()
   }
 }
@@ -2196,6 +2238,7 @@ function toggleScreenOffManual() {
       :cam-zoom-max="CAM_ZOOM_MAX"
       :poi-cats="POI_CATS"
       :poi-visible="poiVisible"
+      :poi-counts="poiCounts"
       :poi-loading="poiLoading"
       :route-search="hasRoute"
       :dbg-radar="dbgRadar"
@@ -2217,8 +2260,8 @@ function toggleScreenOffManual() {
       @save-zoom="saveZoomToProfile"
       @toggle-terrain="toggleTerrain"
       @toggle-poi="pois.togglePoi"
-      @search-pois="pois.fetchPlaces({ center: lastPos ?? undefined })"
-      @search-pois-route="pois.fetchPlaces()"
+      @search-pois="searchPois({ center: lastPos ?? undefined })"
+      @search-pois-route="searchPois()"
       @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
@@ -2235,6 +2278,20 @@ function toggleScreenOffManual() {
         />
       </template>
     </NavControlsPanel>
+
+    <!-- Toast transitoire : résultat d'une recherche POI (« autour de moi » / trajet). -->
+    <Transition name="nav-toast">
+      <div
+        v-if="poiToast"
+        class="nav-toast"
+        :class="poiToast.ok ? 'nav-toast--ok' : 'nav-toast--err'"
+        role="status"
+        aria-live="polite"
+      >
+        <i class="fa-solid" :class="poiToast.ok ? 'fa-circle-check' : 'fa-circle-exclamation'" aria-hidden="true"></i>
+        <span>{{ poiToast.text }}</span>
+      </div>
+    </Transition>
 
     <!-- Dialogue de chargement d'un itinéraire (itinéraires sauvegardés + « naviguer
          vers un lieu »). Bascule la page de la navigation libre vers le suivi de tracé. -->
@@ -2455,6 +2512,21 @@ function toggleScreenOffManual() {
 .nav-offroute-bigarrow--sleep { z-index: 21; opacity: 1; }
 .nav-banner--warn { background: #fff3cd; color: #664d03; }
 .nav-banner--info { background: #cfe2ff; color: #084298; }
+
+/* Toast transitoire de résultat de recherche POI : centré en haut, au-dessus des
+   panneaux (z 10), non interactif. Vert si abouti, rouge si échec. */
+.nav-toast {
+  position: absolute; top: 4.5rem; left: 50%; transform: translateX(-50%);
+  z-index: 10; display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 1rem; border-radius: 999px;
+  font-weight: 600; font-size: 0.9rem; white-space: nowrap;
+  color: #fff; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+.nav-toast--ok { background: #198754; }
+.nav-toast--err { background: #dc3545; }
+.nav-toast-enter-active, .nav-toast-leave-active { transition: opacity 0.25s, transform 0.25s; }
+.nav-toast-enter-from, .nav-toast-leave-to { opacity: 0; transform: translate(-50%, -0.5rem); }
 
 .nav-recenter {
   position: absolute; bottom: 8.5rem; right: 0.75rem; z-index: 4;

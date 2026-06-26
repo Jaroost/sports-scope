@@ -348,12 +348,13 @@ const placeNavActive = ref(false)
 // la tête dans la carte et le clavier, pas sur la route : bipper ou vibrer pour un virage
 // du tracé qu'il s'apprête à abandonner ne serait que du bruit parasite.
 const alertsMuted = computed(() => placeNavActive.value || editMode.value)
-// Sourdine AUDIO = sourdine globale (mode recherche) OU tiroir de commandes affiché.
-// Tant que le panneau de boutons est visible (l'utilisateur le consulte / ajuste un
-// réglage), on coupe les alertes SONORES (virage, hors-trace, radar) — un bip par-dessus
-// le menu serait du bruit parasite. Les vibrations, elles, restent pilotées par
+// Sourdine AUDIO = sourdine globale (mode recherche) OU tiroir de commandes affiché OU
+// parcours des POI. Tant que le panneau de boutons est visible (l'utilisateur le consulte
+// / ajuste un réglage), ou qu'on enchaîne les POI à la main (tête dans la liste, pas sur
+// la route), on coupe les alertes SONORES (virage, hors-trace, radar, POI) — un bip
+// par-dessus serait du bruit parasite. Les vibrations, elles, restent pilotées par
 // alertsMuted, donc actives. controlsVisible est fourni par useControlsHide ci-dessus.
-const audioMuted = computed(() => alertsMuted.value || controlsVisible.value)
+const audioMuted = computed(() => alertsMuted.value || controlsVisible.value || poiBrowseActive.value)
 // Points d'étape posés au tap avant de valider : la navigation passera par chacun
 // dans l'ordre, depuis la position GPS. Un seul point = destination directe.
 const destPoints = ref<LngLat[]>([])
@@ -2279,6 +2280,17 @@ function stopAnimation() {
 function updateTurns(): boolean {
   // Débug : un virage factice est épinglé, on ne le réécrit pas depuis le GPS.
   if (dbgTurn.value) return false
+  // Hors-tracé : plus aucun virage du tracé à annoncer. On désarme l'alerte sonore et sa
+  // répétition (tickTurnRepeat) — sinon un virage encore proche de la position projetée
+  // resterait « bloqué » à sonner en boucle alors qu'on a quitté l'itinéraire ; l'alerte
+  // hors-tracé prend le relais. autoWakeForTurns gère déjà la mise en veille hors-tracé.
+  if (offRoute.value) {
+    turnHint.value = null
+    activeTurn = null
+    activeTurnUrgent = false
+    autoWakeForTurns(null)
+    return false
+  }
   if (!turns.length) { turnHint.value = null; activeTurn = null; reachedTurn = null; return false }
   const here = snapDistAlongM
   // Avance le pointeur sur les virages dépassés (>5 m derrière), en mémorisant chacun

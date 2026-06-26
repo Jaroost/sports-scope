@@ -702,6 +702,9 @@ onMounted(async () => {
     }
     await initMap()
     startTracking()
+    // POI sauvegardés de l'utilisateur (table `pois`) : rendus en permanence dès que la
+    // carte est prête, indépendamment de toute recherche Overpass.
+    void pois.loadSavedPois()
     // Recherche Overpass des POI du profil (best-effort, non bloquant) : les
     // marqueurs apparaissent dès que la réponse arrive, la carte est déjà prête.
     // Sans tracé (mode libre), les POI ne se chargent qu'à la demande (« autour de moi »).
@@ -3331,6 +3334,18 @@ function toggleScreenOffManual() {
   z-index: 1;
 }
 .place-marker i { font-size: 0.78rem; }
+/* POI sauvegardé : badge étoile pour le distinguer d'un POI Overpass découvert. */
+.place-marker--saved { position: relative; }
+.place-marker--saved::after {
+  content: '\2605';
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 0.6rem;
+  line-height: 1;
+  color: #f59e0b;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff;
+}
 /* Survol souris ou popup ouvert : le marqueur s'inverse — le fond se remplit de sa
    couleur, l'icône passe en blanc. */
 .place-marker:hover,

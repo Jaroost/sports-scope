@@ -82,6 +82,7 @@ class User < ApplicationRecord
 
   has_many :chart_layouts, dependent: :destroy
   has_many :routes, dependent: :destroy
+  has_many :pois, dependent: :destroy
   has_many :imported_activities, dependent: :destroy
   has_many :strava_activity_peak_powers, dependent: :destroy
 

@@ -14,7 +14,9 @@ import type { MapStyleId } from '../userPreferences'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import type { Place } from '../stores/placesStore'
-import { categoryForType } from '../poiCategories'
+import { savedPoisStore } from '../stores/savedPoisStore'
+import type { SavedPoi } from '../savedPois'
+import { categoryForType, POI_CATEGORIES } from '../poiCategories'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
 } from '../routeHelpers'
@@ -74,6 +76,19 @@ const placeMarkerObservers: MutationObserver[] = []
 // Permet de retrouver l'élément DOM d'un POI à partir de ses coordonnées, pour
 // surligner le bon marqueur au survol (depuis la carte ou la liste latérale).
 const placeMarkerEls = new Map<string, HTMLElement>()
+// ── POI sauvegardés (table `pois`, globaux à l'utilisateur) ──────────────────
+// Marqueurs persistants distincts des POI Overpass : posés à la main ou épinglés,
+// rendus en permanence (indépendamment d'une recherche Overpass). Badge étoile pour
+// les distinguer ; clic → popup renommer/supprimer.
+const savedPoiMarkers: any[] = []
+const savedPoiMarkerObservers: MutationObserver[] = []
+let savedPoiPopup: any = null
+// Mode « poser un POI » : un clic carte pose un POI sauvegardé au lieu d'ajouter un
+// point au tracé. Basculé par un bouton de la toolbar (hors lecture seule).
+const placePoiMode = ref(false)
+// Dialogue de création d'un POI (nom + catégorie) ouvert au clic en mode « poser ».
+const poiDialog = ref<{ lng: number; lat: number; name: string; category: string } | null>(null)
+const POI_CATS = POI_CATEGORIES
 let hoveredPlaceEl: HTMLElement | null = null
 let selectedPlaceEl: HTMLElement | null = null
 let placePopup: any = null
@@ -233,11 +248,19 @@ async function initMap() {
         // Tooltip « point quelconque » (clic droit / appui long) ouverte : un clic ne
         // fait que la refermer, sans ajouter de point au tracé.
         if (coordPopup) { closeCoordPopup(); return }
+        // Mode « poser un POI » : le clic ouvre le dialogue de création d'un POI
+        // sauvegardé au point cliqué, sans toucher au tracé.
+        if (placePoiMode.value && !routeStore.readOnly.value) {
+          if (savedPoiPopup) closeSavedPoiPopup()
+          openPoiDialog(e.lngLat.lng, e.lngLat.lat)
+          return
+        }
         // Lecture seule : le clic ne modifie jamais le tracé. Il referme une tooltip
         // ouverte (POI ou point du trajet), ou — si l'on clique sur le tracé — ouvre
         // une tooltip informative sur le point du trajet le plus proche.
         if (routeStore.readOnly.value) {
           if (placePopup) { closePlacePopup(); return }
+          if (savedPoiPopup) { closeSavedPoiPopup(); return }
           if (routePointPopup) { closeRoutePointPopup(); return }
           const idx = nearestGeomIndexAt(e.point)
           if (idx != null) {
@@ -249,6 +272,8 @@ async function initMap() {
         // Tooltip de POI (cimetière/boulangerie) ouverte : le clic ne fait que la
         // refermer, sans ajouter de point au trajet.
         if (placePopup) { closePlacePopup(); return }
+        // Popup d'un POI sauvegardé ouvert : le clic ne fait que le refermer.
+        if (savedPoiPopup) { closeSavedPoiPopup(); return }
         // Un point sélectionné (tooltip ouverte) : le clic ne fait que refermer la
         // tooltip, sans ajouter de nouveau point au trajet.
         if (selectedWpIdx >= 0) { deselectAll(); return }
@@ -267,6 +292,12 @@ async function initMap() {
         }
       })
       mapInstance.on('mousemove', (e: any) => {
+        // Mode « poser un POI » : curseur viseur, pas de marqueur d'insertion de point.
+        if (placePoiMode.value && !routeStore.readOnly.value) {
+          hideHoverMarker()
+          mapInstance.getCanvas().style.cursor = 'crosshair'
+          return
+        }
         if (routeStore.readOnly.value) {
           hideHoverMarker()
           // Curseur « pointer » au survol du tracé pour signaler qu'il est cliquable.
@@ -308,6 +339,8 @@ async function initMap() {
       applyMarkerScale()
       // En lecture seule, pas de curseur « crosshair » qui suggérerait l'ajout de points.
       mapInstance.getCanvas().style.cursor = routeStore.readOnly.value ? '' : 'crosshair'
+      // POI sauvegardés de l'utilisateur : chargés une fois, rendus en permanence.
+      void savedPoisStore.load().then(() => installSavedPoiMarkers())
       resolve()
     })
   })
@@ -601,12 +634,21 @@ function showPlacePopup(place: Place) {
         <i class="fa-solid fa-circle-plus" aria-hidden="true"></i>
         <span>${escapeHtml(t('routes.add_to_route'))}</span>
       </button>`
+  // « Sauvegarder ce POI » : épingle le POI Overpass dans la table `pois` (hors
+  // lecture seule, et seulement si sa catégorie est reconnue).
+  const saveAction = routeStore.readOnly.value || !categoryForType(place.type)
+    ? ''
+    : `<button type="button" class="place-popup-link place-popup-link--save-poi">
+        <i class="fa-solid fa-bookmark" aria-hidden="true"></i>
+        <span>${escapeHtml(t('routes.save_poi'))}</span>
+      </button>`
   wrap.innerHTML = `
     <div class="place-popup-header">
       <span class="place-popup-name">${escapeHtml(place.name)}</span>
       <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
     </div>
     ${addAction}
+    ${saveAction}
     <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
       <i class="fa-brands fa-google" aria-hidden="true"></i>
       <span>Google Maps</span>
@@ -627,6 +669,10 @@ function showPlacePopup(place: Place) {
   wrap.querySelector('.place-popup-close')?.addEventListener('click', closePlacePopup)
   wrap.querySelector('.place-popup-link--add-route')?.addEventListener('click', () => {
     insertWaypointSmart(place.lng, place.lat)
+    closePlacePopup()
+  })
+  wrap.querySelector('.place-popup-link--save-poi')?.addEventListener('click', () => {
+    void savePlaceAsPoi(place)
     closePlacePopup()
   })
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
@@ -820,6 +866,131 @@ function showPlaceHoverMarker(lng: number, lat: number, distanceM: number) {
 function hidePlaceHoverMarker() {
   if (hoveredPlaceEl) { hoveredPlaceEl.classList.remove('place-marker--hover'); hoveredPlaceEl = null }
   placesStore.placeHoverKm = null
+}
+
+// ─── POI sauvegardés ──────────────────────────────────────────────────────────
+// Rendu permanent des POI de la table `pois` (posés à la main ou épinglés). Style
+// identique aux POI Overpass + badge étoile (.place-marker--saved). Filtrés par
+// l'état d'affichage par catégorie (savedPoisStore.show).
+
+function clearSavedPoiMarkers() {
+  savedPoiMarkerObservers.forEach((o) => o.disconnect()); savedPoiMarkerObservers.length = 0
+  savedPoiMarkers.forEach((m) => m.remove()); savedPoiMarkers.length = 0
+}
+
+function installSavedPoiMarkers() {
+  if (!_maplibregl || !mapInstance) return
+  clearSavedPoiMarkers()
+  for (const poi of savedPoisStore.pois.value) {
+    if (savedPoisStore.show[poi.category] === false) continue
+    const el = buildSavedPoiMarkerEl(poi)
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
+      .setLngLat([poi.lng, poi.lat])
+      .addTo(mapInstance)
+    savedPoiMarkerObservers.push(attachClimbMarkerScaleObserver(el))
+    savedPoiMarkers.push(marker)
+  }
+}
+
+function buildSavedPoiMarkerEl(poi: SavedPoi) {
+  const el = document.createElement('div')
+  const cat = POI_CATEGORIES.find((c) => c.key === poi.category)
+  const icon = cat?.icon ?? 'fa-location-dot'
+  el.className = 'place-marker place-marker--saved'
+  el.style.color = cat?.color ?? '#6b7280'
+  el.title = poi.name
+  el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
+  el.addEventListener('click', (ev) => { ev.stopPropagation(); showSavedPoiPopup(poi) })
+  el.addEventListener('mousedown', (ev) => ev.stopPropagation())
+  el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker() })
+  el.addEventListener('mouseleave', () => { overClimbMarker = false })
+  return el
+}
+
+function closeSavedPoiPopup() {
+  if (savedPoiPopup) { savedPoiPopup.remove(); savedPoiPopup = null }
+}
+
+// Popup d'un POI sauvegardé : renommer / supprimer (hors lecture seule) en plus des
+// liens Google Maps / Street View (mêmes que les POI Overpass).
+function showSavedPoiPopup(poi: SavedPoi) {
+  if (!_maplibregl || !mapInstance) return
+  closeSavedPoiPopup()
+  const OFFSET = 0.00008
+  const mapsUrl = `https://www.google.com/maps?q=${poi.lat + OFFSET},${poi.lng + OFFSET}`
+  const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${poi.lat},${poi.lng}`
+  const wrap = document.createElement('div')
+  wrap.className = 'place-popup'
+  const editActions = routeStore.readOnly.value ? '' : `
+    <button type="button" class="place-popup-link place-popup-link--rename">
+      <i class="fa-solid fa-pen" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.rename_poi'))}</span>
+    </button>
+    <button type="button" class="place-popup-link place-popup-link--delete">
+      <i class="fa-solid fa-trash" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.delete_poi'))}</span>
+    </button>`
+  wrap.innerHTML = `
+    <div class="place-popup-header">
+      <span class="place-popup-name">${escapeHtml(poi.name)}</span>
+      <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
+    </div>
+    ${editActions}
+    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-brands fa-google" aria-hidden="true"></i>
+      <span>Google Maps</span>
+    </a>
+    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+      <span>${t('routes.street_view')}</span>
+    </a>`
+  savedPoiPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([poi.lng, poi.lat])
+    .setDOMContent(wrap)
+    .addTo(mapInstance)
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', closeSavedPoiPopup)
+  wrap.querySelector('.place-popup-link--rename')?.addEventListener('click', async () => {
+    const name = window.prompt(t('routes.poi_name'), poi.name)?.trim()
+    closeSavedPoiPopup()
+    if (name) { await savedPoisStore.update(poi.id, { name }); installSavedPoiMarkers() }
+  })
+  wrap.querySelector('.place-popup-link--delete')?.addEventListener('click', async () => {
+    closeSavedPoiPopup()
+    await savedPoisStore.remove(poi.id)
+    installSavedPoiMarkers()
+  })
+  const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
+  if (svLink) {
+    checkSV(poi.lat, poi.lng).then((ok) => {
+      svLink.classList.toggle('place-popup-link--disabled', !ok)
+      if (!ok) svLink.setAttribute('aria-disabled', 'true')
+      else svLink.removeAttribute('aria-disabled')
+    })
+  }
+}
+
+// Ouvre le dialogue de création (nom + catégorie) au point cliqué en mode « poser ».
+function openPoiDialog(lng: number, lat: number) {
+  poiDialog.value = { lng, lat, name: '', category: POI_CATEGORIES[0].key }
+}
+
+// Enregistre le POI saisi dans le dialogue. Nom vide → libellé de la catégorie.
+async function savePoiFromDialog() {
+  const d = poiDialog.value
+  if (!d) return
+  const cat = POI_CATEGORIES.find((c) => c.key === d.category) ?? POI_CATEGORIES[0]
+  const name = d.name.trim() || t(`profile.poi.${cat.labelKey}`)
+  poiDialog.value = null
+  const poi = await savedPoisStore.add({ name, category: cat.key, lng: d.lng, lat: d.lat, source: 'custom' })
+  if (poi) installSavedPoiMarkers()
+}
+
+// Épingle un POI Overpass découvert : le sauvegarde dans la table `pois`.
+async function savePlaceAsPoi(place: Place) {
+  const cat = categoryForType(place.type)
+  if (!cat) return
+  const poi = await savedPoisStore.add({ name: place.name, category: cat.key, lng: place.lng, lat: place.lat, source: 'overpass' })
+  if (poi) installSavedPoiMarkers()
 }
 
 // ─── Selection markers ────────────────────────────────────────────────────────
@@ -1431,7 +1602,7 @@ function setMapStyle(id: string) {
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
     installRouteLayer(); installPreviewLayer(); installOverlays()
-    updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); installClimbMarkers(); installPlaceMarkers()
+    updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); installClimbMarkers(); installPlaceMarkers(); installSavedPoiMarkers()
     if (locationVisible.value && lastLocationCoords) installLocationLayers(lastLocationCoords, lastLocationAccuracy)
     if (props.state.is3D) {
       if (!mapInstance.getSource('terrain-dem')) {
@@ -1734,6 +1905,10 @@ watch(selectionStore.selectionRange, () => {
 // Réagit aux toggles de filtre et au rafraîchissement de la liste des lieux.
 watch(placesStore.filteredPlaces, () => installPlaceMarkers())
 
+// Réagit à l'ajout/suppression de POI sauvegardés et à leurs bascules d'affichage.
+watch(savedPoisStore.pois, () => installSavedPoiMarkers())
+watch(savedPoisStore.show, () => installSavedPoiMarkers(), { deep: true })
+
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 onBeforeUnmount(() => {
@@ -1742,6 +1917,8 @@ onBeforeUnmount(() => {
   climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
   climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
   clearPlaceMarkers()
+  clearSavedPoiMarkers()
+  closeSavedPoiPopup()
   closeRoutePointPopup()
   closeCoordPopup()
   if (detachLongPress) { detachLongPress(); detachLongPress = null }
@@ -1821,6 +1998,15 @@ defineExpose({
           @click="fitMapToRoute"
           title="Recentrer sur le trajet">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div v-if="!routeStore.readOnly.value" class="btn-group-vertical btn-group-sm shadow-sm" role="group">
+        <button type="button" class="btn map-ctrl-btn"
+          :class="placePoiMode ? 'btn-warning text-dark active' : 'btn-light'"
+          @click="placePoiMode = !placePoiMode"
+          :title="placePoiMode ? t('routes.place_poi_done') : t('routes.place_poi')"
+          :aria-pressed="placePoiMode">
+          <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
         </button>
       </div>
       <div class="btn-group-vertical btn-group-sm shadow-sm d-none d-md-flex" role="group">
@@ -2012,6 +2198,24 @@ defineExpose({
         </div>
       </div>
     </Transition>
+
+    <!-- Dialogue de création d'un POI sauvegardé (mode « poser un POI ») -->
+    <div v-if="poiDialog" class="poi-dialog-backdrop" @click.self="poiDialog = null">
+      <div class="poi-dialog card shadow">
+        <div class="card-body">
+          <h6 class="mb-2">{{ t('routes.place_poi') }}</h6>
+          <input v-model="poiDialog.name" class="form-control form-control-sm mb-2"
+            :placeholder="t('routes.poi_name')" autofocus @keyup.enter="savePoiFromDialog" />
+          <select v-model="poiDialog.category" class="form-select form-select-sm mb-3">
+            <option v-for="c in POI_CATS" :key="c.key" :value="c.key">{{ t(`profile.poi.${c.labelKey}`) }}</option>
+          </select>
+          <div class="d-flex gap-2 justify-content-end">
+            <button type="button" class="btn btn-sm btn-light" @click="poiDialog = null">{{ t('routes.cancel') }}</button>
+            <button type="button" class="btn btn-sm btn-primary" @click="savePoiFromDialog">{{ t('routes.save_poi') }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -2227,6 +2431,18 @@ defineExpose({
 .wt-result-meta { font-size: 0.72rem; color: #6b7280; display: flex; align-items: center; gap: 0.25rem; }
 .wt-drawer-enter-active, .wt-drawer-leave-active { transition: transform 0.22s ease; }
 .wt-drawer-enter-from, .wt-drawer-leave-to { transform: translateX(100%); }
+
+/* Dialogue de création d'un POI sauvegardé (mode « poser un POI »). */
+.poi-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+.poi-dialog { width: min(320px, 90%); border: none; }
 </style>
 
 <style>
@@ -2437,6 +2653,18 @@ defineExpose({
   transition: box-shadow 0.1s ease;
 }
 .place-marker i { font-size: 0.78rem; }
+/* POI sauvegardé : badge étoile en haut à droite pour le distinguer d'un POI Overpass. */
+.place-marker--saved::after {
+  content: '\2605';
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 0.6rem;
+  line-height: 1;
+  color: #f59e0b;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff;
+}
+.place-marker--saved { position: relative; }
 /* Survol souris, surbrillance synchronisée (carte ou liste) ou popup ouvert : le
    marqueur s'inverse — le fond se remplit de sa couleur, l'icône passe en blanc. */
 .place-marker:hover,

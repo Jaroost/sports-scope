@@ -50,6 +50,13 @@ Rails.application.routes.draw do
   get "/api/routes/:id/gpx", to: "routes#export_gpx", constraints: { id: /\d+/ }
   post "/api/routes/:id/duplicate", to: "routes#duplicate", constraints: { id: /\d+/ }
 
+  # Saved points of interest (JSON consumed by Vue components) — global to the user,
+  # rendered in the route builder and in navigation.
+  get "/api/pois", to: "pois#index"
+  post "/api/pois", to: "pois#create"
+  patch "/api/pois/:id", to: "pois#update", constraints: { id: /\d+/ }
+  delete "/api/pois/:id", to: "pois#destroy", constraints: { id: /\d+/ }
+
   # Imported (FIT) activities (JSON consumed by Vue components)
   get "/api/imported_activities", to: "imported_activities#index"
   post "/api/imported_activities", to: "imported_activities#create"

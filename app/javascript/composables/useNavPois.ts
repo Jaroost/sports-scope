@@ -1,9 +1,10 @@
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref, computed, watch } from 'vue'
 import { t } from '../i18n'
 import { haversine } from '../routeHelpers'
 import type { Coord, LngLat } from '../routeHelpers'
 import { userPreferences } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
+import { savedPoisStore } from '../stores/savedPoisStore'
 
 // ─── Points d'intérêt de la navigation (POI ponctuels du profil) ───────────────
 // Sous-système autonome de RouteNavigation.vue : recherche Overpass des POI autour
@@ -13,7 +14,9 @@ import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 // à la géométrie (non encore prêtes au montage) ainsi que la loi d'échelle du tracé,
 // pour caler la taille des POI sur celle des indicateurs de virage.
 
-export interface NavPlace { name: string; type: string; lng: number; lat: number }
+// `saved` : POI provenant de la table `pois` (badge étoile, rendu en permanence) par
+// opposition aux POI Overpass découverts à la volée.
+export interface NavPlace { name: string; type: string; lng: number; lat: number; saved?: boolean }
 
 // Résultat d'une recherche POI, remonté à l'appelant pour un retour visuel (toast) :
 // `ok` faux signale un échec réseau / serveur Overpass ; sinon `count` est le nombre
@@ -61,6 +64,9 @@ export function useNavPois(deps: {
   // profondeur les éléments de `places` (ref), donc `visiblePlaces` renvoie des proxys —
   // une Map indexée par l'objet brut renverrait alors undefined.
   const places = ref<NavPlace[]>([])
+  // POI sauvegardés (table `pois`) projetés en NavPlace : rendus en permanence, en plus
+  // des POI Overpass. Alimentés depuis savedPoisStore (cf. bas du composable).
+  const savedPlaces = ref<NavPlace[]>([])
   const placeEls = new Map<string, HTMLElement>()
   const placeKey = (p: NavPlace) => `${p.type}:${p.lng}:${p.lat}`
   let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
@@ -153,10 +159,17 @@ export function useNavPois(deps: {
     }
   }
 
-  // Marqueur HTML persistant par POI (même look que le créateur). Les marqueurs
-  // MapLibre sont des overlays DOM, ils survivent à un setStyle — pas besoin de les
-  // réinstaller au changement de fond de carte.
+  // Remplace les POI Overpass et redessine tous les marqueurs (Overpass + sauvegardés).
   function installPlaceMarkers(newPlaces: NavPlace[]) {
+    places.value = newPlaces
+    renderMarkers()
+  }
+
+  // Marqueur HTML persistant par POI (même look que le créateur), pour l'union des POI
+  // Overpass (`places`) et sauvegardés (`savedPlaces`). Les marqueurs MapLibre sont des
+  // overlays DOM, ils survivent à un setStyle — pas besoin de les réinstaller au
+  // changement de fond de carte. Les POI sauvegardés portent un badge étoile.
+  function renderMarkers() {
     const map = getMap()
     const maplibre = getMaplibre()
     if (!map || !maplibre) return
@@ -164,12 +177,11 @@ export function useNavPois(deps: {
     for (const m of placeMarkers) m.remove()
     placeMarkers = []
     placeEls.clear()
-    places.value = newPlaces
-    for (const place of newPlaces) {
+    for (const place of [...places.value, ...savedPlaces.value]) {
       const el = document.createElement('div')
       const cat = categoryForType(place.type)
       const icon = cat?.icon ?? 'fa-location-dot'
-      el.className = 'place-marker'
+      el.className = place.saved ? 'place-marker place-marker--saved' : 'place-marker'
       // Couleur pilotée par le registre POI (currentColor → bordure / remplissage).
       el.style.color = cat?.color ?? '#6b7280'
       // Clé de catégorie : sert au filtrage d'affichage par le panneau de séance.
@@ -206,7 +218,7 @@ export function useNavPois(deps: {
   // POI ponctuels actuellement affichés (catégorie non masquée par le panneau de séance).
   // Alimente le parcours des POI et la détection de proximité.
   const visiblePlaces = computed(() =>
-    places.value.filter((p) => {
+    [...places.value, ...savedPlaces.value].filter((p) => {
       const cat = categoryForType(p.type)
       return !cat || poiVisible[cat.key] !== false
     }),
@@ -362,7 +374,30 @@ export function useNavPois(deps: {
     })
   }
 
+  // ─── POI sauvegardés ──────────────────────────────────────────────────────────
+  // Projette les POI du store en NavPlace : le `type` reprend le premier serverType de
+  // la catégorie pour que categoryForType (couleur, icône, filtre d'affichage) les
+  // classe comme les POI Overpass de même catégorie.
+  function syncSavedPlaces() {
+    savedPlaces.value = savedPoisStore.pois.value.map((p) => {
+      const cat = POI_CATEGORIES.find((c) => c.key === p.category)
+      return { name: p.name, type: cat?.serverTypes[0] ?? p.category, lng: p.lng, lat: p.lat, saved: true }
+    })
+  }
+
+  // Charge une fois les POI sauvegardés et les rend. Best-effort : déconnecté → liste
+  // vide. Appelé par l'hôte dès la carte prête (le set curé s'affiche sans recherche).
+  async function loadSavedPois() {
+    await savedPoisStore.load()
+    syncSavedPlaces()
+    renderMarkers()
+  }
+
+  // Réagit aux changements du store (ajout/suppression depuis une autre vue).
+  watch(savedPoisStore.pois, () => { syncSavedPlaces(); renderMarkers() })
+
   return {
+    loadSavedPois,
     POI_CATS,
     poiVisible,
     poiCounts,

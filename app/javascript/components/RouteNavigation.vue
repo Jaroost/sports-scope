@@ -9,7 +9,9 @@ import {
   buildOffsetDisplayLine, densifyGeometry,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
-import { fetchRouteToPlace, fetchRouteVia } from '../navRoute'
+import { fetchRouteToPlace, fetchRouteVia, fetchRouteFromWaypoints } from '../navRoute'
+import type { Waypoint } from '../navRoute'
+import { MAX_WAYPOINTS } from '../stores/routeStore'
 import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
 } from '../navHelpers'
@@ -251,7 +253,7 @@ const placeNavActive = ref(false)
 // on neutralise TOUTES les alertes — sons (virage, hors-trace, radar) ET vibrations. Il a
 // la tête dans la carte et le clavier, pas sur la route : bipper ou vibrer pour un virage
 // du tracé qu'il s'apprête à abandonner ne serait que du bruit parasite.
-const alertsMuted = computed(() => placeNavActive.value)
+const alertsMuted = computed(() => placeNavActive.value || editMode.value)
 // Sourdine AUDIO = sourdine globale (mode recherche) OU tiroir de commandes affiché.
 // Tant que le panneau de boutons est visible (l'utilisateur le consulte / ajuste un
 // réglage), on coupe les alertes SONORES (virage, hors-trace, radar) — un bip par-dessus
@@ -325,6 +327,35 @@ let rawHints: VoiceHint[] = []
 // Catégorie d'activité du tracé (Route#activity) → profil BRouter du reroutage.
 let routeSport: Sport = 'cycling'
 const routeName = ref('')
+
+// ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
+// Points d'ancrage (waypoints) de l'itinéraire chargé : source de vérité de l'édition.
+// Présents pour un itinéraire chargé depuis la liste / un lien partagé ; vides pour une
+// destination ad hoc (« naviguer ici ») ou après un reroutage hors-trace, où l'édition
+// est désactivée (le tracé ne correspond plus à des points sauvegardés).
+let routeWaypoints: Waypoint[] = []
+// Identifiant de l'itinéraire sauvegardé (pour l'enregistrement des modifications via
+// PATCH /api/routes/:id). null pour un lien partagé d'autrui ou une destination ad hoc.
+let routeId: number | null = null
+// Mode édition : affiche les points d'ancrage déplaçables ; un tap sur la carte en
+// ajoute un (au plus proche du tracé), un tap sur un point ouvre sa suppression. Toute
+// modification re-route l'itinéraire entier via BRouter (mêmes règles qu'au créateur).
+const editMode = ref(false)
+// Recalcul BRouter d'une édition en cours : neutralise les actions concurrentes.
+const editBusy = ref(false)
+// Vrai dès qu'un point a été modifié : pilote l'enregistrement à la sortie du mode.
+const editDirty = ref(false)
+const editError = ref<string | null>(null)
+const editSaving = ref(false)
+let editMarkers: any[] = []
+let editPopup: any = null
+let editToken = 0
+// L'itinéraire est-il éditable ? Il faut ses points d'ancrage (≥ 2). routeWaypoints
+// n'est pas réactif (gros tableau lu dans des callbacks), donc on reflète l'éligibilité
+// dans ce ref, recalculé via syncEditable() aux moments où elle peut changer (chargement,
+// reroutage, déchargement).
+const canEditRoute = ref(false)
+function syncEditable() { canEditRoute.value = hasRoute.value && routeWaypoints.length >= 2 }
 
 // Tracking helpers
 let lastIdx = 0
@@ -589,6 +620,9 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', refreshContainerH)
   if (detachCoordLongPress) { detachCoordLongPress(); detachCoordLongPress = null }
   closeCoordPopup()
+  closeEditPopup()
+  for (const m of editMarkers) m.remove()
+  editMarkers = []
   if (map) { map.remove(); map = null }
 })
 
@@ -613,8 +647,11 @@ async function loadSharedRouteData(token: string) {
   routeToken.value = token
   routeName.value = route.name || ''
   routeSport = (route.activity as Sport) || 'cycling'
+  routeId = typeof route.id === 'number' ? route.id : null
+  routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
   hasRoute.value = true
+  syncEditable()
 }
 
 // Recompute everything derived from `geometry` + raw voicehints: altitudes, distances,
@@ -790,6 +827,11 @@ function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   rebuildRouteState(newGeometry, hints)
   resetRouteTracking(true)
   hasRoute.value = true
+  // Le tracé ne correspond plus à des points d'ancrage sauvegardés (détour depuis la
+  // position GPS, ou destination ad hoc) : on désactive l'édition.
+  routeWaypoints = []
+  routeId = null
+  syncEditable()
   ensureRouteInstalled()
   refreshRemaining()
 }
@@ -805,9 +847,12 @@ function loadRoute(route: any) {
   routeToken.value = (route.share_token as string) || null
   routeName.value = route.name || t('routes.destination')
   routeSport = (route.activity as Sport) || 'cycling'
+  routeId = typeof route.id === 'number' ? route.id : null
+  routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
   resetRouteTracking(false)
   hasRoute.value = true
+  syncEditable()
   showRoutePicker.value = false
   ensureRouteInstalled()
   refreshRemaining()
@@ -827,6 +872,11 @@ function loadRoute(route: any) {
 // couches du tracé, les marqueurs de virage, et on remet à zéro l'état d'itinéraire.
 // Le suivi GPS continue (le prochain fix s'ancre sur la position brute).
 function unloadRoute() {
+  // Sort proprement du mode édition (retire marqueurs / popup) avant de tout effacer.
+  if (editMode.value) closeEditMode()
+  routeWaypoints = []
+  routeId = null
+  syncEditable()
   hasRoute.value = false
   routeToken.value = null
   routeName.value = ''
@@ -1165,6 +1215,10 @@ async function insertViaIntoRoute(lng: number, lat: number) {
     const tailKeys = new Set(tail.map((c) => `${c[0]},${c[1]}`))
     const headHints = rawHints.filter((h) => headKeys.has(`${h.lng},${h.lat}`))
     const tailHints = rawHints.filter((h) => tailKeys.has(`${h.lng},${h.lat}`))
+    // Garde les points d'ancrage en phase avec la géométrie : le point inséré devient un
+    // vrai ancrage (au bon rang), pour que l'édition ultérieure ne le perde pas. Calculé
+    // sur l'ancienne géométrie (nearIdx), avant qu'elle ne soit remplacée ci-dessous.
+    if (routeWaypoints.length >= 2) routeWaypoints.splice(waypointInsertIndex(lng, lat, nearIdx), 0, { lng, lat })
     rebuildRouteState(newGeometry, headHints.concat(detourHints).concat(tailHints))
     // Le tracé a changé : on relocalise au prochain fix (le coureur peut être n'importe
     // où dessus) plutôt que de repartir du début.
@@ -1175,6 +1229,225 @@ async function insertViaIntoRoute(lng: number, lat: number) {
     navError.value = t('routes.error_routing')
   } finally {
     viaInserting.value = false
+  }
+}
+
+// ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
+// Un itinéraire chargé (avec ses points d'ancrage) peut être retouché sans quitter la
+// navigation : déplacement, ajout et suppression de points. Chaque modification re-route
+// l'itinéraire entier via BRouter (mêmes règles que le créateur, tronçons libres
+// compris), puis on relocalise au prochain fix. À la sortie du mode, les modifications
+// sont enregistrées sur l'itinéraire sauvegardé (si on en est le propriétaire connecté).
+
+function csrfToken(): string {
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+}
+
+// Cadre la carte sur l'ensemble du tracé (vue tous-points) et débraye le suivi caméra.
+function fitRouteBounds() {
+  if (!map || !maplibre || geometry.length < 2) return
+  const coords = geometry.map(([lng, lat]) => [lng, lat] as LngLat)
+  const b = new maplibre.LngLatBounds(coords[0], coords[0])
+  coords.forEach((c) => b.extend(c))
+  map.fitBounds(b, { padding: 70, duration: 500, pitch: camPitch.value })
+}
+
+// Index du sommet de la géométrie le plus proche d'un point.
+function nearestGeomIdxOf(lng: number, lat: number): number {
+  let best = 0, bestD = Infinity
+  for (let i = 0; i < geometry.length; i++) {
+    const d = haversine([lng, lat], [geometry[i][0], geometry[i][1]])
+    if (d < bestD) { bestD = d; best = i }
+  }
+  return best
+}
+
+// Rang d'insertion d'un nouveau point dans routeWaypoints : on repère le tronçon de
+// points d'ancrage (waypoint[i] → waypoint[i+1]) auquel appartient le sommet le plus
+// proche du clic, et on insère juste après waypoint[i]. À défaut, on ajoute en fin.
+// `nearIdx` peut être fourni si déjà calculé par l'appelant.
+function waypointInsertIndex(lng: number, lat: number, nearIdx?: number): number {
+  if (routeWaypoints.length < 2 || geometry.length < 2) return routeWaypoints.length
+  const near = nearIdx ?? nearestGeomIdxOf(lng, lat)
+  const wpIdx = routeWaypoints.map((w) => nearestGeomIdxOf(w.lng, w.lat))
+  for (let i = 0; i < wpIdx.length - 1; i++) {
+    if (near >= wpIdx[i] && near <= wpIdx[i + 1]) return i + 1
+  }
+  return routeWaypoints.length
+}
+
+// Re-route l'itinéraire entier à travers les points d'ancrage courants et remplace la
+// géométrie de navigation. Appelé après chaque déplacement / ajout / suppression.
+async function recomputeFromWaypoints() {
+  if (routeWaypoints.length < 2) return
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    editError.value = t('routes.reroute_offline')
+    return
+  }
+  editBusy.value = true
+  editError.value = null
+  const token = ++editToken
+  try {
+    const { geometry: geom, hints } = await fetchRouteFromWaypoints(routeWaypoints, routeSport)
+    if (token !== editToken) return
+    rebuildRouteState(geom, hints)
+    // Le tracé a changé : on relocalise au prochain fix (le coureur peut être n'importe
+    // où dessus) plutôt que de repartir du début.
+    resetRouteTracking(false)
+    ensureRouteInstalled()
+    refreshRemaining()
+    editDirty.value = true
+  } catch {
+    if (token === editToken) editError.value = t('routes.error_routing')
+  } finally {
+    if (token === editToken) editBusy.value = false
+  }
+}
+
+function closeEditPopup() {
+  if (editPopup) { editPopup.remove(); editPopup = null }
+}
+
+// Renumérote les pastilles d'ancrage d'après leur rang courant.
+function renumberEditMarkers() {
+  editMarkers.forEach((m, i) => {
+    const span = m.getElement().querySelector('.nav-edit-num')
+    if (span) span.textContent = String(i + 1)
+  })
+}
+
+// (Re)pose un marqueur déplaçable par point d'ancrage. Glisser-déposer → met à jour le
+// point et re-route ; un tap (sans glissement) ouvre la suppression.
+function makeEditMarker(wp: Waypoint): any {
+  const el = document.createElement('div')
+  el.className = 'nav-edit-marker'
+  el.innerHTML = '<span class="nav-edit-num"></span>'
+  const marker = new maplibre.Marker({ element: el, anchor: 'center', draggable: true }).setLngLat([wp.lng, wp.lat]).addTo(map)
+  let dragged = false
+  marker.on('dragstart', () => { dragged = true; closeEditPopup() })
+  marker.on('dragend', () => {
+    const idx = editMarkers.indexOf(marker)
+    if (idx >= 0) {
+      const ll = marker.getLngLat()
+      routeWaypoints[idx] = { ...routeWaypoints[idx], lng: ll.lng, lat: ll.lat }
+      void recomputeFromWaypoints()
+    }
+    setTimeout(() => { dragged = false }, 300)
+  })
+  el.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    if (dragged) return
+    showEditPointPopup(marker)
+  })
+  return marker
+}
+
+// Tooltip d'un point d'ancrage (clic sur sa pastille) : suppression + liens carto.
+function showEditPointPopup(marker: any) {
+  if (!maplibre || !map) return
+  const idx = editMarkers.indexOf(marker)
+  if (idx < 0) return
+  closeEditPopup()
+  const wp = routeWaypoints[idx]
+  editPopup = new maplibre.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([wp.lng, wp.lat])
+    .setDOMContent(buildDestPointPopupContent(wp.lng, wp.lat, closeEditPopup, () => {
+      closeEditPopup()
+      const i = editMarkers.indexOf(marker)
+      if (i >= 0) removeEditWaypoint(i)
+    }))
+    .addTo(map)
+}
+
+function refreshEditMarkers() {
+  for (const m of editMarkers) m.remove()
+  editMarkers = []
+  if (!map || !maplibre || !editMode.value) return
+  routeWaypoints.forEach((w) => editMarkers.push(makeEditMarker(w)))
+  renumberEditMarkers()
+}
+
+// Ajoute un point d'ancrage au tap sur la carte (inséré au plus proche du tracé).
+function addEditWaypoint(lng: number, lat: number) {
+  if (routeWaypoints.length >= MAX_WAYPOINTS) {
+    editError.value = t('routes.error_max_waypoints', { count: MAX_WAYPOINTS })
+    return
+  }
+  routeWaypoints.splice(waypointInsertIndex(lng, lat), 0, { lng, lat })
+  refreshEditMarkers()
+  void recomputeFromWaypoints()
+}
+
+// Retire un point d'ancrage (on en garde au moins deux).
+function removeEditWaypoint(idx: number) {
+  if (routeWaypoints.length <= 2) { editError.value = t('routes.error_min_points'); return }
+  routeWaypoints.splice(idx, 1)
+  refreshEditMarkers()
+  void recomputeFromWaypoints()
+}
+
+function enterEditMode() {
+  if (!canEditRoute.value) return
+  editMode.value = true
+  editError.value = null
+  editDirty.value = false
+  // L'édition se fait carte en main : on débraye le suivi caméra et on referme le tiroir.
+  following.value = false
+  cameraUnlocked.value = true
+  closeCoordPopup()
+  hideControls()
+  fitRouteBounds()
+  refreshEditMarkers()
+}
+
+// Retire marqueurs et popup d'édition et quitte le mode (sans enregistrer).
+function closeEditMode() {
+  closeEditPopup()
+  for (const m of editMarkers) m.remove()
+  editMarkers = []
+  editMode.value = false
+  editError.value = null
+}
+
+// Termine l'édition : enregistre les modifications (si itinéraire possédé et connecté)
+// puis quitte le mode et rend la caméra au suivi.
+async function finishEditMode() {
+  if (editBusy.value || editSaving.value) return
+  if (editDirty.value && routeId != null && loggedIn) await saveRouteEdits()
+  closeEditMode()
+  following.value = true
+  cameraUnlocked.value = false
+  recenter()
+}
+
+// Enregistre l'itinéraire modifié (PATCH). Silencieux à l'échec d'appartenance (404) :
+// un lien partagé d'autrui n'a pas de routeId → on n'arrive jamais ici dans ce cas.
+async function saveRouteEdits() {
+  if (routeId == null) return
+  editSaving.value = true
+  try {
+    const totals = computeGainLoss(geometry)
+    const body = JSON.stringify({
+      waypoints: routeWaypoints,
+      geometry,
+      voice_hints: rawHints,
+      distance_m: cumDistM[cumDistM.length - 1] || 0,
+      elevation_gain_m: totals.gain,
+      elevation_loss_m: totals.loss,
+    })
+    const res = await fetch(`/api/routes/${routeId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+      body,
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    editDirty.value = false
+    showPoiToast(true, t('routes.edit_saved'))
+  } catch {
+    showPoiToast(false, t('routes.edit_save_error'))
+  } finally {
+    editSaving.value = false
   }
 }
 
@@ -1265,6 +1538,13 @@ async function initMap() {
     if (suppressNextMapClick) { suppressNextMapClick = false; return }
     // Tooltip « point quelconque » ouverte : un tap ne fait que la refermer.
     if (coordPopup) { closeCoordPopup(); return }
+    // Mode édition : un tap pose un nouveau point d'ancrage (ou referme la tooltip d'un
+    // point ouverte) au lieu de mettre en veille.
+    if (editMode.value) {
+      if (editPopup) { closeEditPopup(); return }
+      addEditWaypoint(e.lngLat.lng, e.lngLat.lat)
+      return
+    }
     // Mode « cible » : le tap pose un point d'étape au lieu de mettre en veille.
     // Tooltip d'un point ouverte → un tap ailleurs la referme d'abord. Tap SUR le
     // trajet d'aperçu → insertion au bon rang ; sinon ajout en fin de séquence.
@@ -2226,6 +2506,8 @@ function toggleScreenOffManual() {
       :map-style-id="mapStyleId"
       :sound-on="soundOn"
       :route-loaded="hasRoute"
+      :can-edit="canEditRoute"
+      :edit-mode="editMode"
       :climb-card-visible="hasRoute ? showClimbCard : undefined"
       :radar-known="radarKnown"
       v-model:cam-pitch="camPitch"
@@ -2250,6 +2532,7 @@ function toggleScreenOffManual() {
       @arm-controls-hide="armControlsHide"
       @open-route-picker="showRoutePicker = true"
       @unload-route="unloadRoute"
+      @toggle-edit="editMode ? finishEditMode() : enterEditMode()"
       @set-map-style="setMapStyle"
       @toggle-sound="toggleSound"
       @toggle-climb-card="showClimbCard = !showClimbCard"
@@ -2356,6 +2639,28 @@ function toggleScreenOffManual() {
       <div v-if="navError" class="nav-place-error">{{ navError }}</div>
     </div>
 
+    <!-- Mode édition de l'itinéraire : bandeau de consigne en haut + barre d'actions en
+         bas. Les points d'ancrage déplaçables sont posés sur la carte (marqueurs JS). -->
+    <div v-if="editMode" class="nav-edit-banner shadow">
+      <i class="fa-solid fa-circle-info me-2" aria-hidden="true"></i>{{ t('routes.edit_hint') }}
+    </div>
+    <div v-if="editMode" class="nav-edit-bar">
+      <div v-if="editError" class="nav-edit-error">{{ editError }}</div>
+      <div v-else-if="editBusy" class="nav-edit-status shadow">
+        <i class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>{{ t('routes.computing_route') }}
+      </div>
+      <button
+        type="button"
+        class="btn btn-primary shadow nav-edit-done"
+        :disabled="editBusy || editSaving"
+        @click="finishEditMode"
+      >
+        <i v-if="editSaving" class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>
+        <i v-else class="fa-solid fa-check me-1" aria-hidden="true"></i>
+        {{ editSaving ? t('routes.save') : t('routes.edit_done') }}
+      </button>
+    </div>
+
     <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
          visible en mode veille (info de sécurité). -->
     <RadarOverlay :elevated="screenOff" />
@@ -2363,7 +2668,7 @@ function toggleScreenOffManual() {
     <!-- Upcoming turn indicator. Masqué en mode recherche : l'utilisateur a la tête
          dans la carte pour choisir une nouvelle destination, pas sur le tracé courant. -->
     <NavTurnBanner
-      v-if="turnHint && hasFix && !offRoute && !placeNavActive"
+      v-if="turnHint && hasFix && !offRoute && !placeNavActive && !editMode"
       :turn-hint="turnHint"
       :urgent-m="TURN_URGENT_M"
       :radar-banner-visible="radarBannerVisible"
@@ -2384,7 +2689,7 @@ function toggleScreenOffManual() {
          Reste visible (au-dessus du voile noir) en mode veille : quitter le tracé
          est une info de sécurité qui doit réveiller l'attention même écran éteint. -->
     <i
-      v-if="offRoute && hasFix && !placeNavActive"
+      v-if="offRoute && hasFix && !placeNavActive && !editMode"
       class="fa-solid fa-arrow-up nav-offroute-bigarrow"
       :class="{ 'nav-offroute-bigarrow--sleep': screenOff }"
       :style="{ transform: `translate(-50%, -50%) rotate(${offRouteRelBearing}deg)` }"
@@ -2394,7 +2699,7 @@ function toggleScreenOffManual() {
     <!-- Reroutage manuel : recalcule un chemin BRouter de la position vers le tracé.
          Reste visible en veille (au-dessus du voile noir) : quitter le tracé est une
          info de sécurité ; l'erreur éventuelle s'affiche sous le bouton. -->
-    <div v-if="offRoute && hasFix && !placeNavActive" class="nav-reroute" :class="{ 'nav-reroute--sleep': screenOff }">
+    <div v-if="offRoute && hasFix && !placeNavActive && !editMode" class="nav-reroute" :class="{ 'nav-reroute--sleep': screenOff }">
       <button
         type="button"
         class="btn btn-warning shadow nav-reroute-btn"
@@ -2411,7 +2716,7 @@ function toggleScreenOffManual() {
     <!-- Recenter button. Masqué en mode recherche : recentrer sur l'utilisateur
          annulerait la vue sur le lieu cherché et chevaucherait « Naviguer ici ». -->
     <button
-      v-if="!following && hasFix && !placeNavActive"
+      v-if="!following && hasFix && !placeNavActive && !editMode"
       type="button"
       class="btn btn-warning shadow nav-recenter"
       @click="recenter"
@@ -2422,7 +2727,7 @@ function toggleScreenOffManual() {
     <!-- Climb card: full graded elevation profile with a position cursor.
          Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
     <NavClimbCard
-      v-if="showClimbCard && climbInfo && !offRoute && !approachingTurn"
+      v-if="showClimbCard && climbInfo && !offRoute && !approachingTurn && !editMode"
       :climb-info="climbInfo"
       :screen-off="screenOff"
       @resume="toggleScreenOffManual"
@@ -2596,6 +2901,33 @@ function toggleScreenOffManual() {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
+/* Mode édition : bandeau de consigne en haut (au-dessus de la carte, sous le tiroir
+   replié z 8) + barre d'actions ancrée en bas, au-dessus du bandeau de stats. */
+.nav-edit-banner {
+  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  z-index: 7; width: min(440px, calc(100% - 1.5rem));
+  background: rgba(124, 58, 237, 0.96); color: #fff;
+  padding: 0.5rem 0.9rem; border-radius: 0.6rem;
+  font-size: 0.85rem; font-weight: 500; text-align: center;
+}
+.nav-edit-bar {
+  position: absolute; bottom: 8rem; left: 50%; transform: translateX(-50%);
+  z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+}
+.nav-edit-status {
+  background: rgba(255, 255, 255, 0.95); color: #1f2937; border-radius: 999px;
+  padding: 0.25rem 0.8rem; font-size: 0.9rem; font-weight: 600;
+  display: inline-flex; align-items: center;
+}
+.nav-edit-done {
+  border-radius: 999px; font-weight: 600; font-size: 1.1rem; padding: 0.6rem 1.6rem;
+}
+.nav-edit-error {
+  background: #fff3cd; color: #664d03; border-radius: 999px;
+  padding: 0.3rem 0.8rem; font-size: 0.85rem; font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
 /* Barre du bas en navigation libre : réduite à la vitesse (reprend l'allure de
    NavStatsBar), centrée. Affichée tant qu'aucun itinéraire n'est chargé. */
 .nav-stats {
@@ -2644,6 +2976,21 @@ function toggleScreenOffManual() {
   font-size: 0.5em; font-weight: 700; line-height: 1;
   color: #fff;
 }
+
+/* Point d'ancrage déplaçable en mode édition (créé en JS, donc style global). Pastille
+   ronde violette numérotée, posée sur le tracé ; déplaçable au glisser, suppression au
+   tap. touch-action: none laisse MapLibre gérer le glissement au doigt. */
+.nav-edit-marker {
+  display: flex; align-items: center; justify-content: center;
+  width: 1.6rem; height: 1.6rem; border-radius: 50%;
+  background: #7c3aed; color: #fff; border: 2px solid #fff;
+  font-size: 0.8rem; font-weight: 700; line-height: 1;
+  pointer-events: auto; cursor: grab; touch-action: none;
+  z-index: 4;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.45);
+}
+.nav-edit-marker:active { cursor: grabbing; }
+.nav-edit-num { pointer-events: none; }
 
 /* Indicateurs de virage (pastille orange + flèche / numéro de sortie). Marqueurs
    DOM placés au-dessus des POI (z-index 2 > 1) pour ne jamais être masqués par eux.

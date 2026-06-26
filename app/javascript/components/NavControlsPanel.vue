@@ -16,6 +16,10 @@ const props = defineProps<{
   climbCardVisible?: boolean
   // Vrai quand un itinéraire est chargé : affiche le bouton « ne plus suivre l'itinéraire ».
   routeLoaded?: boolean
+  // Vrai quand l'itinéraire chargé porte ses points d'ancrage (éditable en séance).
+  canEdit?: boolean
+  // Mode édition de l'itinéraire actif : le bouton « modifier » passe en état « terminer ».
+  editMode?: boolean
   radarKnown: boolean
   camPitch: number
   camZoom: number
@@ -48,6 +52,7 @@ const emit = defineEmits<{
   (e: 'arm-controls-hide'): void
   (e: 'open-route-picker'): void
   (e: 'unload-route'): void
+  (e: 'toggle-edit'): void
   (e: 'set-map-style', id: string): void
   (e: 'toggle-sound'): void
   (e: 'toggle-climb-card'): void
@@ -112,6 +117,20 @@ function onZoom(e: Event) {
         @click="$emit('open-route-picker')"
       >
         <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+      </button>
+
+      <!-- Modifie l'itinéraire courant sans quitter la navigation (déplacement / ajout /
+           suppression de points d'ancrage). Disponible si le tracé porte ses points. -->
+      <button
+        v-if="routeLoaded && canEdit"
+        type="button"
+        class="btn btn-sm btn-light shadow-sm"
+        :class="{ active: editMode }"
+        :title="editMode ? t('routes.edit_done') : t('routes.edit_route')"
+        :aria-label="editMode ? t('routes.edit_done') : t('routes.edit_route')"
+        @click="$emit('toggle-edit')"
+      >
+        <i class="fa-solid" :class="editMode ? 'fa-check' : 'fa-pen'" aria-hidden="true"></i>
       </button>
 
       <!-- Revient à la navigation libre : ne plus suivre l'itinéraire courant. -->

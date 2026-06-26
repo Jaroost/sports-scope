@@ -292,6 +292,8 @@ en:
     poi_browse: "Browse POIs"
     poi_browse_prev: "Previous"
     poi_browse_next: "Next"
+    poi_filter: "Filter POIs"
+    poi_filter_all: "All categories"
     camera_zoom: "Zoom"
     camera_pitch: "Tilt"
     camera_3d: "3D terrain"

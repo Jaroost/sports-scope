@@ -292,6 +292,8 @@ fr:
     poi_browse: "Parcourir les POI"
     poi_browse_prev: "Précédent"
     poi_browse_next: "Suivant"
+    poi_filter: "Filtrer les POI"
+    poi_filter_all: "Toutes les catégories"
     camera_zoom: "Zoom"
     camera_pitch: "Inclinaison"
     camera_3d: "Relief 3D"

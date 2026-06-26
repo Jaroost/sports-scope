@@ -187,8 +187,32 @@ async function searchPois(opts: { center?: [number, number] } = {}) {
 const posTick = ref(0)
 const poiBrowseActive = ref(false)
 const poiBrowseIndex = ref(0)
-const poiBrowseList = ref<NavPlace[]>([])
+// Liste complète des POI à parcourir (tous les POI visibles, triés par distance au
+// lancement). Le filtre par catégorie s'applique par-dessus sans retoucher cette liste,
+// pour qu'un changement de filtre ne rejoue pas le tri.
+const poiBrowseAll = ref<NavPlace[]>([])
+// Catégorie de POI parcourue (clé du registre POI) ou null = toutes les catégories.
+const poiBrowseFilter = ref<string | null>(null)
 const poiBrowseCount = computed(() => pois.visiblePlaces.value.length)
+// Liste effectivement parcourue : la liste complète filtrée par la catégorie choisie.
+const poiBrowseList = computed(() =>
+  poiBrowseFilter.value
+    ? poiBrowseAll.value.filter((p) => categoryForType(p.type)?.key === poiBrowseFilter.value)
+    : poiBrowseAll.value,
+)
+// Catégories présentes dans la liste, dans l'ordre du registre, avec leur nombre de POI :
+// alimente le menu déroulant de filtre du bandeau de parcours. On ne propose que les
+// catégories effectivement trouvées (filtrer sur une catégorie vide n'aurait aucun sens).
+const poiBrowseCats = computed(() => {
+  const counts = new Map<string, number>()
+  for (const p of poiBrowseAll.value) {
+    const k = categoryForType(p.type)?.key
+    if (k) counts.set(k, (counts.get(k) ?? 0) + 1)
+  }
+  return POI_CATS
+    .filter((c) => counts.has(c.key))
+    .map((c) => ({ key: c.key, icon: c.icon, color: c.color, labelKey: c.labelKey, count: counts.get(c.key)! }))
+})
 const poiBrowseCurrent = computed(() => poiBrowseList.value[poiBrowseIndex.value] ?? null)
 // Distance live (recalculée quand `lastPos` change via posTick) du POI courant à la position.
 const poiBrowseDistM = computed(() => {
@@ -215,10 +239,20 @@ function startPoiBrowse() {
     list.sort((a, b) => haversine(here, [a.lng, a.lat]) - haversine(here, [b.lng, b.lat]))
   }
   if (list.length === 0) return
-  poiBrowseList.value = list
+  poiBrowseAll.value = list
+  poiBrowseFilter.value = null   // on parcourt toutes les catégories par défaut
   poiBrowseIndex.value = 0
   poiBrowseActive.value = true
   focusBrowsePlace()
+}
+
+// Change la catégorie parcourue (null = toutes) : on repart du premier POI de la liste
+// filtrée et on recadre la caméra dessus. Le menu ne propose que des catégories présentes,
+// donc poiBrowseCurrent est normalement défini après le filtrage.
+function setPoiBrowseFilter(key: string | null) {
+  poiBrowseFilter.value = key
+  poiBrowseIndex.value = 0
+  if (poiBrowseCurrent.value) focusBrowsePlace()
 }
 
 function focusBrowsePlace() {
@@ -232,15 +266,19 @@ function focusBrowsePlace() {
   pois.openPlacePopup(place)
 }
 
+// Suivant / précédent en boucle : depuis le dernier POI on revient au premier, et depuis
+// le premier on saute au dernier (modulo la longueur de la liste filtrée).
 function browseNext() {
-  if (poiBrowseIndex.value >= poiBrowseList.value.length - 1) return
-  poiBrowseIndex.value++
+  const n = poiBrowseList.value.length
+  if (n === 0) return
+  poiBrowseIndex.value = (poiBrowseIndex.value + 1) % n
   focusBrowsePlace()
 }
 
 function browsePrev() {
-  if (poiBrowseIndex.value <= 0) return
-  poiBrowseIndex.value--
+  const n = poiBrowseList.value.length
+  if (n === 0) return
+  poiBrowseIndex.value = (poiBrowseIndex.value - 1 + n) % n
   focusBrowsePlace()
 }
 
@@ -2956,8 +2994,11 @@ function toggleScreenOffManual() {
       :dist-m="poiBrowseDistM"
       :index="poiBrowseIndex"
       :total="poiBrowseList.length"
+      :cats="poiBrowseCats"
+      :filter="poiBrowseFilter"
       @prev="browsePrev"
       @next="browseNext"
+      @set-filter="setPoiBrowseFilter"
       @close="stopPoiBrowse"
     />
 

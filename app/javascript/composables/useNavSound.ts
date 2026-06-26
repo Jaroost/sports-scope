@@ -7,18 +7,30 @@ import { userPreferences } from '../userPreferences'
 // (ré)autorisé au moment où l'utilisateur réactive le son — un geste utilisateur
 // fiable. Partagé entre navigation libre et navigation sur itinéraire.
 const SOUND_KEY = 'sportsScope.navSound'
+const VOLUME_KEY = 'sportsScope.navVolume'
 
 function loadSound(): boolean {
   try { return localStorage.getItem(SOUND_KEY) !== 'off' } catch { return true }
 }
 
+function loadVolume(fallback: number): number {
+  try {
+    const raw = localStorage.getItem(VOLUME_KEY)
+    if (raw == null) return fallback
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : fallback
+  } catch { return fallback }
+}
+
 export function useNavSound() {
   const soundOn = ref(loadSound())
 
-  // Applique le volume général choisi dans le profil (virages + radar) dès l'entrée
-  // en navigation. La valeur est figée pour la séance : changer la préférence
-  // nécessite de rouvrir la navigation (cohérent avec les autres réglages nav).
-  setSoundVolume(userPreferences().navigation.sound_volume ?? 100)
+  // Volume général des alertes (virages + radar). Initialisé sur le dernier réglage de
+  // séance (localStorage), à défaut la préférence du profil. Modifiable en direct depuis
+  // le tiroir via setVolume : le changement est appliqué immédiatement (setSoundVolume)
+  // et persisté pour les séances suivantes.
+  const soundVolume = ref(loadVolume(userPreferences().navigation.sound_volume ?? 100))
+  setSoundVolume(soundVolume.value)
 
   function toggleSound() {
     soundOn.value = !soundOn.value
@@ -26,5 +38,11 @@ export function useNavSound() {
     if (soundOn.value) unlockAudio()
   }
 
-  return { soundOn, toggleSound }
+  function setVolume(percent: number) {
+    soundVolume.value = percent
+    setSoundVolume(percent)
+    try { localStorage.setItem(VOLUME_KEY, String(percent)) } catch { /* ignore */ }
+  }
+
+  return { soundOn, toggleSound, soundVolume, setVolume }
 }

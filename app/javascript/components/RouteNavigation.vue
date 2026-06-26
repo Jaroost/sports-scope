@@ -104,7 +104,8 @@ const following = ref(true)
 // they left it; tapping "recenter" clears it and resumes following.
 const cameraUnlocked = ref(false)
 // Son de la séance (alertes virage / radar). Voir useNavSound.
-const { soundOn, toggleSound } = useNavSound()
+const { soundOn, toggleSound, soundVolume, setVolume } = useNavSound()
+const showSoundPanel = ref(false)
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
 // on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
 const mapStyleId = ref(navPrefs.default_style as string)
@@ -302,8 +303,8 @@ const screenOff = ref(false)
 // On ne masque pas tant qu'un sous-panneau (caméra / POI / débug) est ouvert. Voir
 // useControlsHide.
 const { controlsVisible, armControlsHide, showControls, hideControls } = useControlsHide({
-  isPanelOpen: () => showCamPanel.value || showPoiPanel.value || showDebugPanel.value,
-  closePanels: () => { showCamPanel.value = false; showPoiPanel.value = false; showDebugPanel.value = false },
+  isPanelOpen: () => showCamPanel.value || showPoiPanel.value || showDebugPanel.value || showSoundPanel.value,
+  closePanels: () => { showCamPanel.value = false; showPoiPanel.value = false; showDebugPanel.value = false; showSoundPanel.value = false },
 })
 
 // ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
@@ -2745,6 +2746,8 @@ function toggleScreenOffManual() {
       :debug-mode="debugMode"
       :map-style-id="mapStyleId"
       :sound-on="soundOn"
+      :sound-volume="soundVolume"
+      v-model:show-sound-panel="showSoundPanel"
       :route-loaded="hasRoute"
       :can-edit="canEditRoute"
       :edit-mode="editMode"
@@ -2777,6 +2780,7 @@ function toggleScreenOffManual() {
       @toggle-edit="editMode ? finishEditMode() : enterEditMode()"
       @set-map-style="setMapStyle"
       @toggle-sound="toggleSound"
+      @update:sound-volume="setVolume"
       @toggle-climb-card="showClimbCard = !showClimbCard"
       @toggle-radar="toggleRadar"
       @pitch-input="onPitchInput"

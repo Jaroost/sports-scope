@@ -11,6 +11,9 @@ const props = defineProps<{
   debugMode: boolean
   mapStyleId: string
   soundOn: boolean
+  // Volume général des alertes (0–200 %), réglé en direct depuis le tiroir son.
+  soundVolume: number
+  showSoundPanel: boolean
   // Visibilité du profil des cols : undefined en mode libre (pas d'itinéraire → pas de
   // cols), auquel cas le bouton de bascule n'est pas affiché.
   climbCardVisible?: boolean
@@ -59,6 +62,8 @@ const emit = defineEmits<{
   (e: 'toggle-edit'): void
   (e: 'set-map-style', id: string): void
   (e: 'toggle-sound'): void
+  (e: 'update:soundVolume', v: number): void
+  (e: 'update:showSoundPanel', v: boolean): void
   (e: 'toggle-climb-card'): void
   (e: 'toggle-radar'): void
   (e: 'pitch-input'): void
@@ -90,6 +95,9 @@ function onPitch(e: Event) {
 function onZoom(e: Event) {
   emit('update:camZoom', Number((e.target as HTMLInputElement).value))
   emit('zoom-input')
+}
+function onVolume(e: Event) {
+  emit('update:soundVolume', Number((e.target as HTMLInputElement).value))
 }
 </script>
 
@@ -193,15 +201,48 @@ function onZoom(e: Event) {
       <MapStyleDropdown :model-value="mapStyleId" @update:model-value="$emit('set-map-style', $event)" />
       <!-- Bouton « carte hors-ligne » (fourni par le parent : il a accès au token et à la géométrie). -->
       <slot name="map-extra" />
-      <button
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :title="soundOn ? t('routes.sound_on') : t('routes.sound_off')"
-        :aria-label="soundOn ? t('routes.sound_on') : t('routes.sound_off')"
-        @click="$emit('toggle-sound')"
-      >
-        <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
-      </button>
+      <!-- Réglages son : ouvre un tiroir pour couper le son et régler le volume de
+           TOUTES les alertes (virages + radar). L'icône reflète l'état muet / actif. -->
+      <div class="position-relative">
+        <button
+          type="button"
+          class="btn btn-sm btn-light shadow-sm"
+          :class="{ active: showSoundPanel }"
+          :title="t('routes.sound_settings')"
+          :aria-label="t('routes.sound_settings')"
+          @click="$emit('update:showSoundPanel', !showSoundPanel)"
+        >
+          <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
+        </button>
+        <div v-if="showSoundPanel" class="nav-cam-panel nav-sound-panel shadow">
+          <label class="nav-cam-row nav-cam-row--switch">
+            <span class="nav-cam-label">{{ t('routes.sound_label') }}</span>
+            <span class="form-check form-switch m-0">
+              <input
+                class="form-check-input"
+                type="checkbox"
+                role="switch"
+                :checked="soundOn"
+                @change="$emit('toggle-sound')"
+              />
+            </span>
+          </label>
+          <div class="nav-sound-vol">
+            <div class="nav-sound-vol-head">
+              <span class="nav-cam-label">{{ t('routes.sound_volume') }}</span>
+              <span class="nav-cam-val">{{ Math.round(soundVolume) }}%</span>
+            </div>
+            <input
+              type="range"
+              class="form-range nav-sound-range"
+              min="0" max="200" step="10"
+              :value="soundVolume"
+              :disabled="!soundOn"
+              @input="onVolume"
+            />
+          </div>
+        </div>
+      </div>
 
       <!-- Affiche / masque le profil des cols (carte d'altitude en bas d'écran). Activé
            par défaut ; certains préfèrent dégager le bas de l'écran. -->
@@ -461,6 +502,22 @@ function onZoom(e: Event) {
 }
 .nav-cam-savezoom:hover { background: #f3effd; }
 .nav-cam-savezoom--done { background: #198754; border-color: #198754; color: #fff; }
+
+/* Tiroir des réglages son : mute + volume. Le volume occupe sa propre ligne pleine
+   largeur (label/valeur au-dessus, slider en dessous) pour offrir une grande course
+   facile à viser au pouce sur la route. */
+.nav-sound-panel { width: 15rem; }
+.nav-sound-vol { margin-top: 0.9rem; }
+.nav-sound-vol-head {
+  display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.5rem;
+}
+.nav-sound-vol-head .nav-cam-label { width: auto; }
+.nav-sound-vol-head .nav-cam-val { width: auto; }
+/* Piste large et curseur surdimensionné : la course couvre toute la largeur du tiroir
+   et la cible tactile est nettement plus grande que les sliders caméra. */
+.nav-sound-range { width: 100%; margin: 0; height: 2.2rem; }
+.nav-sound-range::-webkit-slider-thumb { width: 2rem; height: 2rem; }
+.nav-sound-range::-moz-range-thumb { width: 2rem; height: 2rem; }
 
 /* Panneau des filtres POI : même boîte que la caméra, lignes icône + libellé +
    interrupteur. Le libellé occupe la largeur disponible (textes longs : « Points

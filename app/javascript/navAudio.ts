@@ -119,8 +119,8 @@ export function playPoi(): void {
 // reads clearly as "vehicle approaching", not a maneuver.
 export function playRadarThreat(): void {
   unlockAudio()
-  beep(880, 0, 0.09, 0.16)
-  beep(1180, 0.1, 0.14, 0.16)
+  beep(880, 0, 0.09, 0.2)
+  beep(1180, 0.1, 0.14, 0.2)
 }
 
 // Three fast, louder notes — the car has closed in (under ~30 m). More insistent

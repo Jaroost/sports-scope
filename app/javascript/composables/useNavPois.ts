@@ -1,4 +1,4 @@
-import { reactive, ref } from 'vue'
+import { reactive, ref, computed } from 'vue'
 import { t } from '../i18n'
 import { haversine } from '../routeHelpers'
 import type { Coord, LngLat } from '../routeHelpers'
@@ -13,7 +13,7 @@ import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 // à la géométrie (non encore prêtes au montage) ainsi que la loi d'échelle du tracé,
 // pour caler la taille des POI sur celle des indicateurs de virage.
 
-interface NavPlace { name: string; type: string; lng: number; lat: number }
+export interface NavPlace { name: string; type: string; lng: number; lat: number }
 
 // Résultat d'une recherche POI, remonté à l'appelant pour un retour visuel (toast) :
 // `ok` faux signale un échec réseau / serveur Overpass ; sinon `count` est le nombre
@@ -54,7 +54,15 @@ export function useNavPois(deps: {
   const poiCounts = reactive<Record<string, number>>({})
 
   let placeMarkers: any[] = []   // marqueurs POI ponctuels (filtrés par le panneau de séance)
-  let currentPlaces: NavPlace[] = []   // POI ponctuels actuellement posés (pour la détection de proximité)
+  // POI ponctuels actuellement posés (réactif : alimente `visiblePlaces`, le parcours des
+  // POI et la détection de proximité). Lien place → élément DOM du marqueur tenu en
+  // parallèle (`placeEls`) pour rouvrir le popup d'un POI depuis le parcours. Indexé par
+  // une clé stable (type + coordonnées) et NON par référence d'objet : Vue proxifie en
+  // profondeur les éléments de `places` (ref), donc `visiblePlaces` renvoie des proxys —
+  // une Map indexée par l'objet brut renverrait alors undefined.
+  const places = ref<NavPlace[]>([])
+  const placeEls = new Map<string, HTMLElement>()
+  const placeKey = (p: NavPlace) => `${p.type}:${p.lng}:${p.lat}`
   let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
   let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
   const svCache = new Map<string, boolean>()     // cache « Street View dispo ? » par POI
@@ -148,15 +156,16 @@ export function useNavPois(deps: {
   // Marqueur HTML persistant par POI (même look que le créateur). Les marqueurs
   // MapLibre sont des overlays DOM, ils survivent à un setStyle — pas besoin de les
   // réinstaller au changement de fond de carte.
-  function installPlaceMarkers(places: NavPlace[]) {
+  function installPlaceMarkers(newPlaces: NavPlace[]) {
     const map = getMap()
     const maplibre = getMaplibre()
     if (!map || !maplibre) return
     closePlacePopup()
     for (const m of placeMarkers) m.remove()
     placeMarkers = []
-    currentPlaces = places
-    for (const place of places) {
+    placeEls.clear()
+    places.value = newPlaces
+    for (const place of newPlaces) {
       const el = document.createElement('div')
       const cat = categoryForType(place.type)
       const icon = cat?.icon ?? 'fa-location-dot'
@@ -175,6 +184,7 @@ export function useNavPois(deps: {
         .setLngLat([place.lng, place.lat])
         .addTo(map)
       placeMarkers.push(marker)
+      placeEls.set(placeKey(place), el)
     }
     applyPoiScale(map.getZoom())
     applyPoiVisibility()
@@ -185,14 +195,28 @@ export function useNavPois(deps: {
   // navigation (RouteNavigation) : on prévient le coureur quand il passe près d'un lieu.
   function nearestVisiblePoi(pos: LngLat, maxDistM: number): { place: NavPlace; distM: number } | null {
     let best: { place: NavPlace; distM: number } | null = null
-    for (const place of currentPlaces) {
-      const cat = categoryForType(place.type)
-      if (cat && poiVisible[cat.key] === false) continue
+    for (const place of visiblePlaces.value) {
       const d = haversine(pos, [place.lng, place.lat])
       if (d > maxDistM) continue
       if (!best || d < best.distM) best = { place, distM: d }
     }
     return best
+  }
+
+  // POI ponctuels actuellement affichés (catégorie non masquée par le panneau de séance).
+  // Alimente le parcours des POI et la détection de proximité.
+  const visiblePlaces = computed(() =>
+    places.value.filter((p) => {
+      const cat = categoryForType(p.type)
+      return !cat || poiVisible[cat.key] !== false
+    }),
+  )
+
+  // Ouvre le popup d'un POI (mêmes actions que le clic sur son marqueur) depuis le
+  // parcours : retrouve l'élément DOM du marqueur par référence de `place`.
+  function openPlacePopup(place: NavPlace) {
+    const el = placeEls.get(placeKey(place))
+    if (el) showPlacePopup(place, el)
   }
 
   // Affiche/masque les marqueurs POI selon les bascules du panneau de séance.
@@ -345,6 +369,8 @@ export function useNavPois(deps: {
     loading,
     fetchPlaces,
     nearestVisiblePoi,
+    visiblePlaces,
+    openPlacePopup,
     togglePoi,
     applyPoiScale,
     closePlacePopup,

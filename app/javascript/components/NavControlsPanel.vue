@@ -36,6 +36,9 @@ const props = defineProps<{
   poiCounts: Record<string, number>
   // Recherche POI « autour de moi » en cours : grise le bouton et affiche un spinner.
   poiLoading?: boolean
+  // Nombre de POI actuellement visibles (catégories non masquées) : active le bouton
+  // « parcourir les POI ». Zéro → bouton désactivé (rien à parcourir).
+  poiBrowseCount?: number
   // Vrai en navigation sur itinéraire (un tracé existe) : ajoute un bouton de recherche
   // POI le long du trajet, en plus de « autour de moi ». Absent en mode libre (pas de tracé).
   routeSearch?: boolean
@@ -66,6 +69,7 @@ const emit = defineEmits<{
   (e: 'toggle-poi', key: string): void
   (e: 'search-pois'): void
   (e: 'search-pois-route'): void
+  (e: 'browse-pois'): void
   (e: 'toggle-debug-radar'): void
   (e: 'toggle-debug-climb'): void
   (e: 'cycle-debug-turn'): void
@@ -335,6 +339,17 @@ function onZoom(e: Event) {
               aria-hidden="true"
             ></i>
             {{ t('routes.poi_search_around') }}
+          </button>
+          <!-- Parcours des POI : enchaîne les lieux visibles, du plus proche au plus loin,
+               en zoomant la carte sur chacun. Désactivé tant qu'aucun POI n'est visible. -->
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary w-100 nav-poi-search nav-poi-browse"
+            :disabled="!poiBrowseCount"
+            @click="$emit('browse-pois')"
+          >
+            <i class="fa-solid fa-binoculars me-1" aria-hidden="true"></i>
+            {{ t('routes.poi_browse') }}
           </button>
           <label v-for="cat in poiCats" :key="cat.key" class="nav-cam-row nav-cam-row--switch">
             <span class="nav-cam-label nav-poi-label">

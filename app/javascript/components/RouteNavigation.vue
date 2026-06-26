@@ -6,7 +6,7 @@ import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
   haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
-  buildOffsetDisplayLine, densifyGeometry,
+  buildOffsetDisplayLine, densifyGeometry, formatDistancePrecise,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { fetchRouteToPlace, fetchRouteVia, fetchRouteFromWaypoints } from '../navRoute'
@@ -23,6 +23,7 @@ import RadarOverlay from './RadarOverlay.vue'
 import NavOfflineButton from './NavOfflineButton.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
 import NavPoiBanner from './NavPoiBanner.vue'
+import NavPoiBrowser from './NavPoiBrowser.vue'
 import NavScreenOff from './NavScreenOff.vue'
 import NavClimbCard from './NavClimbCard.vue'
 import NavStatsBar from './NavStatsBar.vue'
@@ -34,6 +35,7 @@ import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { useNavPois } from '../composables/useNavPois'
+import type { NavPlace } from '../composables/useNavPois'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
 import { useNavSound } from '../composables/useNavSound'
 import { useRadarAlerts } from '../composables/useRadarAlerts'
@@ -171,6 +173,80 @@ async function searchPois(opts: { center?: [number, number] } = {}) {
   if (res.count === 0) { showPoiToast(true, t('routes.poi_search_none')); return }
   const key = res.count === 1 ? 'routes.poi_search_found_one' : 'routes.poi_search_found_other'
   showPoiToast(true, t(key, { count: res.count }))
+}
+
+// ─── Parcours des POI ──────────────────────────────────────────────────────────
+// Enchaîne les POI visibles, du plus proche au plus loin, en faisant voler la caméra
+// sur chacun (zoom rapproché) et en affichant sa distance depuis la position courante.
+// L'ordre est figé au lancement (tri par distance) : seule la distance affichée se met
+// à jour en roulant, l'index ne saute pas. La caméra est détachée (following=false) le
+// temps du parcours ; le bouton « Recentrer » la ramène sur le coureur.
+// Compteur réactif incrémenté à chaque fix GPS : `lastPos` est non réactif (gros volume,
+// lu dans des callbacks), ce tick permet aux computed dépendants de la position (distance
+// du POI parcouru) de se recalculer en roulant.
+const posTick = ref(0)
+const poiBrowseActive = ref(false)
+const poiBrowseIndex = ref(0)
+const poiBrowseList = ref<NavPlace[]>([])
+const poiBrowseCount = computed(() => pois.visiblePlaces.value.length)
+const poiBrowseCurrent = computed(() => poiBrowseList.value[poiBrowseIndex.value] ?? null)
+// Distance live (recalculée quand `lastPos` change via posTick) du POI courant à la position.
+const poiBrowseDistM = computed(() => {
+  posTick.value   // dépendance : force le recalcul à chaque fix GPS
+  const cur = poiBrowseCurrent.value
+  return cur && lastPos ? haversine(lastPos, [cur.lng, cur.lat]) : 0
+})
+const poiBrowseHint = computed(() => {
+  const cur = poiBrowseCurrent.value
+  if (!cur) return null
+  const cat = categoryForType(cur.type)
+  return {
+    name: cur.name || t('routes.point_of_interest'),
+    icon: cat?.icon ?? 'fa-location-dot',
+    color: cat?.color ?? '#6b7280',
+  }
+})
+
+function startPoiBrowse() {
+  showPoiPanel.value = false
+  const list = [...pois.visiblePlaces.value]
+  if (lastPos) {
+    const here = lastPos
+    list.sort((a, b) => haversine(here, [a.lng, a.lat]) - haversine(here, [b.lng, b.lat]))
+  }
+  if (list.length === 0) return
+  poiBrowseList.value = list
+  poiBrowseIndex.value = 0
+  poiBrowseActive.value = true
+  focusBrowsePlace()
+}
+
+function focusBrowsePlace() {
+  const place = poiBrowseCurrent.value
+  if (!place || !map) return
+  // Détache la caméra : la boucle de rendu ne touchera plus la vue (cf. `tick`,
+  // `if (following.value)`), seul le marqueur de position continue de bouger.
+  following.value = false
+  cameraUnlocked.value = true
+  map.flyTo({ center: [place.lng, place.lat], zoom: 16, pitch: 0, bearing: 0, duration: 700 })
+  pois.openPlacePopup(place)
+}
+
+function browseNext() {
+  if (poiBrowseIndex.value >= poiBrowseList.value.length - 1) return
+  poiBrowseIndex.value++
+  focusBrowsePlace()
+}
+
+function browsePrev() {
+  if (poiBrowseIndex.value <= 0) return
+  poiBrowseIndex.value--
+  focusBrowsePlace()
+}
+
+function stopPoiBrowse() {
+  poiBrowseActive.value = false
+  pois.closePlacePopup()
 }
 
 // Garde l'écran allumé pendant la séance (Screen Wake Lock). Le composable gère sa
@@ -2038,6 +2114,7 @@ function onPositionFree(pos: GeolocationPosition, here: LngLat) {
 function onPosition(pos: GeolocationPosition) {
   gpsError.value = null
   hasFix.value = true
+  posTick.value++
   const here: LngLat = [pos.coords.longitude, pos.coords.latitude]
 
   if (hasRoute.value) {
@@ -2502,6 +2579,8 @@ function updateLocationMarker(coords: LngLat) {
 }
 
 function recenter() {
+  // Revenir au suivi clôt le parcours des POI (le popup et le bandeau de parcours).
+  stopPoiBrowse()
   following.value = true
   cameraUnlocked.value = false
   // Rétablit le zoom PAR DÉFAUT du profil (et non le zoom courant de la séance) :
@@ -2613,6 +2692,7 @@ function toggleScreenOffManual() {
       :poi-visible="poiVisible"
       :poi-counts="poiCounts"
       :poi-loading="poiLoading"
+      :poi-browse-count="poiBrowseCount"
       :route-search="hasRoute"
       :dbg-radar="dbgRadar"
       :dbg-climb="dbgClimb"
@@ -2637,6 +2717,7 @@ function toggleScreenOffManual() {
       @toggle-poi="pois.togglePoi"
       @search-pois="searchPois({ center: lastPos ?? undefined })"
       @search-pois-route="searchPois()"
+      @browse-pois="startPoiBrowse"
       @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
@@ -2832,7 +2913,21 @@ function toggleScreenOffManual() {
          rendu ici (et non dans NavScreenOff) pour échapper au contexte d'empilement du
          voile et pouvoir passer AU-DESSUS de la carte de col en veille (z-index relevé
          via screen-off). -->
-    <NavPoiBanner v-if="poiHint && hasFix && bottomOverlaysVisible" :poi-hint="poiHint" :screen-off="screenOff" @toggle="toggleScreenOffManual" />
+    <NavPoiBanner v-if="poiHint && hasFix && bottomOverlaysVisible && !poiBrowseActive" :poi-hint="poiHint" :screen-off="screenOff" @toggle="toggleScreenOffManual" />
+
+    <!-- Parcours des POI : bandeau de pilotage (précédent / suivant) qui enchaîne les POI
+         visibles, du plus proche au plus loin, en faisant voler la caméra sur chacun.
+         Remplace la notification de proximité tant qu'il est actif. -->
+    <NavPoiBrowser
+      v-if="poiBrowseActive && poiBrowseHint && !placeNavActive && !editMode"
+      :place="poiBrowseHint"
+      :dist-m="poiBrowseDistM"
+      :index="poiBrowseIndex"
+      :total="poiBrowseList.length"
+      @prev="browsePrev"
+      @next="browseNext"
+      @close="stopPoiBrowse"
+    />
 
     <!-- Bottom stats : barre complète (distance / D+ / ETA / progression) en navigation
          sur itinéraire (masquable par le geste du bas) ; en navigation libre, carte

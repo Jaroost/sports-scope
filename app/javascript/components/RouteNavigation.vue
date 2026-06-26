@@ -546,14 +546,19 @@ let displayBearing = 0                 // smoothed bearing actually rendered
 // bas de l'écran à la carte du col : la flèche reste donc dans la carte visible sans
 // qu'on ait à décaler la caméra. On signale juste le rétrécissement à MapLibre.
 // À l'approche d'un virage, la carte de col est masquée (approachingTurn) : la carte
-// reprend alors toute la hauteur, donc on ne la rétrécit pas dans ce cas.
+// reprend alors toute la hauteur, donc on ne la rétrécit pas dans ce cas. Idem
+// hors-tracé (offRoute) et en édition (editMode), où la carte de col n'est pas rendue.
 // Affichage du profil des cols (carte d'altitude en bas d'écran), basculable depuis
 // le tiroir de commandes. Valeur initiale issue du profil (section Navigation) ;
 // masqué, la carte n'est plus rétrécie et le bas de l'écran est dégagé.
 const showClimbCard = ref(navPrefs.show_climb_card ?? true)
-// La carte de col n'est rétrécie/affichée que si elle est activée (showClimbCard) ET que
-// les overlays du bas ne sont pas masqués par le geste (bottomOverlaysVisible).
-const isClimbing = computed(() => showClimbCard.value && bottomOverlaysVisible.value && climbInfo.value != null && !approachingTurn.value)
+// La carte n'est rétrécie que quand la carte de col est EFFECTIVEMENT affichée : cette
+// condition doit donc rester alignée sur le v-if de NavClimbCard (showClimbCard +
+// overlays du bas visibles + col en cours + ni approche de virage, ni hors-tracé, ni
+// édition). Sinon la carte se rétrécit pour un panneau absent, laissant un vide en bas.
+const isClimbing = computed(() =>
+  showClimbCard.value && bottomOverlaysVisible.value && climbInfo.value != null
+  && !approachingTurn.value && !offRoute.value && !editMode.value)
 // Quand on entre/sort d'un col, la carte change de taille (CSS) : on attend le
 // reflow puis on prévient MapLibre et on rafraîchit la hauteur mise en cache, sinon
 // le canvas garde ses anciennes dimensions et la vue paraît étirée.
@@ -590,11 +595,7 @@ const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn, muted: audioMuted 
 // Le bandeau radar (RadarOverlay) occupe le tout-haut de l'écran. Quand il est
 // visible, on descend la vitesse/le virage pour ne pas passer dessous. Même
 // condition d'affichage que le composant.
-const radarBannerVisible = computed(
-  () =>
-    radarStore.isConnected.value &&
-    (navPrefs.radar_always_visible || radarStore.targets.value.length > 0),
-)
+const radarBannerVisible = computed(() => radarStore.isConnected.value)
 
 // Vrai à l'approche d'un virage (bandeau violet/orange « near ») et au virage atteint
 // (bandeau vert « now ») : le virage prime alors sur le col, on masque la carte de col

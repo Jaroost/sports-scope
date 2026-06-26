@@ -53,7 +53,6 @@ interface Preferences {
     turn_marker_color: string
     turn_marker_icon_color: string
     show_climb_card: boolean
-    radar_always_visible: boolean
     radar_close_m: number
   }
   display: {
@@ -597,13 +596,6 @@ function placePreviewMarker(coords: [number, number]) {
               <label for="nav-show-climb-card" class="form-check-label">{{ t('profile.navigation.show_climb_card') }}</label>
             </div>
             <p class="text-muted small mb-0">{{ t('profile.navigation.show_climb_card_help') }}</p>
-          </div>
-          <div class="col-12">
-            <div class="form-check form-switch">
-              <input id="nav-radar-always" v-model="prefs.navigation.radar_always_visible" class="form-check-input" type="checkbox" role="switch">
-              <label for="nav-radar-always" class="form-check-label">{{ t('profile.navigation.radar_always_visible') }}</label>
-            </div>
-            <p class="text-muted small mb-0">{{ t('profile.navigation.radar_always_visible_help') }}</p>
           </div>
           <div class="col-sm-6">
             <label for="nav-radar-close" class="form-label mb-1">

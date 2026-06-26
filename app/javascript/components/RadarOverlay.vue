@@ -4,10 +4,9 @@ import { radarStore } from '../stores/radarStore'
 import { userPreferences } from '../userPreferences'
 import { t } from '../i18n'
 
-// Option de profil : garder le bandeau visible en permanence (radar connecté) plutôt
-// que de ne l'afficher qu'à l'approche d'un véhicule. Sans voiture, on affiche alors
-// un témoin discret « voie dégagée ».
-const alwaysVisible = userPreferences().navigation.radar_always_visible
+// Dès que le radar est connecté, le bandeau reste affiché en permanence : avec une ou
+// plusieurs voitures il indique la distance (orange/rouge), sans voiture il reste un
+// simple bandeau vert vide — un témoin que la voie arrière est dégagée.
 // Seuil (m) de l'alerte rapprochée : sous cette distance le bandeau passe au rouge
 // avec « Attention » (cohérent avec le bip insistant déclenché par la navigation).
 const closeM = userPreferences().navigation.radar_close_m
@@ -26,9 +25,7 @@ const MAX_ICONS = 4
 const targets = computed(() => radarStore.targets.value)
 const count = computed(() => targets.value.length)
 const nearest = computed(() => radarStore.nearest.value)
-const active = computed(
-  () => radarStore.isConnected.value && (alwaysVisible || count.value > 0),
-)
+const active = computed(() => radarStore.isConnected.value)
 
 // Voiture proche → bandeau rouge « Attention ».
 const close = computed(() => !!nearest.value && nearest.value.distanceM <= closeM)
@@ -58,11 +55,7 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
         {{ Math.round(nearest!.distanceM) }}<small>m</small>
       </span>
     </template>
-    <!-- Voie dégagée (radar connecté, aucune voiture, mode « toujours visible »). -->
-    <template v-else>
-      <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
-      <span>{{ t('routes.radar_clear') }}</span>
-    </template>
+    <!-- Voie dégagée (radar connecté, aucune voiture) : bandeau vert vide, sans texte. -->
   </div>
 </template>
 
@@ -122,10 +115,11 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
   background: #fd7e14;
   color: #fff;
 }
+/* Voie dégagée : bandeau vert plein, vide (aucun contenu). On garde une hauteur via
+   min-height car il n'y a plus de texte pour imposer la hauteur du bandeau. */
 .radar-banner--clear {
-  background: rgba(33, 37, 41, 0.82);
-  color: #20c997;
-  font-weight: 600;
+  background: #198754;
+  min-height: 1.5rem;
 }
 /* L'icône d'alerte « Attention » clignote doucement pour attirer l'œil. */
 .radar-alert-icon {

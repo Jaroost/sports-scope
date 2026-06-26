@@ -239,6 +239,7 @@ fr:
     edit_route: "Modifier l'itinéraire"
     edit_hint: "Faites glisser un point pour le déplacer, touchez la carte pour en ajouter un, touchez un point pour le supprimer."
     edit_done: "Terminer"
+    edit_cancel: "Annuler"
     edit_saved: "Itinéraire enregistré"
     edit_save_error: "Échec de l'enregistrement de l'itinéraire"
     destination: "Destination"

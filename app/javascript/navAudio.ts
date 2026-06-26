@@ -105,13 +105,19 @@ export function playOffRoute(): void {
   beep(280, 0.24, 0.3, 0.22)
 }
 
-// Soft two-note chime — a point of interest is coming up nearby. Gentle and
-// pleasant (a rising major third), deliberately quieter than the maneuver/radar
-// cues: it's a "heads up, there's a fountain/bakery here", not a safety alert.
+// Petite ritournelle enjouée — un point d'intérêt approche. Une courte montée en
+// arpège majeur (do-mi-sol-do) suivie d'une note d'accroche, plus musicale qu'un
+// simple bip : ça s'entend comme « tiens, il y a quelque chose à voir ici ».
+// Volontairement plus douce que les alertes virage/radar : c'est une invitation,
+// pas une consigne de sécurité.
 export function playPoi(): void {
   unlockAudio()
-  beep(660, 0, 0.14, 0.1)
-  beep(880, 0.16, 0.22, 0.1)
+  // do5 · mi5 · sol5 · do6, puis un petit « ding » d'accroche sur le mi6.
+  beep(523, 0, 0.1, 0.09)
+  beep(659, 0.11, 0.1, 0.09)
+  beep(784, 0.22, 0.1, 0.09)
+  beep(1047, 0.33, 0.14, 0.1)
+  beep(1319, 0.5, 0.2, 0.1)
 }
 
 // Two quick rising notes — a car has just entered radar range behind you. Kept

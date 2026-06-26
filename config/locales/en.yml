@@ -239,6 +239,7 @@ en:
     edit_route: "Edit the route"
     edit_hint: "Drag a point to move it, tap the map to add one, tap a point to remove it."
     edit_done: "Done"
+    edit_cancel: "Cancel"
     edit_saved: "Route saved"
     edit_save_error: "Could not save the route"
     destination: "Destination"

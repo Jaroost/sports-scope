@@ -506,6 +506,9 @@ const editSaving = ref(false)
 let editMarkers: any[] = []
 let editPopup: any = null
 let editToken = 0
+// Instantané de l'itinéraire pris à l'entrée du mode édition : permet d'annuler
+// (restaurer points d'ancrage, géométrie et voicehints d'origine) sans enregistrer.
+let editSnapshot: { waypoints: Waypoint[]; geometry: Coord[]; hints: VoiceHint[] } | null = null
 // L'itinéraire est-il éditable ? Il faut ses points d'ancrage (≥ 2). routeWaypoints
 // n'est pas réactif (gros tableau lu dans des callbacks), donc on reflète l'éligibilité
 // dans ce ref, recalculé via syncEditable() aux moments où elle peut changer (chargement,
@@ -705,6 +708,8 @@ function cycleDebugTurn() {
   hasFix.value = true
   const p = DBG_TURNS[dbgTurnIdx.value]
   turnHint.value = { direction: p.direction, distM: p.distM, kind: p.kind, angle: p.angle, exitNumber: p.exitNumber, state: p.state }
+  // Prévisualisation sonore : joue le bip du virage correspondant (comme en vrai).
+  if (soundOn.value) playManeuver(p.kind, p.direction)
 }
 
 function toggleDebugClimb() {
@@ -728,6 +733,8 @@ function toggleDebugPoi() {
     color: cat?.color ?? '#6b7280',
     distM: 80,
   }
+  // Prévisualisation sonore : joue la ritournelle d'approche POI (comme en vrai).
+  if (soundOn.value) playPoi()
 }
 
 // Radar factice : on passe le store en « connecté » sans Bluetooth (pas de watchdog,
@@ -1575,6 +1582,13 @@ function enterEditMode() {
   editHintVisible.value = true
   editError.value = null
   editDirty.value = false
+  // Sauvegarde l'état d'origine pour pouvoir l'annuler (copies profondes : ces tableaux
+  // sont mutés en place pendant l'édition).
+  editSnapshot = {
+    waypoints: routeWaypoints.map((w) => ({ ...w })),
+    geometry: geometry.map((c) => [...c] as Coord),
+    hints: rawHints.map((h) => ({ ...h })),
+  }
   // L'édition se fait carte en main : on débraye le suivi caméra et on referme le tiroir.
   following.value = false
   cameraUnlocked.value = true
@@ -1591,6 +1605,27 @@ function closeEditMode() {
   editMarkers = []
   editMode.value = false
   editError.value = null
+  editSnapshot = null
+}
+
+// Annule l'édition : restaure l'itinéraire d'origine (si des modifications ont eu lieu),
+// quitte le mode sans enregistrer et rend la caméra au suivi.
+function cancelEditMode() {
+  if (editSaving.value) return
+  // Neutralise un éventuel reroutage BRouter en cours pour qu'il n'écrase pas la restauration.
+  editToken++
+  editBusy.value = false
+  if (editDirty.value && editSnapshot) {
+    routeWaypoints = editSnapshot.waypoints
+    rebuildRouteState(editSnapshot.geometry, editSnapshot.hints)
+    resetRouteTracking(false)
+    ensureRouteInstalled()
+    refreshRemaining()
+  }
+  closeEditMode()
+  following.value = true
+  cameraUnlocked.value = false
+  recenter()
 }
 
 // Termine l'édition : enregistre les modifications (si itinéraire possédé et connecté)
@@ -2901,16 +2936,26 @@ function toggleScreenOffManual() {
       <div v-else-if="editBusy" class="nav-edit-status shadow">
         <i class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>{{ t('routes.computing_route') }}
       </div>
-      <button
-        type="button"
-        class="btn btn-primary shadow nav-edit-done"
-        :disabled="editBusy || editSaving"
-        @click="finishEditMode"
-      >
-        <i v-if="editSaving" class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>
-        <i v-else class="fa-solid fa-check me-1" aria-hidden="true"></i>
-        {{ editSaving ? t('routes.save') : t('routes.edit_done') }}
-      </button>
+      <div class="nav-edit-actions">
+        <button
+          type="button"
+          class="btn btn-light shadow nav-edit-cancel"
+          :disabled="editSaving"
+          @click="cancelEditMode"
+        >
+          <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('routes.edit_cancel') }}
+        </button>
+        <button
+          type="button"
+          class="btn btn-primary shadow nav-edit-done"
+          :disabled="editBusy || editSaving"
+          @click="finishEditMode"
+        >
+          <i v-if="editSaving" class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>
+          <i v-else class="fa-solid fa-check me-1" aria-hidden="true"></i>
+          {{ editSaving ? t('routes.save') : t('routes.edit_done') }}
+        </button>
+      </div>
     </div>
 
     <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
@@ -3244,8 +3289,14 @@ function toggleScreenOffManual() {
   padding: 0.25rem 0.8rem; font-size: 0.9rem; font-weight: 600;
   display: inline-flex; align-items: center;
 }
+.nav-edit-actions {
+  display: flex; align-items: center; gap: 0.6rem;
+}
 .nav-edit-done {
   border-radius: 999px; font-weight: 600; font-size: 1.1rem; padding: 0.6rem 1.6rem;
+}
+.nav-edit-cancel {
+  border-radius: 999px; font-weight: 600; font-size: 1.1rem; padding: 0.6rem 1.4rem;
 }
 .nav-edit-error {
   background: #fff3cd; color: #664d03; border-radius: 999px;

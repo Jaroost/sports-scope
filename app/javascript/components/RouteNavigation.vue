@@ -200,6 +200,22 @@ const { onRevealDown, onRevealMove, onRevealUp, cancel: cancelReveal } = useReve
   canTap: () => !screenOff.value,
 })
 
+// ─── Masquage groupé des overlays du bas (cols / POI / avancement) ─────────────
+// Un swipe vers le haut depuis le bord inférieur (ou un tap sur la poignée) bascule la
+// visibilité de TOUS les overlays du bas d'un coup, pour dégager la carte.
+const bottomOverlaysVisible = ref(true)
+const {
+  onRevealDown: onBottomDown,
+  onRevealMove: onBottomMove,
+  onRevealUp: onBottomUp,
+  cancel: cancelBottomReveal,
+} = useRevealGesture({
+  onReveal: () => { bottomOverlaysVisible.value = !bottomOverlaysVisible.value },
+  onTap: () => { bottomOverlaysVisible.value = !bottomOverlaysVisible.value },
+  canTap: () => true,
+  direction: 'up',
+})
+
 // ─── Échelle largeur tracé / pastilles selon le zoom ───────────────────────────
 // Tracé et indicateurs de virage doivent se comporter comme un ruban posé au sol :
 // épais quand on zoome, fin quand on dézoome (et non l'inverse, ce que donnait une
@@ -459,7 +475,9 @@ let displayBearing = 0                 // smoothed bearing actually rendered
 // le tiroir de commandes. Valeur initiale issue du profil (section Navigation) ;
 // masqué, la carte n'est plus rétrécie et le bas de l'écran est dégagé.
 const showClimbCard = ref(navPrefs.show_climb_card ?? true)
-const isClimbing = computed(() => showClimbCard.value && climbInfo.value != null && !approachingTurn.value)
+// La carte de col n'est rétrécie/affichée que si elle est activée (showClimbCard) ET que
+// les overlays du bas ne sont pas masqués par le geste (bottomOverlaysVisible).
+const isClimbing = computed(() => showClimbCard.value && bottomOverlaysVisible.value && climbInfo.value != null && !approachingTurn.value)
 // Quand on entre/sort d'un col, la carte change de taille (CSS) : on attend le
 // reflow puis on prévient MapLibre et on rafraîchit la hauteur mise en cache, sinon
 // le canvas garde ses anciennes dimensions et la vue paraît étirée.
@@ -905,6 +923,8 @@ function loadRoute(route: any) {
 function unloadRoute() {
   // Sort proprement du mode édition (retire marqueurs / popup) avant de tout effacer.
   if (editMode.value) closeEditMode()
+  // Le geste de masquage groupé n'existe qu'en navigation sur itinéraire : on réaffiche.
+  bottomOverlaysVisible.value = true
   routeWaypoints = []
   routeId = null
   syncEditable()
@@ -2800,7 +2820,7 @@ function toggleScreenOffManual() {
     <!-- Climb card: full graded elevation profile with a position cursor.
          Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
     <NavClimbCard
-      v-if="showClimbCard && climbInfo && !offRoute && !approachingTurn && !editMode"
+      v-if="showClimbCard && bottomOverlaysVisible && climbInfo && !offRoute && !approachingTurn && !editMode"
       :climb-info="climbInfo"
       :screen-off="screenOff"
       @resume="toggleScreenOffManual"
@@ -2812,21 +2832,40 @@ function toggleScreenOffManual() {
          rendu ici (et non dans NavScreenOff) pour échapper au contexte d'empilement du
          voile et pouvoir passer AU-DESSUS de la carte de col en veille (z-index relevé
          via screen-off). -->
-    <NavPoiBanner v-if="poiHint && hasFix" :poi-hint="poiHint" :screen-off="screenOff" @toggle="toggleScreenOffManual" />
+    <NavPoiBanner v-if="poiHint && hasFix && bottomOverlaysVisible" :poi-hint="poiHint" :screen-off="screenOff" @toggle="toggleScreenOffManual" />
 
     <!-- Bottom stats : barre complète (distance / D+ / ETA / progression) en navigation
-         sur itinéraire ; en navigation libre, carte réduite à la vitesse. -->
+         sur itinéraire (masquable par le geste du bas) ; en navigation libre, carte
+         réduite à la vitesse. -->
     <NavStatsBar
-      v-if="hasRoute"
+      v-if="hasRoute && bottomOverlaysVisible"
       :remaining-m="remainingM"
       :remaining-gain-m="remainingGainM"
       :done-percent="donePercent"
       :speed-kmh="speedKmh"
       :eta-speed-kmh="avgSpeedKmh"
     />
-    <div v-else class="nav-stats nav-stats--free shadow">
+    <div v-else-if="!hasRoute" class="nav-stats nav-stats--free shadow">
       <div class="nav-stat-value">{{ Math.round(speedKmh) }}<span class="nav-stat-unit"> km/h</span></div>
       <div class="nav-stat-label">{{ t('routes.speed') }}</div>
+    </div>
+
+    <!-- Masquage groupé des overlays du bas : une fine zone au bord inférieur capte le
+         swipe vers le haut (ou un tap) et bascule la visibilité de tous les overlays du
+         bas. Réservée à la navigation sur itinéraire, masquée en veille / recherche /
+         édition. Le chevron pointe vers le bas quand tout est visible (geste → masquer)
+         et vers le haut quand c'est masqué (geste → réafficher). -->
+    <div
+      v-if="hasRoute && !screenOff && !placeNavActive && !editMode"
+      class="nav-bottom-reveal-zone"
+      @pointerdown="onBottomDown"
+      @pointermove="onBottomMove"
+      @pointerup="onBottomUp"
+      @pointercancel="cancelBottomReveal"
+    >
+      <span class="nav-bottom-grabber" aria-hidden="true">
+        <i class="fa-solid" :class="bottomOverlaysVisible ? 'fa-chevron-down' : 'fa-chevron-up'"></i>
+      </span>
     </div>
   </div>
 </template>
@@ -2880,6 +2919,26 @@ function toggleScreenOffManual() {
   50% { opacity: 0.7; }
 }
 
+/* Zone de geste « swipe vers le haut » du tiroir du bas : petit grabber centré au bord
+   inférieur (étroit pour ne pas capter les taps sur la barre de stats au-dessus).
+   touch-action:none pour que le glissement vertical déclenche pointermove. z-index 8 :
+   au-dessus des overlays du bas (stats z6, POI z7), sous le tiroir lui-même (z9). */
+.nav-bottom-reveal-zone {
+  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 6rem; height: 2.2rem; z-index: 8; touch-action: none;
+  display: flex; justify-content: center; align-items: flex-end;
+}
+/* Chevron discret indiquant qu'on peut faire glisser vers le haut pour déployer le
+   tiroir d'affichage. */
+.nav-bottom-grabber {
+  margin-bottom: 0.2rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.4rem; height: 1.3rem; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28); color: #fff; font-size: 0.7rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  animation: nav-reveal-pulse 2.4s ease-in-out infinite;
+}
+
 .nav-banner {
   position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
   z-index: 3; padding: 0.45rem 0.9rem; border-radius: 999px;
@@ -2914,24 +2973,29 @@ function toggleScreenOffManual() {
 .nav-toast-enter-active, .nav-toast-leave-active { transition: opacity 0.25s, transform 0.25s; }
 .nav-toast-enter-from, .nav-toast-leave-to { opacity: 0; transform: translate(-50%, -0.5rem); }
 
+/* Bouton recentrer : centré horizontalement, tout en bas (par-dessus la barre
+   d'avancement) et au-dessus de TOUS les autres éléments (z-index 22 > voile de
+   veille 20/21 et marqueurs POI 1) pour rester toujours accessible. */
 .nav-recenter {
-  position: absolute; bottom: 8.5rem; right: 0.75rem; z-index: 4;
-  border-radius: 999px; font-weight: 600;
-  font-size: 1.1rem; padding: 0.6rem 1.1rem;
+  position: absolute; bottom: 0.9rem; left: 50%; transform: translateX(-50%); z-index: 22;
+  border-radius: 999px; font-weight: 700;
+  font-size: 1.35rem; padding: 0.85rem 1.8rem;
 }
 
-/* Bouton de reroutage : centré sous la grande flèche hors-tracé, au-dessus du
-   bandeau de stats. z-index 7 pour rester cliquable au-dessus de la flèche (z 6). */
+/* Bouton de reroutage : centré AU-DESSUS de la grande flèche hors-tracé (flèche
+   centrée à 50 %, ~20 vmin de demi-hauteur). On ancre le bas du bloc juste au-dessus
+   du sommet de la flèche pour qu'il la surplombe. z-index 7 pour rester cliquable
+   au-dessus de la flèche (z 6). */
 .nav-reroute {
-  position: absolute; bottom: 12rem; left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: calc(50% + 21vmin); left: 50%; transform: translateX(-50%);
   z-index: 7; display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
 }
 /* Mode veille : au-dessus du voile noir (z 20) pour rester cliquable écran éteint,
    comme la grande flèche hors-tracé. */
 .nav-reroute--sleep { z-index: 21; }
 .nav-reroute-btn {
-  border-radius: 999px; font-weight: 600;
-  font-size: 1.1rem; padding: 0.6rem 1.4rem;
+  border-radius: 999px; font-weight: 700;
+  font-size: 1.45rem; padding: 0.9rem 2rem;
 }
 .nav-reroute-error {
   background: #fff3cd; color: #664d03; border-radius: 999px;

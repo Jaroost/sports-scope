@@ -343,18 +343,26 @@ const rerouteError = ref<string | null>(null)
 // tap sur la carte fixe le point de destination ; « Naviguer ici » calcule un
 // itinéraire depuis la position GPS et remplace le tracé courant (applyReroute).
 const placeNavActive = ref(false)
-// Mode recherche (cible) : tant que l'utilisateur cherche un nouveau lieu / itinéraire,
-// on neutralise TOUTES les alertes — sons (virage, hors-trace, radar) ET vibrations. Il a
-// la tête dans la carte et le clavier, pas sur la route : bipper ou vibrer pour un virage
-// du tracé qu'il s'apprête à abandonner ne serait que du bruit parasite.
-const alertsMuted = computed(() => placeNavActive.value || editMode.value)
-// Sourdine AUDIO = sourdine globale (mode recherche) OU tiroir de commandes affiché OU
-// parcours des POI. Tant que le panneau de boutons est visible (l'utilisateur le consulte
-// / ajuste un réglage), ou qu'on enchaîne les POI à la main (tête dans la liste, pas sur
-// la route), on coupe les alertes SONORES (virage, hors-trace, radar, POI) — un bip
-// par-dessus serait du bruit parasite. Les vibrations, elles, restent pilotées par
-// alertsMuted, donc actives. controlsVisible est fourni par useControlsHide ci-dessus.
-const audioMuted = computed(() => alertsMuted.value || controlsVisible.value || poiBrowseActive.value)
+// Mode recherche (cible) / édition : l'utilisateur cherche un nouveau lieu / itinéraire ou
+// retouche le tracé — la tête dans la carte et le clavier, pas sur la route. Bipper ou
+// vibrer pour un virage du tracé qu'il s'apprête à abandonner ne serait que du bruit
+// parasite. Base commune aux différentes sourdines ci-dessous.
+const searchOrEditMuted = computed(() => placeNavActive.value || editMode.value)
+// Sourdine des alertes du TRACÉ (virage, hors-trace, POI) — sons ET vibrations. On y
+// ajoute le parcours des POI : pendant qu'il enchaîne ses POI à la main, on ne le
+// dérange pas avec les indications du tracé. Le radar, lui, n'est PAS coupé par le
+// parcours POI (cf. radarMuted) : une voiture qui arrive derrière reste une alerte de
+// sécurité, à signaler quoi qu'il fasse.
+const alertsMuted = computed(() => searchOrEditMuted.value || poiBrowseActive.value)
+// Sourdine AUDIO des alertes du tracé = sourdine alertes OU tiroir de commandes affiché.
+// Tant que le panneau de boutons est visible (l'utilisateur le consulte / ajuste un
+// réglage), on coupe les sons (virage, hors-trace, POI) — un bip par-dessus le menu serait
+// du bruit parasite. Les vibrations, elles, restent pilotées par alertsMuted.
+const audioMuted = computed(() => alertsMuted.value || controlsVisible.value)
+// Sourdine du RADAR : mêmes conditions que les sons du tracé MAIS sans le parcours POI —
+// l'alerte radar (son + overlay) reste active pendant qu'on parcourt ses POI, car c'est
+// une info de sécurité (voiture arrivant par l'arrière).
+const radarMuted = computed(() => searchOrEditMuted.value || controlsVisible.value)
 // Points d'étape posés au tap avant de valider : la navigation passera par chacun
 // dans l'ordre, depuis la position GPS. Un seul point = destination directe.
 const destPoints = ref<LngLat[]>([])
@@ -556,10 +564,11 @@ const showClimbCard = ref(navPrefs.show_climb_card ?? true)
 // La carte n'est rétrécie que quand la carte de col est EFFECTIVEMENT affichée : cette
 // condition doit donc rester alignée sur le v-if de NavClimbCard (showClimbCard +
 // overlays du bas visibles + col en cours + ni approche de virage, ni hors-tracé, ni
-// édition). Sinon la carte se rétrécit pour un panneau absent, laissant un vide en bas.
+// édition, ni parcours POI). Sinon la carte se rétrécit pour un panneau absent, laissant
+// un vide en bas.
 const isClimbing = computed(() =>
   showClimbCard.value && bottomOverlaysVisible.value && climbInfo.value != null
-  && !approachingTurn.value && !offRoute.value && !editMode.value)
+  && !approachingTurn.value && !offRoute.value && !editMode.value && !poiBrowseActive.value)
 // Quand on entre/sort d'un col, la carte change de taille (CSS) : on attend le
 // reflow puis on prévient MapLibre et on rafraîchit la hauteur mise en cache, sinon
 // le canvas garde ses anciennes dimensions et la vue paraît étirée.
@@ -591,7 +600,7 @@ const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
 // ─── Radar arrière (Garmin Varia) ─────────────────────────────────────────────
 // Connexion/déconnexion + alertes sonores (une par véhicule). Voir useRadarAlerts.
-const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn, muted: audioMuted })
+const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn, muted: radarMuted })
 
 // Le bandeau radar (RadarOverlay) occupe le tout-haut de l'écran. Quand il est
 // visible, on descend la vitesse/le virage pour ne pas passer dessous. Même
@@ -2865,7 +2874,7 @@ function toggleScreenOffManual() {
     <!-- Upcoming turn indicator. Masqué en mode recherche : l'utilisateur a la tête
          dans la carte pour choisir une nouvelle destination, pas sur le tracé courant. -->
     <NavTurnBanner
-      v-if="turnHint && hasFix && !offRoute && !placeNavActive && !editMode"
+      v-if="turnHint && hasFix && !offRoute && !placeNavActive && !editMode && !poiBrowseActive"
       :turn-hint="turnHint"
       :urgent-m="TURN_URGENT_M"
       :radar-banner-visible="radarBannerVisible"
@@ -2886,7 +2895,7 @@ function toggleScreenOffManual() {
          Reste visible (au-dessus du voile noir) en mode veille : quitter le tracé
          est une info de sécurité qui doit réveiller l'attention même écran éteint. -->
     <i
-      v-if="offRoute && hasFix && !placeNavActive && !editMode"
+      v-if="offRoute && hasFix && !placeNavActive && !editMode && !poiBrowseActive"
       class="fa-solid fa-arrow-up nav-offroute-bigarrow"
       :class="{ 'nav-offroute-bigarrow--sleep': screenOff }"
       :style="{ transform: `translate(-50%, -50%) rotate(${offRouteRelBearing}deg)` }"
@@ -2896,7 +2905,7 @@ function toggleScreenOffManual() {
     <!-- Reroutage manuel : recalcule un chemin BRouter de la position vers le tracé.
          Reste visible en veille (au-dessus du voile noir) : quitter le tracé est une
          info de sécurité ; l'erreur éventuelle s'affiche sous le bouton. -->
-    <div v-if="offRoute && hasFix && !placeNavActive && !editMode" class="nav-reroute" :class="{ 'nav-reroute--sleep': screenOff }">
+    <div v-if="offRoute && hasFix && !placeNavActive && !editMode && !poiBrowseActive" class="nav-reroute" :class="{ 'nav-reroute--sleep': screenOff }">
       <button
         type="button"
         class="btn btn-warning shadow nav-reroute-btn"
@@ -2924,7 +2933,7 @@ function toggleScreenOffManual() {
     <!-- Climb card: full graded elevation profile with a position cursor.
          Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
     <NavClimbCard
-      v-if="showClimbCard && bottomOverlaysVisible && climbInfo && !offRoute && !approachingTurn && !editMode"
+      v-if="showClimbCard && bottomOverlaysVisible && climbInfo && !offRoute && !approachingTurn && !editMode && !poiBrowseActive"
       :climb-info="climbInfo"
       :screen-off="screenOff"
       @resume="toggleScreenOffManual"

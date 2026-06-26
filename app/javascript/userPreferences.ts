@@ -21,6 +21,7 @@ export interface UserPreferences {
     show_toilets: boolean
     show_picnic: boolean
     radius_m: number
+    alert_m: number
   }
   map: { default_style: MapStyleId; overlays: string[] }
   search: { country_codes: string[]; worldwide_fallback: boolean }
@@ -54,6 +55,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     show_toilets: false,
     show_picnic: false,
     radius_m: 1500,
+    alert_m: 100,
   },
   map: { default_style: 'cyclosm', overlays: [] },
   search: {

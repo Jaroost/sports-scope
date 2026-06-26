@@ -242,6 +242,7 @@ en:
     edit_saved: "Route saved"
     edit_save_error: "Could not save the route"
     destination: "Destination"
+    point_of_interest: "Point of interest"
     share: "Share navigation link"
     share_view: "Share link (read-only)"
     share_copied: "Link copied!"
@@ -411,6 +412,8 @@ en:
       cemeteries: "Cemeteries (water points)"
       localities: "Localities along the way"
       radius: "Detection radius"
+      alert: "Notification distance"
+      alert_help: "While navigating, a point of interest within this distance triggers a notification at the bottom of the screen."
     map:
       title: "Map type"
       help: "Default base map shown when opening the route builder."

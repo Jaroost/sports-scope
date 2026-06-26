@@ -16,11 +16,13 @@ import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
-import { unlockAudio, playManeuver, playOffRoute } from '../navAudio'
-import { vibrateManeuver, vibrateApproach, vibrateOffRoute } from '../navHaptics'
+import { unlockAudio, playManeuver, playOffRoute, playPoi } from '../navAudio'
+import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi } from '../navHaptics'
+import { categoryForType } from '../poiCategories'
 import RadarOverlay from './RadarOverlay.vue'
 import NavOfflineButton from './NavOfflineButton.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
+import NavPoiBanner from './NavPoiBanner.vue'
 import NavScreenOff from './NavScreenOff.vue'
 import NavClimbCard from './NavClimbCard.vue'
 import NavStatsBar from './NavStatsBar.vue'
@@ -291,6 +293,17 @@ const climbInfo = ref<ClimbInfo | null>(null)
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
 const turnHint = ref<TurnHint | null>(null)
 
+// ─── Notification de proximité d'un point d'intérêt ────────────────────────────
+// Quand le coureur passe à portée (≤ points_of_interest.alert_m, 100 m par défaut)
+// d'un POI affiché, on montre un bandeau en bas (NavPoiBanner, au-dessus de la barre
+// de progression) — le pendant « POI » de la notification de virage. `poiHint` pilote
+// le bandeau (POI le plus proche dans le rayon, ou null). `announcedPoiKey` retient le
+// dernier POI signalé (son + vibration) pour ne le faire qu'une fois par approche ;
+// remis à zéro dès qu'on s'éloigne (poiHint repasse à null), pour réalerter en cas de
+// repassage. Le rayon de notification est relu à chaque fix (réglable au profil).
+const poiHint = ref<{ name: string; icon: string; color: string; distM: number } | null>(null)
+let announcedPoiKey: string | null = null
+
 let map: any = null
 let maplibre: any = null
 let locationMarker: any = null
@@ -503,13 +516,14 @@ const approachingTurn = computed(
 // Réservé aux comptes pouvant tout faire (can? :manage, :all → prop canDebug), ou
 // forçable via `?debug=1` dans l'URL. Il révèle un bouton « flacon » dans le tiroir
 // de commandes qui ouvre un panneau permettant d'injecter des données factices pour
-// prévisualiser, sans GPS / col réel / radar Varia, les trois overlays clés :
+// prévisualiser, sans GPS / col réel / radar Varia, les overlays clés :
 //   • le radar arrière (RadarOverlay)
 //   • la carte de col (climbInfo)
 //   • la notification de virage (turnHint)
-// Tant qu'une bascule est active, les mises à jour live (updateTurns / updateProgress)
-// ne réécrivent PAS l'overlay correspondant (gardes dbgTurn / dbgClimb), pour qu'un
-// vrai fix GPS ne l'efface pas pendant qu'on l'inspecte.
+//   • la notification de POI (poiHint)
+// Tant qu'une bascule est active, les mises à jour live (updateTurns / updateProgress /
+// updatePoiProximity) ne réécrivent PAS l'overlay correspondant (gardes dbgTurn /
+// dbgClimb / dbgPoi), pour qu'un vrai fix GPS ne l'efface pas pendant qu'on l'inspecte.
 const debugMode = props.canDebug === true || (() => {
   try { return new URLSearchParams(window.location.search).has('debug') } catch { return false }
 })()
@@ -517,6 +531,7 @@ const showDebugPanel = ref(false)
 const dbgRadar = ref(false)
 const dbgClimb = ref(false)
 const dbgTurn = ref(false)
+const dbgPoi = ref(false)
 
 // Scénarios de virage parcourus en boucle (un clic = scénario suivant, puis « off »).
 // Couvre chaque état visuel : lointain (gris), approche (violet), urgent (orange),
@@ -550,6 +565,22 @@ function toggleDebugClimb() {
   dbgClimb.value = true
   hasFix.value = true
   climbInfo.value = buildDebugClimb()
+}
+
+// Notification POI factice : épingle un bandeau « boulangerie » à 80 m pour
+// prévisualiser le rendu (bas d'écran, et en veille via NavScreenOff) sans devoir
+// passer à portée d'un vrai POI.
+function toggleDebugPoi() {
+  if (dbgPoi.value) { dbgPoi.value = false; poiHint.value = null; return }
+  dbgPoi.value = true
+  hasFix.value = true
+  const cat = categoryForType('bakery')
+  poiHint.value = {
+    name: 'Boulangerie du Col',
+    icon: cat?.icon ?? 'fa-location-dot',
+    color: cat?.color ?? '#6b7280',
+    distM: 80,
+  }
 }
 
 // Radar factice : on passe le store en « connecté » sans Bluetooth (pas de watchdog,
@@ -1995,6 +2026,9 @@ function onPosition(pos: GeolocationPosition) {
     onPositionFree(pos, here)
   }
 
+  // Notification de proximité d'un POI (bandeau du bas), en mode itinéraire comme libre.
+  updatePoiProximity(here)
+
   if (!hasInitialZoom) {
     // First fix: a smooth intro that also applies the profile zoom & pitch once,
     // then the rAF loop takes over the camera. On affiche directement l'ancre
@@ -2288,6 +2322,43 @@ function handleOffRouteSound(wasOffRoute: boolean) {
   }
 }
 
+// Notification de proximité d'un point d'intérêt : repère le POI affiché le plus
+// proche dans le rayon configuré (points_of_interest.alert_m) et pilote le bandeau du
+// bas. Émet une alerte discrète (son + vibration) une seule fois à l'entrée dans le
+// rayon de chaque POI. Masquée — comme les notifications du tracé — en mode recherche,
+// en édition ou hors-trajet ; le silence des alertes suit alertsMuted / audioMuted.
+function updatePoiProximity(here: LngLat) {
+  // Débug : une notification POI factice est épinglée, on ne la réécrit pas depuis le GPS.
+  if (dbgPoi.value) return
+  if (placeNavActive.value || editMode.value || offRoute.value) {
+    poiHint.value = null
+    announcedPoiKey = null
+    return
+  }
+  const alertM = userPreferences().points_of_interest.alert_m
+  const near = alertM > 0 ? pois.nearestVisiblePoi(here, alertM) : null
+  if (!near) {
+    poiHint.value = null
+    announcedPoiKey = null
+    return
+  }
+  const cat = categoryForType(near.place.type)
+  poiHint.value = {
+    name: near.place.name || t('routes.point_of_interest'),
+    icon: cat?.icon ?? 'fa-location-dot',
+    color: cat?.color ?? '#6b7280',
+    distM: near.distM,
+  }
+  // Identité stable d'un POI (type + coordonnées) : une seule alerte par entrée dans
+  // le rayon ; announcedPoiKey est remis à null dès qu'on en sort (cf. branches ci-dessus).
+  const key = `${near.place.type}:${near.place.lng.toFixed(5)}:${near.place.lat.toFixed(5)}`
+  if (key !== announcedPoiKey) {
+    announcedPoiKey = key
+    if (soundOn.value && !audioMuted.value) playPoi()
+    if (!alertsMuted.value) vibratePoi()
+  }
+}
+
 // Instantaneous speed in km/h: trust the GPS-reported speed when present,
 // otherwise derive it from the displacement since the previous fix.
 function updateSpeed(pos: GeolocationPosition, here: LngLat) {
@@ -2526,6 +2597,7 @@ function toggleScreenOffManual() {
       :dbg-radar="dbgRadar"
       :dbg-climb="dbgClimb"
       :dbg-turn-label="dbgTurnLabel"
+      :dbg-poi="dbgPoi"
       v-model:show-cam-panel="showCamPanel"
       v-model:show-poi-panel="showPoiPanel"
       v-model:show-debug-panel="showDebugPanel"
@@ -2548,6 +2620,7 @@ function toggleScreenOffManual() {
       @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
+      @toggle-debug-poi="toggleDebugPoi"
     >
       <template #map-extra>
         <!-- Carte hors-ligne réservée à un itinéraire identifié par token (lien partagé
@@ -2732,6 +2805,14 @@ function toggleScreenOffManual() {
       :screen-off="screenOff"
       @resume="toggleScreenOffManual"
     />
+
+    <!-- Notification de proximité d'un point d'intérêt : bandeau compact en bas, juste
+         au-dessus de la barre de progression. Le pendant « POI » du virage (en haut).
+         Maintenu en veille (un point d'eau / une boulangerie reste utile écran éteint) :
+         rendu ici (et non dans NavScreenOff) pour échapper au contexte d'empilement du
+         voile et pouvoir passer AU-DESSUS de la carte de col en veille (z-index relevé
+         via screen-off). -->
+    <NavPoiBanner v-if="poiHint && hasFix" :poi-hint="poiHint" :screen-off="screenOff" @toggle="toggleScreenOffManual" />
 
     <!-- Bottom stats : barre complète (distance / D+ / ETA / progression) en navigation
          sur itinéraire ; en navigation libre, carte réduite à la vitesse. -->

@@ -3,6 +3,7 @@ class ProfilesController < ApplicationController
 
   # Bornes de validation pour les préférences numériques (cohérentes avec le front).
   RADIUS_RANGE = (200..5000)
+  POI_ALERT_RANGE = (20..1000)
   MIN_GRADE_RANGE = (0.0..15.0)
   MIN_GAIN_RANGE = (0..1000)
   MIN_LENGTH_RANGE = (50..5000)
@@ -77,6 +78,7 @@ class ProfilesController < ApplicationController
         "show_toilets" => to_bool(poi[:show_toilets], false),
         "show_picnic" => to_bool(poi[:show_picnic], false),
         "radius_m" => clamp_int(poi[:radius_m], RADIUS_RANGE, 1500),
+        "alert_m" => clamp_int(poi[:alert_m], POI_ALERT_RANGE, 100),
       },
       "map" => {
         "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, "cyclosm"),

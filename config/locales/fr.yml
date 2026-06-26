@@ -242,6 +242,7 @@ fr:
     edit_saved: "Itinéraire enregistré"
     edit_save_error: "Échec de l'enregistrement de l'itinéraire"
     destination: "Destination"
+    point_of_interest: "Point d'intérêt"
     share: "Partager le lien de navigation"
     share_view: "Partager le lien (lecture seule)"
     share_copied: "Lien copié !"
@@ -411,6 +412,8 @@ fr:
       cemeteries: "Cimetières (points d'eau)"
       localities: "Localités traversées"
       radius: "Rayon de détection"
+      alert: "Distance de notification"
+      alert_help: "En navigation, un point d'intérêt situé à cette distance ou moins déclenche une notification en bas de l'écran."
     map:
       title: "Type de carte"
       help: "Fond de carte affiché par défaut à l'ouverture du créateur d'itinéraire."

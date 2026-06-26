@@ -54,6 +54,7 @@ export function useNavPois(deps: {
   const poiCounts = reactive<Record<string, number>>({})
 
   let placeMarkers: any[] = []   // marqueurs POI ponctuels (filtrés par le panneau de séance)
+  let currentPlaces: NavPlace[] = []   // POI ponctuels actuellement posés (pour la détection de proximité)
   let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
   let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
   const svCache = new Map<string, boolean>()     // cache « Street View dispo ? » par POI
@@ -154,6 +155,7 @@ export function useNavPois(deps: {
     closePlacePopup()
     for (const m of placeMarkers) m.remove()
     placeMarkers = []
+    currentPlaces = places
     for (const place of places) {
       const el = document.createElement('div')
       const cat = categoryForType(place.type)
@@ -176,6 +178,21 @@ export function useNavPois(deps: {
     }
     applyPoiScale(map.getZoom())
     applyPoiVisibility()
+  }
+
+  // POI ponctuel visible (catégorie non masquée par le panneau) le plus proche de
+  // `pos`, dans la limite `maxDistM`, ou null. Sert à la notification de proximité de
+  // navigation (RouteNavigation) : on prévient le coureur quand il passe près d'un lieu.
+  function nearestVisiblePoi(pos: LngLat, maxDistM: number): { place: NavPlace; distM: number } | null {
+    let best: { place: NavPlace; distM: number } | null = null
+    for (const place of currentPlaces) {
+      const cat = categoryForType(place.type)
+      if (cat && poiVisible[cat.key] === false) continue
+      const d = haversine(pos, [place.lng, place.lat])
+      if (d > maxDistM) continue
+      if (!best || d < best.distM) best = { place, distM: d }
+    }
+    return best
   }
 
   // Affiche/masque les marqueurs POI selon les bascules du panneau de séance.
@@ -327,6 +344,7 @@ export function useNavPois(deps: {
     poiCounts,
     loading,
     fetchPlaces,
+    nearestVisiblePoi,
     togglePoi,
     applyPoiScale,
     closePlacePopup,

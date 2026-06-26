@@ -105,6 +105,15 @@ export function playOffRoute(): void {
   beep(280, 0.24, 0.3, 0.22)
 }
 
+// Soft two-note chime — a point of interest is coming up nearby. Gentle and
+// pleasant (a rising major third), deliberately quieter than the maneuver/radar
+// cues: it's a "heads up, there's a fountain/bakery here", not a safety alert.
+export function playPoi(): void {
+  unlockAudio()
+  beep(660, 0, 0.14, 0.1)
+  beep(880, 0.16, 0.22, 0.1)
+}
+
 // Two quick rising notes — a car has just entered radar range behind you. Kept
 // distinct from the turn cues (which carry a left/right pitch direction) so it
 // reads clearly as "vehicle approaching", not a maneuver.

@@ -13,6 +13,7 @@ class User < ApplicationRecord
       "show_toilets" => false,
       "show_picnic" => false,
       "radius_m" => 1500,
+      "alert_m" => 100,    # distance (m) à laquelle un POI proche déclenche la notification de navigation
     },
     "map" => {
       "default_style" => "cyclosm",

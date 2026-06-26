@@ -41,6 +41,7 @@ const props = defineProps<{
   routeSearch?: boolean
   dbgRadar: boolean
   dbgClimb: boolean
+  dbgPoi: boolean
   // Libellé d'état du scénario de virage débug (ex. « Approche »), ou null quand off.
   dbgTurnLabel: string | null
   showCamPanel: boolean
@@ -68,6 +69,7 @@ const emit = defineEmits<{
   (e: 'toggle-debug-radar'): void
   (e: 'toggle-debug-climb'): void
   (e: 'cycle-debug-turn'): void
+  (e: 'toggle-debug-poi'): void
   (e: 'update:camPitch', v: number): void
   (e: 'update:camZoom', v: number): void
   (e: 'update:showCamPanel', v: boolean): void
@@ -174,6 +176,11 @@ function onZoom(e: Event) {
             <i class="fa-solid fa-arrow-turn-up" aria-hidden="true"></i>
             <span>Virage</span>
             <span class="nav-debug-state">{{ dbgTurnLabel ?? 'off' }}</span>
+          </button>
+          <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgPoi }" @click="$emit('toggle-debug-poi')">
+            <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+            <span>POI</span>
+            <span class="nav-debug-state">{{ dbgPoi ? 'on' : 'off' }}</span>
           </button>
         </div>
       </div>

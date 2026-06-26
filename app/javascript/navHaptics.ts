@@ -35,3 +35,9 @@ export function vibrateApproach(): void {
 export function vibrateOffRoute(): void {
   vibrate([400, 120, 400])
 }
+
+// Court double buzz léger : on passe près d'un point d'intérêt. Volontairement
+// discret (ce n'est pas une alerte de sécurité) et distinct des motifs de virage.
+export function vibratePoi(): void {
+  vibrate([120, 80, 120])
+}

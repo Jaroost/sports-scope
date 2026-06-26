@@ -22,6 +22,7 @@ interface Preferences {
     show_toilets: boolean
     show_picnic: boolean
     radius_m: number
+    alert_m: number
   }
   map: {
     default_style: string
@@ -445,6 +446,11 @@ function placePreviewMarker(coords: [number, number]) {
           {{ t('profile.poi.radius') }} : <strong>{{ prefs.points_of_interest.radius_m }} m</strong>
         </label>
         <input id="poi-radius" v-model.number="prefs.points_of_interest.radius_m" type="range" class="form-range" min="200" max="5000" step="100">
+        <label for="poi-alert" class="form-label mb-1 mt-2">
+          {{ t('profile.poi.alert') }} : <strong>{{ prefs.points_of_interest.alert_m }} m</strong>
+        </label>
+        <p class="text-muted small mb-1">{{ t('profile.poi.alert_help') }}</p>
+        <input id="poi-alert" v-model.number="prefs.points_of_interest.alert_m" type="range" class="form-range" min="20" max="1000" step="10">
       </div>
     </section>
 

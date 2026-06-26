@@ -131,6 +131,69 @@ export function buildCoordPopupContent(
   return wrap
 }
 
+// Tooltip d'un point d'étape posé en mode « cible » (navigation vers un lieu). Reprend
+// les liens Google Maps / Street View de la tooltip générique, mais propose en tête un
+// bouton « Supprimer ce point » (rouge) au lieu de « Ajouter à l'itinéraire ». `onDelete`
+// retire le point de la séquence ; `onClose` ferme le popup.
+export function buildDestPointPopupContent(
+  lng: number,
+  lat: number,
+  onClose: () => void,
+  onDelete: () => void,
+): HTMLElement {
+  const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`
+  const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`
+  const wrap = document.createElement('div')
+  wrap.className = 'place-popup'
+  wrap.innerHTML = `
+    <div class="place-popup-header">
+      <span class="place-popup-name">${escapeHtml(t('routes.waypoint'))}</span>
+      <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
+    </div>
+    <button type="button" class="place-popup-link place-popup-link--delete">
+      <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.delete_point'))}</span>
+    </button>
+    <div class="place-popup-coords-row">
+      <button type="button" class="place-popup-link place-popup-link--copy" data-coord="${lat.toFixed(6)}" title="${escapeHtml(t('routes.copy_latitude'))}">
+        <i class="fa-regular fa-copy" aria-hidden="true"></i>
+        <span>Lat&nbsp;${lat.toFixed(6)}</span>
+      </button>
+      <button type="button" class="place-popup-link place-popup-link--copy" data-coord="${lng.toFixed(6)}" title="${escapeHtml(t('routes.copy_longitude'))}">
+        <i class="fa-regular fa-copy" aria-hidden="true"></i>
+        <span>Lng&nbsp;${lng.toFixed(6)}</span>
+      </button>
+    </div>
+    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-brands fa-google" aria-hidden="true"></i>
+      <span>Google Maps</span>
+    </a>
+    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.street_view'))}</span>
+    </a>`
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', onClose)
+  wrap.querySelector('.place-popup-link--delete')?.addEventListener('click', (ev) => {
+    ev.stopPropagation(); ev.preventDefault()
+    onDelete()
+  })
+  wrap.querySelectorAll<HTMLElement>('.place-popup-link--copy').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation(); ev.preventDefault()
+      copyText(btn.dataset.coord || '', btn)
+    })
+  })
+  const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
+  if (svLink) {
+    checkStreetView(lat, lng).then((ok) => {
+      svLink.classList.toggle('place-popup-link--disabled', !ok)
+      if (!ok) svLink.setAttribute('aria-disabled', 'true')
+      else svLink.removeAttribute('aria-disabled')
+    })
+  }
+  return wrap
+}
+
 // Détecte un appui long (mobile) sur un élément (typiquement le canvas de la carte) et
 // appelle `handler(clientX, clientY)` au point touché. On reste passif (aucun
 // preventDefault) pour ne pas casser le pan / pinch natif de MapLibre : un déplacement

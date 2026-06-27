@@ -7,28 +7,42 @@ import type { Sport } from './userPreferences'
 // tracé en ligne droite plutôt qu'accroché à la route). Aligné sur routeStore.
 export interface Waypoint { lng: number; lat: number; free?: boolean }
 
+// Cap (angle boussole 0–360) injecté comme direction de départ BRouter. Le moteur place
+// un faux point d'origine à 1 km en arrière dans ce cap, si bien que repartir en sens
+// inverse au départ subit la pleine pénalité de virage (turncost) : le demi-tour initial
+// devient très coûteux. Sert au reroutage pour repartir vers l'avant au lieu de faire
+// demi-tour vers d'où l'on vient. Renvoie le fragment d'URL `&heading=…` (ou rien).
+function headingParam(heading?: number): string {
+  if (heading == null || !Number.isFinite(heading)) return ''
+  const deg = Math.round(((heading % 360) + 360) % 360)
+  return `&heading=${deg}`
+}
+
 // Calcule un itinéraire BRouter entre deux points et renvoie sa géométrie + les
 // indications de virage (voicehints). Partagé par le reroutage en séance
 // (RouteNavigation) et le lancement d'une navigation vers un lieu choisi sur la
-// carte (navigation libre ou sur itinéraire).
+// carte (navigation libre ou sur itinéraire). `heading` (optionnel) fixe le cap de
+// départ pour décourager un demi-tour initial — voir headingParam.
 export async function fetchRouteToPlace(
   from: LngLat,
   to: LngLat,
   sport: Sport,
+  heading?: number,
 ): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
-  return fetchRouteVia([from, to], sport)
+  return fetchRouteVia([from, to], sport, heading)
 }
 
 // Calcule un itinéraire BRouter passant par une suite de points (≥ 2). Sert à insérer
 // un point intermédiaire en navigation : on route depuis un ancrage du tracé, à travers
 // le nouveau point, jusqu'à un ancrage situé un peu plus loin. Même format de retour que
-// fetchRouteToPlace (géométrie + voicehints).
+// fetchRouteToPlace (géométrie + voicehints). `heading` (optionnel) fixe le cap de départ.
 export async function fetchRouteVia(
   points: LngLat[],
   sport: Sport,
+  heading?: number,
 ): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
   const lonlats = points.map((p) => `${p[0]},${p[1]}`).join('|')
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${brouterProfile(sport)}&alternativeidx=0&format=geojson&timode=2`
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${brouterProfile(sport)}&alternativeidx=0&format=geojson&timode=2${headingParam(heading)}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
   const data = await res.json()

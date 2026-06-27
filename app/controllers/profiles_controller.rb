@@ -10,6 +10,7 @@ class ProfilesController < ApplicationController
   GRADE_SMOOTHING_RANGE = (10..200)
   MERGE_GAP_RANGE = (0..2000)
   SPEED_RANGE = (3.0..80.0)
+  TURN_ANOMALY_RANGE = (30..200)
   NAV_ZOOM_RANGE = (14.0..40.0)
   NAV_PITCH_RANGE = (0..90)
   NAV_FPS_RANGE = (0.5..60.0)
@@ -36,6 +37,10 @@ class ProfilesController < ApplicationController
 
   # Vitesses moyennes par défaut (km/h), miroir de User::DEFAULT_PREFERENCES.
   DEFAULT_SPEEDS = { "cycling" => 18, "mtb" => 14, "hiking" => 4.5 }.freeze
+
+  # Diamètres (m) par défaut de la détection d'amas de virages, par sport. Miroir de
+  # User::DEFAULT_PREFERENCES.
+  DEFAULT_TURN_ANOMALY = { "cycling" => 100, "mtb" => 80, "hiking" => 60 }.freeze
 
   # GET /profile — page HTML qui monte l'îlot Vue UserProfile.
   def show
@@ -66,6 +71,7 @@ class ProfilesController < ApplicationController
     display = incoming[:display] || {}
     climb = incoming[:climb_detection] || {}
     speeds = incoming[:speeds] || {}
+    turn_anomaly = incoming[:turn_anomaly] || {}
 
     {
       "points_of_interest" => {
@@ -128,6 +134,7 @@ class ProfilesController < ApplicationController
         "merge_gap_m" => clamp_int(climb[:merge_gap_m], MERGE_GAP_RANGE, 350),
       },
       "speeds" => sanitize_speeds(speeds),
+      "turn_anomaly" => sanitize_turn_anomaly(turn_anomaly),
     }
   end
 
@@ -150,6 +157,12 @@ class ProfilesController < ApplicationController
   def sanitize_speeds(speeds)
     DEFAULT_SPEEDS.each_with_object({}) do |(sport, default), out|
       out[sport] = clamp_float(speeds[sport], SPEED_RANGE, default)
+    end
+  end
+
+  def sanitize_turn_anomaly(turn_anomaly)
+    DEFAULT_TURN_ANOMALY.each_with_object({}) do |(sport, default), out|
+      out[sport] = clamp_int(turn_anomaly[sport], TURN_ANOMALY_RANGE, default)
     end
   end
 

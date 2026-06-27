@@ -68,6 +68,16 @@ class User < ApplicationRecord
       "mtb" => 14,
       "hiking" => 4.5,
     },
+    # Détection d'amas de virages dans le créateur : diamètre (m) du cercle sous lequel
+    # un groupe d'au moins 3 virages BRouter est signalé comme anomalie (typiquement un
+    # point d'étape posé à côté de la route, qui fait crocheter le routage). Réglable par
+    # sport car les sentiers (rando/VTT) enchaînent des virages serrés légitimes (lacets)
+    # : un diamètre plus petit y limite les faux positifs.
+    "turn_anomaly" => {
+      "cycling" => 100,
+      "mtb" => 80,
+      "hiking" => 60,
+    },
     "climb_detection" => {
       "min_grade" => 2,        # pente moyenne minimale (%)
       "min_gain_m" => 60,      # dénivelé positif minimal (m)

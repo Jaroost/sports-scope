@@ -509,6 +509,9 @@ fr:
     speeds:
       title: "Vitesses moyennes"
       help: "Vitesse moyenne par activité, utilisée pour estimer le temps de parcours d'un itinéraire. Le créateur et la liste choisissent la vitesse correspondant à l'activité sélectionnée."
+    turn_anomaly:
+      title: "Détection des virages suspects"
+      help: "À l'enregistrement, le créateur signale les endroits où plusieurs virages serrés se groupent sur un petit rayon — souvent le signe d'un point d'étape posé à côté de la route. Ce réglage fixe le diamètre (m) de la zone analysée, par activité : une valeur plus petite limite les fausses alertes sur les sentiers à lacets (rando, VTT)."
   common:
     days_ago_today: "aujourd'hui"
     days_ago_yesterday: "hier"

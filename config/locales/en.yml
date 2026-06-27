@@ -509,6 +509,9 @@ en:
     speeds:
       title: "Average speeds"
       help: "Average speed per activity, used to estimate ride time on a route. The route builder and list pick the speed matching the selected activity."
+    turn_anomaly:
+      title: "Suspicious turn detection"
+      help: "When saving, the builder flags spots where several sharp turns bunch up within a small radius — usually a sign of a waypoint dropped off the road. This sets the diameter (m) of the analysed area, per activity: a smaller value cuts false alarms on switchback trails (hiking, MTB)."
   common:
     days_ago_today: "today"
     days_ago_yesterday: "yesterday"

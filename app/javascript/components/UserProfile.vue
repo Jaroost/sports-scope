@@ -75,6 +75,11 @@ interface Preferences {
     mtb: number
     hiking: number
   }
+  turn_anomaly: {
+    cycling: number
+    mtb: number
+    hiking: number
+  }
 }
 
 const props = defineProps<{
@@ -840,6 +845,36 @@ function placePreviewMarker(coords: [number, number]) {
                 step="0.5"
               >
               <span class="input-group-text">km/h</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="showSection('turn_anomaly')" class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-triangle-exclamation text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.turn_anomaly.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">{{ t('profile.turn_anomaly.help') }}</p>
+        <div class="row g-3">
+          <div v-for="s in SPORTS" :key="s" class="col-sm-4">
+            <label :for="`turn-anomaly-${s}`" class="form-label d-flex align-items-center gap-2">
+              <i :class="`fa-solid ${sportIcon(s)} text-muted`" aria-hidden="true"></i>
+              {{ t(`profile.display.sport_${s}`) }}
+            </label>
+            <div class="input-group">
+              <input
+                :id="`turn-anomaly-${s}`"
+                v-model.number="prefs.turn_anomaly[s]"
+                type="number"
+                class="form-control"
+                min="30"
+                max="200"
+                step="5"
+              >
+              <span class="input-group-text">m</span>
             </div>
           </div>
         </div>

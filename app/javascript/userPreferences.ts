@@ -42,6 +42,8 @@ export interface UserPreferences {
     merge_gap_m: number
   }
   speeds: Record<Sport, number>
+  // Diamètre (m) de détection d'amas de virages dans le créateur, par sport.
+  turn_anomaly: Record<Sport, number>
 }
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
@@ -82,6 +84,11 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     cycling: 18,
     mtb: 14,
     hiking: 4.5,
+  },
+  turn_anomaly: {
+    cycling: 100,
+    mtb: 80,
+    hiking: 60,
   },
 }
 
@@ -181,6 +188,7 @@ function parse(): UserPreferences {
       display: { ...d.display, ...incoming.display },
       climb_detection: { ...d.climb_detection, ...incoming.climb_detection },
       speeds: { ...d.speeds, ...incoming.speeds },
+      turn_anomaly: { ...d.turn_anomaly, ...incoming.turn_anomaly },
     }
   } catch {
     return DEFAULT_PREFERENCES
@@ -194,4 +202,13 @@ export function speedForSport(sport: Sport): number {
   const v = userPreferences().speeds[sport]
   if (Number.isFinite(v) && v >= 3 && v <= 80) return v
   return DEFAULT_PREFERENCES.speeds[sport] ?? 18
+}
+
+// Diamètre (m) de détection d'amas de virages configuré pour une catégorie d'activité,
+// avec repli sur la valeur par défaut du sport. Source unique pour le créateur
+// d'itinéraire (cf. detectTurnAnomalies).
+export function turnAnomalyDiameterForSport(sport: Sport): number {
+  const v = userPreferences().turn_anomaly[sport]
+  if (Number.isFinite(v) && v >= 30 && v <= 200) return v
+  return DEFAULT_PREFERENCES.turn_anomaly[sport] ?? 100
 }

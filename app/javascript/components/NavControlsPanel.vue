@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS } from '../mapStyles'
 import { radarStore } from '../stores/radarStore'
@@ -81,15 +81,35 @@ function onVolume(e: Event) {
   emit('update:soundVolume', Number((e.target as HTMLInputElement).value))
 }
 
+// Historique de navigation dans les panneaux : permet à « retour » de remonter à
+// Settings plutôt qu'à la barre quand on navigue Settings → sous-panneau.
+const prevPanel = ref<string | null>(null)
+
+watch(() => props.activePanel, (val) => {
+  if (val === null) prevPanel.value = null
+})
+
+function openSubPanel(panel: string) {
+  prevPanel.value = props.activePanel
+  emit('update:activePanel', panel)
+}
+
+function goBack() {
+  const target = prevPanel.value
+  prevPanel.value = null
+  emit('update:activePanel', target)
+}
+
 const panelTitle = computed(() => {
   switch (props.activePanel) {
-    case 'route': return t('routes.route_panel')
-    case 'map':   return t('strava.map_style_label')
-    case 'sound': return t('routes.sound_settings')
-    case 'cam':   return t('routes.camera_settings')
-    case 'poi':   return t('routes.poi_settings')
-    case 'debug': return 'Débug navigation'
-    default:      return ''
+    case 'settings': return t('nav.settings')
+    case 'route':    return t('routes.route_panel')
+    case 'map':      return t('strava.map_style_label')
+    case 'sound':    return t('routes.sound_settings')
+    case 'cam':      return t('routes.camera_settings')
+    case 'poi':      return t('routes.poi_settings')
+    case 'debug':    return 'Débug navigation'
+    default:         return ''
   }
 })
 
@@ -122,7 +142,7 @@ const currentStyleIcon = computed(() =>
           type="button"
           class="btn btn-sm btn-light shadow-sm"
           :aria-label="t('routes.back')"
-          @click="$emit('update:activePanel', null)"
+          @click="goBack()"
         >
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
         </button>
@@ -131,8 +151,53 @@ const currentStyleIcon = computed(() =>
 
       <div class="nav-panel-body">
 
+        <!-- Réglages -->
+        <template v-if="activePanel === 'settings'">
+          <button v-if="loggedIn" type="button" class="nav-setting-row" data-profile-trigger
+            data-profile-sections="navigation,search,poi,climb">
+            <i class="fa-solid fa-sliders nav-setting-icon" aria-hidden="true"></i>
+            <span class="nav-setting-label">{{ t('nav.profile') }}</span>
+            <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="nav-setting-row" @click="openSubPanel('map')">
+            <i class="fa-solid nav-setting-icon" :class="currentStyleIcon" aria-hidden="true"></i>
+            <span class="nav-setting-label">{{ t('strava.map_style_label') }}</span>
+            <span class="nav-setting-value">{{ t(`strava.map_style_${mapStyleId}`) }}</span>
+            <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="nav-setting-row" @click="openSubPanel('sound')">
+            <i class="fa-solid nav-setting-icon" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
+            <span class="nav-setting-label">{{ t('routes.sound_settings') }}</span>
+            <span class="nav-setting-value">{{ soundOn ? Math.round(soundVolume) + '%' : t('routes.sound_muted') }}</span>
+            <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
+          </button>
+          <label v-if="climbCardVisible !== undefined" class="nav-setting-row">
+            <i class="fa-solid fa-mountain nav-setting-icon" :class="{ 'nav-setting-icon--on': climbCardVisible }" aria-hidden="true"></i>
+            <span class="nav-setting-label">{{ t('routes.climb_card_show') }}</span>
+            <span class="form-check form-switch m-0">
+              <input class="form-check-input nav-setting-switch" type="checkbox" role="switch"
+                :checked="climbCardVisible" @change="$emit('toggle-climb-card')" />
+            </span>
+          </label>
+          <button type="button" class="nav-setting-row" @click="openSubPanel('cam')">
+            <i class="fa-solid fa-video nav-setting-icon" aria-hidden="true"></i>
+            <span class="nav-setting-label">{{ t('routes.camera_settings') }}</span>
+            <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="nav-setting-row" @click="openSubPanel('poi')">
+            <i class="fa-solid fa-location-dot nav-setting-icon" aria-hidden="true"></i>
+            <span class="nav-setting-label">{{ t('routes.poi_settings') }}</span>
+            <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
+          </button>
+          <button v-if="debugMode" type="button" class="nav-setting-row" @click="openSubPanel('debug')">
+            <i class="fa-solid fa-flask nav-setting-icon" aria-hidden="true"></i>
+            <span class="nav-setting-label">Débug navigation</span>
+            <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
+          </button>
+        </template>
+
         <!-- Itinéraire -->
-        <template v-if="activePanel === 'route'">
+        <template v-else-if="activePanel === 'route'">
           <button type="button" class="nav-route-action" @click="$emit('open-route-picker')">
             <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
             <span>{{ t('routes.load_route') }}</span>
@@ -346,18 +411,12 @@ const currentStyleIcon = computed(() =>
       </div>
     </template>
 
-    <!-- ── Mode barre : groupes de boutons ──────────────────────────────────── -->
+    <!-- ── Mode barre : 4 boutons ──────────────────────────────────────────── -->
     <template v-else>
       <div class="nav-panel-group">
         <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
         </a>
-        <button v-if="loggedIn" type="button" class="btn btn-sm btn-light shadow-sm" data-profile-trigger
-          data-profile-sections="navigation,search,poi,climb"
-          :title="t('nav.profile')" :aria-label="t('nav.profile')">
-          <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-        </button>
-
         <button
           type="button"
           class="btn btn-sm btn-light shadow-sm"
@@ -368,53 +427,10 @@ const currentStyleIcon = computed(() =>
         >
           <i class="fa-solid fa-route" aria-hidden="true"></i>
         </button>
-
-        <button
-          v-if="debugMode"
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          title="Débug navigation"
-          aria-label="Débug navigation"
-          @click="$emit('update:activePanel', 'debug')"
-        >
-          <i class="fa-solid fa-flask" aria-hidden="true"></i>
-        </button>
       </div>
 
       <div class="nav-panel-group nav-panel-group--right">
-        <button
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          :title="t('strava.map_style_label')"
-          :aria-label="t('strava.map_style_label')"
-          @click="$emit('update:activePanel', 'map')"
-        >
-          <i class="fa-solid" :class="currentStyleIcon" aria-hidden="true"></i>
-        </button>
         <slot name="map-extra" />
-
-        <button
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          :title="t('routes.sound_settings')"
-          :aria-label="t('routes.sound_settings')"
-          @click="$emit('update:activePanel', 'sound')"
-        >
-          <i class="fa-solid" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
-        </button>
-
-        <button
-          v-if="climbCardVisible !== undefined"
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          :class="{ 'nav-climb-btn--visible': climbCardVisible }"
-          :title="climbCardVisible ? t('routes.climb_card_hide') : t('routes.climb_card_show')"
-          :aria-label="climbCardVisible ? t('routes.climb_card_hide') : t('routes.climb_card_show')"
-          @click="$emit('toggle-climb-card')"
-        >
-          <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-        </button>
-
         <button
           v-if="radarSupported()"
           type="button"
@@ -431,25 +447,14 @@ const currentStyleIcon = computed(() =>
             aria-hidden="true"
           ></i>
         </button>
-
         <button
           type="button"
           class="btn btn-sm btn-light shadow-sm"
-          :title="t('routes.camera_settings')"
-          :aria-label="t('routes.camera_settings')"
-          @click="$emit('update:activePanel', 'cam')"
+          :title="t('nav.settings')"
+          :aria-label="t('nav.settings')"
+          @click="$emit('update:activePanel', 'settings')"
         >
-          <i class="fa-solid fa-video" aria-hidden="true"></i>
-        </button>
-
-        <button
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          :title="t('routes.poi_settings')"
-          :aria-label="t('routes.poi_settings')"
-          @click="$emit('update:activePanel', 'poi')"
-        >
-          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+          <i class="fa-solid fa-gear" aria-hidden="true"></i>
         </button>
       </div>
     </template>
@@ -593,6 +598,25 @@ const currentStyleIcon = computed(() =>
   color: #6c757d; margin-bottom: 0.4rem;
 }
 .nav-mapstyle-group-sep { margin-top: 0.75rem; }
+
+/* Lignes du panneau Réglages (style iOS settings). */
+.nav-setting-row {
+  display: flex; align-items: center; gap: 0.75rem; width: 100%;
+  padding: 0.65rem 0; border: none; background: none;
+  border-bottom: 1px solid #f0f0f0; cursor: pointer; text-align: left;
+  transition: background 0.1s ease;
+}
+.nav-setting-row:last-child { border-bottom: none; }
+.nav-setting-row:hover { background: #f8f9fa; margin: 0 -1rem; padding-left: 1rem; padding-right: 1rem; width: calc(100% + 2rem); }
+.nav-setting-icon {
+  width: 1.6rem; height: 1.6rem; display: flex; align-items: center; justify-content: center;
+  font-size: 0.95rem; color: #6c757d; flex-shrink: 0;
+}
+.nav-setting-icon--on { color: #198754; }
+.nav-setting-label { flex: 1; font-size: 0.95rem; font-weight: 500; color: #212529; }
+.nav-setting-value { font-size: 0.85rem; color: #6c757d; white-space: nowrap; }
+.nav-setting-chevron { color: #ced4da; font-size: 0.8rem; flex-shrink: 0; }
+.nav-setting-switch { width: 2.5rem !important; height: 1.35rem !important; }
 
 /* Actions du panneau itinéraire. */
 .nav-route-action {

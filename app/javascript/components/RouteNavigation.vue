@@ -20,7 +20,6 @@ import { unlockAudio, playManeuver, playOffRoute, playPoi } from '../navAudio'
 import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
 import RadarOverlay from './RadarOverlay.vue'
-import NavOfflineButton from './NavOfflineButton.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
 import NavPoiBanner from './NavPoiBanner.vue'
 import NavPoiBrowser from './NavPoiBrowser.vue'
@@ -47,6 +46,7 @@ import { useRevealGesture } from '../composables/useRevealGesture'
 import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS } from '../navConstants'
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineGrauStyle, OFFLINE_DEFAULTS,
+  downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
 } from '../offline/offlineMaps'
 import { buildCoordPopupContent, buildDestPointPopupContent, attachLongPress } from '../mapCoordPopup'
 
@@ -129,6 +129,15 @@ const offlinePois = ref<Array<{ name: string; type: string; lat: number; lng: nu
 const offlineReady = ref(false)        // archive présente (affichage)
 let offlineRegistered = false          // archive branchée sur le protocole pmtiles://
 let baseIsOffline = false              // le fond actif est-il la version locale ?
+const offlineIsSup = offlineSupported()
+const offlineDownloading = ref(false)
+const offlineProgress = ref({ done: 0, total: 0, failed: 0 })
+const offlineErrored = ref(false)
+let offlineAbort: AbortController | null = null
+const offlineEst = computed(() => estimateOffline(offlineCoords.value))
+const offlinePct = computed(() =>
+  offlineProgress.value.total ? Math.round((offlineProgress.value.done / offlineProgress.value.total) * 100) : 0,
+)
 
 // Réglages caméra (inclinaison / zoom / relief 3D), ajustables en séance et reportés
 // sur le profil. La boucle d'animation et followOptions lisent ces refs (et non plus
@@ -2077,6 +2086,36 @@ function onOfflineRemoved() {
   refreshBaseMap()
 }
 
+async function startOfflineDownload() {
+  if (offlineDownloading.value || !routeToken.value) return
+  offlineErrored.value = false
+  offlineDownloading.value = true
+  offlineProgress.value = { done: 0, total: 0, failed: 0 }
+  offlineAbort = new AbortController()
+  try {
+    await downloadOfflineArchive(
+      routeToken.value, offlineCoords.value, undefined,
+      (p) => { offlineProgress.value = p }, offlineAbort.signal,
+    )
+    if (offlinePois.value.length > 0) saveOfflinePois(routeToken.value, offlinePois.value)
+    await onOfflineAvailable()
+  } catch (e) {
+    if (!(e instanceof DOMException && e.name === 'AbortError')) offlineErrored.value = true
+  } finally {
+    offlineDownloading.value = false
+    offlineAbort = null
+  }
+}
+
+function cancelOfflineDownload() { offlineAbort?.abort() }
+
+async function removeOfflineMap() {
+  if (!routeToken.value) return
+  await deleteOfflineArchive(routeToken.value)
+  deleteOfflinePois(routeToken.value)
+  onOfflineRemoved()
+}
+
 // ─── Reprise après rechargement (tracés auto-recoupants) ──────────────────────
 // La position GPS seule ne distingue pas les passages d'un tracé qui se recoupe :
 // au même endroit, lng/lat peut appartenir à 2–3 passages. On mémorise donc la
@@ -2830,6 +2869,13 @@ function onScreenOffTap() {
       :sound-on="soundOn"
       :sound-volume="soundVolume"
       v-model:active-panel="activePanel"
+      :offline-supported="offlineIsSup && !!routeToken"
+      :offline-ready="offlineReady"
+      :offline-downloading="offlineDownloading"
+      :offline-pct="offlinePct"
+      :offline-est-mb="offlineEst.mb.toFixed(0)"
+      :offline-est-tiles="offlineEst.tiles"
+      :offline-errored="offlineErrored"
       :route-loaded="hasRoute"
       :can-edit="canEditRoute"
       :edit-mode="editMode"
@@ -2871,23 +2917,14 @@ function onScreenOffTap() {
       @search-pois="searchPois({ center: lastPos ?? undefined })"
       @search-pois-route="searchPois()"
       @browse-pois="startPoiBrowse"
+      @start-offline="startOfflineDownload"
+      @cancel-offline="cancelOfflineDownload"
+      @remove-offline="removeOfflineMap"
       @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
       @toggle-debug-poi="toggleDebugPoi"
-    >
-      <template #map-extra>
-        <!-- Carte hors-ligne réservée à un itinéraire identifié par token (lien partagé
-             ou itinéraire sauvegardé). Absente en mode libre / destination ad hoc. -->
-        <NavOfflineButton
-          v-if="routeToken"
-          :share-token="routeToken"
-          :coords="offlineCoords"
-          :pois="offlinePois"
-          @available="onOfflineAvailable"
-          @removed="onOfflineRemoved"
-        />
-      </template>
+    />
     </NavControlsPanel>
 
     <!-- Toast transitoire : résultat d'une recherche POI (« autour de moi » / trajet). -->

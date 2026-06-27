@@ -37,7 +37,14 @@ const props = defineProps<{
   dbgClimb: boolean
   dbgPoi: boolean
   dbgTurnLabel: string | null
-  // Panneau actif dans le tiroir ('route' | 'sound' | 'cam' | 'poi' | 'debug' | null).
+  offlineSupported?: boolean
+  offlineReady?: boolean
+  offlineDownloading?: boolean
+  offlinePct?: number
+  offlineEstMb?: string
+  offlineEstTiles?: number
+  offlineErrored?: boolean
+  // Panneau actif dans le tiroir ('route' | 'sound' | 'cam' | 'poi' | 'debug' | 'offline' | null).
   activePanel: string | null
 }>()
 
@@ -66,6 +73,9 @@ const emit = defineEmits<{
   (e: 'toggle-debug-poi'): void
   (e: 'update:camPitch', v: number): void
   (e: 'update:camZoom', v: number): void
+  (e: 'start-offline'): void
+  (e: 'cancel-offline'): void
+  (e: 'remove-offline'): void
   (e: 'update:activePanel', v: string | null): void
 }>()
 
@@ -102,8 +112,9 @@ function goBack() {
 
 const panelTitle = computed(() => {
   switch (props.activePanel) {
-    case 'settings': return t('nav.settings')
-    case 'route':    return t('routes.route_panel')
+    case 'settings':  return t('nav.settings')
+    case 'route':     return t('routes.route_panel')
+    case 'offline':   return t('routes.offline_title')
     case 'map':      return t('strava.map_style_label')
     case 'sound':    return t('routes.sound_settings')
     case 'cam':      return t('routes.camera_settings')
@@ -165,6 +176,18 @@ const currentStyleIcon = computed(() =>
             <span class="nav-setting-value">{{ t(`strava.map_style_${mapStyleId}`) }}</span>
             <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
           </button>
+          <button v-if="offlineSupported" type="button" class="nav-setting-row" @click="openSubPanel('offline')">
+            <i
+              class="fa-solid nav-setting-icon"
+              :class="offlineDownloading ? 'fa-spinner fa-spin' : offlineReady ? 'fa-circle-check nav-setting-icon--on' : 'fa-cloud-arrow-down'"
+              aria-hidden="true"
+            ></i>
+            <span class="nav-setting-label">{{ t('routes.offline_title') }}</span>
+            <span class="nav-setting-value">
+              {{ offlineDownloading ? (offlinePct + '%') : offlineReady ? t('routes.offline_ready') : ('~' + offlineEstMb + ' Mo') }}
+            </span>
+            <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
+          </button>
           <button type="button" class="nav-setting-row" @click="openSubPanel('sound')">
             <i class="fa-solid nav-setting-icon" :class="soundOn ? 'fa-volume-high' : 'fa-volume-xmark'" aria-hidden="true"></i>
             <span class="nav-setting-label">{{ t('routes.sound_settings') }}</span>
@@ -182,11 +205,6 @@ const currentStyleIcon = computed(() =>
           <button type="button" class="nav-setting-row" @click="openSubPanel('cam')">
             <i class="fa-solid fa-video nav-setting-icon" aria-hidden="true"></i>
             <span class="nav-setting-label">{{ t('routes.camera_settings') }}</span>
-            <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
-          </button>
-          <button type="button" class="nav-setting-row" @click="openSubPanel('poi')">
-            <i class="fa-solid fa-location-dot nav-setting-icon" aria-hidden="true"></i>
-            <span class="nav-setting-label">{{ t('routes.poi_settings') }}</span>
             <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
           </button>
           <button v-if="debugMode" type="button" class="nav-setting-row" @click="openSubPanel('debug')">
@@ -221,6 +239,43 @@ const currentStyleIcon = computed(() =>
             <i class="fa-solid fa-xmark" aria-hidden="true"></i>
             <span>{{ t('routes.unload_route') }}</span>
           </button>
+        </template>
+
+        <!-- Hors-ligne -->
+        <template v-else-if="activePanel === 'offline'">
+          <template v-if="offlineDownloading">
+            <div class="nav-offline-progress-row">
+              <div class="nav-offline-bar"><div class="nav-offline-bar-fill" :style="{ width: offlinePct + '%' }"></div></div>
+              <span class="nav-offline-pct">{{ offlinePct }}%</span>
+            </div>
+            <button type="button" class="nav-route-action" @click="$emit('cancel-offline')">
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              <span>{{ t('routes.offline_cancel') }}</span>
+            </button>
+          </template>
+          <template v-else-if="offlineReady">
+            <div class="nav-offline-status">
+              <i class="fa-solid fa-circle-check nav-offline-status-icon" aria-hidden="true"></i>
+              {{ t('routes.offline_ready') }}
+            </div>
+            <button type="button" class="nav-route-action nav-route-action--danger" @click="$emit('remove-offline')">
+              <i class="fa-solid fa-trash" aria-hidden="true"></i>
+              <span>{{ t('routes.offline_delete') }}</span>
+            </button>
+          </template>
+          <template v-else>
+            <div class="nav-offline-status">
+              {{ t('routes.offline_estimate', { mb: offlineEstMb, tiles: offlineEstTiles }) }}
+            </div>
+            <button type="button" class="nav-route-action" @click="$emit('start-offline')">
+              <i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i>
+              <span>{{ t('routes.offline_download') }}</span>
+            </button>
+            <div v-if="offlineErrored" class="nav-offline-error">
+              <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+              {{ t('routes.offline_error') }}
+            </div>
+          </template>
         </template>
 
         <!-- Fond de carte -->
@@ -430,7 +485,15 @@ const currentStyleIcon = computed(() =>
       </div>
 
       <div class="nav-panel-group nav-panel-group--right">
-        <slot name="map-extra" />
+        <button
+          type="button"
+          class="btn btn-sm btn-light shadow-sm"
+          :title="t('routes.poi_settings')"
+          :aria-label="t('routes.poi_settings')"
+          @click="$emit('update:activePanel', 'poi')"
+        >
+          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+        </button>
         <button
           v-if="radarSupported()"
           type="button"
@@ -598,6 +661,23 @@ const currentStyleIcon = computed(() =>
   color: #6c757d; margin-bottom: 0.4rem;
 }
 .nav-mapstyle-group-sep { margin-top: 0.75rem; }
+
+/* Panneau hors-ligne. */
+.nav-offline-status {
+  font-size: 0.9rem; font-weight: 500; color: #495057;
+  padding: 0.25rem 0 0.5rem;
+}
+.nav-offline-status-icon { color: #198754; margin-right: 0.4rem; }
+.nav-offline-progress-row {
+  display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;
+}
+.nav-offline-bar {
+  flex: 1; height: 6px; border-radius: 3px;
+  background: rgba(0, 0, 0, 0.12); overflow: hidden;
+}
+.nav-offline-bar-fill { height: 100%; background: #7c3aed; transition: width 0.2s linear; }
+.nav-offline-pct { font-size: 0.9rem; font-weight: 700; color: #495057; width: 2.5rem; text-align: right; }
+.nav-offline-error { font-size: 0.85rem; color: #dc3545; margin-top: 0.5rem; display: flex; align-items: center; gap: 0.4rem; }
 
 /* Lignes du panneau Réglages (style iOS settings). */
 .nav-setting-row {

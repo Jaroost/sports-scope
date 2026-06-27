@@ -407,7 +407,7 @@ const currentStyleIcon = computed(() =>
           v-if="climbCardVisible !== undefined"
           type="button"
           class="btn btn-sm btn-light shadow-sm"
-          :class="{ active: climbCardVisible }"
+          :class="{ 'nav-climb-btn--visible': climbCardVisible }"
           :title="climbCardVisible ? t('routes.climb_card_hide') : t('routes.climb_card_show')"
           :aria-label="climbCardVisible ? t('routes.climb_card_hide') : t('routes.climb_card_show')"
           @click="$emit('toggle-climb-card')"
@@ -514,7 +514,11 @@ const currentStyleIcon = computed(() =>
 .nav-radar-btn--connected,
 .nav-radar-btn--connected:hover,
 .nav-radar-btn--connected:focus,
-.nav-radar-btn--connected:active {
+.nav-radar-btn--connected:active,
+.nav-climb-btn--visible,
+.nav-climb-btn--visible:hover,
+.nav-climb-btn--visible:focus,
+.nav-climb-btn--visible:active {
   background-color: #198754 !important;
   border-color: #198754 !important;
   color: #fff !important;

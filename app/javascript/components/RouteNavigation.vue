@@ -2925,7 +2925,6 @@ function onScreenOffTap() {
       @cycle-debug-turn="cycleDebugTurn"
       @toggle-debug-poi="toggleDebugPoi"
     />
-    </NavControlsPanel>
 
     <!-- Toast transitoire : résultat d'une recherche POI (« autour de moi » / trajet). -->
     <Transition name="nav-toast">

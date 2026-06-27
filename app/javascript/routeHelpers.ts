@@ -642,9 +642,21 @@ function firstPassFrom(pos: LngLat, geometry: Coord[], fromIdx: number, proximit
     }
   }
   if (clusterIdx >= 0) return clusterIdx
+  // Repli BORNÉ : on cherche le sommet le plus proche dans une petite fenêtre en avant
+  // du curseur, jamais sur tout le reste du tracé. Sur un tracé qui se recoupe (boucle,
+  // aller-retour), un hint non apparié dans la proximité — amas de virages ayant dépassé
+  // le curseur (rond-point, double virage), ou hint légèrement hors tracé — verrait
+  // sinon son sommet GLOBALEMENT le plus proche tomber sur un passage très lointain de la
+  // même route. Le curseur sauterait alors de plusieurs km, et tous les hints suivants,
+  // appariés depuis ce curseur empoisonné, perdraient leurs virages : il en résulte un
+  // énorme trou dans la chaîne de virages (« prochain virage » annoncé à 50 km). La
+  // fenêtre couvre la jitter de densification et un léger décrochage sans jamais
+  // atteindre un recoupement distant.
+  const FALLBACK_AHEAD = 50
+  const end = Math.min(geometry.length, fromIdx + FALLBACK_AHEAD)
   let bestIdx = fromIdx
   let bestDist = Infinity
-  for (let i = fromIdx; i < geometry.length; i++) {
+  for (let i = fromIdx; i < end; i++) {
     const d = haversine(pos, geometry[i])
     if (d < bestDist) { bestDist = d; bestIdx = i }
   }

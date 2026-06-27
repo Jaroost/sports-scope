@@ -11,7 +11,13 @@ export function useScreenWakeLock() {
 
   async function acquire() {
     try {
-      if ('wakeLock' in navigator) wakeLock = await (navigator as any).wakeLock.request('screen')
+      if ('wakeLock' in navigator) {
+        wakeLock = await (navigator as any).wakeLock.request('screen')
+        // Le navigateur relâche le verrou quand la page passe en arrière-plan : il
+        // faut remettre la variable à null pour pouvoir le reprendre au retour
+        // (sinon `!wakeLock` reste false et acquire() n'est jamais rappelé).
+        wakeLock.addEventListener?.('release', () => { wakeLock = null })
+      }
     } catch { /* non supporté ou refusé */ }
   }
 

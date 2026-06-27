@@ -54,6 +54,8 @@ interface Preferences {
     turn_marker_icon_color: string
     show_climb_card: boolean
     radar_close_m: number
+    auto_reroute: boolean
+    auto_reroute_cooldown_s: number
   }
   display: {
     default_sport: string
@@ -601,6 +603,20 @@ function placePreviewMarker(coords: [number, number]) {
               <label for="nav-show-climb-card" class="form-check-label">{{ t('profile.navigation.show_climb_card') }}</label>
             </div>
             <p class="text-muted small mb-0">{{ t('profile.navigation.show_climb_card_help') }}</p>
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input id="nav-auto-reroute" v-model="prefs.navigation.auto_reroute" class="form-check-input" type="checkbox" role="switch">
+              <label for="nav-auto-reroute" class="form-check-label">{{ t('profile.navigation.auto_reroute') }}</label>
+            </div>
+            <p class="text-muted small mb-0">{{ t('profile.navigation.auto_reroute_help') }}</p>
+          </div>
+          <div v-if="prefs.navigation.auto_reroute" class="col-sm-6">
+            <label for="nav-auto-reroute-cooldown" class="form-label mb-1">
+              {{ t('profile.navigation.auto_reroute_cooldown_s') }} : <strong>{{ prefs.navigation.auto_reroute_cooldown_s }} s</strong>
+            </label>
+            <input id="nav-auto-reroute-cooldown" v-model.number="prefs.navigation.auto_reroute_cooldown_s" type="range" class="form-range" min="3" max="120" step="1">
+            <p class="text-muted small mb-0">{{ t('profile.navigation.auto_reroute_cooldown_s_help') }}</p>
           </div>
           <div class="col-sm-6">
             <label for="nav-radar-close" class="form-label mb-1">

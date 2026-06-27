@@ -44,6 +44,8 @@ class User < ApplicationRecord
       "turn_marker_icon_color" => "#ffffff", # couleur de la flèche / du numéro de sortie dans la pastille
       "show_climb_card" => true, # afficher le profil des cols (graphique d'altitude) pendant la navigation
       "radar_close_m" => 30, # distance (m) sous laquelle le radar passe en alerte rapprochée (rouge + bip insistant)
+      "auto_reroute" => true, # recalculer automatiquement l'itinéraire dès qu'on quitte le tracé (hors-course)
+      "auto_reroute_cooldown_s" => 10, # délai (s) entre deux recalculs automatiques tant qu'on reste hors-course
     },
     # Recherche de lieux (barre de recherche du créateur d'itinéraire) : liste
     # ordonnée de pays privilégiés (ISO 3166-1 alpha-2). Passée en `countrycodes`

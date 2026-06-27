@@ -92,6 +92,14 @@ const TURN_REPEAT_URGENT_MS = navPrefs.turn_repeat_urgent_ms
 // Rayon (px) des pastilles orange de changement de direction.
 const TURN_MARKER_SIZE = navPrefs.turn_marker_size ?? 11
 const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
+// Recalcul automatique hors-course (profil navigation.auto_reroute) : délai entre deux
+// recalculs auto tant qu'on reste hors-course (profil navigation.auto_reroute_cooldown_s,
+// 10 s par défaut). Évite qu'un flottement GPS hors-tracé/sur-tracé déclenche une rafale
+// d'appels BRouter ; le décompte restant s'affiche sur le bouton « Recalculer ».
+const AUTO_REROUTE_COOLDOWN_MS = (navPrefs.auto_reroute_cooldown_s ?? 10) * 1000
+// Secondes restantes avant la prochaine tentative de recalcul auto (0 = éligible ou
+// inactif). Affiché sur le bouton « Recalculer ». Mis à jour par tickTurnRepeat.
+const autoRerouteLeftS = ref(0)
 
 const mapEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
@@ -567,6 +575,7 @@ let autoWoken = false
 let revealZoom: number | null = null
 let lastTurnReminderMs = 0   // timestamp of the last repeated turn cue
 let lastOffRouteAlert = 0    // timestamp of the last off-route buzz
+let lastAutoReroute = 0      // timestamp of the last automatic off-route recalculation
 // Virage en cours d'annonce (dans la zone d'alerte) : la répétition du son est
 // cadencée par un timer dédié (turnRepeatId) et non par les fixes GPS, sinon
 // l'intervalle réel serait plafonné par la fréquence du GPS (souvent plusieurs
@@ -917,6 +926,10 @@ function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number
 
 async function recalcRoute() {
   if (rerouting.value || !offRoute.value || !lastPos || geometry.length < 2) return
+  // Arme le cooldown du recalcul auto pour TOUTE tentative (auto ou manuelle, en ligne
+  // comme hors-ligne) : un appui manuel décale d'autant la prochaine relance auto, et un
+  // échec hors-ligne n'enchaîne pas une rafale de tentatives.
+  lastAutoReroute = performance.now()
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     rerouteError.value = t('routes.reroute_offline')
     return
@@ -2172,6 +2185,7 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
 
   const turnApproaching = updateTurns()
   handleOffRouteSound(wasOffRoute)
+  maybeAutoReroute()
 
   // Snap the 3D view back over the rider as they reach an intersection — unless
   // they've deliberately unlocked the camera to study the map.
@@ -2490,6 +2504,7 @@ function muteTurnAlert() {
 // Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.
 // Un poll court (250 ms) suffit : la préférence est plafonnée à 500 ms mini.
 function tickTurnRepeat() {
+  updateAutoRerouteCountdown()
   if (!activeTurn || !soundOn.value || audioMuted.value || turnAlertMuted.value) return
   const now = Date.now()
   const interval = activeTurnUrgent ? TURN_REPEAT_URGENT_MS : TURN_REPEAT_MS
@@ -2510,6 +2525,34 @@ function handleOffRouteSound(wasOffRoute: boolean) {
     if (soundOn.value && !audioMuted.value) playOffRoute()
     vibrateOffRoute()
   }
+}
+
+// Recalcul automatique hors-course (profil navigation.auto_reroute, true par défaut). On
+// relance recalcRoute() tant qu'on reste hors-tracé, espacé d'AUTO_REROUTE_COOLDOWN_MS :
+// si la première tentative échoue (réseau) ou si le coureur n'a pas encore rejoint le
+// nouveau tracé, on réessaie au lieu de s'arrêter à une seule tentative. Un recalcul
+// réussi remet le coureur sur le tracé (offRoute repasse à faux) et stoppe les relances.
+// Mêmes gardes que le bouton manuel (recherche de lieu, édition, parcours de POI) ; le
+// cooldown protège aussi d'un clignotement GPS hors-tracé/sur-tracé.
+function maybeAutoReroute() {
+  if (!navPrefs.auto_reroute) return
+  if (!offRoute.value) return
+  if (rerouting.value || placeNavActive.value || editMode.value || poiBrowseActive.value) return
+  // recalcRoute arme lui-même lastAutoReroute, donc on ne gère ici que la temporisation.
+  if (performance.now() - lastAutoReroute < AUTO_REROUTE_COOLDOWN_MS) return
+  void recalcRoute()
+}
+
+// Décompte (s) avant la prochaine tentative de recalcul auto, pour le bouton « Recalculer ».
+// 0 quand le recalcul auto est inactif, qu'on n'est pas hors-course, ou qu'une tentative
+// est en cours. Appelé par tickTurnRepeat (toutes les 250 ms) pour un affichage fluide.
+function updateAutoRerouteCountdown() {
+  if (!navPrefs.auto_reroute || !offRoute.value || rerouting.value) {
+    autoRerouteLeftS.value = 0
+    return
+  }
+  const leftMs = AUTO_REROUTE_COOLDOWN_MS - (performance.now() - lastAutoReroute)
+  autoRerouteLeftS.value = leftMs > 0 ? Math.ceil(leftMs / 1000) : 0
 }
 
 // Notification de proximité d'un point d'intérêt : repère le POI affiché le plus
@@ -3000,6 +3043,7 @@ function onScreenOffTap() {
         <i v-if="rerouting" class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>
         <i v-else class="fa-solid fa-route me-1" aria-hidden="true"></i>
         {{ rerouting ? t('routes.rerouting') : t('routes.reroute') }}
+        <span v-if="!rerouting && autoRerouteLeftS > 0" class="nav-reroute-cooldown">{{ autoRerouteLeftS }}s</span>
       </button>
       <div v-if="rerouteError" class="nav-reroute-error">{{ rerouteError }}</div>
     </div>
@@ -3226,6 +3270,12 @@ function onScreenOffTap() {
 .nav-reroute-btn {
   border-radius: 999px; font-weight: 700;
   font-size: 1.45rem; padding: 0.9rem 2rem;
+}
+.nav-reroute-cooldown {
+  display: inline-block; margin-left: 0.5rem;
+  background: rgba(0, 0, 0, 0.18); border-radius: 999px;
+  padding: 0.05em 0.55em; font-size: 0.8em; font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 .nav-reroute-error {
   background: #fff3cd; color: #664d03; border-radius: 999px;

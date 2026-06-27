@@ -222,6 +222,7 @@ fr:
     back: "Retour à la liste"
     navigate: "Naviguer"
     navigate_title: "Navigation"
+    route_panel: "Itinéraire"
     load_route: "Charger un itinéraire"
     unload_route: "Ne plus suivre l'itinéraire"
     my_routes: "Mes itinéraires"

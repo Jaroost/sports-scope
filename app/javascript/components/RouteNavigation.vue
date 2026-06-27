@@ -114,6 +114,7 @@ const cameraUnlocked = ref(false)
 // Son de la séance (alertes virage / radar). Voir useNavSound.
 const { soundOn, toggleSound, soundVolume, setVolume } = useNavSound()
 const showSoundPanel = ref(false)
+const showRoutePanel = ref(false)
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
 // on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
 const mapStyleId = ref(navPrefs.default_style as string)
@@ -314,8 +315,8 @@ const screenOff = ref(false)
 // On ne masque pas tant qu'un sous-panneau (caméra / POI / débug) est ouvert. Voir
 // useControlsHide.
 const { controlsVisible, armControlsHide, showControls, hideControls } = useControlsHide({
-  isPanelOpen: () => showCamPanel.value || showPoiPanel.value || showDebugPanel.value || showSoundPanel.value,
-  closePanels: () => { showCamPanel.value = false; showPoiPanel.value = false; showDebugPanel.value = false; showSoundPanel.value = false },
+  isPanelOpen: () => showCamPanel.value || showPoiPanel.value || showDebugPanel.value || showSoundPanel.value || showRoutePanel.value,
+  closePanels: () => { showCamPanel.value = false; showPoiPanel.value = false; showDebugPanel.value = false; showSoundPanel.value = false; showRoutePanel.value = false },
 })
 
 // ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
@@ -2834,6 +2835,7 @@ function onScreenOffTap() {
       :sound-on="soundOn"
       :sound-volume="soundVolume"
       v-model:show-sound-panel="showSoundPanel"
+      v-model:show-route-panel="showRoutePanel"
       :route-loaded="hasRoute"
       :can-edit="canEditRoute"
       :edit-mode="editMode"

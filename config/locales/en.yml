@@ -222,6 +222,7 @@ en:
     back: "Back to list"
     navigate: "Navigate"
     navigate_title: "Navigation"
+    route_panel: "Route"
     load_route: "Load a route"
     unload_route: "Stop following the route"
     my_routes: "My routes"

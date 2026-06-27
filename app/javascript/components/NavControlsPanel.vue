@@ -25,6 +25,7 @@ const props = defineProps<{
   canEdit?: boolean
   // Mode édition de l'itinéraire actif : le bouton « modifier » passe en état « terminer ».
   editMode?: boolean
+  showRoutePanel: boolean
   radarKnown: boolean
   camPitch: number
   camZoom: number
@@ -62,6 +63,7 @@ const emit = defineEmits<{
   (e: 'open-route-picker'): void
   (e: 'unload-route'): void
   (e: 'toggle-edit'): void
+  (e: 'update:showRoutePanel', v: boolean): void
   (e: 'set-map-style', id: string): void
   (e: 'toggle-sound'): void
   (e: 'update:soundVolume', v: number): void
@@ -123,43 +125,44 @@ function onVolume(e: Event) {
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
       </button>
 
-      <!-- Ouvre la dialogue de chargement d'un itinéraire (itinéraires sauvegardés +
-           « naviguer vers un lieu »). Passe la page en navigation sur itinéraire. -->
-      <button
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :title="t('routes.load_route')"
-        :aria-label="t('routes.load_route')"
-        @click="$emit('open-route-picker')"
-      >
-        <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
-      </button>
-
-      <!-- Modifie l'itinéraire courant sans quitter la navigation (déplacement / ajout /
-           suppression de points d'ancrage). Disponible si le tracé porte ses points. -->
-      <button
-        v-if="routeLoaded && canEdit"
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :class="{ active: editMode }"
-        :title="editMode ? t('routes.edit_done') : t('routes.edit_route')"
-        :aria-label="editMode ? t('routes.edit_done') : t('routes.edit_route')"
-        @click="$emit('toggle-edit')"
-      >
-        <i class="fa-solid" :class="editMode ? 'fa-check' : 'fa-pen'" aria-hidden="true"></i>
-      </button>
-
-      <!-- Revient à la navigation libre : ne plus suivre l'itinéraire courant. -->
-      <button
-        v-if="routeLoaded"
-        type="button"
-        class="btn btn-sm btn-light shadow-sm"
-        :title="t('routes.unload_route')"
-        :aria-label="t('routes.unload_route')"
-        @click="$emit('unload-route')"
-      >
-        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-      </button>
+      <!-- Sous-panneau itinéraire : regroupe charger / modifier / décharger. -->
+      <div class="position-relative">
+        <button
+          type="button"
+          class="btn btn-sm btn-light shadow-sm"
+          :class="{ active: showRoutePanel, 'nav-route-btn--loaded': routeLoaded }"
+          :title="t('routes.route_panel')"
+          :aria-label="t('routes.route_panel')"
+          @click="$emit('update:showRoutePanel', !showRoutePanel)"
+        >
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
+        </button>
+        <div v-if="showRoutePanel" class="nav-cam-panel nav-route-panel shadow">
+          <button type="button" class="nav-route-action" @click="$emit('open-route-picker')">
+            <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+            <span>{{ t('routes.load_route') }}</span>
+          </button>
+          <button
+            v-if="routeLoaded && canEdit"
+            type="button"
+            class="nav-route-action"
+            :class="{ 'nav-route-action--active': editMode }"
+            @click="$emit('toggle-edit')"
+          >
+            <i class="fa-solid" :class="editMode ? 'fa-check' : 'fa-pen'" aria-hidden="true"></i>
+            <span>{{ editMode ? t('routes.edit_done') : t('routes.edit_route') }}</span>
+          </button>
+          <button
+            v-if="routeLoaded"
+            type="button"
+            class="nav-route-action nav-route-action--danger"
+            @click="$emit('unload-route')"
+          >
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            <span>{{ t('routes.unload_route') }}</span>
+          </button>
+        </div>
+      </div>
 
       <!-- Panneau de débug (comptes pouvant tout faire, ou ?debug=1). Injecte des
            overlays factices pour les prévisualiser sans GPS / col / radar réels. -->
@@ -564,4 +567,32 @@ function onVolume(e: Event) {
 .nav-debug-state { margin-left: auto; font-size: 0.85rem; opacity: 0.7; }
 .nav-debug-btn--on { background: #ede7fb; border-color: #7c3aed; color: #5b21b6; }
 .nav-debug-btn--on .nav-debug-state { opacity: 1; }
+
+/* Indicateur visuel sur le bouton itinéraire quand un tracé est chargé : point vert
+   en coin pour signaler l'état sans changer l'icône. */
+.nav-route-btn--loaded::after {
+  content: '';
+  position: absolute; top: 0.3rem; right: 0.3rem;
+  width: 0.55rem; height: 0.55rem;
+  border-radius: 50%; background: #198754;
+  border: 2px solid #fff;
+}
+
+/* Panneau itinéraire : ancré à gauche (bouton dans le groupe gauche), même style que
+   le panneau debug. Les actions sont des boutons pleine largeur avec icône + libellé. */
+.nav-route-panel { width: 16rem; left: 0; right: auto; }
+.nav-route-action {
+  display: flex; align-items: center; gap: 0.6rem; width: 100%;
+  padding: 0.6rem 0.75rem; border: 1px solid #dee2e6; border-radius: 0.5rem;
+  background: #fff; color: #495057; font-size: 0.95rem; font-weight: 600;
+  cursor: pointer; text-align: left;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.nav-route-action + .nav-route-action { margin-top: 0.5rem; }
+.nav-route-action i { width: 1.2rem; text-align: center; flex-shrink: 0; }
+.nav-route-action:hover { background: #f8f9fa; }
+.nav-route-action--active { background: #ede7fb; border-color: #7c3aed; color: #5b21b6; }
+.nav-route-action--active:hover { background: #e4d8f8; }
+.nav-route-action--danger { color: #dc3545; border-color: #f5c2c7; }
+.nav-route-action--danger:hover { background: #fff5f5; border-color: #dc3545; }
 </style>

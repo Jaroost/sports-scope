@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { t } from '../i18n'
-import MapStyleDropdown from './MapStyleDropdown.vue'
+import { MAP_STYLES, MAP_STYLE_GROUPS } from '../mapStyles'
 import { radarStore } from '../stores/radarStore'
 import { radarSupported } from '../variaRadar'
 import type { PoiCategory } from '../poiCategories'
@@ -84,6 +84,7 @@ function onVolume(e: Event) {
 const panelTitle = computed(() => {
   switch (props.activePanel) {
     case 'route': return t('routes.route_panel')
+    case 'map':   return t('strava.map_style_label')
     case 'sound': return t('routes.sound_settings')
     case 'cam':   return t('routes.camera_settings')
     case 'poi':   return t('routes.poi_settings')
@@ -91,6 +92,16 @@ const panelTitle = computed(() => {
     default:      return ''
   }
 })
+
+const groupedStyles = computed(() =>
+  MAP_STYLE_GROUPS
+    .map(group => ({ group, styles: MAP_STYLES.filter(s => s.group === group) }))
+    .filter(g => g.styles.length > 0),
+)
+
+const currentStyleIcon = computed(() =>
+  MAP_STYLES.find(s => s.id === props.mapStyleId)?.icon ?? 'fa-map',
+)
 </script>
 
 <template>
@@ -145,6 +156,27 @@ const panelTitle = computed(() => {
             <i class="fa-solid fa-xmark" aria-hidden="true"></i>
             <span>{{ t('routes.unload_route') }}</span>
           </button>
+        </template>
+
+        <!-- Fond de carte -->
+        <template v-else-if="activePanel === 'map'">
+          <template v-for="(g, gi) in groupedStyles" :key="g.group">
+            <div :class="{ 'nav-mapstyle-group-sep': gi > 0 }">
+              <div class="nav-mapstyle-group-label">{{ t(`strava.map_style_group_${g.group}`) }}</div>
+              <button
+                v-for="s in g.styles"
+                :key="s.id"
+                type="button"
+                class="nav-route-action"
+                :class="{ 'nav-route-action--active': mapStyleId === s.id }"
+                @click="$emit('set-map-style', s.id); $emit('update:activePanel', null)"
+              >
+                <i class="fa-solid" :class="s.icon" aria-hidden="true"></i>
+                <span>{{ t(`strava.map_style_${s.id}`) }}</span>
+                <i v-if="mapStyleId === s.id" class="fa-solid fa-check ms-auto" aria-hidden="true"></i>
+              </button>
+            </div>
+          </template>
         </template>
 
         <!-- Son -->
@@ -350,7 +382,15 @@ const panelTitle = computed(() => {
       </div>
 
       <div class="nav-panel-group nav-panel-group--right">
-        <MapStyleDropdown :model-value="mapStyleId" @update:model-value="$emit('set-map-style', $event)" />
+        <button
+          type="button"
+          class="btn btn-sm btn-light shadow-sm"
+          :title="t('strava.map_style_label')"
+          :aria-label="t('strava.map_style_label')"
+          @click="$emit('update:activePanel', 'map')"
+        >
+          <i class="fa-solid" :class="currentStyleIcon" aria-hidden="true"></i>
+        </button>
         <slot name="map-extra" />
 
         <button
@@ -418,11 +458,6 @@ const panelTitle = computed(() => {
 </template>
 
 <style scoped>
-.nav-controls-panel :deep(.dropdown-menu) {
-  right: 0;
-  left: auto;
-}
-
 .nav-controls-panel {
   position: absolute; top: 0; left: 0; right: 0; z-index: 8;
   display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 0.6rem;
@@ -547,6 +582,13 @@ const panelTitle = computed(() => {
   font-size: 0.78rem; font-weight: 600; text-align: center;
 }
 .nav-poi-count--zero { opacity: 0.5; }
+
+/* Panneau fond de carte : en-têtes de groupe + boutons de style. */
+.nav-mapstyle-group-label {
+  font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: #6c757d; margin-bottom: 0.4rem;
+}
+.nav-mapstyle-group-sep { margin-top: 0.75rem; }
 
 /* Actions du panneau itinéraire. */
 .nav-route-action {

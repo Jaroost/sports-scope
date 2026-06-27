@@ -7,6 +7,8 @@ import type { PoiCategory } from '../poiCategories'
 
 const props = defineProps<{
   controlsVisible: boolean
+  // En veille, le panneau doit passer au-dessus du voile noir (z 20) quand on l'ouvre.
+  screenOff?: boolean
   loggedIn: boolean
   debugMode: boolean
   mapStyleId: string
@@ -108,7 +110,7 @@ function onVolume(e: Event) {
        radar). Masqué hors séance, rappelé par la zone de swipe. -->
   <div
     class="nav-controls-panel"
-    :class="{ 'nav-controls-panel--hidden': !controlsVisible }"
+    :class="{ 'nav-controls-panel--hidden': !controlsVisible, 'nav-controls-panel--sleep': screenOff }"
     @pointerdown="$emit('arm-controls-hide')"
   >
     <div class="nav-panel-group">
@@ -451,6 +453,9 @@ function onVolume(e: Event) {
   opacity: 0;
   pointer-events: none;
 }
+/* En veille, le voile noir (NavScreenOff, z 20) recouvre tout : on remonte le tiroir
+   au-dessus pour qu'il reste visible et cliquable quand on l'ouvre écran éteint. */
+.nav-controls-panel--sleep { z-index: 21; }
 
 /* Larger touch targets: these controls are tapped one-handed on a phone while
    riding. Min dimensions keep the icon-only buttons a comfortable ~3.25rem

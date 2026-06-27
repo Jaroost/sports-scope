@@ -308,11 +308,13 @@ const { controlsVisible, armControlsHide, showControls, hideControls } = useCont
 })
 
 // ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
-// Swipe → rappelle les boutons ; tap quasi immobile → bascule la veille. Voir useRevealGesture.
+// Swipe → rappelle les boutons (y compris en veille, par-dessus le voile noir) ; tap
+// quasi immobile → bascule la veille dans les deux sens (endort hors veille, réveille
+// en veille, comme un tap n'importe où sur le voile). Voir useRevealGesture.
 const { onRevealDown, onRevealMove, onRevealUp, cancel: cancelReveal } = useRevealGesture({
   onReveal: showControls,
   onTap: () => toggleScreenOffManual(),
-  canTap: () => !screenOff.value,
+  canTap: () => true,
 })
 
 // ─── Masquage groupé des overlays du bas (cols / POI / avancement) ─────────────
@@ -2733,6 +2735,14 @@ function toggleScreenOffManual() {
   autoWoken = false
   toggleScreenOff()
 }
+
+// Tap sur le voile de veille (en dehors du tiroir du haut, qui passe au-dessus). Si le
+// tiroir est ouvert, ce premier tap se contente de le refermer — sans quitter la veille,
+// comme un clic hors d'un menu déroulant. Sinon (tiroir fermé), on réveille l'écran.
+function onScreenOffTap() {
+  if (controlsVisible.value) { hideControls(); return }
+  toggleScreenOffManual()
+}
 </script>
 
 <template>
@@ -2745,11 +2755,11 @@ function toggleScreenOffManual() {
       :turn-hint="turnHint"
       :has-fix="hasFix"
       :off-route="offRoute"
-      :climb-info="showClimbCard ? climbInfo : null"
+      :climb-info="isClimbing ? climbInfo : null"
       :urgent-m="TURN_URGENT_M"
       :speed-kmh="speedKmh"
       :muted="turnAlertMuted"
-      @resume="toggleScreenOffManual"
+      @resume="onScreenOffTap"
       @mute="muteTurnAlert"
     />
 
@@ -2760,11 +2770,13 @@ function toggleScreenOffManual() {
       <i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>{{ error }}
     </div>
 
-    <!-- Zone de swipe (révèle les boutons masqués) : fine bande transparente en
-         haut, active seulement boutons masqués et écran allumé. -->
+    <!-- Zone de swipe (révèle les boutons masqués) : fine bande transparente en haut,
+         active dès que les boutons sont masqués (y compris en veille, où elle passe
+         au-dessus du voile noir pour permettre d'ouvrir le tiroir du haut écran éteint). -->
     <div
-      v-if="!controlsVisible && !screenOff"
+      v-if="!controlsVisible"
       class="nav-reveal-zone"
+      :class="{ 'nav-reveal-zone--sleep': screenOff }"
       @pointerdown="onRevealDown"
       @pointermove="onRevealMove"
       @pointerup="onRevealUp"
@@ -2781,6 +2793,7 @@ function toggleScreenOffManual() {
          radar). Masqué hors séance, rappelé par la zone de swipe. -->
     <NavControlsPanel
       :controls-visible="controlsVisible"
+      :screen-off="screenOff"
       :logged-in="loggedIn"
       :debug-mode="debugMode"
       :map-style-id="mapStyleId"
@@ -3073,12 +3086,14 @@ function toggleScreenOffManual() {
 
     <!-- Masquage groupé des overlays du bas : une fine zone au bord inférieur capte le
          swipe vers le haut (ou un tap) et bascule la visibilité de tous les overlays du
-         bas. Réservée à la navigation sur itinéraire, masquée en veille / recherche /
-         édition. Le chevron pointe vers le bas quand tout est visible (geste → masquer)
-         et vers le haut quand c'est masqué (geste → réafficher). -->
+         bas. Disponible aussi en veille (pour masquer la carte de col écran éteint, comme
+         hors veille) ; masquée seulement en recherche / édition. Le chevron pointe vers le
+         bas quand tout est visible (geste → masquer) et vers le haut quand c'est masqué
+         (geste → réafficher). -->
     <div
-      v-if="hasRoute && !screenOff && !placeNavActive && !editMode"
+      v-if="hasRoute && !placeNavActive && !editMode"
       class="nav-bottom-reveal-zone"
+      :class="{ 'nav-bottom-reveal-zone--sleep': screenOff }"
       @pointerdown="onBottomDown"
       @pointermove="onBottomMove"
       @pointerup="onBottomUp"
@@ -3125,6 +3140,12 @@ function toggleScreenOffManual() {
   z-index: 6; touch-action: none;
   display: flex; justify-content: center; align-items: flex-start;
 }
+/* En veille, le voile noir (z 20) recouvre tout : on remonte la zone de geste au-dessus
+   pour qu'un swipe vers le bas ouvre le tiroir du haut écran éteint (le tiroir lui-même
+   passe aussi au-dessus du voile, cf. nav-controls-panel--sleep). */
+.nav-reveal-zone--sleep { z-index: 21; }
+/* Fond sombre du grabber confondu avec le voile : on l'éclaircit en veille. */
+.nav-reveal-zone--sleep .nav-reveal-grabber { background: rgba(255, 255, 255, 0.25); }
 /* Petit chevron discret indiquant qu'on peut faire glisser vers le bas pour déployer
    le tiroir de commandes. Centré sur le bord supérieur. */
 .nav-reveal-grabber {
@@ -3149,6 +3170,10 @@ function toggleScreenOffManual() {
   width: 6rem; height: 2.2rem; z-index: 8; touch-action: none;
   display: flex; justify-content: center; align-items: flex-end;
 }
+/* En veille, le voile noir (z 20) recouvre tout : on remonte la zone de geste au-dessus
+   (comme la carte de col à z 21) pour qu'un swipe vers le haut puisse masquer la carte
+   de col écran éteint. */
+.nav-bottom-reveal-zone--sleep { z-index: 21; }
 /* Chevron discret indiquant qu'on peut faire glisser vers le haut pour déployer le
    tiroir d'affichage. */
 .nav-bottom-grabber {
@@ -3159,6 +3184,9 @@ function toggleScreenOffManual() {
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
   animation: nav-reveal-pulse 2.4s ease-in-out infinite;
 }
+/* En veille, le fond sombre du grabber se confondrait avec le voile noir : on l'éclaircit
+   pour qu'il reste repérable. */
+.nav-bottom-reveal-zone--sleep .nav-bottom-grabber { background: rgba(255, 255, 255, 0.25); }
 
 .nav-banner {
   position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);

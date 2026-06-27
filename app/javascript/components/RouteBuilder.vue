@@ -7,8 +7,8 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration } from '../routeHelpers'
-import type { Coord, VoiceHint } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, turnsFromVoiceHints, detectTurnAnomalies } from '../routeHelpers'
+import type { Coord, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { BROUTER_URL, BROUTER_PROFILES } from '../brouter'
 import RouteBuilderStats from './RouteBuilderStats.vue'
@@ -49,6 +49,11 @@ const exporting = ref(false)
 // pas sauvegardé, donc pas de navigation possible avant l'enregistrement).
 const routeShareToken = ref<string | null>(null)
 const showExportDialog = ref(false)
+// Avertissement « amas de virages » détecté à l'enregistrement : un point d'étape mal
+// posé (à côté de la route) fait crocheter BRouter et empile plusieurs virages serrés
+// au même endroit, ce qui fausse la navigation. On le signale sans bloquer la sauvegarde.
+const turnWarnings = ref<TurnAnomaly[]>([])
+const showTurnWarning = ref(false)
 const exportStyleId = ref('')
 const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
@@ -232,6 +237,8 @@ function onChangeSport(sport: Sport) {
 async function recomputeRoute() {
   const token = ++recomputeToken
   selectionStore.clear()
+  // Toute modification du tracé invalide un éventuel avertissement d'amas de virages.
+  if (showTurnWarning.value || turnWarnings.value.length) dismissTurnWarning()
 
   if (routeStore.waypoints.value.length < 2) {
     routeStore.geometry.value = []
@@ -424,6 +431,16 @@ async function fetchSharedRoute(token: string) {
   }
 }
 
+// Recherche les amas de virages (point mal placé) sur le tracé courant à partir des
+// voicehints BRouter déjà calculés. Vide tant que la géométrie est trop courte.
+function computeTurnAnomalies(): TurnAnomaly[] {
+  const geom = routeStore.geometry.value
+  if (geom.length < 3) return []
+  const cumDistM = buildDistancesM(geom)
+  const turns = turnsFromVoiceHints(routeStore.voiceHints.value, geom, cumDistM)
+  return detectTurnAnomalies(turns, geom)
+}
+
 async function save() {
   if (routeStore.readOnly.value) return
   // Sur mobile le champ nom du header n'est pas affiché : on le demande au moment de
@@ -436,10 +453,50 @@ async function save() {
     routeStore.name.value = name
   }
   if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
+  // Avant d'enregistrer, on prévient si le tracé contient des amas de virages (signe
+  // d'un point posé à côté de la route). L'utilisateur peut corriger ou passer outre.
+  const anomalies = computeTurnAnomalies()
+  if (anomalies.length) {
+    turnWarnings.value = anomalies
+    showTurnWarning.value = true
+    mapRef.value?.showTurnAnomalyMarkers(anomalies)
+    return
+  }
+  await persistAndIndexPlaces()
+}
+
+async function persistAndIndexPlaces() {
   await persist()
   // Les lieux ne sont recherchés qu'à l'enregistrement (et non à chaque édition du
   // tracé) : on lance la requête Overpass maintenant que l'itinéraire est figé.
   fetchImportantPlaces()
+}
+
+// Enregistre malgré l'avertissement d'amas de virages : l'utilisateur assume le tracé,
+// on retire donc les marqueurs d'alerte.
+async function saveAnyway() {
+  dismissTurnWarning()
+  await persistAndIndexPlaces()
+}
+
+// Ferme la modale mais LAISSE les marqueurs d'alerte sur la carte : ils guident
+// l'utilisateur vers les points à corriger et disparaissent au prochain recalcul du
+// tracé (cf. recomputeRoute).
+function closeTurnWarning() {
+  showTurnWarning.value = false
+}
+
+// Recentre la carte sur un amas pour le corriger (marqueurs conservés).
+function focusTurnAnomaly(a: TurnAnomaly) {
+  closeTurnWarning()
+  mapRef.value?.flyTo(a.lng, a.lat, 17)
+}
+
+// Réinitialise complètement l'avertissement : modale, liste et marqueurs d'alerte.
+function dismissTurnWarning() {
+  showTurnWarning.value = false
+  turnWarnings.value = []
+  mapRef.value?.clearTurnAnomalyMarkers()
 }
 
 async function persist() {
@@ -1385,6 +1442,44 @@ onBeforeUnmount(() => {
       </div>
     </Transition>
 
+    <!-- Avertissement amas de virages (point mal placé) -->
+    <Transition name="modal">
+      <div v-if="showTurnWarning" class="modal-backdrop-custom" @click.self="closeTurnWarning">
+        <div class="modal-dialog-custom shadow-lg">
+          <div class="modal-header-custom">
+            <strong class="d-flex align-items-center gap-2">
+              <i class="fa-solid fa-triangle-exclamation text-danger" aria-hidden="true"></i>
+              {{ t('routes.turn_warning_title') }}
+            </strong>
+            <button type="button" class="btn-close" @click="closeTurnWarning" :aria-label="t('routes.turn_warning_dismiss')"></button>
+          </div>
+          <div class="modal-body-custom d-flex flex-column gap-3">
+            <p class="small text-muted mb-0">{{ t('routes.turn_warning_body') }}</p>
+            <ul class="turn-warning-list">
+              <li v-for="(a, i) in turnWarnings" :key="i">
+                <button type="button" class="turn-warning-item" @click="focusTurnAnomaly(a)">
+                  <span class="turn-warning-item-label">
+                    <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
+                    {{ t('routes.turn_warning_item', { count: a.count, distance: formatDistancePrecise(a.distM) }) }}
+                  </span>
+                  <i class="fa-solid fa-chevron-right text-muted" aria-hidden="true"></i>
+                </button>
+              </li>
+            </ul>
+            <div class="d-flex gap-2">
+              <button type="button" class="btn btn-outline-secondary flex-fill" @click="closeTurnWarning">
+                {{ t('routes.turn_warning_fix') }}
+              </button>
+              <button type="button" class="btn btn-warning flex-fill" :disabled="saving" @click="saveAnyway">
+                <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                {{ t('routes.turn_warning_save_anyway') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- Export image dialog -->
     <Transition name="modal">
       <div v-if="showExportDialog" class="modal-backdrop-custom" @click.self="showExportDialog = false">
@@ -1642,4 +1737,34 @@ onBeforeUnmount(() => {
 .modal-body-custom { padding: 1.25rem; }
 .modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
+
+/* ─── Avertissement amas de virages ───────────────────────────────────────── */
+.turn-warning-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.turn-warning-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #fde0e0;
+  border-radius: 0.5rem;
+  background: #fef2f2;
+  color: #7f1d1d;
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.turn-warning-item:hover { background: #fee2e2; border-color: #fca5a5; }
+.turn-warning-item-label { display: flex; align-items: center; gap: 0.5rem; }
 </style>

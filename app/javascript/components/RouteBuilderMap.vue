@@ -71,6 +71,7 @@ let selectionMarkerBKm: number | null = null
 let selectionMarkerDragging = false
 const climbMarkers: any[] = []
 const climbMarkerObservers: MutationObserver[] = []
+const turnAnomalyMarkers: any[] = []
 const placeMarkers: any[] = []
 const placeMarkerObservers: MutationObserver[] = []
 // Permet de retrouver l'élément DOM d'un POI à partir de ses coordonnées, pour
@@ -848,6 +849,28 @@ function showChartCrossMarker(lng: number, lat: number) {
 
 function hideChartCrossMarker() {
   if (chartCrossMarker) chartCrossMarker.getElement().style.display = 'none'
+}
+
+// Marqueurs d'alerte « amas de virages » : posés à la sauvegarde quand un point mal
+// placé déclenche plusieurs virages serrés au même endroit (cf. detectTurnAnomalies).
+// Purement informatifs ; retirés dès que l'utilisateur ferme l'avertissement.
+function clearTurnAnomalyMarkers() {
+  turnAnomalyMarkers.forEach((m) => m.remove())
+  turnAnomalyMarkers.length = 0
+}
+
+function showTurnAnomalyMarkers(anomalies: Array<{ lng: number; lat: number }>) {
+  if (!_maplibregl || !mapInstance) return
+  clearTurnAnomalyMarkers()
+  for (const a of anomalies) {
+    const el = document.createElement('div')
+    el.className = 'turn-anomaly-marker'
+    el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>'
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([a.lng, a.lat])
+      .addTo(mapInstance)
+    turnAnomalyMarkers.push(marker)
+  }
 }
 
 // Surligne le POI survolé en remplissant son marqueur (le fond passe à la couleur
@@ -1916,6 +1939,7 @@ onBeforeUnmount(() => {
   divergentMarkers.forEach((m) => m.remove()); divergentMarkers.length = 0
   climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
   climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
+  clearTurnAnomalyMarkers()
   clearPlaceMarkers()
   clearSavedPoiMarkers()
   closeSavedPoiPopup()
@@ -1946,6 +1970,8 @@ defineExpose({
   fitBounds,
   showChartCrossMarker,
   hideChartCrossMarker,
+  showTurnAnomalyMarkers,
+  clearTurnAnomalyMarkers,
   showPlaceHoverMarker,
   hidePlaceHoverMarker,
   showPlacePopup,
@@ -2783,6 +2809,25 @@ defineExpose({
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(0,0,0,0.45);
   pointer-events: none;
+}
+.turn-anomaly-marker {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #dc2626;
+  border: 2px solid #fff;
+  color: #fff;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  pointer-events: none;
+  animation: turn-anomaly-pulse 1.4s ease-in-out infinite;
+}
+@keyframes turn-anomaly-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 0 rgba(220,38,38,0.55); }
+  50% { box-shadow: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 10px rgba(220,38,38,0); }
 }
 .user-location-dot {
   width: 16px;

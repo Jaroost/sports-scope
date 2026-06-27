@@ -731,6 +731,71 @@ export function detectTurns(
   return out
 }
 
+// ─── Turn anomaly detection ──────────────────────────────────────────────────
+
+// Un « amas de virages » : plusieurs virages rapprochés sur un très court rayon.
+// Symptôme typique d'un point d'étape mal posé (à côté de la route) : BRouter trace
+// un crochet pour aller le chercher puis revenir, ce qui empile 2–3 virages au même
+// endroit et fausse la navigation (instructions contradictoires en quelques mètres).
+export interface TurnAnomaly {
+  idx: number       // sommet géométrique du virage le plus marqué de l'amas
+  lng: number
+  lat: number
+  distM: number     // distance cumulée jusqu'à l'amas
+  count: number     // nombre de virages dans l'amas
+}
+
+// Repère les amas d'au moins `minTurns` virages tenant dans un cercle de `diameterM`
+// de diamètre. `turns` provient des voicehints BRouter (turnsFromVoiceHints) ou de la
+// détection géométrique (detectTurns) ; on lit la position de chaque virage dans
+// `geometry` via son index. On parcourt les virages dans l'ordre de parcours et on
+// agrège ceux qui restent regroupés : un virage rejoint l'amas tant que sa distance à
+// TOUS les virages déjà retenus reste sous `diameterM` (l'amas tient donc bien dans un
+// cercle de ce diamètre). Un amas assez fourni est signalé, ancré sur son virage le
+// plus serré. `diameterM` vaut 100 m par défaut : un point posé à côté de la route fait
+// crocheter BRouter (virage d'entrée → demi-tour → virage de sortie) dont l'entrée et
+// la sortie peuvent s'écarter de plusieurs dizaines de mètres le long de la route ; un
+// crochet diffus dépasse facilement 60 m d'emprise. Validé sur des cas réels : à 100 m
+// on capture les crochets étalés sans faux positif (les virages naturels d'une route
+// sinueuse ne se groupent pas à 3+ sous ce diamètre).
+export function detectTurnAnomalies(
+  turns: TurnPoint[],
+  geometry: Coord[],
+  opts: { diameterM?: number; minTurns?: number } = {},
+): TurnAnomaly[] {
+  const diameterM = opts.diameterM ?? 100
+  const minTurns = opts.minTurns ?? 3
+  const out: TurnAnomaly[] = []
+  if (turns.length < minTurns || !geometry.length) return out
+  const pos = (t: TurnPoint): LngLat => [geometry[t.idx][0], geometry[t.idx][1]]
+  const sorted = [...turns].sort((a, b) => a.distM - b.distM)
+  let i = 0
+  while (i < sorted.length) {
+    let j = i
+    while (j + 1 < sorted.length) {
+      let fits = true
+      for (let k = i; k <= j; k++) {
+        if (haversine(pos(sorted[k]), pos(sorted[j + 1])) > diameterM) { fits = false; break }
+      }
+      if (!fits) break
+      j++
+    }
+    const count = j - i + 1
+    if (count >= minTurns) {
+      let sharp = sorted[i]
+      for (let k = i + 1; k <= j; k++) {
+        if (Math.abs(sorted[k].angle) > Math.abs(sharp.angle)) sharp = sorted[k]
+      }
+      const [lng, lat] = pos(sharp)
+      out.push({ idx: sharp.idx, lng, lat, distM: sharp.distM, count })
+      i = j + 1
+    } else {
+      i++
+    }
+  }
+  return out
+}
+
 // The climb currently being ridden (idx within [startIdx, endIdx]) and how far
 // through it we are (0..1), or null when not on a climb. The ratio is measured by
 // distance covered (via cumDistM, and `doneM` for sub-segment precision) rather

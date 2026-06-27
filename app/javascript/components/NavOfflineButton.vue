@@ -7,10 +7,11 @@ import { ref, computed, onMounted } from 'vue'
 import { t } from '../i18n'
 import {
   offlineSupported, hasOfflineArchive, deleteOfflineArchive,
-  downloadOfflineArchive, estimateOffline, type DownloadProgress,
+  downloadOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
+  type DownloadProgress, type OfflinePoi,
 } from '../offline/offlineMaps'
 
-const props = defineProps<{ shareToken: string; coords: [number, number][] }>()
+const props = defineProps<{ shareToken: string; coords: [number, number][]; pois?: OfflinePoi[] }>()
 const emit = defineEmits<{ (e: 'available'): void; (e: 'removed'): void }>()
 
 const supported = offlineSupported()
@@ -39,6 +40,7 @@ async function start() {
       props.shareToken, props.coords, undefined,
       (p) => { progress.value = p }, abort.signal,
     )
+    if (props.pois && props.pois.length > 0) saveOfflinePois(props.shareToken, props.pois)
     ready.value = true
     emit('available')
   } catch (e) {
@@ -53,6 +55,7 @@ function cancel() { abort?.abort() }
 
 async function remove() {
   await deleteOfflineArchive(props.shareToken)
+  deleteOfflinePois(props.shareToken)
   ready.value = false
   emit('removed')
 }

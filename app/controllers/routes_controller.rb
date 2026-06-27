@@ -89,6 +89,7 @@ class RoutesController < ApplicationController
       waypoints: src.waypoints,
       geometry: src.geometry,
       voice_hints: src.voice_hints,
+      pois: src.pois,
       distance_m: src.distance_m,
       elevation_gain_m: src.elevation_gain_m,
       elevation_loss_m: src.elevation_loss_m,
@@ -111,6 +112,7 @@ class RoutesController < ApplicationController
     out[:waypoints] = clean_waypoints(p[:waypoints]) if p.key?(:waypoints)
     out[:geometry] = clean_geometry(p[:geometry]) if p.key?(:geometry)
     out[:voice_hints] = clean_voice_hints(p[:voice_hints]) if p.key?(:voice_hints)
+    out[:pois] = clean_pois(p[:pois]) if p.key?(:pois)
     out[:distance_m] = p[:distance_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:distance_m)
     out[:elevation_gain_m] = p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_gain_m)
     out[:elevation_loss_m] = p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_loss_m)
@@ -143,6 +145,7 @@ class RoutesController < ApplicationController
   end
 
   MAX_VOICE_HINTS = 2_000
+  MAX_POIS = 2_000
 
   def clean_voice_hints(raw)
     return [] unless raw.is_a?(Array)
@@ -158,6 +161,21 @@ class RoutesController < ApplicationController
       next nil if lat.abs > 90 || lng.abs > 180
       { "lng" => lng.to_f, "lat" => lat.to_f, "cmd" => cmd.to_i, "angle" => angle.to_f, "exit_number" => exit_number.to_i }
     end.compact
+  end
+
+  def clean_pois(raw)
+    return [] unless raw.is_a?(Array)
+    raw.take(MAX_POIS).filter_map do |item|
+      h = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
+      next unless h.is_a?(Hash)
+      name = (h["name"] || h[:name]).to_s.strip.first(100)
+      type = (h["type"] || h[:type]).to_s.gsub(/[^a-zA-Z0-9_]/, "").first(50)
+      lat  = h["lat"]  || h[:lat]
+      lng  = h["lng"]  || h[:lng]
+      next unless lat.is_a?(Numeric) && lng.is_a?(Numeric)
+      next if lat.abs > 90 || lng.abs > 180
+      { "name" => name, "type" => type, "lat" => lat.to_f, "lng" => lng.to_f }
+    end
   end
 
   def serialize_summary(route)
@@ -179,6 +197,7 @@ class RoutesController < ApplicationController
       waypoints: route.waypoints || [],
       geometry: route.geometry || [],
       voice_hints: route.voice_hints || [],
+      pois: route.pois || [],
     )
   end
 

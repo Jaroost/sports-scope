@@ -143,6 +143,33 @@ export async function downloadOfflineArchive(
   return { tiles: collected.length, bytes: archive.length }
 }
 
+// ─── POI hors-ligne (localStorage) ───────────────────────────────────────────
+// Sauvegarde les POI du tracé dans le localStorage au moment du téléchargement de
+// l'archive hors-ligne. Clé dérivée du token (identique à l'archive PMTiles).
+
+function poisKey(token: string): string {
+  return `offline-pois-${token.replace(/[^a-zA-Z0-9_-]/g, '')}`
+}
+
+export interface OfflinePoi { name: string; type: string; lat: number; lng: number }
+
+export function saveOfflinePois(token: string, pois: OfflinePoi[]): void {
+  try { localStorage.setItem(poisKey(token), JSON.stringify(pois)) } catch { /* quota */ }
+}
+
+export function loadOfflinePois(token: string): OfflinePoi[] {
+  try {
+    const raw = localStorage.getItem(poisKey(token))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch { return [] }
+}
+
+export function deleteOfflinePois(token: string): void {
+  try { localStorage.removeItem(poisKey(token)) } catch {}
+}
+
 // ─── Lecture / MapLibre ───────────────────────────────────────────────────────
 
 let protocol: Protocol | null = null

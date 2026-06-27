@@ -511,6 +511,7 @@ async function persist() {
       waypoints: routeStore.waypoints.value,
       geometry: routeStore.geometry.value,
       voice_hints: routeStore.voiceHints.value,
+      pois: placesStore.importantPlaces.value.map(({ name, type, lat, lng }) => ({ name, type, lat, lng })),
       distance_m: routeStore.distanceM.value,
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,

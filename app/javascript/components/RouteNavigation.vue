@@ -123,6 +123,9 @@ const mapStyleId = ref(navPrefs.default_style as string)
 // (NavOfflineButton) gère le téléchargement ; ici on ne fait que basculer le fond vers
 // la version locale quand le réseau tombe (cf. resolveBaseStyle / refreshBaseMap).
 const offlineCoords = ref<[number, number][]>([])
+// POI du tracé actif (issues de routes.pois) : passés à NavOfflineButton pour être
+// sauvegardés dans le localStorage au moment du téléchargement hors-ligne.
+const offlinePois = ref<Array<{ name: string; type: string; lat: number; lng: number }>>([])
 const offlineReady = ref(false)        // archive présente (affichage)
 let offlineRegistered = false          // archive branchée sur le protocole pmtiles://
 let baseIsOffline = false              // le fond actif est-il la version locale ?
@@ -849,6 +852,9 @@ async function loadSharedRouteData(token: string) {
   routeId = typeof route.id === 'number' ? route.id : null
   routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
+  const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
+  offlinePois.value = savedPois
+  if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
   hasRoute.value = true
   syncEditable()
 }
@@ -1034,6 +1040,9 @@ function loadRoute(route: any) {
   routeId = typeof route.id === 'number' ? route.id : null
   routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
+  const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
+  offlinePois.value = savedPois
+  if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
   resetRouteTracking(false)
   hasRoute.value = true
   syncEditable()
@@ -1066,6 +1075,7 @@ function unloadRoute() {
   hasRoute.value = false
   routeToken.value = null
   routeName.value = ''
+  offlinePois.value = []
   geometry = []
   displayLine = []
   displayWScale = []
@@ -2880,6 +2890,7 @@ function onScreenOffTap() {
           v-if="routeToken"
           :share-token="routeToken"
           :coords="offlineCoords"
+          :pois="offlinePois"
           @available="onOfflineAvailable"
           @removed="onOfflineRemoved"
         />

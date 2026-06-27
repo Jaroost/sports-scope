@@ -64,6 +64,11 @@ export function useNavPois(deps: {
   // profondeur les éléments de `places` (ref), donc `visiblePlaces` renvoie des proxys —
   // une Map indexée par l'objet brut renverrait alors undefined.
   const places = ref<NavPlace[]>([])
+  // POI sauvegardés avec le tracé dans la table `routes.pois` : affichés dès le chargement
+  // du tracé, avant toute recherche Overpass. Remplacés/effacés dès qu'une recherche live
+  // aboutit, pour éviter les doublons. Fallback offline : si Overpass échoue, ces POI
+  // restent visibles tout au long de la séance.
+  const routePlaces = ref<NavPlace[]>([])
   // POI sauvegardés (table `pois`) projetés en NavPlace : rendus en permanence, en plus
   // des POI Overpass. Alimentés depuis savedPoisStore (cf. bas du composable).
   const savedPlaces = ref<NavPlace[]>([])
@@ -160,8 +165,17 @@ export function useNavPois(deps: {
   }
 
   // Remplace les POI Overpass et redessine tous les marqueurs (Overpass + sauvegardés).
+  // Les POI du tracé (routePlaces) sont effacés : la recherche live les remplace.
   function installPlaceMarkers(newPlaces: NavPlace[]) {
     places.value = newPlaces
+    routePlaces.value = []
+    renderMarkers()
+  }
+
+  // Installe les POI sauvegardés avec le tracé (routes.pois) comme source de secours
+  // affichée avant toute recherche Overpass et en cas d'indisponibilité du réseau.
+  function setRoutePlaces(pois: Array<{ name: string; type: string; lat: number; lng: number }>) {
+    routePlaces.value = pois.map(({ name, type, lat, lng }) => ({ name, type, lng, lat }))
     renderMarkers()
   }
 
@@ -177,7 +191,8 @@ export function useNavPois(deps: {
     for (const m of placeMarkers) m.remove()
     placeMarkers = []
     placeEls.clear()
-    for (const place of [...places.value, ...savedPlaces.value]) {
+    const overpassOrRoute = places.value.length > 0 ? places.value : routePlaces.value
+    for (const place of [...overpassOrRoute, ...savedPlaces.value]) {
       const el = document.createElement('div')
       const cat = categoryForType(place.type)
       const icon = cat?.icon ?? 'fa-location-dot'
@@ -216,13 +231,14 @@ export function useNavPois(deps: {
   }
 
   // POI ponctuels actuellement affichés (catégorie non masquée par le panneau de séance).
-  // Alimente le parcours des POI et la détection de proximité.
-  const visiblePlaces = computed(() =>
-    [...places.value, ...savedPlaces.value].filter((p) => {
+  // Priorité : Overpass live > POI sauvegardés du tracé > rien. En plus : POI perso.
+  const visiblePlaces = computed(() => {
+    const overpassOrRoute = places.value.length > 0 ? places.value : routePlaces.value
+    return [...overpassOrRoute, ...savedPlaces.value].filter((p) => {
       const cat = categoryForType(p.type)
       return !cat || poiVisible[cat.key] !== false
-    }),
-  )
+    })
+  })
 
   // Ouvre le popup d'un POI (mêmes actions que le clic sur son marqueur) depuis le
   // parcours : retrouve l'élément DOM du marqueur par référence de `place`.
@@ -398,6 +414,7 @@ export function useNavPois(deps: {
 
   return {
     loadSavedPois,
+    setRoutePlaces,
     POI_CATS,
     poiVisible,
     poiCounts,
@@ -410,5 +427,6 @@ export function useNavPois(deps: {
     applyPoiScale,
     closePlacePopup,
     hasOpenPopup: () => placePopup != null,
+    routePlaces,
   }
 }

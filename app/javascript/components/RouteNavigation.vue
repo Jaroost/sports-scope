@@ -113,8 +113,7 @@ const following = ref(true)
 const cameraUnlocked = ref(false)
 // Son de la séance (alertes virage / radar). Voir useNavSound.
 const { soundOn, toggleSound, soundVolume, setVolume } = useNavSound()
-const showSoundPanel = ref(false)
-const showRoutePanel = ref(false)
+const activePanel = ref<string | null>(null)
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
 // on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
 const mapStyleId = ref(navPrefs.default_style as string)
@@ -145,7 +144,6 @@ function onManualZoom() {
   following.value = false
   cameraUnlocked.value = true
 }
-const showCamPanel = ref(false)
 
 // ─── Filtres POI (panneau de séance) ──────────────────────────────────────────
 // Le sous-système POI (recherche Overpass, marqueurs, popup, Street View, mise à
@@ -166,8 +164,6 @@ const pois = useNavPois({
   hasRoute: () => hasRoute.value,
 })
 const { POI_CATS, poiVisible, poiCounts, loading: poiLoading } = pois
-const showPoiPanel = ref(false)
-
 // Toast transitoire du résultat d'une recherche POI manuelle (boutons « autour de moi »
 // / « sur le trajet ») : nombre de lieux trouvés, ou échec de la recherche. Auto-effacé.
 const poiToast = ref<{ ok: boolean; text: string } | null>(null)
@@ -245,7 +241,7 @@ const poiBrowseHint = computed(() => {
 })
 
 function startPoiBrowse() {
-  showPoiPanel.value = false
+  activePanel.value = null
   const list = [...pois.visiblePlaces.value]
   if (lastPos) {
     const here = lastPos
@@ -315,8 +311,8 @@ const screenOff = ref(false)
 // On ne masque pas tant qu'un sous-panneau (caméra / POI / débug) est ouvert. Voir
 // useControlsHide.
 const { controlsVisible, armControlsHide, showControls, hideControls } = useControlsHide({
-  isPanelOpen: () => showCamPanel.value || showPoiPanel.value || showDebugPanel.value || showSoundPanel.value || showRoutePanel.value,
-  closePanels: () => { showCamPanel.value = false; showPoiPanel.value = false; showDebugPanel.value = false; showSoundPanel.value = false; showRoutePanel.value = false },
+  isPanelOpen: () => activePanel.value !== null,
+  closePanels: () => { activePanel.value = null },
 })
 
 // ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
@@ -692,7 +688,6 @@ const approachingTurn = computed(
 const debugMode = props.canDebug === true || (() => {
   try { return new URLSearchParams(window.location.search).has('debug') } catch { return false }
 })()
-const showDebugPanel = ref(false)
 const dbgRadar = ref(false)
 const dbgClimb = ref(false)
 const dbgTurn = ref(false)
@@ -2834,8 +2829,7 @@ function onScreenOffTap() {
       :map-style-id="mapStyleId"
       :sound-on="soundOn"
       :sound-volume="soundVolume"
-      v-model:show-sound-panel="showSoundPanel"
-      v-model:show-route-panel="showRoutePanel"
+      v-model:active-panel="activePanel"
       :route-loaded="hasRoute"
       :can-edit="canEditRoute"
       :edit-mode="editMode"
@@ -2859,9 +2853,6 @@ function onScreenOffTap() {
       :dbg-climb="dbgClimb"
       :dbg-turn-label="dbgTurnLabel"
       :dbg-poi="dbgPoi"
-      v-model:show-cam-panel="showCamPanel"
-      v-model:show-poi-panel="showPoiPanel"
-      v-model:show-debug-panel="showDebugPanel"
       @arm-controls-hide="armControlsHide"
       @open-route-picker="showRoutePicker = true"
       @unload-route="unloadRoute"

@@ -16,8 +16,12 @@ defineEmits<{ (e: 'resume'): void }>()
     @click="$emit('resume')"
   >
     <div class="d-flex align-items-center justify-content-between mb-1">
-      <span class="fw-semibold">
-        <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
+      <!-- D+ restant et pourcentage déjà réalisé, mis en avant dans l'en-tête
+           (les mêmes infos que la petite étiquette sur le graphique, trop petite
+           pour être lue en conditions réelles). -->
+      <span class="nav-climb-progress">
+        <span class="nav-climb-progress-gain">+{{ Math.round(climbInfo.remainingGainM) }} m</span>
+        <span class="nav-climb-progress-pct">{{ Math.round(climbInfo.ratio * 100) }} %</span>
       </span>
       <span class="d-flex align-items-center gap-2">
         <!-- Distance restante du col, mise en avant. -->
@@ -79,6 +83,13 @@ defineEmits<{ (e: 'resume'): void }>()
 .nav-climb-remaining-dist {
   font-weight: 800; font-size: 1.5rem; line-height: 1; color: #111827;
 }
+/* D+ restant + pourcentage réalisé, en gros dans l'en-tête (lisible d'un coup
+   d'œil en roulant). */
+.nav-climb-progress {
+  display: flex; align-items: baseline; gap: 0.5rem; line-height: 1;
+}
+.nav-climb-progress-gain { font-size: 1.5rem; font-weight: 800; color: #c2410c; }
+.nav-climb-progress-pct { font-size: 1.1rem; font-weight: 700; color: #6c757d; }
 .nav-climb-graph {
   position: relative; height: 210px; width: 100%;
 }

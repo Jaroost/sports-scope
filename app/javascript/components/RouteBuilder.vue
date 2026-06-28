@@ -12,6 +12,7 @@ import type { Coord, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport } from '../userPreferences'
 import { BROUTER_URL, BROUTER_PROFILES } from '../brouter'
+import { parseGpxWaypoints } from '../gpxImport'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
@@ -1052,6 +1053,25 @@ function onSheetHandleTouchStart(ev: TouchEvent) {
 
 // ─── GPX import ───────────────────────────────────────────────────────────────
 
+// Charge un jeu de waypoints importés (GPX) dans le créateur : nom + type si
+// fournis, puis recalcule le tracé via BRouter et cadre la carte dessus.
+function applyImportedWaypoints(
+  wps: Array<{ lng: number; lat: number; free?: boolean }>,
+  name?: string,
+  activity?: string,
+) {
+  if (!Array.isArray(wps) || wps.length < 2) return
+  if (name && !routeStore.name.value.trim()) routeStore.name.value = String(name).slice(0, 80)
+  if (activity === 'cycling' || activity === 'mtb' || activity === 'hiking') {
+    routeStore.setSport(activity)
+  }
+  routeStore.waypoints.value = wps
+  mapRef.value?.refreshWaypointMarkers()
+  const lngs = wps.map((w) => w.lng), lats = wps.map((w) => w.lat)
+  mapRef.value?.fitBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)], { padding: 60, duration: 600, maxZoom: 14 })
+  recomputeRoute()
+}
+
 function applyPendingGpxImport() {
   try {
     const u = new URL(window.location.href)
@@ -1061,18 +1081,42 @@ function applyPendingGpxImport() {
     sessionStorage.removeItem('sportsScope.gpxImport')
     if (!raw) return
     const payload = JSON.parse(raw)
-    const wps = Array.isArray(payload?.waypoints) ? payload.waypoints : []
-    if (wps.length < 2) return
-    if (payload.name && !routeStore.name.value.trim()) routeStore.name.value = String(payload.name).slice(0, 80)
-    if (payload.activity === 'cycling' || payload.activity === 'mtb' || payload.activity === 'hiking') {
-      routeStore.setSport(payload.activity)
-    }
-    routeStore.waypoints.value = wps
-    mapRef.value?.refreshWaypointMarkers()
-    const lngs = wps.map((w: any) => w.lng), lats = wps.map((w: any) => w.lat)
-    mapRef.value?.fitBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)], { padding: 60, duration: 600, maxZoom: 14 })
-    recomputeRoute()
+    applyImportedWaypoints(payload?.waypoints, payload?.name, payload?.activity)
   } catch { /* stale payload */ }
+}
+
+// Web Share Target (Android) : un .gpx partagé à l'app est mis en cache par le
+// service worker, qui redirige ici avec ?fromShare=1. On récupère le fichier
+// (consommation one-shot côté SW) et on charge directement le tracé.
+async function applySharedGpx() {
+  try {
+    const u = new URL(window.location.href)
+    if (u.searchParams.get('fromShare') !== '1') return
+    u.searchParams.delete('fromShare'); window.history.replaceState({}, '', u.toString())
+    const res = await fetch('/__shared_gpx__', { cache: 'no-store' })
+    if (!res.ok) return
+    const text = await res.text()
+    const filename = decodeURIComponent(res.headers.get('X-Filename') || '').replace(/\.gpx$/i, '').trim()
+    applyImportedWaypoints(parseGpxWaypoints(text), filename || undefined)
+  } catch { /* partage illisible */ }
+}
+
+// File Handling API : quand l'OS ouvre un .gpx avec l'app installée (PWA), il
+// lance le créateur — action déclarée dans public/manifest.webmanifest — et nous
+// transmet le fichier via launchQueue. On le parse et on charge directement le
+// tracé, sans détour par la liste ni la modale.
+function setupGpxFileHandler() {
+  const queue = (window as { launchQueue?: { setConsumer: (cb: (p: { files?: FileSystemFileHandle[] }) => void) => void } }).launchQueue
+  if (!queue || typeof queue.setConsumer !== 'function') return
+  queue.setConsumer(async (params) => {
+    const handle = params?.files?.[0]
+    if (!handle) return
+    try {
+      const file = await handle.getFile()
+      const waypoints = parseGpxWaypoints(await file.text())
+      applyImportedWaypoints(waypoints, file.name.replace(/\.gpx$/i, '').trim())
+    } catch { /* fichier illisible : on reste sur un créateur vierge */ }
+  })
 }
 
 // ─── Watchers ─────────────────────────────────────────────────────────────────
@@ -1221,8 +1265,15 @@ onMounted(async () => {
     } catch { /* ignore */ }
   }
   await mapRef.value?.initMap()
-  if (routeStore.currentId.value) await fetchRoute(routeStore.currentId.value)
-  else applyPendingGpxImport()
+  if (routeStore.currentId.value) {
+    await fetchRoute(routeStore.currentId.value)
+  } else {
+    applyPendingGpxImport()
+    // .gpx partagé à l'app (Android, Web Share Target) puis, à défaut, fichier
+    // ouvert via le gestionnaire de fichiers PWA (desktop, File Handling API).
+    await applySharedGpx()
+    setupGpxFileHandler()
+  }
   // Chargement initial terminé : on commence à suivre les modifications. Un
   // import GPX en cours (applyPendingGpxImport) reste lui marqué comme non
   // enregistré, ses mutations de points étant vues une fois trackDirty activé.

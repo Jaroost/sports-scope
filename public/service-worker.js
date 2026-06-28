@@ -13,7 +13,11 @@
 //  - JSON du trajet partagé   → réseau d'abord, repli sur le cache.
 //  - tout le reste / cross-origin (tuiles WMTS, OpenFreeMap, S3…) → réseau direct.
 
-const CACHE = 'sports-scope-v2'
+const CACHE = 'sports-scope-v3'
+
+// URL synthétique (même origine) sous laquelle on stocke temporairement le GPX
+// reçu via le Web Share Target, le temps que le créateur le récupère (one-shot).
+const SHARED_GPX_URL = '/__shared_gpx__'
 
 self.addEventListener('install', () => {
   self.skipWaiting()
@@ -54,11 +58,60 @@ async function staleWhileRevalidate(request) {
   return cached || network
 }
 
+// Web Share Target (Android) : réception d'un .gpx partagé à l'app. Android POST
+// le fichier (multipart) vers /routes/share-target. On le met en cache puis on
+// redirige vers le créateur, qui le récupère via GET SHARED_GPX_URL.
+async function handleSharedGpx(request) {
+  try {
+    const form = await request.formData()
+    const file = form.get('gpx')
+    if (file && typeof file !== 'string') {
+      const cache = await caches.open(CACHE)
+      await cache.put(
+        SHARED_GPX_URL,
+        new Response(file, {
+          headers: {
+            'Content-Type': 'application/gpx+xml',
+            'X-Filename': encodeURIComponent(file.name || 'route.gpx'),
+          },
+        }),
+      )
+    }
+  } catch (e) {
+    /* partage illisible : on ouvre quand même un créateur vierge */
+  }
+  // 303 : force le navigateur à suivre en GET (navigation vers le créateur).
+  // Response.redirect exige une URL absolue.
+  return Response.redirect(new URL('/routes/new?fromShare=1', self.location.origin).href, 303)
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event
+  const reqUrl = new URL(request.url)
+
+  // POST du Web Share Target : intercepté avant le filtre GET ci-dessous.
+  if (request.method === 'POST' && reqUrl.pathname === '/routes/share-target') {
+    event.respondWith(handleSharedGpx(request))
+    return
+  }
+
   if (request.method !== 'GET') return
 
-  const url = new URL(request.url)
+  // Récupération one-shot du GPX partagé par le créateur : on sert depuis le cache
+  // puis on purge l'entrée pour ne pas rejouer un vieux fichier au lancement suivant.
+  if (reqUrl.pathname === SHARED_GPX_URL) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE)
+        const cached = await cache.match(SHARED_GPX_URL)
+        if (cached) await cache.delete(SHARED_GPX_URL)
+        return cached || new Response('', { status: 404 })
+      })(),
+    )
+    return
+  }
+
+  const url = reqUrl
   const sameOrigin = url.origin === self.location.origin
 
   // Cross-origin (tuiles WMTS / OpenFreeMap / élévation S3…) : réseau direct, jamais caché.

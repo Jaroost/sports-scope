@@ -89,6 +89,91 @@ export function downsample<T>(arr: T[], maxPoints: number): T[] {
   return out
 }
 
+// Sous-échantillonne une trace en répartissant les points uniformément par DISTANCE
+// parcourue (et non par index, comme downsample). Indispensable pour les traces GPS
+// enregistrées à intervalle de temps fixe : avec un échantillonnage par index, les
+// sections rapides (descentes, souvent les plus sinueuses) reçoivent trop peu de points,
+// ce qui maximise la dérive après re-routage. Conserve toujours le premier et le dernier
+// point, et garantit des index strictement croissants (pas de waypoint dupliqué).
+export function downsampleByDistance<T extends Coord | LngLat>(coords: T[], maxPoints: number): T[] {
+  if (coords.length <= maxPoints || maxPoints < 2) return coords.slice()
+  const dists = buildDistancesM(coords)
+  const total = dists[dists.length - 1]
+  if (total <= 0) return downsample(coords, maxPoints)
+  const out: T[] = [coords[0]]
+  let lastIdx = 0
+  let j = 1
+  for (let i = 1; i < maxPoints - 1; i++) {
+    const target = (total * i) / (maxPoints - 1)
+    while (j < coords.length - 1 && dists[j] < target) j++
+    if (j > lastIdx) { out.push(coords[j]); lastIdx = j }
+  }
+  out.push(coords[coords.length - 1])
+  return out
+}
+
+// Distance perpendiculaire (en mètres) du point p au segment [a, b]. Les coordonnées
+// lng/lat sont projetées sur un plan local (équirectangulaire centré sur le segment) :
+// l'approximation est largement suffisante aux échelles d'un itinéraire pour comparer
+// une distance à une tolérance en mètres.
+function perpDistanceM(p: Coord | LngLat, a: Coord | LngLat, b: Coord | LngLat): number {
+  const latRef = (((a[1] + b[1]) / 2) * Math.PI) / 180
+  const mLat = 111320
+  const mLng = 111320 * Math.cos(latRef)
+  const ax = a[0] * mLng, ay = a[1] * mLat
+  const bx = b[0] * mLng, by = b[1] * mLat
+  const px = p[0] * mLng, py = p[1] * mLat
+  const dx = bx - ax, dy = by - ay
+  const len2 = dx * dx + dy * dy
+  if (len2 === 0) return Math.hypot(px - ax, py - ay)
+  let t = ((px - ax) * dx + (py - ay) * dy) / len2
+  t = Math.max(0, Math.min(1, t))
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+}
+
+// Simplifie une trace par l'algorithme de Ramer-Douglas-Peucker : ne conserve que les
+// points qui s'écartent de plus de `toleranceM` de la corde — autrement dit, les points
+// où la trace change réellement de direction. Les longues lignes droites s'effondrent à
+// deux points, les virages gardent le détail nécessaire. Bien plus malin qu'un
+// sous-échantillonnage uniforme : moins de waypoints inutiles pour une fidélité égale.
+// Implémentation itérative (pile explicite) pour encaisser les traces de milliers de points.
+// `maxPoints` (optionnel) : si la simplification dépasse ce plafond, la tolérance est
+// augmentée progressivement jusqu'à passer dessous (utile pour rester sous la limite BRouter).
+export function simplifyTrack<T extends Coord | LngLat>(coords: T[], toleranceM = 8, maxPoints?: number): T[] {
+  const rdp = (tol: number): T[] => {
+    const n = coords.length
+    if (n <= 2) return coords.slice()
+    const keep = new Uint8Array(n)
+    keep[0] = 1; keep[n - 1] = 1
+    const stack: Array<[number, number]> = [[0, n - 1]]
+    while (stack.length) {
+      const [first, last] = stack.pop()!
+      let maxDist = -1, idx = -1
+      for (let i = first + 1; i < last; i++) {
+        const d = perpDistanceM(coords[i], coords[first], coords[last])
+        if (d > maxDist) { maxDist = d; idx = i }
+      }
+      if (idx !== -1 && maxDist > tol) {
+        keep[idx] = 1
+        stack.push([first, idx], [idx, last])
+      }
+    }
+    const out: T[] = []
+    for (let i = 0; i < n; i++) if (keep[i]) out.push(coords[i])
+    return out
+  }
+
+  let tol = toleranceM
+  let out = rdp(tol)
+  if (maxPoints && maxPoints >= 2) {
+    let guard = 0
+    while (out.length > maxPoints && guard++ < 24) { tol *= 1.6; out = rdp(tol) }
+    // Garde-fou ultime sur trace pathologique : coupe net par distance.
+    if (out.length > maxPoints) out = downsampleByDistance(out, maxPoints)
+  }
+  return out
+}
+
 // ─── Grade / climb helpers ────────────────────────────────────────────────────
 
 export const GRADE_BUCKETS = [

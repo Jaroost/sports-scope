@@ -1,20 +1,21 @@
 <script setup lang="ts">
-import { reactive, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
+import { reactive, ref, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
 import { type PropType } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import { ActivityMapState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
+import RouteFromActivityModal from './RouteFromActivityModal.vue'
 import {
   activityIcon,
   decodePolyline,
-  downsample,
   buildGradedSegments,
   detectClimbs,
   GRADE_BUCKETS,
   pickPhotoUrl,
   type PhotoLike,
 } from '../activityHelpers'
+import { simplifyTrack } from '../routeHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 
 const props = defineProps({
@@ -110,7 +111,10 @@ function formatDuration(seconds) {
   return h > 0 ? `${h}h ${m}min` : (m > 0 ? `${m}min ${s}s` : `${s}s`)
 }
 
-const ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS = 25
+// Valeur par défaut proposée dans la modale « créer un itinéraire depuis l'activité » :
+// nombre de points max après simplification. Plus de points = re-routage BRouter plus
+// fidèle à la trace d'origine ; 100 reste sous les limites pratiques de BRouter.
+const ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS = 100
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
@@ -662,19 +666,22 @@ async function renderMap() {
 }
 
 // ─── "Create route from this activity" ──────────────────────────────────
-function createRouteFromActivity() {
+const showCreateRouteModal = ref(false)
+const defaultRouteName = computed(() => (props.activity?.name || '').trim().slice(0, 80))
+
+function openCreateRouteModal() {
+  if (routeCoords.value.length) showCreateRouteModal.value = true
+}
+
+function confirmCreateRoute({ name, maxPoints }: { name: string; maxPoints: number }) {
+  showCreateRouteModal.value = false
   const coords = routeCoords.value
   if (!coords.length) return
-  const defaultName = (props.activity?.name || '').trim().slice(0, 80)
-  const raw = window.prompt(t('routes.name_prompt'), defaultName)
-  if (raw == null) return
-  const name = raw.trim().slice(0, 80)
-  if (!name) return
-  const sampled = downsample(coords.slice(), ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS)
-  if (sampled.length >= 2) {
-    sampled[0] = coords[0]
-    sampled[sampled.length - 1] = coords[coords.length - 1]
-  }
+  // Simplification Ramer-Douglas-Peucker : on garde les points où la trace tourne
+  // vraiment et on jette les points alignés inutiles. Résultat : peu de waypoints sur
+  // les lignes droites, du détail dans les virages → re-routage BRouter fidèle. Le
+  // plafond (saisi par l'utilisateur) borne le nombre de waypoints.
+  const sampled = simplifyTrack(coords.slice() as [number, number][], 8, maxPoints)
   sessionStorage.setItem('sportsScope.gpxImport', JSON.stringify({
     name,
     waypoints: sampled.map((p) => ({ lng: p[0], lat: p[1] })),
@@ -767,7 +774,7 @@ onBeforeUnmount(() => {
         type="button"
         class="btn btn-sm btn-outline-warning d-inline-flex align-items-center gap-1 ms-auto"
         :title="t('routes.create_from_activity_title')"
-        @click="createRouteFromActivity"
+        @click="openCreateRouteModal"
       >
         <i class="fa-solid fa-route" aria-hidden="true"></i>
         <span class="d-none d-md-inline">{{ t('routes.create_from_activity') }}</span>
@@ -842,6 +849,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+  <RouteFromActivityModal
+    :show="showCreateRouteModal"
+    :initial-name="defaultRouteName"
+    :default-max-points="ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS"
+    @confirm="confirmCreateRoute"
+    @close="showCreateRouteModal = false"
+  />
 </template>
 
 <style scoped>

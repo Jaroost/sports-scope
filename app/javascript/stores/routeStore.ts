@@ -4,9 +4,9 @@ import type { Coord, Climb, VoiceHint } from '../routeHelpers'
 import { userPreferences, speedForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 
-// Plafond du nombre de waypoints — doit rester aligné sur MAX_WAYPOINTS côté
-// serveur (RoutesController), qui tronque silencieusement au-delà à la sauvegarde.
-export const MAX_WAYPOINTS = 51
+// Plafond du nombre de waypoints — doit rester ≤ MAX_WAYPOINTS côté serveur
+// (RoutesController = 500), qui tronque silencieusement au-delà à la sauvegarde.
+export const MAX_WAYPOINTS = 200
 
 class RouteStore {
   // ─── Core route data ────────────────────────────────────────────────────────

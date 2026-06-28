@@ -363,6 +363,8 @@ fr:
     hide_elevation_chart: "Masquer le profil d'altitude"
     show_waypoints: "Afficher les points"
     hide_waypoints: "Masquer les points"
+    show_pois: "Afficher les POI"
+    hide_pois: "Masquer les POI"
     enable_readonly: "Passer en lecture seule"
     disable_readonly: "Quitter la lecture seule"
     remove_waypoint: "Supprimer ce point"

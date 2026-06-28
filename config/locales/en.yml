@@ -363,6 +363,8 @@ en:
     hide_elevation_chart: "Hide elevation profile"
     show_waypoints: "Show waypoints"
     hide_waypoints: "Hide waypoints"
+    show_pois: "Show POIs"
+    hide_pois: "Hide POIs"
     enable_readonly: "Switch to read-only"
     disable_readonly: "Exit read-only"
     remove_waypoint: "Remove this point"

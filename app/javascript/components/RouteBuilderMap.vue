@@ -796,6 +796,7 @@ function showRoutePointPopup(lng: number, lat: number) {
 function installPlaceMarkers() {
   if (!_maplibregl || !mapInstance) return
   clearPlaceMarkers()
+  if (!props.state.showPois) return
   for (const place of placesStore.filteredPlaces.value) {
     const cat = categoryForType(place.type)
     if (!cat || !cat.point) continue
@@ -919,6 +920,7 @@ function clearSavedPoiMarkers() {
 function installSavedPoiMarkers() {
   if (!_maplibregl || !mapInstance) return
   clearSavedPoiMarkers()
+  if (!props.state.showPois) return
   for (const poi of savedPoisStore.pois.value) {
     if (savedPoisStore.show[poi.category] === false) continue
     const el = buildSavedPoiMarkerEl(poi)
@@ -1751,6 +1753,16 @@ function toggleClimbs() {
   installClimbMarkers()
 }
 
+// Affiche/masque tous les marqueurs de POI : ceux trouvés le long du tracé
+// (Overpass) et ceux enregistrés manuellement. La fermeture d'un éventuel popup
+// évite qu'il flotte sans marqueur après le masquage.
+function togglePois() {
+  props.state.showPois = !props.state.showPois
+  if (!props.state.showPois && savedPoiPopup) closeSavedPoiPopup()
+  installPlaceMarkers()
+  installSavedPoiMarkers()
+}
+
 function toggleGrade() {
   props.state.colorMode = props.state.colorMode === 'grade' ? 'none' : 'grade'
   applyColorMode()
@@ -2056,6 +2068,13 @@ defineExpose({
           :title="state.showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
           :aria-pressed="state.showClimbs">
           <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="btn map-ctrl-btn"
+          :class="state.showPois ? 'btn-warning text-dark active' : 'btn-light'"
+          @click="togglePois"
+          :title="state.showPois ? t('routes.hide_pois') : t('routes.show_pois')"
+          :aria-pressed="state.showPois">
+          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
         </button>
         <button type="button" class="btn map-ctrl-btn"
           :class="state.showGrade ? 'btn-warning text-dark active' : 'btn-light'"

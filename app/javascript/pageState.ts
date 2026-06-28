@@ -83,6 +83,7 @@ export class ActivityMapState extends MapPageState {
 export class RouteBuilderState extends MapPageState {
   colorMode: ColorMode = 'grade'
   showWaypoints = true
+  showPois = true
   showStatsSidebar = true
   showElevationChart = true
   overlays: string[] = []
@@ -110,6 +111,6 @@ export class RouteBuilderState extends MapPageState {
   // sinon une ancienne valeur de session écraserait silencieusement le profil. Les autres
   // réglages de vue (épingles, panneau, cols) restent locaux à la session.
   protected override persistedFields(): string[] {
-    return ['showClimbs', 'showWaypoints', 'showStatsSidebar']
+    return ['showClimbs', 'showWaypoints', 'showPois', 'showStatsSidebar']
   }
 }

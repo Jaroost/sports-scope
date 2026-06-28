@@ -1,6 +1,6 @@
 import { reactive, ref, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { haversine } from '../routeHelpers'
+import { haversine, streetViewUrl, bearingFromRoute } from '../routeHelpers'
 import type { Coord, LngLat } from '../routeHelpers'
 import { userPreferences } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
@@ -292,7 +292,8 @@ export function useNavPois(deps: {
     // le POI. On vise juste à côté pour le laisser visible/cliquable.
     const OFFSET = 0.00008
     const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
-    const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${place.lat},${place.lng}`
+    // Caméra Street View orientée depuis le tracé vers le POI (cap tracé → POI).
+    const svUrl = streetViewUrl(place.lat, place.lng, bearingFromRoute(getGeometry(), place.lng, place.lat))
     const wrap = document.createElement('div')
     wrap.className = 'place-popup'
     // « Naviguer ici » en tête (action principale) : lance la navigation guidée vers le

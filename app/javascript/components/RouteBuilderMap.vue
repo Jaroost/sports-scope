@@ -19,6 +19,7 @@ import type { SavedPoi } from '../savedPois'
 import { categoryForType, POI_CATEGORIES } from '../poiCategories'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
+  streetViewUrl, bearingFromRoute, bearingAlongRoute,
 } from '../routeHelpers'
 import type { Climb } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
@@ -53,6 +54,10 @@ let mapInstance: any = null
 let _maplibregl: any = null
 const waypointMarkers: any[] = []
 let hoverMarker: any = null
+// Point d'insertion sous le curseur, projeté sur l'arête du tracé (pas snappé au sommet).
+// Mémorisé au survol pour que le clic insère exactement sous le « + », et non sur le
+// sommet de géométrie le plus proche (qui sautait « par grille » sur les tronçons droits).
+let hoverInsert: { lng: number; lat: number; edgeIdx: number } | null = null
 let locationMarker: any = null
 let lastLocationCoords: [number, number] | null = null
 let lastLocationAccuracy = 0
@@ -286,8 +291,8 @@ async function initMap() {
           return
         }
         deselectAll()
-        if (selectionStore.hoverIdx.value != null) {
-          insertWaypointAtGeomIdx(selectionStore.hoverIdx.value)
+        if (hoverInsert) {
+          insertWaypointAtHover(hoverInsert)
         } else {
           addWaypoint(e.lngLat.lng, e.lngLat.lat)
         }
@@ -307,25 +312,27 @@ async function initMap() {
         }
         if (overClimbMarker) { hideHoverMarker(); return }
         if (routeStore.waypoints.value.length < 2) { hideHoverMarker(); return }
-        const idx = nearestGeomIndexAt(e.point)
-        if (idx == null) { hideHoverMarker(); return }
+        const hit = nearestPointOnRouteAt(e.point)
+        if (hit == null) { hideHoverMarker(); return }
         if (isNearWaypoint(e.point)) { hideHoverMarker(); return }
-        selectionStore.hoverIdx.value = idx
-        showHoverMarker(routeStore.geometry.value[idx])
+        selectionStore.hoverIdx.value = hit.vertexIdx
+        hoverInsert = { lng: hit.lng, lat: hit.lat, edgeIdx: hit.edgeIdx }
+        showHoverMarker([hit.lng, hit.lat])
       })
       mapInstance.on('mouseout', hideHoverMarker)
       // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View.
       mapInstance.on('contextmenu', (e: any) => {
         e.preventDefault?.()
-        showCoordPopup(e.lngLat.lng, e.lngLat.lat)
+        showCoordPopup(e.lngLat.lng, e.lngLat.lat, e.point)
       })
       // Appui long (mobile) : même tooltip. On supprime le clic synthétique de relâchement
       // pour qu'il n'ajoute pas un point au tracé (suppressNextMapClick), avec garde temporelle
       // au cas où aucun clic ne serait émis. Voir attachLongPress.
       detachLongPress = attachLongPress(mapInstance.getCanvas(), (clientX, clientY) => {
         const rect = mapInstance.getContainer().getBoundingClientRect()
-        const ll = mapInstance.unproject([clientX - rect.left, clientY - rect.top])
-        showCoordPopup(ll.lng, ll.lat)
+        const px = { x: clientX - rect.left, y: clientY - rect.top }
+        const ll = mapInstance.unproject([px.x, px.y])
+        showCoordPopup(ll.lng, ll.lat, px)
         suppressNextMapClick = true
         suppressNextWpClick = true
         setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 500)
@@ -624,7 +631,8 @@ function showPlacePopup(place: Place) {
   // le POI. On vise juste à côté pour le laisser visible/cliquable.
   const OFFSET = 0.00008
   const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
-  const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${place.lat},${place.lng}`
+  // Caméra Street View orientée depuis le tracé vers le POI (s'il y a un tracé chargé).
+  const svUrl = streetViewUrl(place.lat, place.lng, bearingFromRoute(routeStore.geometry.value, place.lng, place.lat))
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   // En édition, on propose d'insérer le POI dans le tracé (au plus proche). En lecture
@@ -702,7 +710,7 @@ function closeCoordPopup() {
 
 // Tooltip d'un point quelconque de la carte (clic droit / appui long). Lecture seule :
 // n'ajoute jamais de point au tracé, propose juste les coordonnées et les liens carto.
-function showCoordPopup(lng: number, lat: number) {
+function showCoordPopup(lng: number, lat: number, point?: { x: number; y: number }) {
   if (!_maplibregl || !mapInstance) return
   closeCoordPopup()
   // En édition, le popup propose d'insérer ce point dans le tracé (au plus proche).
@@ -710,9 +718,13 @@ function showCoordPopup(lng: number, lat: number) {
   const onAdd = routeStore.readOnly.value
     ? undefined
     : (plng: number, plat: number) => { insertWaypointSmart(plng, plat); closeCoordPopup() }
+  // Si le clic vise le tracé (proximité testée en pixels), oriente Street View dans le
+  // sens de parcours ; sinon point quelconque, vue par défaut.
+  const onRoute = point != null && nearestGeomIndexAt(point) != null
+  const heading = onRoute ? bearingAlongRoute(routeStore.geometry.value, lng, lat) : undefined
   coordPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([lng, lat])
-    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup, onAdd))
+    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup, onAdd, heading))
     .addTo(mapInstance)
 }
 
@@ -723,6 +735,8 @@ function showRoutePointPopup(lng: number, lat: number) {
   if (!_maplibregl || !mapInstance) return
   closeRoutePointPopup()
   const komootUrl = `https://www.komoot.com/plan/@${lat},${lng},13z?sport=touringbicycle&p[0][loc]=${lat},${lng}`
+  // Caméra Street View orientée dans le sens de parcours du tracé à cet endroit.
+  const svUrl = streetViewUrl(lat, lng, bearingAlongRoute(routeStore.geometry.value, lng, lat))
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   wrap.innerHTML = `
@@ -744,7 +758,7 @@ function showRoutePointPopup(lng: number, lat: number) {
       <i class="fa-brands fa-google" aria-hidden="true"></i>
       <span>Google Maps</span>
     </a>
-    <a class="wp-tooltip-action wp-tooltip-action--streetview" href="https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}" target="_blank" rel="noopener noreferrer">
+    <a class="wp-tooltip-action wp-tooltip-action--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
       <i class="fa-solid fa-street-view" aria-hidden="true"></i>
       <span>${t('routes.street_view')}</span>
     </a>
@@ -832,6 +846,7 @@ function showHoverMarker(coord: any) {
 
 function hideHoverMarker() {
   selectionStore.hoverIdx.value = null
+  hoverInsert = null
   if (hoverMarker) hoverMarker.getElement().style.display = 'none'
 }
 
@@ -941,7 +956,8 @@ function showSavedPoiPopup(poi: SavedPoi) {
   closeSavedPoiPopup()
   const OFFSET = 0.00008
   const mapsUrl = `https://www.google.com/maps?q=${poi.lat + OFFSET},${poi.lng + OFFSET}`
-  const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${poi.lat},${poi.lng}`
+  // Caméra Street View orientée depuis le tracé vers le POI (s'il y a un tracé chargé).
+  const svUrl = streetViewUrl(poi.lat, poi.lng, bearingFromRoute(routeStore.geometry.value, poi.lng, poi.lat))
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   const editActions = routeStore.readOnly.value ? '' : `
@@ -1197,17 +1213,18 @@ function addReturnTo(idx: number) {
   emit('waypoints-changed')
 }
 
-function insertWaypointAtGeomIdx(geomIdx: number) {
+// Insère un point à l'endroit exact du « + » (point projeté sur l'arête `edgeIdx`),
+// dans le tronçon de waypoints qui contient cette arête. L'arête j relie geom[j]→geom[j+1] ;
+// le tronçon entre waypoint i et i+1 couvre les arêtes [wgi[i], wgi[i+1][.
+function insertWaypointAtHover(hit: { lng: number; lat: number; edgeIdx: number }) {
   if (atWaypointLimit()) return
-  if (!waypointGeomIndices.length) return
-  const pt = routeStore.geometry.value[geomIdx]
-  if (!pt) return
+  if (waypointGeomIndices.length !== routeStore.waypoints.value.length) return
   let insertAt = routeStore.waypoints.value.length
   for (let i = 0; i < waypointGeomIndices.length - 1; i++) {
-    if (geomIdx >= waypointGeomIndices[i] && geomIdx <= waypointGeomIndices[i + 1]) { insertAt = i + 1; break }
+    if (hit.edgeIdx >= waypointGeomIndices[i] && hit.edgeIdx < waypointGeomIndices[i + 1]) { insertAt = i + 1; break }
   }
   const next = routeStore.waypoints.value.slice()
-  next.splice(insertAt, 0, { lng: pt[0], lat: pt[1] })
+  next.splice(insertAt, 0, { lng: hit.lng, lat: hit.lat })
   routeStore.waypoints.value = next
   hideHoverMarker()
   refreshWaypointMarkers()
@@ -1259,6 +1276,41 @@ function nearestGeomIndexAt(point: { x: number; y: number }) {
     if (d < bestDist) { bestDist = d; best = i }
   }
   return best >= 0 ? best : null
+}
+
+// Renvoie le point du tracé le plus proche du curseur, projeté sur l'arête (et non snappé
+// au sommet de géométrie le plus proche) : { lng, lat, edgeIdx, vertexIdx }. edgeIdx est
+// l'arête geom[j]→geom[j+1] sur laquelle tombe la projection ; vertexIdx le sommet le plus
+// proche (pour le surlignage du graphe via hoverIdx). Le « + » suit ainsi la ligne en
+// continu, y compris sur les tronçons droits dépourvus de sommets intermédiaires (où il
+// sautait auparavant d'un point à l'autre, « par grille »). Gardé par queryRenderedFeatures
+// pour ne réagir qu'au survol réel du tracé.
+function nearestPointOnRouteAt(point: { x: number; y: number }) {
+  if (!mapInstance || routeStore.geometry.value.length < 2) return null
+  const features = mapInstance.queryRenderedFeatures(
+    [[point.x - 6, point.y - 6], [point.x + 6, point.y + 6]],
+    { layers: ['builder-route-line', 'builder-route-straight-line'] },
+  )
+  if (!features.length) return null
+  const geom = routeStore.geometry.value
+  const px = geom.map((pt) => mapInstance.project([pt[0], pt[1]]))
+  let bestEdge = -1, bestT = 0, bestDist = Infinity
+  for (let j = 0; j < px.length - 1; j++) {
+    const a = px[j], b = px[j + 1]
+    const vx = b.x - a.x, vy = b.y - a.y
+    const len2 = vx * vx + vy * vy
+    let t = len2 > 0 ? ((point.x - a.x) * vx + (point.y - a.y) * vy) / len2 : 0
+    if (t < 0) t = 0; else if (t > 1) t = 1
+    const cx = a.x + t * vx, cy = a.y + t * vy
+    const dx = cx - point.x, dy = cy - point.y
+    const d = dx * dx + dy * dy
+    if (d < bestDist) { bestDist = d; bestEdge = j; bestT = t }
+  }
+  if (bestEdge < 0) return null
+  const a = px[bestEdge], b = px[bestEdge + 1]
+  const ll = mapInstance.unproject([a.x + bestT * (b.x - a.x), a.y + bestT * (b.y - a.y)])
+  const vertexIdx = bestT < 0.5 ? bestEdge : bestEdge + 1
+  return { lng: ll.lng, lat: ll.lat, edgeIdx: bestEdge, vertexIdx }
 }
 
 function isNearWaypoint(point: { x: number; y: number }) {
@@ -1358,6 +1410,8 @@ function refreshWaypointMarkers() {
     ].filter(Boolean)
     const komootPoints = komootNeighbors.map((p: any, i) => `p[${i}][loc]=${p.lat},${p.lng}`).join('&')
     const komootUrl = `https://www.komoot.com/plan/@${w.lat},${w.lng},13z?sport=touringbicycle&${komootPoints}`
+    // Caméra Street View orientée dans le sens de parcours du tracé à ce waypoint.
+    const svUrl = streetViewUrl(w.lat, w.lng, bearingAlongRoute(routeStore.geometry.value, w.lng, w.lat))
     el.innerHTML = `
       <div class="wp-tooltip">
         <div class="wp-tooltip-header">
@@ -1378,7 +1432,7 @@ function refreshWaypointMarkers() {
           <i class="fa-brands fa-google" aria-hidden="true"></i>
           <span>Google Maps</span>
         </a>
-        <a class="wp-tooltip-action wp-tooltip-action--streetview" href="https://www.google.com/maps?q=&layer=c&cbll=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
+        <a class="wp-tooltip-action wp-tooltip-action--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
           <i class="fa-solid fa-street-view" aria-hidden="true"></i>
           <span>${t('routes.street_view')}</span>
         </a>

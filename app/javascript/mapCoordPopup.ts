@@ -5,6 +5,7 @@
 // `.place-popup*` présentes dans les deux composants ; on ne dépend donc d'aucune
 // feuille de style propre à un composant.
 import { t } from './i18n'
+import { streetViewUrl } from './routeHelpers'
 
 // ─── Street View (disponibilité) ───────────────────────────────────────────────
 // Sonde best-effort du service d'imagerie Google (JSONP) : true si une vue existe à
@@ -74,9 +75,12 @@ export function buildCoordPopupContent(
   lat: number,
   onClose: () => void,
   onAddToRoute?: (lng: number, lat: number) => void,
+  // Cap optionnel (degrés, 0 = nord) : quand le point cliqué est sur le tracé, oriente la
+  // caméra Street View dans le sens de parcours. Absent (point hors tracé) → vue par défaut.
+  heading?: number,
 ): HTMLElement {
   const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`
-  const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`
+  const svUrl = streetViewUrl(lat, lng, heading)
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   const addAction = onAddToRoute

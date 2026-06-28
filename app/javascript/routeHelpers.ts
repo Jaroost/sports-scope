@@ -411,6 +411,40 @@ export function generateCircle(center: LngLat, radiusM: number, steps = 64): Lng
   return pts
 }
 
+// Construit l'URL Google Maps Street View d'un point. Quand `heading` est fourni (cap en
+// degrés, 0 = nord), le panorama est orienté dans cette direction — typiquement le cap
+// depuis le tracé vers un POI, pour regarder le POI plutôt que la route. Utilise l'API
+// Google Maps URLs (action `pano`), qui « snappe » au panorama le plus proche du `viewpoint`
+// et, contrairement au format `cbll`, honore l'orientation de la caméra.
+export function streetViewUrl(lat: number, lng: number, heading?: number): string {
+  const base = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`
+  if (heading == null || Number.isNaN(heading)) return base
+  const h = ((Math.round(heading) % 360) + 360) % 360
+  return `${base}&heading=${h}`
+}
+
+// Cap (degrés, 0 = nord) depuis le point du tracé le plus proche de `[lng, lat]` vers ce
+// point : la direction dans laquelle regarder pour voir le POI depuis la route. Renvoie
+// undefined si la géométrie est vide (aucune référence) — l'appelant ouvre alors Street
+// View sans orientation imposée.
+export function bearingFromRoute(geometry: Coord[], lng: number, lat: number): number | undefined {
+  if (!geometry.length) return undefined
+  const { idx } = nearestGeomIndex([lng, lat], geometry)
+  return bearingBetween(geometry[idx], [lng, lat])
+}
+
+// Cap (degrés, 0 = nord) du tracé À l'endroit le plus proche de `[lng, lat]` : la
+// direction de parcours (sens aller). Pour un point situé SUR le tracé (waypoint, point
+// cliqué du tracé), oriente une vue Street View dans le sens de la route plutôt que vers
+// un POI. Renvoie undefined si la géométrie compte moins de 2 points.
+export function bearingAlongRoute(geometry: Coord[], lng: number, lat: number): number | undefined {
+  if (geometry.length < 2) return undefined
+  const { idx } = nearestGeomIndex([lng, lat], geometry)
+  // Cap du segment courant : du point vers le suivant, sauf au tout dernier point.
+  const a = idx < geometry.length - 1 ? idx : idx - 1
+  return bearingBetween(geometry[a], geometry[a + 1])
+}
+
 // Initial bearing (degrees, 0 = north) from point a to point b.
 export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
   const toRad = (d: number) => (d * Math.PI) / 180

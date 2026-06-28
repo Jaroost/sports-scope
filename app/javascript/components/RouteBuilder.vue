@@ -302,6 +302,10 @@ async function recomputeRoute() {
     mapRef.value?.recomputeWaypointGeomIndices()
     mapRef.value?.updateRouteLayer()
     mapRef.value?.installClimbMarkers()
+    // Régénère les tooltips des waypoints avec les coordonnées et la géométrie à jour :
+    // après un déplacement, leurs liens (Street View, Google Maps, Komoot, coordonnées
+    // copiables) doivent refléter la nouvelle position, pas celle d'avant le drag.
+    mapRef.value?.refreshWaypointMarkers()
 
     // BRouter ne renvoie pas d'altitude pour les tronçons « straight » (points libres).
     // On ne se fie aux altitudes inline que si TOUS les points en ont ; sinon on

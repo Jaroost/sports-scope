@@ -142,5 +142,8 @@
             unlinkPath: unlink_strava_path
           }.to_json %>'></div>
     <% end %>
+
+    <%# Bannière d'installation PWA (Android : invite native ; iOS : instructions). %>
+    <div data-vue-component="PwaInstall"></div>
   </body>
 </html>

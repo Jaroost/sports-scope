@@ -529,3 +529,11 @@ fr:
     days_ago_yesterday: "hier"
     days_ago_other: "il y a %{count} j"
     days_in_future: "dans %{count} j"
+  pwa:
+    install_title: "Installer Sports Scope"
+    install_text: "Ajoutez l'app à votre écran d'accueil pour un accès rapide et un usage hors-ligne."
+    install_button: "Installer"
+    dismiss: "Plus tard"
+    ios_title: "Installer sur iPhone / iPad"
+    ios_step_share: "Touchez le bouton Partager"
+    ios_step_add: "puis « Sur l'écran d'accueil »."

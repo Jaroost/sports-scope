@@ -29,7 +29,13 @@ let chartHandleDrag: { fixedKm: number } | null = null
 let chartSelectionWiredEl: Element | null = null
 let wheelRafPending = false
 let pendingWheel: { px: number; deltaY: number } | null = null
+// Gestes tactiles (mobile)
+let pinch: { idA: number; idB: number; vA: number; vB: number } | null = null
+let touchSelect: { id: number; startPx: number; moved: boolean } | null = null
+let touchHandle: { id: number; fixedKm: number } | null = null
 const HANDLE_TOL_PX = 8
+const TOUCH_HANDLE_TOL_PX = 14
+const TOUCH_TAP_TOL_PX = 8
 
 const emit = defineEmits<{
   'fly-to': [lng: number, lat: number]
@@ -383,6 +389,21 @@ function zoomToSelection() {
   applyZoom()
 }
 
+// Applique une fenêtre de zoom [newMin, newMax] avec recadrage sur les bornes
+// naturelles. Si la fenêtre couvre (ou dépasse) tout le tracé → reset complet.
+function applyZoomRange(newMin: number, newMax: number) {
+  if (!selectionStore.cumDistKm.length) return
+  const naturalMin = selectionStore.cumDistKm[0]
+  const naturalMax = selectionStore.cumDistKm[selectionStore.cumDistKm.length - 1]
+  const naturalRange = naturalMax - naturalMin
+  if (newMax - newMin >= naturalRange) { resetZoom(); return }
+  if (newMin < naturalMin) { newMax += naturalMin - newMin; newMin = naturalMin }
+  if (newMax > naturalMax) { newMin -= newMax - naturalMax; newMax = naturalMax }
+  selectionStore.zoomMin = newMin
+  selectionStore.zoomMax = newMax
+  applyZoom()
+}
+
 // ─── Selection ────────────────────────────────────────────────────────────────
 
 function clearSelection() {
@@ -393,7 +414,7 @@ function clearSelection() {
 
 // ─── Chart handle detection ───────────────────────────────────────────────────
 
-function detectHandle(px: number): 'start' | 'end' | null {
+function detectHandle(px: number, tol = HANDLE_TOL_PX): 'start' | 'end' | null {
   if (!chartInstance || !selectionStore.selectionRange.value) return null
   const area = chartInstance.chartArea
   const xScale = chartInstance.scales.x
@@ -403,8 +424,8 @@ function detectHandle(px: number): 'start' | 'end' | null {
   const pxEnd = Math.max(area.left, Math.min(area.right, xScale.getPixelForValue(hi)))
   const dStart = Math.abs(px - pxStart)
   const dEnd = Math.abs(px - pxEnd)
-  if (dStart <= HANDLE_TOL_PX && dStart <= dEnd) return 'start'
-  if (dEnd <= HANDLE_TOL_PX) return 'end'
+  if (dStart <= tol && dStart <= dEnd) return 'start'
+  if (dEnd <= tol) return 'end'
   return null
 }
 
@@ -431,18 +452,10 @@ function onChartWheel(e: WheelEvent) {
     const curMax = selectionStore.zoomMax ?? naturalMax
     const range = curMax - curMin
     if (range <= 0) return
-    const naturalRange = naturalMax - naturalMin
     const factor = deltaY > 0 ? 1.25 : 0.8
     const newRange = range * factor
-    if (newRange >= naturalRange) { resetZoom(); return }
     const leftFrac = (cursorVal - curMin) / range
-    let newMin = cursorVal - leftFrac * newRange
-    let newMax = newMin + newRange
-    if (newMin < naturalMin) { newMax += naturalMin - newMin; newMin = naturalMin }
-    if (newMax > naturalMax) { newMin -= newMax - naturalMax; newMax = naturalMax }
-    selectionStore.zoomMin = newMin
-    selectionStore.zoomMax = newMax
-    applyZoom()
+    applyZoomRange(cursorVal - leftFrac * newRange, cursorVal - leftFrac * newRange + newRange)
   })
 }
 
@@ -452,6 +465,7 @@ function attachInteractionOnce(canvas: HTMLCanvasElement) {
   if (chartSelectionWiredEl === canvas || !canvas) return
   chartSelectionWiredEl = canvas
   canvas.addEventListener('wheel', onChartWheel as EventListener, { passive: false })
+  attachTouchInteraction(canvas)
 
   canvas.addEventListener('mousemove', (ev) => {
     if (chartHandleDrag || chartDrag || !chartInstance) return
@@ -558,6 +572,186 @@ function attachInteractionOnce(canvas: HTMLCanvasElement) {
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   })
+}
+
+// ─── Touch interactions (mobile) ───────────────────────────────────────────────
+// 1 doigt : glisser pour sélectionner une plage, taper pour zoomer/sélectionner un col.
+// 2 doigts : pincer pour zoomer + déplacer la fenêtre (pan) quand on est zoomé.
+
+function findTouch(list: TouchList, id: number): Touch | null {
+  for (let i = 0; i < list.length; i++) if (list[i].identifier === id) return list[i]
+  return null
+}
+
+// Position horizontale (px) du doigt relative au canvas.
+function touchPx(canvas: HTMLCanvasElement, clientX: number): number {
+  return clientX - canvas.getBoundingClientRect().left
+}
+
+// Fraction [0..1] de la zone de tracé sous le doigt (sert au calcul de pincement).
+function touchFraction(canvas: HTMLCanvasElement, clientX: number): number {
+  if (!chartInstance) return 0
+  const area = chartInstance.chartArea
+  return (touchPx(canvas, clientX) - area.left) / (area.right - area.left)
+}
+
+function resetTouchGestures() {
+  pinch = null
+  touchSelect = null
+  touchHandle = null
+  if (chartDrag) { chartDrag = null; if (chartInstance) chartInstance.update('none') }
+}
+
+function attachTouchInteraction(canvas: HTMLCanvasElement) {
+  canvas.addEventListener('touchstart', (ev: TouchEvent) => {
+    if (!chartInstance || !selectionStore.cumDistKm.length) return
+
+    // Deux doigts → pincement/déplacement ; on annule tout geste à un doigt en cours.
+    if (ev.touches.length >= 2) {
+      ev.preventDefault()
+      touchSelect = null
+      touchHandle = null
+      if (chartDrag) { chartDrag = null; chartInstance.update('none') }
+      const a = ev.touches[0], b = ev.touches[1]
+      const naturalMin = selectionStore.cumDistKm[0]
+      const naturalMax = selectionStore.cumDistKm[selectionStore.cumDistKm.length - 1]
+      const curMin = selectionStore.zoomMin ?? naturalMin
+      const curMax = selectionStore.zoomMax ?? naturalMax
+      const fA = touchFraction(canvas, a.clientX)
+      const fB = touchFraction(canvas, b.clientX)
+      pinch = {
+        idA: a.identifier, idB: b.identifier,
+        vA: curMin + fA * (curMax - curMin),
+        vB: curMin + fB * (curMax - curMin),
+      }
+      return
+    }
+
+    const touch = ev.touches[0]
+    const x = touchPx(canvas, touch.clientX)
+    const area = chartInstance.chartArea
+    if (x < area.left - TOUCH_HANDLE_TOL_PX || x > area.right + TOUCH_HANDLE_TOL_PX) return
+    ev.preventDefault()
+
+    // Poignée d'une sélection existante → redimensionnement.
+    const handle = detectHandle(x, TOUCH_HANDLE_TOL_PX)
+    if (handle) {
+      touchHandle = {
+        id: touch.identifier,
+        fixedKm: handle === 'start'
+          ? selectionStore.selectionRange.value!.endKm
+          : selectionStore.selectionRange.value!.startKm,
+      }
+      return
+    }
+
+    if (x < area.left || x > area.right) return
+    touchSelect = { id: touch.identifier, startPx: x, moved: false }
+    chartDrag = { startPx: x, currentPx: x }
+    chartInstance.update('none')
+  }, { passive: false })
+
+  canvas.addEventListener('touchmove', (ev: TouchEvent) => {
+    if (!chartInstance) return
+
+    if (pinch) {
+      const a = findTouch(ev.touches, pinch.idA)
+      const b = findTouch(ev.touches, pinch.idB)
+      if (!a || !b) return
+      ev.preventDefault()
+      const fA = touchFraction(canvas, a.clientX)
+      const fB = touchFraction(canvas, b.clientX)
+      if (Math.abs(fA - fB) < 1e-4) return
+      const newRange = (pinch.vA - pinch.vB) / (fA - fB)
+      const newMin = pinch.vA - fA * newRange
+      applyZoomRange(newMin, newMin + newRange)
+      return
+    }
+
+    if (touchHandle) {
+      const t = findTouch(ev.touches, touchHandle.id)
+      if (!t) return
+      ev.preventDefault()
+      const area = chartInstance.chartArea
+      const xx = Math.max(area.left, Math.min(area.right, touchPx(canvas, t.clientX)))
+      const km = chartInstance.scales.x.getValueForPixel(xx)
+      if (km == null || Number.isNaN(km)) return
+      selectionStore.selectionRange.value = { startKm: Math.min(touchHandle.fixedKm, km), endKm: Math.max(touchHandle.fixedKm, km) }
+      selectionStore.selectionPinned.value = true
+      chartInstance.update('none')
+      return
+    }
+
+    if (touchSelect && chartDrag) {
+      const t = findTouch(ev.touches, touchSelect.id)
+      if (!t) return
+      ev.preventDefault()
+      const area = chartInstance.chartArea
+      const x = Math.max(area.left, Math.min(area.right, touchPx(canvas, t.clientX)))
+      if (Math.abs(x - touchSelect.startPx) > TOUCH_TAP_TOL_PX) touchSelect.moved = true
+      chartDrag.currentPx = x
+      const km = chartInstance.scales.x.getValueForPixel(x)
+      if (km != null && !Number.isNaN(km)) {
+        const pt = routeStore.geometry.value[geomIdxForKm(km, selectionStore.cumDistKm)]
+        if (pt) emit('fly-to', pt[0], pt[1])
+      }
+      chartInstance.update('none')
+    }
+  }, { passive: false })
+
+  const onTouchEnd = (ev: TouchEvent) => {
+    if (!chartInstance) return
+
+    if (pinch) {
+      if (ev.touches.length < 2) pinch = null
+      return
+    }
+
+    if (touchHandle) {
+      if (findTouch(ev.touches, touchHandle.id)) return
+      touchHandle = null
+      emit('fit-to-selection')
+      return
+    }
+
+    if (touchSelect) {
+      if (findTouch(ev.touches, touchSelect.id)) return
+      const startPx = touchSelect.startPx
+      const moved = touchSelect.moved
+      const finalX = chartDrag ? chartDrag.currentPx : startPx
+      touchSelect = null
+      chartDrag = null
+      const xScale = chartInstance.scales.x
+      if (moved) {
+        const km1 = xScale.getValueForPixel(Math.min(startPx, finalX))
+        const km2 = xScale.getValueForPixel(Math.max(startPx, finalX))
+        selectionStore.selectionRange.value = { startKm: km1 as number, endKm: km2 as number }
+        selectionStore.selectionPinned.value = true
+        chartInstance.update('none')
+        emit('fit-to-selection')
+      } else {
+        const km1 = xScale.getValueForPixel(startPx)
+        const col = km1 != null ? routeStore.detectedClimbs.value.find((c) => km1 >= c.startKm && km1 <= c.endKm) : undefined
+        if (col) {
+          selectionStore.selectionRange.value = { startKm: col.startKm, endKm: col.endKm }
+          selectionStore.selectionPinned.value = true
+          chartInstance.update('none')
+          emit('fit-to-selection')
+        } else {
+          selectionStore.selectionRange.value = null
+          selectionStore.selectionPinned.value = false
+          chartInstance.update('none')
+          if (km1 != null) {
+            const pt = routeStore.geometry.value[geomIdxForKm(km1, selectionStore.cumDistKm)]
+            if (pt) emit('zoom-to', pt[0], pt[1])
+          }
+        }
+      }
+      emit('hover-end')
+    }
+  }
+  canvas.addEventListener('touchend', onTouchEnd, { passive: false })
+  canvas.addEventListener('touchcancel', () => { resetTouchGestures(); emit('hover-end') }, { passive: false })
 }
 
 // ─── Watchers ─────────────────────────────────────────────────────────────────
@@ -744,7 +938,7 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
   min-height: 0;
   width: 100%;
 }
-.elevation-canvas-wrap canvas { cursor: crosshair; width: 100% !important; }
+.elevation-canvas-wrap canvas { cursor: crosshair; width: 100% !important; touch-action: none; }
 .chart-collapse-btn {
   flex-shrink: 0;
   padding: 0.15rem 0.4rem;

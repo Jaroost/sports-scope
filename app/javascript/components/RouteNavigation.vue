@@ -2901,6 +2901,7 @@ function onScreenOffTap() {
       :dbg-poi="dbgPoi"
       @arm-controls-hide="armControlsHide"
       @open-route-picker="showRoutePicker = true"
+      @navigate-place="() => { activePanel = null; startPlaceNav() }"
       @unload-route="unloadRoute"
       @toggle-edit="editMode ? finishEditMode() : enterEditMode()"
       @set-map-style="setMapStyle"
@@ -2946,7 +2947,6 @@ function onScreenOffTap() {
       v-if="showRoutePicker"
       :logged-in="loggedIn"
       @load="loadRoute"
-      @navigate-place="() => { showRoutePicker = false; startPlaceNav() }"
       @close="showRoutePicker = false"
     />
 

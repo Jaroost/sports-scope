@@ -11,7 +11,6 @@ const props = defineProps<{ loggedIn: boolean }>()
 
 const emit = defineEmits<{
   (e: 'load', route: any): void
-  (e: 'navigate-place'): void
   (e: 'close'): void
 }>()
 
@@ -89,12 +88,6 @@ onMounted(fetchRoutes)
         </button>
       </div>
 
-      <!-- Naviguer vers un lieu : action toujours disponible (anonymes compris). -->
-      <button type="button" class="nav-picker-place" @click="$emit('navigate-place')">
-        <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
-        <span>{{ t('routes.navigate_to_place') }}</span>
-      </button>
-
       <div class="nav-picker-section">{{ t('routes.my_routes') }}</div>
 
       <!-- Anonyme : pas d'itinéraires sauvegardés → invite à se connecter. -->
@@ -155,14 +148,6 @@ onMounted(fetchRoutes)
   display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .nav-picker-close:hover { background: rgba(0, 0, 0, 0.12); }
-
-.nav-picker-place {
-  display: flex; align-items: center; gap: 0.6rem; width: 100%;
-  padding: 0.7rem 0.85rem; border: none; border-radius: 0.65rem;
-  background: #fc4c02; color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
-}
-.nav-picker-place:hover { background: #e34602; }
-.nav-picker-place i { width: 1.3rem; text-align: center; }
 
 .nav-picker-section {
   margin: 1rem 0 0.4rem; font-size: 0.8rem; font-weight: 700;

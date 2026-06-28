@@ -51,6 +51,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'arm-controls-hide'): void
   (e: 'open-route-picker'): void
+  (e: 'navigate-place'): void
   (e: 'unload-route'): void
   (e: 'toggle-edit'): void
   (e: 'set-map-style', id: string): void
@@ -216,6 +217,10 @@ const currentStyleIcon = computed(() =>
 
         <!-- Itinéraire -->
         <template v-else-if="activePanel === 'route'">
+          <button type="button" class="nav-route-action" @click="$emit('navigate-place')">
+            <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
+            <span>{{ t('routes.navigate_to_place') }}</span>
+          </button>
           <button type="button" class="nav-route-action" @click="$emit('open-route-picker')">
             <i class="fa-solid fa-folder-open" aria-hidden="true"></i>
             <span>{{ t('routes.load_route') }}</span>

@@ -33,7 +33,14 @@
       "files": [
         {
           "name": "gpx",
-          "accept": ["application/gpx+xml", "application/xml", "text/xml", ".gpx"]
+          "accept": [
+            "application/gpx+xml",
+            "application/octet-stream",
+            "application/xml",
+            "text/xml",
+            "application/gpx",
+            ".gpx"
+          ]
         }
       ]
     }

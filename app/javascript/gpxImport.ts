@@ -22,7 +22,7 @@ export const GPX_IMPORT_MAX_NATIVE_WAYPOINTS = 500
 
 // Namespace de l'extension Sports Scope — doit rester aligné sur GPX_NS côté
 // routes_controller.rb (build_gpx_extensions).
-const SS_GPX_NS = 'https://sports-scope.app/gpx/1'
+const SS_GPX_NS = 'https://sports.logicraft.ch/gpx/1'
 
 // Erreur d'import typée : `code` permet aux appelants de choisir le message i18n.
 export class GpxImportError extends Error {

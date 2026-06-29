@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { t } from '../i18n'
 
 // compact : sur le tableau de bord on n'affiche que la chaîne montée de chaque vélo
@@ -136,6 +136,18 @@ function removeChain(bike: any, chain: any) {
 function setDefault(bike: any) {
   run(() => api(`/api/bikes/${bike.id}`, 'PATCH', { is_default: true }))
 }
+function toggleWax(bike: any) {
+  run(() => api(`/api/bikes/${bike.id}`, 'PATCH', { uses_wax: bike.uses_wax === false }))
+}
+
+// Tableau de bord : seulement les vélos avec de la cire ET une chaîne montée.
+const compactBikes = computed(() =>
+  bikes.value.filter((b) => b.uses_wax !== false && b.mounted_chain_id),
+)
+
+// Page /chains : vélos par défaut d'abord, puis ceux avec chaîne cirée.
+const rank = (b: any) => (b.is_default ? 0 : 2) + (b.uses_wax !== false ? 0 : 1)
+const sortedBikes = computed(() => [...bikes.value].sort((a, b) => rank(a) - rank(b)))
 
 function mountedChain(bike: any) {
   return bike.chains.find((c: any) => c.id === bike.mounted_chain_id) || bike.chains[0]
@@ -166,8 +178,8 @@ onMounted(() => fetchBikes())
       <button type="button" class="btn-close" @click="error = null" aria-label="dismiss"></button>
     </div>
 
-    <!-- ── Mode compact (tableau de bord) ── -->
-    <div v-else-if="compact" class="card shadow-sm border-0">
+    <!-- ── Mode compact (tableau de bord) : vélos avec cire + chaîne montée ── -->
+    <div v-else-if="compact && compactBikes.length" class="card shadow-sm border-0">
       <div class="card-header activity-card-header d-flex align-items-center gap-2">
         <h2 class="h5 mb-0 d-flex align-items-center gap-2">
           <i class="fa-solid fa-link text-warning" aria-hidden="true"></i>
@@ -178,10 +190,15 @@ onMounted(() => fetchBikes())
         </a>
       </div>
       <div class="card-body d-flex flex-column gap-3">
-        <div v-for="bike in bikes" :key="bike.id">
-          <div class="d-flex justify-content-between align-items-baseline mb-1">
-            <span class="fw-semibold">{{ bike.name }}</span>
-            <small class="text-muted">
+        <div v-for="bike in compactBikes" :key="bike.id">
+          <div class="d-flex justify-content-between align-items-baseline mb-1 gap-2">
+            <span class="fw-semibold d-flex align-items-center gap-2 min-width-0">
+              <span class="text-truncate">{{ bike.name }}</span>
+              <span v-if="bike.chains.length > 1" class="badge bg-success-subtle text-success flex-shrink-0">
+                <i class="fa-solid fa-check me-1" aria-hidden="true"></i>{{ mountedChain(bike).name }}
+              </span>
+            </span>
+            <small class="text-muted flex-shrink-0">
               {{ mountedChain(bike).km_since_wax }} / {{ mountedChain(bike).wax_threshold_km }} km
             </small>
           </div>
@@ -197,8 +214,8 @@ onMounted(() => fetchBikes())
     </div>
 
     <!-- ── Mode complet (page /chains) ── -->
-    <div v-else class="d-flex flex-column gap-4">
-      <div v-for="bike in bikes" :key="bike.id" class="card shadow-sm border-0">
+    <div v-else-if="!compact" class="d-flex flex-column gap-4">
+      <div v-for="bike in sortedBikes" :key="bike.id" class="card shadow-sm border-0">
         <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
           <h2 class="h5 mb-0 d-flex align-items-center gap-2">
             <i class="fa-solid fa-bicycle text-warning" aria-hidden="true"></i>
@@ -207,15 +224,31 @@ onMounted(() => fetchBikes())
           <span v-if="bike.is_default" class="badge bg-primary-subtle text-primary">
             {{ t('chains.default_bike') }}
           </span>
-          <button
-            v-else
-            type="button"
-            class="btn btn-sm btn-outline-secondary ms-auto"
-            @click="setDefault(bike)"
-          >{{ t('chains.set_default') }}</button>
+          <div class="ms-auto d-flex align-items-center gap-3">
+            <button
+              v-if="!bike.is_default"
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              @click="setDefault(bike)"
+            >{{ t('chains.set_default') }}</button>
+            <div class="form-check form-switch mb-0">
+              <input
+                :id="`wax-${bike.id}`"
+                class="form-check-input"
+                type="checkbox"
+                :checked="bike.uses_wax !== false"
+                @change="toggleWax(bike)"
+              />
+              <label :for="`wax-${bike.id}`" class="form-check-label small">{{ t('chains.uses_wax') }}</label>
+            </div>
+          </div>
         </div>
 
         <div class="card-body d-flex flex-column gap-3">
+          <p v-if="bike.uses_wax === false" class="text-muted mb-0 d-flex align-items-center gap-2">
+            <i class="fa-regular fa-circle-xmark" aria-hidden="true"></i>{{ t('chains.no_wax_note') }}
+          </p>
+          <template v-else>
           <div v-for="chain in bike.chains" :key="chain.id" class="chain-row">
             <div class="d-flex justify-content-between align-items-baseline mb-1 flex-wrap gap-2">
               <span class="fw-semibold d-flex align-items-center gap-2">
@@ -315,6 +348,7 @@ onMounted(() => fetchBikes())
               <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('chains.add_chain') }}
             </button>
           </div>
+          </template>
         </div>
       </div>
     </div>
@@ -328,5 +362,8 @@ onMounted(() => fetchBikes())
 }
 .progress {
   height: 1.25rem;
+}
+.min-width-0 {
+  min-width: 0;
 }
 </style>

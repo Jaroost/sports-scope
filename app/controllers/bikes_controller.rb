@@ -24,6 +24,7 @@ class BikesController < ApplicationController
 
     bike.name = params[:name].to_s.strip.first(Bike::MAX_NAME_LEN) if params[:name].present?
     make_default(bike) if ActiveModel::Type::Boolean.new.cast(params[:is_default])
+    bike.uses_wax = ActiveModel::Type::Boolean.new.cast(params[:uses_wax]) if params.key?(:uses_wax)
     bike.save!
     render json: { bike: serialize_bike(bike) }
   rescue ActiveRecord::RecordInvalid => e

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_29_000005) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_29_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -21,6 +21,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_29_000005) do
     t.string "strava_gear_id"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.boolean "uses_wax", default: true, null: false
     t.index ["user_id", "strava_gear_id"], name: "index_bikes_on_user_id_and_strava_gear_id", unique: true
     t.index ["user_id"], name: "index_bikes_on_user_id"
   end

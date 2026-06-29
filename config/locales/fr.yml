@@ -29,6 +29,8 @@ fr:
     threshold: "Seuil"
     add_chain: "Ajouter une chaîne"
     delete_confirm: "Supprimer cette chaîne ?"
+    uses_wax: "Chaîne cirée"
+    no_wax_note: "Ce vélo n'a pas de chaîne cirée — suivi désactivé."
   auth:
     signed_in: "Bienvenue !"
     login_first: "Veuillez vous connecter d'abord."

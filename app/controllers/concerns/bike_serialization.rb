@@ -11,6 +11,7 @@ module BikeSerialization
       id: bike.id,
       name: bike.name,
       is_default: bike.is_default,
+      uses_wax: bike.uses_wax,
       strava_gear_id: bike.strava_gear_id,
       mounted_chain_id: wear.mounted_chain_id,
       chains: bike.chains.order(:id).map do |chain|

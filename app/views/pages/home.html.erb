@@ -9,6 +9,11 @@
   <p class="lead text-muted"><%= t("pages.home_lead") %></p>
 
   <% if user_signed_in? %>
+      <div class="row justify-content-center mb-5">
+        <div class="col-lg-8">
+          <div data-vue-component="ChainWax" data-vue-props='{"compact":true}'></div>
+        </div>
+      </div>
     <p class="d-flex flex-wrap justify-content-center gap-2">
       <%= link_to dashboard_path, class: "btn btn-primary btn-lg home-button" do %>
         <i class="fa-solid fa-gauge-high me-2" aria-hidden="true"></i><%= t("nav.dashboard") %>

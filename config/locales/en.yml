@@ -29,6 +29,8 @@ en:
     threshold: "Threshold"
     add_chain: "Add a chain"
     delete_confirm: "Delete this chain?"
+    uses_wax: "Waxed chain"
+    no_wax_note: "This bike has no waxed chain — tracking disabled."
   auth:
     signed_in: "Welcome!"
     login_first: "Please sign in first."

@@ -13,7 +13,10 @@
 
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { PEAK_POWER_DURATIONS, detectClimbs } from '../activityHelpers'
+import { PEAK_POWER_DURATIONS } from '../activityHelpers'
+// Même détection de cols et même pente lissée (fenêtre du profil) que le créateur
+// d'itinéraire, pour que carte, graphique et tableau de cols soient cohérents.
+import { detectClimbs, gradeForIndex } from '../routeHelpers'
 import PhotoGallery from './PhotoGallery.vue'
 import ActivityStats from './ActivityStats.vue'
 import ActivityMapCard from './ActivityMapCard.vue'
@@ -150,9 +153,8 @@ const climbsWithVam = computed(() => {
   const alt = streams.value.altitude?.data
   const dist = streams.value.distance?.data
   const time = streams.value.time?.data
-  const grades = streams.value.grade_smooth?.data
   if (!Array.isArray(alt) || !Array.isArray(dist) || alt.length === 0) return []
-  const climbs = detectClimbs(grades, alt, dist)
+  const climbs = detectClimbs(alt, dist)
   return climbs.map((c) => {
     const t0 = Array.isArray(time) ? time[c.startIdx] : null
     const t1 = Array.isArray(time) ? time[c.endIdx] : null
@@ -207,6 +209,20 @@ async function fetchActivity() {
   }
 }
 
+// Remplace le stream `grade_smooth` brut de Strava par une pente recalculée depuis
+// l'altitude avec la fenêtre de lissage du profil (gradeForIndex). Le graphique, le
+// tooltip et les stats de pente reflètent ainsi la même pente que la carte et le
+// créateur d'itinéraire. Sans altitude/distance, on laisse les streams intacts.
+function withSmoothedGrade(s) {
+  const alt = s?.altitude?.data
+  const dist = s?.distance?.data
+  if (!Array.isArray(alt) || !Array.isArray(dist) || alt.length < 2) return s
+  const n = Math.min(alt.length, dist.length)
+  const grade = new Array(n)
+  for (let i = 0; i < n; i++) grade[i] = gradeForIndex(Math.min(i, n - 2), alt, dist)
+  return { ...s, grade_smooth: { ...(s.grade_smooth || {}), data: grade } }
+}
+
 async function fetchStreams() {
   streamsLoading.value = true
   streamsError.value = null
@@ -217,7 +233,7 @@ async function fetchStreams() {
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
-    streams.value = payload.streams || {}
+    streams.value = withSmoothedGrade(payload.streams || {})
   } catch (e) {
     streamsError.value = e.message
   } finally {

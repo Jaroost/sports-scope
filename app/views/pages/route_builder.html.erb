@@ -12,4 +12,13 @@
     <% end %>
   </div>
 <% end %>
-<div data-vue-component="RouteBuilder" data-vue-props='<%= { routeId: @route_id }.to_json %>'></div>
+<%
+  # GPX partagé via le Web Share Target (filet de sécurité serveur, cf. PagesController#share_target) :
+  # transmis en base64 — caractères [A-Za-z0-9+/=] sûrs dans l'attribut single-quote ci-dessous.
+  rb_props = { routeId: @route_id }
+  if @shared_gpx.present?
+    rb_props[:sharedGpx] = Base64.strict_encode64(@shared_gpx)
+    rb_props[:sharedGpxName] = @shared_gpx_name
+  end
+%>
+<div data-vue-component="RouteBuilder" data-vue-props='<%= rb_props.to_json %>'></div>

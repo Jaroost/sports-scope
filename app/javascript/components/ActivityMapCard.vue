@@ -9,13 +9,15 @@ import RouteFromActivityModal from './RouteFromActivityModal.vue'
 import {
   activityIcon,
   decodePolyline,
-  buildGradedSegments,
-  detectClimbs,
-  GRADE_BUCKETS,
   pickPhotoUrl,
   type PhotoLike,
 } from '../activityHelpers'
-import { simplifyTrack } from '../routeHelpers'
+// Détection de cols, segments colorés par pente et buckets : on réutilise les mêmes
+// helpers que le créateur d'itinéraire — donc les seuils de col et la fenêtre de
+// lissage de pente du profil utilisateur — pour que l'analyse et la création
+// d'itinéraire restent cohérentes.
+import { simplifyTrack, buildGradedSegments, detectClimbs, GRADE_BUCKETS } from '../routeHelpers'
+import { userPreferences } from '../userPreferences'
 import { buildTooltipHtml } from '../activityTooltip'
 
 const props = defineProps({
@@ -50,6 +52,18 @@ const emit = defineEmits([
 
 // ─── Page state (persisted to localStorage) ──────────────────────────────
 const state = reactive(new ActivityMapState())
+
+// Couleur (hors mode pente), opacité et épaisseur du tracé : réglables dans le profil
+// (section Affichage), exactement comme le créateur d'itinéraire. La bordure et la
+// sélection se déduisent de l'épaisseur pour rester proportionnées.
+const ROUTE_COLOR = userPreferences().display.route_color ?? '#7c3aed'
+const ROUTE_OPACITY = userPreferences().display.route_opacity ?? 0.8
+const ROUTE_WIDTH = userPreferences().display.route_width ?? 5
+// Sur petit écran tactile, on élargit légèrement le tracé (même logique que le créateur).
+const ROUTE_LINE_DISPLAY_SCALE = window.matchMedia('(max-width: 767px), (max-height: 500px)').matches ? 1.3 : 1
+const ROUTE_LINE_WIDTH = ROUTE_WIDTH * ROUTE_LINE_DISPLAY_SCALE
+const ROUTE_BORDER_WIDTH = (ROUTE_WIDTH + 3) * ROUTE_LINE_DISPLAY_SCALE
+const SELECTED_LINE_WIDTH = (ROUTE_WIDTH + 2) * ROUTE_LINE_DISPLAY_SCALE
 
 // Imperative map state — kept as `let`/non-reactive caches because the map
 // library hands us instances that don't play well with deep reactivity.
@@ -144,7 +158,7 @@ function setMapStyle(id) {
 
 // ─── Map layers ──────────────────────────────────────────────────────────
 function gradePaintExpression() {
-  if (!state.showGrade) return '#fc4c02'
+  if (!state.showGrade) return ROUTE_COLOR
   return [
     'match', ['get', 'bucket'],
     0, GRADE_BUCKETS[0].color,
@@ -165,9 +179,10 @@ function installRouteLayers(coords) {
   if (!mapInstance) return
   const altitudes = props.streams?.altitude?.data
   const distances = props.streams?.distance?.data
-  const grades = props.streams?.grade_smooth?.data
-  const segments = buildGradedSegments(coords, grades, altitudes, distances)
-  const hasGrades = segments.length > 0 && (grades?.length || (altitudes && distances))
+  // Pente lissée depuis l'altitude (fenêtre du profil), comme le créateur d'itinéraire —
+  // le stream `grade_smooth` de Strava (lissage maison) n'est volontairement pas utilisé.
+  const segments = buildGradedSegments(coords, altitudes, distances)
+  const hasGrades = segments.length > 0 && altitudes?.length && distances?.length
 
   mapInstance.addSource('route', {
     type: 'geojson',
@@ -184,14 +199,14 @@ function installRouteLayers(coords) {
       type: 'line',
       source: 'route-graded',
       layout: ROUTE_LINE_LAYOUT,
-      paint: ROUTE_BORDER_PAINT,
+      paint: { ...ROUTE_BORDER_PAINT, 'line-width': ROUTE_BORDER_WIDTH },
     })
     mapInstance.addLayer({
       id: 'route-line',
       type: 'line',
       source: 'route-graded',
       layout: ROUTE_LINE_LAYOUT,
-      paint: { 'line-color': gradePaintExpression(), 'line-width': 5 },
+      paint: { 'line-color': gradePaintExpression(), 'line-width': ROUTE_LINE_WIDTH, 'line-opacity': ROUTE_OPACITY },
     })
   } else {
     mapInstance.addLayer({
@@ -199,18 +214,18 @@ function installRouteLayers(coords) {
       type: 'line',
       source: 'route',
       layout: ROUTE_LINE_LAYOUT,
-      paint: ROUTE_BORDER_PAINT,
+      paint: { ...ROUTE_BORDER_PAINT, 'line-width': ROUTE_BORDER_WIDTH },
     })
     mapInstance.addLayer({
       id: 'route-line',
       type: 'line',
       source: 'route',
       layout: ROUTE_LINE_LAYOUT,
-      paint: { 'line-color': '#fc4c02', 'line-width': 4 },
+      paint: { 'line-color': ROUTE_COLOR, 'line-width': ROUTE_LINE_WIDTH, 'line-opacity': ROUTE_OPACITY },
     })
   }
 
-  mapInstance.addImage('route-arrow', buildArrowIcon())
+  mapInstance.addImage('route-arrow', buildArrowImage(28), { pixelRatio: 2 })
   mapInstance.addLayer({
     id: 'route-direction',
     type: 'symbol',
@@ -219,10 +234,10 @@ function installRouteLayers(coords) {
       'symbol-placement': 'line',
       'symbol-spacing': 90,
       'icon-image': 'route-arrow',
-      'icon-size': 1,
+      'icon-size': 0.85,
+      'icon-rotation-alignment': 'map',
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
-      'icon-rotation-alignment': 'map',
     },
   })
 
@@ -235,7 +250,7 @@ function installRouteLayers(coords) {
     type: 'line',
     source: 'selected-route',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#0d6efd', 'line-width': 6 },
+    paint: { 'line-color': '#00b4d8', 'line-width': SELECTED_LINE_WIDTH },
   })
 
   // Re-apply the 3D terrain if it was on before the style switch.
@@ -264,9 +279,8 @@ function installClimbMarkers(maplibregl) {
   const latlng = props.streams?.latlng?.data
   const altitudes = props.streams?.altitude?.data
   const distances = props.streams?.distance?.data
-  const grades = props.streams?.grade_smooth?.data
   if (!latlng || !altitudes || !distances) return
-  const climbs = detectClimbs(grades, altitudes, distances)
+  const climbs = detectClimbs(altitudes, distances)
   climbs.forEach((climb) => {
     const pt = latlng[climb.startIdx]
     if (!pt) return
@@ -294,14 +308,23 @@ function buildClimbMarkerEl(climb) {
   el.title = `${t('strava.click_to_select_climb')}\n${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
+    // Clic = on committe la sélection (le parent pin le tronçon) puis on zoome dessus.
+    // On garde la prévisualisation jusqu'au mouseleave : le temps que props.selection
+    // se mette à jour, le tronçon reste affiché sans clignoter.
     emit('select-segment', climb.startIdx, climb.endIdx)
+    fitMapToSegment(climb.startIdx, climb.endIdx)
   })
   // Stop the mousedown so the user clicking the badge doesn't start a map pan.
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
-  // Sync hover with the stats table — the parent owns hoveredClimbStartIdx.
-  el.addEventListener('mouseenter', () => emit('update:hoveredClimbStartIdx', climb.startIdx))
+  // Survol : on surligne la ligne du tableau de stats (hoveredClimbStartIdx) ET on
+  // prévisualise le tronçon comme sélectionné sur la carte (tronçon bleu + poignées).
+  el.addEventListener('mouseenter', () => {
+    emit('update:hoveredClimbStartIdx', climb.startIdx)
+    previewSelection.value = { startIdx: climb.startIdx, endIdx: climb.endIdx }
+  })
   el.addEventListener('mouseleave', () => {
     if (props.hoveredClimbStartIdx === climb.startIdx) emit('update:hoveredClimbStartIdx', null)
+    previewSelection.value = null
   })
   return el
 }
@@ -357,25 +380,29 @@ function togglePhotos() {
 }
 
 // ─── Draggable selection handles ─────────────────────────────────────────
-function buildArrowIcon() {
-  const size = 18
-  const cnv = document.createElement('canvas')
-  cnv.width = size
-  cnv.height = size
-  const ctx = cnv.getContext('2d')
-  ctx.translate(size / 2, size / 2)
-  ctx.beginPath()
-  ctx.moveTo(6, 0)
-  ctx.lineTo(-5, -5)
-  ctx.lineTo(-5, 5)
-  ctx.closePath()
-  ctx.fillStyle = '#ffffff'
-  ctx.strokeStyle = '#7a2400'
-  ctx.lineWidth = 1.5
-  ctx.fill()
-  ctx.stroke()
-  const imgData = ctx.getImageData(0, 0, size, size)
-  return { width: size, height: size, data: new Uint8Array(imgData.data.buffer) }
+// Chevron de sens du parcours — identique au créateur d'itinéraire : trait blanc
+// cerné d'un liseré sombre semi-transparent, lisible sur tous les fonds de carte.
+function buildArrowImage(size = 28): ImageData {
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  const draw = () => {
+    ctx.beginPath()
+    ctx.moveTo(size * 0.34, size * 0.24)
+    ctx.lineTo(size * 0.7, size * 0.5)
+    ctx.lineTo(size * 0.34, size * 0.76)
+    ctx.stroke()
+  }
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)'
+  ctx.lineWidth = size * 0.22
+  draw()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = size * 0.12
+  draw()
+  return ctx.getImageData(0, 0, size, size)
 }
 
 function createFlagElement(kind) {
@@ -481,14 +508,22 @@ function syncFromMarkers() {
   applyMarkerRoles()
 }
 
+// Survol d'un marqueur de col : on prévisualise le tronçon comme « sélectionné »
+// (tronçon bleu + poignées A/B) sans toucher à la sélection committée du parent.
+// La sélection effectivement affichée est donc la prévisualisation si elle existe,
+// sinon `props.selection`. Même logique que le créateur d'itinéraire.
+const previewSelection = ref<{ startIdx: number; endIdx: number } | null>(null)
+const effectiveSelection = computed(() => previewSelection.value || props.selection)
+
 function refreshSelectedRoute() {
   if (!mapInstance || !mapInstance.getSource('selected-route')) return
-  if (!hasLatLngStream.value || !props.selection) {
+  const sel = effectiveSelection.value
+  if (!hasLatLngStream.value || !sel) {
     mapInstance.getSource('selected-route').setData({ type: 'FeatureCollection', features: [] })
     return
   }
   const data = props.streams.latlng.data
-  const { startIdx, endIdx } = props.selection
+  const { startIdx, endIdx } = sel
   const coords = data.slice(startIdx, endIdx + 1).map(([lat, lng]) => [lng, lat])
   mapInstance.getSource('selected-route').setData({
     type: 'Feature',
@@ -501,9 +536,10 @@ function refreshSelectedRoute() {
 function syncMarkersFromSelection() {
   if (!markerA || !markerB || !hasLatLngStream.value) return
   const data = props.streams.latlng.data
-  if (props.selection) {
-    const a = data[props.selection.startIdx]
-    const b = data[props.selection.endIdx]
+  const sel = effectiveSelection.value
+  if (sel) {
+    const a = data[sel.startIdx]
+    const b = data[sel.endIdx]
     if (a) markerA.setLngLat([a[1], a[0]])
     if (b) markerB.setLngLat([b[1], b[0]])
   } else {
@@ -512,6 +548,22 @@ function syncMarkersFromSelection() {
     markerB.setLngLat([data[data.length - 1][1], data[data.length - 1][0]])
   }
   applyMarkerRoles()
+}
+
+// Zoome sur le tronçon [startIdx, endIdx] (clic sur un col), comme le créateur.
+function fitMapToSegment(startIdx: number, endIdx: number) {
+  if (!mapInstance || !hasLatLngStream.value) return
+  const data = props.streams.latlng.data
+  const slice = data.slice(Math.min(startIdx, endIdx), Math.max(startIdx, endIdx) + 1)
+  if (slice.length < 2) return
+  let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity
+  for (const [lat, lng] of slice) {
+    if (lng < minLng) minLng = lng
+    if (lat < minLat) minLat = lat
+    if (lng > maxLng) maxLng = lng
+    if (lat > maxLat) maxLat = lat
+  }
+  mapInstance.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 500 })
 }
 
 // ─── Hover tooltip + cursor ──────────────────────────────────────────────
@@ -665,6 +717,29 @@ async function renderMap() {
   })
 }
 
+// The map is drawn as soon as we have coords — which, for an activity with a
+// `summary_polyline`, happens before the detailed streams arrive. In that case
+// the first draw has no grade colouring, no drag handles and no climb markers.
+// Re-draw the route once `altitude`/`grade_smooth`/`latlng` land so the slope
+// colouring + high-res track appear. (`installMapHoverTooltip` is not re-run —
+// it binds once and reads the streams lazily at event time.)
+function redrawRouteWithStreams() {
+  const map = mapInstance
+  if (!map || !_maplibregl) return
+  const reinstall = () => {
+    const layers = ['route-direction', 'route-line', 'route-border', 'selected-route-line']
+    layers.forEach((id) => { if (map.getLayer(id)) map.removeLayer(id) })
+    const sources = ['route', 'route-graded', 'selected-route']
+    sources.forEach((id) => { if (map.getSource(id)) map.removeSource(id) })
+    if (map.hasImage('route-arrow')) map.removeImage('route-arrow')
+    installRouteLayers(routeCoords.value)
+    if (hasLatLngStream.value && !markerA) installMapHandles(_maplibregl)
+    installClimbMarkers(_maplibregl)
+  }
+  if (map.isStyleLoaded()) reinstall()
+  else map.once('style.load', reinstall)
+}
+
 // ─── "Create route from this activity" ──────────────────────────────────
 const showCreateRouteModal = ref(false)
 const defaultRouteName = computed(() => (props.activity?.name || '').trim().slice(0, 80))
@@ -697,10 +772,19 @@ function confirmCreateRoute({ name, maxPoints }: { name: string; maxPoints: numb
 // DOM update before calling `renderMap` (which reads `mapEl.value`).
 watch(hasRoute, (v) => { if (v && !mapInstance) renderMap() }, { flush: 'post' })
 
+// Streams usually arrive after the map has already been drawn from the summary
+// polyline. When they do, redraw so the grade colouring / drag handles / climb
+// markers show up. If the map isn't up yet, the `hasRoute` watch handles it.
+watch(() => props.streams, () => {
+  if (mapInstance) redrawRouteWithStreams()
+})
+
 // Selection drives both the highlighted segment on the map and the A/B
 // handle positions. We listen rather than reacting at the parent so the
 // parent never has to reach into our DOM.
-watch(() => props.selection, () => {
+// `effectiveSelection` couvre à la fois la sélection committée (props.selection) et la
+// prévisualisation au survol d'un col — les deux redessinent tronçon bleu + poignées.
+watch(effectiveSelection, () => {
   refreshSelectedRoute()
   syncMarkersFromSelection()
 })

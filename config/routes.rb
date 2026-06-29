@@ -20,6 +20,14 @@ Rails.application.routes.draw do
     delete "/profile/strava", to: "profiles#unlink_strava", as: :unlink_strava
   end
 
+  # Web Share Target (Android) : le service worker intercepte normalement ce POST
+  # côté client (cf. public/service-worker.js) et n'atteint jamais le serveur. Cette
+  # route est un filet de sécurité quand le SW n'intercepte pas (SW obsolète, lancement
+  # à froid avant prise de contrôle, navigateur non compatible) : le serveur lit le .gpx
+  # partagé et rend le créateur avec le tracé chargé. Hors scope de langue : l'action
+  # déclarée dans le manifest est /routes/share-target, sans préfixe de locale.
+  post "/routes/share-target", to: "pages#share_target"
+
   # User preferences profile (JSON consumed by Vue)
   patch "/api/profile/preferences", to: "profiles#update"
 
@@ -31,6 +39,7 @@ Rails.application.routes.draw do
 
   # Strava activities (JSON consumed by Vue components)
   get "/strava/activities", to: "strava#activities", as: :strava_activities
+  post "/strava/sync", to: "strava#sync", as: :strava_sync
   get "/strava/activities/:id", to: "strava#show", as: :strava_activity, constraints: { id: /\d+/ }
   get "/strava/activities/:id/streams", to: "strava#streams", as: :strava_activity_streams, constraints: { id: /\d+/ }
   get "/strava/activities/:id/peak_power_ranks", to: "strava#peak_power_ranks", as: :strava_activity_peak_power_ranks, constraints: { id: /\d+/ }

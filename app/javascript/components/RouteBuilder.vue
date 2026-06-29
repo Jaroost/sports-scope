@@ -23,6 +23,11 @@ const props = defineProps({
   // Jeton de partage : présent => itinéraire ouvert en lecture seule via un lien
   // public (fonctionne sans être connecté).
   shareToken: { type: String, default: null },
+  // GPX partagé via le Web Share Target, transmis en base64 par le filet de sécurité
+  // serveur (cf. PagesController#share_target) quand le service worker n'a pas
+  // intercepté le POST. Voie alternative à applySharedGpx() (cache du SW).
+  sharedGpx: { type: String, default: null },
+  sharedGpxName: { type: String, default: null },
 })
 
 // Lecture seule effective : pilotée par le store. Activée d'office par un lien de
@@ -1101,6 +1106,19 @@ async function applySharedGpx() {
   } catch { /* partage illisible */ }
 }
 
+// Web Share Target — filet de sécurité serveur : si le service worker n'a pas
+// intercepté le POST, le serveur rend le créateur avec le GPX en prop (base64).
+// On le décode (UTF-8 pour les accents des noms de points) et on charge le tracé.
+function applySharedGpxProp() {
+  if (!props.sharedGpx) return
+  try {
+    const bytes = Uint8Array.from(atob(props.sharedGpx), (c) => c.charCodeAt(0))
+    const text = new TextDecoder('utf-8').decode(bytes)
+    const name = (props.sharedGpxName ?? '').trim()
+    applyImportedWaypoints(parseGpxWaypoints(text), name || undefined)
+  } catch { /* partage illisible : on reste sur un créateur vierge */ }
+}
+
 // File Handling API : quand l'OS ouvre un .gpx avec l'app installée (PWA), il
 // lance le créateur — action déclarée dans public/manifest.webmanifest — et nous
 // transmet le fichier via launchQueue. On le parse et on charge directement le
@@ -1269,9 +1287,11 @@ onMounted(async () => {
     await fetchRoute(routeStore.currentId.value)
   } else {
     applyPendingGpxImport()
-    // .gpx partagé à l'app (Android, Web Share Target) puis, à défaut, fichier
-    // ouvert via le gestionnaire de fichiers PWA (desktop, File Handling API).
+    // .gpx partagé à l'app (Android, Web Share Target) : voie SW (cache) puis, à
+    // défaut, voie serveur (prop base64, si le SW n'a pas intercepté le POST).
     await applySharedGpx()
+    applySharedGpxProp()
+    // Fichier ouvert via le gestionnaire de fichiers PWA (desktop, File Handling API).
     setupGpxFileHandler()
   }
   // Chargement initial terminé : on commence à suivre les modifications. Un

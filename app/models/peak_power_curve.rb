@@ -53,7 +53,7 @@ module PeakPowerCurve
   end
 
   # For a user, return the best across BOTH sources (`imported_activities`
-  # and `strava_activity_peak_powers`), keyed by duration string.
+  # and `strava_activities`), keyed by duration string.
   # Each value: `{ avg_watts:, source:, external_id:, started_at: }`.
   # `exclude:` is a tuple `[source, external_id]` to leave out (so when
   # comparing a current activity it doesn't trivially tie with itself).
@@ -87,10 +87,10 @@ module PeakPowerCurve
          WHERE user_id = $1 AND peak_powers ? $2
         UNION ALL
         SELECT 'strava'              AS source,
-               strava_activity_id    AS external_id,
+               strava_id::text       AS external_id,
                started_at,
                (peak_powers->>$2)::float AS avg_watts
-          FROM strava_activity_peak_powers
+          FROM strava_activities
          WHERE user_id = $1 AND peak_powers ? $2
       )
       SELECT source, external_id, started_at, avg_watts

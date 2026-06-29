@@ -3,6 +3,19 @@ class User < ApplicationRecord
   # initiales et de schéma de référence (clés autorisées + types) pour assainir
   # les payloads entrants — cf. ProfilesController.
   DEFAULT_PREFERENCES = {
+    # Menus de la barre de navigation : liste ordonnée (l'ordre = ordre d'affichage)
+    # d'items {clé, visible}. L'utilisateur peut réordonner et masquer chaque menu
+    # depuis son profil. Les clés sont validées contre NAVBAR_ITEM_KEYS ; tout menu
+    # connu absent du tableau stocké est réinjecté (visible) par normalize_navbar_items,
+    # de sorte qu'un menu ajouté plus tard apparaisse pour les comptes existants.
+    "navbar" => {
+      "items" => [
+        { "key" => "dashboard", "visible" => true },
+        { "key" => "routes", "visible" => true },
+        { "key" => "free_navigate", "visible" => true },
+        { "key" => "chains", "visible" => true },
+      ],
+    },
     "points_of_interest" => {
       "show_cemeteries" => true,
       "show_bakeries" => true,
@@ -92,6 +105,31 @@ class User < ApplicationRecord
     },
   }.freeze
 
+  # Menus de navigation configurables, dans leur ordre par défaut. Source de vérité des
+  # clés autorisées : la définition (chemin, icône, libellé) vit côté vue (NavbarHelper)
+  # et côté éditeur (UserProfile.vue). Ajouter un menu : une clé ici + l'entrée
+  # correspondante dans NavbarHelper::NAVBAR_ITEM_DEFS et UserProfile.vue.
+  NAVBAR_ITEM_KEYS = %w[dashboard routes free_navigate chains].freeze
+
+  # Assainit/normalise un tableau d'items de navbar reçu (front ou base) : ne garde que
+  # les clés connues, dédoublonnées, dans l'ordre reçu, en coercant `visible` en booléen ;
+  # puis réinjecte (visible) tout menu connu absent, afin qu'un menu ajouté plus tard
+  # apparaisse pour les comptes existants. Retourne toujours la liste complète et valide.
+  def self.normalize_navbar_items(raw)
+    raw = [] unless raw.is_a?(Array)
+    by_key = {}
+    raw.each do |item|
+      next unless item.is_a?(Hash)
+      key = (item["key"] || item[:key]).to_s
+      next unless NAVBAR_ITEM_KEYS.include?(key) && !by_key.key?(key)
+      visible = item.key?("visible") ? item["visible"] : item[:visible]
+      visible = visible.nil? ? true : ActiveModel::Type::Boolean.new.cast(visible)
+      by_key[key] = { "key" => key, "visible" => visible }
+    end
+    NAVBAR_ITEM_KEYS.each { |key| by_key[key] ||= { "key" => key, "visible" => true } }
+    by_key.values
+  end
+
   has_many :chart_layouts, dependent: :destroy
   has_many :routes, dependent: :destroy
   has_many :pois, dependent: :destroy
@@ -140,7 +178,16 @@ class User < ApplicationRecord
     DEFAULT_PREFERENCES.each_with_object({}) do |(section, defaults), result|
       stored = preferences.is_a?(Hash) ? (preferences[section] || {}) : {}
       result[section] = defaults.merge(stored.slice(*defaults.keys))
+    end.tap do |result|
+      # La navbar est une liste ordonnée (pas un simple hash de clés) : on la normalise
+      # pour garantir des items valides et complets, même après l'ajout d'un nouveau menu.
+      result["navbar"]["items"] = self.class.normalize_navbar_items(result.dig("navbar", "items"))
     end
+  end
+
+  # Items de navbar normalisés (ordre + visibilité) pour le rendu de la barre.
+  def navbar_items
+    preferences_with_defaults.dig("navbar", "items")
   end
 
   def detach_strava!

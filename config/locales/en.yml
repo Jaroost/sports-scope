@@ -438,6 +438,10 @@ en:
     save_error: "Save failed"
     reset: "Reset to defaults"
     reset_confirm: "Restore all preferences to their default values?"
+    navbar:
+      title: "Navigation bar"
+      help: "Drag to reorder the navigation bar menus, and hide the ones you don't use with the toggle."
+      toggle: "Show this menu"
     strava:
       title: "Strava account"
       help: "Connect your Strava account to import and analyze your activities."

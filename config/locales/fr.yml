@@ -438,6 +438,10 @@ fr:
     save_error: "Échec de l'enregistrement"
     reset: "Valeurs par défaut"
     reset_confirm: "Restaurer toutes les préférences à leurs valeurs par défaut ?"
+    navbar:
+      title: "Barre de navigation"
+      help: "Glissez pour réordonner les menus de la barre de navigation, et masquez ceux que vous n'utilisez pas avec l'interrupteur."
+      toggle: "Afficher ce menu"
     strava:
       title: "Compte Strava"
       help: "Liez votre compte Strava pour importer et analyser vos activités."

@@ -73,8 +73,12 @@ class ProfilesController < ApplicationController
     climb = incoming[:climb_detection] || {}
     speeds = incoming[:speeds] || {}
     turn_anomaly = incoming[:turn_anomaly] || {}
+    navbar = incoming[:navbar] || {}
 
     {
+      "navbar" => {
+        "items" => User.normalize_navbar_items(navbar[:items]),
+      },
       "points_of_interest" => {
         "show_cemeteries" => to_bool(poi[:show_cemeteries], true),
         "show_bakeries" => to_bool(poi[:show_bakeries], true),

@@ -12,6 +12,9 @@ const groupedStyles = computed(() =>
 )
 
 interface Preferences {
+  navbar: {
+    items: { key: string; visible: boolean }[]
+  }
   points_of_interest: {
     show_cemeteries: boolean
     show_bakeries: boolean
@@ -122,6 +125,51 @@ const SPORTS = ['cycling', 'mtb', 'hiking'] as const
 
 function sportIcon(s: (typeof SPORTS)[number]): string {
   return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
+
+// ─── Barre de navigation : ordre et visibilité des menus ────────────────────
+// Liste réordonnable par glisser-déposer ; chaque menu peut être masqué via son
+// interrupteur. Les icônes reflètent celles de la navbar (cf. NavbarHelper) et les
+// libellés réutilisent les clés i18n `nav.*`.
+const NAVBAR_ICONS: Record<string, string> = {
+  dashboard: 'fa-gauge-high',
+  routes: 'fa-route',
+  free_navigate: 'fa-location-crosshairs',
+  chains: 'fa-link',
+}
+
+function navIcon(key: string): string {
+  return NAVBAR_ICONS[key] ?? 'fa-circle'
+}
+
+function navLabel(key: string): string {
+  return t(`nav.${key}`)
+}
+
+const dragNavIndex = ref<number | null>(null)
+const dragOverNavIndex = ref<number | null>(null)
+
+function onNavDragStart(i: number) {
+  dragNavIndex.value = i
+}
+
+function onNavDragOver(i: number) {
+  dragOverNavIndex.value = i
+}
+
+function onNavDrop(to: number) {
+  const from = dragNavIndex.value
+  if (from !== null && from !== to) {
+    const arr = prefs.navbar.items
+    const [moved] = arr.splice(from, 1)
+    arr.splice(to, 0, moved)
+  }
+  onNavDragEnd()
+}
+
+function onNavDragEnd() {
+  dragNavIndex.value = null
+  dragOverNavIndex.value = null
 }
 
 // ─── Recherche de lieux : pays privilégiés (ordre = priorité) ───────────────
@@ -430,6 +478,48 @@ function placePreviewMarker(coords: [number, number]) {
 
 <template>
   <form class="user-profile" @submit.prevent="save">
+    <!-- Barre de navigation : ordre et visibilité des menus -->
+    <section v-if="showSection('navbar')" class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-bars text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.navbar.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">{{ t('profile.navbar.help') }}</p>
+        <ul class="navbar-items list-unstyled mb-0">
+          <li
+            v-for="(item, i) in prefs.navbar.items"
+            :key="item.key"
+            class="navbar-item"
+            :class="{
+              dragging: dragNavIndex === i,
+              dragover: dragOverNavIndex === i && dragNavIndex !== i,
+              hidden: !item.visible,
+            }"
+            draggable="true"
+            @dragstart="onNavDragStart(i)"
+            @dragover.prevent="onNavDragOver(i)"
+            @drop.prevent="onNavDrop(i)"
+            @dragend="onNavDragEnd"
+          >
+            <i class="fa-solid fa-grip-vertical navbar-item-grip" aria-hidden="true"></i>
+            <i class="fa-solid navbar-item-icon" :class="navIcon(item.key)" aria-hidden="true"></i>
+            <span class="navbar-item-label">{{ navLabel(item.key) }}</span>
+            <div class="form-check form-switch m-0 ms-auto">
+              <input
+                :id="`navbar-${item.key}`"
+                v-model="item.visible"
+                class="form-check-input"
+                type="checkbox"
+                role="switch"
+                :aria-label="t('profile.navbar.toggle')"
+              >
+            </div>
+          </li>
+        </ul>
+      </div>
+    </section>
+
     <!-- Points d'intérêt -->
     <section v-if="showSection('poi')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
@@ -990,6 +1080,36 @@ function placePreviewMarker(coords: [number, number]) {
 .country-flag { font-size: 1.1rem; line-height: 1; }
 .country-name { flex: 1; font-size: 0.9rem; }
 .country-remove { line-height: 1; }
+
+/* Liste réordonnable des menus de la barre de navigation */
+.navbar-items {
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.navbar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: var(--bs-body-bg);
+  cursor: grab;
+  transition: border-color 0.15s, background-color 0.15s, opacity 0.15s;
+}
+
+.navbar-item:active { cursor: grabbing; }
+.navbar-item.dragging { opacity: 0.45; }
+.navbar-item.dragover { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
+.navbar-item.hidden .navbar-item-icon,
+.navbar-item.hidden .navbar-item-label { opacity: 0.4; }
+
+.navbar-item-grip { color: var(--bs-secondary-color); cursor: grab; }
+.navbar-item-icon { width: 1.2rem; text-align: center; color: var(--bs-primary); }
+.navbar-item-label { font-size: 0.95rem; }
 
 /* Cadre façon téléphone en portrait : même proportions que l'écran de navigation,
    pour que le réglage du zoom/inclinaison soit représentatif du rendu réel. */

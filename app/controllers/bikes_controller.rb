@@ -62,9 +62,7 @@ class BikesController < ApplicationController
   private
 
   def bootstrap_bikes!
-    if current_user.strava_linked? && (current_user.bikes.none? || params[:refresh].present?)
-      StravaGearSyncService.new(current_user).call
-    end
+    StravaGearSyncService.new(current_user).call if current_user.strava_linked? && gear_sync_needed?
 
     # Filet : aucun vélo (pas de Strava, ou Strava sans gear déclaré) → vélo par défaut.
     if current_user.bikes.none?
@@ -72,6 +70,17 @@ class BikesController < ApplicationController
     end
 
     current_user.bikes.each(&:ensure_chain!)
+  end
+
+  # Resync quand `?refresh=1`, ou quand une activité référence un vélo (gear_id) pour
+  # lequel on n'a pas encore créé de Bike (nouveau vélo acheté depuis). Sinon on évite
+  # tout appel Strava : la page se sert de la BDD.
+  def gear_sync_needed?
+    return true if params[:refresh].present?
+
+    known = current_user.bikes.where.not(strava_gear_id: nil).pluck(:strava_gear_id)
+    used = current_user.strava_activities.where.not(gear_id: nil).distinct.pluck(:gear_id)
+    (used - known).any?
   end
 
   def make_default(bike)

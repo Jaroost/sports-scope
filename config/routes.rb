@@ -18,6 +18,8 @@ Rails.application.routes.draw do
     get "/routes/:token/view", to: "pages#route_view", as: :view_route
     get "/profile", to: "profiles#show", as: :profile
     delete "/profile/strava", to: "profiles#unlink_strava", as: :unlink_strava
+    # Suivi du cirage de chaîne (par vélo)
+    get "/chains", to: "pages#chains", as: :chains
   end
 
   # Web Share Target (Android) : le service worker intercepte normalement ce POST
@@ -73,6 +75,15 @@ Rails.application.routes.draw do
   get "/api/imported_activities/:id/streams", to: "imported_activities#streams", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/peak_power_ranks", to: "imported_activities#peak_power_ranks", constraints: { id: /\d+/ }
   delete "/api/imported_activities/:id", to: "imported_activities#destroy", constraints: { id: /\d+/ }
+
+  # Bike chain waxing tracker (JSON consumed by Vue components)
+  get    "/api/bikes", to: "bikes#index"
+  patch  "/api/bikes/:id", to: "bikes#update", constraints: { id: /\d+/ }
+  post   "/api/bikes/:id/chains", to: "bikes#add_chain", constraints: { id: /\d+/ }
+  post   "/api/bikes/:id/mount", to: "bikes#mount", constraints: { id: /\d+/ }
+  patch  "/api/chains/:id", to: "chains#update", constraints: { id: /\d+/ }
+  delete "/api/chains/:id", to: "chains#destroy", constraints: { id: /\d+/ }
+  post   "/api/chains/:id/wax", to: "chains#wax", constraints: { id: /\d+/ }
 
   # User preferences (JSON consumed by Vue components) — named layout presets
   get "/preferences/chart_layouts", to: "preferences#index"

@@ -10,9 +10,41 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_29_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_29_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "bikes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.boolean "is_default", default: false, null: false
+    t.string "name", null: false
+    t.string "strava_gear_id"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "strava_gear_id"], name: "index_bikes_on_user_id_and_strava_gear_id", unique: true
+    t.index ["user_id"], name: "index_bikes_on_user_id"
+  end
+
+  create_table "chain_mounts", force: :cascade do |t|
+    t.bigint "bike_id", null: false
+    t.bigint "chain_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "mounted_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bike_id", "mounted_at"], name: "index_chain_mounts_on_bike_id_and_mounted_at"
+    t.index ["bike_id"], name: "index_chain_mounts_on_bike_id"
+    t.index ["chain_id"], name: "index_chain_mounts_on_chain_id"
+  end
+
+  create_table "chains", force: :cascade do |t|
+    t.bigint "bike_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "last_waxed_at"
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.integer "wax_threshold_km", default: 300, null: false
+    t.index ["bike_id"], name: "index_chains_on_bike_id"
+  end
 
   create_table "chart_layouts", force: :cascade do |t|
     t.datetime "created_at", null: false
@@ -97,6 +129,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_29_000001) do
     t.float "distance_m"
     t.integer "elapsed_time_s"
     t.jsonb "end_latlng"
+    t.string "gear_id"
     t.float "max_cadence"
     t.float "max_heartrate"
     t.float "max_speed"
@@ -112,6 +145,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_29_000001) do
     t.float "total_elevation_gain"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.index ["user_id", "gear_id"], name: "index_strava_activities_on_user_id_and_gear_id"
     t.index ["user_id", "started_at"], name: "index_strava_activities_on_user_id_and_started_at"
     t.index ["user_id", "strava_id"], name: "index_strava_activities_on_user_id_and_strava_id", unique: true
     t.index ["user_id"], name: "index_strava_activities_on_user_id"
@@ -149,6 +183,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_29_000001) do
     t.index ["strava_uid"], name: "index_users_on_strava_uid", unique: true, where: "(strava_uid IS NOT NULL)"
   end
 
+  add_foreign_key "bikes", "users"
+  add_foreign_key "chain_mounts", "bikes"
+  add_foreign_key "chain_mounts", "chains"
+  add_foreign_key "chains", "bikes"
   add_foreign_key "chart_layouts", "users"
   add_foreign_key "imported_activities", "users"
   add_foreign_key "pois", "users"

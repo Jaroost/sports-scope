@@ -8,13 +8,15 @@ class User < ApplicationRecord
     # depuis son profil. Les clés sont validées contre NAVBAR_ITEM_KEYS ; tout menu
     # connu absent du tableau stocké est réinjecté (visible) par normalize_navbar_items,
     # de sorte qu'un menu ajouté plus tard apparaisse pour les comptes existants.
+    # Chaque menu porte deux interrupteurs indépendants : `visible` (présent dans la
+    # barre de navigation) et `home` (présent comme bouton sur la page d'accueil).
     "navbar" => {
       "items" => [
-        { "key" => "dashboard", "visible" => true },
-        { "key" => "routes", "visible" => true },
-        { "key" => "new_route", "visible" => true },
-        { "key" => "free_navigate", "visible" => true },
-        { "key" => "chains", "visible" => true },
+        { "key" => "dashboard", "visible" => true, "home" => true },
+        { "key" => "routes", "visible" => true, "home" => true },
+        { "key" => "new_route", "visible" => true, "home" => true },
+        { "key" => "free_navigate", "visible" => true, "home" => true },
+        { "key" => "chains", "visible" => true, "home" => true },
       ],
     },
     "points_of_interest" => {
@@ -113,9 +115,10 @@ class User < ApplicationRecord
   NAVBAR_ITEM_KEYS = %w[dashboard routes new_route free_navigate chains].freeze
 
   # Assainit/normalise un tableau d'items de navbar reçu (front ou base) : ne garde que
-  # les clés connues, dédoublonnées, dans l'ordre reçu, en coercant `visible` en booléen ;
-  # puis réinjecte (visible) tout menu connu absent, afin qu'un menu ajouté plus tard
-  # apparaisse pour les comptes existants. Retourne toujours la liste complète et valide.
+  # les clés connues, dédoublonnées, dans l'ordre reçu, en coercant `visible` et `home`
+  # en booléens ; puis réinjecte (visible + sur l'accueil) tout menu connu absent, afin
+  # qu'un menu ajouté plus tard apparaisse pour les comptes existants. Retourne toujours
+  # la liste complète et valide.
   def self.normalize_navbar_items(raw)
     raw = [] unless raw.is_a?(Array)
     by_key = {}
@@ -123,12 +126,21 @@ class User < ApplicationRecord
       next unless item.is_a?(Hash)
       key = (item["key"] || item[:key]).to_s
       next unless NAVBAR_ITEM_KEYS.include?(key) && !by_key.key?(key)
-      visible = item.key?("visible") ? item["visible"] : item[:visible]
-      visible = visible.nil? ? true : ActiveModel::Type::Boolean.new.cast(visible)
-      by_key[key] = { "key" => key, "visible" => visible }
+      by_key[key] = {
+        "key" => key,
+        "visible" => coerce_navbar_flag(item, "visible", :visible),
+        "home" => coerce_navbar_flag(item, "home", :home),
+      }
     end
-    NAVBAR_ITEM_KEYS.each { |key| by_key[key] ||= { "key" => key, "visible" => true } }
+    NAVBAR_ITEM_KEYS.each { |key| by_key[key] ||= { "key" => key, "visible" => true, "home" => true } }
     by_key.values
+  end
+
+  # Lit un drapeau booléen d'item de navbar (`visible`/`home`) en acceptant les clés
+  # string ou symbole ; absent ou nil ⇒ true (le menu est actif par défaut).
+  def self.coerce_navbar_flag(item, str_key, sym_key)
+    value = item.key?(str_key) ? item[str_key] : item[sym_key]
+    value.nil? ? true : ActiveModel::Type::Boolean.new.cast(value)
   end
 
   has_many :chart_layouts, dependent: :destroy

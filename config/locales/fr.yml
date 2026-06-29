@@ -440,8 +440,11 @@ fr:
     reset_confirm: "Restaurer toutes les préférences à leurs valeurs par défaut ?"
     navbar:
       title: "Barre de navigation"
-      help: "Glissez pour réordonner les menus de la barre de navigation, et masquez ceux que vous n'utilisez pas avec l'interrupteur."
-      toggle: "Afficher ce menu"
+      help: "Glissez pour réordonner les menus. Pour chaque menu, choisissez s'il apparaît dans la barre de navigation et/ou comme bouton sur la page d'accueil."
+      toggle: "Afficher ce menu dans la barre de navigation"
+      toggle_home: "Afficher ce menu sur la page d'accueil"
+      in_navbar: "Barre"
+      on_home: "Accueil"
     strava:
       title: "Compte Strava"
       help: "Liez votre compte Strava pour importer et analyser vos activités."

@@ -440,8 +440,11 @@ en:
     reset_confirm: "Restore all preferences to their default values?"
     navbar:
       title: "Navigation bar"
-      help: "Drag to reorder the navigation bar menus, and hide the ones you don't use with the toggle."
-      toggle: "Show this menu"
+      help: "Drag to reorder the menus. For each menu, choose whether it appears in the navigation bar and/or as a button on the home page."
+      toggle: "Show this menu in the navigation bar"
+      toggle_home: "Show this menu on the home page"
+      in_navbar: "Bar"
+      on_home: "Home"
     strava:
       title: "Strava account"
       help: "Connect your Strava account to import and analyze your activities."

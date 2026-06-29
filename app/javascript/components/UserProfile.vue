@@ -14,7 +14,9 @@ const groupedStyles = computed(() =>
 
 interface Preferences {
   navbar: {
-    items: { key: string; visible: boolean }[]
+    // `visible` : présent dans la barre de navigation ; `home` : présent comme bouton
+    // sur la page d'accueil. Les deux interrupteurs sont indépendants.
+    items: { key: string; visible: boolean; home: boolean }[]
   }
   points_of_interest: {
     show_cemeteries: boolean
@@ -470,15 +472,35 @@ function placePreviewMarker(coords: [number, number]) {
             ></i>
             <i class="fa-solid navbar-item-icon" :class="navIcon(item.key)" aria-hidden="true"></i>
             <span class="navbar-item-label">{{ navLabel(item.key) }}</span>
-            <div class="form-check form-switch m-0 ms-auto">
-              <input
-                :id="`navbar-${item.key}`"
-                v-model="item.visible"
-                class="form-check-input"
-                type="checkbox"
-                role="switch"
-                :aria-label="t('profile.navbar.toggle')"
-              >
+            <div class="navbar-item-toggles ms-auto">
+              <div class="form-check form-switch m-0">
+                <input
+                  :id="`navbar-${item.key}`"
+                  v-model="item.visible"
+                  class="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  :aria-label="t('profile.navbar.toggle')"
+                >
+                <label class="form-check-label navbar-toggle-label" :for="`navbar-${item.key}`">
+                  <i class="fa-solid fa-bars" aria-hidden="true"></i>
+                  <span>{{ t('profile.navbar.in_navbar') }}</span>
+                </label>
+              </div>
+              <div class="form-check form-switch m-0">
+                <input
+                  :id="`navbar-home-${item.key}`"
+                  v-model="item.home"
+                  class="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  :aria-label="t('profile.navbar.toggle_home')"
+                >
+                <label class="form-check-label navbar-toggle-label" :for="`navbar-home-${item.key}`">
+                  <i class="fa-solid fa-house" aria-hidden="true"></i>
+                  <span>{{ t('profile.navbar.on_home') }}</span>
+                </label>
+              </div>
             </div>
           </li>
         </ul>
@@ -1087,6 +1109,23 @@ function placePreviewMarker(coords: [number, number]) {
 .navbar-item-grip:active { cursor: grabbing; }
 .navbar-item-icon { width: 1.2rem; text-align: center; color: var(--bs-primary); }
 .navbar-item-label { font-size: 0.95rem; }
+
+/* Deux interrupteurs par menu : présence dans la navbar et sur la page d'accueil. */
+.navbar-item-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.navbar-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: var(--bs-secondary-color);
+}
+
+.navbar-toggle-label i { width: 0.9rem; text-align: center; }
 
 /* Cadre façon téléphone en portrait : même proportions que l'écran de navigation,
    pour que le réglage du zoom/inclinaison soit représentatif du rendu réel. */

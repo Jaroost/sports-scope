@@ -479,7 +479,9 @@ async function renderCharts() {
       yScales[`y-${idx}`] = {
         type: 'linear',
         position: idx % 2 === 0 ? 'left' : 'right',
-        title: { display: true, text: def.unit, color: def.color },
+        // Titre d'axe retiré pour gagner de la place — l'unité est rappelée dans la
+        // légende du panneau. Les graduations restent colorées pour repérer l'axe.
+        title: { display: false },
         ticks: { maxTicksLimit: 6, color: def.color },
         grid: { drawOnChartArea: idx === 0 },
       }
@@ -509,7 +511,8 @@ async function renderCharts() {
         scales: {
           x: {
             type: 'linear',
-            title: { display: true, text: xAxisLabel() },
+            // Titre d'axe retiré (rappelé dans la légende du panneau, cf. axis-x-hint).
+            title: { display: false },
             ticks: props.xAxis === 'time'
               ? {
                   stepSize: 10,
@@ -867,16 +870,21 @@ let pdMoveListener = null
 let pdUpListener = null
 
 function onChartPointerDown(group, e) {
-  if (e.button !== undefined && e.button !== 0) return
+  // Pointer Events : couvre souris ET tactile (le drag-reorder marche donc sur mobile).
+  if (e.button !== undefined && e.button > 0) return
   if (e.target.closest && e.target.closest('button')) return
   pdStartX = e.clientX
   pdStartY = e.clientY
   pdInitialized = false
   dragSourceId.value = group.id
+  // Capture le pointeur sur le header : au doigt, les pointermove/up continuent d'arriver
+  // ici même si le doigt survole d'autres éléments, et la page ne défile pas pendant le drag.
+  if (e.pointerId != null) (e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId)
   pdMoveListener = (ev) => onPointerMove(ev)
   pdUpListener = () => onPointerUp()
-  window.addEventListener('mousemove', pdMoveListener)
-  window.addEventListener('mouseup', pdUpListener)
+  window.addEventListener('pointermove', pdMoveListener)
+  window.addEventListener('pointerup', pdUpListener)
+  window.addEventListener('pointercancel', pdUpListener)
 }
 
 function onPointerMove(e) {
@@ -935,11 +943,12 @@ function pointerHitTest(clientX, clientY) {
 
 function onPointerUp() {
   if (pdMoveListener) {
-    window.removeEventListener('mousemove', pdMoveListener)
+    window.removeEventListener('pointermove', pdMoveListener)
     pdMoveListener = null
   }
   if (pdUpListener) {
-    window.removeEventListener('mouseup', pdUpListener)
+    window.removeEventListener('pointerup', pdUpListener)
+    window.removeEventListener('pointercancel', pdUpListener)
     pdUpListener = null
   }
   document.body.style.cursor = ''
@@ -1505,7 +1514,7 @@ onBeforeUnmount(() => {
             <div
               class="chart-group-header"
               :title="t('strava.layout.drag_hint')"
-              @mousedown="onChartPointerDown(group, $event)"
+              @pointerdown="onChartPointerDown(group, $event)"
             >
               <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -1521,14 +1530,14 @@ onBeforeUnmount(() => {
                       :class="{ hidden: isDatasetHidden(group.id, sIdx) }"
                       :title="isDatasetHidden(group.id, sIdx) ? t('strava.layout.show_curve') : t('strava.layout.hide_curve')"
                       @click="toggleDataset(group.id, sIdx)"
-                      @mousedown.stop
+                      @pointerdown.stop
                     >
                       <i
                         :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'} legend-icon`"
                         :style="{ color: defByKey(streamKey)?.color }"
                         aria-hidden="true"
                       ></i>
-                      <span>{{ t('strava.stream.' + streamKey) }}</span>
+                      <span>{{ t('strava.stream.' + streamKey) }} <span class="legend-unit">[{{ defByKey(streamKey)?.unit }}]</span></span>
                     </button>
                   </template>
                   <template v-else>
@@ -1542,9 +1551,15 @@ onBeforeUnmount(() => {
                         :style="{ color: defByKey(streamKey)?.color }"
                         aria-hidden="true"
                       ></i>
-                      <span>{{ t('strava.stream.' + streamKey) }}</span>
+                      <span>{{ t('strava.stream.' + streamKey) }} <span class="legend-unit">[{{ defByKey(streamKey)?.unit }}]</span></span>
                     </span>
                   </template>
+                  <!-- Axe X (commun au panneau) rappelé ici, les titres d'axes ayant été
+                       retirés du graphique pour gagner de la place. -->
+                  <span class="axis-x-hint" :title="t('strava.x_axis_label')">
+                    <i class="fa-solid fa-arrows-left-right" aria-hidden="true"></i>
+                    <span>{{ xAxisLabel() }}</span>
+                  </span>
                 </div>
                 <div class="d-flex gap-1">
                   <button
@@ -1553,7 +1568,7 @@ onBeforeUnmount(() => {
                     class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
                     :title="t('strava.layout.split')"
                     @click="splitGroup(group)"
-                    @mousedown.stop
+                    @pointerdown.stop
                   >
                     <i class="fa-solid fa-object-ungroup" aria-hidden="true"></i>
                     <span>{{ t('strava.layout.split') }}</span>
@@ -1563,7 +1578,7 @@ onBeforeUnmount(() => {
                     class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
                     :title="group.collapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
                     @click="toggleCollapsed(group)"
-                    @mousedown.stop
+                    @pointerdown.stop
                   >
                     <i :class="group.collapsed ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" aria-hidden="true"></i>
                   </button>
@@ -1779,6 +1794,21 @@ onBeforeUnmount(() => {
   border-style: dashed;
 }
 .legend-pill-static:hover { background: rgba(0, 0, 0, 0.02); }
+/* Unité rappelée dans la pastille de légende, à la place du titre d'axe Y. */
+.legend-unit {
+  font-weight: 400;
+  opacity: 0.6;
+}
+/* Rappel de l'axe X (à la place du titre d'axe X), discret et non interactif. */
+.axis-x-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: #6c757d;
+  user-select: none;
+  padding-left: 0.15rem;
+}
 
 /* Layout / drag-reorder. */
 .chart-layout { position: relative; }
@@ -1854,6 +1884,9 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(0, 0, 0, 0.05);
   transition: background-color 0.12s, border-color 0.12s;
   user-select: none;
+  /* Le header est une poignée de drag (réordonnancement) : on neutralise le
+     défilement/zoom tactile dessus pour que le drag fonctionne au doigt. */
+  touch-action: none;
 }
 .chart-group-header:hover {
   background: rgba(252, 76, 2, 0.06);

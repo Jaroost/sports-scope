@@ -1,4 +1,8 @@
 class PagesController < ApplicationController
+  # Le Web Share Target (Android) POST le .gpx sans jeton CSRF : on désactive la
+  # protection pour cette seule action (le partage est une entrée publique du système).
+  skip_forgery_protection only: :share_target
+
   def home
   end
 
@@ -13,6 +17,21 @@ class PagesController < ApplicationController
   def route_builder
     require_login!
     @route_id = params[:id]
+  end
+
+  # Filet de sécurité du Web Share Target quand le service worker n'a pas intercepté
+  # le POST (cf. config/routes.rb). On lit le .gpx partagé et on rend le créateur,
+  # qui charge directement le tracé via les props sharedGpx / sharedGpxName.
+  def share_target
+    require_login!
+    return if performed? # require_login! a pu rediriger (non connecté)
+
+    file = params[:gpx]
+    if file.respond_to?(:read)
+      @shared_gpx = file.read
+      @shared_gpx_name = File.basename(file.original_filename.to_s, ".*") if file.respond_to?(:original_filename)
+    end
+    render :route_builder
   end
 
   def free_navigation

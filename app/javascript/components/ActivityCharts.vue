@@ -62,6 +62,9 @@ const dragOverGroupId = ref(null)
 const dragOverSlotIndex = ref(null)
 const isCopyMode = ref(false) // true while the pointer is on the "copy" half
 const hiddenDatasets = ref(new Map()) // groupId → Set<datasetIdx>
+// Sur mobile, les contrôles du header (zoom/sélection/preset/axe) sont repliés dans un
+// menu déroulant ouvert par un bouton « réglages », pour ne pas manger la moitié de l'écran.
+const mobileControlsOpen = ref(false)
 
 const availableLayout = computed(() => (props.streams ? chartLayout.value : []))
 
@@ -257,6 +260,10 @@ function chartStats(def) {
 
 // ─── Chart.js plugin: drag-to-select + flag handles + selection highlight
 const HANDLE_TOL = 8
+// Tolérances tactiles (px) : zone d'accroche d'une poignée et seuil sous lequel un
+// geste reste un « tap » (mobile, doigts plus gros que le curseur souris).
+const TOUCH_HANDLE_TOL_PX = 16
+const TOUCH_TAP_TOL_PX = 8
 
 function drawChartFlag(ctx, area, x, kind) {
   const fw = 12
@@ -406,6 +413,11 @@ const dragSelectPlugin = {
 // ─── Chart instances + rendering ─────────────────────────────────────────
 const chartInstances = new Map()
 const wheelHandlers = new Map()
+const touchCleanups = new Map() // groupId → () => void : retire les listeners tactiles
+// Geste tactile en cours (un seul à la fois). Chaque objet mémorise le chart concerné.
+let touchPinch: any = null  // { idA, idB, vA, vB, chart } — pincement + pan (2 doigts)
+let touchSelect: any = null // { id, startPx, startY, moved, chart } — sélection (1 doigt)
+let touchHandle: any = null // { id, fixedValue, chart } — déplacement d'une borne min/max
 let xMinAll = 0
 let xMaxAll = 0
 
@@ -482,7 +494,9 @@ async function renderCharts() {
         animation: false,
         parsing: false,
         interaction: { intersect: false, mode: 'index', axis: 'x' },
-        events: ['mousedown', 'mousemove', 'mouseup', 'mouseout', 'click', 'touchstart', 'touchmove', 'touchend'],
+        // Tactile géré par nos propres listeners (attachTouchInteraction) : on ne
+        // laisse à Chart.js que la souris pour éviter un double traitement des gestes.
+        events: ['mousedown', 'mousemove', 'mouseup', 'mouseout', 'click'],
         plugins: {
           legend: { display: false },
           tooltip: {
@@ -503,8 +517,11 @@ async function renderCharts() {
                   callback: ((tf) => (val: number) => formatHMS(val * tf))(timeFactor()),
                 }
               : { maxTicksLimit: 8 },
-            min: props.zoomRange?.xMin,
-            max: props.zoomRange?.xMax,
+            // Épingle l'axe sur l'étendue exacte des données (hors zoom) pour que la
+            // courbe touche les deux bords. Sans min/max, Chart.js arrondit au tick
+            // supérieur et laisse un vide à droite (la courbe n'atteint pas 100 %).
+            min: props.zoomRange?.xMin ?? xMinAll,
+            max: props.zoomRange?.xMax ?? xMaxAll,
           },
           ...yScales,
         },
@@ -525,6 +542,8 @@ async function renderCharts() {
     const wheelHandler = (e) => handleZoomWheel(chart, e)
     canvas.addEventListener('wheel', wheelHandler, { passive: false })
     wheelHandlers.set(group.id, { canvas, handler: wheelHandler })
+
+    touchCleanups.set(group.id, attachTouchInteraction(canvas, chart))
 
     chartInstances.set(group.id, chart)
   })
@@ -554,6 +573,9 @@ function applySelectionToCharts() {
 function destroyCharts() {
   wheelHandlers.forEach(({ canvas, handler }) => canvas.removeEventListener('wheel', handler))
   wheelHandlers.clear()
+  touchCleanups.forEach((detach) => detach())
+  touchCleanups.clear()
+  touchPinch = touchSelect = touchHandle = null
   // Remove any external tooltip DOM nodes before destroying their charts.
   chartInstances.forEach((c) => {
     c.canvas.parentNode?.querySelector('.chart-tooltip')?.remove()
@@ -1025,6 +1047,163 @@ function applyZoomStep(chart, px, deltaY) {
   setZoom(newMin, newMax)
 }
 
+// ─── Touch interactions (mobile) ──────────────────────────────────────────
+// 1 doigt : glisser horizontalement = sélectionner une plage ; saisir un drapeau de
+//   bord = déplacer la limite min/max (les drapeaux affichés aux bords sont les bornes).
+//   Un glissement majoritairement vertical rend la main au scroll de la page.
+// 2 doigts : pincer pour zoomer + déplacer la fenêtre (pan) quand on est zoomé.
+function findTouchById(list: TouchList, id: number): Touch | null {
+  for (let i = 0; i < list.length; i++) if (list[i].identifier === id) return list[i]
+  return null
+}
+function touchPxIn(canvas: HTMLCanvasElement, clientX: number): number {
+  return clientX - canvas.getBoundingClientRect().left
+}
+function touchFractionIn(chart: any, canvas: HTMLCanvasElement, clientX: number): number {
+  const area = chart.chartArea
+  return (touchPxIn(canvas, clientX) - area.left) / (area.right - area.left)
+}
+// Valeur d'axe (chart-x) → index d'échantillon dans les streams.
+function chartValueToIndex(chartXVal: number): number {
+  return xValueToIndex(chartXToRaw(chartXVal))
+}
+
+function attachTouchInteraction(canvas: HTMLCanvasElement, chart: any) {
+  const onStart = (ev: TouchEvent) => {
+    // 2 doigts → pincement/pan : on annule tout geste à un doigt en cours.
+    if (ev.touches.length >= 2) {
+      ev.preventDefault()
+      touchSelect = null
+      touchHandle = null
+      if (chart.$drag) { chart.$drag = null; chart.update('none') }
+      const a = ev.touches[0], b = ev.touches[1]
+      const curMin = props.zoomRange?.xMin ?? xMinAll
+      const curMax = props.zoomRange?.xMax ?? xMaxAll
+      const fA = touchFractionIn(chart, canvas, a.clientX)
+      const fB = touchFractionIn(chart, canvas, b.clientX)
+      touchPinch = {
+        idA: a.identifier, idB: b.identifier, chart,
+        vA: curMin + fA * (curMax - curMin),
+        vB: curMin + fB * (curMax - curMin),
+      }
+      return
+    }
+    const touch = ev.touches[0]
+    const x = touchPxIn(canvas, touch.clientX)
+    const area = chart.chartArea
+    if (x < area.left - TOUCH_HANDLE_TOL_PX || x > area.right + TOUCH_HANDLE_TOL_PX) return
+    // Drapeau de bord (limite min/max) sous le doigt → redimensionnement : on capture.
+    const handle = detectChartHandle(chart, x)
+    if (handle) {
+      ev.preventDefault()
+      touchHandle = { id: touch.identifier, fixedValue: handle.fixedValue, chart }
+      return
+    }
+    if (x < area.left || x > area.right) return
+    // Sélection : on ne capture pas encore (pas de preventDefault) — le scroll vertical
+    // de la page reste possible tant que le doigt n'a pas tranché en faveur de l'horizontale.
+    touchSelect = { id: touch.identifier, startPx: x, startY: touch.clientY, moved: false, chart }
+  }
+
+  const onMove = (ev: TouchEvent) => {
+    if (touchPinch && touchPinch.chart === chart) {
+      const a = findTouchById(ev.touches, touchPinch.idA)
+      const b = findTouchById(ev.touches, touchPinch.idB)
+      if (!a || !b) return
+      ev.preventDefault()
+      const fA = touchFractionIn(chart, canvas, a.clientX)
+      const fB = touchFractionIn(chart, canvas, b.clientX)
+      if (Math.abs(fA - fB) < 1e-4) return
+      const newRange = (touchPinch.vA - touchPinch.vB) / (fA - fB)
+      const newMin = touchPinch.vA - fA * newRange
+      setZoom(newMin, newMin + newRange)
+      return
+    }
+
+    if (touchHandle && touchHandle.chart === chart) {
+      const tt = findTouchById(ev.touches, touchHandle.id)
+      if (!tt) return
+      ev.preventDefault()
+      const area = chart.chartArea
+      const xx = Math.max(area.left, Math.min(area.right, touchPxIn(canvas, tt.clientX)))
+      const val = chart.scales.x.getValueForPixel(xx)
+      if (val == null || Number.isNaN(val)) return
+      const lo = Math.min(chartValueToIndex(val), chartValueToIndex(touchHandle.fixedValue))
+      const hi = Math.max(chartValueToIndex(val), chartValueToIndex(touchHandle.fixedValue))
+      if (hi > lo) emit('select-segment', lo, hi)
+      return
+    }
+
+    if (touchSelect && touchSelect.chart === chart) {
+      const tt = findTouchById(ev.touches, touchSelect.id)
+      if (!tt) return
+      const area = chart.chartArea
+      const x = Math.max(area.left, Math.min(area.right, touchPxIn(canvas, tt.clientX)))
+      if (!touchSelect.moved) {
+        const dx = Math.abs(x - touchSelect.startPx)
+        const dy = Math.abs(tt.clientY - touchSelect.startY)
+        // Vertical dominant → c'est un scroll de page : on abandonne la sélection.
+        if (dy > dx && dy > TOUCH_TAP_TOL_PX) { touchSelect = null; return }
+        if (dx <= TOUCH_TAP_TOL_PX) return
+        touchSelect.moved = true
+        chart.$drag = { mode: 'select', x0: touchSelect.startPx, x1: x }
+      }
+      ev.preventDefault()
+      chart.$drag.x1 = x
+      chart.update('none')
+    }
+  }
+
+  const onEnd = (ev: TouchEvent) => {
+    if (touchPinch && touchPinch.chart === chart) {
+      if (ev.touches.length < 2) touchPinch = null
+      return
+    }
+    if (touchHandle && touchHandle.chart === chart) {
+      if (findTouchById(ev.touches, touchHandle.id)) return
+      touchHandle = null
+      return
+    }
+    if (touchSelect && touchSelect.chart === chart) {
+      if (findTouchById(ev.touches, touchSelect.id)) return
+      const moved = touchSelect.moved
+      const drag = chart.$drag
+      touchSelect = null
+      chart.$drag = null
+      if (moved && drag) {
+        const xScale = chart.scales.x
+        const v0 = xScale.getValueForPixel(Math.min(drag.x0, drag.x1))
+        const v1 = xScale.getValueForPixel(Math.max(drag.x0, drag.x1))
+        if (v0 != null && v1 != null) {
+          const sIdx = chartValueToIndex(v0)
+          const eIdx = chartValueToIndex(v1)
+          const xs = props.streams?.[props.xAxis]?.data || props.streams?.time?.data
+          const maxIdx = (xs?.length || 1) - 1
+          if (sIdx <= 0 && eIdx >= maxIdx) emit('clear-selection')
+          else if (eIdx > sIdx) emit('select-segment', sIdx, eIdx)
+        }
+      }
+      chart.update('none')
+    }
+  }
+
+  const onCancel = () => {
+    touchPinch = touchSelect = touchHandle = null
+    if (chart.$drag) { chart.$drag = null; chart.update('none') }
+  }
+
+  canvas.addEventListener('touchstart', onStart, { passive: false })
+  canvas.addEventListener('touchmove', onMove, { passive: false })
+  canvas.addEventListener('touchend', onEnd, { passive: false })
+  canvas.addEventListener('touchcancel', onCancel, { passive: false })
+  return () => {
+    canvas.removeEventListener('touchstart', onStart)
+    canvas.removeEventListener('touchmove', onMove)
+    canvas.removeEventListener('touchend', onEnd)
+    canvas.removeEventListener('touchcancel', onCancel)
+  }
+}
+
 // ─── Toggle wrappers (v-model) ───────────────────────────────────────────
 function setXAxis(v) { emit('update:xAxis', v) }
 function toggleCardCollapsed() { emit('update:collapsed', !props.collapsed) }
@@ -1090,10 +1269,26 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-chart-line text-warning" aria-hidden="true"></i>
           <span>{{ t('strava.charts') }}</span>
         </h3>
-        <div class="d-flex flex-wrap gap-3 align-items-center">
+        <div class="d-flex flex-wrap gap-3 align-items-center chart-controls-wrap">
+          <!-- Bouton « réglages » : visible uniquement sur mobile, ouvre/ferme le menu
+               déroulant des contrôles ci-dessous. -->
+          <button
+            v-if="!collapsed"
+            type="button"
+            class="btn btn-sm btn-outline-secondary chart-controls-toggle"
+            :aria-pressed="mobileControlsOpen"
+            :title="t('strava.charts')"
+            @click="mobileControlsOpen = !mobileControlsOpen"
+          >
+            <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+          </button>
           <!-- Controls only render when the charts card is expanded. The
                toggle button stays visible in both states. -->
-          <template v-if="!collapsed">
+          <div
+            v-if="!collapsed"
+            class="chart-controls"
+            :class="{ 'chart-controls-open': mobileControlsOpen }"
+          >
             <!-- GROUPE 1 : Actions ponctuelles (visibles si applicables) -->
             <div class="control-group" v-if="selection || zoomRange">
               <button
@@ -1101,7 +1296,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
                 :title="t('strava.zoom_to_selection')"
-                @click="zoomToSelection"
+                @click="zoomToSelection(); mobileControlsOpen = false"
               >
                 <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
                 <span>{{ t('strava.zoom_to_selection') }}</span>
@@ -1111,7 +1306,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
                 :title="t('strava.clear_selection')"
-                @click="clearSelection"
+                @click="clearSelection(); mobileControlsOpen = false"
               >
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
                 <span>{{ t('strava.clear_selection') }}</span>
@@ -1121,7 +1316,7 @@ onBeforeUnmount(() => {
                 type="button"
                 class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
                 :title="t('strava.reset_zoom')"
-                @click="resetZoom"
+                @click="resetZoom(); mobileControlsOpen = false"
               >
                 <i class="fa-solid fa-magnifying-glass-minus" aria-hidden="true"></i>
                 <span>{{ t('strava.reset_zoom') }}</span>
@@ -1181,7 +1376,7 @@ onBeforeUnmount(() => {
                 <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
               </div>
             </div>
-          </template>
+          </div>
 
           <button
             type="button"
@@ -1402,6 +1597,47 @@ onBeforeUnmount(() => {
   backdrop-filter: saturate(140%);
   border-bottom: 1px solid rgba(252, 76, 2, 0.22);
   box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.18);
+}
+
+/* ── Contrôles du header : responsive ──────────────────────────────────────
+   Desktop : les groupes de contrôles s'insèrent inline dans la barre (display:
+   contents → ils héritent du flex/gap du parent), le bouton « réglages » est masqué.
+   Mobile  : la barre ne garde que titre + réglages + cacher ; les contrôles passent
+   dans un menu déroulant flottant (overlay) ouvert par le bouton réglages, pour ne
+   plus occuper la moitié de l'écran. */
+.chart-controls-wrap { position: relative; }
+.chart-controls { display: contents; }
+.chart-controls-toggle { display: none; }
+
+@media (max-width: 767px) {
+  /* Le header (donc les statistiques) reste sticky pendant le défilement des
+     graphiques ; les contrôles étant repliés dans le menu, sa hauteur reste contenue. */
+  .chart-controls-toggle { display: inline-flex; }
+  .chart-controls { display: none; }
+  .chart-controls.chart-controls-open {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.6rem;
+    position: absolute;
+    top: calc(100% + 0.4rem);
+    right: 0;
+    z-index: 30;
+    width: min(20rem, 88vw);
+    max-height: 70vh;
+    overflow-y: auto;
+    padding: 0.75rem;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 0.6rem;
+    box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.4);
+  }
+  /* Dans le menu, chaque groupe occupe toute la largeur et reste lisible. */
+  .chart-controls.chart-controls-open .control-group {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .chart-controls.chart-controls-open .preset-select { max-width: none; flex: 1; }
 }
 
 .range-chips { font-size: 0.85rem; }

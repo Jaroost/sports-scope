@@ -230,7 +230,7 @@ class RoutesController < ApplicationController
   # (Strava, Garmin, Komoot…) ignorent les <extensions> d'un namespace inconnu,
   # donc le fichier reste un GPX 1.1 valide ailleurs ; côté Sports Scope on s'en
   # sert pour ré-importer les waypoints d'origine avec leur flag « libre ».
-  GPX_NS = "https://sports-scope.app/gpx/1"
+  GPX_NS = "https://sports.logicraft.ch/gpx/1"
 
   def build_gpx(route, step: nil)
     pts = Array(route.geometry)

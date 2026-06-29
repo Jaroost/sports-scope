@@ -4,6 +4,7 @@ import { t } from '../i18n'
 import { speedForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { buildNewRouteUrl } from '../routeHelpers'
+import { parseGpxWaypoints, GpxImportError } from '../gpxImport'
 import NewRouteModal from './NewRouteModal.vue'
 
 // canDense : réservé aux admins (can :manage, :all). Débloque l'export d'un GPX
@@ -19,12 +20,6 @@ const localePrefix = lang ? `/${lang}` : ''
 
 const gpxInputEl = ref(null)
 const importingGpx = ref(false)
-// Cap waypoints handed to the builder when down-sampling a foreign GPX track.
-// 25 leaves the user headroom to drag-insert more once the route is loaded.
-const GPX_IMPORT_MAX_WAYPOINTS = 25
-// A Sports Scope GPX already carries deliberate waypoints (not a dense track),
-// so we keep them all up to the controller's MAX_WAYPOINTS=500 ceiling.
-const GPX_IMPORT_MAX_NATIVE_WAYPOINTS = 500
 
 // Estimation du temps de parcours et icône de la liste : pilotées par la catégorie
 // d'activité enregistrée avec chaque itinéraire (cycling | mtb | hiking). La vitesse
@@ -273,29 +268,7 @@ async function processGpxFile(file) {
   error.value = null
   importingGpx.value = true
   try {
-    const text = await file.text()
-    const doc = new DOMParser().parseFromString(text, 'application/xml')
-    if (doc.getElementsByTagName('parsererror').length) {
-      throw new Error(t('routes.error_gpx_invalid'))
-    }
-    // Si le GPX porte l'extension Sports Scope, on rejoue les waypoints d'origine
-    // (avec leur flag `free`) tels quels : pas de re-sampling, le builder relance
-    // BRouter et reconstruit un tracé identique à l'export.
-    const ssWaypoints = parseSportsScopeWaypoints(doc)
-    let waypoints
-    if (ssWaypoints.length >= 2) {
-      waypoints = ssWaypoints
-    } else {
-      const points = parseGpxPoints(doc)
-      if (!points.length) throw new Error(t('routes.error_gpx_no_points'))
-      const sampled = downsample(points, GPX_IMPORT_MAX_WAYPOINTS)
-      // Pin original endpoints so they survive downsampling.
-      if (sampled.length >= 2) {
-        sampled[0] = points[0]
-        sampled[sampled.length - 1] = points[points.length - 1]
-      }
-      waypoints = sampled.map((p) => ({ lng: p[0], lat: p[1] }))
-    }
+    const waypoints = parseGpxWaypoints(await file.text())
     const baseName = file.name.replace(/\.gpx$/i, '').trim().slice(0, 80)
     // On laisse l'utilisateur confirmer/ajuster le nom (pré-rempli avec le nom
     // du fichier) et choisir le type avant d'ouvrir le créateur.
@@ -303,59 +276,13 @@ async function processGpxFile(file) {
     newRouteName.value = baseName
     showNewRouteModal.value = true
   } catch (e) {
-    error.value = `${t('routes.error_gpx_invalid')}: ${e.message}`
+    const key = e instanceof GpxImportError && e.code === 'no_points'
+      ? 'routes.error_gpx_no_points'
+      : 'routes.error_gpx_invalid'
+    error.value = t(key)
   } finally {
     importingGpx.value = false
   }
-}
-
-// Namespace de l'extension Sports Scope — doit rester aligné sur GPX_NS côté
-// routes_controller.rb (build_gpx_extensions).
-const SS_GPX_NS = 'https://sports-scope.app/gpx/1'
-
-// Waypoints d'origine embarqués par Sports Scope, avec le flag `free`. Vide si
-// le GPX vient d'une autre source. Plafonné à MAX_WAYPOINTS (le serveur rejette
-// au-delà), même si en pratique l'export n'en produit jamais plus.
-function parseSportsScopeWaypoints(doc) {
-  const nodes = doc.getElementsByTagNameNS(SS_GPX_NS, 'wp')
-  const out = []
-  for (let i = 0; i < nodes.length && out.length < GPX_IMPORT_MAX_NATIVE_WAYPOINTS; i++) {
-    const lat = parseFloat(nodes[i].getAttribute('lat'))
-    const lng = parseFloat(nodes[i].getAttribute('lon'))
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) continue
-    const wp = { lng, lat }
-    if (nodes[i].getAttribute('free') === 'true') wp.free = true
-    out.push(wp)
-  }
-  return out
-}
-
-// [[lng, lat], ...] — <trkpt> first (device exports), then <rtept> (planned
-// routes from tools like Komoot), then <wpt> as a last resort.
-function parseGpxPoints(doc) {
-  const collect = (tag) => {
-    const out = []
-    const nodes = doc.getElementsByTagName(tag)
-    for (let i = 0; i < nodes.length; i++) {
-      const lat = parseFloat(nodes[i].getAttribute('lat'))
-      const lng = parseFloat(nodes[i].getAttribute('lon'))
-      if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-        out.push([lng, lat])
-      }
-    }
-    return out
-  }
-  return collect('trkpt').length ? collect('trkpt')
-    : collect('rtept').length ? collect('rtept')
-    : collect('wpt')
-}
-
-function downsample(arr, maxPoints) {
-  if (arr.length <= maxPoints) return arr.slice()
-  const step = arr.length / maxPoints
-  const out = []
-  for (let i = 0; i < maxPoints; i++) out.push(arr[Math.floor(i * step)])
-  return out
 }
 
 function setInputRef(id, el) {

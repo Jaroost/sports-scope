@@ -3,18 +3,34 @@ class StravaController < ApplicationController
   before_action :ensure_strava_linked!
 
   ACTIVITIES_TTL = 1.day
+  ACTIVITIES_LIMIT = 200
 
+  # Serves the user's activities straight from `strava_activities`. The first
+  # visit (empty table) triggers a full sync; `?refresh=1` runs an incremental
+  # sync to pull anything new since the last stored activity.
   def activities
-    cache_key = "strava:activities:#{current_user.id}"
-    Rails.cache.delete(cache_key) if params[:refresh].present?
+    sync = current_user.strava_activities.none? ? :full : (params[:refresh].present? ? :incremental : nil)
 
-    payload = Rails.cache.fetch(cache_key, expires_in: ACTIVITIES_TTL) do
-      list = strava_get('https://www.strava.com/api/v3/athlete/activities', per_page: 10)
-      { cached_at: Time.current.iso8601, activities: list }
+    case sync
+    when :full        then StravaSyncService.new(current_user).call(full: true)
+    when :incremental then StravaSyncService.new(current_user).call
     end
 
-    render json: payload
-  rescue StravaApiError => e
+    records = current_user.strava_activities.order(started_at: :desc).limit(ACTIVITIES_LIMIT)
+    render json: {
+      cached_at: current_user.strava_activities.maximum(:updated_at)&.iso8601,
+      activities: records.map { |a| summary_json(a) }
+    }
+  rescue StravaSyncService::StravaApiError => e
+    render json: { error: e.message }, status: :bad_gateway
+  end
+
+  # POST /strava/sync — force a (re)synchronisation of activity summaries.
+  # `?full=1` re-paginates the whole history; otherwise it's incremental.
+  def sync
+    count = StravaSyncService.new(current_user).call(full: params[:full].present?)
+    render json: { synced: count, total: current_user.strava_activities.count }
+  rescue StravaSyncService::StravaApiError => e
     render json: { error: e.message }, status: :bad_gateway
   end
 
@@ -42,7 +58,9 @@ class StravaController < ApplicationController
     cache_key = "strava:streams:v2:#{current_user.id}:#{id}"
     Rails.cache.delete(cache_key) if params[:refresh].present?
 
+    fetched = false
     payload = Rails.cache.fetch(cache_key, expires_in: ACTIVITIES_TTL) do
+      fetched = true
       streams = strava_get(
         "https://www.strava.com/api/v3/activities/#{id}/streams",
         keys: STREAM_KEYS.join(','),
@@ -50,6 +68,10 @@ class StravaController < ApplicationController
       )
       { cached_at: Time.current.iso8601, streams: streams }
     end
+
+    # Write-through: persist the detailed series into `strava_activities` the
+    # first time we actually hit the API (computes the peak-power curve too).
+    persist_streams(id, payload[:streams] || payload['streams']) if fetched
 
     render json: payload
   rescue StravaApiError => e
@@ -67,18 +89,17 @@ class StravaController < ApplicationController
     streams = load_streams_for(id)
     return head :not_found unless streams
 
-    summary = load_summary_for(id)
-    started_at = parse_started_at(summary)
-
-    record = StravaActivityPeakPower.upsert_from_streams(
-      user: current_user,
-      strava_activity_id: id,
-      started_at: started_at,
-      streams: streams
-    )
+    activity = current_user.strava_activities.find_by(strava_id: id)
+    current =
+      if activity
+        activity.store_streams!(streams) if activity.peak_powers.blank?
+        activity.peak_powers
+      else
+        PeakPowerCurve.compute_from(streams)
+      end
 
     render json: {
-      current: record.peak_powers,
+      current: current,
       bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['strava', id])
     }
   rescue StravaApiError => e
@@ -124,23 +145,41 @@ class StravaController < ApplicationController
     payload[:streams] || payload['streams']
   end
 
-  def load_summary_for(id)
-    cache_key = "strava:activity:#{current_user.id}:#{id}"
-    payload = Rails.cache.fetch(cache_key, expires_in: ACTIVITIES_TTL) do
-      activity = strava_get("https://www.strava.com/api/v3/activities/#{id}")
-      { cached_at: Time.current.iso8601, activity: activity }
-    end
-    payload[:activity] || payload['activity']
+  # Serialized form consumed by the frontend. We return the stored Strava
+  # summary verbatim (`raw`) so list/detail views keep full field parity with
+  # the live API; older rows without `raw` fall back to a built hash.
+  def summary_json(a)
+    raw = a.raw.is_a?(Hash) ? a.raw : {}
+    return raw if raw.present?
+
+    {
+      'id' => a.strava_id,
+      'name' => a.name,
+      'type' => a.activity_type,
+      'sport_type' => a.activity_type,
+      'start_date' => a.started_at&.iso8601,
+      'start_date_local' => a.started_at&.iso8601,
+      'distance' => a.distance_m,
+      'moving_time' => a.moving_time_s,
+      'elapsed_time' => a.elapsed_time_s,
+      'total_elevation_gain' => a.total_elevation_gain,
+      'average_speed' => a.average_speed,
+      'max_speed' => a.max_speed,
+      'average_heartrate' => a.average_heartrate,
+      'max_heartrate' => a.max_heartrate,
+      'average_watts' => a.average_watts,
+      'max_watts' => a.max_watts,
+      'average_cadence' => a.average_cadence,
+      'start_latlng' => a.start_latlng,
+      'end_latlng' => a.end_latlng
+    }
   end
 
-  def parse_started_at(summary)
-    return nil unless summary.is_a?(Hash)
+  def persist_streams(id, streams)
+    return unless streams.is_a?(Hash)
 
-    raw = summary['start_date'] || summary[:start_date] ||
-          summary['start_date_local'] || summary[:start_date_local]
-    Time.iso8601(raw.to_s)
-  rescue ArgumentError, TypeError
-    nil
+    activity = current_user.strava_activities.find_by(strava_id: id)
+    activity&.store_streams!(streams)
   end
 
   class StravaApiError < StandardError

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_27_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_29_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -86,6 +86,37 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_27_000001) do
     t.index ["user_id"], name: "index_routes_on_user_id"
   end
 
+  create_table "strava_activities", force: :cascade do |t|
+    t.string "activity_type"
+    t.float "average_cadence"
+    t.float "average_heartrate"
+    t.float "average_speed"
+    t.float "average_temp"
+    t.float "average_watts"
+    t.datetime "created_at", null: false
+    t.float "distance_m"
+    t.integer "elapsed_time_s"
+    t.jsonb "end_latlng"
+    t.float "max_cadence"
+    t.float "max_heartrate"
+    t.float "max_speed"
+    t.float "max_watts"
+    t.integer "moving_time_s"
+    t.string "name", null: false
+    t.jsonb "peak_powers", default: {}, null: false
+    t.jsonb "raw", default: {}, null: false
+    t.jsonb "start_latlng"
+    t.datetime "started_at"
+    t.bigint "strava_id", null: false
+    t.jsonb "streams", default: {}, null: false
+    t.float "total_elevation_gain"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "started_at"], name: "index_strava_activities_on_user_id_and_started_at"
+    t.index ["user_id", "strava_id"], name: "index_strava_activities_on_user_id_and_strava_id", unique: true
+    t.index ["user_id"], name: "index_strava_activities_on_user_id"
+  end
+
   create_table "strava_activity_peak_powers", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.jsonb "peak_powers", default: {}, null: false
@@ -122,6 +153,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_27_000001) do
   add_foreign_key "imported_activities", "users"
   add_foreign_key "pois", "users"
   add_foreign_key "routes", "users"
+  add_foreign_key "strava_activities", "users"
   add_foreign_key "strava_activity_peak_powers", "users"
   add_foreign_key "users", "chart_layouts", column: "last_chart_layout_id", on_delete: :nullify
 end

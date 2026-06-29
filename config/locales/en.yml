@@ -529,3 +529,11 @@ en:
     days_ago_yesterday: "yesterday"
     days_ago_other: "%{count}d ago"
     days_in_future: "in %{count}d"
+  pwa:
+    install_title: "Install Sports Scope"
+    install_text: "Add the app to your home screen for quick access and offline use."
+    install_button: "Install"
+    dismiss: "Later"
+    ios_title: "Install on iPhone / iPad"
+    ios_step_share: "Tap the Share button"
+    ios_step_add: "then \"Add to Home Screen\"."

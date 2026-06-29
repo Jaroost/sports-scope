@@ -8,6 +8,7 @@ import ImportFitActivity from './components/ImportFitActivity.vue'
 import UserProfile from './components/UserProfile.vue'
 import ProfileDialog from './components/ProfileDialog.vue'
 import NewRouteButton from './components/NewRouteButton.vue'
+import PwaInstall from './components/PwaInstall.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
@@ -19,6 +20,7 @@ const registry: Record<string, Component> = {
   UserProfile,
   ProfileDialog,
   NewRouteButton,
+  PwaInstall,
 }
 
 export function mountVueIslands(): void {

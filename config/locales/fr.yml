@@ -6,6 +6,7 @@ fr:
     home: "Accueil"
     dashboard: "Tableau de bord"
     routes: "Itinéraires"
+    new_route: "Créer un itinéraire"
     free_navigate: "Mode libre"
     chains: "Cirage chaîne"
     profile: "Profil"
@@ -419,7 +420,6 @@ fr:
     cyclosm_icn: "International (EuroVelo)"
   pages:
     home_lead: "Planifiez vos itinéraires, suivez-les en navigation, et analysez vos sorties Strava sur des cartes interactives — le tout au même endroit."
-    home_nav_routes: "Mes itinéraires"
     feature_builder_title: "Créateur d'itinéraire"
     feature_builder_body: "Planifiez vos sorties vélo : snap aux routes, profil d'altitude, cols détectés, couleurs de pente/revêtement, export GPX."
     feature_builder_cta: "Créer un itinéraire"

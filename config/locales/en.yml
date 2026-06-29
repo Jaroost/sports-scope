@@ -6,6 +6,7 @@ en:
     home: "Home"
     dashboard: "Dashboard"
     routes: "Routes"
+    new_route: "Create a route"
     free_navigate: "Free ride"
     chains: "Chain wax"
     profile: "Profile"
@@ -419,7 +420,6 @@ en:
     cyclosm_icn: "International (EuroVelo)"
   pages:
     home_lead: "Plan your routes, follow them with turn-by-turn navigation, and analyze your Strava rides on interactive maps — all in one place."
-    home_nav_routes: "My routes"
     feature_builder_title: "Route builder"
     feature_builder_body: "Plan your rides: snap-to-roads, elevation profile, climb detection, grade/surface colouring, GPX export."
     feature_builder_cta: "Build a route"

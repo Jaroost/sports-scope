@@ -50,8 +50,13 @@
               <%# Menus configurables depuis le profil : ordre et visibilité (cf. NavbarHelper). %>
               <% navbar_menu_items(current_user).each do |item| %>
                 <li class="nav-item">
-                  <%= link_to item[:path], class: "nav-link" do %>
-                    <i class="fa-solid <%= item[:icon] %> me-1" aria-hidden="true"></i><%= item[:label] %>
+                  <% if item[:key] == "new_route" %>
+                    <%# Ouvre la modale nom + type avant d'aller au créateur (même îlot que la home). %>
+                    <span data-vue-component="NewRouteButton" data-vue-props='<%= { variant: "nav" }.to_json %>'></span>
+                  <% else %>
+                    <%= link_to item[:path], class: "nav-link" do %>
+                      <i class="fa-solid <%= item[:icon] %> me-1" aria-hidden="true"></i><%= item[:label] %>
+                    <% end %>
                   <% end %>
                 </li>
               <% end %>

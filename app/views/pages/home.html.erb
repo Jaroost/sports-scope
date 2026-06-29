@@ -14,17 +14,19 @@
           <div data-vue-component="ChainWax" data-vue-props='{"compact":true}'></div>
         </div>
       </div>
+    <%# Mêmes menus que la barre de navigation : ordre et visibilité pilotés depuis le
+        profil (cf. NavbarHelper). Le premier bouton visible ressort en « primary », sauf
+        « créer un itinéraire » qui garde sa modale (îlot NewRouteButton). %>
     <p class="d-flex flex-wrap justify-content-center gap-2">
-      <%= link_to dashboard_path, class: "btn btn-primary btn-lg home-button" do %>
-        <i class="fa-solid fa-gauge-high me-2" aria-hidden="true"></i><%= t("nav.dashboard") %>
+      <% navbar_menu_items(current_user).each_with_index do |item, i| %>
+        <% if item[:key] == "new_route" %>
+          <span data-vue-component="NewRouteButton"></span>
+        <% else %>
+          <%= link_to item[:path], class: "btn btn-lg home-button #{i.zero? ? 'btn-primary' : 'btn-outline-secondary'}" do %>
+            <i class="fa-solid <%= item[:icon] %> me-2" aria-hidden="true"></i><%= item[:label] %>
+          <% end %>
+        <% end %>
       <% end %>
-      <%= link_to routes_index_path, class: "btn btn-outline-secondary btn-lg home-button" do %>
-        <i class="fa-solid fa-route me-2" aria-hidden="true"></i><%= t("pages.home_nav_routes") %>
-      <% end %>
-      <%= link_to free_navigate_path, class: "btn btn-outline-secondary btn-lg home-button" do %>
-        <i class="fa-solid fa-location-crosshairs me-2" aria-hidden="true"></i><%= t("nav.free_navigate") %>
-      <% end %>
-      <span data-vue-component="NewRouteButton"></span>
     </p>
   <% else %>
     <p>

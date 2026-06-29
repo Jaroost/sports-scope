@@ -12,6 +12,7 @@ class User < ApplicationRecord
       "items" => [
         { "key" => "dashboard", "visible" => true },
         { "key" => "routes", "visible" => true },
+        { "key" => "new_route", "visible" => true },
         { "key" => "free_navigate", "visible" => true },
         { "key" => "chains", "visible" => true },
       ],
@@ -109,7 +110,7 @@ class User < ApplicationRecord
   # clés autorisées : la définition (chemin, icône, libellé) vit côté vue (NavbarHelper)
   # et côté éditeur (UserProfile.vue). Ajouter un menu : une clé ici + l'entrée
   # correspondante dans NavbarHelper::NAVBAR_ITEM_DEFS et UserProfile.vue.
-  NAVBAR_ITEM_KEYS = %w[dashboard routes free_navigate chains].freeze
+  NAVBAR_ITEM_KEYS = %w[dashboard routes new_route free_navigate chains].freeze
 
   # Assainit/normalise un tableau d'items de navbar reçu (front ou base) : ne garde que
   # les clés connues, dédoublonnées, dans l'ordre reçu, en coercant `visible` en booléen ;

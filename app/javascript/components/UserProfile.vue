@@ -134,6 +134,7 @@ function sportIcon(s: (typeof SPORTS)[number]): string {
 const NAVBAR_ICONS: Record<string, string> = {
   dashboard: 'fa-gauge-high',
   routes: 'fa-route',
+  new_route: 'fa-map-location-dot',
   free_navigate: 'fa-location-crosshairs',
   chains: 'fa-link',
 }

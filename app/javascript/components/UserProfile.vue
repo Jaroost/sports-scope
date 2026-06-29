@@ -4,6 +4,7 @@ import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS, mapStyleFor } from '../mapStyles'
 import { POI_CATEGORIES } from '../poiCategories'
 import { ALL_COUNTRY_CODES, countryName, countryFlag } from '../countries'
+import { usePointerSort } from '../composables/usePointerSort'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -147,38 +148,17 @@ function navLabel(key: string): string {
   return t(`nav.${key}`)
 }
 
-const dragNavIndex = ref<number | null>(null)
-const dragOverNavIndex = ref<number | null>(null)
-
-function onNavDragStart(i: number) {
-  dragNavIndex.value = i
-}
-
-function onNavDragOver(i: number) {
-  dragOverNavIndex.value = i
-}
-
-function onNavDrop(to: number) {
-  const from = dragNavIndex.value
-  if (from !== null && from !== to) {
+const { dragIndex: dragNavIndex, overIndex: dragOverNavIndex, onDown: onNavSortDown } =
+  usePointerSort((from, to) => {
     const arr = prefs.navbar.items
     const [moved] = arr.splice(from, 1)
     arr.splice(to, 0, moved)
-  }
-  onNavDragEnd()
-}
-
-function onNavDragEnd() {
-  dragNavIndex.value = null
-  dragOverNavIndex.value = null
-}
+  })
 
 // ─── Recherche de lieux : pays privilégiés (ordre = priorité) ───────────────
 // Liste réordonnable par glisser-déposer ; chaque pays peut être retiré, et on
 // peut en ajouter depuis le sélecteur (pays absents de la liste, triés par nom).
 const countryToAdd = ref('')
-const dragCountryIndex = ref<number | null>(null)
-const dragOverCountryIndex = ref<number | null>(null)
 
 // Pays sélectionnables = tous ceux pas encore dans la liste, triés par nom localisé.
 const availableCountries = computed(() => {
@@ -200,28 +180,12 @@ function removeCountry(cc: string) {
   if (i !== -1) prefs.search.country_codes.splice(i, 1)
 }
 
-function onCountryDragStart(i: number) {
-  dragCountryIndex.value = i
-}
-
-function onCountryDragOver(i: number) {
-  dragOverCountryIndex.value = i
-}
-
-function onCountryDrop(to: number) {
-  const from = dragCountryIndex.value
-  if (from !== null && from !== to) {
+const { dragIndex: dragCountryIndex, overIndex: dragOverCountryIndex, onDown: onCountrySortDown } =
+  usePointerSort((from, to) => {
     const arr = prefs.search.country_codes
     const [moved] = arr.splice(from, 1)
     arr.splice(to, 0, moved)
-  }
-  onCountryDragEnd()
-}
-
-function onCountryDragEnd() {
-  dragCountryIndex.value = null
-  dragOverCountryIndex.value = null
-}
+  })
 
 function csrfToken(): string {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
@@ -497,13 +461,13 @@ function placePreviewMarker(coords: [number, number]) {
               dragover: dragOverNavIndex === i && dragNavIndex !== i,
               hidden: !item.visible,
             }"
-            draggable="true"
-            @dragstart="onNavDragStart(i)"
-            @dragover.prevent="onNavDragOver(i)"
-            @drop.prevent="onNavDrop(i)"
-            @dragend="onNavDragEnd"
+            :data-sort-index="i"
           >
-            <i class="fa-solid fa-grip-vertical navbar-item-grip" aria-hidden="true"></i>
+            <i
+              class="fa-solid fa-grip-vertical navbar-item-grip"
+              aria-hidden="true"
+              @pointerdown="onNavSortDown(i, $event)"
+            ></i>
             <i class="fa-solid navbar-item-icon" :class="navIcon(item.key)" aria-hidden="true"></i>
             <span class="navbar-item-label">{{ navLabel(item.key) }}</span>
             <div class="form-check form-switch m-0 ms-auto">
@@ -598,13 +562,13 @@ function placePreviewMarker(coords: [number, number]) {
             :key="cc"
             class="country-item"
             :class="{ dragging: dragCountryIndex === i, dragover: dragOverCountryIndex === i && dragCountryIndex !== i }"
-            draggable="true"
-            @dragstart="onCountryDragStart(i)"
-            @dragover.prevent="onCountryDragOver(i)"
-            @drop.prevent="onCountryDrop(i)"
-            @dragend="onCountryDragEnd"
+            :data-sort-index="i"
           >
-            <i class="fa-solid fa-grip-vertical country-grip" aria-hidden="true"></i>
+            <i
+              class="fa-solid fa-grip-vertical country-grip"
+              aria-hidden="true"
+              @pointerdown="onCountrySortDown(i, $event)"
+            ></i>
             <span class="country-rank">{{ i + 1 }}</span>
             <span class="country-flag" aria-hidden="true">{{ countryFlag(cc) }}</span>
             <span class="country-name">{{ countryName(cc) }}</span>
@@ -1060,15 +1024,22 @@ function placePreviewMarker(coords: [number, number]) {
   border: 1px solid var(--bs-border-color);
   border-radius: 0.4rem;
   background: var(--bs-body-bg);
-  cursor: grab;
   transition: border-color 0.15s, background-color 0.15s, opacity 0.15s;
 }
 
-.country-item:active { cursor: grabbing; }
 .country-item.dragging { opacity: 0.45; }
 .country-item.dragover { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
 
-.country-grip { color: var(--bs-secondary-color); cursor: grab; }
+/* `touch-action: none` : la poignée capte le geste tactile sans que le défilement
+   de la page ne l'intercepte (indispensable pour le tri au doigt sur mobile). */
+.country-grip {
+  color: var(--bs-secondary-color);
+  cursor: grab;
+  touch-action: none;
+  padding: 0.25rem;
+  margin: -0.25rem;
+}
+.country-grip:active { cursor: grabbing; }
 
 .country-rank {
   min-width: 1.4rem;
@@ -1098,17 +1069,22 @@ function placePreviewMarker(coords: [number, number]) {
   border: 1px solid var(--bs-border-color);
   border-radius: 0.4rem;
   background: var(--bs-body-bg);
-  cursor: grab;
   transition: border-color 0.15s, background-color 0.15s, opacity 0.15s;
 }
 
-.navbar-item:active { cursor: grabbing; }
 .navbar-item.dragging { opacity: 0.45; }
 .navbar-item.dragover { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
 .navbar-item.hidden .navbar-item-icon,
 .navbar-item.hidden .navbar-item-label { opacity: 0.4; }
 
-.navbar-item-grip { color: var(--bs-secondary-color); cursor: grab; }
+.navbar-item-grip {
+  color: var(--bs-secondary-color);
+  cursor: grab;
+  touch-action: none;
+  padding: 0.25rem;
+  margin: -0.25rem;
+}
+.navbar-item-grip:active { cursor: grabbing; }
 .navbar-item-icon { width: 1.2rem; text-align: center; color: var(--bs-primary); }
 .navbar-item-label { font-size: 0.95rem; }
 

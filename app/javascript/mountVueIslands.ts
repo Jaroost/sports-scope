@@ -9,6 +9,7 @@ import UserProfile from './components/UserProfile.vue'
 import ProfileDialog from './components/ProfileDialog.vue'
 import NewRouteButton from './components/NewRouteButton.vue'
 import PwaInstall from './components/PwaInstall.vue'
+import ChainWax from './components/ChainWax.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
@@ -21,6 +22,7 @@ const registry: Record<string, Component> = {
   ProfileDialog,
   NewRouteButton,
   PwaInstall,
+  ChainWax,
 }
 
 export function mountVueIslands(): void {

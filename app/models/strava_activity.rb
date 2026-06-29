@@ -30,6 +30,7 @@ class StravaActivity < ApplicationRecord
     {
       name: (s['name'] || s[:name]).to_s.strip.first(255).presence || 'Strava activity',
       activity_type: (s['sport_type'] || s[:sport_type] || s['type'] || s[:type]).to_s.presence,
+      gear_id: (s['gear_id'] || s[:gear_id]).presence,
       started_at: parse_time(s['start_date'] || s[:start_date] || s['start_date_local'] || s[:start_date_local]),
       distance_m: num(s['distance'] || s[:distance]),
       moving_time_s: int(s['moving_time'] || s[:moving_time]),

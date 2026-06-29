@@ -74,6 +74,12 @@ let markerB = null
 let hoverMarker = null
 let isDragging = false
 let dragRafPending = false
+// Auto-zoom de la carte sur la sélection committée (clic sur un col du panneau stats,
+// drag sur un graphique…). `suppressSelectionFit` court-circuite ce zoom pour les
+// gestes internes à la carte (drag des poignées, clic sur un marqueur de col qui zoome
+// déjà lui-même). Le timer débounce les sélections émises en continu (poignées de graphique).
+let suppressSelectionFit = false
+let selectionFitTimer: ReturnType<typeof setTimeout> | null = null
 const climbMarkers = []
 // Map climb.startIdx → marker DOM element so the parent-driven hover state
 // (hoveredClimbStartIdx prop) can add/remove the `.climb-marker-active` class.
@@ -310,7 +316,9 @@ function buildClimbMarkerEl(climb) {
     ev.stopPropagation()
     // Clic = on committe la sélection (le parent pin le tronçon) puis on zoome dessus.
     // On garde la prévisualisation jusqu'au mouseleave : le temps que props.selection
-    // se mette à jour, le tronçon reste affiché sans clignoter.
+    // se mette à jour, le tronçon reste affiché sans clignoter. On zoome directement ici
+    // (et on court-circuite l'auto-zoom du watch) pour un zoom fiable à chaque clic.
+    suppressSelectionFit = true
     emit('select-segment', climb.startIdx, climb.endIdx)
     fitMapToSegment(climb.startIdx, climb.endIdx)
   })
@@ -503,6 +511,8 @@ function syncFromMarkers() {
   const lo = Math.min(aIdx, bIdx)
   const hi = Math.max(aIdx, bIdx)
   const isFullRange = lo === 0 && hi === maxIdx
+  // Geste interne à la carte : on ne re-zoome pas, l'utilisateur vise déjà l'endroit voulu.
+  suppressSelectionFit = true
   if (isFullRange) emit('clear-selection')
   else emit('select-segment', lo, hi)
   applyMarkerRoles()
@@ -789,6 +799,18 @@ watch(effectiveSelection, () => {
   syncMarkersFromSelection()
 })
 
+// Toute sélection committée venue d'ailleurs (clic sur un col / un pic de puissance dans
+// le panneau stats, drag sur un graphique…) zoome la carte sur le tronçon, comme le clic
+// sur un col de la carte. On ignore : les sélections d'un point unique (clic simple) et
+// les gestes internes à la carte (flag suppressSelectionFit). Le débounce évite de faire
+// vibrer la carte quand la sélection change en continu (drag des poignées de graphique).
+watch(() => props.selection, (sel: any) => {
+  if (suppressSelectionFit) { suppressSelectionFit = false; return }
+  if (selectionFitTimer) { clearTimeout(selectionFitTimer); selectionFitTimer = null }
+  if (!sel || sel.endIdx <= sel.startIdx) return
+  selectionFitTimer = setTimeout(() => fitMapToSegment(sel.startIdx, sel.endIdx), 180)
+})
+
 // Photos may arrive after the map is up — re-install markers when the list
 // changes.
 watch(() => props.photos, () => {
@@ -815,6 +837,7 @@ onBeforeUnmount(() => {
   photoMarkers.forEach((m) => m.remove())
   photoMarkers.length = 0
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
+  if (selectionFitTimer) { clearTimeout(selectionFitTimer); selectionFitTimer = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
 </script>

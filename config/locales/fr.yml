@@ -377,6 +377,20 @@ fr:
     wt_sport_cycling: "Vélo"
     wt_sport_mtb: "VTT"
     wt_sport_hiking: "Rando"
+    profile_label: "Profil de routage"
+    brouter_profile:
+      trekking: "Cyclotourisme"
+      trekking_desc: "Évite le trafic, privilégie les petites routes et pistes cyclables."
+      fastbike: "Rapide / route"
+      fastbike_desc: "Accepte les grands axes, reste sur le bitume, tracé direct."
+      fastbike-lowtraffic: "Rapide, tranquille"
+      fastbike-lowtraffic_desc: "Rapide tout en évitant le gros trafic."
+      shortest: "Le plus court"
+      shortest_desc: "Distance minimale, sans tenir compte du confort."
+      gravel: "Gravel"
+      gravel_desc: "Chemins et pistes non revêtues, évite le bitume."
+      hiking-mountain: "Montagne"
+      hiking-mountain_desc: "Sentiers étroits et exigeants, y compris hors sentiers balisés."
     show_stats_sidebar: "Afficher les statistiques"
     hide_stats_sidebar: "Masquer les statistiques"
     show_elevation_chart: "Afficher le profil d'altitude"
@@ -547,6 +561,9 @@ fr:
     speeds:
       title: "Vitesses moyennes"
       help: "Vitesse moyenne par activité, utilisée pour estimer le temps de parcours d'un itinéraire. Le créateur et la liste choisissent la vitesse correspondant à l'activité sélectionnée."
+    route_profiles:
+      title: "Profils de routage"
+      help: "Profil de routage BRouter utilisé par défaut pour chaque activité. Il détermine le type de voies privilégiées (petites routes, grands axes, chemins…). Un nouvel itinéraire démarre sur ce profil ; il reste modifiable dans le créateur."
     turn_anomaly:
       title: "Détection des virages suspects"
       help: "À l'enregistrement, le créateur signale les endroits où plusieurs virages serrés se groupent sur un petit rayon — souvent le signe d'un point d'étape posé à côté de la route. Ce réglage fixe le diamètre (m) de la zone analysée, par activité : une valeur plus petite limite les fausses alertes sur les sentiers à lacets (rando, VTT)."

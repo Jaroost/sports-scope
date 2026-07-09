@@ -8,6 +8,7 @@ import type { Climb } from '../routeHelpers'
 import type { Place } from '../stores/placesStore'
 import { categoryForType } from '../poiCategories'
 import type { Sport } from '../userPreferences'
+import { profilesForSport } from '../brouter'
 
 // Catégories d'activité — pilotent la vitesse moyenne (via le profil) et sont
 // enregistrées avec l'itinéraire.
@@ -28,6 +29,7 @@ const emit = defineEmits<{
   'hover-place': [place: Place | null]
   'retry-places': []
   'change-sport': [sport: Sport]
+  'change-profile': [profile: string]
 }>()
 
 const climbsExpanded = ref(true)
@@ -100,6 +102,33 @@ const climbsExpanded = ref(true)
           <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
           <span class="ms-1 d-none d-sm-inline">{{ t(`routes.wt_sport_${s}`) }}</span>
         </button>
+      </div>
+
+      <!-- Profil de routage BRouter — filtré par sport, relance le calcul du tracé -->
+      <div class="profile-select">
+        <label class="form-label small text-muted mb-1" for="route-profile-select">
+          {{ t('routes.profile_label') }}
+        </label>
+        <select
+          id="route-profile-select"
+          class="form-select form-select-sm"
+          :value="routeStore.profile.value"
+          :disabled="routeStore.readOnly.value"
+          :title="t(`routes.brouter_profile.${routeStore.profile.value}_desc`)"
+          @change="emit('change-profile', ($event.target as HTMLSelectElement).value)"
+        >
+          <option
+            v-for="p in profilesForSport(routeStore.sport.value)"
+            :key="p"
+            :value="p"
+            :title="t(`routes.brouter_profile.${p}_desc`)"
+          >
+            {{ t(`routes.brouter_profile.${p}`) }}
+          </option>
+        </select>
+        <p class="profile-desc small text-muted mb-0 mt-1">
+          {{ t(`routes.brouter_profile.${routeStore.profile.value}_desc`) }}
+        </p>
       </div>
 
       <!-- Temps estimé -->

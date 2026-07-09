@@ -377,6 +377,20 @@ en:
     wt_sport_cycling: "Cycling"
     wt_sport_mtb: "MTB"
     wt_sport_hiking: "Hiking"
+    profile_label: "Routing profile"
+    brouter_profile:
+      trekking: "Touring"
+      trekking_desc: "Avoids traffic, favours small roads and cycleways."
+      fastbike: "Fast / road"
+      fastbike_desc: "Accepts main roads, stays on tarmac, direct line."
+      fastbike-lowtraffic: "Fast, low traffic"
+      fastbike-lowtraffic_desc: "Fast while avoiding heavy traffic."
+      shortest: "Shortest"
+      shortest_desc: "Minimal distance, ignores comfort."
+      gravel: "Gravel"
+      gravel_desc: "Tracks and unpaved paths, avoids tarmac."
+      hiking-mountain: "Mountain"
+      hiking-mountain_desc: "Narrow, demanding trails, including off marked paths."
     show_stats_sidebar: "Show statistics"
     hide_stats_sidebar: "Hide statistics"
     show_elevation_chart: "Show elevation profile"
@@ -547,6 +561,9 @@ en:
     speeds:
       title: "Average speeds"
       help: "Average speed per activity, used to estimate ride time on a route. The route builder and list pick the speed matching the selected activity."
+    route_profiles:
+      title: "Routing profiles"
+      help: "Default BRouter routing profile for each activity. It determines which ways are preferred (small roads, main roads, tracks…). A new route starts on this profile; it stays changeable in the builder."
     turn_anomaly:
       title: "Suspicious turn detection"
       help: "When saving, the builder flags spots where several sharp turns bunch up within a small radius — usually a sign of a waypoint dropped off the road. This sets the diameter (m) of the analysed area, per activity: a smaller value cuts false alarms on switchback trails (hiking, MTB)."

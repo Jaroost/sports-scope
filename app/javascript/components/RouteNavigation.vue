@@ -31,8 +31,9 @@ import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import type { PlaceResult } from '../composables/usePlaceSearch'
 import { radarStore } from '../stores/radarStore'
-import { userPreferences, persistDefaultMapStyle, isLoggedIn } from '../userPreferences'
+import { userPreferences, persistDefaultMapStyle, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
+import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
 import { useNavPois } from '../composables/useNavPois'
 import type { NavPlace } from '../composables/useNavPois'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
@@ -496,8 +497,11 @@ let turnsFromBRouter = false
 // Voicehints bruts du tracé (lng/lat/cmd/angle) conservés pour reconstruire les virages
 // après un reroutage : on ré-épissera ceux du tronçon restant aux hints du détour.
 let rawHints: VoiceHint[] = []
-// Catégorie d'activité du tracé (Route#activity) → profil BRouter du reroutage.
+// Catégorie d'activité du tracé (Route#activity) — pilote la vitesse et l'icône.
 let routeSport: Sport = 'cycling'
+// Profil de routage BRouter du tracé (Route#profile) → utilisé au reroutage en séance
+// pour reproduire le même style de tracé qu'à la création. Repli sur le défaut du sport.
+let routeProfile: string = catalogDefaultForSport('cycling')
 const routeName = ref('')
 
 // ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
@@ -854,6 +858,7 @@ async function loadSharedRouteData(token: string) {
   routeToken.value = token
   routeName.value = route.name || ''
   routeSport = (route.activity as Sport) || 'cycling'
+  routeProfile = isProfileValidForSport(route.profile, routeSport) ? route.profile : catalogDefaultForSport(routeSport)
   routeId = typeof route.id === 'number' ? route.id : null
   routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
@@ -957,7 +962,7 @@ async function recalcRoute() {
     // seulement en mouvement : à l'arrêt currentBearing est figé sur le dernier
     // déplacement et orienterait le routage au hasard, donc on l'omet (undefined).
     const heading = speedKmh.value / 3.6 > MIN_SPEED_MS ? currentBearing : undefined
-    const { geometry: detour, hints: detourHints } = await fetchRouteToPlace(from, [target[0], target[1]], routeSport, heading)
+    const { geometry: detour, hints: detourHints } = await fetchRouteToPlace(from, [target[0], target[1]], routeProfile, heading)
     // Réponse périmée (clic plus récent) ou composant démonté : on n'écrase rien.
     if (token !== rerouteToken) return
 
@@ -1042,6 +1047,7 @@ function loadRoute(route: any) {
   routeToken.value = (route.share_token as string) || null
   routeName.value = route.name || t('routes.destination')
   routeSport = (route.activity as Sport) || 'cycling'
+  routeProfile = isProfileValidForSport(route.profile, routeSport) ? route.profile : catalogDefaultForSport(routeSport)
   routeId = typeof route.id === 'number' ? route.id : null
   routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
@@ -1175,9 +1181,9 @@ async function updatePlacePreview() {
   if (!lastPos || pts.length === 0) { clearPlacePreview(); return }
   const seq = ++previewSeq
   previewLoading.value = true
-  const sport = hasRoute.value ? routeSport : userPreferences().display.default_sport
+  const profile = hasRoute.value ? routeProfile : routeProfileForSport(userPreferences().display.default_sport)
   try {
-    const result = await fetchRouteVia([lastPos, ...pts], sport)
+    const result = await fetchRouteVia([lastPos, ...pts], profile)
     if (seq !== previewSeq) return
     previewResult = result
     const cum = buildDistancesM(result.geometry)
@@ -1342,15 +1348,18 @@ async function navigateVia(name: string, vias: LngLat[], precomputed?: { geometr
   navStarting.value = true
   navError.value = null
   try {
-    // Sur un tracé : on garde son profil d'activité ; en mode libre : le sport par défaut du profil.
+    // Sur un tracé : on garde son sport et son profil de routage ; en mode libre : le
+    // sport par défaut du profil et le profil de routage par défaut de ce sport.
     const sport = hasRoute.value ? routeSport : userPreferences().display.default_sport
+    const profile = hasRoute.value ? routeProfile : routeProfileForSport(sport)
     // Réutilise l'aperçu déjà calculé (« ce que tu as vu est ce que tu auras »),
     // sinon route à la volée (cas d'un POI tapé, sans aperçu préalable).
-    const { geometry: geom, hints } = precomputed ?? await fetchRouteVia([lastPos, ...vias], sport)
+    const { geometry: geom, hints } = precomputed ?? await fetchRouteVia([lastPos, ...vias], profile)
     routeName.value = name || t('routes.destination')
     // Destination ad hoc (non sauvegardée) : pas de token → ni hors-ligne ni reprise.
     routeToken.value = null
     routeSport = sport
+    routeProfile = profile
     applyReroute(geom, hints)
     cancelPlaceNav()
     following.value = true
@@ -1404,7 +1413,7 @@ async function insertViaIntoRoute(lng: number, lat: number) {
     while (b < geometry.length - 1 && cumDistM[b] - cumDistM[nearIdx] < VIA_ANCHOR_GAP_M) b++
     const { geometry: detour, hints: detourHints } = await fetchRouteVia(
       [[geometry[a][0], geometry[a][1]], [lng, lat], [geometry[b][0], geometry[b][1]]],
-      routeSport,
+      routeProfile,
     )
     const head = geometry.slice(0, a)
     const tail = geometry.slice(b + 1)
@@ -1489,7 +1498,7 @@ async function recomputeFromWaypoints() {
   editError.value = null
   const token = ++editToken
   try {
-    const { geometry: geom, hints } = await fetchRouteFromWaypoints(routeWaypoints, routeSport)
+    const { geometry: geom, hints } = await fetchRouteFromWaypoints(routeWaypoints, routeProfile)
     if (token !== editToken) return
     rebuildRouteState(geom, hints)
     // Le tracé a changé : on relocalise au prochain fix (le coureur peut être n'importe

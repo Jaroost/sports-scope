@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
 import { t } from '../i18n'
-import { userPreferences } from '../userPreferences'
+import { userPreferences, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
+import { profilesForSport } from '../brouter'
 
 // Modale réutilisable demandée à la création d'un itinéraire (page home, liste,
 // import GPX) : récupère le nom et le type d'activité avant d'ouvrir le créateur.
@@ -14,7 +15,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  confirm: [payload: { name: string; sport: Sport }]
+  confirm: [payload: { name: string; sport: Sport; profile: string }]
   close: []
 }>()
 
@@ -26,7 +27,16 @@ function sportIcon(s: Sport) {
 
 const name = ref('')
 const sport = ref<Sport>(userPreferences().display.default_sport)
+const profile = ref<string>(routeProfileForSport(sport.value))
 const nameInputEl = ref<HTMLInputElement | null>(null)
+
+// Le profil de routage est filtré par sport : changer de sport réaligne sur le
+// défaut du nouveau sport (préférence compte ou défaut catalogue).
+function selectSport(s: Sport) {
+  if (s === sport.value) return
+  sport.value = s
+  profile.value = routeProfileForSport(s)
+}
 
 // À chaque ouverture, on réinitialise le formulaire à partir des valeurs
 // pré-remplies et on place le focus sur le champ nom.
@@ -34,6 +44,7 @@ watch(() => props.show, (open) => {
   if (!open) return
   name.value = props.initialName ?? ''
   sport.value = props.initialSport ?? userPreferences().display.default_sport
+  profile.value = routeProfileForSport(sport.value)
   nextTick(() => {
     nameInputEl.value?.focus()
     nameInputEl.value?.select()
@@ -43,7 +54,7 @@ watch(() => props.show, (open) => {
 function submit() {
   const trimmed = name.value.trim().slice(0, 80)
   if (!trimmed) return
-  emit('confirm', { name: trimmed, sport: sport.value })
+  emit('confirm', { name: trimmed, sport: sport.value, profile: profile.value })
 }
 </script>
 
@@ -83,12 +94,35 @@ function submit() {
                 class="btn"
                 :class="sport === s ? 'btn-primary' : 'btn-outline-secondary'"
                 :title="t(`routes.wt_sport_${s}`)"
-                @click="sport = s"
+                @click="selectSport(s)"
               >
                 <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
                 <span class="ms-1">{{ t(`routes.wt_sport_${s}`) }}</span>
               </button>
             </div>
+          </div>
+          <div>
+            <label for="new-route-profile" class="form-label small fw-semibold mb-1 d-block">
+              {{ t('routes.profile_label') }}
+            </label>
+            <select
+              id="new-route-profile"
+              v-model="profile"
+              class="form-select"
+              :title="t(`routes.brouter_profile.${profile}_desc`)"
+            >
+              <option
+                v-for="p in profilesForSport(sport)"
+                :key="p"
+                :value="p"
+                :title="t(`routes.brouter_profile.${p}_desc`)"
+              >
+                {{ t(`routes.brouter_profile.${p}`) }}
+              </option>
+            </select>
+            <p class="small text-muted mb-0 mt-1">
+              {{ t(`routes.brouter_profile.${profile}_desc`) }}
+            </p>
           </div>
         </div>
         <div class="modal-footer-newroute d-flex justify-content-end gap-2">

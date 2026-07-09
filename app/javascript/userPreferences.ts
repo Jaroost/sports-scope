@@ -7,6 +7,8 @@
 //
 // Le schéma reflète User::DEFAULT_PREFERENCES côté serveur.
 
+import { isProfileValidForSport, catalogDefaultForSport } from './brouter'
+
 export type MapStyleId = 'cyclosm' | 'topo' | 'swisstopo' | 'swissgrau' | 'swissimage' | 'liberty'
 export type Sport = 'cycling' | 'mtb' | 'hiking'
 
@@ -44,6 +46,8 @@ export interface UserPreferences {
   speeds: Record<Sport, number>
   // Diamètre (m) de détection d'amas de virages dans le créateur, par sport.
   turn_anomaly: Record<Sport, number>
+  // Profil de routage BRouter par défaut, par sport (cf. brouter.ts / PROFILES_BY_SPORT).
+  route_profiles: Record<Sport, string>
 }
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
@@ -89,6 +93,11 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     cycling: 100,
     mtb: 80,
     hiking: 60,
+  },
+  route_profiles: {
+    cycling: 'trekking',
+    mtb: 'gravel',
+    hiking: 'hiking-mountain',
   },
 }
 
@@ -189,6 +198,7 @@ function parse(): UserPreferences {
       climb_detection: { ...d.climb_detection, ...incoming.climb_detection },
       speeds: { ...d.speeds, ...incoming.speeds },
       turn_anomaly: { ...d.turn_anomaly, ...incoming.turn_anomaly },
+      route_profiles: { ...d.route_profiles, ...incoming.route_profiles },
     }
   } catch {
     return DEFAULT_PREFERENCES
@@ -211,4 +221,13 @@ export function turnAnomalyDiameterForSport(sport: Sport): number {
   const v = userPreferences().turn_anomaly[sport]
   if (Number.isFinite(v) && v >= 30 && v <= 200) return v
   return DEFAULT_PREFERENCES.turn_anomaly[sport] ?? 100
+}
+
+// Profil de routage BRouter par défaut pour un sport : préférence compte si elle
+// désigne un profil valide pour ce sport, sinon défaut catalogue. Source unique
+// pour l'initialisation du store et le changement de sport dans le créateur.
+export function routeProfileForSport(sport: Sport): string {
+  const pref = userPreferences().route_profiles[sport]
+  if (pref && isProfileValidForSport(pref, sport)) return pref
+  return catalogDefaultForSport(sport)
 }

@@ -6,7 +6,9 @@ class RoutesController < ApplicationController
   MAX_WAYPOINTS = 500
   MAX_GEOMETRY_POINTS = 10_000
   MAX_NAME_LEN = 80
-  ALLOWED_PROFILES = %w[cycling foot driving].freeze
+  # Profils de routage BRouter acceptés — union du catalogue front (brouter.ts /
+  # PROFILES_BY_SPORT). Le profil enregistré pilote le tracé BRouter au rechargement.
+  ALLOWED_PROFILES = %w[trekking fastbike fastbike-lowtraffic shortest gravel hiking-mountain].freeze
   ALLOWED_ACTIVITIES = Route::ACTIVITIES
 
   # GET /api/routes
@@ -107,7 +109,7 @@ class RoutesController < ApplicationController
     # not clobber waypoints/geometry with empty defaults.
     out = {}
     out[:name] = p[:name].to_s.strip.first(MAX_NAME_LEN).presence if p.key?(:name)
-    out[:profile] = ALLOWED_PROFILES.include?(p[:profile].to_s) ? p[:profile] : "cycling" if p.key?(:profile)
+    out[:profile] = ALLOWED_PROFILES.include?(p[:profile].to_s) ? p[:profile] : "trekking" if p.key?(:profile)
     out[:activity] = ALLOWED_ACTIVITIES.include?(p[:activity].to_s) ? p[:activity] : "cycling" if p.key?(:activity)
     out[:waypoints] = clean_waypoints(p[:waypoints]) if p.key?(:waypoints)
     out[:geometry] = clean_geometry(p[:geometry]) if p.key?(:geometry)

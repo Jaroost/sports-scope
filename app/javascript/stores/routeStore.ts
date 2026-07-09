@@ -1,8 +1,9 @@
 import { ref, computed } from 'vue'
 import { haversine, detectClimbs, computeGainLoss, buildDistancesM, formatDuration } from '../routeHelpers'
 import type { Coord, Climb, VoiceHint } from '../routeHelpers'
-import { userPreferences, speedForSport } from '../userPreferences'
+import { userPreferences, speedForSport, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
+import { isProfileValidForSport } from '../brouter'
 
 // Plafond du nombre de waypoints — doit rester ≤ MAX_WAYPOINTS côté serveur
 // (RoutesController = 500), qui tronque silencieusement au-delà à la sauvegarde.
@@ -36,6 +37,10 @@ class RouteStore {
   // modifiable ponctuellement dans le créateur, mais change de sport la réaligne
   // sur la valeur du profil.
   readonly avgSpeedKmh = ref(speedForSport(this.sport.value))
+  // Profil de routage BRouter courant (cf. brouter.ts / PROFILES_BY_SPORT).
+  // Envoyé à BRouter au recalcul et enregistré avec l'itinéraire (Route#profile).
+  // Réaligné sur le défaut du sport à chaque changement de sport (setSport).
+  readonly profile = ref<string>(routeProfileForSport(this.sport.value))
 
   // ─── Computed ───────────────────────────────────────────────────────────────
   readonly hasGeometry = computed(() => this.geometry.value.length >= 2)
@@ -62,6 +67,17 @@ class RouteStore {
     if (sport === this.sport.value) return
     this.sport.value = sport
     this.avgSpeedKmh.value = speedForSport(sport)
+    // Le profil de routage est filtré par sport : on retombe sur le défaut du
+    // nouveau sport (préférence compte ou défaut catalogue).
+    this.profile.value = routeProfileForSport(sport)
+  }
+
+  // Change le profil de routage BRouter. Ignore silencieusement un profil non
+  // proposé pour le sport courant (ex. valeur héritée d'un ancien itinéraire) :
+  // le défaut du sport, déjà en place, est alors conservé.
+  setProfile(profile: string) {
+    if (!isProfileValidForSport(profile, this.sport.value)) return
+    this.profile.value = profile
   }
 
   reset() {

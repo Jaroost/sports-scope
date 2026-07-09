@@ -11,7 +11,7 @@ import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration
 import type { Coord, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport } from '../userPreferences'
-import { BROUTER_URL, BROUTER_PROFILES } from '../brouter'
+import { BROUTER_URL } from '../brouter'
 import { parseGpxWaypoints } from '../gpxImport'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
@@ -231,13 +231,24 @@ async function fetchImportantPlaces() {
 
 // ─── Route computation ────────────────────────────────────────────────────────
 
-// Changement de catégorie d'activité par l'utilisateur : le profil BRouter change
-// (voir BROUTER_PROFILES), donc on relance le routage pour redessiner un tracé
-// adapté au nouveau mode (la rando emprunte des sentiers refusés au vélo, etc.).
+// Changement de catégorie d'activité par l'utilisateur : le profil de routage est
+// réaligné sur le défaut du nouveau sport (setSport → routeProfileForSport), donc on
+// relance le routage pour redessiner un tracé adapté (la rando emprunte des sentiers
+// refusés au vélo, etc.).
 function onChangeSport(sport: Sport) {
   if (routeStore.readOnly.value) return
   if (sport === routeStore.sport.value) return
   routeStore.setSport(sport)
+  if (routeStore.waypoints.value.length >= 2) recomputeRoute()
+}
+
+// Changement de profil de routage BRouter par l'utilisateur (même sport) : on
+// relance le routage pour redessiner un tracé selon le nouveau profil (ex.
+// trekking → fastbike privilégie les grands axes).
+function onChangeProfile(profile: string) {
+  if (routeStore.readOnly.value) return
+  if (profile === routeStore.profile.value) return
+  routeStore.setProfile(profile)
   if (routeStore.waypoints.value.length >= 2) recomputeRoute()
 }
 
@@ -275,7 +286,7 @@ async function recomputeRoute() {
     })
     const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
     // timode=2 makes BRouter emit turn-by-turn voicehints in the GeoJSON properties.
-    const profile = BROUTER_PROFILES[routeStore.sport.value] ?? 'trekking'
+    const profile = routeStore.profile.value
     const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${straightParam}`
     const res = await fetch(url)
     if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
@@ -375,8 +386,11 @@ async function fetchRoute(id: number) {
     routeShareToken.value = r.share_token || null
     routeStore.name.value = r.name || ''
     // Réaligne la catégorie d'activité (et donc la vitesse moyenne) sur celle
-    // enregistrée avec l'itinéraire.
+    // enregistrée avec l'itinéraire. setSport réinitialise le profil au défaut du
+    // sport ; setProfile applique ensuite le profil enregistré (ignoré s'il est
+    // invalide/hérité → défaut du sport conservé).
     if (r.activity) routeStore.setSport(r.activity)
+    if (r.profile) routeStore.setProfile(r.profile)
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
@@ -418,6 +432,7 @@ async function fetchSharedRoute(token: string) {
     const r = payload.route
     routeStore.name.value = r.name || ''
     if (r.activity) routeStore.setSport(r.activity)
+    if (r.profile) routeStore.setProfile(r.profile)
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
@@ -525,7 +540,7 @@ async function persist() {
       distance_m: routeStore.distanceM.value,
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,
-      profile: 'cycling',
+      profile: routeStore.profile.value,
       activity: routeStore.sport.value,
     })
     const url = isEditMode() ? `/api/routes/${routeStore.currentId.value}` : '/api/routes'
@@ -1064,12 +1079,16 @@ function applyImportedWaypoints(
   wps: Array<{ lng: number; lat: number; free?: boolean }>,
   name?: string,
   activity?: string,
+  profile?: string,
 ) {
   if (!Array.isArray(wps) || wps.length < 2) return
   if (name && !routeStore.name.value.trim()) routeStore.name.value = String(name).slice(0, 80)
   if (activity === 'cycling' || activity === 'mtb' || activity === 'hiking') {
     routeStore.setSport(activity)
   }
+  // setSport a réaligné le profil sur le défaut du sport ; on applique ensuite le
+  // profil choisi à la création (ignoré s'il n'est pas proposé pour ce sport).
+  if (profile) routeStore.setProfile(profile)
   routeStore.waypoints.value = wps
   mapRef.value?.refreshWaypointMarkers()
   const lngs = wps.map((w) => w.lng), lats = wps.map((w) => w.lat)
@@ -1086,7 +1105,7 @@ function applyPendingGpxImport() {
     sessionStorage.removeItem('sportsScope.gpxImport')
     if (!raw) return
     const payload = JSON.parse(raw)
-    applyImportedWaypoints(payload?.waypoints, payload?.name, payload?.activity)
+    applyImportedWaypoints(payload?.waypoints, payload?.name, payload?.activity, payload?.profile)
   } catch { /* stale payload */ }
 }
 
@@ -1142,7 +1161,7 @@ function setupGpxFileHandler() {
 watch(state, () => state.save(), { deep: true })
 
 // Toute édition des données persistées marque l'itinéraire comme non enregistré.
-watch([routeStore.waypoints, routeStore.name, routeStore.sport], () => {
+watch([routeStore.waypoints, routeStore.name, routeStore.sport, routeStore.profile], () => {
   if (trackDirty) dirty.value = true
 }, { deep: true })
 
@@ -1277,7 +1296,15 @@ onMounted(async () => {
         routeStore.setSport(presetActivity)
         u.searchParams.delete('activity')
       }
-      if (presetName || presetActivity) {
+      // Profil de routage pré-choisi dans la modale de création (?profile=…).
+      // Appliqué après setSport (qui aurait sinon réaligné sur le défaut du sport) ;
+      // ignoré s'il n'est pas proposé pour le sport.
+      const presetProfile = u.searchParams.get('profile')
+      if (presetProfile) {
+        routeStore.setProfile(presetProfile)
+        u.searchParams.delete('profile')
+      }
+      if (presetName || presetActivity || presetProfile) {
         window.history.replaceState({}, '', u.toString())
       }
     } catch { /* ignore */ }
@@ -1339,7 +1366,7 @@ onBeforeUnmount(() => {
         <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
       </button>
       <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-light" data-profile-trigger
-        data-profile-sections="display,map,search,climb,speeds,turn_anomaly,poi"
+        data-profile-sections="display,map,search,climb,speeds,route_profiles,turn_anomaly,poi"
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
       </button>
@@ -1400,7 +1427,7 @@ onBeforeUnmount(() => {
             <span class="d-none d-lg-inline">{{ t('routes.navigate') }}</span>
           </button>
           <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            data-profile-trigger data-profile-sections="display,map,search,climb,speeds,turn_anomaly,poi" :title="t('nav.profile')">
+            data-profile-trigger data-profile-sections="display,map,search,climb,speeds,route_profiles,turn_anomaly,poi" :title="t('nav.profile')">
             <i class="fa-solid fa-sliders" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">{{ t('nav.profile') }}</span>
           </button>
@@ -1442,6 +1469,7 @@ onBeforeUnmount(() => {
         @hover-place="onHoverPlace"
         @retry-places="fetchImportantPlaces"
         @change-sport="onChangeSport"
+        @change-profile="onChangeProfile"
       />
 
       <!-- Horizontal resize handle -->

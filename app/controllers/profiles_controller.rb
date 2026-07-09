@@ -43,6 +43,17 @@ class ProfilesController < ApplicationController
   # User::DEFAULT_PREFERENCES.
   DEFAULT_TURN_ANOMALY = { "cycling" => 100, "mtb" => 80, "hiking" => 60 }.freeze
 
+  # Profils de routage BRouter par défaut, par sport. Miroir de User::DEFAULT_PREFERENCES.
+  DEFAULT_ROUTE_PROFILES = { "cycling" => "trekking", "mtb" => "gravel", "hiking" => "hiking-mountain" }.freeze
+
+  # Profils BRouter proposés par sport (miroir du catalogue front brouter.ts /
+  # PROFILES_BY_SPORT). Un profil n'est accepté que s'il est proposé pour son sport.
+  ALLOWED_ROUTE_PROFILES = {
+    "cycling" => %w[trekking fastbike fastbike-lowtraffic shortest],
+    "mtb" => %w[gravel trekking shortest],
+    "hiking" => %w[hiking-mountain trekking shortest],
+  }.freeze
+
   # GET /profile — page HTML qui monte l'îlot Vue UserProfile.
   def show
   end
@@ -73,6 +84,7 @@ class ProfilesController < ApplicationController
     climb = incoming[:climb_detection] || {}
     speeds = incoming[:speeds] || {}
     turn_anomaly = incoming[:turn_anomaly] || {}
+    route_profiles = incoming[:route_profiles] || {}
     navbar = incoming[:navbar] || {}
 
     {
@@ -142,6 +154,7 @@ class ProfilesController < ApplicationController
       },
       "speeds" => sanitize_speeds(speeds),
       "turn_anomaly" => sanitize_turn_anomaly(turn_anomaly),
+      "route_profiles" => sanitize_route_profiles(route_profiles),
     }
   end
 
@@ -170,6 +183,14 @@ class ProfilesController < ApplicationController
   def sanitize_turn_anomaly(turn_anomaly)
     DEFAULT_TURN_ANOMALY.each_with_object({}) do |(sport, default), out|
       out[sport] = clamp_int(turn_anomaly[sport], TURN_ANOMALY_RANGE, default)
+    end
+  end
+
+  # Ne garde par sport qu'un profil proposé pour ce sport, sinon repli sur le défaut.
+  def sanitize_route_profiles(route_profiles)
+    DEFAULT_ROUTE_PROFILES.each_with_object({}) do |(sport, default), out|
+      value = route_profiles[sport].to_s
+      out[sport] = ALLOWED_ROUTE_PROFILES.fetch(sport, []).include?(value) ? value : default
     end
   end
 

@@ -13,9 +13,9 @@ const props = defineProps<{ variant?: 'home' | 'nav' }>()
 
 const showModal = ref(false)
 
-function onConfirm({ name, sport }: { name: string; sport: Sport }) {
+function onConfirm({ name, sport, profile }: { name: string; sport: Sport; profile: string }) {
   showModal.value = false
-  window.location.href = buildNewRouteUrl({ name, sport })
+  window.location.href = buildNewRouteUrl({ name, sport, profile })
 }
 </script>
 

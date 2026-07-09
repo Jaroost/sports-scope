@@ -96,6 +96,14 @@ class User < ApplicationRecord
       "mtb" => 80,
       "hiking" => 60,
     },
+    # Profil de routage BRouter par défaut, par sport. Miroir du catalogue front
+    # (brouter.ts / PROFILES_BY_SPORT) ; utilisé comme profil initial d'un nouvel
+    # itinéraire du sport. Assaini contre ProfilesController::ALLOWED_ROUTE_PROFILES.
+    "route_profiles" => {
+      "cycling" => "trekking",
+      "mtb" => "gravel",
+      "hiking" => "hiking-mountain",
+    },
     "climb_detection" => {
       "min_grade" => 2,        # pente moyenne minimale (%)
       "min_gain_m" => 60,      # dénivelé positif minimal (m)

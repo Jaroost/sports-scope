@@ -5,6 +5,7 @@ import { MAP_STYLES, MAP_STYLE_GROUPS, mapStyleFor } from '../mapStyles'
 import { POI_CATEGORIES } from '../poiCategories'
 import { ALL_COUNTRY_CODES, countryName, countryFlag } from '../countries'
 import { usePointerSort } from '../composables/usePointerSort'
+import { profilesForSport } from '../brouter'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -87,6 +88,11 @@ interface Preferences {
     cycling: number
     mtb: number
     hiking: number
+  }
+  route_profiles: {
+    cycling: string
+    mtb: string
+    hiking: string
   }
 }
 
@@ -939,6 +945,40 @@ function placePreviewMarker(coords: [number, number]) {
               >
               <span class="input-group-text">km/h</span>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="showSection('route_profiles')" class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-route text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.route_profiles.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">{{ t('profile.route_profiles.help') }}</p>
+        <div class="row g-3">
+          <div v-for="s in SPORTS" :key="s" class="col-sm-4">
+            <label :for="`route-profile-${s}`" class="form-label d-flex align-items-center gap-2">
+              <i :class="`fa-solid ${sportIcon(s)} text-muted`" aria-hidden="true"></i>
+              {{ t(`profile.display.sport_${s}`) }}
+            </label>
+            <select
+              :id="`route-profile-${s}`"
+              v-model="prefs.route_profiles[s]"
+              class="form-select"
+              :title="t(`routes.brouter_profile.${prefs.route_profiles[s]}_desc`)"
+            >
+              <option
+                v-for="p in profilesForSport(s)"
+                :key="p"
+                :value="p"
+                :title="t(`routes.brouter_profile.${p}_desc`)"
+              >
+                {{ t(`routes.brouter_profile.${p}`) }}
+              </option>
+            </select>
+            <p class="form-text mb-0">{{ t(`routes.brouter_profile.${prefs.route_profiles[s]}_desc`) }}</p>
           </div>
         </div>
       </div>

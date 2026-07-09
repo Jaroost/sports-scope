@@ -9,12 +9,13 @@ export type LngLat = [number, number]
 
 // URL du créateur d'itinéraire pré-renseignée avec le nom et le type choisis dans
 // la modale de création. Respecte le préfixe de langue éventuel (/en, /fr).
-export function buildNewRouteUrl({ name, sport }: { name: string; sport: Sport }): string {
+export function buildNewRouteUrl({ name, sport, profile }: { name: string; sport: Sport; profile?: string }): string {
   const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
   const localePrefix = lang ? `/${lang}` : ''
   const url = new URL(`${localePrefix}/routes/new`, window.location.origin)
   if (name) url.searchParams.set('name', name)
   url.searchParams.set('activity', sport)
+  if (profile) url.searchParams.set('profile', profile)
   return url.toString()
 }
 

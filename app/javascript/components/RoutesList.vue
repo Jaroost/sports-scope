@@ -229,19 +229,20 @@ function createNew() {
   showNewRouteModal.value = true
 }
 
-function onNewRouteConfirm({ name, sport }: { name: string; sport: Sport }) {
+function onNewRouteConfirm({ name, sport, profile }: { name: string; sport: Sport; profile: string }) {
   showNewRouteModal.value = false
   if (pendingGpx.value) {
     sessionStorage.setItem('sportsScope.gpxImport', JSON.stringify({
       name,
       activity: sport,
+      profile,
       waypoints: pendingGpx.value.waypoints,
     }))
     pendingGpx.value = null
     window.location.href = `${localePrefix}/routes/new?fromGpx=1`
     return
   }
-  window.location.href = buildNewRouteUrl({ name, sport })
+  window.location.href = buildNewRouteUrl({ name, sport, profile })
 }
 
 function onNewRouteClose() {

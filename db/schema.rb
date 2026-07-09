@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_29_000006) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_09_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -108,7 +108,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_29_000006) do
     t.jsonb "geometry", default: [], null: false
     t.string "name", null: false
     t.jsonb "pois", default: [], null: false
-    t.string "profile", default: "cycling"
+    t.string "profile", default: "trekking"
     t.string "share_token", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false

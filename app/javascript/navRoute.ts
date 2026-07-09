@@ -1,7 +1,6 @@
-import { BROUTER_URL, brouterProfile } from './brouter'
+import { BROUTER_URL } from './brouter'
 import { densifyGeometry } from './routeHelpers'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
-import type { Sport } from './userPreferences'
 
 // Un point d'ancrage d'itinéraire : position + drapeau « libre » (tronçon entrant
 // tracé en ligne droite plutôt qu'accroché à la route). Aligné sur routeStore.
@@ -26,10 +25,10 @@ function headingParam(heading?: number): string {
 export async function fetchRouteToPlace(
   from: LngLat,
   to: LngLat,
-  sport: Sport,
+  profile: string,
   heading?: number,
 ): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
-  return fetchRouteVia([from, to], sport, heading)
+  return fetchRouteVia([from, to], profile, heading)
 }
 
 // Calcule un itinéraire BRouter passant par une suite de points (≥ 2). Sert à insérer
@@ -38,11 +37,11 @@ export async function fetchRouteToPlace(
 // fetchRouteToPlace (géométrie + voicehints). `heading` (optionnel) fixe le cap de départ.
 export async function fetchRouteVia(
   points: LngLat[],
-  sport: Sport,
+  profile: string,
   heading?: number,
 ): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
   const lonlats = points.map((p) => `${p[0]},${p[1]}`).join('|')
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${brouterProfile(sport)}&alternativeidx=0&format=geojson&timode=2${headingParam(heading)}`
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${headingParam(heading)}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
   const data = await res.json()
@@ -68,7 +67,7 @@ export async function fetchRouteVia(
 // Sert à l'édition des points d'ancrage en séance (RouteNavigation, mode édition).
 export async function fetchRouteFromWaypoints(
   waypoints: Waypoint[],
-  sport: Sport,
+  profile: string,
 ): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
   const lonlats = waypoints.map((w) => `${w.lng},${w.lat}`).join('|')
   // Un waypoint « libre » rend son tronçon ENTRANT droit : le tronçon i (waypoint[i] →
@@ -76,7 +75,7 @@ export async function fetchRouteFromWaypoints(
   const straight = new Set<number>()
   waypoints.forEach((w, i) => { if (i > 0 && w.free) straight.add(i - 1) })
   const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${brouterProfile(sport)}&alternativeidx=0&format=geojson&timode=2${straightParam}`
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${straightParam}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
   const data = await res.json()

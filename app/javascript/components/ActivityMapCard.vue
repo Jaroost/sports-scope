@@ -17,7 +17,7 @@ import {
 // lissage de pente du profil utilisateur — pour que l'analyse et la création
 // d'itinéraire restent cohérentes.
 import { simplifyTrack, buildGradedSegments, detectClimbs, GRADE_BUCKETS } from '../routeHelpers'
-import { userPreferences } from '../userPreferences'
+import { sportPreferences } from '../userPreferences'
 import { buildTooltipHtml } from '../activityTooltip'
 
 const props = defineProps({
@@ -53,12 +53,12 @@ const emit = defineEmits([
 // ─── Page state (persisted to localStorage) ──────────────────────────────
 const state = reactive(new ActivityMapState())
 
-// Couleur (hors mode pente), opacité et épaisseur du tracé : réglables dans le profil
-// (section Affichage), exactement comme le créateur d'itinéraire. La bordure et la
-// sélection se déduisent de l'épaisseur pour rester proportionnées.
-const ROUTE_COLOR = userPreferences().display.route_color ?? '#7c3aed'
-const ROUTE_OPACITY = userPreferences().display.route_opacity ?? 0.8
-const ROUTE_WIDTH = userPreferences().display.route_width ?? 5
+// Couleur (hors mode pente), opacité et épaisseur du tracé : réglables par sport dans le
+// profil, exactement comme le créateur d'itinéraire. Une activité importée n'a pas de
+// sport au sens du profil (son type vient de Strava ou du fichier .fit) : on affiche donc
+// le tracé aux couleurs du sport par défaut du compte. La bordure et la sélection se
+// déduisent de l'épaisseur pour rester proportionnées.
+const { color: ROUTE_COLOR, opacity: ROUTE_OPACITY, width: ROUTE_WIDTH } = sportPreferences().route
 // Sur petit écran tactile, on élargit légèrement le tracé (même logique que le créateur).
 const ROUTE_LINE_DISPLAY_SCALE = window.matchMedia('(max-width: 767px), (max-height: 500px)').matches ? 1.3 : 1
 const ROUTE_LINE_WIDTH = ROUTE_WIDTH * ROUTE_LINE_DISPLAY_SCALE

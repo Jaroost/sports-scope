@@ -1366,7 +1366,7 @@ onBeforeUnmount(() => {
         <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
       </button>
       <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-light" data-profile-trigger
-        data-profile-sections="display,map,search,climb,speeds,route_profiles,turn_anomaly,poi"
+        data-profile-sections="display,sport,map,search,climb,poi"
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
       </button>
@@ -1427,7 +1427,7 @@ onBeforeUnmount(() => {
             <span class="d-none d-lg-inline">{{ t('routes.navigate') }}</span>
           </button>
           <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            data-profile-trigger data-profile-sections="display,map,search,climb,speeds,route_profiles,turn_anomaly,poi" :title="t('nav.profile')">
+            data-profile-trigger data-profile-sections="display,sport,map,search,climb,poi" :title="t('nav.profile')">
             <i class="fa-solid fa-sliders" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">{{ t('nav.profile') }}</span>
           </button>

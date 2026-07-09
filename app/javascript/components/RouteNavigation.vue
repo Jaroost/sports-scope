@@ -31,7 +31,7 @@ import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import type { PlaceResult } from '../composables/usePlaceSearch'
 import { radarStore } from '../stores/radarStore'
-import { userPreferences, persistDefaultMapStyle, isLoggedIn, routeProfileForSport } from '../userPreferences'
+import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
 import NavRoutingPicker from './NavRoutingPicker.vue'
@@ -79,20 +79,6 @@ const DEFAULT_ZOOM = 7
 const navPrefs = userPreferences().navigation
 const OFF_ROUTE_M = 30          // lateral distance beyond which we warn
 const OFF_ROUTE_ACCURACY_CAP = 45  // most we widen the threshold by for a fuzzy GPS fix (élargi pour le drift GPS sous couvert boisé)
-// Largeur (px) du tracé sur la carte ; la bordure ajoute 4 px de part et d'autre.
-const ROUTE_LINE_WIDTH = navPrefs.line_width ?? 8
-const ROUTE_BORDER_WIDTH = ROUTE_LINE_WIDTH + 4
-// Couleur et opacité du tracé sur la carte de navigation (réglables dans le profil).
-const ROUTE_LINE_COLOR = navPrefs.line_color ?? '#7c3aed'
-const ROUTE_LINE_OPACITY = navPrefs.line_opacity ?? 0.8
-const TURN_ALERT_M = navPrefs.turn_alert_m
-const TURN_HINT_M = navPrefs.turn_hint_m
-const TURN_URGENT_M = navPrefs.turn_urgent_m
-const TURN_REPEAT_MS = navPrefs.turn_repeat_ms
-// Intervalle de répétition plus court une fois le virage proche (zone orange, ≤ turn_urgent_m).
-const TURN_REPEAT_URGENT_MS = navPrefs.turn_repeat_urgent_ms
-// Rayon (px) des pastilles orange de changement de direction.
-const TURN_MARKER_SIZE = navPrefs.turn_marker_size ?? 11
 const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
 // Recalcul automatique hors-course (profil navigation.auto_reroute) : délai entre deux
 // recalculs auto tant qu'on reste hors-course (profil navigation.auto_reroute_cooldown_s,
@@ -550,6 +536,48 @@ const routeSport = ref<Sport>(userPreferences().display.default_sport)
 const routeProfile = ref<string>(routeProfileForSport(routeSport.value))
 const routeName = ref('')
 
+// Réglages de navigation du sport de la séance : aspect du tracé, indicateurs de direction,
+// distances et cadences des annonces de virage. Réglés PAR SPORT dans le profil — un virage
+// annoncé 100 m à l'avance arrive dans 20 s à vélo et dans 80 s à pied, et on ne lit pas une
+// carte au guidon comme un sentier à pied. Relus dès que le sport de la séance change (tracé
+// chargé, choix manuel dans NavRoutingPicker).
+const sportNav = computed(() => sportPreferences(routeSport.value).navigation)
+
+// Largeur (px) du tracé ; la bordure ajoute 4 px de part et d'autre.
+const routeLineWidth = computed(() => sportNav.value.line_width)
+const routeBorderWidth = computed(() => routeLineWidth.value + 4)
+// Rayon (px) des pastilles de changement de direction.
+const turnMarkerSize = computed(() => sportNav.value.turn_marker_size)
+
+// Changer de sport en séance rejoue tout ce qui a été peint avec ses réglages : le tracé
+// (largeur, couleur, opacité) et les pastilles de virage, reconstruites en marqueurs DOM.
+// Au passage, les modules hors composant qui lisent les préférences par sport (seuils de
+// détection de cols dans routeHelpers) suivent le sport de la séance.
+watch(routeSport, (sport) => {
+  setActiveSport(sport)
+  applyRouteLinePaint()
+  renderTurnMarkers()
+}, { immediate: true })
+
+// Repeint les couches du tracé aux réglages du sport courant. Sans effet avant la pose des
+// couches (navigation libre, style en cours de chargement) : installRouteLayers les crée
+// déjà aux bonnes valeurs.
+function applyRouteLinePaint() {
+  if (!map) return
+  const { line_color: color, line_opacity: opacity } = sportNav.value
+  if (map.getLayer('nav-route-border')) map.setPaintProperty('nav-route-border', 'line-width', zoomWidthExpr(routeBorderWidth.value, true))
+  if (map.getLayer('nav-route-done')) {
+    map.setPaintProperty('nav-route-done', 'line-width', zoomWidthExpr(routeLineWidth.value, true))
+    map.setPaintProperty('nav-route-done', 'line-opacity', opacity)
+  }
+  if (map.getLayer('nav-route-remaining')) {
+    map.setPaintProperty('nav-route-remaining', 'line-color', color)
+    map.setPaintProperty('nav-route-remaining', 'line-width', zoomWidthExpr(routeLineWidth.value, true))
+    map.setPaintProperty('nav-route-remaining', 'line-opacity', opacity)
+  }
+  if (map.getLayer('nav-place-preview')) map.setPaintProperty('nav-place-preview', 'line-width', zoomWidthExpr(routeLineWidth.value))
+}
+
 // ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
 // Points d'ancrage (waypoints) de l'itinéraire chargé : source de vérité de l'édition.
 // Présents pour un itinéraire chargé depuis la liste / un lien partagé ; vides pour une
@@ -624,23 +652,22 @@ let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
 let announcedTurn = -1       // index of the last turn we played a cue for
 // Virage tout juste atteint, conservé pour le maintenir affiché en vert (confirmation
 // « tournez ici » même à l'arrêt à un carrefour). On mémorise sa distance le long du
-// tracé : le maintien dure tant qu'on n'a pas parcouru GREEN_HOLD_M après le virage.
+// tracé : le maintien dure tant qu'on n'a pas parcouru turn_green_hold_m après le virage.
 let reachedTurn: { direction: 'left' | 'right'; kind: Maneuver; angle: number; exitNumber?: number; distM: number } | null = null
 // Index (dans `turns`) du virage tout juste atteint : sert à colorer en vert SA pastille
 // sur la carte pendant le maintien « now ». -1 quand aucun virage n'est en maintien vert.
 let reachedTurnIdx = -1
 // Horodatage du moment où le virage courant a été atteint : sert à la limite de temps
-// du maintien vert (cf. GREEN_HOLD_MS), indépendante de la distance parcourue.
+// du maintien vert (cf. greenHoldMs), indépendante de la distance parcourue.
 let reachedAtMs = 0
 // La confirmation verte (« maintenant ») disparaît au PREMIER des deux seuils atteints :
-// distance parcourue après le virage (GREEN_HOLD_M) ou temps écoulé (GREEN_HOLD_MS).
-// Les deux sont réglables dans le profil de navigation.
-const GREEN_HOLD_M = navPrefs.turn_green_hold_m ?? 100
-const GREEN_HOLD_MS = (navPrefs.turn_green_hold_s ?? 10) * 1000
+// distance parcourue après le virage (turn_green_hold_m) ou temps écoulé (turn_green_hold_s).
+// Les deux sont réglables par sport dans le profil.
+const greenHoldM = computed(() => sportNav.value.turn_green_hold_m)
+const greenHoldMs = computed(() => sportNav.value.turn_green_hold_s * 1000)
 // Distance AVANT le virage à partir de laquelle on bascule en confirmation verte
-// (« maintenant ») : la pastille passe au vert dès qu'on est à TURN_NOW_M, sans
+// (« maintenant ») : la pastille passe au vert dès qu'on est à turn_now_m, sans
 // attendre de l'avoir franchi.
-const TURN_NOW_M = navPrefs.turn_now_m ?? 15
 // Vrai quand l'écran a été rallumé AUTOMATIQUEMENT à l'approche d'un virage : on ne
 // remet en veille de soi-même que dans ce cas (un réveil manuel reste éveillé).
 let autoWoken = false
@@ -659,8 +686,8 @@ let lastAutoReroute = 0      // timestamp of the last automatic off-route recalc
 // l'intervalle réel serait plafonné par la fréquence du GPS (souvent plusieurs
 // secondes) au lieu de suivre la préférence turn_repeat_ms.
 let activeTurn: { kind: Maneuver; direction: 'left' | 'right' } | null = null
-// Vrai quand le virage armé est dans la zone orange (≤ TURN_URGENT_M) : la répétition
-// du son passe alors à l'intervalle plus court TURN_REPEAT_URGENT_MS.
+// Vrai quand le virage armé est dans la zone orange (≤ turn_urgent_m) : la répétition
+// du son passe alors à l'intervalle plus court turn_repeat_urgent_ms.
 let activeTurnUrgent = false
 // Pointeur du virage pour lequel le double buzz d'entrée en zone orange a déjà été
 // émis : garantit qu'on ne vibre qu'une fois au franchissement du seuil, pas à
@@ -777,7 +804,7 @@ const dbgPoi = ref(false)
 const DBG_TURNS: { label: string; state: 'far' | 'near' | 'now'; kind: Maneuver; direction: 'left' | 'right'; angle: number; distM: number; exitNumber?: number }[] = [
   { label: 'Lointain', state: 'far', kind: 'turn', direction: 'right', angle: 60, distM: 850 },
   { label: 'Approche', state: 'near', kind: 'turn', direction: 'left', angle: -70, distM: 180 },
-  { label: 'Urgent', state: 'near', kind: 'sharp', direction: 'right', angle: 110, distM: Math.min(TURN_URGENT_M, 40) },
+  { label: 'Urgent', state: 'near', kind: 'sharp', direction: 'right', angle: 110, distM: Math.min(sportNav.value.turn_urgent_m, 40) },
   { label: 'Rond-point', state: 'near', kind: 'roundabout', direction: 'right', angle: 90, distM: 120, exitNumber: 2 },
   { label: 'Maintenant', state: 'now', kind: 'turn', direction: 'left', angle: -70, distM: 0 },
 ]
@@ -2012,9 +2039,9 @@ function installRouteLayers() {
   map.addSource('nav-route', { type: 'geojson', data: widthRunsCollection(displayLine, displayWScale) })
   map.addSource('nav-remaining', { type: 'geojson', data: widthRunsCollection(displayLine, displayWScale) })
 
-  map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(ROUTE_BORDER_WIDTH, true) } })
-  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH, true), 'line-opacity': ROUTE_LINE_OPACITY } })
-  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': ROUTE_LINE_COLOR, 'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH, true), 'line-opacity': ROUTE_LINE_OPACITY } })
+  map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(routeBorderWidth.value, true) } })
+  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
+  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.line_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
 }
 
 // Crée à la demande la couche d'aperçu du trajet en mode « cible » (ligne pointillée,
@@ -2039,7 +2066,7 @@ function ensurePlacePreviewLayer() {
     layout: ROUTE_LINE_LAYOUT,
     paint: {
       'line-color': '#2563eb',
-      'line-width': zoomWidthExpr(ROUTE_LINE_WIDTH),
+      'line-width': zoomWidthExpr(routeLineWidth.value),
       'line-opacity': 0.55,
       'line-dasharray': [1.4, 1.1],
     },
@@ -2056,7 +2083,7 @@ function renderTurnMarkers() {
   for (const m of turnMarkers) m.remove()
   turnMarkers = []
   if (!turnsFromBRouter || !turns.length) return
-  const dot = TURN_MARKER_SIZE * 2          // diamètre de la pastille (rayon → diamètre)
+  const dot = turnMarkerSize.value * 2      // diamètre de la pastille (rayon → diamètre)
   for (const tp of turns) {
     let b = tp.idx + 1
     while (b < geometry.length - 1 && cumDistM[b] - cumDistM[tp.idx] < 18) b++
@@ -2070,13 +2097,13 @@ function renderTurnMarkers() {
     const body = document.createElement('div')
     body.className = 'nav-turn-marker-body'
     // Couleurs configurables (profil → navigation) : pastille et icône intérieure.
-    body.style.background = navPrefs.turn_marker_color
+    body.style.background = sportNav.value.turn_marker_color
     // Couleur de la pulsation du prochain virage (halo) = couleur de fond de la pastille.
-    body.style.setProperty('--turn-pulse-color', navPrefs.turn_marker_color)
+    body.style.setProperty('--turn-pulse-color', sportNav.value.turn_marker_color)
     if (tp.kind === 'roundabout') {
       // Rond-point : numéro de sortie, texte maintenu droit (pas d'alignement carte).
-      const exitFont = TURN_MARKER_SIZE / 11 * 13   // 13 px à la taille par défaut (rayon 11)
-      body.innerHTML = `<span class="nav-turn-marker-exit" style="font-size:${exitFont}px;color:${navPrefs.turn_marker_icon_color}">${tp.exitNumber ?? 0}</span>`
+      const exitFont = turnMarkerSize.value / 11 * 13   // 13 px à la taille par défaut (rayon 11)
+      body.innerHTML = `<span class="nav-turn-marker-exit" style="font-size:${exitFont}px;color:${sportNav.value.turn_marker_icon_color}">${tp.exitNumber ?? 0}</span>`
       el.appendChild(body)
       const marker = new maplibre.Marker({ element: el, anchor: 'center' })
         .setLngLat([geometry[tp.idx][0], geometry[tp.idx][1]])
@@ -2086,7 +2113,7 @@ function renderTurnMarkers() {
       // Virage normal : flèche directionnelle couchée sur le plan de la carte
       // (rotationAlignment + pitchAlignment 'map') et orientée selon le cap.
       body.innerHTML = '<svg class="nav-turn-marker-arrow" viewBox="0 0 22 22" aria-hidden="true">'
-        + `<path d="M11 1 L20 20 L11 15 L2 20 Z" fill="${navPrefs.turn_marker_icon_color}"/></svg>`
+        + `<path d="M11 1 L20 20 L11 15 L2 20 Z" fill="${sportNav.value.turn_marker_icon_color}"/></svg>`
       el.appendChild(body)
       const marker = new maplibre.Marker({ element: el, anchor: 'center', rotationAlignment: 'map', pitchAlignment: 'map' })
         .setLngLat([geometry[tp.idx][0], geometry[tp.idx][1]])
@@ -2133,7 +2160,7 @@ function setGreenTurn(idx: number) {
     if (!m) return
     const el = m.getElement() as HTMLElement
     const body = el.firstElementChild as HTMLElement | null
-    const color = green ? TURN_NOW_COLOR : navPrefs.turn_marker_color
+    const color = green ? TURN_NOW_COLOR : sportNav.value.turn_marker_color
     if (body) {
       body.style.background = color
       body.style.setProperty('--turn-pulse-color', color)
@@ -2201,7 +2228,9 @@ function widthRunsCollection(coords: number[][], scales: number[]) {
 function setMapStyle(id: string) {
   if (!map || id === mapStyleId.value) return
   mapStyleId.value = id
-  persistDefaultMapStyle(id as any)
+  // Le fond de carte de la navigation guidée a sa propre préférence, distincte de celle
+  // du créateur (elle-même désormais propre à chaque sport).
+  persistNavigationStyle(id as any)
   baseIsOffline = wantOffline()
   map.setStyle(resolveBaseStyle(id), { diff: false })
   map.once('style.load', afterStyleLoad)
@@ -2574,8 +2603,8 @@ function stopAnimation() {
   if (rafId != null) { cancelAnimationFrame(rafId); rafId = null }
 }
 
-// Track the next turn ahead: announce it once within TURN_ALERT_M (and re-orient
-// the view), and surface a visual hint within TURN_HINT_M. Returns true on the
+// Track the next turn ahead: announce it once within turn_alert_m (and re-orient
+// the view), and surface a visual hint within turn_hint_m. Returns true on the
 // frame a turn alert fires.
 function updateTurns(): boolean {
   // Débug : un virage factice est épinglé, on ne le réécrit pas depuis le GPS.
@@ -2611,11 +2640,11 @@ function updateTurns(): boolean {
 
   // Son / répétition : armé tant que le prochain virage est dans la zone d'alerte.
   let fired = false
-  if (turn && dist <= TURN_ALERT_M && dist > -5) {
+  if (turn && dist <= sportNav.value.turn_alert_m && dist > -5) {
     // Le virage est dans la zone d'alerte : on l'arme pour la répétition cadencée
     // par le timer (tickTurnRepeat), indépendante de la fréquence des fixes GPS.
     activeTurn = { kind: turn.kind, direction: turn.direction }
-    activeTurnUrgent = dist <= TURN_URGENT_M
+    activeTurnUrgent = dist <= sportNav.value.turn_urgent_m
     // Entrée dans la zone orange : double buzz distinct, une seule fois par virage.
     if (activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr) {
       urgentBuzzedTurn = nextTurnPtr
@@ -2636,18 +2665,18 @@ function updateTurns(): boolean {
     activeTurnUrgent = false
   }
 
-  // Virage atteint dès qu'on est à TURN_NOW_M (15 m) devant — et tant que le pointeur
+  // Virage atteint dès qu'on est à turn_now_m (15 m par défaut) devant — et tant que le pointeur
   // n'a pas avancé (on est dessus, potentiellement à l'arrêt à un carrefour) : on
   // rafraîchit le maintien vert pour qu'il ne disparaisse pas tant qu'on n'est pas reparti.
-  if (turn && dist <= TURN_NOW_M) rememberReached(turn, nextTurnPtr)
+  if (turn && dist <= sportNav.value.turn_now_m) rememberReached(turn, nextTurnPtr)
 
   // Choix de l'affichage. Priorité au prochain virage s'il est proche (« sauf s'il y a
   // une autre instruction plus proche »). Sinon, on maintient le virage tout juste
-  // franchi en vert pendant GREEN_HOLD_M après lui. Sinon, le prochain virage en mode lointain.
+  // franchi en vert pendant turn_green_hold_m après lui. Sinon, le prochain virage en mode lointain.
   const greenActive = reachedTurn != null
-    && here - reachedTurn.distM < GREEN_HOLD_M
-    && Date.now() - reachedAtMs < GREEN_HOLD_MS
-  if (turn && dist > TURN_NOW_M && dist <= TURN_HINT_M) {
+    && here - reachedTurn.distM < greenHoldM.value
+    && Date.now() - reachedAtMs < greenHoldMs.value
+  if (turn && dist > sportNav.value.turn_now_m && dist <= sportNav.value.turn_hint_m) {
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
   } else if (greenActive && reachedTurn) {
     turnHint.value = { direction: reachedTurn.direction, distM: 0, kind: reachedTurn.kind, angle: reachedTurn.angle, exitNumber: reachedTurn.exitNumber, state: 'now' }
@@ -2723,7 +2752,7 @@ function tickTurnRepeat() {
   updateAutoRerouteCountdown()
   if (!activeTurn || !soundOn.value || audioMuted.value || turnAlertMuted.value) return
   const now = Date.now()
-  const interval = activeTurnUrgent ? TURN_REPEAT_URGENT_MS : TURN_REPEAT_MS
+  const interval = activeTurnUrgent ? sportNav.value.turn_repeat_urgent_ms : sportNav.value.turn_repeat_ms
   if (now - lastTurnReminderMs >= interval) {
     lastTurnReminderMs = now
     playManeuver(activeTurn.kind, activeTurn.direction)
@@ -3003,7 +3032,7 @@ function onScreenOffTap() {
       :has-fix="hasFix"
       :off-route="offRoute"
       :climb-info="isClimbing ? climbInfo : null"
-      :urgent-m="TURN_URGENT_M"
+      :urgent-m="sportNav.turn_urgent_m"
       :speed-kmh="speedKmh"
       :muted="turnAlertMuted"
       @resume="onScreenOffTap"
@@ -3235,7 +3264,7 @@ function onScreenOffTap() {
     <NavTurnBanner
       v-if="turnHint && hasFix && !offRoute && !placeNavActive && !editMode && !poiBrowseActive"
       :turn-hint="turnHint"
-      :urgent-m="TURN_URGENT_M"
+      :urgent-m="sportNav.turn_urgent_m"
       :radar-banner-visible="radarBannerVisible"
       :speed-kmh="speedKmh"
       :muted="turnAlertMuted"

@@ -484,7 +484,7 @@ fr:
       alert_help: "En navigation, un point d'intérêt situé à cette distance ou moins déclenche une notification en bas de l'écran."
     map:
       title: "Type de carte"
-      help: "Fond de carte affiché par défaut à l'ouverture du créateur d'itinéraire."
+      help: "Fond de carte affiché par défaut à l'ouverture du créateur d'itinéraire, pour le sport sélectionné ci-dessus."
       group_world: "Monde"
       group_swiss: "Suisse et alentours"
       style_cyclosm: "Vélo"
@@ -516,10 +516,13 @@ fr:
       auto_reroute_cooldown_s: "Délai entre recalculs automatiques"
       auto_reroute_cooldown_s_help: "Temps d'attente avant une nouvelle tentative de recalcul automatique tant qu'on reste hors-course. Le décompte s'affiche sur le bouton « Recalculer »."
       nav_fps: "Fluidité de la caméra"
+      line_title: "Tracé et indicateurs de direction"
+      line_help: "Réglés pour le sport sélectionné en haut de page. L'aperçu ci-dessous les reflète en direct."
       line_width: "Largeur du tracé"
       line_color: "Couleur du tracé"
       line_opacity: "Opacité du tracé"
       turns_title: "Virages"
+      turns_help: "Réglés pour le sport sélectionné en haut de page : un virage annoncé 100 m à l'avance arrive dans 20 s à vélo et dans 80 s à pied."
       turn_alert_m: "Distance d'annonce sonore"
       turn_hint_m: "Distance d'affichage de l'indicateur"
       turn_urgent_m: "Distance d'alerte urgente (orange)"
@@ -550,7 +553,7 @@ fr:
       route_width: "Épaisseur du tracé"
     climb:
       title: "Détection de cols"
-      help: "Seuils utilisés pour détecter et catégoriser les montées d'un itinéraire."
+      help: "Seuils utilisés pour détecter et catégoriser les montées d'un itinéraire, pour le sport sélectionné ci-dessus. Un raidillon de sentier n'est pas un col de vélo."
       min_grade: "Pente moyenne min."
       min_gain: "Dénivelé positif min."
       min_length: "Longueur min."
@@ -558,15 +561,18 @@ fr:
       merge_gap_help: "Deux montées séparées par un replat plus court que cette distance sont fusionnées en un seul col."
       grade_smoothing: "Lissage de la pente"
       grade_smoothing_help: "Fenêtre de calcul de la pente. Une valeur plus élevée lisse le bruit du relief (altitude arrondie au mètre) ; une valeur plus faible conserve les pentes courtes mais peut afficher des valeurs aberrantes."
-    speeds:
-      title: "Vitesses moyennes"
-      help: "Vitesse moyenne par activité, utilisée pour estimer le temps de parcours d'un itinéraire. Le créateur et la liste choisissent la vitesse correspondant à l'activité sélectionnée."
-    route_profiles:
-      title: "Profils de routage"
-      help: "Profil de routage BRouter utilisé par défaut pour chaque activité. Il détermine le type de voies privilégiées (petites routes, grands axes, chemins…). Un nouvel itinéraire démarre sur ce profil ; il reste modifiable dans le créateur."
+    sport:
+      picker: "Réglages du sport :"
+      picker_help: "Plusieurs sections ci-dessous dépendent de la pratique — vitesse, routage, fond de carte, détection de cols, annonces de virage. Choisissez le sport dont vous éditez les réglages."
+      title: "Réglages du sport"
+      speed: "Vitesse moyenne"
+      speed_help: "Utilisée pour estimer le temps de parcours d'un itinéraire, dans le créateur comme dans la liste."
+      route_profile: "Profil de routage"
+      route_title: "Tracé dans le créateur"
     turn_anomaly:
       title: "Détection des virages suspects"
-      help: "À l'enregistrement, le créateur signale les endroits où plusieurs virages serrés se groupent sur un petit rayon — souvent le signe d'un point d'étape posé à côté de la route. Ce réglage fixe le diamètre (m) de la zone analysée, par activité : une valeur plus petite limite les fausses alertes sur les sentiers à lacets (rando, VTT)."
+      help: "À l'enregistrement, le créateur signale les endroits où plusieurs virages serrés se groupent sur un petit rayon — souvent le signe d'un point d'étape posé à côté de la route. Une valeur plus petite limite les fausses alertes sur les sentiers à lacets (rando, VTT)."
+      diameter: "Diamètre de la zone analysée"
   common:
     days_ago_today: "aujourd'hui"
     days_ago_yesterday: "hier"

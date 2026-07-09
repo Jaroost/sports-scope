@@ -6,6 +6,8 @@ import { POI_CATEGORIES } from '../poiCategories'
 import { ALL_COUNTRY_CODES, countryName, countryFlag } from '../countries'
 import { usePointerSort } from '../composables/usePointerSort'
 import { profilesForSport } from '../brouter'
+import { SPORTS } from '../userPreferences'
+import type { Sport, UserPreferences } from '../userPreferences'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -13,94 +15,22 @@ const groupedStyles = computed(() =>
     .filter(g => g.styles.length > 0),
 )
 
-interface Preferences {
+// Le profil édite l'objet complet des préférences (cf. User::DEFAULT_PREFERENCES). Il
+// reprend donc le schéma du front, augmenté de la navbar — la seule section que les
+// autres consommateurs n'ont pas à lire.
+interface Preferences extends UserPreferences {
   navbar: {
     // `visible` : présent dans la barre de navigation ; `home` : présent comme bouton
     // sur la page d'accueil. Les deux interrupteurs sont indépendants.
     items: { key: string; visible: boolean; home: boolean }[]
-  }
-  points_of_interest: {
-    show_cemeteries: boolean
-    show_bakeries: boolean
-    show_localities: boolean
-    show_water: boolean
-    show_food: boolean
-    show_viewpoints: boolean
-    show_toilets: boolean
-    show_picnic: boolean
-    radius_m: number
-    alert_m: number
-  }
-  map: {
-    default_style: string
-  }
-  search: {
-    country_codes: string[]
-    worldwide_fallback: boolean
-  }
-  navigation: {
-    default_style: string
-    zoom: number
-    pitch: number
-    terrain: boolean
-    nav_fps: number
-    line_width: number
-    line_color: string
-    line_opacity: number
-    turn_alert_m: number
-    turn_hint_m: number
-    turn_urgent_m: number
-    turn_repeat_ms: number
-    turn_repeat_urgent_ms: number
-    turn_now_m: number
-    turn_green_hold_m: number
-    turn_green_hold_s: number
-    sound_volume: number
-    turn_marker_size: number
-    turn_marker_color: string
-    turn_marker_icon_color: string
-    show_climb_card: boolean
-    radar_close_m: number
-    auto_reroute: boolean
-    auto_reroute_cooldown_s: number
-  }
-  display: {
-    default_sport: string
-    show_grade_colors: boolean
-    show_elevation_chart: boolean
-    route_color: string
-    route_opacity: number
-    route_width: number
-  }
-  climb_detection: {
-    min_grade: number
-    min_gain_m: number
-    min_length_m: number
-    grade_smoothing_m: number
-    merge_gap_m: number
-  }
-  speeds: {
-    cycling: number
-    mtb: number
-    hiking: number
-  }
-  turn_anomaly: {
-    cycling: number
-    mtb: number
-    hiking: number
-  }
-  route_profiles: {
-    cycling: string
-    mtb: string
-    hiking: string
   }
 }
 
 const props = defineProps<{
   preferences: Preferences
   defaults: Preferences
-  // Sections à afficher (clés : poi, map, navigation, display, climb, speeds).
-  // Omis ⇒ profil complet. Permet à ProfileDialog de n'exposer que les réglages
+  // Sections à afficher (clés : navbar, poi, map, search, navigation, display, sport,
+  // climb). Omis ⇒ profil complet. Permet à ProfileDialog de n'exposer que les réglages
   // pertinents selon la page d'où il est ouvert.
   sections?: string[]
 }>()
@@ -130,11 +60,25 @@ const saved = ref(false)
 const error = ref<string | null>(null)
 let savedTimer: ReturnType<typeof setTimeout> | undefined
 
-const SPORTS = ['cycling', 'mtb', 'hiking'] as const
-
-function sportIcon(s: (typeof SPORTS)[number]): string {
+function sportIcon(s: Sport): string {
   return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
 }
+
+// ─── Sport en cours d'édition ───────────────────────────────────────────────
+// Une bonne partie des réglages dépend de la pratique (vitesse, profil de routage, fond
+// de carte, seuils de détection de cols, distances d'annonce des virages). Plutôt que de
+// répéter chaque champ trois fois, un sélecteur unique choisit le sport dont on édite les
+// réglages ; les sections concernées suivent. Amorcé sur le sport par défaut du compte.
+const editedSport = ref<Sport>(prefs.display.default_sport)
+
+// Bloc de réglages du sport en cours d'édition.
+const sport = computed(() => prefs.sports[editedSport.value])
+
+// Sections dont le contenu dépend du sport : le sélecteur n'apparaît que si l'une d'elles
+// est affichée (ProfileDialog peut n'en ouvrir qu'un sous-ensemble).
+const PER_SPORT_SECTIONS = ['sport', 'map', 'climb', 'navigation']
+
+const showSportPicker = computed(() => PER_SPORT_SECTIONS.some(showSection))
 
 // ─── Barre de navigation : ordre et visibilité des menus ────────────────────
 // Liste réordonnable par glisser-déposer ; chaque menu peut être masqué via son
@@ -259,9 +203,9 @@ function applyPreviewRoute() {
     return
   }
   previewMap.addSource('preview-route', { type: 'geojson', data })
-  const w = prefs.navigation.line_width
+  const w = sport.value.navigation.line_width
   previewMap.addLayer({ id: 'preview-route-border', type: 'line', source: 'preview-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'rgba(0,0,0,0.28)', 'line-width': w + 4 } })
-  previewMap.addLayer({ id: 'preview-route-line', type: 'line', source: 'preview-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': prefs.navigation.line_color, 'line-width': w, 'line-opacity': prefs.navigation.line_opacity } })
+  previewMap.addLayer({ id: 'preview-route-line', type: 'line', source: 'preview-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': sport.value.navigation.line_color, 'line-width': w, 'line-opacity': sport.value.navigation.line_opacity } })
   applyPreviewTurnMarker()
 }
 
@@ -279,7 +223,7 @@ function applyPreviewTurnMarker() {
     return
   }
   previewMap.addSource('preview-turn', { type: 'geojson', data })
-  previewMap.addLayer({ id: 'preview-turn-dot', type: 'circle', source: 'preview-turn', paint: { 'circle-radius': prefs.navigation.turn_marker_size, 'circle-color': prefs.navigation.turn_marker_color, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
+  previewMap.addLayer({ id: 'preview-turn-dot', type: 'circle', source: 'preview-turn', paint: { 'circle-radius': sport.value.navigation.turn_marker_size, 'circle-color': sport.value.navigation.turn_marker_color, 'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff' } })
   addPreviewArrowLayer()
 }
 
@@ -292,7 +236,7 @@ function addPreviewArrowLayer() {
   // navigation (taille fixe), pour juger de la lisibilité selon la taille du marqueur.
   if (previewMap.getLayer('preview-turn-arrow')) previewMap.removeLayer('preview-turn-arrow')
   if (previewMap.hasImage('preview-turn-arrow')) previewMap.removeImage('preview-turn-arrow')
-  previewMap.addImage('preview-turn-arrow', createArrowImage(prefs.navigation.turn_marker_icon_color), { pixelRatio: ARROW_SCALE })
+  previewMap.addImage('preview-turn-arrow', createArrowImage(sport.value.navigation.turn_marker_icon_color), { pixelRatio: ARROW_SCALE })
   previewMap.addLayer({
     id: 'preview-turn-arrow',
     type: 'symbol',
@@ -304,7 +248,7 @@ function addPreviewArrowLayer() {
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
       // Proportionnelle à la pastille, un poil plus petite pour tenir dans le cercle.
-      'icon-size': prefs.navigation.turn_marker_size / 15,
+      'icon-size': sport.value.navigation.turn_marker_size / 15,
     },
   })
 }
@@ -404,17 +348,19 @@ async function initPreview() {
   watch(() => prefs.navigation.zoom, (z) => previewMap?.setZoom(z))
   watch(() => prefs.navigation.pitch, (p) => previewMap?.setPitch(p))
   watch(() => prefs.navigation.terrain, applyPreviewTerrain)
-  watch(() => prefs.navigation.line_width, applyPreviewRouteWidth)
-  watch(() => prefs.navigation.line_color, (c) => previewMap?.getLayer('preview-route-line') && previewMap.setPaintProperty('preview-route-line', 'line-color', c))
-  watch(() => prefs.navigation.line_opacity, (o) => previewMap?.getLayer('preview-route-line') && previewMap.setPaintProperty('preview-route-line', 'line-opacity', o))
-  watch(() => prefs.navigation.turn_marker_size, (r) => {
+  // Ces six réglages sont propres au sport : les sources réactives passent par sport.value,
+  // donc l'aperçu se met aussi à jour quand on bascule de sport dans le sélecteur.
+  watch(() => sport.value.navigation.line_width, applyPreviewRouteWidth)
+  watch(() => sport.value.navigation.line_color, (c) => previewMap?.getLayer('preview-route-line') && previewMap.setPaintProperty('preview-route-line', 'line-color', c))
+  watch(() => sport.value.navigation.line_opacity, (o) => previewMap?.getLayer('preview-route-line') && previewMap.setPaintProperty('preview-route-line', 'line-opacity', o))
+  watch(() => sport.value.navigation.turn_marker_size, (r) => {
     if (previewMap?.getLayer('preview-turn-dot')) previewMap.setPaintProperty('preview-turn-dot', 'circle-radius', r)
     if (previewMap?.getLayer('preview-turn-arrow')) previewMap.setLayoutProperty('preview-turn-arrow', 'icon-size', r / 13)
   })
-  watch(() => prefs.navigation.turn_marker_color, (c) => {
+  watch(() => sport.value.navigation.turn_marker_color, (c) => {
     if (previewMap?.getLayer('preview-turn-dot')) previewMap.setPaintProperty('preview-turn-dot', 'circle-color', c)
   })
-  watch(() => prefs.navigation.turn_marker_icon_color, () => addPreviewArrowLayer())
+  watch(() => sport.value.navigation.turn_marker_icon_color, () => addPreviewArrowLayer())
   watch(() => prefs.navigation.default_style, (id) => {
     previewMap?.setStyle(mapStyleFor(id), { diff: false })
     previewMap?.once('style.load', () => { applyPreviewRoute(); applyPreviewTerrain() })
@@ -451,6 +397,29 @@ function placePreviewMarker(coords: [number, number]) {
 
 <template>
   <form class="user-profile" @submit.prevent="save">
+    <!-- Sport dont on édite les réglages : pilote toutes les sections qui en dépendent -->
+    <section v-if="showSportPicker" class="card mb-3 shadow-sm sport-picker">
+      <div class="card-body py-2">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <span class="text-muted small fw-semibold me-1">{{ t('profile.sport.picker') }}</span>
+          <div class="btn-group" role="group" :aria-label="t('profile.sport.picker')">
+            <button
+              v-for="s in SPORTS"
+              :key="s"
+              type="button"
+              class="btn btn-sm"
+              :class="editedSport === s ? 'btn-primary' : 'btn-outline-secondary'"
+              @click="editedSport = s"
+            >
+              <i :class="`fa-solid ${sportIcon(s)} me-1`" aria-hidden="true"></i>
+              {{ t(`profile.display.sport_${s}`) }}
+            </button>
+          </div>
+        </div>
+        <p class="text-muted small mb-0 mt-2">{{ t('profile.sport.picker_help') }}</p>
+      </div>
+    </section>
+
     <!-- Barre de navigation : ordre et visibilité des menus -->
     <section v-if="showSection('navbar')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
@@ -562,9 +531,9 @@ function placePreviewMarker(coords: [number, number]) {
                   v-for="style in g.styles"
                   :key="style.id"
                   class="map-style-option"
-                  :class="{ active: prefs.map.default_style === style.id }"
+                  :class="{ active: sport.map.default_style === style.id }"
                 >
-                  <input v-model="prefs.map.default_style" class="visually-hidden" type="radio" name="map-style" :value="style.id">
+                  <input v-model="sport.map.default_style" class="visually-hidden" type="radio" name="map-style" :value="style.id">
                   <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
                   <span>{{ t(`profile.map.style_${style.id}`) }}</span>
                 </label>
@@ -720,35 +689,43 @@ function placePreviewMarker(coords: [number, number]) {
             </label>
             <input id="nav-fps" v-model.number="prefs.navigation.nav_fps" type="range" class="form-range" min="0.5" max="60" step="0.5">
           </div>
+        </div>
+
+        <hr class="my-3">
+        <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2">
+          <i class="fa-solid fa-pen-ruler me-1" aria-hidden="true"></i>{{ t('profile.navigation.line_title') }}
+        </h3>
+        <p class="text-muted small mb-3">{{ t('profile.navigation.line_help') }}</p>
+        <div class="row g-3">
           <div class="col-sm-6">
             <label for="nav-line-width" class="form-label mb-1">
-              {{ t('profile.navigation.line_width') }} : <strong>{{ prefs.navigation.line_width }} px</strong>
+              {{ t('profile.navigation.line_width') }} : <strong>{{ sport.navigation.line_width }} px</strong>
             </label>
-            <input id="nav-line-width" v-model.number="prefs.navigation.line_width" type="range" class="form-range" min="2" max="200" step="1">
+            <input id="nav-line-width" v-model.number="sport.navigation.line_width" type="range" class="form-range" min="2" max="200" step="1">
           </div>
           <div class="col-sm-6">
             <label for="nav-line-color" class="form-label mb-1">{{ t('profile.navigation.line_color') }}</label>
-            <input id="nav-line-color" v-model="prefs.navigation.line_color" type="color" class="form-control form-control-color">
+            <input id="nav-line-color" v-model="sport.navigation.line_color" type="color" class="form-control form-control-color">
           </div>
           <div class="col-sm-6">
             <label for="nav-line-opacity" class="form-label mb-1">
-              {{ t('profile.navigation.line_opacity') }} : <strong>{{ Math.round(prefs.navigation.line_opacity * 100) }} %</strong>
+              {{ t('profile.navigation.line_opacity') }} : <strong>{{ Math.round(sport.navigation.line_opacity * 100) }} %</strong>
             </label>
-            <input id="nav-line-opacity" v-model.number="prefs.navigation.line_opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
+            <input id="nav-line-opacity" v-model.number="sport.navigation.line_opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-marker-size" class="form-label mb-1">
-              {{ t('profile.navigation.turn_marker_size') }} : <strong>{{ prefs.navigation.turn_marker_size }} px</strong>
+              {{ t('profile.navigation.turn_marker_size') }} : <strong>{{ sport.navigation.turn_marker_size }} px</strong>
             </label>
-            <input id="nav-turn-marker-size" v-model.number="prefs.navigation.turn_marker_size" type="range" class="form-range" min="5" max="200" step="1">
+            <input id="nav-turn-marker-size" v-model.number="sport.navigation.turn_marker_size" type="range" class="form-range" min="5" max="200" step="1">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-marker-color" class="form-label mb-1">{{ t('profile.navigation.turn_marker_color') }}</label>
-            <input id="nav-turn-marker-color" v-model="prefs.navigation.turn_marker_color" type="color" class="form-control form-control-color">
+            <input id="nav-turn-marker-color" v-model="sport.navigation.turn_marker_color" type="color" class="form-control form-control-color">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-marker-icon-color" class="form-label mb-1">{{ t('profile.navigation.turn_marker_icon_color') }}</label>
-            <input id="nav-turn-marker-icon-color" v-model="prefs.navigation.turn_marker_icon_color" type="color" class="form-control form-control-color">
+            <input id="nav-turn-marker-icon-color" v-model="sport.navigation.turn_marker_icon_color" type="color" class="form-control form-control-color">
           </div>
         </div>
 
@@ -771,54 +748,55 @@ function placePreviewMarker(coords: [number, number]) {
         <h3 class="h6 text-muted text-uppercase small fw-semibold mb-3">
           <i class="fa-solid fa-turn-right me-1" aria-hidden="true"></i>{{ t('profile.navigation.turns_title') }}
         </h3>
+        <p class="text-muted small mb-3">{{ t('profile.navigation.turns_help') }}</p>
         <div class="row g-3">
           <div class="col-sm-6">
             <label for="nav-turn-alert" class="form-label mb-1">
-              {{ t('profile.navigation.turn_alert_m') }} : <strong>{{ prefs.navigation.turn_alert_m }} m</strong>
+              {{ t('profile.navigation.turn_alert_m') }} : <strong>{{ sport.navigation.turn_alert_m }} m</strong>
             </label>
-            <input id="nav-turn-alert" v-model.number="prefs.navigation.turn_alert_m" type="range" class="form-range" min="50" max="500" step="10">
+            <input id="nav-turn-alert" v-model.number="sport.navigation.turn_alert_m" type="range" class="form-range" min="20" max="500" step="10">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-hint" class="form-label mb-1">
-              {{ t('profile.navigation.turn_hint_m') }} : <strong>{{ prefs.navigation.turn_hint_m }} m</strong>
+              {{ t('profile.navigation.turn_hint_m') }} : <strong>{{ sport.navigation.turn_hint_m }} m</strong>
             </label>
-            <input id="nav-turn-hint" v-model.number="prefs.navigation.turn_hint_m" type="range" class="form-range" min="50" max="500" step="10">
+            <input id="nav-turn-hint" v-model.number="sport.navigation.turn_hint_m" type="range" class="form-range" min="20" max="500" step="10">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-urgent" class="form-label mb-1">
-              {{ t('profile.navigation.turn_urgent_m') }} : <strong>{{ prefs.navigation.turn_urgent_m }} m</strong>
+              {{ t('profile.navigation.turn_urgent_m') }} : <strong>{{ sport.navigation.turn_urgent_m }} m</strong>
             </label>
-            <input id="nav-turn-urgent" v-model.number="prefs.navigation.turn_urgent_m" type="range" class="form-range" min="5" max="50" step="1">
+            <input id="nav-turn-urgent" v-model.number="sport.navigation.turn_urgent_m" type="range" class="form-range" min="5" max="50" step="1">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-repeat" class="form-label mb-1">
-              {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (prefs.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
+              {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (sport.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
             </label>
-            <input id="nav-turn-repeat" v-model.number="prefs.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500">
+            <input id="nav-turn-repeat" v-model.number="sport.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-repeat-urgent" class="form-label mb-1">
-              {{ t('profile.navigation.turn_repeat_urgent_ms') }} : <strong>{{ (prefs.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
+              {{ t('profile.navigation.turn_repeat_urgent_ms') }} : <strong>{{ (sport.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
             </label>
-            <input id="nav-turn-repeat-urgent" v-model.number="prefs.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500">
+            <input id="nav-turn-repeat-urgent" v-model.number="sport.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-now" class="form-label mb-1">
-              {{ t('profile.navigation.turn_now_m') }} : <strong>{{ prefs.navigation.turn_now_m }} m</strong>
+              {{ t('profile.navigation.turn_now_m') }} : <strong>{{ sport.navigation.turn_now_m }} m</strong>
             </label>
-            <input id="nav-turn-now" v-model.number="prefs.navigation.turn_now_m" type="range" class="form-range" min="0" max="50" step="1">
+            <input id="nav-turn-now" v-model.number="sport.navigation.turn_now_m" type="range" class="form-range" min="0" max="50" step="1">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-green-hold" class="form-label mb-1">
-              {{ t('profile.navigation.turn_green_hold_m') }} : <strong>{{ prefs.navigation.turn_green_hold_m }} m</strong>
+              {{ t('profile.navigation.turn_green_hold_m') }} : <strong>{{ sport.navigation.turn_green_hold_m }} m</strong>
             </label>
-            <input id="nav-turn-green-hold" v-model.number="prefs.navigation.turn_green_hold_m" type="range" class="form-range" min="0" max="500" step="10">
+            <input id="nav-turn-green-hold" v-model.number="sport.navigation.turn_green_hold_m" type="range" class="form-range" min="0" max="500" step="10">
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-green-hold-s" class="form-label mb-1">
-              {{ t('profile.navigation.turn_green_hold_s') }} : <strong>{{ prefs.navigation.turn_green_hold_s }} s</strong>
+              {{ t('profile.navigation.turn_green_hold_s') }} : <strong>{{ sport.navigation.turn_green_hold_s }} s</strong>
             </label>
-            <input id="nav-turn-green-hold-s" v-model.number="prefs.navigation.turn_green_hold_s" type="range" class="form-range" min="2" max="60" step="1">
+            <input id="nav-turn-green-hold-s" v-model.number="sport.navigation.turn_green_hold_s" type="range" class="form-range" min="2" max="60" step="1">
           </div>
         </div>
       </div>
@@ -848,26 +826,6 @@ function placePreviewMarker(coords: [number, number]) {
           <input id="disp-elev" v-model="prefs.display.show_elevation_chart" class="form-check-input" type="checkbox">
           <label class="form-check-label" for="disp-elev">{{ t('profile.display.show_elevation_chart') }}</label>
         </div>
-        <hr class="my-3">
-        <div class="row g-3">
-          <div class="col-sm-6">
-            <label for="disp-route-color" class="form-label mb-1">{{ t('profile.display.route_color') }}</label>
-            <input id="disp-route-color" v-model="prefs.display.route_color" type="color" class="form-control form-control-color">
-            <p class="text-muted small mb-0 mt-1">{{ t('profile.display.route_color_help') }}</p>
-          </div>
-          <div class="col-sm-6">
-            <label for="disp-route-opacity" class="form-label mb-1">
-              {{ t('profile.display.route_opacity') }} : <strong>{{ Math.round(prefs.display.route_opacity * 100) }} %</strong>
-            </label>
-            <input id="disp-route-opacity" v-model.number="prefs.display.route_opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
-          </div>
-          <div class="col-sm-6">
-            <label for="disp-route-width" class="form-label mb-1">
-              {{ t('profile.display.route_width') }} : <strong>{{ prefs.display.route_width }} px</strong>
-            </label>
-            <input id="disp-route-width" v-model.number="prefs.display.route_width" type="range" class="form-range" min="2" max="12" step="1">
-          </div>
-        </div>
       </div>
     </section>
 
@@ -883,28 +841,28 @@ function placePreviewMarker(coords: [number, number]) {
           <div class="col-sm-4">
             <label for="climb-grade" class="form-label">{{ t('profile.climb.min_grade') }}</label>
             <div class="input-group">
-              <input id="climb-grade" v-model.number="prefs.climb_detection.min_grade" type="number" class="form-control" min="0" max="15" step="0.5">
+              <input id="climb-grade" v-model.number="sport.climb_detection.min_grade" type="number" class="form-control" min="0" max="15" step="0.5">
               <span class="input-group-text">%</span>
             </div>
           </div>
           <div class="col-sm-4">
             <label for="climb-gain" class="form-label">{{ t('profile.climb.min_gain') }}</label>
             <div class="input-group">
-              <input id="climb-gain" v-model.number="prefs.climb_detection.min_gain_m" type="number" class="form-control" min="0" max="1000" step="10">
+              <input id="climb-gain" v-model.number="sport.climb_detection.min_gain_m" type="number" class="form-control" min="0" max="1000" step="10">
               <span class="input-group-text">m</span>
             </div>
           </div>
           <div class="col-sm-4">
             <label for="climb-length" class="form-label">{{ t('profile.climb.min_length') }}</label>
             <div class="input-group">
-              <input id="climb-length" v-model.number="prefs.climb_detection.min_length_m" type="number" class="form-control" min="50" max="5000" step="50">
+              <input id="climb-length" v-model.number="sport.climb_detection.min_length_m" type="number" class="form-control" min="50" max="5000" step="50">
               <span class="input-group-text">m</span>
             </div>
           </div>
           <div class="col-sm-4">
             <label for="climb-merge-gap" class="form-label">{{ t('profile.climb.merge_gap') }}</label>
             <div class="input-group">
-              <input id="climb-merge-gap" v-model.number="prefs.climb_detection.merge_gap_m" type="number" class="form-control" min="0" max="2000" step="50">
+              <input id="climb-merge-gap" v-model.number="sport.climb_detection.merge_gap_m" type="number" class="form-control" min="0" max="2000" step="50">
               <span class="input-group-text">m</span>
             </div>
             <div class="form-text">{{ t('profile.climb.merge_gap_help') }}</div>
@@ -912,65 +870,39 @@ function placePreviewMarker(coords: [number, number]) {
         </div>
         <hr class="my-3">
         <label for="climb-smoothing" class="form-label mb-1">
-          {{ t('profile.climb.grade_smoothing') }} : <strong>{{ prefs.climb_detection.grade_smoothing_m }} m</strong>
+          {{ t('profile.climb.grade_smoothing') }} : <strong>{{ sport.climb_detection.grade_smoothing_m }} m</strong>
         </label>
-        <input id="climb-smoothing" v-model.number="prefs.climb_detection.grade_smoothing_m" type="range" class="form-range" min="10" max="200" step="5">
+        <input id="climb-smoothing" v-model.number="sport.climb_detection.grade_smoothing_m" type="range" class="form-range" min="10" max="200" step="5">
         <p class="text-muted small mb-0">{{ t('profile.climb.grade_smoothing_help') }}</p>
       </div>
     </section>
 
-    <!-- Vitesses moyennes -->
-    <section v-if="showSection('speeds')" class="card mb-3 shadow-sm">
+    <!-- Réglages propres au sport sélectionné -->
+    <section v-if="showSection('sport')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
-        <i class="fa-solid fa-gauge-high text-primary" aria-hidden="true"></i>
-        <h2 class="h5 mb-0">{{ t('profile.speeds.title') }}</h2>
+        <i :class="`fa-solid ${sportIcon(editedSport)} text-primary`" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.sport.title') }}</h2>
       </div>
       <div class="card-body">
-        <p class="text-muted small mb-3">{{ t('profile.speeds.help') }}</p>
         <div class="row g-3">
-          <div v-for="s in SPORTS" :key="s" class="col-sm-4">
-            <label :for="`speed-${s}`" class="form-label d-flex align-items-center gap-2">
-              <i :class="`fa-solid ${sportIcon(s)} text-muted`" aria-hidden="true"></i>
-              {{ t(`profile.display.sport_${s}`) }}
-            </label>
+          <div class="col-sm-6">
+            <label for="sport-speed" class="form-label mb-1">{{ t('profile.sport.speed') }}</label>
             <div class="input-group">
-              <input
-                :id="`speed-${s}`"
-                v-model.number="prefs.speeds[s]"
-                type="number"
-                class="form-control"
-                min="3"
-                max="80"
-                step="0.5"
-              >
+              <input id="sport-speed" v-model.number="sport.speed" type="number" class="form-control" min="3" max="80" step="0.5">
               <span class="input-group-text">km/h</span>
             </div>
+            <p class="text-muted small mb-0 mt-1">{{ t('profile.sport.speed_help') }}</p>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="showSection('route_profiles')" class="card mb-3 shadow-sm">
-      <div class="card-header d-flex align-items-center gap-2">
-        <i class="fa-solid fa-route text-primary" aria-hidden="true"></i>
-        <h2 class="h5 mb-0">{{ t('profile.route_profiles.title') }}</h2>
-      </div>
-      <div class="card-body">
-        <p class="text-muted small mb-3">{{ t('profile.route_profiles.help') }}</p>
-        <div class="row g-3">
-          <div v-for="s in SPORTS" :key="s" class="col-sm-4">
-            <label :for="`route-profile-${s}`" class="form-label d-flex align-items-center gap-2">
-              <i :class="`fa-solid ${sportIcon(s)} text-muted`" aria-hidden="true"></i>
-              {{ t(`profile.display.sport_${s}`) }}
-            </label>
+          <div class="col-sm-6">
+            <label for="sport-route-profile" class="form-label mb-1">{{ t('profile.sport.route_profile') }}</label>
             <select
-              :id="`route-profile-${s}`"
-              v-model="prefs.route_profiles[s]"
+              id="sport-route-profile"
+              v-model="sport.route_profile"
               class="form-select"
-              :title="t(`routes.brouter_profile.${prefs.route_profiles[s]}_desc`)"
+              :title="t(`routes.brouter_profile.${sport.route_profile}_desc`)"
             >
               <option
-                v-for="p in profilesForSport(s)"
+                v-for="p in profilesForSport(editedSport)"
                 :key="p"
                 :value="p"
                 :title="t(`routes.brouter_profile.${p}_desc`)"
@@ -978,35 +910,44 @@ function placePreviewMarker(coords: [number, number]) {
                 {{ t(`routes.brouter_profile.${p}`) }}
               </option>
             </select>
-            <p class="form-text mb-0">{{ t(`routes.brouter_profile.${prefs.route_profiles[s]}_desc`) }}</p>
+            <p class="form-text mb-0">{{ t(`routes.brouter_profile.${sport.route_profile}_desc`) }}</p>
           </div>
         </div>
-      </div>
-    </section>
 
-    <section v-if="showSection('turn_anomaly')" class="card mb-3 shadow-sm">
-      <div class="card-header d-flex align-items-center gap-2">
-        <i class="fa-solid fa-triangle-exclamation text-primary" aria-hidden="true"></i>
-        <h2 class="h5 mb-0">{{ t('profile.turn_anomaly.title') }}</h2>
-      </div>
-      <div class="card-body">
+        <hr class="my-3">
+        <h3 class="h6 text-muted text-uppercase small fw-semibold mb-3">
+          <i class="fa-solid fa-pen-ruler me-1" aria-hidden="true"></i>{{ t('profile.sport.route_title') }}
+        </h3>
+        <div class="row g-3">
+          <div class="col-sm-4">
+            <label for="sport-route-color" class="form-label mb-1">{{ t('profile.display.route_color') }}</label>
+            <input id="sport-route-color" v-model="sport.route.color" type="color" class="form-control form-control-color">
+            <p class="text-muted small mb-0 mt-1">{{ t('profile.display.route_color_help') }}</p>
+          </div>
+          <div class="col-sm-4">
+            <label for="sport-route-opacity" class="form-label mb-1">
+              {{ t('profile.display.route_opacity') }} : <strong>{{ Math.round(sport.route.opacity * 100) }} %</strong>
+            </label>
+            <input id="sport-route-opacity" v-model.number="sport.route.opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
+          </div>
+          <div class="col-sm-4">
+            <label for="sport-route-width" class="form-label mb-1">
+              {{ t('profile.display.route_width') }} : <strong>{{ sport.route.width }} px</strong>
+            </label>
+            <input id="sport-route-width" v-model.number="sport.route.width" type="range" class="form-range" min="2" max="12" step="1">
+          </div>
+        </div>
+
+        <hr class="my-3">
+        <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2">
+          <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ t('profile.turn_anomaly.title') }}
+        </h3>
         <p class="text-muted small mb-3">{{ t('profile.turn_anomaly.help') }}</p>
         <div class="row g-3">
-          <div v-for="s in SPORTS" :key="s" class="col-sm-4">
-            <label :for="`turn-anomaly-${s}`" class="form-label d-flex align-items-center gap-2">
-              <i :class="`fa-solid ${sportIcon(s)} text-muted`" aria-hidden="true"></i>
-              {{ t(`profile.display.sport_${s}`) }}
-            </label>
+          <div class="col-sm-4">
+            <label for="sport-turn-anomaly" class="form-label mb-1">{{ t('profile.turn_anomaly.diameter') }}</label>
             <div class="input-group">
-              <input
-                :id="`turn-anomaly-${s}`"
-                v-model.number="prefs.turn_anomaly[s]"
-                type="number"
-                class="form-control"
-                min="30"
-                max="200"
-                step="5"
-              >
+              <input id="sport-turn-anomaly" v-model.number="sport.turn_anomaly_m" type="number" class="form-control" min="30" max="200" step="5">
               <span class="input-group-text">m</span>
             </div>
           </div>
@@ -1036,6 +977,15 @@ function placePreviewMarker(coords: [number, number]) {
 <style scoped>
 .user-profile {
 
+}
+
+/* Le formulaire est long et plusieurs sections dépendent du sport sélectionné : le
+   sélecteur reste visible pendant qu'on fait défiler, sans quoi on édite les réglages
+   d'un sport sans plus voir lequel. */
+.sport-picker {
+  position: sticky;
+  top: 0;
+  z-index: 3;
 }
 
 .map-style-option {

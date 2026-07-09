@@ -1,7 +1,7 @@
 // Utility functions shared between RouteBuilder sub-components.
 // No Vue imports — pure TypeScript.
 
-import { userPreferences } from './userPreferences'
+import { sportPreferences } from './userPreferences'
 import type { Sport } from './userPreferences'
 
 export type Coord = [number, number, number | null]
@@ -187,10 +187,11 @@ export const GRADE_BUCKETS = [
   { max: Infinity, color: '#7f1d1d' },
 ]
 
-// Fenêtre de lissage de la pente (m), réglable dans le profil utilisateur. Repli sur
-// 40 m hors page connectée. Source unique pour gradeForIndex / computeSegmentGrades.
+// Fenêtre de lissage de la pente (m), réglable dans le profil utilisateur pour le sport
+// courant. Repli sur 40 m hors page connectée. Source unique pour gradeForIndex /
+// computeSegmentGrades.
 export function gradeSmoothingM(): number {
-  const v = userPreferences().climb_detection.grade_smoothing_m
+  const v = sportPreferences().climb_detection.grade_smoothing_m
   return Number.isFinite(v) && v > 0 ? v : 40
 }
 
@@ -261,10 +262,11 @@ export interface ClimbDetectionOptions {
   mergeGapM: number
 }
 
-// Seuils par défaut issus des préférences du profil (cf. userPreferences). Tombe
-// sur les valeurs par défaut sûres hors page connectée (navigation partagée…).
+// Seuils par défaut issus des préférences du profil pour le sport courant (cf.
+// sportPreferences) : un raidillon de sentier n'est pas un col de vélo. Tombe sur les
+// valeurs par défaut sûres hors page connectée (navigation partagée…).
 function defaultClimbOptions(): ClimbDetectionOptions {
-  const c = userPreferences().climb_detection
+  const c = sportPreferences().climb_detection
   return { minGrade: c.min_grade, minGainM: c.min_gain_m, minLengthM: c.min_length_m, mergeGapM: c.merge_gap_m }
 }
 

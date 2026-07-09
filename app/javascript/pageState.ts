@@ -9,7 +9,7 @@
 // inside the getter refers to the reactive proxy, so Vue tracks the
 // dependency on any reactive property the getter reads.
 
-import { userPreferences } from './userPreferences'
+import { sportPreferences, userPreferences } from './userPreferences'
 
 export type ColorMode = 'grade' | 'none'
 
@@ -89,11 +89,11 @@ export class RouteBuilderState extends MapPageState {
   overlays: string[] = []
 
   constructor() {
-    super(userPreferences().map.default_style)
+    super(sportPreferences().map.default_style)
     const prefs = userPreferences()
     this.colorMode = prefs.display.show_grade_colors ? 'grade' : 'none'
     this.showElevationChart = prefs.display.show_elevation_chart
-    this.overlays = [...prefs.map.overlays]
+    this.overlays = [...sportPreferences().map.overlays]
   }
 
   // Derived from colorMode — reactive because `this` is the reactive proxy

@@ -9,7 +9,7 @@ import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import MapOverlayDropdown from './MapOverlayDropdown.vue'
 import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
-import { persistDefaultMapStyle, persistOverlays, userPreferences } from '../userPreferences'
+import { persistDefaultMapStyle, persistOverlays, sportPreferences, userPreferences } from '../userPreferences'
 import type { MapStyleId } from '../userPreferences'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
@@ -34,15 +34,15 @@ const emit = defineEmits<{
 
 const mapEl = useTemplateRef('mapEl')
 
-// Couleur (hors mode pente) et opacité du tracé, réglables dans le profil (section
-// Affichage). L'opacité s'applique dans tous les modes ; la couleur ne sert qu'en
-// mode uni (le mode pente garde son dégradé).
-const ROUTE_COLOR = userPreferences().display.route_color ?? '#7c3aed'
-const ROUTE_OPACITY = userPreferences().display.route_opacity ?? 0.8
-// Épaisseur (px) du tracé, réglable dans le profil (section Affichage). Sert de base
-// aux largeurs des couches du tracé : bordure, ligne, tronçons libres et sélection
-// s'en déduisent pour rester proportionnés (cf. ROUTE_LINE_BASE_WIDTH).
-const ROUTE_WIDTH = userPreferences().display.route_width ?? 5
+// Couleur (hors mode pente), opacité et épaisseur du tracé, réglables PAR SPORT dans le
+// profil. L'opacité s'applique dans tous les modes ; la couleur ne sert qu'en mode uni
+// (le mode pente garde son dégradé). L'épaisseur sert de base aux largeurs des couches
+// du tracé : bordure, ligne, tronçons libres et sélection s'en déduisent pour rester
+// proportionnés (cf. routeLineBaseWidths). Relus à chaque changement de sport, d'où des
+// fonctions plutôt que des constantes.
+function routePrefs() {
+  return sportPreferences(routeStore.sport.value).route
+}
 
 // Icône FontAwesome du sport courant (même logique que la sidebar Stats).
 function sportIcon() {
@@ -364,14 +364,14 @@ function installRouteLayer() {
   if (!mapInstance.getSource('builder-route-graded')) {
     mapInstance.addSource('builder-route-graded', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     mapInstance.addLayer({ id: 'builder-route-border', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
-    mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5, 'line-opacity': ROUTE_OPACITY } })
+    mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5, 'line-opacity': routePrefs().opacity } })
   }
   // Tronçons « libres » : tracés en ligne droite (beeline) entre points, rendus en
   // traitillé pour les distinguer du tracé routé. La géométrie droite est exclue de
   // la source graduée (applyColorMode) pour que le pointillé reste lisible.
   if (!mapInstance.getSource('builder-route-straight')) {
     mapInstance.addSource('builder-route-straight', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-    mapInstance.addLayer({ id: 'builder-route-straight-line', type: 'line', source: 'builder-route-straight', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': ROUTE_COLOR, 'line-width': 4, 'line-dasharray': [1.6, 1.4], 'line-opacity': ROUTE_OPACITY } })
+    mapInstance.addLayer({ id: 'builder-route-straight-line', type: 'line', source: 'builder-route-straight', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': routePrefs().color, 'line-width': 4, 'line-dasharray': [1.6, 1.4], 'line-opacity': routePrefs().opacity } })
   }
   if (!mapInstance.getSource('builder-divergent')) {
     mapInstance.addSource('builder-divergent', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -408,12 +408,15 @@ function installRouteLayer() {
 
 // Épaisseurs natives (px écran) des couches de tracé. Utilisé par l'export image pour
 // élargir le tracé proportionnellement à la résolution, sinon il devient invisible.
-const ROUTE_LINE_BASE_WIDTH: Record<string, number> = {
-  'builder-route-border': ROUTE_WIDTH + 3,
-  'builder-route-line': ROUTE_WIDTH,
-  'builder-route-straight-line': Math.max(2, ROUTE_WIDTH - 1),
-  'builder-route-selected-line': ROUTE_WIDTH + 2,
-  'builder-divergent-line': 4,
+function routeLineBaseWidths(): Record<string, number> {
+  const width = routePrefs().width
+  return {
+    'builder-route-border': width + 3,
+    'builder-route-line': width,
+    'builder-route-straight-line': Math.max(2, width - 1),
+    'builder-route-selected-line': width + 2,
+    'builder-divergent-line': 4,
+  }
 }
 // Sur petit écran tactile, on élargit légèrement le tracé pour offrir une cible de clic
 // plus généreuse (insertion de point sur la ligne) et éviter les clics au mauvais endroit.
@@ -424,7 +427,7 @@ function setRouteLineScale(factor: number) {
   // l'élargissement mobile. Tout autre facteur vient de l'export (mise à l'échelle selon la
   // résolution de sortie) et doit rester identique sur mobile et PC — pas de boost mobile.
   const eff = factor === 1 ? ROUTE_LINE_DISPLAY_SCALE : factor
-  for (const [id, base] of Object.entries(ROUTE_LINE_BASE_WIDTH)) {
+  for (const [id, base] of Object.entries(routeLineBaseWidths())) {
     if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-width', base * eff)
   }
 }
@@ -483,7 +486,7 @@ function applyColorMode() {
   const gradeMode = props.state.colorMode === 'grade'
   const routedFeatures: any[] = []
   const straightFeatures: any[] = []
-  let paint: any = ROUTE_COLOR
+  let paint: any = routePrefs().color
 
   if (coords.length >= 2) {
     if (gradeMode) paint = gradePaintExpression()
@@ -1683,11 +1686,18 @@ async function toggleLocation() {
 
 // ─── Map style ────────────────────────────────────────────────────────────────
 
+// Choix manuel de l'utilisateur : ce fond devient le style par défaut du compte pour le
+// sport courant. Le changement de sport, lui, applique un style déjà enregistré et ne
+// doit donc rien réécrire — cf. applyMapStyle.
 function setMapStyle(id: string) {
   if (!mapInstance || id === props.state.mapStyleId) return
+  persistDefaultMapStyle(id as MapStyleId, routeStore.sport.value)
+  applyMapStyle(id)
+}
+
+function applyMapStyle(id: string) {
   props.state.mapStyleId = id
-  // Reporte le choix sur le profil : ce fond devient le style par défaut du compte.
-  persistDefaultMapStyle(id as MapStyleId)
+  if (!mapInstance) return
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
     installRouteLayer(); installPreviewLayer(); installOverlays()
@@ -1726,9 +1736,29 @@ function installOverlays() {
 
 function setOverlays(ids: string[]) {
   props.state.overlays = ids
-  persistOverlays(ids)
+  persistOverlays(ids, routeStore.sport.value)
   installOverlays()
 }
+
+// Le sport gouverne le fond de carte, les overlays et l'aspect du tracé : en changer
+// en cours d'édition réaligne la carte sur les préférences de cette pratique. Un
+// changement de style réinstalle tout (style.load) ; sinon on repeint sur place.
+watch(routeStore.sport, (sport) => {
+  const { map, route } = sportPreferences(sport)
+  const styleChanged = map.default_style !== props.state.mapStyleId
+  props.state.overlays = [...map.overlays]
+  if (styleChanged) {
+    applyMapStyle(map.default_style)
+    return
+  }
+  installOverlays()
+  if (!mapInstance) return
+  for (const id of ['builder-route-line', 'builder-route-straight-line']) {
+    if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-opacity', route.opacity)
+  }
+  applyColorMode()      // couleur du mode uni
+  setRouteLineScale(1)  // épaisseurs dérivées de route.width
+})
 
 function toggleMap3D() {
   if (!mapInstance) return

@@ -1,7 +1,7 @@
 import { ref, computed } from 'vue'
 import { haversine, detectClimbs, computeGainLoss, buildDistancesM, formatDuration } from '../routeHelpers'
 import type { Coord, Climb, VoiceHint } from '../routeHelpers'
-import { userPreferences, speedForSport, routeProfileForSport } from '../userPreferences'
+import { userPreferences, speedForSport, routeProfileForSport, setActiveSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { isProfileValidForSport } from '../brouter'
 
@@ -42,6 +42,12 @@ class RouteStore {
   // Réaligné sur le défaut du sport à chaque changement de sport (setSport).
   readonly profile = ref<string>(routeProfileForSport(this.sport.value))
 
+  constructor() {
+    // Les réglages par sport lus hors composant (détection de cols dans routeHelpers)
+    // suivent le sport du créateur, pas celui du profil.
+    setActiveSport(this.sport.value)
+  }
+
   // ─── Computed ───────────────────────────────────────────────────────────────
   readonly hasGeometry = computed(() => this.geometry.value.length >= 2)
   readonly isEditMode = computed(() => this.currentId.value != null)
@@ -56,16 +62,22 @@ class RouteStore {
   readonly detectedClimbs = computed((): Climb[] => {
     const g = this.geometry.value
     if (g.length < 2) return []
+    // Les seuils de détection viennent du sport courant (via setActiveSport) : on le lit
+    // ici pour que le calcul soit refait au changement de sport, detectClimbs allant
+    // chercher les seuils hors du graphe réactif.
+    void this.sport.value
     const altitudes = g.map((c) => c[2])
     const distances = buildDistancesM(g)
     return detectClimbs(altitudes, distances)
   })
 
-  // Change la catégorie d'activité et réaligne la vitesse moyenne sur la valeur
-  // configurée dans le profil pour ce sport.
+  // Change la catégorie d'activité et réaligne sur les réglages du profil pour ce
+  // sport : vitesse moyenne, profil de routage, et tout ce que lisent les modules
+  // hors composants (seuils de détection de cols) via le sport courant.
   setSport(sport: Sport) {
     if (sport === this.sport.value) return
     this.sport.value = sport
+    setActiveSport(sport)
     this.avgSpeedKmh.value = speedForSport(sport)
     // Le profil de routage est filtré par sport : on retombe sur le défaut du
     // nouveau sport (préférence compte ou défaut catalogue).

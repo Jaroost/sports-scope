@@ -7,8 +7,8 @@ export const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || 'https://brouter.
 
 // Catalogue des profils de routage BRouter proposés, par catégorie d'activité
 // (Route#activity). Le 1er de chaque liste est le défaut catalogue du sport ; il
-// peut être surchargé par la préférence compte `route_profiles` (cf.
-// routeProfileForSport dans userPreferences). Le profil retenu est envoyé tel quel
+// peut être surchargé par la préférence compte du sport (`sports.<sport>.route_profile`,
+// cf. routeProfileForSport dans userPreferences). Le profil retenu est envoyé tel quel
 // à BRouter dans le paramètre `&profile=` (voir RouteBuilder.recomputeRoute).
 //
 // Tous ces profils existent sur l'instance publique brouter.de. Les profils alpins

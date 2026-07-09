@@ -18,8 +18,10 @@ class ProfilesController < ApplicationController
   OPACITY_RANGE = (0.0..1.0)
   ROUTE_WIDTH_RANGE = (2..12)
   HEX_COLOR = /\A#[0-9a-fA-F]{6}\z/
-  NAV_TURN_ALERT_RANGE = (50..500)
-  NAV_TURN_HINT_RANGE = (50..500)
+  # Bornes basses volontairement courtes : à pied, un virage annoncé 50 m à l'avance
+  # laisse déjà 40 secondes de marche.
+  NAV_TURN_ALERT_RANGE = (20..500)
+  NAV_TURN_HINT_RANGE = (20..500)
   NAV_TURN_URGENT_RANGE = (5..50)
   NAV_TURN_REPEAT_RANGE = (500..10000)
   NAV_TURN_REPEAT_URGENT_RANGE = (500..10000)
@@ -34,17 +36,7 @@ class ProfilesController < ApplicationController
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
   ALLOWED_OVERLAYS = %w[veloland mountainbikeland wanderland wanderwege].freeze
-  ALLOWED_SPORTS = %w[cycling mtb hiking].freeze
-
-  # Vitesses moyennes par défaut (km/h), miroir de User::DEFAULT_PREFERENCES.
-  DEFAULT_SPEEDS = { "cycling" => 18, "mtb" => 14, "hiking" => 4.5 }.freeze
-
-  # Diamètres (m) par défaut de la détection d'amas de virages, par sport. Miroir de
-  # User::DEFAULT_PREFERENCES.
-  DEFAULT_TURN_ANOMALY = { "cycling" => 100, "mtb" => 80, "hiking" => 60 }.freeze
-
-  # Profils de routage BRouter par défaut, par sport. Miroir de User::DEFAULT_PREFERENCES.
-  DEFAULT_ROUTE_PROFILES = { "cycling" => "trekking", "mtb" => "gravel", "hiking" => "hiking-mountain" }.freeze
+  ALLOWED_SPORTS = User::SPORTS
 
   # Profils BRouter proposés par sport (miroir du catalogue front brouter.ts /
   # PROFILES_BY_SPORT). Un profil n'est accepté que s'il est proposé pour son sport.
@@ -77,14 +69,9 @@ class ProfilesController < ApplicationController
     incoming = incoming.with_indifferent_access
 
     poi = incoming[:points_of_interest] || {}
-    map = incoming[:map] || {}
     navigation = incoming[:navigation] || {}
     search = incoming[:search] || {}
     display = incoming[:display] || {}
-    climb = incoming[:climb_detection] || {}
-    speeds = incoming[:speeds] || {}
-    turn_anomaly = incoming[:turn_anomaly] || {}
-    route_profiles = incoming[:route_profiles] || {}
     navbar = incoming[:navbar] || {}
 
     {
@@ -103,31 +90,13 @@ class ProfilesController < ApplicationController
         "radius_m" => clamp_int(poi[:radius_m], RADIUS_RANGE, 1500),
         "alert_m" => clamp_int(poi[:alert_m], POI_ALERT_RANGE, 100),
       },
-      "map" => {
-        "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, "cyclosm"),
-        "overlays" => sanitize_overlays(map[:overlays]),
-      },
       "navigation" => {
         "default_style" => allowed(navigation[:default_style], ALLOWED_MAP_STYLES, "swissgrau"),
         "zoom" => clamp_float(navigation[:zoom], NAV_ZOOM_RANGE, 17),
         "pitch" => clamp_int(navigation[:pitch], NAV_PITCH_RANGE, 0),
         "terrain" => to_bool(navigation[:terrain], false),
         "nav_fps" => clamp_float(navigation[:nav_fps], NAV_FPS_RANGE, 8),
-        "line_width" => clamp_int(navigation[:line_width], NAV_LINE_WIDTH_RANGE, 40),
-        "line_color" => hex_color(navigation[:line_color], "#7c3aed"),
-        "line_opacity" => clamp_float(navigation[:line_opacity], OPACITY_RANGE, 0.8),
-        "turn_alert_m" => clamp_int(navigation[:turn_alert_m], NAV_TURN_ALERT_RANGE, 100),
-        "turn_hint_m" => clamp_int(navigation[:turn_hint_m], NAV_TURN_HINT_RANGE, 150),
-        "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, 50),
-        "turn_repeat_ms" => clamp_int(navigation[:turn_repeat_ms], NAV_TURN_REPEAT_RANGE, 2000),
-        "turn_repeat_urgent_ms" => clamp_int(navigation[:turn_repeat_urgent_ms], NAV_TURN_REPEAT_URGENT_RANGE, 1000),
-        "turn_now_m" => clamp_int(navigation[:turn_now_m], NAV_TURN_NOW_RANGE, 15),
-        "turn_green_hold_m" => clamp_int(navigation[:turn_green_hold_m], NAV_TURN_GREEN_HOLD_RANGE, 100),
-        "turn_green_hold_s" => clamp_int(navigation[:turn_green_hold_s], NAV_TURN_GREEN_HOLD_S_RANGE, 10),
         "sound_volume" => clamp_int(navigation[:sound_volume], NAV_SOUND_VOLUME_RANGE, 100),
-        "turn_marker_size" => clamp_int(navigation[:turn_marker_size], NAV_TURN_MARKER_SIZE_RANGE, 25),
-        "turn_marker_color" => hex_color(navigation[:turn_marker_color], "#f97316"),
-        "turn_marker_icon_color" => hex_color(navigation[:turn_marker_icon_color], "#ffffff"),
         "show_climb_card" => to_bool(navigation[:show_climb_card], true),
         "radar_close_m" => clamp_int(navigation[:radar_close_m], NAV_RADAR_CLOSE_RANGE, 30),
         "auto_reroute" => to_bool(navigation[:auto_reroute], true),
@@ -141,20 +110,65 @@ class ProfilesController < ApplicationController
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),
         "show_grade_colors" => to_bool(display[:show_grade_colors], true),
         "show_elevation_chart" => to_bool(display[:show_elevation_chart], true),
-        "route_color" => hex_color(display[:route_color], "#7c3aed"),
-        "route_opacity" => clamp_float(display[:route_opacity], OPACITY_RANGE, 0.8),
-        "route_width" => clamp_int(display[:route_width], ROUTE_WIDTH_RANGE, 5),
+      },
+      "sports" => sanitize_sports(incoming[:sports] || {}),
+    }
+  end
+
+  # Un bloc par sport connu, quoi qu'envoie le client : un sport inconnu est ignoré,
+  # un sport manquant retombe entièrement sur ses défauts.
+  def sanitize_sports(sports)
+    User::DEFAULT_PREFERENCES["sports"].each_with_object({}) do |(sport, defaults), result|
+      result[sport] = sanitize_sport(sport, sports[sport] || {}, defaults)
+    end
+  end
+
+  def sanitize_sport(sport, raw, defaults)
+    map = raw[:map] || {}
+    route = raw[:route] || {}
+    climb = raw[:climb_detection] || {}
+    navigation = raw[:navigation] || {}
+
+    {
+      "speed" => clamp_float(raw[:speed], SPEED_RANGE, defaults["speed"]),
+      "route_profile" => sanitize_route_profile(sport, raw[:route_profile], defaults["route_profile"]),
+      "turn_anomaly_m" => clamp_int(raw[:turn_anomaly_m], TURN_ANOMALY_RANGE, defaults["turn_anomaly_m"]),
+      "map" => {
+        "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, defaults.dig("map", "default_style")),
+        "overlays" => sanitize_overlays(map[:overlays]),
+      },
+      "route" => {
+        "color" => hex_color(route[:color], defaults.dig("route", "color")),
+        "opacity" => clamp_float(route[:opacity], OPACITY_RANGE, defaults.dig("route", "opacity")),
+        "width" => clamp_int(route[:width], ROUTE_WIDTH_RANGE, defaults.dig("route", "width")),
       },
       "climb_detection" => {
-        "min_grade" => clamp_float(climb[:min_grade], MIN_GRADE_RANGE, 2),
-        "min_gain_m" => clamp_int(climb[:min_gain_m], MIN_GAIN_RANGE, 60),
-        "min_length_m" => clamp_int(climb[:min_length_m], MIN_LENGTH_RANGE, 500),
-        "grade_smoothing_m" => clamp_int(climb[:grade_smoothing_m], GRADE_SMOOTHING_RANGE, 40),
-        "merge_gap_m" => clamp_int(climb[:merge_gap_m], MERGE_GAP_RANGE, 350),
+        "min_grade" => clamp_float(climb[:min_grade], MIN_GRADE_RANGE, defaults.dig("climb_detection", "min_grade")),
+        "min_gain_m" => clamp_int(climb[:min_gain_m], MIN_GAIN_RANGE, defaults.dig("climb_detection", "min_gain_m")),
+        "min_length_m" => clamp_int(climb[:min_length_m], MIN_LENGTH_RANGE, defaults.dig("climb_detection", "min_length_m")),
+        "grade_smoothing_m" => clamp_int(climb[:grade_smoothing_m], GRADE_SMOOTHING_RANGE, defaults.dig("climb_detection", "grade_smoothing_m")),
+        "merge_gap_m" => clamp_int(climb[:merge_gap_m], MERGE_GAP_RANGE, defaults.dig("climb_detection", "merge_gap_m")),
       },
-      "speeds" => sanitize_speeds(speeds),
-      "turn_anomaly" => sanitize_turn_anomaly(turn_anomaly),
-      "route_profiles" => sanitize_route_profiles(route_profiles),
+      "navigation" => sanitize_sport_navigation(navigation, defaults["navigation"]),
+    }
+  end
+
+  def sanitize_sport_navigation(navigation, defaults)
+    {
+      "line_width" => clamp_int(navigation[:line_width], NAV_LINE_WIDTH_RANGE, defaults["line_width"]),
+      "line_color" => hex_color(navigation[:line_color], defaults["line_color"]),
+      "line_opacity" => clamp_float(navigation[:line_opacity], OPACITY_RANGE, defaults["line_opacity"]),
+      "turn_marker_size" => clamp_int(navigation[:turn_marker_size], NAV_TURN_MARKER_SIZE_RANGE, defaults["turn_marker_size"]),
+      "turn_marker_color" => hex_color(navigation[:turn_marker_color], defaults["turn_marker_color"]),
+      "turn_marker_icon_color" => hex_color(navigation[:turn_marker_icon_color], defaults["turn_marker_icon_color"]),
+      "turn_alert_m" => clamp_int(navigation[:turn_alert_m], NAV_TURN_ALERT_RANGE, defaults["turn_alert_m"]),
+      "turn_hint_m" => clamp_int(navigation[:turn_hint_m], NAV_TURN_HINT_RANGE, defaults["turn_hint_m"]),
+      "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, defaults["turn_urgent_m"]),
+      "turn_now_m" => clamp_int(navigation[:turn_now_m], NAV_TURN_NOW_RANGE, defaults["turn_now_m"]),
+      "turn_repeat_ms" => clamp_int(navigation[:turn_repeat_ms], NAV_TURN_REPEAT_RANGE, defaults["turn_repeat_ms"]),
+      "turn_repeat_urgent_ms" => clamp_int(navigation[:turn_repeat_urgent_ms], NAV_TURN_REPEAT_URGENT_RANGE, defaults["turn_repeat_urgent_ms"]),
+      "turn_green_hold_m" => clamp_int(navigation[:turn_green_hold_m], NAV_TURN_GREEN_HOLD_RANGE, defaults["turn_green_hold_m"]),
+      "turn_green_hold_s" => clamp_int(navigation[:turn_green_hold_s], NAV_TURN_GREEN_HOLD_S_RANGE, defaults["turn_green_hold_s"]),
     }
   end
 
@@ -174,24 +188,11 @@ class ProfilesController < ApplicationController
     value.map { |c| c.to_s.downcase }.uniq.select { |c| c.match?(/\A[a-z]{2}\z/) }.first(COUNTRY_CODES_MAX)
   end
 
-  def sanitize_speeds(speeds)
-    DEFAULT_SPEEDS.each_with_object({}) do |(sport, default), out|
-      out[sport] = clamp_float(speeds[sport], SPEED_RANGE, default)
-    end
-  end
-
-  def sanitize_turn_anomaly(turn_anomaly)
-    DEFAULT_TURN_ANOMALY.each_with_object({}) do |(sport, default), out|
-      out[sport] = clamp_int(turn_anomaly[sport], TURN_ANOMALY_RANGE, default)
-    end
-  end
-
-  # Ne garde par sport qu'un profil proposé pour ce sport, sinon repli sur le défaut.
-  def sanitize_route_profiles(route_profiles)
-    DEFAULT_ROUTE_PROFILES.each_with_object({}) do |(sport, default), out|
-      value = route_profiles[sport].to_s
-      out[sport] = ALLOWED_ROUTE_PROFILES.fetch(sport, []).include?(value) ? value : default
-    end
+  # N'accepte qu'un profil proposé pour ce sport, sinon repli sur le défaut : pas de
+  # combinaison incohérente type rando + profil vélo.
+  def sanitize_route_profile(sport, value, default)
+    value = value.to_s
+    ALLOWED_ROUTE_PROFILES.fetch(sport, []).include?(value) ? value : default
   end
 
   def to_bool(value, default)

@@ -484,7 +484,7 @@ en:
       alert_help: "While navigating, a point of interest within this distance triggers a notification at the bottom of the screen."
     map:
       title: "Map type"
-      help: "Default base map shown when opening the route builder."
+      help: "Default base map shown when opening the route builder, for the sport selected above."
       group_world: "World"
       group_swiss: "Switzerland & nearby"
       style_cyclosm: "Cycle"
@@ -516,10 +516,13 @@ en:
       auto_reroute_cooldown_s: "Delay between automatic recalculations"
       auto_reroute_cooldown_s_help: "Wait time before another automatic recalculation attempt while you stay off-route. The countdown shows on the “Recalculate” button."
       nav_fps: "Camera smoothness"
+      line_title: "Route line and turn indicators"
+      line_help: "Set for the sport selected at the top of the page. The preview below reflects them live."
       line_width: "Route line width"
       line_color: "Route line colour"
       line_opacity: "Route line opacity"
       turns_title: "Turns"
+      turns_help: "Set for the sport selected at the top of the page: a turn announced 100 m ahead arrives in 20 s on a bike and in 80 s on foot."
       turn_alert_m: "Sound alert distance"
       turn_hint_m: "Turn indicator distance"
       turn_urgent_m: "Urgent alert distance (orange)"
@@ -558,15 +561,18 @@ en:
       merge_gap_help: "Two climbs separated by a flat shorter than this distance are merged into a single climb."
       grade_smoothing: "Grade smoothing"
       grade_smoothing_help: "Window used to compute the grade. A higher value smooths terrain noise (elevation rounded to the metre); a lower value keeps short slopes but may show spurious values."
-    speeds:
-      title: "Average speeds"
-      help: "Average speed per activity, used to estimate ride time on a route. The route builder and list pick the speed matching the selected activity."
-    route_profiles:
-      title: "Routing profiles"
-      help: "Default BRouter routing profile for each activity. It determines which ways are preferred (small roads, main roads, tracks…). A new route starts on this profile; it stays changeable in the builder."
+    sport:
+      picker: "Settings for sport:"
+      picker_help: "Several sections below depend on the activity — speed, routing, base map, climb detection, turn announcements. Pick the sport whose settings you are editing."
+      title: "Sport settings"
+      speed: "Average speed"
+      speed_help: "Used to estimate ride time on a route, both in the builder and in the list."
+      route_profile: "Routing profile"
+      route_title: "Route line in the builder"
     turn_anomaly:
       title: "Suspicious turn detection"
-      help: "When saving, the builder flags spots where several sharp turns bunch up within a small radius — usually a sign of a waypoint dropped off the road. This sets the diameter (m) of the analysed area, per activity: a smaller value cuts false alarms on switchback trails (hiking, MTB)."
+      help: "When saving, the builder flags spots where several sharp turns bunch up within a small radius — usually a sign of a waypoint dropped off the road. A smaller value cuts false alarms on switchback trails (hiking, MTB)."
+      diameter: "Diameter of the analysed area"
   common:
     days_ago_today: "today"
     days_ago_yesterday: "yesterday"

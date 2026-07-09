@@ -1122,13 +1122,23 @@ function recomputeWaypointGeomIndices() {
   const wps = routeStore.waypoints.value
   const geom = routeStore.geometry.value
   if (!wps.length || !geom.length) { waypointGeomIndices = []; return }
-  waypointGeomIndices = wps.map((w) => {
-    let best = 0, bestDist = Infinity
-    for (let i = 0; i < geom.length; i++) {
+  // La géométrie routée parcourt les waypoints dans l'ordre : on cherche le sommet
+  // le plus proche de chaque waypoint en repartant de l'index du précédent, ce qui
+  // garantit des index monotones croissants. Sinon, sur un itinéraire en boucle où
+  // le dernier waypoint = le premier, il se rattacherait au début du tracé (index 0)
+  // et le tronçon final deviendrait un intervalle vide, cassant l'insertion de point.
+  let from = 0
+  waypointGeomIndices = wps.map((w, wi) => {
+    // Le premier waypoint peut chercher sur tout le tracé ; les suivants repartent
+    // de l'index du précédent pour rester monotones.
+    const start = wi === 0 ? 0 : from
+    let best = start, bestDist = Infinity
+    for (let i = start; i < geom.length; i++) {
       const dx = geom[i][0] - w.lng, dy = geom[i][1] - w.lat
       const d = dx * dx + dy * dy
       if (d < bestDist) { bestDist = d; best = i }
     }
+    from = best
     return best
   })
 }

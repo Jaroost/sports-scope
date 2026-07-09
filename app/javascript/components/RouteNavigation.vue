@@ -33,7 +33,7 @@ import type { PlaceResult } from '../composables/usePlaceSearch'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistDefaultMapStyle, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
-import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
+import { catalogDefaultForSport, isProfileValidForSport, profilesForSport } from '../brouter'
 import { useNavPois } from '../composables/useNavPois'
 import type { NavPlace } from '../composables/useNavPois'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
@@ -433,6 +433,44 @@ const confirmLabel = computed(() =>
     ? t('routes.navigate_via_points', { count: destPoints.value.length })
     : t('routes.navigate_here'),
 )
+// Sport et profil de routage BRouter du trajet en cours de composition, réglables dans
+// le panneau de destination. Éphémères : réamorcés à chaque ouverture du mode « cible »
+// (cf. startPlaceNav) depuis le tracé chargé ou les préférences du compte — un choix
+// fait ici ne modifie pas les préférences. Le sport ne sert qu'à filtrer les profils.
+const navSport = ref<Sport>('cycling')
+const navProfile = ref<string>(catalogDefaultForSport('cycling'))
+
+const NAV_SPORTS: Sport[] = ['cycling', 'mtb', 'hiking']
+
+function sportIcon(s: Sport) {
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
+
+// Sport et profil effectifs du prochain calcul BRouter. En mode « cible », ce sont les
+// réglages du panneau ; hors de ce mode (« Naviguer ici » depuis un POI), on garde ceux
+// du tracé suivi, ou à défaut le sport par défaut du compte et son profil.
+function navRouting(): { sport: Sport; profile: string } {
+  if (placeNavActive.value) return { sport: navSport.value, profile: navProfile.value }
+  if (hasRoute.value) return { sport: routeSport, profile: routeProfile }
+  const sport = userPreferences().display.default_sport
+  return { sport, profile: routeProfileForSport(sport) }
+}
+
+// Changer de sport réaligne le profil sur le défaut du nouveau sport (préférence compte
+// ou défaut catalogue) : les profils sont filtrés par sport, l'ancien peut être invalide.
+function selectNavSport(s: Sport) {
+  if (s === navSport.value) return
+  navSport.value = s
+  navProfile.value = routeProfileForSport(s)
+  updatePlacePreview()
+}
+
+function selectNavProfile(p: string) {
+  if (p === navProfile.value) return
+  navProfile.value = p
+  updatePlacePreview()
+}
+
 const navStarting = ref(false)
 const navError = ref<string | null>(null)
 // Insertion d'un point intermédiaire dans le tracé en cours (POI / clic droit) : appel
@@ -1132,6 +1170,12 @@ function unloadRoute() {
 // ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
 
 function startPlaceNav() {
+  // Réamorce les réglages de routage : sur un tracé, on repart de son sport et de son
+  // profil (le détour ressemblera au tracé suivi) ; en mode libre, du sport par défaut
+  // du compte et de son profil. L'utilisateur peut ensuite les changer pour ce trajet.
+  const sport = hasRoute.value ? routeSport : userPreferences().display.default_sport
+  navSport.value = sport
+  navProfile.value = hasRoute.value ? routeProfile : routeProfileForSport(sport)
   placeNavActive.value = true
   navError.value = null
   // Le tiroir de commandes et la recherche se disputent le haut de l'écran : on
@@ -1181,7 +1225,7 @@ async function updatePlacePreview() {
   if (!lastPos || pts.length === 0) { clearPlacePreview(); return }
   const seq = ++previewSeq
   previewLoading.value = true
-  const profile = hasRoute.value ? routeProfile : routeProfileForSport(userPreferences().display.default_sport)
+  const { profile } = navRouting()
   try {
     const result = await fetchRouteVia([lastPos, ...pts], profile)
     if (seq !== previewSeq) return
@@ -1348,10 +1392,7 @@ async function navigateVia(name: string, vias: LngLat[], precomputed?: { geometr
   navStarting.value = true
   navError.value = null
   try {
-    // Sur un tracé : on garde son sport et son profil de routage ; en mode libre : le
-    // sport par défaut du profil et le profil de routage par défaut de ce sport.
-    const sport = hasRoute.value ? routeSport : userPreferences().display.default_sport
-    const profile = hasRoute.value ? routeProfile : routeProfileForSport(sport)
+    const { sport, profile } = navRouting()
     // Réutilise l'aperçu déjà calculé (« ce que tu as vu est ce que tu auras »),
     // sinon route à la volée (cas d'un POI tapé, sans aperçu préalable).
     const { geometry: geom, hints } = precomputed ?? await fetchRouteVia([lastPos, ...vias], profile)
@@ -2977,15 +3018,52 @@ function onScreenOffTap() {
          Un bouton « annuler le dernier point » permet de corriger une étape avant de
          lancer le guidage. -->
     <div v-if="placeNavActive && destPoints.length" class="nav-place-confirm-wrap">
-      <!-- Aperçu du trajet : distance estimée (ou calcul en cours), au-dessus des
-           boutons. La ligne pointillée est tracée sur la carte. -->
-      <div v-if="previewLoading || previewDistM != null" class="nav-place-preview-info shadow">
-        <template v-if="previewLoading">
-          <i class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>{{ t('routes.computing_route') }}
-        </template>
-        <template v-else>
-          <i class="fa-solid fa-route me-1" aria-hidden="true"></i>{{ (previewDistM / 1000).toFixed(1) }} km
-        </template>
+      <!-- Réglages du routage (sport + profil BRouter) et aperçu du trajet : distance
+           estimée (ou calcul en cours), au-dessus des boutons. Chaque changement relance
+           le calcul, dont la ligne pointillée tracée sur la carte. Ces réglages ne valent
+           que pour ce trajet : ils ne touchent pas aux préférences du compte. -->
+      <div class="nav-place-routing shadow">
+        <div class="nav-place-sports" role="group" :aria-label="t('routes.wt_sport')">
+          <button
+            v-for="s in NAV_SPORTS"
+            :key="s"
+            type="button"
+            class="btn btn-sm"
+            :class="navSport === s ? 'btn-primary' : 'btn-outline-secondary'"
+            :disabled="navStarting"
+            :aria-pressed="navSport === s"
+            :title="t(`routes.wt_sport_${s}`)"
+            @click="selectNavSport(s)"
+          >
+            <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+            <span class="ms-1">{{ t(`routes.wt_sport_${s}`) }}</span>
+          </button>
+        </div>
+        <select
+          class="form-select form-select-sm nav-place-profile"
+          :value="navProfile"
+          :disabled="navStarting"
+          :aria-label="t('routes.profile_label')"
+          :title="t(`routes.brouter_profile.${navProfile}_desc`)"
+          @change="selectNavProfile(($event.target as HTMLSelectElement).value)"
+        >
+          <option
+            v-for="p in profilesForSport(navSport)"
+            :key="p"
+            :value="p"
+            :title="t(`routes.brouter_profile.${p}_desc`)"
+          >
+            {{ t(`routes.brouter_profile.${p}`) }}
+          </option>
+        </select>
+        <div v-if="previewLoading || previewDistM != null" class="nav-place-preview-info">
+          <template v-if="previewLoading">
+            <i class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>{{ t('routes.computing_route') }}
+          </template>
+          <template v-else>
+            <i class="fa-solid fa-route me-1" aria-hidden="true"></i>{{ (previewDistM / 1000).toFixed(1) }} km
+          </template>
+        </div>
       </div>
       <div class="nav-place-actions">
         <button
@@ -3357,10 +3435,18 @@ function onScreenOffTap() {
   z-index: 9; display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
 }
 .nav-place-actions { display: flex; align-items: center; gap: 0.5rem; }
+/* Carte de réglage du routage : sport, profil BRouter, distance de l'aperçu. */
+.nav-place-routing {
+  background: rgba(255, 255, 255, 0.95); color: #1f2937; border-radius: 0.75rem;
+  padding: 0.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.4rem;
+  min-width: 16rem; max-width: 92vw;
+}
+.nav-place-sports { display: flex; gap: 0.25rem; }
+.nav-place-sports .btn { flex: 1; white-space: nowrap; }
+.nav-place-profile { font-weight: 500; }
 .nav-place-preview-info {
-  background: rgba(255, 255, 255, 0.95); color: #1f2937; border-radius: 999px;
-  padding: 0.25rem 0.8rem; font-size: 0.9rem; font-weight: 600; min-height: 1.6rem;
-  display: inline-flex; align-items: center;
+  font-size: 0.9rem; font-weight: 600; min-height: 1.6rem;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .nav-place-undo {
   flex-shrink: 0; width: 3rem; height: 3rem; border-radius: 999px;

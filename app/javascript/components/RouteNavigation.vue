@@ -33,7 +33,8 @@ import type { PlaceResult } from '../composables/usePlaceSearch'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistDefaultMapStyle, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
-import { catalogDefaultForSport, isProfileValidForSport, profilesForSport } from '../brouter'
+import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
+import NavRoutingPicker from './NavRoutingPicker.vue'
 import { useNavPois } from '../composables/useNavPois'
 import type { NavPlace } from '../composables/useNavPois'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
@@ -433,42 +434,44 @@ const confirmLabel = computed(() =>
     ? t('routes.navigate_via_points', { count: destPoints.value.length })
     : t('routes.navigate_here'),
 )
-// Sport et profil de routage BRouter du trajet en cours de composition, réglables dans
-// le panneau de destination. Éphémères : réamorcés à chaque ouverture du mode « cible »
-// (cf. startPlaceNav) depuis le tracé chargé ou les préférences du compte — un choix
-// fait ici ne modifie pas les préférences. Le sport ne sert qu'à filtrer les profils.
+// Sport et profil du trajet en cours de composition, ajustables dans le panneau de
+// destination pour ce seul trajet. Réamorcés sur ceux de la séance à chaque ouverture du
+// mode « cible » (cf. startPlaceNav), et reversés dans la séance au lancement du guidage.
 const navSport = ref<Sport>('cycling')
 const navProfile = ref<string>(catalogDefaultForSport('cycling'))
 
-const NAV_SPORTS: Sport[] = ['cycling', 'mtb', 'hiking']
-
-function sportIcon(s: Sport) {
-  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
-}
-
-// Sport et profil effectifs du prochain calcul BRouter. En mode « cible », ce sont les
-// réglages du panneau ; hors de ce mode (« Naviguer ici » depuis un POI), on garde ceux
-// du tracé suivi, ou à défaut le sport par défaut du compte et son profil.
+// Sport et profil effectifs du prochain calcul BRouter : ceux du panneau de destination
+// pendant qu'on le compose, ceux de la séance partout ailleurs.
 function navRouting(): { sport: Sport; profile: string } {
-  if (placeNavActive.value) return { sport: navSport.value, profile: navProfile.value }
-  if (hasRoute.value) return { sport: routeSport, profile: routeProfile }
-  const sport = userPreferences().display.default_sport
-  return { sport, profile: routeProfileForSport(sport) }
+  return placeNavActive.value
+    ? { sport: navSport.value, profile: navProfile.value }
+    : { sport: routeSport.value, profile: routeProfile.value }
 }
 
-// Changer de sport réaligne le profil sur le défaut du nouveau sport (préférence compte
-// ou défaut catalogue) : les profils sont filtrés par sport, l'ancien peut être invalide.
-function selectNavSport(s: Sport) {
-  if (s === navSport.value) return
-  navSport.value = s
-  navProfile.value = routeProfileForSport(s)
+// Réglage du trajet en cours de composition : chaque changement relance l'aperçu.
+function applyNavRouting({ sport, profile }: { sport: Sport; profile: string }) {
+  navSport.value = sport
+  navProfile.value = profile
   updatePlacePreview()
 }
 
-function selectNavProfile(p: string) {
-  if (p === navProfile.value) return
-  navProfile.value = p
-  updatePlacePreview()
+// Adopte le sport et le profil de routage d'un tracé chargé (liste ou lien partagé). Un
+// tracé sauvegardé avant l'introduction des profils, ou avec un profil incohérent avec son
+// sport, retombe sur le défaut catalogue du sport plutôt que d'être envoyé tel quel à
+// BRouter (qui répondrait 500 sur un profil inconnu).
+function adoptRouteRouting(route: any) {
+  const sport = (route.activity as Sport) || 'cycling'
+  routeSport.value = sport
+  routeProfile.value = isProfileValidForSport(route.profile, sport) ? route.profile : catalogDefaultForSport(sport)
+}
+
+// Réglage de la séance, depuis le menu Itinéraire du tiroir. Le tracé suivi est aussitôt
+// recalculé avec le nouveau profil quand on en a encore la source ; sinon le réglage
+// s'appliquera au prochain calcul (reroutage, insertion de via, édition, destination).
+function applyRouteRouting({ sport, profile }: { sport: Sport; profile: string }) {
+  routeSport.value = sport
+  routeProfile.value = profile
+  void recomputeForRoutingChange()
 }
 
 const navStarting = ref(false)
@@ -535,11 +538,16 @@ let turnsFromBRouter = false
 // Voicehints bruts du tracé (lng/lat/cmd/angle) conservés pour reconstruire les virages
 // après un reroutage : on ré-épissera ceux du tronçon restant aux hints du détour.
 let rawHints: VoiceHint[] = []
-// Catégorie d'activité du tracé (Route#activity) — pilote la vitesse et l'icône.
-let routeSport: Sport = 'cycling'
-// Profil de routage BRouter du tracé (Route#profile) → utilisé au reroutage en séance
-// pour reproduire le même style de tracé qu'à la création. Repli sur le défaut du sport.
-let routeProfile: string = catalogDefaultForSport('cycling')
+// Sport et profil de routage BRouter DE LA SÉANCE. Ils pilotent tout ce qui appelle
+// BRouter en navigation : reroutage hors-trace, insertion d'un point intermédiaire,
+// édition des points d'ancrage, et le trajet d'une navigation vers un lieu (qui les reprend
+// comme valeurs de départ). Réglables à tout moment via NavRoutingPicker, dans le menu
+// Itinéraire du tiroir, sans jamais toucher au tracé sauvegardé ni aux préférences.
+//
+// Amorcés sur les préférences du compte, puis écrasés par le sport et le profil d'un tracé
+// chargé (adoptRouteRouting) — un tracé se reroute comme il a été créé.
+const routeSport = ref<Sport>(userPreferences().display.default_sport)
+const routeProfile = ref<string>(routeProfileForSport(routeSport.value))
 const routeName = ref('')
 
 // ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
@@ -551,6 +559,25 @@ let routeWaypoints: Waypoint[] = []
 // Identifiant de l'itinéraire sauvegardé (pour l'enregistrement des modifications via
 // PATCH /api/routes/:id). null pour un lien partagé d'autrui ou une destination ad hoc.
 let routeId: number | null = null
+
+// ─── Sources de recalcul du tracé suivi ────────────────────────────────────────
+// De quoi rejouer le calcul BRouter du tracé quand le profil de la séance change
+// (recomputeForRoutingChange). Chaque forme de tracé garde une source différente :
+//
+//   itinéraire chargé   → routeWaypoints (ci-dessus), qui le reconstruit entièrement
+//   destination ad hoc  → routeVias, les étapes traversées depuis la position
+//   après un reroutage  → detourEndIdx, le sommet où le détour rejoint le tracé
+//
+// Étapes d'une destination ad hoc (« naviguer ici »), dans l'ordre, la dernière étant la
+// destination. Conservées après un reroutage — c'est encore la meilleure source pour ce
+// tracé-là. Vidées dès qu'on charge un itinéraire ou qu'on quitte le tracé.
+let routeVias: LngLat[] = []
+// Indice, dans `geometry`, du sommet où le détour issu du dernier reroutage rejoint le
+// tracé d'origine ; -1 quand la tête du tracé n'est pas un détour. Devient caduc dès que
+// le coureur a dépassé ce sommet (lastIdx >= detourEndIdx) : au-delà, il n'y a plus de
+// détour à refaire, et le tracé d'origine n'a plus de source (ses points d'ancrage ont
+// été jetés par applyReroute).
+let detourEndIdx = -1
 // Mode édition : affiche les points d'ancrage déplaçables ; un tap sur la carte en
 // ajoute un (au plus proche du tracé), un tap sur un point ouvre sa suppression. Toute
 // modification re-route l'itinéraire entier via BRouter (mêmes règles qu'au créateur).
@@ -895,10 +922,10 @@ async function loadSharedRouteData(token: string) {
   if (geom.length < 2) throw new Error(t('routes.error_min_points'))
   routeToken.value = token
   routeName.value = route.name || ''
-  routeSport = (route.activity as Sport) || 'cycling'
-  routeProfile = isProfileValidForSport(route.profile, routeSport) ? route.profile : catalogDefaultForSport(routeSport)
+  adoptRouteRouting(route)
   routeId = typeof route.id === 'number' ? route.id : null
   routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
+  routeVias = []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
@@ -978,31 +1005,103 @@ function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number
   return j
 }
 
+// Étapes d'une destination ad hoc encore devant le coureur : on projette chacune sur le
+// tracé et on garde celles situées au-delà de sa position. Repli sur la destination seule
+// si le GPS les a toutes « dépassées » — il reste toujours quelque part où aller.
+function viasAhead(): LngLat[] {
+  if (routeVias.length === 0) return []
+  const ahead = routeVias.filter((v) => nearestGeomIdxOf(v[0], v[1]) > lastIdx)
+  return ahead.length > 0 ? ahead : [routeVias[routeVias.length - 1]]
+}
+
+// Refait le trajet d'une destination ad hoc depuis la position, par les étapes restantes.
+async function recomputeVias(): Promise<boolean> {
+  const ahead = viasAhead()
+  if (!lastPos || ahead.length === 0) return false
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
+  rerouting.value = true
+  const token = ++rerouteToken
+  const from = lastPos
+  try {
+    const { geometry: geom, hints } = await fetchRouteVia([from, ...ahead], routeProfile.value)
+    if (token !== rerouteToken) return false
+    applyReroute(geom, hints)
+    routeVias = ahead   // les étapes franchies sortent définitivement de la source
+    return true
+  } catch {
+    return false
+  } finally {
+    if (token === rerouteToken) rerouting.value = false
+  }
+}
+
+// Rejoue le calcul BRouter du tracé suivi avec le profil de la séance qu'on vient de
+// changer, en se servant de la meilleure source encore disponible (cf. « Sources de
+// recalcul »). Un tracé sauvegardé déjà rerouté et dont on a franchi le raccord n'a plus
+// de source : il conserve le profil avec lequel il a été calculé.
+//
+// Un recalcul déjà en vol porterait l'ancien profil. On libère donc la garde `rerouting`
+// avant d'en lancer un nouveau : les fonctions appelées incrémentent leur jeton, ce qui
+// périme la réponse en vol — son `finally` ne détiendra plus le jeton courant et ne
+// touchera plus à la garde, c'est à nous de le faire.
+async function recomputeForRoutingChange() {
+  if (!hasRoute.value) return
+  rerouting.value = false
+  rerouteError.value = null
+
+  // Hors-trace, le détour part de la position : il prime sur toute autre source.
+  if (offRoute.value) { void recalcRoute(); return }
+
+  let done: boolean
+  if (routeWaypoints.length >= 2) {
+    // Itinéraire chargé : reconstruit de bout en bout depuis ses points d'ancrage.
+    done = await recomputeFromWaypoints({ markDirty: editMode.value })
+  } else if (routeVias.length > 0) {
+    done = await recomputeVias()
+  } else if (detourEndIdx > 0 && lastIdx < detourEndIdx) {
+    // Détour d'un reroutage, pas encore parcouru : on le refait jusqu'au même raccord.
+    done = await rerouteToward(detourEndIdx)
+  } else {
+    return
+  }
+  // Le tracé recalculé est visible sur la carte ; seul l'échec mérite d'être signalé.
+  if (!done) showPoiToast(false, t('routes.reroute_failed'))
+}
+
 async function recalcRoute() {
   if (rerouting.value || !offRoute.value || !lastPos || geometry.length < 2) return
   // Arme le cooldown du recalcul auto pour TOUTE tentative (auto ou manuelle, en ligne
   // comme hors-ligne) : un appui manuel décale d'autant la prochaine relance auto, et un
   // échec hors-ligne n'enchaîne pas une rafale de tentatives.
   lastAutoReroute = performance.now()
+  const fromIdx = Math.max(0, Math.min(lastIdx, geometry.length - 1))
+  await rerouteToward(rejoinIndexAhead(lastPos, currentBearing, fromIdx))
+}
+
+// Calcule un détour de la position courante jusqu'au sommet `rejoinIdx` du tracé, puis
+// l'épisse devant la suite inchangée. Cœur commun au reroutage hors-trace (recalcRoute,
+// manuel ou auto) et à la reprise du détour après un changement de profil, qui vise le
+// même point de raccord (recomputeForRoutingChange).
+async function rerouteToward(rejoinIdx: number): Promise<boolean> {
+  if (rerouting.value || !lastPos || geometry.length < 2) return false
+  if (rejoinIdx <= 0 || rejoinIdx >= geometry.length) return false
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     rerouteError.value = t('routes.reroute_offline')
-    return
+    return false
   }
   rerouting.value = true
   rerouteError.value = null
   const token = ++rerouteToken
   const from = lastPos
   try {
-    const fromIdx = Math.max(0, Math.min(lastIdx, geometry.length - 1))
-    const rejoinIdx = rejoinIndexAhead(from, currentBearing, fromIdx)
     const target = geometry[rejoinIdx]
     // Cap de départ passé à BRouter pour interdire un demi-tour collé au départ, mais
     // seulement en mouvement : à l'arrêt currentBearing est figé sur le dernier
     // déplacement et orienterait le routage au hasard, donc on l'omet (undefined).
     const heading = speedKmh.value / 3.6 > MIN_SPEED_MS ? currentBearing : undefined
-    const { geometry: detour, hints: detourHints } = await fetchRouteToPlace(from, [target[0], target[1]], routeProfile, heading)
+    const { geometry: detour, hints: detourHints } = await fetchRouteToPlace(from, [target[0], target[1]], routeProfile.value, heading)
     // Réponse périmée (clic plus récent) ou composant démonté : on n'écrase rien.
-    if (token !== rerouteToken) return
+    if (token !== rerouteToken) return false
 
     // Épissage : détour (départ → raccord) + suite inchangée du tracé original.
     const tail = geometry.slice(rejoinIdx)
@@ -1013,8 +1112,14 @@ async function recalcRoute() {
     const tailKeys = new Set(tail.map((c) => `${c[0]},${c[1]}`))
     const tailHints = rawHints.filter((h) => tailKeys.has(`${h.lng},${h.lat}`))
     applyReroute(newGeometry, detourHints.concat(tailHints))
+    // Le détour occupe désormais la tête du tracé : on retient où il se raccorde, pour
+    // pouvoir le refaire au même endroit si le profil change avant qu'on l'ait parcouru.
+    // applyReroute a remis lastIdx à 0, donc le raccord est bien devant nous.
+    detourEndIdx = detour.length
+    return true
   } catch {
     if (token === rerouteToken) rerouteError.value = t('routes.reroute_failed')
+    return false
   } finally {
     if (token === rerouteToken) rerouting.value = false
   }
@@ -1069,6 +1174,9 @@ function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   // position GPS, ou destination ad hoc) : on désactive l'édition.
   routeWaypoints = []
   routeId = null
+  // Les indices de `geometry` viennent de changer : tout détour retenu est caduc.
+  // rerouteToward, seul à en produire un, le réarme juste après cet appel.
+  detourEndIdx = -1
   syncEditable()
   ensureRouteInstalled()
   refreshRemaining()
@@ -1084,10 +1192,10 @@ function loadRoute(route: any) {
   if (geom.length < 2) { navError.value = t('routes.error_min_points'); return }
   routeToken.value = (route.share_token as string) || null
   routeName.value = route.name || t('routes.destination')
-  routeSport = (route.activity as Sport) || 'cycling'
-  routeProfile = isProfileValidForSport(route.profile, routeSport) ? route.profile : catalogDefaultForSport(routeSport)
+  adoptRouteRouting(route)
   routeId = typeof route.id === 'number' ? route.id : null
   routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
+  routeVias = []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
@@ -1119,6 +1227,8 @@ function unloadRoute() {
   // Le geste de masquage groupé n'existe qu'en navigation sur itinéraire : on réaffiche.
   bottomOverlaysVisible.value = true
   routeWaypoints = []
+  routeVias = []
+  detourEndIdx = -1
   routeId = null
   syncEditable()
   hasRoute.value = false
@@ -1170,12 +1280,10 @@ function unloadRoute() {
 // ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
 
 function startPlaceNav() {
-  // Réamorce les réglages de routage : sur un tracé, on repart de son sport et de son
-  // profil (le détour ressemblera au tracé suivi) ; en mode libre, du sport par défaut
-  // du compte et de son profil. L'utilisateur peut ensuite les changer pour ce trajet.
-  const sport = hasRoute.value ? routeSport : userPreferences().display.default_sport
-  navSport.value = sport
-  navProfile.value = hasRoute.value ? routeProfile : routeProfileForSport(sport)
+  // Le trajet part des réglages de la séance ; l'utilisateur peut ensuite les ajuster pour
+  // ce seul trajet, et son choix redeviendra celui de la séance au lancement du guidage.
+  navSport.value = routeSport.value
+  navProfile.value = routeProfile.value
   placeNavActive.value = true
   navError.value = null
   // Le tiroir de commandes et la recherche se disputent le haut de l'écran : on
@@ -1399,9 +1507,11 @@ async function navigateVia(name: string, vias: LngLat[], precomputed?: { geometr
     routeName.value = name || t('routes.destination')
     // Destination ad hoc (non sauvegardée) : pas de token → ni hors-ligne ni reprise.
     routeToken.value = null
-    routeSport = sport
-    routeProfile = profile
+    routeSport.value = sport
+    routeProfile.value = profile
     applyReroute(geom, hints)
+    // Étapes retenues comme source de recalcul : ce trajet n'a pas d'autre définition.
+    routeVias = vias.slice()
     cancelPlaceNav()
     following.value = true
     cameraUnlocked.value = false
@@ -1454,7 +1564,7 @@ async function insertViaIntoRoute(lng: number, lat: number) {
     while (b < geometry.length - 1 && cumDistM[b] - cumDistM[nearIdx] < VIA_ANCHOR_GAP_M) b++
     const { geometry: detour, hints: detourHints } = await fetchRouteVia(
       [[geometry[a][0], geometry[a][1]], [lng, lat], [geometry[b][0], geometry[b][1]]],
-      routeProfile,
+      routeProfile.value,
     )
     const head = geometry.slice(0, a)
     const tail = geometry.slice(b + 1)
@@ -1527,29 +1637,40 @@ function waypointInsertIndex(lng: number, lat: number, nearIdx?: number): number
   return routeWaypoints.length
 }
 
+// Installe une géométrie recalculée à la place du tracé courant, sans toucher à ses
+// sources (points d'ancrage, étapes). Le coureur peut être n'importe où dessus, donc on
+// relocalise au prochain fix plutôt que de repartir du début.
+function installRecomputedRoute(geom: Coord[], hints: VoiceHint[]) {
+  rebuildRouteState(geom, hints)
+  resetRouteTracking(false)
+  detourEndIdx = -1
+  ensureRouteInstalled()
+  refreshRemaining()
+}
+
 // Re-route l'itinéraire entier à travers les points d'ancrage courants et remplace la
-// géométrie de navigation. Appelé après chaque déplacement / ajout / suppression.
-async function recomputeFromWaypoints() {
-  if (routeWaypoints.length < 2) return
+// géométrie de navigation. Appelé après chaque déplacement / ajout / suppression en mode
+// édition, et par recomputeForRoutingChange quand le profil de la séance change.
+// `markDirty` n'a de sens qu'en édition : un changement de profil ne modifie pas
+// l'itinéraire sauvegardé, il ne doit donc pas le marquer comme à enregistrer.
+async function recomputeFromWaypoints({ markDirty = true } = {}): Promise<boolean> {
+  if (routeWaypoints.length < 2) return false
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     editError.value = t('routes.reroute_offline')
-    return
+    return false
   }
   editBusy.value = true
   editError.value = null
   const token = ++editToken
   try {
-    const { geometry: geom, hints } = await fetchRouteFromWaypoints(routeWaypoints, routeProfile)
-    if (token !== editToken) return
-    rebuildRouteState(geom, hints)
-    // Le tracé a changé : on relocalise au prochain fix (le coureur peut être n'importe
-    // où dessus) plutôt que de repartir du début.
-    resetRouteTracking(false)
-    ensureRouteInstalled()
-    refreshRemaining()
-    editDirty.value = true
+    const { geometry: geom, hints } = await fetchRouteFromWaypoints(routeWaypoints, routeProfile.value)
+    if (token !== editToken) return false
+    installRecomputedRoute(geom, hints)
+    if (markDirty) editDirty.value = true
+    return true
   } catch {
     if (token === editToken) editError.value = t('routes.error_routing')
+    return false
   } finally {
     if (token === editToken) editBusy.value = false
   }
@@ -2629,10 +2750,17 @@ function handleOffRouteSound(wasOffRoute: boolean) {
 // réussi remet le coureur sur le tracé (offRoute repasse à faux) et stoppe les relances.
 // Mêmes gardes que le bouton manuel (recherche de lieu, édition, parcours de POI) ; le
 // cooldown protège aussi d'un clignotement GPS hors-tracé/sur-tracé.
+//
+// Le tiroir ouvert suspend aussi les relances : c'est là qu'on choisit le profil de
+// routage du détour, et un recalcul parti au milieu de la sélection l'aurait calculé avec
+// l'ancien profil. À la fermeture, le cooldown est déjà écoulé, donc le détour part
+// aussitôt — avec le profil retenu. Même raisonnement que audioMuted / radarMuted, qui
+// tiennent déjà « tiroir ouvert » pour « l'utilisateur est en train de régler ».
 function maybeAutoReroute() {
   if (!navPrefs.auto_reroute) return
   if (!offRoute.value) return
   if (rerouting.value || placeNavActive.value || editMode.value || poiBrowseActive.value) return
+  if (controlsVisible.value) return
   // recalcRoute arme lui-même lastAutoReroute, donc on ne gère ici que la temporisation.
   if (performance.now() - lastAutoReroute < AUTO_REROUTE_COOLDOWN_MS) return
   void recalcRoute()
@@ -2928,6 +3056,8 @@ function onScreenOffTap() {
       :offline-errored="offlineErrored"
       :route-loaded="hasRoute"
       :can-edit="canEditRoute"
+      :route-sport="routeSport"
+      :route-profile="routeProfile"
       :edit-mode="editMode"
       :climb-card-visible="hasRoute ? showClimbCard : undefined"
       :radar-known="radarKnown"
@@ -2953,6 +3083,7 @@ function onScreenOffTap() {
       @open-route-picker="showRoutePicker = true"
       @navigate-place="() => { activePanel = null; startPlaceNav() }"
       @unload-route="unloadRoute"
+      @change-routing="applyRouteRouting"
       @toggle-edit="editMode ? finishEditMode() : enterEditMode()"
       @set-map-style="setMapStyle"
       @toggle-sound="toggleSound"
@@ -3023,39 +3154,12 @@ function onScreenOffTap() {
            le calcul, dont la ligne pointillée tracée sur la carte. Ces réglages ne valent
            que pour ce trajet : ils ne touchent pas aux préférences du compte. -->
       <div class="nav-place-routing shadow">
-        <div class="nav-place-sports" role="group" :aria-label="t('routes.wt_sport')">
-          <button
-            v-for="s in NAV_SPORTS"
-            :key="s"
-            type="button"
-            class="btn btn-sm"
-            :class="navSport === s ? 'btn-primary' : 'btn-outline-secondary'"
-            :disabled="navStarting"
-            :aria-pressed="navSport === s"
-            :title="t(`routes.wt_sport_${s}`)"
-            @click="selectNavSport(s)"
-          >
-            <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
-            <span class="ms-1">{{ t(`routes.wt_sport_${s}`) }}</span>
-          </button>
-        </div>
-        <select
-          class="form-select form-select-sm nav-place-profile"
-          :value="navProfile"
+        <NavRoutingPicker
+          :sport="navSport"
+          :profile="navProfile"
           :disabled="navStarting"
-          :aria-label="t('routes.profile_label')"
-          :title="t(`routes.brouter_profile.${navProfile}_desc`)"
-          @change="selectNavProfile(($event.target as HTMLSelectElement).value)"
-        >
-          <option
-            v-for="p in profilesForSport(navSport)"
-            :key="p"
-            :value="p"
-            :title="t(`routes.brouter_profile.${p}_desc`)"
-          >
-            {{ t(`routes.brouter_profile.${p}`) }}
-          </option>
-        </select>
+          @change="applyNavRouting"
+        />
         <div v-if="previewLoading || previewDistM != null" class="nav-place-preview-info">
           <template v-if="previewLoading">
             <i class="fa-solid fa-spinner fa-spin me-1" aria-hidden="true"></i>{{ t('routes.computing_route') }}
@@ -3441,9 +3545,6 @@ function onScreenOffTap() {
   padding: 0.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.4rem;
   min-width: 16rem; max-width: 92vw;
 }
-.nav-place-sports { display: flex; gap: 0.25rem; }
-.nav-place-sports .btn { flex: 1; white-space: nowrap; }
-.nav-place-profile { font-weight: 500; }
 .nav-place-preview-info {
   font-size: 0.9rem; font-weight: 600; min-height: 1.6rem;
   display: inline-flex; align-items: center; justify-content: center;

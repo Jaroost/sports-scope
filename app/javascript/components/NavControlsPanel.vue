@@ -5,6 +5,8 @@ import { MAP_STYLES, MAP_STYLE_GROUPS } from '../mapStyles'
 import { radarStore } from '../stores/radarStore'
 import { radarSupported } from '../variaRadar'
 import type { PoiCategory } from '../poiCategories'
+import type { Sport } from '../userPreferences'
+import NavRoutingPicker from './NavRoutingPicker.vue'
 
 const props = defineProps<{
   controlsVisible: boolean
@@ -18,6 +20,10 @@ const props = defineProps<{
   routeLoaded?: boolean
   canEdit?: boolean
   editMode?: boolean
+  // Sport et profil de routage BRouter de la séance (cf. NavRoutingPicker) : ils pilotent
+  // tous les calculs d'itinéraire de la navigation.
+  routeSport: Sport
+  routeProfile: string
   radarKnown: boolean
   camPitch: number
   camZoom: number
@@ -53,6 +59,7 @@ const emit = defineEmits<{
   (e: 'open-route-picker'): void
   (e: 'navigate-place'): void
   (e: 'unload-route'): void
+  (e: 'change-routing', payload: { sport: Sport; profile: string }): void
   (e: 'toggle-edit'): void
   (e: 'set-map-style', id: string): void
   (e: 'toggle-sound'): void
@@ -244,6 +251,20 @@ const currentStyleIcon = computed(() =>
             <i class="fa-solid fa-xmark" aria-hidden="true"></i>
             <span>{{ t('routes.unload_route') }}</span>
           </button>
+          <!-- Profil de routage de la séance : pilote tout ce qui appelle BRouter en
+               navigation — reroutage hors-trace, insertion d'un point intermédiaire, édition
+               des points d'ancrage, et le trajet d'une navigation vers un lieu. Toujours
+               offert, même sans tracé chargé, pour qu'on puisse le poser à l'avance. Il vit
+               ici plutôt que dans le bandeau hors-trace, où le compte à rebours du recalcul
+               auto ne laisse pas le temps de choisir. -->
+          <div class="nav-route-routing">
+            <span class="nav-route-routing-label">{{ t('routes.profile_label') }}</span>
+            <NavRoutingPicker
+              :sport="routeSport"
+              :profile="routeProfile"
+              @change="$emit('change-routing', $event)"
+            />
+          </div>
         </template>
 
         <!-- Hors-ligne -->
@@ -712,6 +733,11 @@ const currentStyleIcon = computed(() =>
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .nav-route-action i { width: 1.2rem; text-align: center; flex-shrink: 0; }
+.nav-route-routing {
+  display: flex; flex-direction: column; gap: 0.4rem;
+  padding-top: 0.6rem; margin-top: 0.2rem; border-top: 1px solid #dee2e6;
+}
+.nav-route-routing-label { font-size: 0.85rem; font-weight: 600; color: #6c757d; }
 .nav-route-action:hover { background: #f8f9fa; }
 .nav-route-action--active { background: #ede7fb; border-color: #7c3aed; color: #5b21b6; }
 .nav-route-action--active:hover { background: #e4d8f8; }

@@ -358,8 +358,8 @@ en:
     error_elevation: "Elevation error"
     error_shared_not_found: "This shared route can't be found or is no longer available."
     turn_warning_title: "Suspicious turns detected"
-    turn_warning_body: "Several sharp turns are bunched up in the same spot. This usually means a waypoint was dropped off the road: navigation may fire contradictory instructions. Check these areas before saving."
-    turn_warning_item: "%{count} bunched turns · at %{distance}"
+    turn_warning_body: "Several sharp turns are bunched up around a waypoint. This usually means the waypoint was dropped off the road: navigation may fire contradictory instructions. Open each waypoint below to move or delete it before saving."
+    turn_warning_item: "Waypoint %{point} · %{count} bunched turns · at %{distance}"
     turn_warning_fix: "Fix"
     turn_warning_save_anyway: "Save anyway"
     turn_warning_dismiss: "Close"
@@ -571,7 +571,7 @@ en:
       route_title: "Route line in the builder"
     turn_anomaly:
       title: "Suspicious turn detection"
-      help: "When saving, the builder flags spots where several sharp turns bunch up within a small radius — usually a sign of a waypoint dropped off the road. A smaller value cuts false alarms on switchback trails (hiking, MTB)."
+      help: "When saving, the builder flags waypoints with several sharp turns bunched up within a small radius — usually a sign of a waypoint dropped off the road. Roundabouts, and junctions you merely ride through, are ignored. A smaller value cuts false alarms on switchback trails (hiking, MTB)."
       diameter: "Diameter of the analysed area"
   common:
     days_ago_today: "today"

@@ -3,10 +3,11 @@
 // son `zxyToTileId` (courbe de Hilbert) pour rester strictement compatible avec lui.
 //
 // Choix de format, alignés sur le lecteur (cf. dist/cjs de `pmtiles`) :
-//   - répertoire racine unique (pas de répertoires « leaf ») : suffisant pour ~quelques
-//     milliers de tuiles, et il tient dans les 16384 premiers octets que le lecteur lit
-//     d'un coup au démarrage (d'où la compression gzip du répertoire pour garder la marge).
-//   - compression interne (header + répertoire) = gzip ; compression des tuiles = aucune
+//   - le lecteur lit les 16384 premiers octets une fois pour toutes et y *découpe* le
+//     répertoire racine sans jamais relire plus loin : la racine doit donc tenir dans
+//     `ROOT_DIR_BUDGET`, sinon l'archive est silencieusement illisible. Tant qu'elle
+//     tient, on garde une racine unique ; au-delà on bascule sur des répertoires « leaf ».
+//   - compression interne (header + répertoires) = gzip ; compression des tuiles = aucune
 //     (les JPEG swisstopo sont déjà compressés).
 //   - archive « clustered » : entrées triées par tileId, données concaténées dans le même
 //     ordre → les offsets se déduisent en chaîne (encodage court « 0 » du lecteur).
@@ -26,6 +27,10 @@ export interface PmtilesMeta {
 interface Entry { tileId: number; offset: number; length: number; runLength: number }
 
 const HEADER_SIZE = 127
+// Le lecteur ne dispose que de son premier `getBytes(0, 16384)` pour reconstruire la racine.
+const ROOT_DIR_BUDGET = 16384 - HEADER_SIZE
+// Taille initiale d'un répertoire « leaf ». Doublée tant que la racine déborde.
+const LEAF_ENTRIES = 1000
 
 // LEB128 non signé. On utilise %128 / Math.floor (et non les opérateurs bit-à-bit,
 // limités à 32 bits) car un tileId dépasse 2^32 dès le zoom ~16.
@@ -69,6 +74,37 @@ async function gzip(data: Uint8Array): Promise<Uint8Array> {
 
 const e7 = (deg: number) => Math.round(deg * 1e7)
 
+function concat(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total)
+  let p = 0
+  for (const c of chunks) { out.set(c, p); p += c.length }
+  return out
+}
+
+/**
+ * Répertoires de l'archive. Une entrée racine de `runLength` 0 désigne un « leaf » :
+ * le lecteur y redescend via `leafDirectoryOffset + offset` (cf. `getZxyAttempt`).
+ * On découpe en leaves de plus en plus gros jusqu'à ce que la racine tienne dans son budget.
+ */
+async function buildDirectories(entries: Entry[]): Promise<{ root: Uint8Array; leaves: Uint8Array }> {
+  const flat = await gzip(serializeDirectory(entries))
+  if (flat.length <= ROOT_DIR_BUDGET) return { root: flat, leaves: new Uint8Array(0) }
+
+  for (let leafSize = LEAF_ENTRIES; ; leafSize *= 2) {
+    const chunks: Uint8Array[] = []
+    const rootEntries: Entry[] = []
+    let offset = 0
+    for (let i = 0; i < entries.length; i += leafSize) {
+      const leaf = await gzip(serializeDirectory(entries.slice(i, i + leafSize)))
+      rootEntries.push({ tileId: entries[i].tileId, offset, length: leaf.length, runLength: 0 })
+      chunks.push(leaf)
+      offset += leaf.length
+    }
+    const root = await gzip(serializeDirectory(rootEntries))
+    if (root.length <= ROOT_DIR_BUDGET) return { root, leaves: concat(chunks, offset) }
+  }
+}
+
 /** Assemble une archive PMTiles v3 (raster JPEG) à partir d'un lot de tuiles. */
 export async function buildPmtilesArchive(tiles: RawTile[], meta: PmtilesMeta): Promise<Uint8Array> {
   const sorted = tiles
@@ -85,13 +121,14 @@ export async function buildPmtilesArchive(tiles: RawTile[], meta: PmtilesMeta): 
   }
   const tileDataLength = offset
 
-  const rootDir = await gzip(serializeDirectory(entries))
+  const { root: rootDir, leaves } = await buildDirectories(entries)
   const metaJson = new TextEncoder().encode(JSON.stringify({ attribution: meta.attribution ?? '', name: meta.name ?? '' }))
   const metaGz = await gzip(metaJson)
 
   const rootDirOffset = HEADER_SIZE
   const metaOffset = rootDirOffset + rootDir.length
-  const tileDataOffset = metaOffset + metaGz.length
+  const leafOffset = metaOffset + metaGz.length
+  const tileDataOffset = leafOffset + leaves.length
   const buf = new Uint8Array(tileDataOffset + tileDataLength)
   const dv = new DataView(buf.buffer)
 
@@ -101,8 +138,8 @@ export async function buildPmtilesArchive(tiles: RawTile[], meta: PmtilesMeta): 
   setU64(dv, 16, rootDir.length)
   setU64(dv, 24, metaOffset)
   setU64(dv, 32, metaGz.length)
-  setU64(dv, 40, 0)                       // leaf directory offset (aucun)
-  setU64(dv, 48, 0)                       // leaf directory length
+  setU64(dv, 40, leaves.length > 0 ? leafOffset : 0)
+  setU64(dv, 48, leaves.length)
   setU64(dv, 56, tileDataOffset)
   setU64(dv, 64, tileDataLength)
   setU64(dv, 72, entries.length)          // numAddressedTiles
@@ -124,6 +161,7 @@ export async function buildPmtilesArchive(tiles: RawTile[], meta: PmtilesMeta): 
 
   buf.set(rootDir, rootDirOffset)
   buf.set(metaGz, metaOffset)
+  buf.set(leaves, leafOffset)
   let p = tileDataOffset
   for (const b of blobs) { buf.set(b, p); p += b.length }
   return buf

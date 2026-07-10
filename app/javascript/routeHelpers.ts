@@ -701,10 +701,16 @@ export interface TurnPoint {
 }
 
 // Classify a BRouter voice-hint command (and its angle as a tie-breaker) into a
-// maneuver family + side. Command ids:
-// 2 TL  3 TSLL  4 TSHL  5 TR  6 TSLR  7 TSHR  8 KL  9 KR
-// 10 TLU  11 TU  12 TRU  14 RNDB(right)  15 RNLB(left)
+// maneuver family + side. Command ids, d'après btools/router/VoiceHint.java :
+// 1 C  2 TL  3 TSLL  4 TSHL  5 TR  6 TSLR  7 TSHR  8 KL  9 KR
+// 10 TLU  11 TRU  12 OFFR  13 RNDB  14 RNLB  15 TU  16 BL  17 EL  18 ER
+//
+// ATTENTION : la table s'écarte de l'intuition à partir de 10. En particulier 13 est le
+// rond-point (et non un marqueur hors-tracé) et 15 est le demi-tour à 180° (et non un
+// rond-point). Confirmé sur les données : les 67 hints `cmd=13` de la base portent un
+// numéro de sortie, et les 9 hints `cmd=15` ont tous un angle de 180° pile.
 function maneuverFromCmd(cmd: number, angle: number): { kind: Maneuver; direction: 'left' | 'right' } {
+  const side = angle >= 0 ? 'right' : 'left'
   switch (cmd) {
     case 2: return { kind: 'turn', direction: 'left' }
     case 5: return { kind: 'turn', direction: 'right' }
@@ -715,11 +721,15 @@ function maneuverFromCmd(cmd: number, angle: number): { kind: Maneuver; directio
     case 8: return { kind: 'keep', direction: 'left' }
     case 9: return { kind: 'keep', direction: 'right' }
     case 10: return { kind: 'uturn', direction: 'left' }
-    case 12: return { kind: 'uturn', direction: 'right' }
-    case 11: return { kind: 'uturn', direction: angle >= 0 ? 'right' : 'left' }
-    case 14: return { kind: 'roundabout', direction: 'right' }
-    case 15: return { kind: 'roundabout', direction: 'left' }
-    default: return { kind: 'turn', direction: angle >= 0 ? 'right' : 'left' }
+    case 11: return { kind: 'uturn', direction: 'right' }
+    case 15: return { kind: 'uturn', direction: side }
+    // L'angle d'un rond-point est l'angle total parcouru sur l'anneau (jusqu'à ±450°) ;
+    // son signe indique le sens de rotation, pas un côté à annoncer.
+    case 13: return { kind: 'roundabout', direction: side }
+    case 14: return { kind: 'roundabout', direction: 'left' }
+    case 17: return { kind: 'keep', direction: 'left' }
+    case 18: return { kind: 'keep', direction: 'right' }
+    default: return { kind: 'turn', direction: side }
   }
 }
 
@@ -741,8 +751,12 @@ export interface VoiceHint {
 }
 
 // BRouter command ids that carry no actionable turn for our cues:
-// 1 = continue straight, 13 = off-route marker, 16 = beeline segment.
-const VOICE_HINT_SKIP = new Set([1, 13, 16])
+// 1 = continue straight, 12 = off-route marker, 16 = beeline segment.
+const VOICE_HINT_SKIP = new Set([1, 12, 16])
+
+// Commandes de rond-point (RNDB / RNLB). Le numéro de sortie ne peut pas servir de test :
+// BRouter l'omet parfois (exit_number = 0) sur un rond-point bien réel.
+const ROUNDABOUT_CMDS = new Set([13, 14])
 
 // Premier passage du tracé sur la coordonnée `pos`, en repartant de `fromIdx` :
 // on avance jusqu'au premier groupe de sommets passant à moins de `proximityM`,
@@ -812,13 +826,12 @@ export function turnsFromVoiceHints(
   const out: TurnPoint[] = []
   let cursor = 0
   for (const h of hints) {
-    const isRoundabout = (h.exit_number ?? 0) > 0
     const idx = firstPassFrom([h.lng, h.lat], geometry, Math.max(0, cursor - BACK_TOL))
     cursor = idx
-    if (VOICE_HINT_SKIP.has(h.cmd) && !isRoundabout) continue
-    const { kind: baseKind, direction } = maneuverFromCmd(h.cmd, h.angle)
-    const kind: Maneuver = isRoundabout ? 'roundabout' : baseKind
-    const exitNumber = isRoundabout ? (h.exit_number ?? 0) : undefined
+    if (VOICE_HINT_SKIP.has(h.cmd)) continue
+    const { kind, direction } = maneuverFromCmd(h.cmd, h.angle)
+    const exit = h.exit_number ?? 0
+    const exitNumber = ROUNDABOUT_CMDS.has(h.cmd) && exit > 0 ? exit : undefined
     out.push({ idx, distM: cumDistM[idx] || 0, angle: h.angle, direction, kind, exitNumber })
   }
   return out.sort((a, b) => a.distM - b.distM)
@@ -872,11 +885,68 @@ export function detectTurns(
 // un crochet pour aller le chercher puis revenir, ce qui empile 2–3 virages au même
 // endroit et fausse la navigation (instructions contradictoires en quelques mètres).
 export interface TurnAnomaly {
-  idx: number       // sommet géométrique du virage le plus marqué de l'amas
+  idx: number         // sommet géométrique du virage le plus marqué de l'amas
   lng: number
   lat: number
-  distM: number     // distance cumulée jusqu'à l'amas
-  count: number     // nombre de virages dans l'amas
+  distM: number       // distance cumulée jusqu'à l'amas
+  count: number       // nombre de virages dans l'amas
+  waypointIdx: number // point d'étape en cause (-1 si les waypoints n'ont pas été fournis)
+}
+
+// Emprise d'un rond-point : rayon autour du hint RNDB dans lequel les virages voisins
+// sont considérés comme faisant partie de la même manœuvre. Couvre les grands giratoires
+// (~50 m de rayon) sans atteindre le carrefour suivant.
+const ROUNDABOUT_SPAN_M = 50
+
+// Un rond-point vaut UNE manœuvre, pas trois. BRouter y émet le virage d'entrée, le hint
+// RNDB porteur du numéro de sortie, puis le virage de sortie : trois virages à quelques
+// dizaines de mètres, soit exactement la signature que detectTurnAnomalies cherche. On
+// replie donc chaque rond-point sur son seul hint RNDB (kind === 'roundabout') avant de
+// compter, en absorbant les virages voisins qui tiennent dans son emprise.
+//
+// Ne couvre que les ronds-points taggés `junction=roundabout` en OSM — ailleurs BRouter
+// n'émet que des TL/TR indiscernables d'un crochet. Le filtre par point d'étape ci-dessous
+// rattrape ces cas : un rond-point simplement traversé ne porte aucun waypoint.
+function collapseRoundabouts(sorted: TurnPoint[], pos: (t: TurnPoint) => LngLat): TurnPoint[] {
+  if (!sorted.some((t) => t.kind === 'roundabout')) return sorted
+  const consumed = sorted.map(() => false)
+  const keep = sorted.map(() => false)
+  for (let r = 0; r < sorted.length; r++) {
+    if (sorted[r].kind !== 'roundabout' || consumed[r]) continue
+    keep[r] = true
+    consumed[r] = true
+    const p = pos(sorted[r])
+    // On s'arrête au premier virage déjà consommé (rond-point précédent : on ne lui vole
+    // pas son représentant) ou hors emprise.
+    for (let j = r - 1; j >= 0; j--) {
+      if (consumed[j] || haversine(pos(sorted[j]), p) > ROUNDABOUT_SPAN_M) break
+      consumed[j] = true
+    }
+    // Vers l'avant, un autre rond-point garde son propre représentant.
+    for (let j = r + 1; j < sorted.length; j++) {
+      if (consumed[j] || sorted[j].kind === 'roundabout') break
+      if (haversine(pos(sorted[j]), p) > ROUNDABOUT_SPAN_M) break
+      consumed[j] = true
+    }
+  }
+  return sorted.filter((_, i) => keep[i] || !consumed[i])
+}
+
+// Point d'étape le plus proche d'un amas de virages, dans un rayon de `radiusM` ; -1 si
+// aucun n'est à portée. On minimise sur TOUS les couples (virage, waypoint) : le premier
+// virage d'un crochet est souvent à quelques dizaines de mètres d'un waypoint parfaitement
+// posé (le départ, l'étape précédente), alors que le point fautif, lui, colle au demi-tour.
+// S'arrêter au premier virage ayant un waypoint à portée accuserait donc l'innocent.
+function nearestWaypoint(positions: LngLat[], waypoints: LngLat[], radiusM: number): number {
+  let best = -1
+  let bestDist = radiusM
+  for (const p of positions) {
+    waypoints.forEach((w, i) => {
+      const d = haversine(w, p)
+      if (d <= bestDist) { bestDist = d; best = i }
+    })
+  }
+  return best
 }
 
 // Repère les amas d'au moins `minTurns` virages tenant dans un cercle de `diameterM`
@@ -892,17 +962,25 @@ export interface TurnAnomaly {
 // crochet diffus dépasse facilement 60 m d'emprise. Validé sur des cas réels : à 100 m
 // on capture les crochets étalés sans faux positif (les virages naturels d'une route
 // sinueuse ne se groupent pas à 3+ sous ce diamètre).
+//
+// Deux garde-fous contre les fausses alertes, les ronds-points en tête :
+//  - les manœuvres d'un même rond-point sont repliées en une (cf. collapseRoundabouts) ;
+//  - un amas n'est signalé que si un point d'étape se trouve à sa portée. Un crochet est
+//    toujours causé par un waypoint mal posé ; un carrefour complexe simplement traversé,
+//    lui, n'en porte aucun. Le waypoint retenu est celui à corriger : on le renvoie dans
+//    `waypointIdx`. Omettre `waypoints` désactive ce filtre (waypointIdx = -1).
 export function detectTurnAnomalies(
   turns: TurnPoint[],
   geometry: Coord[],
-  opts: { diameterM?: number; minTurns?: number } = {},
+  opts: { diameterM?: number; minTurns?: number; waypoints?: LngLat[] } = {},
 ): TurnAnomaly[] {
   const diameterM = opts.diameterM ?? 100
   const minTurns = opts.minTurns ?? 3
+  const waypoints = opts.waypoints
   const out: TurnAnomaly[] = []
   if (turns.length < minTurns || !geometry.length) return out
   const pos = (t: TurnPoint): LngLat => [geometry[t.idx][0], geometry[t.idx][1]]
-  const sorted = [...turns].sort((a, b) => a.distM - b.distM)
+  const sorted = collapseRoundabouts([...turns].sort((a, b) => a.distM - b.distM), pos)
   let i = 0
   while (i < sorted.length) {
     let j = i
@@ -920,8 +998,16 @@ export function detectTurnAnomalies(
       for (let k = i + 1; k <= j; k++) {
         if (Math.abs(sorted[k].angle) > Math.abs(sharp.angle)) sharp = sorted[k]
       }
+      // Le waypoint fautif est cherché depuis TOUS les virages de l'amas, pas seulement
+      // le plus serré : BRouter accroche le point d'étape sur la route la plus proche,
+      // si bien que le crochet peut passer à plusieurs dizaines de mètres du clic brut.
+      let waypointIdx = -1
+      if (waypoints) {
+        waypointIdx = nearestWaypoint(sorted.slice(i, j + 1).map(pos), waypoints, diameterM)
+        if (waypointIdx < 0) { i = j + 1; continue }
+      }
       const [lng, lat] = pos(sharp)
-      out.push({ idx: sharp.idx, lng, lat, distM: sharp.distM, count })
+      out.push({ idx: sharp.idx, lng, lat, distM: sharp.distM, count, waypointIdx })
       i = j + 1
     } else {
       i++

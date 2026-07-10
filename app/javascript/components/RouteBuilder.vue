@@ -8,7 +8,7 @@ import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
 import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, turnsFromVoiceHints, detectTurnAnomalies } from '../routeHelpers'
-import type { Coord, VoiceHint, TurnAnomaly } from '../routeHelpers'
+import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport } from '../userPreferences'
 import { BROUTER_URL } from '../brouter'
@@ -465,7 +465,8 @@ function computeTurnAnomalies(): TurnAnomaly[] {
   const cumDistM = buildDistancesM(geom)
   const turns = turnsFromVoiceHints(routeStore.voiceHints.value, geom, cumDistM)
   const diameterM = turnAnomalyDiameterForSport(routeStore.sport.value)
-  return detectTurnAnomalies(turns, geom, { diameterM })
+  const waypoints = routeStore.waypoints.value.map((w) => [w.lng, w.lat] as LngLat)
+  return detectTurnAnomalies(turns, geom, { diameterM, waypoints })
 }
 
 async function save() {
@@ -513,10 +514,13 @@ function closeTurnWarning() {
   showTurnWarning.value = false
 }
 
-// Recentre la carte sur un amas pour le corriger (marqueurs conservés).
+// Recentre la carte sur un amas pour le corriger (marqueurs conservés) et ouvre le point
+// d'étape en cause : sa bulle porte les actions de correction (déplacer, supprimer), ce
+// qui évite à l'utilisateur de deviner lequel des points voisins a produit le crochet.
 function focusTurnAnomaly(a: TurnAnomaly) {
   closeTurnWarning()
   mapRef.value?.flyTo(a.lng, a.lat, 17)
+  if (a.waypointIdx >= 0) mapRef.value?.focusWaypoint(a.waypointIdx)
 }
 
 // Réinitialise complètement l'avertissement : modale, liste et marqueurs d'alerte.
@@ -1566,7 +1570,7 @@ onBeforeUnmount(() => {
                 <button type="button" class="turn-warning-item" @click="focusTurnAnomaly(a)">
                   <span class="turn-warning-item-label">
                     <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
-                    {{ t('routes.turn_warning_item', { count: a.count, distance: formatDistancePrecise(a.distM) }) }}
+                    {{ t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count, distance: formatDistancePrecise(a.distM) }) }}
                   </span>
                   <i class="fa-solid fa-chevron-right text-muted" aria-hidden="true"></i>
                 </button>

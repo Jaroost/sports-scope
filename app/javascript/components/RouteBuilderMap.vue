@@ -1367,6 +1367,15 @@ function selectWaypoint(idx: number) {
   }
 }
 
+// Ouvre la bulle d'un point d'étape depuis l'extérieur (avertissement d'amas de virages).
+// Passe par deselectAll pour ne pas retomber sur la bascule de selectWaypoint, qui
+// refermerait la bulle si ce point était déjà sélectionné.
+function focusWaypoint(idx: number) {
+  if (idx < 0 || idx >= waypointMarkers.length) return
+  deselectAll()
+  selectWaypoint(idx)
+}
+
 function deselectAll() {
   waypointMarkers.forEach((m) => {
     if (!m) return
@@ -2070,6 +2079,7 @@ defineExpose({
   updateSelectionMarkers,
   refreshWaypointMarkers,
   recomputeWaypointGeomIndices,
+  focusWaypoint,
   fitMapToRoute,
   fitMapToSelection,
   flyTo,

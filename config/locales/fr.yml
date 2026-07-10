@@ -358,8 +358,8 @@ fr:
     error_elevation: "Erreur altitude"
     error_shared_not_found: "Cet itinéraire partagé est introuvable ou n'est plus disponible."
     turn_warning_title: "Virages suspects détectés"
-    turn_warning_body: "Plusieurs virages serrés sont regroupés au même endroit. C'est souvent le signe d'un point d'étape posé à côté de la route : la navigation risque d'enchaîner des consignes contradictoires. Vérifie ces zones avant d'enregistrer."
-    turn_warning_item: "%{count} virages rapprochés · au %{distance}"
+    turn_warning_body: "Plusieurs virages serrés sont regroupés autour d'un point d'étape. C'est souvent le signe d'un point posé à côté de la route : la navigation risque d'enchaîner des consignes contradictoires. Ouvre chaque point ci-dessous pour le déplacer ou le supprimer avant d'enregistrer."
+    turn_warning_item: "Point %{point} · %{count} virages rapprochés · au %{distance}"
     turn_warning_fix: "Corriger"
     turn_warning_save_anyway: "Enregistrer quand même"
     turn_warning_dismiss: "Fermer"
@@ -571,7 +571,7 @@ fr:
       route_title: "Tracé dans le créateur"
     turn_anomaly:
       title: "Détection des virages suspects"
-      help: "À l'enregistrement, le créateur signale les endroits où plusieurs virages serrés se groupent sur un petit rayon — souvent le signe d'un point d'étape posé à côté de la route. Une valeur plus petite limite les fausses alertes sur les sentiers à lacets (rando, VTT)."
+      help: "À l'enregistrement, le créateur signale les points d'étape autour desquels plusieurs virages serrés se groupent sur un petit rayon — souvent le signe d'un point posé à côté de la route. Les ronds-points, et les carrefours simplement traversés, sont ignorés. Une valeur plus petite limite les fausses alertes sur les sentiers à lacets (rando, VTT)."
       diameter: "Diamètre de la zone analysée"
   common:
     days_ago_today: "aujourd'hui"

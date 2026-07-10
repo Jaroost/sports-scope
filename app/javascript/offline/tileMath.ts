@@ -32,31 +32,42 @@ export function boundsOf(coords: [number, number][]): [number, number, number, n
   return [minLon, minLat, maxLon, maxLat]
 }
 
-// Ajoute à `set` toutes les tuiles d'un zoom couvrant le carré de demi-côté `bufferM`
-// centré sur (lng, lat).
+// Ajoute à `set` (clés `x/y`) toutes les tuiles d'un zoom couvrant le carré de demi-côté
+// `bufferM` centré sur (lng, lat).
 function addBufferBox(set: Set<string>, lng: number, lat: number, z: number, bufferM: number): void {
   const dLat = bufferM / 111320
   const dLng = bufferM / (111320 * Math.cos((lat * Math.PI) / 180))
   const tl = lngLatToTile(lng - dLng, lat + dLat, z) // coin haut-gauche (y croît vers le sud)
   const br = lngLatToTile(lng + dLng, lat - dLat, z)
   for (let x = tl.x; x <= br.x; x++) {
-    for (let y = tl.y; y <= br.y; y++) set.add(`${z}/${x}/${y}`)
+    for (let y = tl.y; y <= br.y; y++) set.add(`${x}/${y}`)
   }
 }
 
-// Ensemble des tuiles du corridor. Le tracé est densifié pour qu'aucune tuile ne soit
-// manquée entre deux sommets éloignés, puis chaque échantillon contribue sa boîte tampon
-// à chaque zoom demandé.
-export function corridorTiles(coords: [number, number][], opts: CorridorOpts): Tile[] {
+/**
+ * Tuiles du corridor, groupées par zoom croissant. Le tracé est densifié pour qu'aucune
+ * tuile ne soit manquée entre deux sommets éloignés, puis chaque échantillon contribue
+ * sa boîte tampon à chaque zoom demandé.
+ *
+ * Invariant : une tuile présente au zoom z a toujours son parent présent au zoom z-1.
+ * Le téléchargement s'en sert pour descendre la pyramide et élaguer les sous-arbres hors
+ * couverture. Il tient parce que tous les zooms partagent les mêmes points d'échantillonnage :
+ * une tuile n'est retenue que si elle intersecte une boîte, et son parent la couvre donc
+ * intersecte la même boîte. Un pas dépendant du zoom le romprait — les boîtes étant carrées,
+ * un échantillon intercalé déborde des encoches laissées par un échantillonnage plus lâche
+ * le long des segments diagonaux, et le corridor s'élargirait aux zooms fins.
+ */
+export function corridorTilesByZoom(coords: [number, number][], opts: CorridorOpts): Map<number, Tile[]> {
   const { minZoom, maxZoom, bufferM } = opts
-  const set = new Set<string>()
-  if (coords.length === 0) return []
-  const midLat = (boundsOf(coords)[1] + boundsOf(coords)[3]) / 2
+  const byZoom = new Map<number, Tile[]>()
+  if (coords.length === 0) return byZoom
+  const bounds = boundsOf(coords)
+  const midLat = (bounds[1] + bounds[3]) / 2
+  // Assez fin pour qu'aucune tuile ne soit sautée au zoom le plus fin (le plus exigeant).
+  const stepM = Math.max(30, Math.min(bufferM, tileGroundSizeM(maxZoom, midLat) / 2))
 
   for (let z = minZoom; z <= maxZoom; z++) {
-    // Pas d'échantillonnage : assez fin pour que les boîtes tampons se recouvrent le
-    // long du tracé, même au zoom le plus fin (petites tuiles).
-    const stepM = Math.max(30, Math.min(bufferM, tileGroundSizeM(z, midLat) / 2))
+    const set = new Set<string>()
     let prev = coords[0]
     addBufferBox(set, prev[0], prev[1], z, bufferM)
     for (let i = 1; i < coords.length; i++) {
@@ -69,12 +80,18 @@ export function corridorTiles(coords: [number, number][], opts: CorridorOpts): T
       }
       prev = cur
     }
+    byZoom.set(z, [...set].map((k) => {
+      const [x, y] = k.split('/').map(Number)
+      return { z, x, y }
+    }))
   }
 
-  return [...set].map((k) => {
-    const [z, x, y] = k.split('/').map(Number)
-    return { z, x, y }
-  })
+  return byZoom
+}
+
+/** Toutes les tuiles du corridor, à plat (estimation avant téléchargement). */
+export function corridorTiles(coords: [number, number][], opts: CorridorOpts): Tile[] {
+  return [...corridorTilesByZoom(coords, opts).values()].flat()
 }
 
 function haversineM(a: [number, number], b: [number, number]): number {

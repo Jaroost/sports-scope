@@ -47,8 +47,10 @@ import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
 import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS } from '../navConstants'
 import {
-  offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineGrauStyle, OFFLINE_DEFAULTS,
+  offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
+  routeSignature, saveArchiveSignature, archiveSignature, deleteArchiveSignature,
+  purgeLegacyArchive, OFFLINE_LAYERS, isOfflineLayer, type OfflineLayer,
 } from '../offline/offlineMaps'
 import { buildCoordPopupContent, buildDestPointPopupContent, attachLongPress } from '../mapCoordPopup'
 
@@ -114,15 +116,44 @@ const offlineCoords = ref<[number, number][]>([])
 // POI du tracé actif (issues de routes.pois) : passés à NavOfflineButton pour être
 // sauvegardés dans le localStorage au moment du téléchargement hors-ligne.
 const offlinePois = ref<Array<{ name: string; type: string; lat: number; lng: number }>>([])
-const offlineReady = ref(false)        // archive présente (affichage)
-let offlineRegistered = false          // archive branchée sur le protocole pmtiles://
+// Chaque fond swisstopo (gris / couleur / satellite) a sa propre archive : le coureur
+// coche ce qu'il veut emporter, et ne paie que ça en Mo.
+type LayerFlags = Record<OfflineLayer, boolean>
+const noLayers = (): LayerFlags => ({ swissgrau: false, swisstopo: false, swissimage: false })
+
 let baseIsOffline = false              // le fond actif est-il la version locale ?
 const offlineIsSup = offlineSupported()
 const offlineDownloading = ref(false)
 const offlineProgress = ref({ done: 0, total: 0, failed: 0 })
 const offlineErrored = ref(false)
 let offlineAbort: AbortController | null = null
-const offlineEst = computed(() => estimateOffline(offlineCoords.value))
+// Archives présentes dans l'OPFS, et celles branchées sur le protocole pmtiles://.
+const offlineHas = ref<LayerFlags>(noLayers())
+let offlineRegistered: LayerFlags = noLayers()
+// Couches cochées pour le prochain téléchargement.
+const offlineSelected = ref<LayerFlags>(noLayers())
+// Empreinte du tracé au moment du téléchargement, par couche. `null` = archive absente, ou
+// téléchargée avant l'introduction du suivi (on ne réclame alors rien).
+const archivedSigs = ref<Record<OfflineLayer, string | null>>({ swissgrau: null, swisstopo: null, swissimage: null })
+
+// Le tracé a changé depuis le téléchargement (reroutage, détour, édition) : l'archive ne
+// couvre plus tout l'itinéraire, il faut la retélécharger.
+const currentSig = computed(() => routeSignature(offlineCoords.value))
+function layerStale(l: OfflineLayer): boolean {
+  const sig = archivedSigs.value[l]
+  return offlineHas.value[l] && !!sig && sig !== currentSig.value
+}
+const offlineReady = computed(() => OFFLINE_LAYERS.some((l) => offlineHas.value[l]))
+const offlineStale = computed(() => OFFLINE_LAYERS.some(layerStale))
+const selectedLayers = computed(() => OFFLINE_LAYERS.filter((l) => offlineSelected.value[l]))
+const offlineEst = computed(() => estimateOffline(offlineCoords.value, selectedLayers.value))
+// Vue à plat pour le panneau : une ligne par fond téléchargeable.
+const offlineLayerRows = computed(() =>
+  OFFLINE_LAYERS.map((id) => ({ id, ready: offlineHas.value[id], stale: layerStale(id), selected: offlineSelected.value[id] })),
+)
+function toggleOfflineLayer(id: OfflineLayer) {
+  offlineSelected.value = { ...offlineSelected.value, [id]: !offlineSelected.value[id] }
+}
 const offlinePct = computed(() =>
   offlineProgress.value.total ? Math.round((offlineProgress.value.done / offlineProgress.value.total) * 100) : 0,
 )
@@ -1226,6 +1257,7 @@ function loadRoute(route: any) {
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
+  void syncOfflineState()
   if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
   resetRouteTracking(false)
   hasRoute.value = true
@@ -1262,6 +1294,7 @@ function unloadRoute() {
   routeToken.value = null
   routeName.value = ''
   offlinePois.value = []
+  void syncOfflineState()
   geometry = []
   displayLine = []
   displayWScale = []
@@ -1911,10 +1944,7 @@ async function initMap() {
   // style, pour pouvoir démarrer directement sur le fond local en cas de lancement
   // sans réseau.
   // Hors-ligne indisponible en mode libre (aucun token de trajet à archiver).
-  if (routeToken.value && offlineSupported() && await hasOfflineArchive(routeToken.value)) {
-    offlineReady.value = true
-    try { await registerOfflineArchive(routeToken.value, maplibre); offlineRegistered = true } catch { /* archive illisible : on reste en ligne */ }
-  }
+  await syncOfflineState()
   baseIsOffline = wantOffline()
 
   const coords = geometry.map(([lng, lat]) => [lng, lat] as LngLat)
@@ -2252,11 +2282,12 @@ function afterStyleLoad() {
 // préféré (tuiles fraîches, couverture au-delà du corridor). Limité à swisstopo gris,
 // seul fond dont les CGU autorisent le hors-ligne.
 function wantOffline(): boolean {
-  return offlineRegistered && mapStyleId.value === 'swissgrau' && typeof navigator !== 'undefined' && navigator.onLine === false
+  const id = mapStyleId.value
+  return isOfflineLayer(id) && offlineRegistered[id] && typeof navigator !== 'undefined' && navigator.onLine === false
 }
 
 function resolveBaseStyle(id: string): string | object {
-  if (id === 'swissgrau' && wantOffline()) return offlineGrauStyle(routeToken.value!, OFFLINE_DEFAULTS.maxZoom)
+  if (isOfflineLayer(id) && wantOffline()) return offlineStyle(routeToken.value!, id, OFFLINE_DEFAULTS.maxZoom)
   return mapStyleFor(id)
 }
 
@@ -2271,34 +2302,100 @@ function refreshBaseMap() {
   map.once('style.load', afterStyleLoad)
 }
 
-// Appelé par NavOfflineButton quand une archive vient d'être téléchargée.
-async function onOfflineAvailable() {
-  offlineReady.value = true
-  if (!offlineRegistered && maplibre && routeToken.value) {
-    try { await registerOfflineArchive(routeToken.value, maplibre); offlineRegistered = true } catch { /* ignore */ }
+// (Re)calcule l'état hors-ligne du trajet courant : présence de l'archive, branchement
+// sur le protocole pmtiles://, empreinte du tracé archivé. À appeler chaque fois que
+// `routeToken` change (montage, choix d'un autre itinéraire, retour en navigation libre)
+// — sans quoi l'archive du trajet précédent resterait annoncée, voire affichée.
+async function syncOfflineState() {
+  offlineRegistered = noLayers()
+  offlineHas.value = noLayers()
+  archivedSigs.value = { swissgrau: null, swisstopo: null, swissimage: null }
+  const token = routeToken.value
+  if (token && offlineIsSup) {
+    void purgeLegacyArchive(token)
+    const has = noLayers()
+    const sigs: Record<OfflineLayer, string | null> = { swissgrau: null, swisstopo: null, swissimage: null }
+    for (const l of OFFLINE_LAYERS) {
+      if (!await hasOfflineArchive(token, l)) continue
+      has[l] = true
+      sigs[l] = archiveSignature(token, l)
+      if (maplibre) {
+        try { await registerOfflineArchive(token, l, maplibre); offlineRegistered[l] = true } catch { /* archive illisible : on reste en ligne */ }
+      }
+    }
+    offlineHas.value = has
+    archivedSigs.value = sigs
+  }
+  resetOfflineSelection()
+  refreshBaseMap()
+}
+
+// Pré-coche ce qui est déjà téléchargé (pour proposer un re-téléchargement à l'identique),
+// à défaut le fond actif s'il est archivable, sinon le gris.
+function resetOfflineSelection() {
+  const sel = noLayers()
+  for (const l of OFFLINE_LAYERS) sel[l] = offlineHas.value[l]
+  if (!OFFLINE_LAYERS.some((l) => sel[l])) {
+    sel[isOfflineLayer(mapStyleId.value) ? mapStyleId.value : 'swissgrau'] = true
+  }
+  offlineSelected.value = sel
+}
+
+// Appelée quand l'archive d'une couche vient d'être écrite, pour le tracé d'empreinte `sig`.
+async function onOfflineAvailable(layer: OfflineLayer, sig: string) {
+  offlineHas.value = { ...offlineHas.value, [layer]: true }
+  archivedSigs.value = { ...archivedSigs.value, [layer]: sig }
+  // Re-branchement systématique : après un re-téléchargement, la même clé désigne un
+  // nouveau fichier, et le protocole doit servir celui-là.
+  if (maplibre && routeToken.value) {
+    try { await registerOfflineArchive(routeToken.value, layer, maplibre); offlineRegistered[layer] = true } catch { /* ignore */ }
   }
   refreshBaseMap()
 }
 
 function onOfflineRemoved() {
-  offlineReady.value = false
-  offlineRegistered = false
+  offlineHas.value = noLayers()
+  offlineRegistered = noLayers()
+  archivedSigs.value = { swissgrau: null, swisstopo: null, swissimage: null }
+  resetOfflineSelection()
   refreshBaseMap()
 }
 
+// Télécharge les couches cochées, l'une après l'autre : la progression affichée agrège les
+// couches (le corridor a le même nombre de tuiles pour chacune). Un échec ou une annulation
+// interrompt la suite, mais les couches déjà écrites restent utilisables.
 async function startOfflineDownload() {
   if (offlineDownloading.value || !routeToken.value) return
+  const token = routeToken.value
+  const layers = selectedLayers.value
+  if (layers.length === 0) return
+  // Fige le tracé : un reroutage pendant le téléchargement remplace `offlineCoords`, et
+  // l'empreinte enregistrée doit décrire ce qui a réellement été archivé.
+  const coords = offlineCoords.value
+  const archivedPois = offlinePois.value
+  const sig = routeSignature(coords)
+  const perLayer = estimateOffline(coords, [layers[0]]).tiles
   offlineErrored.value = false
   offlineDownloading.value = true
-  offlineProgress.value = { done: 0, total: 0, failed: 0 }
+  offlineProgress.value = { done: 0, total: perLayer * layers.length, failed: 0 }
   offlineAbort = new AbortController()
   try {
-    await downloadOfflineArchive(
-      routeToken.value, offlineCoords.value, undefined,
-      (p) => { offlineProgress.value = p }, offlineAbort.signal,
-    )
-    if (offlinePois.value.length > 0) saveOfflinePois(routeToken.value, offlinePois.value)
-    await onOfflineAvailable()
+    let base = 0
+    let failed = 0
+    for (const layer of layers) {
+      await downloadOfflineArchive(
+        token, layer, coords, undefined,
+        (p) => { offlineProgress.value = { done: base + p.done, total: perLayer * layers.length, failed: failed + p.failed } },
+        offlineAbort.signal,
+      )
+      base += perLayer
+      failed = offlineProgress.value.failed
+      saveArchiveSignature(token, layer, sig)
+      // Le trajet a pu être déchargé/remplacé pendant le téléchargement : ne branche
+      // l'archive que si elle correspond toujours au trajet affiché.
+      if (routeToken.value === token) await onOfflineAvailable(layer, sig)
+    }
+    if (archivedPois.length > 0) saveOfflinePois(token, archivedPois)
   } catch (e) {
     if (!(e instanceof DOMException && e.name === 'AbortError')) offlineErrored.value = true
   } finally {
@@ -2309,10 +2406,15 @@ async function startOfflineDownload() {
 
 function cancelOfflineDownload() { offlineAbort?.abort() }
 
+// Le bouton « Supprimer » libère tout ce qui a été emporté pour ce trajet, toutes couches.
 async function removeOfflineMap() {
   if (!routeToken.value) return
-  await deleteOfflineArchive(routeToken.value)
-  deleteOfflinePois(routeToken.value)
+  const token = routeToken.value
+  for (const l of OFFLINE_LAYERS) {
+    await deleteOfflineArchive(token, l)
+    deleteArchiveSignature(token, l)
+  }
+  deleteOfflinePois(token)
   onOfflineRemoved()
 }
 
@@ -3078,11 +3180,14 @@ function onScreenOffTap() {
       v-model:active-panel="activePanel"
       :offline-supported="offlineIsSup && !!routeToken"
       :offline-ready="offlineReady"
+      :offline-stale="offlineStale"
       :offline-downloading="offlineDownloading"
       :offline-pct="offlinePct"
       :offline-est-mb="offlineEst.mb.toFixed(0)"
       :offline-est-tiles="offlineEst.tiles"
       :offline-errored="offlineErrored"
+      :offline-layers="offlineLayerRows"
+      :offline-nothing-selected="selectedLayers.length === 0"
       :route-loaded="hasRoute"
       :can-edit="canEditRoute"
       :route-sport="routeSport"
@@ -3131,6 +3236,7 @@ function onScreenOffTap() {
       @start-offline="startOfflineDownload"
       @cancel-offline="cancelOfflineDownload"
       @remove-offline="removeOfflineMap"
+      @toggle-offline-layer="toggleOfflineLayer"
       @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"

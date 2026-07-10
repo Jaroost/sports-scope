@@ -44,7 +44,13 @@ const props = defineProps<{
   dbgPoi: boolean
   dbgTurnLabel: string | null
   offlineSupported?: boolean
+  // Au moins une couche téléchargée.
   offlineReady?: boolean
+  // Au moins une couche archivée dont le tracé a changé depuis : à retélécharger.
+  offlineStale?: boolean
+  // Une ligne par fond swisstopo téléchargeable (gris / couleur / satellite).
+  offlineLayers?: Array<{ id: string; ready: boolean; stale: boolean; selected: boolean }>
+  offlineNothingSelected?: boolean
   offlineDownloading?: boolean
   offlinePct?: number
   offlineEstMb?: string
@@ -84,6 +90,7 @@ const emit = defineEmits<{
   (e: 'start-offline'): void
   (e: 'cancel-offline'): void
   (e: 'remove-offline'): void
+  (e: 'toggle-offline-layer', id: string): void
   (e: 'update:activePanel', v: string | null): void
 }>()
 
@@ -141,6 +148,8 @@ const groupedStyles = computed(() =>
 const currentStyleIcon = computed(() =>
   MAP_STYLES.find(s => s.id === props.mapStyleId)?.icon ?? 'fa-map',
 )
+
+const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 'fa-map'
 </script>
 
 <template>
@@ -187,12 +196,18 @@ const currentStyleIcon = computed(() =>
           <button v-if="offlineSupported" type="button" class="nav-setting-row" @click="openSubPanel('offline')">
             <i
               class="fa-solid nav-setting-icon"
-              :class="offlineDownloading ? 'fa-spinner fa-spin' : offlineReady ? 'fa-circle-check nav-setting-icon--on' : 'fa-cloud-arrow-down'"
+              :class="offlineDownloading ? 'fa-spinner fa-spin'
+                : offlineStale ? 'fa-rotate nav-setting-icon--warn'
+                : offlineReady ? 'fa-circle-check nav-setting-icon--on'
+                : 'fa-cloud-arrow-down'"
               aria-hidden="true"
             ></i>
             <span class="nav-setting-label">{{ t('routes.offline_title') }}</span>
             <span class="nav-setting-value">
-              {{ offlineDownloading ? (offlinePct + '%') : offlineReady ? t('routes.offline_ready') : ('~' + offlineEstMb + ' Mo') }}
+              {{ offlineDownloading ? (offlinePct + '%')
+                : offlineStale ? t('routes.offline_outdated')
+                : offlineReady ? t('routes.offline_ready')
+                : ('~' + offlineEstMb + ' Mo') }}
             </span>
             <i class="fa-solid fa-chevron-right nav-setting-chevron" aria-hidden="true"></i>
           </button>
@@ -279,23 +294,37 @@ const currentStyleIcon = computed(() =>
               <span>{{ t('routes.offline_cancel') }}</span>
             </button>
           </template>
-          <template v-else-if="offlineReady">
-            <div class="nav-offline-status">
-              <i class="fa-solid fa-circle-check nav-offline-status-icon" aria-hidden="true"></i>
-              {{ t('routes.offline_ready') }}
+          <template v-else>
+            <div v-if="offlineStale" class="nav-offline-status nav-offline-status--warn">
+              <i class="fa-solid fa-triangle-exclamation nav-offline-status-icon--warn" aria-hidden="true"></i>
+              {{ t('routes.offline_outdated_hint') }}
             </div>
-            <button type="button" class="nav-route-action nav-route-action--danger" @click="$emit('remove-offline')">
+            <label v-for="l in offlineLayers" :key="l.id" class="nav-setting-row nav-offline-layer">
+              <input
+                class="form-check-input nav-offline-check"
+                type="checkbox"
+                :checked="l.selected"
+                @change="$emit('toggle-offline-layer', l.id)"
+              />
+              <i class="fa-solid nav-setting-icon" :class="styleIconFor(l.id)" aria-hidden="true"></i>
+              <span class="nav-setting-label">{{ t(`strava.map_style_${l.id}`) }}</span>
+              <span v-if="l.stale" class="nav-setting-value nav-offline-badge--warn">{{ t('routes.offline_outdated') }}</span>
+              <span v-else-if="l.ready" class="nav-setting-value nav-offline-badge--ok">
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+              </span>
+            </label>
+            <div class="nav-offline-status">
+              {{ offlineNothingSelected
+                ? t('routes.offline_pick_layer')
+                : t('routes.offline_estimate', { mb: offlineEstMb, tiles: offlineEstTiles }) }}
+            </div>
+            <button type="button" class="nav-route-action" :disabled="offlineNothingSelected" @click="$emit('start-offline')">
+              <i class="fa-solid" :class="offlineStale ? 'fa-rotate' : 'fa-cloud-arrow-down'" aria-hidden="true"></i>
+              <span>{{ offlineStale ? t('routes.offline_redownload') : t('routes.offline_download') }}</span>
+            </button>
+            <button v-if="offlineReady" type="button" class="nav-route-action nav-route-action--danger" @click="$emit('remove-offline')">
               <i class="fa-solid fa-trash" aria-hidden="true"></i>
               <span>{{ t('routes.offline_delete') }}</span>
-            </button>
-          </template>
-          <template v-else>
-            <div class="nav-offline-status">
-              {{ t('routes.offline_estimate', { mb: offlineEstMb, tiles: offlineEstTiles }) }}
-            </div>
-            <button type="button" class="nav-route-action" @click="$emit('start-offline')">
-              <i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i>
-              <span>{{ t('routes.offline_download') }}</span>
             </button>
             <div v-if="offlineErrored" class="nav-offline-error">
               <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
@@ -694,6 +723,12 @@ const currentStyleIcon = computed(() =>
   padding: 0.25rem 0 0.5rem;
 }
 .nav-offline-status-icon { color: #198754; margin-right: 0.4rem; }
+.nav-offline-status--warn { color: #8a4b00; }
+.nav-offline-status-icon--warn { color: #fd7e14; margin-right: 0.4rem; }
+.nav-offline-layer { cursor: pointer; }
+.nav-offline-check { flex-shrink: 0; margin: 0; }
+.nav-offline-badge--ok { color: #198754; }
+.nav-offline-badge--warn { color: #fd7e14; font-weight: 600; }
 .nav-offline-progress-row {
   display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;
 }
@@ -719,6 +754,7 @@ const currentStyleIcon = computed(() =>
   font-size: 0.95rem; color: #6c757d; flex-shrink: 0;
 }
 .nav-setting-icon--on { color: #198754; }
+.nav-setting-icon--warn { color: #fd7e14; }
 .nav-setting-label { flex: 1; font-size: 0.95rem; font-weight: 500; color: #212529; }
 .nav-setting-value { font-size: 0.85rem; color: #6c757d; white-space: nowrap; }
 .nav-setting-chevron { color: #ced4da; font-size: 0.8rem; flex-shrink: 0; }
@@ -733,6 +769,7 @@ const currentStyleIcon = computed(() =>
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 .nav-route-action i { width: 1.2rem; text-align: center; flex-shrink: 0; }
+.nav-route-action:disabled { opacity: 0.5; cursor: default; }
 .nav-route-routing {
   display: flex; flex-direction: column; gap: 0.4rem;
   padding-top: 0.6rem; margin-top: 0.2rem; border-top: 1px solid #dee2e6;

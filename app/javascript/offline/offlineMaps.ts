@@ -1,11 +1,11 @@
-// Cartes hors-ligne pour la navigation : pré-télécharge le corridor du trajet en fond
-// swisstopo gris (WMTS, JPEG), empaquète en une archive PMTiles unique stockée dans l'OPFS,
-// puis l'expose à MapLibre via le protocole `pmtiles://`.
+// Cartes hors-ligne pour la navigation : pré-télécharge le corridor du trajet depuis les
+// fonds WMTS swisstopo (JPEG), empaquète chaque couche en une archive PMTiles stockée dans
+// l'OPFS, puis les expose à MapLibre via le protocole `pmtiles://`.
 //
-// Pourquoi swisstopo gris : c'est le seul fond utilisé en navigation dont les CGU autorisent
-// explicitement l'usage hors-ligne (géodonnées OGD, gratuites y compris commercialement,
-// seule condition : mention « © swisstopo »). Les autres fonds (CyclOSM, OpenTopoMap)
-// interdisent le pré-téléchargement. Voir la discussion CGU du projet.
+// Pourquoi seulement swisstopo : ce sont les seuls fonds utilisés en navigation dont les CGU
+// autorisent explicitement l'usage hors-ligne (géodonnées OGD, gratuites y compris
+// commercialement, seule condition : mention « © swisstopo »). Les autres fonds (CyclOSM,
+// OpenTopoMap) interdisent le pré-téléchargement. Voir la discussion CGU du projet.
 //
 // Hors de la couverture suisse (France, Italie…), le WMTS ne renvoie pas d'erreur : il
 // répond 200 avec une tuile JPEG uniforme de 668 octets. Le zoom maximal réellement servi
@@ -14,17 +14,39 @@
 // ne sont pas demandés ; les niveaux manquants sont ensuite comblés en agrandissant le
 // quadrant correspondant du plus profond ancêtre réel. La carte reste ainsi lisible (mais
 // floue) au-delà de la frontière, au lieu de virer au blanc quand on zoome.
+//
+// `swissimage` fait exception : hors de Suisse, il sert un fond mondial basse résolution au
+// lieu de la tuile vide. L'élagage ne s'y déclenche donc jamais et l'archive couvre tout le
+// corridor — ce qui donne le bon résultat visuel, sans code spécifique. Attention en
+// revanche : cette imagerie hors frontière n'est vraisemblablement pas de la donnée
+// swisstopo, et sort donc du cadre OGD ci-dessus.
 import { PMTiles, FileSource, Protocol } from 'pmtiles'
 import { buildPmtilesArchive, type RawTile } from './pmtilesWriter'
 import { corridorTiles, corridorTilesByZoom, boundsOf, type CorridorOpts, type Tile } from './tileMath'
 
-const GRAU_TILE = (z: number, x: number, y: number) =>
-  `https://wmts.geo.admin.ch/1.0.0/ch.swisstopo.pixelkarte-grau/default/current/3857/${z}/${x}/${y}.jpeg`
+// Fonds téléchargeables. Les identifiants sont ceux de `mapStyles.ts` (MAP_STYLES), pour que
+// le style actif en navigation désigne directement son archive.
+export const OFFLINE_LAYERS = ['swissgrau', 'swisstopo', 'swissimage'] as const
+export type OfflineLayer = (typeof OFFLINE_LAYERS)[number]
+
+// `avgTileBytes` : poids moyen d'une tuile, mesuré sur un corridor réel (Lausanne→Aigle,
+// zooms 10–17). Sert uniquement à l'estimation affichée avant téléchargement ; le poids
+// dépend surtout du paysage traversé (~16 Ko en forêt, ~28 Ko en ville ou en montagne).
+const LAYER_SPECS: Record<OfflineLayer, { wmts: string; avgTileBytes: number }> = {
+  swissgrau:  { wmts: 'ch.swisstopo.pixelkarte-grau',  avgTileBytes: 20.0 * 1024 },
+  swisstopo:  { wmts: 'ch.swisstopo.pixelkarte-farbe', avgTileBytes: 21.5 * 1024 },
+  swissimage: { wmts: 'ch.swisstopo.swissimage',       avgTileBytes: 17.9 * 1024 },
+}
+
+export function isOfflineLayer(id: string): id is OfflineLayer {
+  return (OFFLINE_LAYERS as readonly string[]).includes(id)
+}
+
+const tileUrl = (layer: OfflineLayer, z: number, x: number, y: number) =>
+  `https://wmts.geo.admin.ch/1.0.0/${LAYER_SPECS[layer].wmts}/default/current/3857/${z}/${x}/${y}.jpeg`
 
 const OPFS_DIR = 'offline-maps'
 const ATTRIBUTION = '© swisstopo'
-// Poids moyen observé d'une tuile JPEG grau, pour l'estimation affichée avant téléchargement.
-const AVG_TILE_BYTES = 18 * 1024
 // Nombre de requêtes WMTS simultanées : un petit burst ponctuel par trajet reste compatible
 // avec le fair use swisstopo (la limite ~20 req/min vise la moyenne 24/7, pas un import unique).
 const CONCURRENCY = 6
@@ -53,14 +75,16 @@ export function offlineSupported(): boolean {
   )
 }
 
+const safe = (token: string) => token.replace(/[^a-zA-Z0-9_-]/g, '')
+
 // Nom de fichier OPFS = clé du protocole PMTiles. Le `pmtiles://<clé>/{z}/{x}/{y}` du style
 // DOIT correspondre à `FileSource.getKey()`, qui renvoie `file.name`.
-function archiveName(token: string): string {
-  return `route-${token.replace(/[^a-zA-Z0-9_-]/g, '')}.pmtiles`
+function archiveName(token: string, layer: OfflineLayer): string {
+  return `route-${safe(token)}-${layer}.pmtiles`
 }
 
-export function offlineTileUrl(token: string): string {
-  return `pmtiles://${archiveName(token)}/{z}/{x}/{y}`
+export function offlineTileUrl(token: string, layer: OfflineLayer): string {
+  return `pmtiles://${archiveName(token, layer)}/{z}/{x}/{y}`
 }
 
 async function opfsDir(): Promise<FileSystemDirectoryHandle> {
@@ -68,43 +92,63 @@ async function opfsDir(): Promise<FileSystemDirectoryHandle> {
   return root.getDirectoryHandle(OPFS_DIR, { create: true })
 }
 
-export async function hasOfflineArchive(token: string): Promise<boolean> {
+export async function hasOfflineArchive(token: string, layer: OfflineLayer): Promise<boolean> {
   try {
     const dir = await opfsDir()
-    await dir.getFileHandle(archiveName(token))
+    await dir.getFileHandle(archiveName(token, layer))
     return true
   } catch {
     return false
   }
 }
 
-export async function deleteOfflineArchive(token: string): Promise<void> {
+export async function deleteOfflineArchive(token: string, layer: OfflineLayer): Promise<void> {
   try {
     const dir = await opfsDir()
-    await dir.removeEntry(archiveName(token))
+    await dir.removeEntry(archiveName(token, layer))
   } catch {
     /* déjà absent */
   }
 }
 
-async function readArchiveFile(token: string): Promise<File> {
+// Les archives mono-couche s'appelaient `route-<token>.pmtiles` (gris implicite). Elles ne
+// sont plus lisibles depuis que le nom porte la couche : on libère l'OPFS au passage.
+export async function purgeLegacyArchive(token: string): Promise<void> {
+  try {
+    const dir = await opfsDir()
+    await dir.removeEntry(`route-${safe(token)}.pmtiles`)
+  } catch {
+    /* rien à purger */
+  }
+}
+
+async function readArchiveFile(token: string, layer: OfflineLayer): Promise<File> {
   const dir = await opfsDir()
-  const handle = await dir.getFileHandle(archiveName(token))
+  const handle = await dir.getFileHandle(archiveName(token, layer))
   return handle.getFile()
 }
 
-async function writeArchiveFile(token: string, bytes: Uint8Array): Promise<void> {
+async function writeArchiveFile(token: string, layer: OfflineLayer, bytes: Uint8Array): Promise<void> {
   const dir = await opfsDir()
-  const handle = await dir.getFileHandle(archiveName(token), { create: true })
+  const handle = await dir.getFileHandle(archiveName(token, layer), { create: true })
   const writable = await handle.createWritable()
   await writable.write(bytes as unknown as BufferSource)
   await writable.close()
 }
 
-/** Estimation (nombre de tuiles + Mo) affichée avant le téléchargement. */
-export function estimateOffline(coords: [number, number][], opts: CorridorOpts = OFFLINE_DEFAULTS): { tiles: number; mb: number } {
-  const tiles = corridorTiles(coords, opts).length
-  return { tiles, mb: (tiles * AVG_TILE_BYTES) / (1024 * 1024) }
+/**
+ * Estimation (nombre de tuiles à télécharger + Mo) affichée avant le téléchargement, pour
+ * l'ensemble des couches demandées. Le corridor est identique d'une couche à l'autre : seul
+ * le poids moyen des tuiles change.
+ */
+export function estimateOffline(
+  coords: [number, number][],
+  layers: readonly OfflineLayer[],
+  opts: CorridorOpts = OFFLINE_DEFAULTS,
+): { tiles: number; mb: number } {
+  const perLayer = corridorTiles(coords, opts).length
+  const bytes = layers.reduce((sum, l) => sum + perLayer * LAYER_SPECS[l].avgTileBytes, 0)
+  return { tiles: perLayer * layers.length, mb: bytes / (1024 * 1024) }
 }
 
 const tileKey = (z: number, x: number, y: number) => `${z}/${x}/${y}`
@@ -179,6 +223,7 @@ async function fillMissingTiles(
  */
 export async function downloadOfflineArchive(
   token: string,
+  layer: OfflineLayer,
   coords: [number, number][],
   opts: CorridorOpts = OFFLINE_DEFAULTS,
   onProgress?: (p: DownloadProgress) => void,
@@ -198,7 +243,7 @@ export async function downloadOfflineArchive(
         if (signal?.aborted) throw new DOMException('aborted', 'AbortError')
         const t = tiles[next++]
         try {
-          const res = await fetch(GRAU_TILE(t.z, t.x, t.y), { signal })
+          const res = await fetch(tileUrl(layer, t.z, t.x, t.y), { signal })
           if (res.ok) {
             const data = new Uint8Array(await res.arrayBuffer())
             if (data.length > BLANK_MAX_BYTES) real.set(tileKey(t.z, t.x, t.y), data)
@@ -249,8 +294,44 @@ export async function downloadOfflineArchive(
     bounds: boundsOf(coords),
     attribution: ATTRIBUTION,
   })
-  await writeArchiveFile(token, archive)
+  await writeArchiveFile(token, layer, archive)
   return { tiles: collected.length, bytes: archive.length }
+}
+
+// ─── Signature du tracé archivé (localStorage) ───────────────────────────────
+// L'archive ne couvre qu'un corridor autour du tracé tel qu'il était au moment du
+// téléchargement. Si l'itinéraire change ensuite (reroutage, détour, édition en
+// séance), les tuiles manquent le long du nouveau tracé : on mémorise une empreinte
+// de la géométrie archivée pour pouvoir proposer un re-téléchargement.
+
+function sigKey(token: string, layer: OfflineLayer): string {
+  return `offline-sig-${safe(token)}-${layer}`
+}
+
+/** Empreinte FNV-1a du tracé, coordonnées arrondies au 1e-5 (~1 m). */
+export function routeSignature(coords: [number, number][]): string {
+  let h = 0x811c9dc5
+  for (const [lng, lat] of coords) {
+    const s = `${lng.toFixed(5)},${lat.toFixed(5)};`
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i)
+      h = Math.imul(h, 0x01000193)
+    }
+  }
+  return `${coords.length}-${(h >>> 0).toString(16)}`
+}
+
+export function saveArchiveSignature(token: string, layer: OfflineLayer, signature: string): void {
+  try { localStorage.setItem(sigKey(token, layer), signature) } catch { /* quota */ }
+}
+
+/** Empreinte du tracé archivé, ou `null` si inconnue (archive antérieure à ce suivi). */
+export function archiveSignature(token: string, layer: OfflineLayer): string | null {
+  try { return localStorage.getItem(sigKey(token, layer)) } catch { return null }
+}
+
+export function deleteArchiveSignature(token: string, layer: OfflineLayer): void {
+  try { localStorage.removeItem(sigKey(token, layer)) } catch {}
 }
 
 // ─── POI hors-ligne (localStorage) ───────────────────────────────────────────
@@ -284,30 +365,38 @@ export function deleteOfflinePois(token: string): void {
 
 let protocol: Protocol | null = null
 
-// Enregistre le protocole `pmtiles://` (une seule fois par page) et y attache l'archive
-// du trajet. À appeler avant d'utiliser un style hors-ligne.
-export async function registerOfflineArchive(token: string, maplibregl: { addProtocol: (s: string, h: unknown) => void }): Promise<void> {
+// Enregistre le protocole `pmtiles://` (une seule fois par page) et y attache l'archive d'une
+// couche du trajet. À appeler avant d'utiliser le style hors-ligne correspondant. Chaque
+// archive a sa propre clé (nom de fichier), plusieurs couches coexistent donc sans conflit ;
+// ré-attacher la même clé remplace l'entrée, ce qui est le comportement voulu après un
+// re-téléchargement.
+export async function registerOfflineArchive(
+  token: string,
+  layer: OfflineLayer,
+  maplibregl: { addProtocol: (s: string, h: unknown) => void },
+): Promise<void> {
   if (!protocol) {
     protocol = new Protocol()
     maplibregl.addProtocol('pmtiles', protocol.tile)
   }
-  const file = await readArchiveFile(token)
+  const file = await readArchiveFile(token, layer)
   protocol.add(new PMTiles(new FileSource(file)))
 }
 
-// Style MapLibre raster pointant sur l'archive locale (équivalent hors-ligne de swissGrauStyle).
-export function offlineGrauStyle(token: string, maxZoom: number = OFFLINE_DEFAULTS.maxZoom): object {
+// Style MapLibre raster pointant sur l'archive locale (équivalent hors-ligne du style en ligne
+// de la même couche).
+export function offlineStyle(token: string, layer: OfflineLayer, maxZoom: number = OFFLINE_DEFAULTS.maxZoom): object {
   return {
     version: 8,
     sources: {
-      'swissgrau-offline': {
+      [`${layer}-offline`]: {
         type: 'raster',
-        tiles: [offlineTileUrl(token)],
+        tiles: [offlineTileUrl(token, layer)],
         tileSize: 256,
         maxzoom: maxZoom,
         attribution: ATTRIBUTION,
       },
     },
-    layers: [{ id: 'swissgrau-offline-base', type: 'raster', source: 'swissgrau-offline' }],
+    layers: [{ id: `${layer}-offline-base`, type: 'raster', source: `${layer}-offline` }],
   }
 }

@@ -9,5 +9,5 @@
 <p class="text-muted"><%= t("chains.intro") %></p>
 
 <%# Un vélo « par défaut » existe toujours (créé automatiquement sans Strava), donc
-    pas de garde Strava ici. %>
-<div data-vue-component="ChainWax"></div>
+    pas de garde Strava ici : seul le bouton de resynchronisation dépend du lien Strava. %>
+<div data-vue-component="ChainWax" data-vue-props='<%= { stravaLinked: current_user.strava_linked? }.to_json %>'></div>

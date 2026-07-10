@@ -21,7 +21,8 @@ module BikeSerialization
           wax_threshold_km: chain.wax_threshold_km,
           last_waxed_at: chain.last_waxed_at&.iso8601,
           km_since_wax: wear.km_since_wax(chain),
-          progress_percent: wear.progress_percent(chain)
+          progress_percent: wear.progress_percent(chain),
+          needs_wax: chain.needs_wax
         }
       end
     }

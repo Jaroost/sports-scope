@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_09_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_10_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -42,6 +42,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_09_000002) do
     t.datetime "created_at", null: false
     t.datetime "last_waxed_at"
     t.string "name", null: false
+    t.boolean "needs_wax", default: false, null: false
     t.datetime "updated_at", null: false
     t.integer "wax_threshold_km", default: 300, null: false
     t.index ["bike_id"], name: "index_chains_on_bike_id"

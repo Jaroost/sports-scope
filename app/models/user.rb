@@ -114,6 +114,9 @@ class User < ApplicationRecord
       "default_sport" => "cycling",   # cycling | mtb | hiking — sport des pages sans itinéraire
       "show_grade_colors" => true,
       "show_elevation_chart" => true,
+      # Widget de cirage de chaîne sur la page d'accueil (n'apparaît de toute façon
+      # que si Strava est lié — cf. pages/home.html.erb).
+      "show_chain_widget" => true,
     },
     # Réglages dépendant de la pratique. Le sport courant est celui de l'itinéraire
     # ouvert (Route#activity), ou `display.default_sport` à défaut — cf. sportPreferences()

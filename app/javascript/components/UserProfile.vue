@@ -476,6 +476,26 @@ function placePreviewMarker(coords: [number, number]) {
                   <span>{{ t('profile.navbar.on_home') }}</span>
                 </label>
               </div>
+              <!-- Le menu « chaînes » porte un réglage de plus : le widget de cirage sur
+                   l'accueil, distinct du bouton d'accès à la page (interrupteur ci-dessus). -->
+              <div v-if="item.key === 'chains'" class="form-check form-switch m-0">
+                <input
+                  id="navbar-chain-widget"
+                  v-model="prefs.display.show_chain_widget"
+                  class="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  :aria-label="t('profile.display.show_chain_widget')"
+                >
+                <label
+                  class="form-check-label navbar-toggle-label"
+                  for="navbar-chain-widget"
+                  :title="t('profile.navbar.chain_widget_hint')"
+                >
+                  <i class="fa-solid fa-link" aria-hidden="true"></i>
+                  <span>{{ t('profile.navbar.chain_widget') }}</span>
+                </label>
+              </div>
             </div>
           </li>
         </ul>

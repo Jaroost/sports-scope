@@ -110,6 +110,7 @@ class ProfilesController < ApplicationController
         "default_sport" => allowed(display[:default_sport], ALLOWED_SPORTS, "cycling"),
         "show_grade_colors" => to_bool(display[:show_grade_colors], true),
         "show_elevation_chart" => to_bool(display[:show_elevation_chart], true),
+        "show_chain_widget" => to_bool(display[:show_chain_widget], true),
       },
       "sports" => sanitize_sports(incoming[:sports] || {}),
     }

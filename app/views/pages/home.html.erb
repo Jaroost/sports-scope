@@ -9,11 +9,15 @@
   </div>
 
   <% if user_signed_in? %>
+    <%# Sans Strava lié, les km des chaînes ne peuvent pas être rafraîchis : widget masqué.
+        Avec Strava, il reste masquable depuis le profil (display.show_chain_widget). %>
+    <% if current_user.strava_linked? && current_user.preferences_with_defaults.dig("display", "show_chain_widget") %>
       <div class="row justify-content-center mb-5">
         <div class="col-lg-8">
           <div data-vue-component="ChainWax" data-vue-props='{"compact":true}'></div>
         </div>
       </div>
+    <% end %>
     <%# Boutons d'accueil : mêmes menus que la barre de navigation, mais pilotés par
         l'interrupteur « accueil » du profil (cf. NavbarHelper#home_menu_items), distinct
         de la visibilité dans la navbar. Le premier bouton ressort en « primary », sauf

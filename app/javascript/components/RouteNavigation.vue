@@ -2482,11 +2482,35 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   // sinon (entrée périmée ou rider ailleurs) on retombe sur la recherche globale.
   const hint = located ? lastIdx : resumeHintIdx()
   let { idx, distM } = nearestGeomIndex(here, geometry, hint)
-  if (!located && hint >= 0 && distM > OFF_ROUTE_M + OFF_ROUTE_ACCURACY_CAP) {
-    ;({ idx, distM } = nearestGeomIndex(here, geometry, -1))
+  // Recherche globale de secours quand la projection fenêtrée nous place hors-tracé :
+  //  • au premier fix d'un tracé chargé (!located), le coureur peut être n'importe où ;
+  //  • en séance (located), s'il a quitté la ligne suivie — typiquement un reroutage auto
+  //    ignoré, qui a remplacé la géométrie par un détour+queue — puis rejoint le tracé plus
+  //    loin, la fenêtre ±60 autour du dernier indice ne le retrouve pas. On rebalaie tout et
+  //    on adopte le point vraiment le plus proche. `relocated` : vrai quand cela fait sauter
+  //    la position sur un tout autre passage, ce qui invalide les pointeurs de virage.
+  let relocated = false
+  if (hint >= 0 && distM > OFF_ROUTE_M + OFF_ROUTE_ACCURACY_CAP) {
+    const global = nearestGeomIndex(here, geometry, -1)
+    if (global.distM < distM) {
+      relocated = located && Math.abs(global.idx - idx) > 1
+      ;({ idx, distM } = global)
+    }
   }
   lastIdx = idx
   located = true
+  // Re-localisation réelle : `nextTurnPtr` est monotone (updateTurns ne fait qu'avancer),
+  // donc un saut en arrière le laisserait bloqué sur un virage déjà « dépassé » — au pire
+  // le dernier du trajet. On repart de zéro : la boucle forward d'updateTurns re-dérivera le
+  // bon prochain virage depuis la position réelle. On purge aussi l'état d'annonce / de
+  // maintien vert, qui pointe l'ancien passage.
+  if (relocated) {
+    nextTurnPtr = 0
+    announcedTurn = -1
+    urgentBuzzedTurn = -1
+    reachedTurn = null
+    reachedTurnIdx = -1
+  }
   // Snap the raw fix onto the polyline so the grey/purple boundary follows the
   // rider continuously along a segment instead of jumping vertex to vertex.
   const snap = projectOnRoute(here, geometry, cumDistM, idx)

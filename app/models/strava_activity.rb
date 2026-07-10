@@ -9,6 +9,11 @@ class StravaActivity < ApplicationRecord
   validates :strava_id, presence: true, uniqueness: { scope: :user_id }
   validates :name, presence: true, length: { maximum: 255 }
 
+  # Les gear_id Strava sont préfixés par type : « b… » pour les vélos, « g… » pour
+  # les chaussures. Le suivi du cirage ne concerne que les vélos — on écarte donc
+  # les chaussures (sinon une sortie course créerait un faux « vélo »).
+  scope :with_bike_gear, -> { where("gear_id LIKE 'b%'") }
+
   PEAK_POWER_DURATIONS = PeakPowerCurve::DURATIONS
 
   # Idempotent upsert of one Strava activity summary (the hash returned by

@@ -26,7 +26,7 @@ class StravaGearSyncService
 
   # Upsert les vélos de l'utilisateur. Renvoie le nombre de vélos.
   def call
-    gear_ids = @user.strava_activities.where.not(gear_id: nil).distinct.pluck(:gear_id)
+    gear_ids = @user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
     gear_ids.each { |gear_id| upsert_bike(gear_id) }
 
     ensure_a_default!

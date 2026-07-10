@@ -89,7 +89,7 @@ class BikesController < ApplicationController
     return true if params[:refresh].to_s == "gear"
 
     known = current_user.bikes.where.not(strava_gear_id: nil).pluck(:strava_gear_id)
-    used = current_user.strava_activities.where.not(gear_id: nil).distinct.pluck(:gear_id)
+    used = current_user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
     (used - known).any?
   end
 

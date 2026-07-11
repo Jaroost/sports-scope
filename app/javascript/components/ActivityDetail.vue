@@ -21,6 +21,7 @@ import PhotoGallery from './PhotoGallery.vue'
 import ActivityStats from './ActivityStats.vue'
 import ActivityMapCard from './ActivityMapCard.vue'
 import ActivityCharts from './ActivityCharts.vue'
+import ActivityConditions from './ActivityConditions.vue'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -53,6 +54,10 @@ const streamsLoading = ref(false)
 const streamsError = ref(null)
 const photos = ref([])
 const peakPowerRanks = ref(null) // { current: {dur: w}, bests: {dur: {avg_watts, …}} } | null
+// Conditions météo du jour (matériel Strava + vent) — reconstituées via /api/weather
+// à partir de la position de départ et de l'heure de l'activité.
+const weather = ref(null)
+const weatherLoading = ref(false)
 
 // ─── Cross-component state ───────────────────────────────────────────────
 // `selection` is the rendezvous between map (segment highlight + A/B handles),
@@ -276,6 +281,31 @@ async function fetchPhotos() {
   }
 }
 
+// Conditions météo du jour de l'activité. Best-effort : on lit la position de
+// départ (start_latlng) et l'heure UTC (start_date) puis on interroge notre proxy
+// Open-Meteo. Sans coordonnées ou sans date, on n'affiche rien.
+async function fetchWeather() {
+  weather.value = null
+  const ll = activity.value?.start_latlng
+  const at = activity.value?.start_date || activity.value?.start_date_local
+  if (!Array.isArray(ll) || ll.length !== 2 || !at) return
+  const [lat, lng] = ll
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return
+
+  weatherLoading.value = true
+  try {
+    const url = `/api/weather?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&at=${encodeURIComponent(at)}`
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+    if (res.status === 204 || !res.ok) return
+    const payload = await res.json()
+    weather.value = payload.weather || null
+  } catch {
+    // Best-effort — le bandeau conditions s'affiche sans la météo (matériel seul).
+  } finally {
+    weatherLoading.value = false
+  }
+}
+
 // All-time peak-power ranks — works for both Strava (cached server-side) and
 // imported (persisted alongside the FIT data).
 async function fetchPeakPowerRanks() {
@@ -307,6 +337,8 @@ onMounted(async () => {
   fetchPhotos()
   await fetchActivity()
   if (!activity.value) return
+  // Fire-and-forget — le bandeau conditions se remplit dès que la météo arrive.
+  fetchWeather()
   await fetchStreams()
   // Fire-and-forget — the table renders fine without ranks.
   fetchPeakPowerRanks()
@@ -337,6 +369,13 @@ onMounted(async () => {
         @update:show-grade="showGrade = $event"
         @select-segment="(s, e) => setSelection(s, e)"
         @clear-selection="clearSelection"
+      />
+
+      <!-- Matériel Strava + météo du jour (best-effort). -->
+      <ActivityConditions
+        :activity="activity"
+        :weather="weather"
+        :weather-loading="weatherLoading"
       />
 
       <!-- Onglets d'analyse — la carte ci-dessus reste toujours visible. -->

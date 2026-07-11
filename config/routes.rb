@@ -50,6 +50,9 @@ Rails.application.routes.draw do
   # Geocoding proxy (avoids CORS when calling Nominatim from the browser)
   get "/api/geocode/places", to: "geocodes#places"
 
+  # Météo historique (Open-Meteo) — conditions du jour d'une activité
+  get "/api/weather", to: "weather#show"
+
   # Route builder (JSON CRUD consumed by Vue components)
   get "/api/routes", to: "routes#index"
   post "/api/routes", to: "routes#create"

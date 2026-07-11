@@ -30,8 +30,8 @@ const props = defineProps({
   // v-model:visible-streams — exposed up so MapCard's tooltip can list the
   // currently-rendered stream rows.
   visibleStreams: { type: Array, default: () => [] },
-  // v-model:zoom-range — { xMin, xMax } | null. Kept here so the chart's wheel
-  // zoom and the "Zoom to selection" button share the same state.
+  // v-model:zoom-range — { xMin, xMax } | null. Alimenté par le bouton
+  // « Zoomer sur la sélection » et le pincement tactile.
   zoomRange: { type: Object, default: null },
   // v-model:collapsed — persisted by the parent (localStorage).
   collapsed: { type: Boolean, default: false },
@@ -412,7 +412,6 @@ const dragSelectPlugin = {
 
 // ─── Chart instances + rendering ─────────────────────────────────────────
 const chartInstances = new Map()
-const wheelHandlers = new Map()
 const touchCleanups = new Map() // groupId → () => void : retire les listeners tactiles
 // Geste tactile en cours (un seul à la fois). Chaque objet mémorise le chart concerné.
 let touchPinch: any = null  // { idA, idB, vA, vB, chart } — pincement + pan (2 doigts)
@@ -542,10 +541,6 @@ async function renderCharts() {
       else emit('select-segment', sIdx, eIdx)
     }
 
-    const wheelHandler = (e) => handleZoomWheel(chart, e)
-    canvas.addEventListener('wheel', wheelHandler, { passive: false })
-    wheelHandlers.set(group.id, { canvas, handler: wheelHandler })
-
     touchCleanups.set(group.id, attachTouchInteraction(canvas, chart))
 
     chartInstances.set(group.id, chart)
@@ -574,8 +569,6 @@ function applySelectionToCharts() {
 }
 
 function destroyCharts() {
-  wheelHandlers.forEach(({ canvas, handler }) => canvas.removeEventListener('wheel', handler))
-  wheelHandlers.clear()
   touchCleanups.forEach((detach) => detach())
   touchCleanups.clear()
   touchPinch = touchSelect = touchHandle = null
@@ -969,7 +962,7 @@ function onPointerUp() {
   pdInitialized = false
 }
 
-// ─── Zoom (drag-selection on a chart + wheel) ────────────────────────────
+// ─── Zoom (drag-selection on a chart) ────────────────────────────
 function setZoom(min, max) {
   const natural = xMaxAll - xMinAll
   if (natural <= 0) return
@@ -1006,54 +999,6 @@ function applyZoomToCharts() {
     chart.options.scales.x.max = props.zoomRange?.xMax
     chart.update('none')
   })
-}
-
-let wheelRafPending = false
-let pendingWheel = null
-
-function handleZoomWheel(chart, e) {
-  e.preventDefault()
-  const rect = chart.canvas.getBoundingClientRect()
-  const px = e.clientX - rect.left
-  // Latest event wins per frame — older pending events are dropped.
-  pendingWheel = { chart, px, deltaY: e.deltaY }
-  if (wheelRafPending) return
-  wheelRafPending = true
-  requestAnimationFrame(() => {
-    wheelRafPending = false
-    if (!pendingWheel) return
-    const { chart: c, px: p, deltaY } = pendingWheel
-    pendingWheel = null
-    applyZoomStep(c, p, deltaY)
-  })
-}
-
-function applyZoomStep(chart, px, deltaY) {
-  const xScale = chart.scales.x
-  const cursorVal = xScale.getValueForPixel(px)
-  const currentMin = props.zoomRange?.xMin ?? xMinAll
-  const currentMax = props.zoomRange?.xMax ?? xMaxAll
-  const range = currentMax - currentMin
-  if (range <= 0 || cursorVal == null || Number.isNaN(cursorVal)) return
-  const factor = deltaY > 0 ? 1.25 : 0.8
-  const naturalRange = xMaxAll - xMinAll
-  const newRange = range * factor
-  if (newRange >= naturalRange) {
-    resetZoom()
-    return
-  }
-  const leftFrac = (cursorVal - currentMin) / range
-  let newMin = cursorVal - leftFrac * newRange
-  let newMax = newMin + newRange
-  if (newMin < xMinAll) {
-    newMax += xMinAll - newMin
-    newMin = xMinAll
-  }
-  if (newMax > xMaxAll) {
-    newMin -= newMax - xMaxAll
-    newMax = xMaxAll
-  }
-  setZoom(newMin, newMax)
 }
 
 // ─── Touch interactions (mobile) ──────────────────────────────────────────
@@ -1151,9 +1096,14 @@ function attachTouchInteraction(canvas: HTMLCanvasElement, chart: any) {
       if (!touchSelect.moved) {
         const dx = Math.abs(x - touchSelect.startPx)
         const dy = Math.abs(tt.clientY - touchSelect.startY)
-        // Vertical dominant → c'est un scroll de page : on abandonne la sélection.
-        if (dy > dx && dy > TOUCH_TAP_TOL_PX) { touchSelect = null; return }
-        if (dx <= TOUCH_TAP_TOL_PX) return
+        // On ne démarre une sélection que si le geste est franchement horizontal.
+        // Tant que ce n'est pas le cas (vertical ou diagonal), on ne fait pas de
+        // preventDefault : le scroll vertical de la page reste possible. Dès que le
+        // geste penche vers la verticale, on abandonne définitivement la sélection.
+        if (dx <= TOUCH_TAP_TOL_PX || dx <= dy) {
+          if (dy > TOUCH_TAP_TOL_PX && dy >= dx) touchSelect = null
+          return
+        }
         touchSelect.moved = true
         chart.$drag = { mode: 'select', x0: touchSelect.startPx, x1: x }
       }
@@ -1629,6 +1579,8 @@ onBeforeUnmount(() => {
      graphiques ; les contrôles étant repliés dans le menu, sa hauteur reste contenue. */
   .chart-controls-toggle { display: inline-flex; }
   .chart-controls { display: none; }
+  /* Graphiques plus courts sur téléphone pour en voir davantage à l'écran. */
+  .chart-canvas-wrap { height: 170px; }
   .chart-controls.chart-controls-open {
     display: flex;
     flex-direction: column;

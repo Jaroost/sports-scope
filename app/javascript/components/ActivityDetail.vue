@@ -336,47 +336,39 @@ onMounted(async () => {
       />
 
       <!-- Onglets d'analyse — la carte ci-dessus reste toujours visible. -->
-      <ul class="nav nav-tabs activity-tabs mt-3" role="tablist">
-        <li v-if="hasPhotos" class="nav-item" role="presentation">
-          <button
-            type="button"
-            class="nav-link d-flex align-items-center gap-2"
-            :class="{ active: effectiveTab === 'photos' }"
-            role="tab"
-            :aria-selected="effectiveTab === 'photos'"
-            @click="activeTab = 'photos'"
-          >
-            <i class="fa-solid fa-images" aria-hidden="true"></i>
-            <span>{{ t('strava.tabs.photos') }} ({{ photos.length }})</span>
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button
-            type="button"
-            class="nav-link d-flex align-items-center gap-2"
-            :class="{ active: effectiveTab === 'power' }"
-            role="tab"
-            :aria-selected="effectiveTab === 'power'"
-            @click="activeTab = 'power'"
-          >
-            <i class="fa-solid fa-bolt" aria-hidden="true"></i>
-            <span>{{ t('strava.tabs.power_climbs') }}</span>
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button
-            type="button"
-            class="nav-link d-flex align-items-center gap-2"
-            :class="{ active: effectiveTab === 'analysis' }"
-            role="tab"
-            :aria-selected="effectiveTab === 'analysis'"
-            @click="activeTab = 'analysis'"
-          >
-            <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
-            <span>{{ t('strava.tabs.analysis') }}</span>
-          </button>
-        </li>
-      </ul>
+      <div class="btn-group btn-group-sm activity-tabs mt-3" role="group" :aria-label="t('strava.tabs.analysis')">
+        <button
+          v-if="hasPhotos"
+          type="button"
+          class="btn d-flex align-items-center gap-2"
+          :class="effectiveTab === 'photos' ? 'btn-warning' : 'btn-outline-secondary'"
+          :aria-pressed="effectiveTab === 'photos'"
+          @click="activeTab = 'photos'"
+        >
+          <i class="fa-solid fa-images" aria-hidden="true"></i>
+          <span>{{ t('strava.tabs.photos') }} ({{ photos.length }})</span>
+        </button>
+        <button
+          type="button"
+          class="btn d-flex align-items-center gap-2"
+          :class="effectiveTab === 'power' ? 'btn-warning' : 'btn-outline-secondary'"
+          :aria-pressed="effectiveTab === 'power'"
+          @click="activeTab = 'power'"
+        >
+          <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+          <span>{{ t('strava.tabs.power_climbs') }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn d-flex align-items-center gap-2"
+          :class="effectiveTab === 'analysis' ? 'btn-warning' : 'btn-outline-secondary'"
+          :aria-pressed="effectiveTab === 'analysis'"
+          @click="activeTab = 'analysis'"
+        >
+          <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+          <span>{{ t('strava.tabs.analysis') }}</span>
+        </button>
+      </div>
 
       <!-- PhotoGallery reste toujours monté (même hors onglet) pour que la
            lightbox déclenchée par les marqueurs photo de la carte fonctionne
@@ -390,6 +382,7 @@ onMounted(async () => {
 
       <ActivityStats
         v-if="effectiveTab === 'power'"
+        class="mb-3"
         :moving-stats="movingStats"
         :global-vam="globalVam"
         :climbs-with-vam="climbsWithVam"
@@ -404,6 +397,7 @@ onMounted(async () => {
 
       <ActivityCharts
         v-if="effectiveTab === 'analysis'"
+        class="mb-3"
         :streams="streams"
         :activity="activity"
         :streams-loading="streamsLoading"

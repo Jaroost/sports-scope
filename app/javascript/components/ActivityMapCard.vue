@@ -16,7 +16,7 @@ import {
 // helpers que le créateur d'itinéraire — donc les seuils de col et la fenêtre de
 // lissage de pente du profil utilisateur — pour que l'analyse et la création
 // d'itinéraire restent cohérentes.
-import { simplifyTrack, buildGradedSegments, detectClimbs, GRADE_BUCKETS } from '../routeHelpers'
+import { simplifyTrack, simplifyIndices, buildGradedSegments, detectClimbs, GRADE_BUCKETS } from '../routeHelpers'
 import { sportPreferences } from '../userPreferences'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -101,6 +101,31 @@ const routeCoords = computed(() => {
 const hasRoute = computed(() => routeCoords.value.length > 0)
 const hasLatLngStream = computed(() => Array.isArray(props.streams?.latlng?.data) && props.streams.latlng.data.length > 0)
 
+// Tolérance (m) de simplification du tracé pour l'AFFICHAGE. Une trace Strava peut compter
+// des dizaines de milliers de points quasi superposés (le GPS qui « grouille » sur place
+// pendant un arrêt) : les rendre bruts sature le pavage MapLibre et fige la carte. À ~3 m
+// on ne perd rien de visible aux échelles d'une activité, mais on divise le nombre de
+// sommets par 10 à 40.
+const DISPLAY_SIMPLIFY_TOLERANCE_M = 3
+// Tracé simplifié réservé aux COUCHES de la carte (ligne, dégradé de pente, flèches de
+// direction). On sous-échantillonne altitude et distance sur les MÊMES indices que les
+// coordonnées pour préserver l'alignement exigé par buildGradedSegments. Toutes les
+// interactions (survol, sélection, marqueurs de cols/photos) continuent d'indexer les
+// streams pleine résolution — cette simplification est purement visuelle.
+const displayRoute = computed(() => {
+  const coords = routeCoords.value
+  const altitudes = props.streams?.altitude?.data
+  const distances = props.streams?.distance?.data
+  if (coords.length < 3) return { coords, altitudes, distances }
+  const idx = simplifyIndices(coords as [number, number][], DISPLAY_SIMPLIFY_TOLERANCE_M)
+  if (idx.length >= coords.length) return { coords, altitudes, distances }
+  return {
+    coords: idx.map((i) => coords[i]),
+    altitudes: Array.isArray(altitudes) ? idx.map((i) => altitudes[i]) : altitudes,
+    distances: Array.isArray(distances) ? idx.map((i) => distances[i]) : distances,
+  }
+})
+
 const startEndDisplay = computed(() => {
   const a = props.activity
   if (!a?.start_date_local) return null
@@ -159,7 +184,7 @@ function setMapStyle(id) {
   // `diff: false` forces a full wipe — without it, maplibre preserves custom
   // items across the swap and our re-addImage() call throws.
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
-  mapInstance.once('style.load', () => installRouteLayers(routeCoords.value))
+  mapInstance.once('style.load', () => installRouteLayers())
 }
 
 // ─── Map layers ──────────────────────────────────────────────────────────
@@ -181,13 +206,15 @@ function gradePaintExpression() {
 // Adds the route geometry / arrows / selection overlay to the current style.
 // Safe to call after a setStyle() swap because all layers/sources belong to
 // the style and are wiped when the style changes.
-function installRouteLayers(coords) {
+function installRouteLayers() {
   if (!mapInstance) return
-  const altitudes = props.streams?.altitude?.data
-  const distances = props.streams?.distance?.data
+  // Géométrie simplifiée pour l'affichage (cf. displayRoute) — coords/altitude/distance
+  // restent alignées par index.
+  const { coords, altitudes, distances } = displayRoute.value
+  if (!coords.length) return
   // Pente lissée depuis l'altitude (fenêtre du profil), comme le créateur d'itinéraire —
   // le stream `grade_smooth` de Strava (lissage maison) n'est volontairement pas utilisé.
-  const segments = buildGradedSegments(coords, altitudes, distances)
+  const segments = buildGradedSegments(coords as [number, number][], altitudes, distances)
   const hasGrades = segments.length > 0 && altitudes?.length && distances?.length
 
   mapInstance.addSource('route', {
@@ -719,7 +746,7 @@ async function renderMap() {
   mapInstance.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
 
   mapInstance.on('load', () => {
-    installRouteLayers(coords)
+    installRouteLayers()
     if (hasLatLngStream.value) installMapHandles(maplibregl)
     installClimbMarkers(maplibregl)
     installPhotoMarkers(maplibregl)
@@ -742,7 +769,7 @@ function redrawRouteWithStreams() {
     const sources = ['route', 'route-graded', 'selected-route']
     sources.forEach((id) => { if (map.getSource(id)) map.removeSource(id) })
     if (map.hasImage('route-arrow')) map.removeImage('route-arrow')
-    installRouteLayers(routeCoords.value)
+    installRouteLayers()
     if (hasLatLngStream.value && !markerA) installMapHandles(_maplibregl)
     installClimbMarkers(_maplibregl)
   }

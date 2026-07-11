@@ -175,6 +175,33 @@ export function simplifyTrack<T extends Coord | LngLat>(coords: T[], toleranceM 
   return out
 }
 
+// Variante de simplifyTrack qui renvoie les INDICES conservés (triés croissant) plutôt que
+// les points eux-mêmes. Utile pour sous-échantillonner en parallèle plusieurs tableaux
+// alignés par index (coords + altitude + distance) sans casser leur correspondance — ce
+// qu'exige buildGradedSegments. Même algorithme Ramer-Douglas-Peucker que simplifyTrack.
+export function simplifyIndices(coords: (Coord | LngLat)[], toleranceM = 8): number[] {
+  const n = coords.length
+  if (n <= 2) return coords.map((_, i) => i)
+  const keep = new Uint8Array(n)
+  keep[0] = 1; keep[n - 1] = 1
+  const stack: Array<[number, number]> = [[0, n - 1]]
+  while (stack.length) {
+    const [first, last] = stack.pop()!
+    let maxDist = -1, idx = -1
+    for (let i = first + 1; i < last; i++) {
+      const d = perpDistanceM(coords[i], coords[first], coords[last])
+      if (d > maxDist) { maxDist = d; idx = i }
+    }
+    if (idx !== -1 && maxDist > toleranceM) {
+      keep[idx] = 1
+      stack.push([first, idx], [idx, last])
+    }
+  }
+  const out: number[] = []
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(i)
+  return out
+}
+
 // ─── Grade / climb helpers ────────────────────────────────────────────────────
 
 export const GRADE_BUCKETS = [

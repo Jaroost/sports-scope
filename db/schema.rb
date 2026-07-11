@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_11_000004) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_11_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -167,17 +167,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000004) do
     t.index ["user_id"], name: "index_strava_activities_on_user_id"
   end
 
-  create_table "strava_activity_peak_powers", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.jsonb "peak_powers", default: {}, null: false
-    t.datetime "started_at"
-    t.string "strava_activity_id", null: false
-    t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
-    t.index ["user_id", "strava_activity_id"], name: "idx_strava_peak_powers_user_activity", unique: true
-    t.index ["user_id"], name: "index_strava_activity_peak_powers_on_user_id"
-  end
-
   create_table "users", force: :cascade do |t|
     t.boolean "admin", default: false, null: false
     t.jsonb "chart_layout"
@@ -210,6 +199,5 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000004) do
   add_foreign_key "pois", "users"
   add_foreign_key "routes", "users"
   add_foreign_key "strava_activities", "users"
-  add_foreign_key "strava_activity_peak_powers", "users"
   add_foreign_key "users", "chart_layouts", column: "last_chart_layout_id", on_delete: :nullify
 end

@@ -4,6 +4,8 @@
 # `StravaController#streams`) since they cost one request each and would blow
 # the Strava rate limit if fetched in bulk.
 class StravaActivity < ApplicationRecord
+  include Activityable
+
   belongs_to :user
 
   validates :strava_id, presence: true, uniqueness: { scope: :user_id }
@@ -13,8 +15,6 @@ class StravaActivity < ApplicationRecord
   # les chaussures. Le suivi du cirage ne concerne que les vélos — on écarte donc
   # les chaussures (sinon une sortie course créerait un faux « vélo »).
   scope :with_bike_gear, -> { where("gear_id LIKE 'b%'") }
-
-  PEAK_POWER_DURATIONS = PeakPowerCurve::DURATIONS
 
   # Idempotent upsert of one Strava activity summary (the hash returned by
   # `/athlete/activities`). Returns the (re)loaded record. Only summary fields
@@ -53,22 +53,6 @@ class StravaActivity < ApplicationRecord
       start_latlng: latlng(s['start_latlng'] || s[:start_latlng]),
       end_latlng: latlng(s['end_latlng'] || s[:end_latlng])
     }
-  end
-
-  # Write-through of the detailed streams fetched from the Strava API, then
-  # recompute the peak-power curve. `streams` is the key_by_type hash returned
-  # by `/activities/:id/streams`.
-  def store_streams!(streams)
-    self.streams = streams.is_a?(Hash) ? streams : {}
-    self.peak_powers = PeakPowerCurve.compute_from(self.streams)
-    save!
-    self
-  end
-
-  def compute_peak_powers!
-    self.peak_powers = PeakPowerCurve.compute_from(streams)
-    save!(touch: false) if changed?
-    peak_powers
   end
 
   def self.parse_time(v)

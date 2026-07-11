@@ -208,7 +208,6 @@ class User < ApplicationRecord
   has_many :imported_activities, dependent: :destroy
   has_many :strava_activities, dependent: :destroy
   has_many :bikes, dependent: :destroy
-  has_many :strava_activity_peak_powers, dependent: :destroy
 
   validates :keycloak_uid, presence: true, uniqueness: true
   validates :email, presence: true, uniqueness: true

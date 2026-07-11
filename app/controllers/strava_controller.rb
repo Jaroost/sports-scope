@@ -80,10 +80,9 @@ class StravaController < ApplicationController
   end
 
   # GET /strava/activities/:id/peak_power_ranks
-  # Mirrors `ImportedActivitiesController#peak_power_ranks` but persists the
-  # current Strava activity's peak-power curve into `strava_activity_peak_powers`
-  # (Strava activities themselves aren't stored — only the curve is, so we can
-  # rank against the user's history).
+  # Mirrors `ImportedActivitiesController#peak_power_ranks`: ensures the current
+  # Strava activity's streams (and thus its peak-power curve) are persisted, then
+  # ranks it against the user's all-time bests across both activity sources.
   def peak_power_ranks
     id = params[:id]
     streams = load_streams_for(id)

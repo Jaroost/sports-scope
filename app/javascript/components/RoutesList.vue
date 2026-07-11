@@ -6,6 +6,7 @@ import type { Sport } from '../userPreferences'
 import { buildNewRouteUrl } from '../routeHelpers'
 import { parseGpxWaypoints, GpxImportError } from '../gpxImport'
 import NewRouteModal from './NewRouteModal.vue'
+import RoutesOverviewMap from './RoutesOverviewMap.vue'
 
 // canDense : réservé aux admins (can :manage, :all). Débloque l'export d'un GPX
 // densifié (1 point / 5 m) — utile pour les simulateurs de position GPS, à éviter
@@ -15,6 +16,26 @@ const props = defineProps<{ canDense?: boolean }>()
 const routes = ref([])
 const loading = ref(true)
 const error = ref(null)
+// Bascule liste / carte d'ensemble. La carte n'est montée que quand on l'ouvre.
+const view = ref<'list' | 'map'>('list')
+// Itinéraire sélectionné depuis la carte : on revient sur la liste, on défile
+// jusqu'à sa ligne et on la fait clignoter le temps de la repérer.
+const selectedRouteId = ref(null)
+const rowEls = ref({}) // { [routeId]: HTMLElement } — pour le scroll/highlight
+
+function setRowRef(id, el) {
+  if (el) rowEls.value[id] = el
+  else delete rowEls.value[id]
+}
+
+function onSelectRouteFromMap(id) {
+  view.value = 'list'
+  selectedRouteId.value = id
+  nextTick(() => {
+    rowEls.value[id]?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setTimeout(() => { if (selectedRouteId.value === id) selectedRouteId.value = null }, 2500)
+  })
+}
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
@@ -30,6 +51,15 @@ function activityOf(r): Sport {
 
 function sportIcon(s: Sport) {
   return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
+
+// Couleur d'un segment de l'aperçu selon la catégorie de pente calculée côté
+// serveur : 1 = montée (rouge), 2 = descente (bleu), 0 = plat (gris neutre).
+// Ces teintes restent lisibles en thème clair comme sombre.
+function gradeColor(cat: number) {
+  if (cat === 1) return '#e0503f'
+  if (cat === 2) return '#2f8fed'
+  return '#9aa0a6'
 }
 
 // Share feedback: holds the id of the route whose link was just copied, so the
@@ -354,7 +384,45 @@ onMounted(() => fetchRoutes())
       />
     </div>
 
-    <div class="card shadow-sm border-0">
+    <div class="btn-group btn-group-sm mb-3" role="group" :aria-label="t('routes.list_title')">
+      <button
+        type="button"
+        class="btn d-flex align-items-center gap-1"
+        :class="view === 'list' ? 'btn-warning' : 'btn-outline-secondary'"
+        :aria-pressed="view === 'list'"
+        @click="view = 'list'"
+      >
+        <i class="fa-solid fa-list-ul" aria-hidden="true"></i>
+        <span>{{ t('routes.view_list') }}</span>
+      </button>
+      <button
+        type="button"
+        class="btn d-flex align-items-center gap-1"
+        :class="view === 'map' ? 'btn-warning' : 'btn-outline-secondary'"
+        :aria-pressed="view === 'map'"
+        @click="view = 'map'"
+      >
+        <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+        <span>{{ t('routes.view_map') }}</span>
+      </button>
+    </div>
+
+    <div v-if="view === 'map'" class="card shadow-sm border-0 mb-0">
+      <div class="card-body p-2">
+        <div v-if="loading" class="text-muted d-flex align-items-center gap-2 p-2">
+          <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+          <span>Loading…</span>
+        </div>
+        <RoutesOverviewMap
+          v-else
+          :routes="routes"
+          :locale-prefix="localePrefix"
+          @select-route="onSelectRouteFromMap"
+        />
+      </div>
+    </div>
+
+    <div v-show="view === 'list'" class="card shadow-sm border-0">
       <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
         <h2 class="h5 mb-0 d-flex align-items-center gap-2">
           <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
@@ -377,7 +445,12 @@ onMounted(() => fetchRoutes())
           <span>{{ t('routes.empty') }}</span>
         </div>
         <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1">
-          <li v-for="r in routes" :key="r.id">
+          <li
+            v-for="r in routes"
+            :key="r.id"
+            :ref="(el) => setRowRef(r.id, el)"
+            :class="{ 'route-row-selected': selectedRouteId === r.id }"
+          >
             <div v-if="editingId === r.id" class="activity-row d-flex align-items-center gap-2">
               <input
                 :ref="(el) => setInputRef(r.id, el)"
@@ -415,12 +488,19 @@ onMounted(() => fetchRoutes())
                 class="flex-grow-1 d-flex align-items-center gap-3 text-decoration-none text-reset min-width-0"
               >
                 <span class="route-preview" :title="t(`routes.wt_sport_${activityOf(r)}`)">
-                  <svg v-if="r.preview_path" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                  <svg
+                    v-if="r.preview_segments && r.preview_segments.length"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="xMidYMid meet"
+                    aria-hidden="true"
+                  >
                     <path
-                      :d="r.preview_path"
+                      v-for="(s, i) in r.preview_segments"
+                      :key="i"
+                      :d="s.d"
                       fill="none"
-                      stroke="currentColor"
-                      stroke-width="5"
+                      :stroke="gradeColor(s.c)"
+                      stroke-width="6"
                       stroke-linejoin="round"
                       stroke-linecap="round"
                     />
@@ -581,6 +661,17 @@ onMounted(() => fetchRoutes())
    gets the translateX hover bump from .activity-row in application.scss. */
 .route-row-actions {
   flex-shrink: 0;
+}
+
+/* Flash de repérage quand on arrive depuis la carte (« voir dans la liste ») :
+   la ligne clignote brièvement en jaune puis revient à la normale. */
+.route-row-selected .activity-row {
+  animation: route-row-flash 2.5s ease-out;
+  border-radius: 0.5rem;
+}
+@keyframes route-row-flash {
+  0%, 12% { background-color: rgba(255, 193, 7, 0.4); }
+  100% { background-color: transparent; }
 }
 
 

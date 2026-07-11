@@ -204,6 +204,12 @@ en:
     delete_confirm: "Delete this imported activity?"
   routes:
     list_title: "My routes"
+    view_list: "List"
+    view_map: "Map"
+    map_empty: "No routes to show on the map."
+    map_count: "%{count} routes"
+    open: "Open"
+    show_in_list: "Show in list"
     builder_title: "New route"
     view_title: "Shared route"
     readonly_badge: "Read-only"

@@ -204,6 +204,12 @@ fr:
     delete_confirm: "Supprimer cette activité importée ?"
   routes:
     list_title: "Mes itinéraires"
+    view_list: "Liste"
+    view_map: "Carte"
+    map_empty: "Aucun tracé à afficher sur la carte."
+    map_count: "%{count} tracés"
+    open: "Ouvrir"
+    show_in_list: "Voir dans la liste"
     builder_title: "Créer un itinéraire"
     view_title: "Itinéraire partagé"
     readonly_badge: "Lecture seule"

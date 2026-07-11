@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_11_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_11_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -107,9 +107,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000001) do
     t.float "elevation_gain_m"
     t.float "elevation_loss_m"
     t.jsonb "geometry", default: [], null: false
+    t.jsonb "map_polyline"
     t.string "name", null: false
     t.jsonb "pois", default: [], null: false
-    t.text "preview_path"
+    t.jsonb "preview_segments"
     t.string "profile", default: "trekking"
     t.string "share_token", null: false
     t.datetime "updated_at", null: false

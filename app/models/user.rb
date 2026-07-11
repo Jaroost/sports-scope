@@ -202,6 +202,8 @@ class User < ApplicationRecord
 
   has_many :chart_layouts, dependent: :destroy
   has_many :routes, dependent: :destroy
+  # Itinéraires d'autrui ouverts via un lien partagé (cf. OpenedRoute).
+  has_many :opened_routes, dependent: :destroy
   has_many :pois, dependent: :destroy
   has_many :imported_activities, dependent: :destroy
   has_many :strava_activities, dependent: :destroy

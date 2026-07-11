@@ -14,7 +14,10 @@ class RoutesController < ApplicationController
   # GET /api/routes
   def index
     routes = current_user.routes.order(updated_at: :desc)
-    render json: { routes: routes.map { |r| serialize_summary(r) } }
+    render json: {
+      routes: routes.map { |r| serialize_summary(r) },
+      opened: opened_routes_summaries,
+    }
   end
 
   # GET /api/routes/:id
@@ -30,6 +33,7 @@ class RoutesController < ApplicationController
   def shared
     route = Route.find_by(share_token: params[:token])
     return head :not_found unless route
+    record_open(route)
     render json: { route: serialize_full(route) }
   end
 
@@ -102,6 +106,36 @@ class RoutesController < ApplicationController
   end
 
   private
+
+  # Mémorise qu'un utilisateur connecté a ouvert l'itinéraire d'un AUTRE via un lien
+  # partagé, pour l'exposer dans la catégorie « récemment ouverts » du sélecteur de
+  # navigation. On ignore ses propres itinéraires (déjà listés) et les anonymes.
+  # Rafraîchit `last_opened_at` à chaque réouverture (une ligne par paire user/route).
+  def record_open(route)
+    return unless current_user && route.user_id != current_user.id
+
+    # Upsert atomique (ON CONFLICT sur l'index unique user/route) : évite la course
+    # entre deux ouvertures simultanées, qui violerait l'unicité avec un
+    # find_or_initialize + save. Écriture de tracé, on ne veut pas faire échouer la
+    # requête publique si ça rate.
+    now = Time.current
+    OpenedRoute.upsert(
+      { user_id: current_user.id, route_id: route.id, last_opened_at: now, created_at: now, updated_at: now },
+      unique_by: %i[user_id route_id],
+    )
+  rescue StandardError => e
+    Rails.logger.warn("[routes] record_open failed: #{e.message}")
+  end
+
+  # Résumés des itinéraires ouverts (les plus récents d'abord), dédupliqués des
+  # itinéraires possédés au cas où l'utilisateur en serait devenu propriétaire depuis.
+  def opened_routes_summaries
+    current_user.opened_routes
+                .where.not(route_id: current_user.routes.select(:id))
+                .includes(:route)
+                .order(last_opened_at: :desc)
+                .filter_map { |o| serialize_summary(o.route).merge(last_opened_at: o.last_opened_at.iso8601) if o.route }
+  end
 
   def sanitize_attrs(p)
     # Only include keys that were actually present in the payload so PATCH

@@ -5,6 +5,8 @@ class Route < ApplicationRecord
   ACTIVITIES = %w[cycling mtb hiking].freeze
 
   belongs_to :user
+  # Traces d'ouverture par d'autres utilisateurs (via lien partagé) — purgées avec l'itinéraire.
+  has_many :opened_routes, dependent: :destroy
   # Unguessable token for public, shareable navigation links.
   has_secure_token :share_token
   validates :name, presence: true, length: { maximum: 80 }

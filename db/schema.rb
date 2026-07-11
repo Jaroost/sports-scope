@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_11_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_11_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -86,6 +86,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000003) do
     t.bigint "user_id", null: false
     t.index ["user_id", "started_at"], name: "index_imported_activities_on_user_id_and_started_at"
     t.index ["user_id"], name: "index_imported_activities_on_user_id"
+  end
+
+  create_table "opened_routes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "last_opened_at", null: false
+    t.bigint "route_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["route_id"], name: "index_opened_routes_on_route_id"
+    t.index ["user_id", "last_opened_at"], name: "index_opened_routes_on_user_id_and_last_opened_at"
+    t.index ["user_id", "route_id"], name: "index_opened_routes_on_user_id_and_route_id", unique: true
+    t.index ["user_id"], name: "index_opened_routes_on_user_id"
   end
 
   create_table "pois", force: :cascade do |t|
@@ -193,6 +205,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000003) do
   add_foreign_key "chains", "bikes"
   add_foreign_key "chart_layouts", "users"
   add_foreign_key "imported_activities", "users"
+  add_foreign_key "opened_routes", "routes"
+  add_foreign_key "opened_routes", "users"
   add_foreign_key "pois", "users"
   add_foreign_key "routes", "users"
   add_foreign_key "strava_activities", "users"

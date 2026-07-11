@@ -275,6 +275,8 @@ fr:
     my_routes: "Mes itinéraires"
     no_routes: "Aucun itinéraire sauvegardé."
     login_to_load: "Connectez-vous pour charger un de vos itinéraires."
+    opened_routes: "Itinéraires ouverts"
+    no_opened_routes: "Aucun itinéraire ouvert récemment."
     error_loading: "Échec du chargement des itinéraires."
     navigate_to_place: "Naviguer vers un lieu"
     navigate_pick_hint: "Touchez la carte pour ajouter un ou plusieurs points, puis lancez la navigation. La recherche recadre la carte."

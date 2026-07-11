@@ -275,6 +275,8 @@ en:
     my_routes: "My routes"
     no_routes: "No saved routes."
     login_to_load: "Sign in to load one of your routes."
+    opened_routes: "Opened routes"
+    no_opened_routes: "No recently opened routes."
     error_loading: "Failed to load routes."
     navigate_to_place: "Navigate to a place"
     navigate_pick_hint: "Tap the map to add one or more points, then start navigating. Search recenters the map."

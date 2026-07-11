@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_11_000005) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_11_000007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -158,13 +158,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000005) do
     t.datetime "started_at"
     t.bigint "strava_id", null: false
     t.jsonb "streams", default: {}, null: false
+    t.datetime "streams_fetched_at"
     t.float "total_elevation_gain"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
     t.index ["user_id", "gear_id"], name: "index_strava_activities_on_user_id_and_gear_id"
     t.index ["user_id", "started_at"], name: "index_strava_activities_on_user_id_and_started_at"
     t.index ["user_id", "strava_id"], name: "index_strava_activities_on_user_id_and_strava_id", unique: true
+    t.index ["user_id", "streams_fetched_at"], name: "index_strava_activities_on_user_id_and_streams_fetched_at"
     t.index ["user_id"], name: "index_strava_activities_on_user_id"
+  end
+
+  create_table "strava_backfill_runs", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "last_error"
+    t.datetime "rate_limited_until"
+    t.string "status", default: "pending", null: false
+    t.integer "total", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "status"], name: "index_strava_backfill_runs_on_user_id_and_status"
+    t.index ["user_id"], name: "index_strava_backfill_runs_on_user_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -199,5 +213,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_11_000005) do
   add_foreign_key "pois", "users"
   add_foreign_key "routes", "users"
   add_foreign_key "strava_activities", "users"
+  add_foreign_key "strava_backfill_runs", "users"
   add_foreign_key "users", "chart_layouts", column: "last_chart_layout_id", on_delete: :nullify
 end

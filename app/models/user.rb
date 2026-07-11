@@ -207,6 +207,7 @@ class User < ApplicationRecord
   has_many :pois, dependent: :destroy
   has_many :imported_activities, dependent: :destroy
   has_many :strava_activities, dependent: :destroy
+  has_many :strava_backfill_runs, dependent: :destroy
   has_many :bikes, dependent: :destroy
 
   validates :keycloak_uid, presence: true, uniqueness: true

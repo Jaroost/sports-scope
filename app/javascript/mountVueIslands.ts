@@ -1,5 +1,6 @@
 import { createApp, type Component } from 'vue'
 import HelloStrava from './components/HelloStrava.vue'
+import StravaBackfill from './components/StravaBackfill.vue'
 import ActivityDetail from './components/ActivityDetail.vue'
 import RoutesList from './components/RoutesList.vue'
 import RouteBuilder from './components/RouteBuilder.vue'
@@ -13,6 +14,7 @@ import ChainWax from './components/ChainWax.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
+  StravaBackfill,
   ActivityDetail,
   RoutesList,
   RouteBuilder,

@@ -16,6 +16,18 @@ class StravaActivity < ApplicationRecord
   # les chaussures (sinon une sortie course créerait un faux « vélo »).
   scope :with_bike_gear, -> { where("gear_id LIKE 'b%'") }
 
+  # Activités dont les streams n'ont jamais été récupérés (ni via consultation,
+  # ni via backfill). Cible du backfill de masse.
+  scope :streams_pending, -> { where(streams_fetched_at: nil) }
+
+  # Marque la date de récupération en plus du write-through partagé (`Activityable`),
+  # pour qu'une activité sans données de streams (200 vide ou 404) ne reste pas
+  # indéfiniment éligible au backfill.
+  def store_streams!(streams)
+    self.streams_fetched_at = Time.current
+    super
+  end
+
   # Idempotent upsert of one Strava activity summary (the hash returned by
   # `/athlete/activities`). Returns the (re)loaded record. Only summary fields
   # are touched — `streams`/`peak_powers` are left intact for already-synced

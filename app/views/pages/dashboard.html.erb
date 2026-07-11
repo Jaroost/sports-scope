@@ -13,6 +13,7 @@
 <%# La section Strava n'apparaît que si le compte est lié ; sinon on invite à le
     lier depuis le profil. L'import .fit reste disponible dans tous les cas. %>
 <% if current_user.strava_linked? %>
+  <div data-vue-component="StravaBackfill" class="mb-3"></div>
   <div data-vue-component="HelloStrava"></div>
 <% else %>
   <div class="alert alert-info d-flex align-items-center gap-2">

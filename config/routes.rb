@@ -42,6 +42,8 @@ Rails.application.routes.draw do
   # Strava activities (JSON consumed by Vue components)
   get "/strava/activities", to: "strava#activities", as: :strava_activities
   post "/strava/sync", to: "strava#sync", as: :strava_sync
+  get "/strava/backfill", to: "strava#backfill_status", as: :strava_backfill
+  post "/strava/backfill", to: "strava#backfill"
   get "/strava/activities/:id", to: "strava#show", as: :strava_activity, constraints: { id: /\d+/ }
   get "/strava/activities/:id/streams", to: "strava#streams", as: :strava_activity_streams, constraints: { id: /\d+/ }
   get "/strava/activities/:id/peak_power_ranks", to: "strava#peak_power_ranks", as: :strava_activity_peak_power_ranks, constraints: { id: /\d+/ }

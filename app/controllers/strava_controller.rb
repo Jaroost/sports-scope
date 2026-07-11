@@ -50,31 +50,20 @@ class StravaController < ApplicationController
     render json: { error: e.message }, status: status
   end
 
-  STREAM_KEYS = %w[time distance latlng altitude velocity_smooth heartrate cadence watts temp moving
-                   grade_smooth].freeze
-
   def streams
     id = params[:id]
-    cache_key = "strava:streams:v2:#{current_user.id}:#{id}"
-    Rails.cache.delete(cache_key) if params[:refresh].present?
+    activity = current_user.strava_activities.find_by(strava_id: id)
 
-    fetched = false
-    payload = Rails.cache.fetch(cache_key, expires_in: ACTIVITIES_TTL) do
-      fetched = true
-      streams = strava_get(
-        "https://www.strava.com/api/v3/activities/#{id}/streams",
-        keys: STREAM_KEYS.join(','),
-        key_by_type: true
-      )
-      { cached_at: Time.current.iso8601, streams: streams }
+    # Sert les streams persistés dès qu'on les a déjà récupérés (consultation
+    # antérieure ou backfill) : la BDD est le cache. `?refresh=1` force un re-fetch.
+    if params[:refresh].blank? && activity&.streams_fetched_at.present?
+      return render json: { cached_at: activity.streams_fetched_at.iso8601, streams: activity.streams }
     end
 
-    # Write-through: persist the detailed series into `strava_activities` the
-    # first time we actually hit the API (computes the peak-power curve too).
-    persist_streams(id, payload[:streams] || payload['streams']) if fetched
-
-    render json: payload
-  rescue StravaApiError => e
+    streams = StravaStreamsFetcher.new(current_user).fetch(id)
+    activity&.store_streams!(streams)
+    render json: { cached_at: Time.current.iso8601, streams: streams }
+  rescue StravaStreamsFetcher::ApiError => e
     status = e.status == 404 ? :not_found : :bad_gateway
     render json: { error: e.message }, status: status
   end
@@ -101,9 +90,35 @@ class StravaController < ApplicationController
       current: current,
       bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['strava', id])
     }
-  rescue StravaApiError => e
+  rescue StravaStreamsFetcher::ApiError => e
     status = e.status == 404 ? :not_found : :bad_gateway
     render json: { error: e.message }, status: status
+  end
+
+  # POST /strava/backfill — récupère en masse les streams manquants. Réutilise un
+  # run actif s'il y en a un (idempotent) ; ne (ré)enfile un job que si rien ne
+  # tourne déjà, pour ne pas dupliquer le travail.
+  def backfill
+    run = current_user.strava_backfill_runs.active.order(created_at: :desc).first
+    if run.nil?
+      run = current_user.strava_backfill_runs.create!(
+        status: 'pending',
+        total: current_user.strava_activities.streams_pending.count
+      )
+      StravaStreamsBackfillJob.perform_later(run.id)
+    elsif run.resumable?
+      StravaStreamsBackfillJob.perform_later(run.id)
+    end
+
+    render json: backfill_json(run)
+  end
+
+  # GET /strava/backfill — état du run le plus récent (pour le suivi de progression).
+  def backfill_status
+    run = current_user.strava_backfill_runs.order(created_at: :desc).first
+    return render json: backfill_json(run) if run
+
+    render json: { run: nil, pending: current_user.strava_activities.streams_pending.count }
   end
 
   def photos
@@ -128,20 +143,29 @@ class StravaController < ApplicationController
 
   private
 
-  # Reuse the same cache keys as `#streams` and `#show` so a normal page visit
-  # warms what `peak_power_ranks` later needs (no extra Strava API call when
-  # streams were already fetched in this session).
+  # Sert les streams persistés quand on les a déjà récupérés, sinon tape l'API.
+  # La BDD `strava_activities.streams` fait office de cache durable.
   def load_streams_for(id)
-    cache_key = "strava:streams:v2:#{current_user.id}:#{id}"
-    payload = Rails.cache.fetch(cache_key, expires_in: ACTIVITIES_TTL) do
-      streams = strava_get(
-        "https://www.strava.com/api/v3/activities/#{id}/streams",
-        keys: STREAM_KEYS.join(','),
-        key_by_type: true
-      )
-      { cached_at: Time.current.iso8601, streams: streams }
-    end
-    payload[:streams] || payload['streams']
+    activity = current_user.strava_activities.find_by(strava_id: id)
+    return activity.streams if activity&.streams_fetched_at.present?
+
+    StravaStreamsFetcher.new(current_user).fetch(id)
+  end
+
+  def backfill_json(run)
+    pending = current_user.strava_activities.streams_pending.count
+    {
+      run: {
+        id: run.id,
+        status: run.status,
+        total: run.total,
+        done: [run.total - pending, 0].max,
+        pending: pending,
+        rate_limited_until: run.rate_limited_until&.iso8601,
+        last_error: run.last_error,
+        updated_at: run.updated_at&.iso8601
+      }
+    }
   end
 
   # Serialized form consumed by the frontend. We return the stored Strava
@@ -172,13 +196,6 @@ class StravaController < ApplicationController
       'start_latlng' => a.start_latlng,
       'end_latlng' => a.end_latlng
     }
-  end
-
-  def persist_streams(id, streams)
-    return unless streams.is_a?(Hash)
-
-    activity = current_user.strava_activities.find_by(strava_id: id)
-    activity&.store_streams!(streams)
   end
 
   class StravaApiError < StandardError

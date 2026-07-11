@@ -19,9 +19,10 @@ import type { SavedPoi } from '../savedPois'
 import { categoryForType, POI_CATEGORIES } from '../poiCategories'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
-  streetViewUrl, bearingFromRoute, bearingAlongRoute,
+  streetViewUrl, bearingFromRoute, bearingAlongRoute, downsampleByDistance,
 } from '../routeHelpers'
-import type { Climb } from '../routeHelpers'
+import type { Climb, Coord } from '../routeHelpers'
+import type { RouteAlternative } from '../routeAlternatives'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 
 const props = defineProps<{ state: RouteBuilderState }>()
@@ -30,7 +31,12 @@ const emit = defineEmits<{
   'select-place': [place: Place]
   'hover-place': [place: Place | null]
   'retry-places': []
+  'hover-alternative': [altId: number | null]
+  'select-alternative': [altId: number]
 }>()
+
+// Palette des variantes de tracé (une couleur par position dans la liste proposée).
+const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828']
 
 const mapEl = useTemplateRef('mapEl')
 
@@ -381,6 +387,29 @@ function installRouteLayer() {
     mapInstance.addSource('builder-route-selected', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
     mapInstance.addLayer({ id: 'builder-route-selected-line', type: 'line', source: 'builder-route-selected', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#00b4d8', 'line-width': 7 } })
   }
+  // Variantes de tracé proposées pour le tronçon sélectionné (cf. showAlternatives).
+  // Chaque feature porte `altId` (position dans la liste) et sa couleur ; la variante
+  // survolée/active est élargie via l'état de feature `active`.
+  if (!mapInstance.getSource('builder-alternatives')) {
+    mapInstance.addSource('builder-alternatives', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+    mapInstance.addLayer({
+      id: 'builder-alternatives-border', type: 'line', source: 'builder-alternatives',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': 'rgba(0,0,0,0.45)', 'line-width': ['case', ['boolean', ['feature-state', 'active'], false], 11, 8] },
+    })
+    mapInstance.addLayer({
+      id: 'builder-alternatives-line', type: 'line', source: 'builder-alternatives',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': ['case', ['boolean', ['feature-state', 'active'], false], 7, 4.5],
+        'line-opacity': ['case', ['boolean', ['feature-state', 'active'], false], 1, 0.8],
+      },
+    })
+    mapInstance.on('mousemove', 'builder-alternatives-line', onAltMouseMove)
+    mapInstance.on('mouseleave', 'builder-alternatives-line', onAltMouseLeave)
+    mapInstance.on('click', 'builder-alternatives-line', onAltClick)
+  }
   // Flèches de sens de parcours : espacées en pixels écran (constantes au zoom) et
   // posées au-dessus du tracé, sur la géométrie continue de `builder-route`.
   if (!mapInstance.hasImage('route-arrow')) {
@@ -522,6 +551,111 @@ function applyColorMode() {
   if (mapInstance.getLayer('builder-route-line')) mapInstance.setPaintProperty('builder-route-line', 'line-color', paint)
   // Le traitillé suit le même code couleur que la ligne pleine en mode pente.
   if (mapInstance.getLayer('builder-route-straight-line')) mapInstance.setPaintProperty('builder-route-straight-line', 'line-color', paint)
+}
+
+// ─── Alternatives de tronçon ──────────────────────────────────────────────────
+// Variantes de tracé proposées entre les deux extrémités d'une sélection. Rendues en
+// superposition (couches builder-alternatives) et choisissables ; la variante retenue
+// remplace le tronçon via applyAlternative.
+
+let activeAltId: number | null = null
+
+function altColor(altId: number) { return ALT_COLORS[altId % ALT_COLORS.length] }
+
+function onAltMouseMove(e: any) {
+  if (!mapInstance) return
+  const f = e.features?.[0]
+  if (!f) return
+  mapInstance.getCanvas().style.cursor = 'pointer'
+  emit('hover-alternative', f.properties?.altId ?? null)
+}
+
+function onAltMouseLeave() {
+  if (!mapInstance) return
+  mapInstance.getCanvas().style.cursor = routeStore.readOnly.value ? '' : 'crosshair'
+  emit('hover-alternative', null)
+}
+
+function onAltClick(e: any) {
+  const f = e.features?.[0]
+  if (!f) return
+  suppressNextMapClick = true
+  emit('select-alternative', f.properties?.altId ?? 0)
+}
+
+// Affiche les variantes en superposition. Chaque variante reçoit un altId = sa
+// position dans la liste, qui sert aussi de couleur et d'id de feature (feature-state).
+function showAlternatives(alts: RouteAlternative[]) {
+  if (!mapInstance) return
+  const src = mapInstance.getSource('builder-alternatives')
+  if (!src) return
+  activeAltId = null
+  const features = alts.map((alt, i) => ({
+    type: 'Feature',
+    id: i,
+    properties: { altId: i, color: altColor(i) },
+    geometry: { type: 'LineString', coordinates: alt.coords.map(([lng, lat]) => [lng, lat]) },
+  }))
+  src.setData({ type: 'FeatureCollection', features })
+}
+
+function highlightAlternative(altId: number | null) {
+  if (!mapInstance) return
+  if (activeAltId != null) mapInstance.setFeatureState({ source: 'builder-alternatives', id: activeAltId }, { active: false })
+  activeAltId = altId
+  if (altId != null) mapInstance.setFeatureState({ source: 'builder-alternatives', id: altId }, { active: true })
+}
+
+function clearAlternatives() {
+  if (!mapInstance) return
+  activeAltId = null
+  const src = mapInstance.getSource('builder-alternatives')
+  if (src) src.setData({ type: 'FeatureCollection', features: [] })
+}
+
+// Remplace la portion du tracé entre les index géométrie lo..hi par la variante
+// choisie : on retire les waypoints intérieurs, on ancre les deux extrémités (en
+// réutilisant un waypoint de bord s'il est déjà là) et on insère des points de passage
+// échantillonnés le long de la variante. recomputeRoute (via waypoints-changed) re-route
+// à travers ces points et reproduit la variante.
+function applyAlternative(lo: number, hi: number, altCoords: Coord[]) {
+  if (routeStore.readOnly.value) return
+  recomputeWaypointGeomIndices()
+  const wps = routeStore.waypoints.value
+  const geom = routeStore.geometry.value
+  if (waypointGeomIndices.length !== wps.length || geom.length < 2 || altCoords.length < 2) return
+
+  // Waypoints à conserver : ceux avant/au niveau de lo, et ceux après/au niveau de hi.
+  const before = wps.filter((_, i) => waypointGeomIndices[i] <= lo)
+  const after = wps.filter((_, i) => waypointGeomIndices[i] >= hi)
+
+  // Ancres : réutilise le waypoint de bord s'il coïncide ~avec l'extrémité (< 20 m),
+  // sinon ancre neuve sur le point de géométrie exact.
+  const ANCHOR_TOL_M = 20
+  const startPt = geom[lo]
+  const endPt = geom[hi]
+  const startAnchor = before.length && haversine([before[before.length - 1].lng, before[before.length - 1].lat], startPt) < ANCHOR_TOL_M
+    ? [] : [{ lng: startPt[0], lat: startPt[1] }]
+  const endAnchor = after.length && haversine([after[0].lng, after[0].lat], endPt) < ANCHOR_TOL_M
+    ? [] : [{ lng: endPt[0], lat: endPt[1] }]
+
+  // Points de passage le long de la variante (hors extrémités, déjà couvertes par les
+  // ancres), ~1 point / 200 m, plafonnés pour respecter MAX_WAYPOINTS.
+  const budget = MAX_WAYPOINTS - before.length - after.length - startAnchor.length - endAnchor.length
+  if (budget < 0) { routeStore.error.value = t('routes.error_max_waypoints', { count: MAX_WAYPOINTS }); return }
+  const distanceM = altCoords.reduce((acc, c, i) => i === 0 ? 0 : acc + haversine(altCoords[i - 1], c), 0)
+  // ~1 point / 200 m, avec un minimum de points intérieurs pour que le re-routage à
+  // travers les vias reproduise fidèlement la variante (sinon BRouter recouperait droit).
+  const byDistance = Math.max(4, Math.round(distanceM / 200))
+  const sampleCount = Math.min(byDistance, budget + 2)
+  const sampled = downsampleByDistance(altCoords, sampleCount)
+  const vias = sampled.slice(1, -1).map((c) => ({ lng: c[0], lat: c[1] }))
+
+  routeStore.waypoints.value = [...before, ...startAnchor, ...vias, ...endAnchor, ...after]
+  clearAlternatives()
+  deselectAll()
+  refreshWaypointMarkers()
+  emit('waypoints-changed')
 }
 
 function updateSelectionLayer() {
@@ -2077,6 +2211,10 @@ defineExpose({
   installPlaceMarkers,
   updateSelectionLayer,
   updateSelectionMarkers,
+  showAlternatives,
+  highlightAlternative,
+  clearAlternatives,
+  applyAlternative,
   refreshWaypointMarkers,
   recomputeWaypointGeomIndices,
   focusWaypoint,

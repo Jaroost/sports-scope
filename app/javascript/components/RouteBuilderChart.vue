@@ -42,6 +42,9 @@ const emit = defineEmits<{
   'zoom-to': [lng: number, lat: number]
   'hover-end': []
   'fit-to-selection': []
+  'open-selection-in-komoot': []
+  'propose-alternatives': []
+  'collapse': []
 }>()
 
 // ─── Computed ─────────────────────────────────────────────────────────────────
@@ -846,6 +849,16 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
         >
           <i class="fa-solid fa-xmark" aria-hidden="true"></i>
           <span>{{ t('routes.clear_selection') }}</span>
+        </button>
+        <button
+          v-if="selectionStore.selectionRange.value && !routeStore.readOnly.value"
+          type="button"
+          class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+          :title="t('routes.propose_alternatives')"
+          @click="$emit('propose-alternatives')"
+        >
+          <i class="fa-solid fa-code-branch" aria-hidden="true"></i>
+          <span>{{ t('routes.alternatives_short') }}</span>
         </button>
         <button
           v-if="selectionStore.selectionRange.value"

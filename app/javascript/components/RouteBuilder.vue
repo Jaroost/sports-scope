@@ -7,11 +7,13 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, turnsFromVoiceHints, detectTurnAnomalies } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, formatDistanceShort, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies } from '../routeHelpers'
 import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport } from '../userPreferences'
 import { BROUTER_URL } from '../brouter'
+import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
+import type { RouteAlternative } from '../routeAlternatives'
 import { parseGpxWaypoints } from '../gpxImport'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
@@ -651,6 +653,115 @@ function openSelectionInKomoot() {
   const points = pts.map((p, i) => `p[${i}][loc]=${p.lat},${p.lng}`).join('&')
   window.open(`https://www.komoot.com/plan/@${centerLat},${centerLng},12z?sport=touringbicycle&${points}`, '_blank', 'noopener,noreferrer')
 }
+
+// ─── Alternatives de tronçon ──────────────────────────────────────────────────
+// Sur une sélection, on rejoue le routage BRouter entre ses deux extrémités
+// (alternativeidx 0..3) pour proposer d'autres tracés du tronçon. Le choix d'une
+// variante remplace la portion via mapRef.applyAlternative.
+
+interface AlternativeView extends RouteAlternative {
+  color: string
+  deltaDistanceM: number
+  deltaGainM: number
+}
+const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828']
+
+const alternatives = ref<AlternativeView[]>([])
+const alternativesLoading = ref(false)
+const alternativesError = ref<string | null>(null)
+const activeAltId = ref<number | null>(null)
+// Bornes géométrie de la sélection au moment de la proposition (figées : la sélection
+// est effacée à l'application, mais on en a besoin pour le splice).
+let altBounds: { lo: number; hi: number } | null = null
+let altToken = 0
+
+const showAlternativesPanel = computed(() => alternativesLoading.value || alternativesError.value != null || alternatives.value.length > 0)
+
+async function proposeAlternatives() {
+  if (routeStore.readOnly.value) return
+  const range = selectionStore.selectionRange.value
+  const geom = routeStore.geometry.value
+  if (!range || !selectionStore.cumDistKm.length || geom.length < 2) return
+  const lo = geomIdxForKm(range.startKm, selectionStore.cumDistKm)
+  const hi = geomIdxForKm(range.endKm, selectionStore.cumDistKm)
+  const loI = Math.min(lo, hi), hiI = Math.max(lo, hi)
+  if (hiI - loI < 2) { alternativesError.value = t('routes.alternatives_too_short'); alternatives.value = []; altBounds = null; return }
+
+  const token = ++altToken
+  altBounds = { lo: loI, hi: hiI }
+  alternatives.value = []
+  alternativesError.value = null
+  alternativesLoading.value = true
+  activeAltId.value = null
+  mapRef.value?.clearAlternatives()
+
+  // Tronçon actuel (entre les extrémités) : sert de référence pour les écarts et pour
+  // écarter les variantes identiques au tracé déjà en place.
+  const currentCoords = geom.slice(loI, hiI + 1)
+  const currentDists = buildDistancesM(currentCoords)
+  const currentDist = currentDists[currentDists.length - 1] ?? 0
+  const currentGL = computeGainLoss(currentCoords)
+
+  try {
+    const p0: LngLat = [geom[loI][0], geom[loI][1]]
+    const p1: LngLat = [geom[hiI][0], geom[hiI][1]]
+    const alts = await fetchSegmentAlternatives(p0, p1, routeStore.profile.value)
+    if (token !== altToken) return
+    // Écarte les variantes identiques au tronçon actuel : rien à proposer d'utile.
+    const distinct = alts.filter((a) => !equivalentGeometry(a, { coords: currentCoords, distanceM: currentDist }))
+    if (!distinct.length) { alternativesError.value = t('routes.alternatives_none'); return }
+    alternatives.value = distinct.slice(0, ALT_COLORS.length).map((a, i) => ({
+      ...a,
+      color: ALT_COLORS[i % ALT_COLORS.length],
+      deltaDistanceM: a.distanceM - currentDist,
+      deltaGainM: a.gainM - currentGL.gain,
+    }))
+    mapRef.value?.showAlternatives(alternatives.value)
+  } catch (e: any) {
+    if (token === altToken) alternativesError.value = `${t('routes.alternatives_error')}: ${e.message}`
+  } finally {
+    if (token === altToken) alternativesLoading.value = false
+  }
+}
+
+function onHoverAlternative(altId: number | null) {
+  activeAltId.value = altId
+  mapRef.value?.highlightAlternative(altId)
+}
+
+function onSelectAlternative(altId: number) {
+  const alt = alternatives.value[altId]
+  if (alt) applyChosenAlternative(alt)
+}
+
+function applyChosenAlternative(alt: AlternativeView) {
+  if (!altBounds) return
+  mapRef.value?.applyAlternative(altBounds.lo, altBounds.hi, alt.coords)
+  cancelAlternatives()
+}
+
+function cancelAlternatives() {
+  altToken++
+  alternatives.value = []
+  alternativesError.value = null
+  alternativesLoading.value = false
+  activeAltId.value = null
+  altBounds = null
+  mapRef.value?.clearAlternatives()
+}
+
+// Formatage de l'écart (distance/dénivelé) d'une variante vs le tronçon actuel.
+function formatDelta(m: number, unit: 'dist' | 'elev'): string {
+  const sign = m > 0 ? '+' : m < 0 ? '−' : '±'
+  const abs = Math.abs(Math.round(m))
+  if (unit === 'elev') return `${sign}${abs} m`
+  return `${sign}${formatDistanceShort(abs)}`
+}
+
+// La sélection disparaît (effacée, ou tracé recalculé) → on retire le panneau.
+watch(() => selectionStore.selectionRange.value, (r) => {
+  if (!r && (alternatives.value.length || alternativesLoading.value || alternativesError.value)) cancelAlternatives()
+})
 
 // ─── Undo / clear ─────────────────────────────────────────────────────────────
 
@@ -1496,9 +1607,53 @@ onBeforeUnmount(() => {
             @select-place="onSelectPlace"
             @hover-place="onHoverPlace"
             @retry-places="fetchImportantPlaces"
+            @hover-alternative="onHoverAlternative"
+            @select-alternative="onSelectAlternative"
             @toggle-chart="state.showElevationChart = !state.showElevationChart; nextTick(() => mapRef?.resize())"
             @toggle-mobile-sheet="mobileSheetOpen = !mobileSheetOpen"
           />
+
+          <!-- Panneau des variantes de tronçon (proposées sur une sélection) -->
+          <Transition name="alt-panel">
+            <div v-if="showAlternativesPanel" class="alt-panel shadow-lg">
+              <div class="alt-panel-header">
+                <span class="alt-panel-title">
+                  <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>
+                  {{ t('routes.alternatives_title') }}
+                </span>
+                <button type="button" class="alt-panel-close" :aria-label="t('routes.close')" @click="cancelAlternatives">×</button>
+              </div>
+              <div v-if="alternativesLoading" class="alt-panel-status">
+                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
+                {{ t('routes.alternatives_loading') }}
+              </div>
+              <div v-else-if="alternativesError" class="alt-panel-status text-danger">
+                {{ alternativesError }}
+              </div>
+              <ul v-else class="alt-panel-list">
+                <li
+                  v-for="(alt, i) in alternatives"
+                  :key="alt.idx"
+                  class="alt-panel-item"
+                  :class="{ 'alt-panel-item--active': activeAltId === i }"
+                  @mouseenter="onHoverAlternative(i)"
+                  @mouseleave="onHoverAlternative(null)"
+                  @click="applyChosenAlternative(alt)"
+                >
+                  <span class="alt-swatch" :style="{ backgroundColor: alt.color }" aria-hidden="true"></span>
+                  <span class="alt-panel-item-stats">
+                    <strong>{{ formatDistancePrecise(alt.distanceM) }}</strong>
+                    <span class="alt-panel-delta" :class="alt.deltaDistanceM <= 0 ? 'text-success' : 'text-muted'">{{ formatDelta(alt.deltaDistanceM, 'dist') }}</span>
+                    <span class="alt-panel-elev">
+                      <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i> +{{ Math.round(alt.gainM) }} m
+                      <span class="alt-panel-delta" :class="alt.deltaGainM <= 0 ? 'text-success' : 'text-muted'">{{ formatDelta(alt.deltaGainM, 'elev') }}</span>
+                    </span>
+                  </span>
+                  <span class="alt-panel-choose">{{ t('routes.apply_alternative') }}</span>
+                </li>
+              </ul>
+            </div>
+          </Transition>
         </div>
 
         <!-- Vertical resize handle (desktop only) -->
@@ -1522,6 +1677,7 @@ onBeforeUnmount(() => {
             @hover-end="onChartHoverEnd"
             @fit-to-selection="onChartFitToSelection"
             @open-selection-in-komoot="openSelectionInKomoot"
+            @propose-alternatives="proposeAlternatives"
             @collapse="onChartCollapse"
           />
         </div>
@@ -1545,6 +1701,7 @@ onBeforeUnmount(() => {
             @hover-end="onChartHoverEnd"
             @fit-to-selection="onChartFitToSelection"
             @open-selection-in-komoot="openSelectionInKomoot"
+            @propose-alternatives="proposeAlternatives"
             @collapse="mobileSheetOpen = false"
           />
           </div>
@@ -1703,7 +1860,72 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
+
+/* ─── Panneau des variantes de tronçon ────────────────────────────────────── */
+.alt-panel {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  z-index: 5;
+  width: min(420px, calc(100% - 24px));
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 0.85rem;
+}
+.alt-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+}
+.alt-panel-title { font-weight: 600; }
+.alt-panel-close {
+  border: 0;
+  background: transparent;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #6b7280;
+}
+.alt-panel-status { padding: 12px; display: flex; align-items: center; }
+.alt-panel-list { list-style: none; margin: 0; padding: 4px; }
+.alt-panel-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.alt-panel-item:hover,
+.alt-panel-item--active { background: #eef2ff; }
+.alt-swatch {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15);
+}
+.alt-panel-item-stats { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.alt-panel-elev { color: #6b7280; }
+.alt-panel-delta { margin-left: 6px; font-variant-numeric: tabular-nums; }
+.alt-panel-choose {
+  flex: 0 0 auto;
+  font-weight: 600;
+  color: #4f46e5;
+  white-space: nowrap;
+}
+.alt-panel-enter-active,
+.alt-panel-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.alt-panel-enter-from,
+.alt-panel-leave-to { opacity: 0; transform: translate(-50%, 8px); }
 .route-builder-chart-wrap {
   display: flex;
   flex-direction: column;

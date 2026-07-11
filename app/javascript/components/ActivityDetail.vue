@@ -68,6 +68,9 @@ const lightboxIndex = ref(null)
 const xAxis = ref('distance')
 const zoomRange = ref(null) // { xMin, xMax } | null
 const visibleStreams = ref([])
+// « Couleur des tracés » — possédée par ActivityMapCard (bouton palette de la carte),
+// remontée ici pour que ActivityCharts colore aussi le profil d'altitude par pente.
+const showGrade = ref(true)
 // `*Collapsed` are persisted across reloads — the children mutate them via
 // v-model, we mirror to localStorage in the watchers below.
 const galleryCollapsed = ref(
@@ -331,6 +334,7 @@ onMounted(async () => {
         v-model:hovered-climb-start-idx="hoveredClimbStartIdx"
         v-model:lightbox-index="lightboxIndex"
         :locale-prefix="localePrefix"
+        @update:show-grade="showGrade = $event"
         @select-segment="(s, e) => setSelection(s, e)"
         @clear-selection="clearSelection"
       />
@@ -403,6 +407,7 @@ onMounted(async () => {
         :streams-loading="streamsLoading"
         :streams-error="streamsError"
         :selection="selection"
+        :show-grade="showGrade"
         v-model:x-axis="xAxis"
         v-model:visible-streams="visibleStreams"
         v-model:zoom-range="zoomRange"

@@ -11,6 +11,9 @@ import {
   formatKm,
   downsample,
   computeElevGain,
+  GRADE_BUCKETS,
+  bucketGrade,
+  gradeForIndex,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -35,6 +38,10 @@ const props = defineProps({
   zoomRange: { type: Object, default: null },
   // v-model:collapsed — persisted by the parent (localStorage).
   collapsed: { type: Boolean, default: false },
+  // Coloration par pente (« couleur des tracés ») — pilotée par le même bouton que la
+  // carte (ActivityMapCard). Quand elle est active, le remplissage sous la courbe
+  // d'altitude est teinté par bucket de pente, comme le tracé de la carte.
+  showGrade: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -316,6 +323,51 @@ function detectChartHandle(chart, px) {
   return null
 }
 
+// Remplissage sous la courbe d'altitude teinté par bucket de pente, quand la « couleur
+// des tracés » est active. On peint, segment par segment, un quadrilatère depuis la ligne
+// jusqu'au bas du graphique, avec la couleur de pente pré-calculée à la construction du
+// dataset (`$gradeColors`, aligné sur les points sous-échantillonnés). Même rendu que le
+// profil d'altitude du créateur d'itinéraire (RouteBuilderChart.gradeFillPlugin).
+const gradeFillPlugin = {
+  id: 'activityGradeFill',
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea } = chart
+    chart.data.datasets.forEach((dataset, di) => {
+      const colors = dataset.$gradeColors
+      if (!colors || colors.length === 0) return
+      if (chart.getDatasetMeta(di).hidden) return
+      const data = dataset.data
+      if (!data || data.length < 2) return
+      const xScale = chart.scales.x
+      const yScale = chart.scales[dataset.yAxisID] || chart.scales.y
+      if (!yScale) return
+      const baseY = chartArea.bottom
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+      ctx.clip()
+      for (let i = 1; i < data.length; i++) {
+        const c = colors[i - 1]
+        if (!c) continue
+        const x0 = xScale.getPixelForValue(data[i - 1].x)
+        const x1 = xScale.getPixelForValue(data[i].x)
+        if (x1 < chartArea.left || x0 > chartArea.right) continue
+        const y0 = yScale.getPixelForValue(data[i - 1].y)
+        const y1 = yScale.getPixelForValue(data[i].y)
+        ctx.fillStyle = c + '66'
+        ctx.beginPath()
+        ctx.moveTo(x0, baseY)
+        ctx.lineTo(x0, y0)
+        ctx.lineTo(x1, y1)
+        ctx.lineTo(x1, baseY)
+        ctx.closePath()
+        ctx.fill()
+      }
+      ctx.restore()
+    })
+  },
+}
+
 const dragSelectPlugin = {
   id: 'dragSelect',
   beforeEvent(chart, args) {
@@ -425,7 +477,7 @@ async function renderCharts() {
   if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
-  Chart.register(...registerables, dragSelectPlugin)
+  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin)
 
   destroyCharts()
 
@@ -457,6 +509,26 @@ async function renderCharts() {
         pairs.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(yRaw[i]) })
       }
       const data = downsample(pairs, maxPoints)
+
+      // Coloration par pente du profil d'altitude (« couleur des tracés »). On calcule une
+      // couleur par échantillon puis on sous-échantillonne AVEC LE MÊME `maxPoints` que les
+      // points : les deux tableaux partent de la même longueur, donc `downsample` garde des
+      // indices alignés. `$gradeColors` est lu par gradeFillPlugin (remplissage) et par
+      // `segment.borderColor` (couleur de la ligne).
+      const gradeAltitude = props.showGrade && streamKey === 'altitude'
+      let gradeColors = null
+      if (gradeAltitude) {
+        const gradeData = props.streams.grade_smooth?.data
+        const altData = props.streams.altitude?.data
+        const distData = props.streams.distance?.data
+        const colors = new Array(len)
+        for (let i = 0; i < len; i++) {
+          const g = gradeForIndex(Math.min(i, len - 1), gradeData, altData, distData)
+          colors[i] = GRADE_BUCKETS[bucketGrade(g)].color
+        }
+        gradeColors = downsample(colors, maxPoints)
+      }
+
       return {
         label,
         data,
@@ -465,9 +537,14 @@ async function renderCharts() {
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.2,
-        fill: true,
+        // En mode pente, le remplissage vient de gradeFillPlugin — on coupe le fill uni.
+        fill: !gradeAltitude,
+        ...(gradeAltitude
+          ? { segment: { borderColor: (ctx) => gradeColors[ctx.p0DataIndex] || def.color } }
+          : {}),
         yAxisID: `y-${idx}`,
         $streamKey: streamKey,
+        $gradeColors: gradeColors,
       }
     }).filter(Boolean)
 
@@ -1212,6 +1289,12 @@ function clearSelection() { emit('clear-selection') }
 // ─── Watchers ────────────────────────────────────────────────────────────
 watch(() => props.xAxis, () => {
   emit('update:zoomRange', null)
+  if (props.streams) renderCharts()
+})
+
+// La « couleur des tracés » (re)colore le remplissage du profil d'altitude : on reconstruit
+// les datasets pour (dés)activer $gradeColors et le fill uni.
+watch(() => props.showGrade, () => {
   if (props.streams) renderCharts()
 })
 

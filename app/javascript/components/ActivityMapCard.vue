@@ -48,6 +48,8 @@ const emit = defineEmits([
   'clear-selection',
   'update:hoveredClimbStartIdx',
   'update:lightboxIndex',
+  // Remonté au parent pour que ActivityCharts colore aussi le profil d'altitude par pente.
+  'update:showGrade',
 ])
 
 // ─── Page state (persisted to localStorage) ──────────────────────────────
@@ -852,6 +854,10 @@ watch(() => props.hoveredClimbStartIdx, (curr, prev) => {
 })
 
 watch(state, () => state.save(), { deep: true })
+
+// Remonte l'état « couleur des tracés » au parent (initial + à chaque bascule) pour que
+// ActivityCharts colore le profil d'altitude par pente en même temps que la carte.
+watch(() => state.showGrade, (v) => emit('update:showGrade', v), { immediate: true })
 
 onMounted(() => {
   state.load()

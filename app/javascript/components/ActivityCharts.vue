@@ -89,9 +89,24 @@ const visibleStreamsLocal = computed(() => {
 // Push the list up via v-model so MapCard's tooltip can mirror what charts show.
 watch(visibleStreamsLocal, (v) => emit('update:visibleStreams', v), { immediate: true, deep: true })
 
+// Flux appartenant à au moins un graphique NON replié. Un graphique replié n'affiche plus
+// sa courbe : ses stats n'ont donc plus à figurer dans le bandeau du header. On garde
+// `visibleStreamsLocal` intact (il alimente le tooltip de la carte, indépendant du repli).
+const visibleUncollapsedStreams = computed(() => {
+  const seen = new Set()
+  const result = []
+  for (const group of availableLayout.value) {
+    if (group.collapsed) continue
+    for (const s of group.streams) {
+      if (!seen.has(s)) { seen.add(s); result.push(s) }
+    }
+  }
+  return result
+})
+
 // Stream chips shown in the sticky header — independent of chartDefs order.
 const chipStreams = computed(() => {
-  const present = new Set(visibleStreamsLocal.value)
+  const present = new Set(visibleUncollapsedStreams.value)
   return STREAM_CHIP_ORDER.filter((k) => present.has(k))
 })
 
@@ -1489,7 +1504,7 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-arrow-trend-down" aria-hidden="true"></i>
           <strong>{{ Math.round(rangeElevation.down) }} m</strong>
         </span>
-        <span v-if="rangeGrade() != null && !visibleStreamsLocal.includes('grade_smooth')" class="range-chip">
+        <span v-if="rangeGrade() != null && !visibleUncollapsedStreams.includes('grade_smooth')" class="range-chip">
           <i class="fa-solid fa-percent" aria-hidden="true"></i>
           <strong>{{ rangeGrade().toFixed(1) }} %</strong>
         </span>

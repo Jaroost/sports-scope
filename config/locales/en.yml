@@ -113,6 +113,10 @@ en:
     start_date: "Start"
     end_date: "End"
     charts: "Charts"
+    tabs:
+      photos: "Photos"
+      power_climbs: "Power & climbs"
+      analysis: "Analysis charts"
     x_axis_label: "X axis"
     x_distance: "Distance"
     x_time: "Time"

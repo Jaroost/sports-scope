@@ -113,6 +113,10 @@ fr:
     start_date: "Début"
     end_date: "Fin"
     charts: "Graphiques"
+    tabs:
+      photos: "Photos"
+      power_climbs: "Puissance & cols"
+      analysis: "Graphiques d'analyse"
     x_axis_label: "Axe X"
     x_distance: "Distance"
     x_time: "Temps"

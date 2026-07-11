@@ -84,6 +84,23 @@ const chartsCollapsed = ref(
 // local ref here to bind v-model since the prop API expects it.
 const hoveredPeakDuration = ref(null)
 
+// ─── Onglets d'analyse ────────────────────────────────────────────────────
+// La carte reste toujours affichée au-dessus ; photos / puissance & cols /
+// graphiques basculent dans des onglets pour libérer de la place verticale.
+// L'onglet actif est persisté comme les toggles « collapsed » ci-dessus.
+const TABS = ['photos', 'power', 'analysis']
+const savedTab = (typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.activityTab')) || ''
+const activeTab = ref(TABS.includes(savedTab) ? savedTab : 'analysis')
+const hasPhotos = computed(() => photos.value.length > 0)
+// L'onglet photos n'existe que s'il y a des photos : si l'onglet demandé est
+// « photos » alors qu'il n'y en a pas, on affiche les graphiques à la place.
+const effectiveTab = computed(() =>
+  activeTab.value === 'photos' && !hasPhotos.value ? 'analysis' : activeTab.value,
+)
+watch(activeTab, (v) => {
+  try { localStorage.setItem('sportsScope.activityTab', v) } catch { /* ignore */ }
+})
+
 // ─── Computed stats fed into ActivityStats ───────────────────────────────
 // elapsed - moving = stopped time (red lights, refueling, etc.).
 const movingStats = computed(() => {
@@ -318,13 +335,61 @@ onMounted(async () => {
         @clear-selection="clearSelection"
       />
 
+      <!-- Onglets d'analyse — la carte ci-dessus reste toujours visible. -->
+      <ul class="nav nav-tabs activity-tabs mt-3" role="tablist">
+        <li v-if="hasPhotos" class="nav-item" role="presentation">
+          <button
+            type="button"
+            class="nav-link d-flex align-items-center gap-2"
+            :class="{ active: effectiveTab === 'photos' }"
+            role="tab"
+            :aria-selected="effectiveTab === 'photos'"
+            @click="activeTab = 'photos'"
+          >
+            <i class="fa-solid fa-images" aria-hidden="true"></i>
+            <span>{{ t('strava.tabs.photos') }} ({{ photos.length }})</span>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            type="button"
+            class="nav-link d-flex align-items-center gap-2"
+            :class="{ active: effectiveTab === 'power' }"
+            role="tab"
+            :aria-selected="effectiveTab === 'power'"
+            @click="activeTab = 'power'"
+          >
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+            <span>{{ t('strava.tabs.power_climbs') }}</span>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button
+            type="button"
+            class="nav-link d-flex align-items-center gap-2"
+            :class="{ active: effectiveTab === 'analysis' }"
+            role="tab"
+            :aria-selected="effectiveTab === 'analysis'"
+            @click="activeTab = 'analysis'"
+          >
+            <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
+            <span>{{ t('strava.tabs.analysis') }}</span>
+          </button>
+        </li>
+      </ul>
+
+      <!-- PhotoGallery reste toujours monté (même hors onglet) pour que la
+           lightbox déclenchée par les marqueurs photo de la carte fonctionne
+           quel que soit l'onglet actif ; seule sa grille suit l'onglet. -->
       <PhotoGallery
         :photos="photos"
+        :active="effectiveTab === 'photos'"
         v-model:lightbox-index="lightboxIndex"
         v-model:collapsed="galleryCollapsed"
       />
 
       <ActivityStats
+        v-if="effectiveTab === 'power'"
         :moving-stats="movingStats"
         :global-vam="globalVam"
         :climbs-with-vam="climbsWithVam"
@@ -338,6 +403,7 @@ onMounted(async () => {
       />
 
       <ActivityCharts
+        v-if="effectiveTab === 'analysis'"
         :streams="streams"
         :activity="activity"
         :streams-loading="streamsLoading"

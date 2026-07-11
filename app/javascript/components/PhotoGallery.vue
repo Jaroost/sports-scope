@@ -11,6 +11,10 @@ const props = defineProps({
   lightboxIndex: { type: Number, default: null },
   // v-model:collapsed — persisted by the parent (localStorage).
   collapsed: { type: Boolean, default: false },
+  // Onglet photos actif ? Le composant reste monté hors onglet (pour que la
+  // lightbox ouverte depuis la carte marche partout) ; seule la grille est
+  // masquée quand `active` est faux.
+  active: { type: Boolean, default: true },
 })
 const emit = defineEmits(['update:lightboxIndex', 'update:collapsed'])
 
@@ -42,7 +46,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onLightboxKey))
 </script>
 
 <template>
-  <div v-if="photos.length > 0" class="card mt-3 shadow-sm border-0">
+  <div v-if="active && photos.length > 0" class="card mt-3 shadow-sm border-0">
     <div class="card-header activity-card-header d-flex align-items-center gap-2">
       <i class="fa-solid fa-images text-warning" aria-hidden="true"></i>
       <h3 class="h6 mb-0 flex-grow-1">{{ t('strava.photo_gallery') }} ({{ photos.length }})</h3>

@@ -414,12 +414,25 @@ onMounted(() => fetchRoutes())
                 :href="`${localePrefix}/routes/${r.id}/edit`"
                 class="flex-grow-1 d-flex align-items-center gap-3 text-decoration-none text-reset min-width-0"
               >
-                <span class="activity-type-badge" :title="t(`routes.wt_sport_${activityOf(r)}`)">
-                  <i :class="`fa-solid ${sportIcon(activityOf(r))}`" aria-hidden="true"></i>
+                <span class="route-preview" :title="t(`routes.wt_sport_${activityOf(r)}`)">
+                  <svg v-if="r.preview_path" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                    <path
+                      :d="r.preview_path"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="5"
+                      stroke-linejoin="round"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                  <i v-else :class="`fa-solid ${sportIcon(activityOf(r))}`" aria-hidden="true"></i>
                 </span>
                 <div class="min-width-0 flex-grow-1">
                   <div class="fw-semibold text-truncate">{{ r.name }}</div>
                   <small class="text-muted d-flex flex-wrap align-items-center gap-x-3 gap-y-1">
+                    <span class="d-inline-flex align-items-center gap-1">
+                      <i :class="`fa-solid ${sportIcon(activityOf(r))}`" aria-hidden="true"></i>{{ t(`routes.wt_sport_${activityOf(r)}`) }}
+                    </span>
                     <span class="d-inline-flex align-items-center gap-1">
                       <i class="fa-solid fa-route text-warning" aria-hidden="true"></i>{{ formatKm(r.distance_m) }}
                     </span>
@@ -538,6 +551,25 @@ onMounted(() => fetchRoutes())
 <style scoped>
 .min-width-0 {
   min-width: 0;
+}
+
+/* Vignette du tracé : même encombrement que l'ancien badge d'activité. Le SVG
+   utilise currentColor pour rester lisible en thème clair/sombre ; on teinte le
+   trait avec l'accent warning. L'icône de repli (pas d'aperçu) est centrée. */
+.route-preview {
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg, rgba(0, 0, 0, 0.04));
+  color: var(--bs-warning, #ffc107);
+}
+.route-preview svg {
+  width: 100%;
+  height: 100%;
 }
 
 /* Tighter horizontal/vertical gaps for the meta line under each route name —

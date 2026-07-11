@@ -190,6 +190,7 @@ class RoutesController < ApplicationController
       profile: route.profile,
       activity: route.activity,
       share_token: route.share_token,
+      preview_path: route.preview_path,
       updated_at: route.updated_at.iso8601,
     }
   end

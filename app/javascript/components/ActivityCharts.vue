@@ -1680,7 +1680,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .charts-sticky-header {
   position: sticky;
-  top: 4rem;
+  top: 3.5rem;
   z-index: 5;
   background: #ffffff;
   backdrop-filter: saturate(140%);

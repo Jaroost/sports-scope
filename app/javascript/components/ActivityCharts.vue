@@ -862,6 +862,43 @@ let pdInitialized = false
 let pdMoveListener = null
 let pdUpListener = null
 
+// Auto-défilement en bord d'écran pendant un drag-reorder : la capture du pointeur
+// (+ touch-action: none sur la poignée) désactive le scroll natif, donc on le pilote
+// nous-mêmes quand le doigt approche du haut/bas du viewport, pour pouvoir déposer un
+// graphique hors de la zone visible.
+const EDGE_SCROLL_ZONE_PX = 90
+const EDGE_SCROLL_MAX_SPEED = 20
+let autoScrollVel = 0
+let autoScrollRaf = 0
+let lastPointerX = 0
+let lastPointerY = 0
+
+function updateAutoScroll(clientY) {
+  const h = window.innerHeight
+  if (clientY < EDGE_SCROLL_ZONE_PX) {
+    autoScrollVel = -EDGE_SCROLL_MAX_SPEED * (1 - clientY / EDGE_SCROLL_ZONE_PX)
+  } else if (clientY > h - EDGE_SCROLL_ZONE_PX) {
+    autoScrollVel = EDGE_SCROLL_MAX_SPEED * (1 - (h - clientY) / EDGE_SCROLL_ZONE_PX)
+  } else {
+    autoScrollVel = 0
+  }
+  if (autoScrollVel !== 0 && !autoScrollRaf) autoScrollRaf = requestAnimationFrame(autoScrollStep)
+}
+
+function autoScrollStep() {
+  autoScrollRaf = 0
+  if (!pdInitialized || autoScrollVel === 0) return
+  window.scrollBy(0, autoScrollVel)
+  // La page a bougé sous le doigt : on refait le hit-test à la dernière position connue.
+  pointerHitTest(lastPointerX, lastPointerY)
+  autoScrollRaf = requestAnimationFrame(autoScrollStep)
+}
+
+function stopAutoScroll() {
+  autoScrollVel = 0
+  if (autoScrollRaf) { cancelAnimationFrame(autoScrollRaf); autoScrollRaf = 0 }
+}
+
 function onChartPointerDown(group, e) {
   // Pointer Events : couvre souris ET tactile (le drag-reorder marche donc sur mobile).
   if (e.button !== undefined && e.button > 0) return
@@ -887,7 +924,10 @@ function onPointerMove(e) {
     if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return
     pdInitialized = true
   }
+  lastPointerX = e.clientX
+  lastPointerY = e.clientY
   pointerHitTest(e.clientX, e.clientY)
+  updateAutoScroll(e.clientY)
   document.body.style.cursor = dragOverGroupId.value
     ? (isCopyMode.value ? 'copy' : 'alias')
     : 'grabbing'
@@ -944,6 +984,7 @@ function onPointerUp() {
     window.removeEventListener('pointercancel', pdUpListener)
     pdUpListener = null
   }
+  stopAutoScroll()
   document.body.style.cursor = ''
 
   if (pdInitialized && dragSourceId.value) {

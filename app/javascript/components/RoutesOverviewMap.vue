@@ -86,13 +86,23 @@ function installLayers() {
   if (!mapInstance) return
   mapInstance.addSource('routes', { type: 'geojson', data: featureCollection() })
 
+  // Liseré sombre sous chaque tracé : détache les traits du fond de carte quel
+  // qu'il soit (surtout les fonds clairs), pour qu'ils restent lisibles même quand
+  // leur couleur est proche de celle du fond.
+  mapInstance.addLayer({
+    id: 'routes-casing',
+    type: 'line',
+    source: 'routes',
+    layout: ROUTE_LINE_LAYOUT,
+    paint: { 'line-color': 'rgba(0,0,0,0.45)', 'line-width': 6.5 },
+  })
   // Tracés colorés.
   mapInstance.addLayer({
     id: 'routes-line',
     type: 'line',
     source: 'routes',
     layout: ROUTE_LINE_LAYOUT,
-    paint: { 'line-color': ['get', 'color'], 'line-width': 3.5, 'line-opacity': 0.85 },
+    paint: { 'line-color': ['get', 'color'], 'line-width': 3.5, 'line-opacity': 0.95 },
   })
   // Surbrillance (survol / sélection) : liseré blanc + trait coloré plus épais,
   // filtrés sur l'id actif (aucun au départ).

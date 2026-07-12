@@ -134,6 +134,64 @@ const tsbZonesPlugin: any = {
 const current = computed(() => data.value?.current ?? null)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
 
+// ── Recommandation du jour ───────────────────────────────────────────────────
+// Objectif de l'utilisateur → « plancher de fatigue » (TSB) acceptable. Selon la marge
+// entre le TSB du jour et ce plancher, on propose repos / sortie facile / grosse séance.
+// Persisté en localStorage comme le sport sélectionné.
+const GOAL_STORAGE_KEY = 'sportsScope.trainingGoal'
+const GOALS = ['improve_fast', 'improve_slow', 'maintain', 'peak'] as const
+type Goal = typeof GOALS[number]
+const GOAL_FLOOR: Record<Goal, number> = { improve_fast: -30, improve_slow: -20, maintain: -8, peak: 5 }
+
+const storedGoal = (typeof localStorage !== 'undefined' && localStorage.getItem(GOAL_STORAGE_KEY)) as Goal | null
+const goal = ref<Goal>(storedGoal && GOALS.includes(storedGoal) ? storedGoal : 'improve_slow')
+watch(goal, (g) => { try { localStorage.setItem(GOAL_STORAGE_KEY, g) } catch { /* ignore */ } })
+
+const ACTION_STYLE: Record<string, { icon: string; color: string }> = {
+  rest: { icon: 'fa-bed', color: '#6c757d' },
+  easy: { icon: 'fa-person-biking', color: '#198754' },
+  big: { icon: 'fa-fire', color: '#dc3545' },
+}
+
+// Convertit un TSS en durée approx. (min, arrondie au 1/4 h) pour une intensité donnée :
+// TSS = heures × IF² × 100 ⟹ heures = TSS / (IF² × 100). Rend la reco parlante.
+function tssToMinutes(tss: number, intensity: number): number {
+  const minutes = (tss / (intensity * intensity * 100)) * 60
+  return Math.max(15, Math.round(minutes / 15) * 15)
+}
+
+function fmtDuration(min: number): string {
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  if (h && m) return `${h}h${String(m).padStart(2, '0')}`
+  if (h) return `${h}h`
+  return `${m} min`
+}
+
+const recommendation = computed(() => {
+  const c = current.value
+  if (!c) return null
+  const tsb = c.tsb
+  const ctl = c.ctl
+  const headroom = tsb - GOAL_FLOOR[goal.value]
+
+  let action: 'rest' | 'easy' | 'big'
+  let tss = 0
+  let minutes = 0
+  let effort = ''
+  let reason: string
+  if (tsb <= -30) {
+    action = 'rest'; reason = 'reason_overreaching'
+  } else if (headroom < 0) {
+    action = 'rest'; reason = 'reason_rest'
+  } else if (headroom < 12) {
+    action = 'easy'; tss = Math.round(0.6 * ctl); minutes = tssToMinutes(tss, 0.65); effort = 'endurance'; reason = 'reason_easy'
+  } else {
+    action = 'big'; tss = Math.round(1.4 * ctl); minutes = tssToMinutes(tss, 0.80); effort = 'hard'; reason = 'reason_big'
+  }
+  return { action, tss, minutes, effort, reason, tsb: Math.round(tsb) }
+})
+
 function fmtSigned(v: number): string {
   return v > 0 ? `+${Math.round(v)}` : String(Math.round(v))
 }
@@ -420,6 +478,38 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- Recommandation du jour -->
+          <div v-if="recommendation" class="reco-card mb-3" :style="{ borderColor: ACTION_STYLE[recommendation.action].color }">
+            <div class="d-flex flex-wrap align-items-center gap-3">
+              <span class="reco-icon" :style="{ backgroundColor: ACTION_STYLE[recommendation.action].color }">
+                <i :class="`fa-solid ${ACTION_STYLE[recommendation.action].icon}`" aria-hidden="true"></i>
+              </span>
+              <div class="flex-grow-1">
+                <div class="small text-muted">{{ t('performance.load.reco.title') }}</div>
+                <div class="fs-5 fw-bold" :style="{ color: ACTION_STYLE[recommendation.action].color }">
+                  {{ t(`performance.load.reco.action_${recommendation.action}`) }}
+                  <span v-if="recommendation.minutes" class="text-body fw-normal fs-6">·
+                    ≈ {{ fmtDuration(recommendation.minutes) }} {{ t(`performance.load.reco.effort_${recommendation.effort}`) }}
+                  </span>
+                </div>
+                <div class="small text-muted">
+                  {{ t(`performance.load.reco.${recommendation.reason}`, { tsb: recommendation.tsb }) }}
+                  <span
+                    v-if="recommendation.tss"
+                    class="reco-tss"
+                    :title="t('performance.load.reco.tss_explain')"
+                  >(~{{ recommendation.tss }} TSS <i class="fa-solid fa-circle-info" aria-hidden="true"></i>)</span>
+                </div>
+              </div>
+              <div>
+                <label class="small text-muted d-block mb-1">{{ t('performance.load.reco.goal_label') }}</label>
+                <select v-model="goal" class="form-select form-select-sm reco-goal">
+                  <option v-for="g in GOALS" :key="g" :value="g">{{ t(`performance.load.reco.goal_${g}`) }}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <!-- Aide « comment lire » -->
           <details class="mb-3 load-how">
             <summary class="small fw-semibold text-primary">
@@ -504,6 +594,32 @@ onBeforeUnmount(() => {
   padding: 0.75rem 1rem;
   border: 1px solid var(--bs-border-color);
   border-radius: 0.5rem;
+}
+.reco-card {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--bs-border-color);
+  border-left-width: 4px;
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg);
+}
+.reco-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 1.2rem;
+}
+.reco-goal {
+  width: auto;
+  min-width: 11rem;
+}
+.reco-tss {
+  cursor: help;
+  white-space: nowrap;
 }
 .load-help {
   font-size: 0.78rem;

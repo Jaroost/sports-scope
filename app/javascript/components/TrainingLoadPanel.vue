@@ -179,9 +179,14 @@ async function resetLthr() {
 }
 
 // ── Graphique PMC (Chart.js) ─────────────────────────────────────────────────
-const chartCanvas = ref<HTMLCanvasElement | null>(null)
+// Deux graphiques empilés : « charge » (CTL+ATL) en haut, « fraîcheur » (TSB + zones)
+// en bas. Ainsi chaque bande de couleur ne va qu'avec la seule courbe sous elle.
+const loadCanvas = ref<HTMLCanvasElement | null>(null)
+const tsbCanvas = ref<HTMLCanvasElement | null>(null)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let chart: any = null
+let loadChart: any = null
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let tsbChart: any = null
 
 const hasData = computed(() => (data.value?.series?.length ?? 0) >= 2)
 
@@ -266,75 +271,100 @@ function externalTooltip(context: { chart: any; tooltip: any }) {
   }
 }
 
+// Aligne l'aire de tracé des deux graphes : même largeur d'axe Y à gauche.
+const Y_AXIS_WIDTH = 46
+
+// Interactions communes aux deux graphes (clic → séance, curseur, tooltip externe).
+function sharedOptions(pts: Point[], extra: Record<string, unknown> = {}) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index' as const, intersect: false },
+    onClick: (_evt: unknown, els: { index: number }[]) => {
+      const act = pts[els?.[0]?.index]?.activities?.[0]
+      if (act) window.location.href = activityHref(act)
+    },
+    onHover: (evt: { native?: Event }, els: { index: number }[]) => {
+      const target = evt.native?.target as HTMLElement | undefined
+      if (!target) return
+      target.style.cursor = pts[els?.[0]?.index]?.activities?.length ? 'pointer' : 'default'
+    },
+    plugins: {
+      legend: { position: 'top' as const, labels: { usePointStyle: true, boxWidth: 8 } },
+      tooltip: { enabled: false, external: externalTooltip },
+    },
+    ...extra,
+  }
+}
+
 async function renderChart() {
-  if (chart) { chart.destroy(); chart = null }
-  if (!hasData.value || !chartCanvas.value) return
+  if (loadChart) { loadChart.destroy(); loadChart = null }
+  if (tsbChart) { tsbChart.destroy(); tsbChart = null }
+  if (!hasData.value || !loadCanvas.value || !tsbCanvas.value) return
   const { Chart, registerables } = await import('chart.js')
   Chart.register(...registerables)
 
   const pts = displayed.value
-  const ctx = chartCanvas.value.getContext('2d')
-  if (!ctx) return
-  chart = new Chart(ctx, {
-    plugins: [tsbZonesPlugin],
-    data: {
-      labels: pts.map((p) => fmtDate(p.date)),
-      datasets: [
-        {
-          // TSB en trait neutre sans remplissage : les bandes de zones colorées en fond
-          // portent désormais la lecture de la fraîcheur, la ligne doit rester lisible dessus.
-          type: 'line', label: t('performance.load.tsb_label'),
-          data: pts.map((p) => p.tsb), yAxisID: 'tsb', order: 1,
-          borderColor: '#343a40', pointRadius: 0, borderWidth: 2, tension: 0.3,
+  const labels = pts.map((p) => fmtDate(p.date))
+
+  // ── Graphe du haut : charge (forme de fond + fatigue) ──────────────────────
+  const loadCtx = loadCanvas.value.getContext('2d')
+  if (loadCtx) {
+    loadChart = new Chart(loadCtx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: t('performance.load.ctl_label'), data: pts.map((p) => p.ctl),
+            borderColor: '#0d6efd', pointRadius: 0, borderWidth: 2, tension: 0.3,
+          },
+          {
+            label: t('performance.load.atl_label'), data: pts.map((p) => p.atl),
+            borderColor: '#fd7e14', pointRadius: 0, borderWidth: 1.5, tension: 0.3, borderDash: [5, 3],
+          },
+        ],
+      },
+      options: sharedOptions(pts, {
+        scales: {
+          y: { beginAtZero: true, position: 'left', afterFit: (s: { width: number }) => { s.width = Y_AXIS_WIDTH }, title: { display: true, text: t('performance.load.axis_load') } },
+          x: { ticks: { display: false }, grid: { display: false } },
         },
-        {
-          type: 'line', label: t('performance.load.ctl_label'),
-          data: pts.map((p) => p.ctl), yAxisID: 'load', order: 2,
-          borderColor: '#0d6efd', pointRadius: 0, borderWidth: 2, tension: 0.3,
+      }),
+    })
+  }
+
+  // ── Graphe du bas : fraîcheur (TSB) seule, avec les bandes de zones ─────────
+  const tsbCtx = tsbCanvas.value.getContext('2d')
+  if (tsbCtx) {
+    tsbChart = new Chart(tsbCtx, {
+      type: 'line',
+      plugins: [tsbZonesPlugin],
+      data: {
+        labels,
+        datasets: [
+          {
+            label: t('performance.load.tsb_label'), data: pts.map((p) => p.tsb), yAxisID: 'tsb',
+            borderColor: '#343a40', pointRadius: 0, borderWidth: 2, tension: 0.3,
+          },
+        ],
+      },
+      options: sharedOptions(pts, {
+        scales: {
+          tsb: { type: 'linear', position: 'left', afterFit: (s: { width: number }) => { s.width = Y_AXIS_WIDTH }, title: { display: true, text: t('performance.load.axis_tsb') } },
+          x: { ticks: { maxTicksLimit: 12, autoSkip: true } },
         },
-        {
-          type: 'line', label: t('performance.load.atl_label'),
-          data: pts.map((p) => p.atl), yAxisID: 'load', order: 3,
-          borderColor: '#fd7e14', pointRadius: 0, borderWidth: 1.5, tension: 0.3, borderDash: [5, 3],
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      // Clic sur un jour → ouvre la séance principale (plus gros TSS) de ce jour.
-      onClick: (_evt: unknown, els: { index: number }[]) => {
-        const p = pts[els?.[0]?.index]
-        const act = p?.activities?.[0]
-        if (act) window.location.href = activityHref(act)
-      },
-      // Curseur « main » sur les jours qui ont au moins une activité.
-      onHover: (evt: { native?: Event }, els: { index: number }[]) => {
-        const target = evt.native?.target as HTMLElement | undefined
-        if (!target) return
-        const p = pts[els?.[0]?.index]
-        target.style.cursor = p?.activities?.length ? 'pointer' : 'default'
-      },
-      plugins: {
-        legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 8 } },
-        // Tooltip HTML externe (badge coloré pour l'état + pastilles de couleur).
-        tooltip: { enabled: false, external: externalTooltip },
-      },
-      scales: {
-        load: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: t('performance.load.axis_load') } },
-        tsb: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: t('performance.load.axis_tsb') } },
-        x: { ticks: { maxTicksLimit: 12, autoSkip: true } },
-      },
-    },
-  })
+      }),
+    })
+  }
 }
 
 // Re-render quand la fenêtre change.
 watch(rangeDays, async () => { await nextTick(); renderChart() })
 
 onBeforeUnmount(() => {
-  if (chart) { chart.destroy(); chart = null }
+  if (loadChart) { loadChart.destroy(); loadChart = null }
+  if (tsbChart) { tsbChart.destroy(); tsbChart = null }
   if (tooltipEl) { tooltipEl.remove(); tooltipEl = null }
 })
 </script>
@@ -407,9 +437,12 @@ onBeforeUnmount(() => {
             >{{ t(`performance.load.${r.key}`) }}</button>
           </div>
 
-          <!-- Graphique -->
-          <div class="load-chart-wrap">
-            <canvas ref="chartCanvas"></canvas>
+          <!-- Graphiques : charge en haut, fraîcheur (+ zones) en bas -->
+          <div class="load-chart-wrap load-chart-top">
+            <canvas ref="loadCanvas"></canvas>
+          </div>
+          <div class="load-chart-wrap load-chart-bottom">
+            <canvas ref="tsbCanvas"></canvas>
           </div>
 
           <!-- Légende des zones -->
@@ -479,7 +512,13 @@ onBeforeUnmount(() => {
 }
 .load-chart-wrap {
   position: relative;
-  height: 320px;
+}
+.load-chart-top {
+  height: 210px;
+}
+.load-chart-bottom {
+  height: 180px;
+  margin-top: 0.25rem;
 }
 .zone-chip {
   cursor: help;

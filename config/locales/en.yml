@@ -5,6 +5,7 @@ en:
   nav:
     home: "Home"
     dashboard: "Dashboard"
+    performance: "Performance"
     routes: "Routes"
     new_route: "Create a route"
     free_navigate: "Free ride"
@@ -14,6 +15,50 @@ en:
     login: "Sign in"
     logout: "Sign out"
     language: "Language"
+  performance:
+    title: "Performance analysis"
+    intro: "Your records and totals across all activities (Strava and imported files)."
+    loading: "Analysing…"
+    no_data: "No activities to analyse yet. Sync Strava or import a .fit file."
+    no_records: "No records available for this sport."
+    sports:
+      all: "All"
+      cycling: "Cycling"
+      running: "Running"
+      ski: "Ski"
+      hiking: "Hiking"
+      swimming: "Swimming"
+      other: "Other"
+    totals:
+      count: "Rides"
+      distance: "Total distance"
+      elevation: "Total elevation"
+      time: "Total time"
+    records:
+      title: "All-time records"
+      longest_distance: "Longest ride"
+      longest_duration: "Longest duration"
+      biggest_elevation: "Biggest climb"
+      max_speed: "Top speed"
+      max_heartrate: "Max heart rate"
+      max_power: "Max power (instant)"
+      max_cadence: "Max cadence"
+    peak_power:
+      title: "Peak power / duration curve"
+      subtitle: "Best average power sustained for each duration, across all your workouts."
+      axis: "Power (W)"
+      duration: "Duration"
+      click_hint: "Click a point to open the activity"
+    periods:
+      title: "Best periods"
+      best_year_distance: "Best year (distance)"
+      best_month_distance: "Best month (distance)"
+      best_year_elevation: "Best year (elevation)"
+      best_month_elevation: "Best month (elevation)"
+    by_year:
+      title: "Yearly history"
+      year: "Year"
+      count: "Rides"
   chains:
     title: "Chain wax"
     intro: "Track chain wear per bike. A chain should be re-waxed roughly every 300 km."
@@ -660,6 +705,9 @@ en:
     days_ago_today: "today"
     days_ago_yesterday: "yesterday"
     days_ago_other: "%{count}d ago"
+    months_ago: "%{count}mo ago"
+    years_ago_one: "%{count}y ago"
+    years_ago_other: "%{count}y ago"
     days_in_future: "in %{count}d"
   pwa:
     install_title: "Install Sports Scope"

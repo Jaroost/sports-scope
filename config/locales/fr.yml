@@ -5,6 +5,7 @@ fr:
   nav:
     home: "Accueil"
     dashboard: "Tableau de bord"
+    performance: "Performances"
     routes: "Itinéraires"
     new_route: "Créer un itinéraire"
     free_navigate: "Mode libre"
@@ -14,6 +15,50 @@ fr:
     login: "Se connecter"
     logout: "Se déconnecter"
     language: "Langue"
+  performance:
+    title: "Analyse des performances"
+    intro: "Vos records et cumuls, toutes activités confondues (Strava et fichiers importés)."
+    loading: "Analyse en cours…"
+    no_data: "Aucune activité à analyser pour l'instant. Synchronisez Strava ou importez un fichier .fit."
+    no_records: "Aucun record disponible pour ce sport."
+    sports:
+      all: "Tout"
+      cycling: "Vélo"
+      running: "Course"
+      ski: "Ski"
+      hiking: "Rando"
+      swimming: "Natation"
+      other: "Autre"
+    totals:
+      count: "Sorties"
+      distance: "Distance totale"
+      elevation: "Dénivelé total"
+      time: "Temps total"
+    records:
+      title: "Records absolus"
+      longest_distance: "Plus longue sortie"
+      longest_duration: "Plus longue durée"
+      biggest_elevation: "Plus grande ascension"
+      max_speed: "Vitesse maximale"
+      max_heartrate: "Fréquence cardiaque max"
+      max_power: "Puissance max (instantanée)"
+      max_cadence: "Cadence maximale"
+    peak_power:
+      title: "Courbe de puissance max / temps"
+      subtitle: "Meilleure puissance moyenne soutenue pour chaque durée, tous entraînements confondus."
+      axis: "Puissance (W)"
+      duration: "Durée"
+      click_hint: "Cliquez un point pour ouvrir l'activité"
+    periods:
+      title: "Meilleures périodes"
+      best_year_distance: "Meilleure année (distance)"
+      best_month_distance: "Meilleur mois (distance)"
+      best_year_elevation: "Meilleure année (dénivelé)"
+      best_month_elevation: "Meilleur mois (dénivelé)"
+    by_year:
+      title: "Historique par année"
+      year: "Année"
+      count: "Sorties"
   chains:
     title: "Cirage de chaîne"
     intro: "Suivez l'usure des chaînes par vélo. Une chaîne doit être recirée environ tous les 300 km."
@@ -660,6 +705,9 @@ fr:
     days_ago_today: "aujourd'hui"
     days_ago_yesterday: "hier"
     days_ago_other: "il y a %{count} j"
+    months_ago: "il y a %{count} mois"
+    years_ago_one: "il y a %{count} an"
+    years_ago_other: "il y a %{count} ans"
     days_in_future: "dans %{count} j"
   pwa:
     install_title: "Installer Sports Scope"

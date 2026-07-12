@@ -10,6 +10,10 @@ class PagesController < ApplicationController
     require_login!
   end
 
+  def performance
+    require_login!
+  end
+
   def routes_index
     require_login!
   end

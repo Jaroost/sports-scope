@@ -86,6 +86,7 @@ const showSportPicker = computed(() => PER_SPORT_SECTIONS.some(showSection))
 // libellés réutilisent les clés i18n `nav.*`.
 const NAVBAR_ICONS: Record<string, string> = {
   dashboard: 'fa-gauge-high',
+  performance: 'fa-trophy',
   routes: 'fa-route',
   new_route: 'fa-map-location-dot',
   free_navigate: 'fa-location-crosshairs',

@@ -2,6 +2,7 @@ Rails.application.routes.draw do
   scope "(:locale)", locale: /en|fr/ do
     root "pages#home"
     get "/dashboard", to: "pages#dashboard", as: :dashboard
+    get "/performance", to: "pages#performance", as: :performance
     get "/activities/:id", to: "activities#show", as: :activity, constraints: { id: /\d+/ }
     get "/imported_activities/:id", to: "activities#show_imported", as: :imported_activity, constraints: { id: /\d+/ }
     get "/routes", to: "pages#routes_index", as: :routes_index
@@ -48,6 +49,9 @@ Rails.application.routes.draw do
   get "/strava/activities/:id/streams", to: "strava#streams", as: :strava_activity_streams, constraints: { id: /\d+/ }
   get "/strava/activities/:id/peak_power_ranks", to: "strava#peak_power_ranks", as: :strava_activity_peak_power_ranks, constraints: { id: /\d+/ }
   get "/strava/activities/:id/photos", to: "strava#photos", as: :strava_activity_photos, constraints: { id: /\d+/ }
+
+  # Analyse de performance (records / cumuls / courbe de puissance — JSON pour Vue)
+  get "/api/performance", to: "performance#show", as: :api_performance
 
   # Geocoding proxy (avoids CORS when calling Nominatim from the browser)
   get "/api/geocode/places", to: "geocodes#places"

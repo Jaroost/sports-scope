@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
+import FtpPanel from './FtpPanel.vue'
+import TrainingLoadPanel from './TrainingLoadPanel.vue'
 
 // ── Types du payload /api/performance ───────────────────────────────────────
 interface ActivityRef {
@@ -411,6 +413,14 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </template>
+
+      <!-- Forme & fatigue : charge globale (tous sports), donc affichée sur chaque
+           onglet. Sans v-if lié au sport, le panneau reste monté et ne se recharge pas
+           à chaque changement d'onglet. -->
+      <TrainingLoadPanel />
+
+      <!-- FTP & progression (vélo uniquement) -->
+      <FtpPanel v-if="selectedSport === 'all' || selectedSport === 'cycling'" />
 
       <!-- Meilleures périodes -->
       <template v-if="periodCards.length">

@@ -14,10 +14,11 @@ module Activityable
 
   # Write-through of a detailed streams hash (the key_by_type shape returned by
   # the Strava streams API / produced by the FIT importer), then recompute the
-  # peak-power curve. Returns self.
+  # peak-power curve and the normalized power. Returns self.
   def store_streams!(streams)
     self.streams = streams.is_a?(Hash) ? streams : {}
     self.peak_powers = PeakPowerCurve.compute_from(self.streams)
+    self.normalized_power = TrainingLoad.normalized_power(self.streams)
     save!
     self
   end
@@ -28,5 +29,12 @@ module Activityable
     self.peak_powers = PeakPowerCurve.compute_from(streams)
     save!(touch: false) if changed?
     peak_powers
+  end
+
+  # Recompute the stored normalized power from `streams`. Idempotent save.
+  def compute_normalized_power!
+    self.normalized_power = TrainingLoad.normalized_power(streams)
+    save!(touch: false) if changed?
+    normalized_power
   end
 end

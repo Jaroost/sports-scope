@@ -33,6 +33,9 @@ class ProfilesController < ApplicationController
   NAV_RADAR_CLOSE_RANGE = (10..100)
   NAV_AUTO_REROUTE_COOLDOWN_RANGE = (3..120)
   COUNTRY_CODES_MAX = 100
+  FTP_MANUAL_RANGE = (50..600)     # watts plausibles pour une FTP saisie à la main
+  WEIGHT_RANGE = (30.0..250.0)     # kg
+  LTHR_MANUAL_RANGE = (100..220)   # bpm plausibles pour un seuil FC saisi à la main
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
   ALLOWED_OVERLAYS = %w[veloland mountainbikeland wanderland wanderwege].freeze
@@ -60,6 +63,15 @@ class ProfilesController < ApplicationController
   def update
     current_user.update!(preferences: sanitize_preferences(params[:preferences]))
     render json: { preferences: current_user.preferences_with_defaults }
+  end
+
+  # PATCH /api/athlete — met à jour uniquement les seuils athlète (FTP manuelle, poids),
+  # en fusion dans les préférences existantes pour ne rien écraser d'autre.
+  def update_athlete
+    prefs = current_user.preferences.is_a?(Hash) ? current_user.preferences.deep_dup : {}
+    prefs["athlete"] = sanitize_athlete(params[:athlete], current_user)
+    current_user.update!(preferences: prefs)
+    render json: { athlete: current_user.preferences_with_defaults["athlete"] }
   end
 
   private
@@ -113,7 +125,42 @@ class ProfilesController < ApplicationController
         "show_chain_widget" => to_bool(display[:show_chain_widget], true),
       },
       "sports" => sanitize_sports(incoming[:sports] || {}),
+      # Le formulaire de profil (UserProfile.vue) n'envoie pas les seuils athlète :
+      # sanitize_athlete retombe alors sur les valeurs déjà stockées pour ne pas les
+      # effacer. Ils se modifient via PATCH /api/athlete (update_athlete).
+      "athlete" => sanitize_athlete(incoming[:athlete], current_user),
     }
+  end
+
+  # Assainit les seuils athlète. Toute clé absente du payload retombe sur la valeur
+  # déjà stockée (préservation). `ftp_manual_at` est (re)daté au jour du changement
+  # de la FTP manuelle, préservé sinon, effacé quand on retire la valeur.
+  def sanitize_athlete(raw, user)
+    raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
+    raw = (raw || {}).with_indifferent_access
+    existing = user.preferences.is_a?(Hash) ? (user.preferences["athlete"] || {}) : {}
+
+    ftp = raw.key?(:ftp_manual) ? clamp_int_or_nil(raw[:ftp_manual], FTP_MANUAL_RANGE) : clamp_int_or_nil(existing["ftp_manual"], FTP_MANUAL_RANGE)
+    weight = raw.key?(:weight_kg) ? clamp_float_or_nil(raw[:weight_kg], WEIGHT_RANGE) : clamp_float_or_nil(existing["weight_kg"], WEIGHT_RANGE)
+    lthr = raw.key?(:lthr_manual) ? clamp_int_or_nil(raw[:lthr_manual], LTHR_MANUAL_RANGE) : clamp_int_or_nil(existing["lthr_manual"], LTHR_MANUAL_RANGE)
+
+    {
+      "ftp_manual" => ftp,
+      "ftp_manual_at" => manual_at(raw, existing, :ftp_manual, ftp, "ftp_manual", "ftp_manual_at"),
+      "weight_kg" => weight,
+      "lthr_manual" => lthr,
+      "lthr_manual_at" => manual_at(raw, existing, :lthr_manual, lthr, "lthr_manual", "lthr_manual_at"),
+    }
+  end
+
+  # Date de saisie d'un seuil manuel : (re)datée au jour du changement de valeur,
+  # préservée si inchangée, effacée quand on retire la valeur, intacte si le payload
+  # ne touche pas à ce champ (préservation lors d'un save de profil).
+  def manual_at(raw, existing, key, value, value_col, at_col)
+    return existing[at_col] unless raw.key?(key)
+    return nil unless value
+
+    existing[value_col].to_i != value ? Date.current.iso8601 : existing[at_col]
   end
 
   # Un bloc par sport connu, quoi qu'envoie le client : un sport inconnu est ignoré,
@@ -219,6 +266,22 @@ class ProfilesController < ApplicationController
   def clamp_float(value, range, default)
     n = Float(value, exception: false)
     return default if n.nil?
+    n.clamp(range.min, range.max).round(1)
+  end
+
+  # Variantes préservant nil : une valeur absente/vide/invalide vaut « non renseigné »
+  # (les seuils athlète sont optionnels), au lieu de retomber sur un défaut.
+  def clamp_int_or_nil(value, range)
+    return nil if value.nil? || value.to_s.strip.empty?
+    n = Integer(value, exception: false)
+    return nil if n.nil?
+    n.clamp(range.min, range.max)
+  end
+
+  def clamp_float_or_nil(value, range)
+    return nil if value.nil? || value.to_s.strip.empty?
+    n = Float(value, exception: false)
+    return nil if n.nil?
     n.clamp(range.min, range.max).round(1)
   end
 end

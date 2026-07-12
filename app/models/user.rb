@@ -163,6 +163,19 @@ class User < ApplicationRecord
         }
       ),
     },
+    # Seuils physiologiques de l'athlète, pour l'analyse d'entraînement (page Performances).
+    # `ftp_manual` (watts) surcharge l'estimation automatique de la FTP quand elle est
+    # renseignée (ex. issue d'un test officiel) ; `ftp_manual_at` date cette saisie.
+    # `weight_kg` sert au calcul des W/kg. Tous nuls par défaut (aucune saisie).
+    "athlete" => {
+      "ftp_manual" => nil,
+      "ftp_manual_at" => nil,
+      "weight_kg" => nil,
+      # Seuil de fréquence cardiaque (LTHR, bpm) : ancre du hrTSS pour les sorties sans
+      # puissance. Estimé automatiquement (cf. TrainingLoad) mais surchargé si renseigné.
+      "lthr_manual" => nil,
+      "lthr_manual_at" => nil,
+    },
   }.freeze
 
   # Menus de navigation configurables, dans leur ordre par défaut. Source de vérité des

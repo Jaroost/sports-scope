@@ -52,6 +52,11 @@ Rails.application.routes.draw do
 
   # Analyse de performance (records / cumuls / courbe de puissance — JSON pour Vue)
   get "/api/performance", to: "performance#show", as: :api_performance
+  get "/api/performance/ftp", to: "performance#ftp", as: :api_performance_ftp
+  get "/api/performance/training_load", to: "performance#training_load", as: :api_performance_training_load
+
+  # Seuils physiologiques de l'athlète (FTP manuelle, poids — JSON pour Vue)
+  patch "/api/athlete", to: "profiles#update_athlete"
 
   # Geocoding proxy (avoids CORS when calling Nominatim from the browser)
   get "/api/geocode/places", to: "geocodes#places"

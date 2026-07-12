@@ -86,6 +86,8 @@ en:
       how_title: "How to read these curves?"
       how_body: "Each session earns a stress score (TSS). From it we derive a slow-moving fitness (CTL, 42d) and a fast-reacting fatigue (ATL, 7d). Their difference is your daily freshness (TSB). Goal: raise fitness while managing fatigue, and let freshness rebound before a goal event."
       today: "Today"
+      today_state: "State that day"
+      click_activity: "Click to open the session"
       ctl_label: "Fitness"
       ctl_sub: "CTL · 42 days"
       ctl_help: "Your accumulated training level. Rises slowly with consistent training — this is your progression."

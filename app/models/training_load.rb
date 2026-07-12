@@ -57,6 +57,7 @@ module TrainingLoad
     lthr_info = lthr(user, rows)
 
     daily = Hash.new(0.0)
+    daily_activities = Hash.new { |h, k| h[k] = [] }
     coverage = Hash.new(0)
     rows.each do |row|
       date = parse_date(row['started_at'])
@@ -67,10 +68,15 @@ module TrainingLoad
 
       daily[date] += res[:tss]
       coverage[res[:source]] += 1
+      daily_activities[date] << {
+        source: row['source'], external_id: row['external_id'],
+        name: row['name'], tss: res[:tss], source_tss: res[:source]
+      }
     end
     return empty_summary if daily.empty?
 
     series = performance_management(daily)
+    attach_activities(series, daily_activities)
     current = series.last
 
     {
@@ -133,6 +139,17 @@ module TrainingLoad
     series
   end
 
+  # Attache à chaque point de série les activités du jour (triées par TSS décroissant),
+  # pour permettre au front d'ouvrir la séance principale au clic. Jours de repos → [].
+  def attach_activities(series, daily_activities)
+    by_iso = daily_activities.transform_keys(&:iso8601)
+    series.each do |point|
+      acts = by_iso[point[:date]] || []
+      point[:activities] = acts.sort_by { |a| -a[:tss] }
+    end
+    series
+  end
+
   # Zone de forme (TSB) — clés interprétées côté front (couleur + libellé + aide).
   def form_zone(tsb)
     return 'very_fresh' if tsb >= 20
@@ -182,7 +199,7 @@ module TrainingLoad
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
   def load_rows(user)
-    columns = %w[started_at moving_time_s average_heartrate activity_type normalized_power]
+    columns = %w[name started_at moving_time_s average_heartrate activity_type normalized_power]
     union = UserActivities.union_sql(user_id: user.id, columns: columns)
     UserActivities.select_all("SELECT * FROM (#{union}) rows", 'TrainingLoad#load_rows')
   end

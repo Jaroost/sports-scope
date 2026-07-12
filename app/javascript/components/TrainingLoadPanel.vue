@@ -3,7 +3,8 @@ import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 
 // ── Types du payload /api/performance/training_load ──────────────────────────
-interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number }
+interface DayActivity { source: string; external_id: string; name: string; tss: number; source_tss: string }
+interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; activities?: DayActivity[] }
 interface Current extends Point { form_zone: string }
 interface Coverage { power: number; hr: number; estimated: number; total: number }
 interface Thresholds { ftp_current?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null }
@@ -34,6 +35,14 @@ const lthrInput = ref<string | number>('')
 
 function csrfToken(): string {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+}
+
+const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
+const localePrefix = lang ? `/${lang}` : ''
+
+function activityHref(a: { source: string; external_id: string }): string {
+  const base = a.source === 'imported' ? '/imported_activities' : '/activities'
+  return `${localePrefix}${base}/${a.external_id}`
 }
 
 async function fetchData() {
@@ -69,6 +78,57 @@ const ZONE_ORDER = ['fresh', 'neutral', 'productive', 'overreaching', 'very_fres
 
 function zoneColor(key: string): string {
   return ZONES[key]?.color ?? '#6c757d'
+}
+
+// Zone de fraîcheur d'un TSB (mêmes seuils que TrainingLoad#form_zone côté serveur) —
+// sert au tooltip pour afficher l'état de n'importe quel jour, pas seulement aujourd'hui.
+function formZone(tsb: number): string {
+  if (tsb >= 20) return 'very_fresh'
+  if (tsb >= 5) return 'fresh'
+  if (tsb >= -10) return 'neutral'
+  if (tsb >= -30) return 'productive'
+  return 'overreaching'
+}
+
+// Remplissages translucides des bandes de zones (mêmes couleurs que la légende).
+const ZONE_FILL: Record<string, string> = {
+  very_fresh: 'rgba(13,110,253,0.20)',
+  fresh: 'rgba(25,135,84,0.20)',
+  neutral: 'rgba(108,117,125,0.14)',
+  productive: 'rgba(253,126,20,0.22)',
+  overreaching: 'rgba(220,53,69,0.24)',
+}
+
+// Plugin Chart.js : peint en fond les bandes de zones TSB, calées sur l'axe droit
+// (`tsb`), derrière les courbes. Bornes = seuils de formZone.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const tsbZonesPlugin: any = {
+  id: 'tsbZones',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  beforeDatasetsDraw(c: any) {
+    const scale = c.scales?.tsb
+    const area = c.chartArea
+    if (!scale || !area) return
+    const bands = [
+      { from: 20, to: Infinity, fill: ZONE_FILL.very_fresh },
+      { from: 5, to: 20, fill: ZONE_FILL.fresh },
+      { from: -10, to: 5, fill: ZONE_FILL.neutral },
+      { from: -30, to: -10, fill: ZONE_FILL.productive },
+      { from: -Infinity, to: -30, fill: ZONE_FILL.overreaching },
+    ]
+    const { ctx } = c
+    ctx.save()
+    for (const b of bands) {
+      let yTop = b.to === Infinity ? area.top : scale.getPixelForValue(b.to)
+      let yBot = b.from === -Infinity ? area.bottom : scale.getPixelForValue(b.from)
+      yTop = Math.max(area.top, Math.min(area.bottom, yTop))
+      yBot = Math.max(area.top, Math.min(area.bottom, yBot))
+      if (yBot - yTop <= 0.5) continue
+      ctx.fillStyle = b.fill
+      ctx.fillRect(area.left, yTop, area.right - area.left, yBot - yTop)
+    }
+    ctx.restore()
+  },
 }
 
 const current = computed(() => data.value?.current ?? null)
@@ -129,6 +189,83 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
 }
 
+// ── Tooltip HTML externe (permet un badge coloré pour l'état du jour) ────────
+let tooltipEl: HTMLElement | null = null
+
+function escapeHtml(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+}
+function dot(color: string): string {
+  return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle"></span>`
+}
+function dateLong(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getTooltipEl(chart: any): HTMLElement {
+  const parent = chart.canvas.parentNode as HTMLElement
+  if (!tooltipEl) {
+    tooltipEl = document.createElement('div')
+    Object.assign(tooltipEl.style, {
+      position: 'absolute', pointerEvents: 'none', opacity: '0',
+      transform: 'translate(-50%, -100%)', transition: 'opacity .1s ease',
+      background: 'rgba(17,24,39,0.92)', color: '#fff', padding: '8px 10px',
+      borderRadius: '6px', fontSize: '12px', lineHeight: '1.4', width: '240px',
+      boxSizing: 'border-box', zIndex: '20', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', whiteSpace: 'normal',
+    } as Partial<CSSStyleDeclaration>)
+    parent.appendChild(tooltipEl)
+  } else if (tooltipEl.parentNode !== parent) {
+    parent.appendChild(tooltipEl)
+  }
+  return tooltipEl
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function externalTooltip(context: { chart: any; tooltip: any }) {
+  const { chart, tooltip } = context
+  const el = getTooltipEl(chart)
+  if (!tooltip.opacity) { el.style.opacity = '0'; return }
+
+  const p = displayed.value[tooltip.dataPoints?.[0]?.dataIndex]
+  if (!p) { el.style.opacity = '0'; return }
+
+  const zone = formZone(p.tsb)
+  const acts = p.activities ?? []
+  const actHtml = acts.length
+    ? '<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.15);padding-top:5px">' +
+      acts.slice(0, 4).map((a) => `<div style="opacity:.9">• ${escapeHtml(a.name)} <span style="opacity:.6">(${Math.round(a.tss)})</span></div>`).join('') +
+      (acts.length > 4 ? `<div style="opacity:.6">+${acts.length - 4}…</div>` : '') +
+      `<div style="opacity:.7;margin-top:3px"><i>${escapeHtml(t('performance.load.click_activity'))}</i></div>` +
+      '</div>'
+    : ''
+
+  el.innerHTML =
+    `<div style="font-weight:600;margin-bottom:5px;text-transform:capitalize">${escapeHtml(dateLong(p.date))}</div>` +
+    `<div>${dot('#0d6efd')}${escapeHtml(t('performance.load.ctl_label'))} : <b>${Math.round(p.ctl)}</b></div>` +
+    `<div>${dot('#fd7e14')}${escapeHtml(t('performance.load.atl_label'))} : <b>${Math.round(p.atl)}</b></div>` +
+    `<div style="margin-bottom:6px">${dot('#adb5bd')}${escapeHtml(t('performance.load.tsb_label'))} : <b>${p.tsb > 0 ? '+' : ''}${Math.round(p.tsb)}</b></div>` +
+    `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${zoneColor(zone)};color:#fff;font-weight:600;font-size:11px">${escapeHtml(t(`performance.load.zone_${zone}`))}</span>` +
+    actHtml
+
+  // Positionne le tooltip du côté OPPOSÉ au survol (coin haut), pour qu'il ne soit
+  // jamais masqué par le curseur : souris à gauche → tooltip à droite, et inversement.
+  const area = chart.chartArea
+  const left = chart.canvas.offsetLeft
+  const top = chart.canvas.offsetTop
+  const onLeftHalf = tooltip.caretX <= (area.left + area.right) / 2
+
+  el.style.opacity = '1'
+  el.style.top = `${top + area.top + 6}px`
+  if (onLeftHalf) {
+    el.style.left = `${left + area.right - 6}px`
+    el.style.transform = 'translate(-100%, 0)'
+  } else {
+    el.style.left = `${left + area.left + 6}px`
+    el.style.transform = 'translate(0, 0)'
+  }
+}
+
 async function renderChart() {
   if (chart) { chart.destroy(); chart = null }
   if (!hasData.value || !chartCanvas.value) return
@@ -139,14 +276,16 @@ async function renderChart() {
   const ctx = chartCanvas.value.getContext('2d')
   if (!ctx) return
   chart = new Chart(ctx, {
+    plugins: [tsbZonesPlugin],
     data: {
       labels: pts.map((p) => fmtDate(p.date)),
       datasets: [
         {
+          // TSB en trait neutre sans remplissage : les bandes de zones colorées en fond
+          // portent désormais la lecture de la fraîcheur, la ligne doit rester lisible dessus.
           type: 'line', label: t('performance.load.tsb_label'),
           data: pts.map((p) => p.tsb), yAxisID: 'tsb', order: 1,
-          borderColor: '#198754', backgroundColor: 'rgba(25,135,84,0.15)',
-          fill: 'origin', pointRadius: 0, borderWidth: 1.5, tension: 0.3,
+          borderColor: '#343a40', pointRadius: 0, borderWidth: 2, tension: 0.3,
         },
         {
           type: 'line', label: t('performance.load.ctl_label'),
@@ -164,8 +303,23 @@ async function renderChart() {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
+      // Clic sur un jour → ouvre la séance principale (plus gros TSS) de ce jour.
+      onClick: (_evt: unknown, els: { index: number }[]) => {
+        const p = pts[els?.[0]?.index]
+        const act = p?.activities?.[0]
+        if (act) window.location.href = activityHref(act)
+      },
+      // Curseur « main » sur les jours qui ont au moins une activité.
+      onHover: (evt: { native?: Event }, els: { index: number }[]) => {
+        const target = evt.native?.target as HTMLElement | undefined
+        if (!target) return
+        const p = pts[els?.[0]?.index]
+        target.style.cursor = p?.activities?.length ? 'pointer' : 'default'
+      },
       plugins: {
         legend: { position: 'top', labels: { usePointStyle: true, boxWidth: 8 } },
+        // Tooltip HTML externe (badge coloré pour l'état + pastilles de couleur).
+        tooltip: { enabled: false, external: externalTooltip },
       },
       scales: {
         load: { type: 'linear', position: 'left', beginAtZero: true, title: { display: true, text: t('performance.load.axis_load') } },
@@ -179,7 +333,10 @@ async function renderChart() {
 // Re-render quand la fenêtre change.
 watch(rangeDays, async () => { await nextTick(); renderChart() })
 
-onBeforeUnmount(() => { if (chart) { chart.destroy(); chart = null } })
+onBeforeUnmount(() => {
+  if (chart) { chart.destroy(); chart = null }
+  if (tooltipEl) { tooltipEl.remove(); tooltipEl = null }
+})
 </script>
 
 <template>

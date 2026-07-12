@@ -86,6 +86,8 @@ fr:
       how_title: "Comment lire ces courbes ?"
       how_body: "Chaque sortie rapporte un « stress » (TSS). On en tire une forme de fond qui monte lentement (CTL, 42 j) et une fatigue qui réagit vite (ATL, 7 j). Leur écart donne ta fraîcheur du jour (TSB). Objectif : faire monter la forme de fond tout en gérant la fatigue, et laisser la fraîcheur remonter avant un objectif."
       today: "Aujourd'hui"
+      today_state: "État ce jour-là"
+      click_activity: "Cliquez pour ouvrir la séance"
       ctl_label: "Forme de fond"
       ctl_sub: "CTL · 42 jours"
       ctl_help: "Ton niveau d'entraînement accumulé. Monte lentement quand tu t'entraînes régulièrement — c'est ta progression."

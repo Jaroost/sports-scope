@@ -90,7 +90,8 @@ module TrainingLoad
         ftp_current: ftp_at.call(Time.zone.today),
         lthr: lthr_info[:value],
         lthr_source: lthr_info[:source],
-        lthr_auto: lthr_info[:auto]
+        lthr_auto: lthr_info[:auto],
+        typical_speed_kmh: typical_cycling_speed(rows)
       }
     }
   end
@@ -188,6 +189,23 @@ module TrainingLoad
     { value: value, auto: auto, source: (manual&.positive? ? 'manual' : (auto ? 'auto' : nil)) }
   end
 
+  # Vitesse « habituelle » à vélo (km/h) = médiane des vitesses moyennes des sorties
+  # vélo. Sert à traduire une durée recommandée en distance approximative. nil sans data.
+  def typical_cycling_speed(rows)
+    speeds = rows.filter_map do |r|
+      next unless PerformanceRecords.sport_category(r['activity_type']) == 'cycling'
+
+      v = numeric(r['average_speed'])
+      v if v&.positive?
+    end
+    return nil if speeds.empty?
+
+    sorted = speeds.sort
+    mid = sorted.length / 2
+    median = sorted.length.odd? ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2.0
+    (median * 3.6).round(1) # m/s → km/h
+  end
+
   def auto_lthr(rows)
     max_hr = rows.filter_map { |r| numeric(r['average_heartrate']) }.max
     # `average_heartrate` sous-estime la FC max ; on approxime la FC max par le plus
@@ -199,7 +217,7 @@ module TrainingLoad
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
   def load_rows(user)
-    columns = %w[name started_at moving_time_s average_heartrate activity_type normalized_power]
+    columns = %w[name started_at moving_time_s average_heartrate activity_type normalized_power average_speed]
     union = UserActivities.union_sql(user_id: user.id, columns: columns)
     UserActivities.select_all("SELECT * FROM (#{union}) rows", 'TrainingLoad#load_rows')
   end

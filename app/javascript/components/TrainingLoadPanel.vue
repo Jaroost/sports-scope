@@ -7,7 +7,7 @@ interface DayActivity { source: string; external_id: string; name: string; tss: 
 interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; activities?: DayActivity[] }
 interface Current extends Point { form_zone: string }
 interface Coverage { power: number; hr: number; estimated: number; total: number }
-interface Thresholds { ftp_current?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null }
+interface Thresholds { ftp_current?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; typical_speed_kmh?: number | null }
 interface LoadSummary {
   current: Current | null
   series: Point[]
@@ -189,7 +189,10 @@ const recommendation = computed(() => {
   } else {
     action = 'big'; tss = Math.round(1.4 * ctl); minutes = tssToMinutes(tss, 0.80); effort = 'hard'; reason = 'reason_big'
   }
-  return { action, tss, minutes, effort, reason, tsb: Math.round(tsb) }
+  // Distance approximative selon la vitesse habituelle (km/h) × durée.
+  const speed = data.value?.thresholds?.typical_speed_kmh ?? null
+  const distanceKm = speed && minutes ? Math.round((speed * minutes) / 60) : null
+  return { action, tss, minutes, effort, reason, distanceKm, tsb: Math.round(tsb) }
 })
 
 function fmtSigned(v: number): string {
@@ -489,7 +492,8 @@ onBeforeUnmount(() => {
                 <div class="fs-5 fw-bold" :style="{ color: ACTION_STYLE[recommendation.action].color }">
                   {{ t(`performance.load.reco.action_${recommendation.action}`) }}
                   <span v-if="recommendation.minutes" class="text-body fw-normal fs-6">·
-                    ≈ {{ fmtDuration(recommendation.minutes) }} {{ t(`performance.load.reco.effort_${recommendation.effort}`) }}
+                    ≈ {{ fmtDuration(recommendation.minutes) }}<template v-if="recommendation.distanceKm"> (~{{ recommendation.distanceKm }} km)</template>
+                    {{ t(`performance.load.reco.effort_${recommendation.effort}`) }}
                   </span>
                 </div>
                 <div class="small text-muted">

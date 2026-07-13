@@ -58,6 +58,12 @@ Rails.application.routes.draw do
   # Seuils physiologiques de l'athlète (FTP manuelle, poids — JSON pour Vue)
   patch "/api/athlete", to: "profiles#update_athlete"
 
+  # Maintenance réservée aux administrateurs (déclenchée depuis l'UI)
+  namespace :admin do
+    post "/maintenance/backfill_np", to: "maintenance#backfill_np"
+    post "/maintenance/backfill_zones", to: "maintenance#backfill_zones"
+  end
+
   # Geocoding proxy (avoids CORS when calling Nominatim from the browser)
   get "/api/geocode/places", to: "geocodes#places"
 

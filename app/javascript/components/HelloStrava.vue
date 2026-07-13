@@ -12,6 +12,7 @@ const refreshing = ref(false)
 const error = ref(null)
 const activities = ref([])
 const cachedAt = ref(null)
+const total = ref(null)
 
 const title = computed(() => t('strava.recent_activities'))
 const emptyText = computed(() => t('strava.no_activities'))
@@ -32,6 +33,7 @@ async function fetchActivities({ refresh = false } = {}) {
     const payload = await res.json()
     activities.value = payload.activities || []
     cachedAt.value = payload.cached_at || null
+    total.value = payload.total ?? activities.value.length
     error.value = null
   } catch (e) {
     error.value = e.message
@@ -79,6 +81,7 @@ function activityIcon(type) {
       <h2 class="h5 mb-0 d-flex align-items-center gap-2">
         <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
         <span>{{ title }}</span>
+        <span v-if="total !== null" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ total }}</span>
       </h2>
       <div class="d-flex align-items-center gap-2">
         <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1">

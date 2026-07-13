@@ -497,6 +497,26 @@ function placePreviewMarker(coords: [number, number]) {
                   <span>{{ t('profile.navbar.chain_widget') }}</span>
                 </label>
               </div>
+              <!-- De même, le menu « performance » porte le widget « plan du jour » sur
+                   l'accueil, distinct du bouton d'accès à la page (interrupteur ci-dessus). -->
+              <div v-if="item.key === 'performance'" class="form-check form-switch m-0">
+                <input
+                  id="navbar-performance-widget"
+                  v-model="prefs.display.show_performance_widget"
+                  class="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  :aria-label="t('profile.display.show_performance_widget')"
+                >
+                <label
+                  class="form-check-label navbar-toggle-label"
+                  for="navbar-performance-widget"
+                  :title="t('profile.navbar.performance_widget_hint')"
+                >
+                  <i class="fa-solid fa-heart-pulse" aria-hidden="true"></i>
+                  <span>{{ t('profile.navbar.performance_widget') }}</span>
+                </label>
+              </div>
             </div>
           </li>
         </ul>

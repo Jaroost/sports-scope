@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_12_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_13_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -70,6 +70,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_12_000001) do
     t.integer "elapsed_time_s"
     t.jsonb "end_latlng"
     t.string "filename"
+    t.jsonb "hr_histogram", default: {}, null: false
     t.float "max_cadence"
     t.float "max_heartrate"
     t.float "max_speed"
@@ -78,6 +79,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_12_000001) do
     t.string "name", null: false
     t.float "normalized_power"
     t.jsonb "peak_powers", default: {}, null: false
+    t.jsonb "power_histogram", default: {}, null: false
     t.string "source", default: "fit", null: false
     t.jsonb "start_latlng"
     t.datetime "started_at"
@@ -147,6 +149,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_12_000001) do
     t.integer "elapsed_time_s"
     t.jsonb "end_latlng"
     t.string "gear_id"
+    t.jsonb "hr_histogram", default: {}, null: false
     t.float "max_cadence"
     t.float "max_heartrate"
     t.float "max_speed"
@@ -155,6 +158,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_12_000001) do
     t.string "name", null: false
     t.float "normalized_power"
     t.jsonb "peak_powers", default: {}, null: false
+    t.jsonb "power_histogram", default: {}, null: false
     t.jsonb "raw", default: {}, null: false
     t.jsonb "start_latlng"
     t.datetime "started_at"

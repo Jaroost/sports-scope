@@ -117,6 +117,9 @@ class User < ApplicationRecord
       # Widget de cirage de chaîne sur la page d'accueil (n'apparaît de toute façon
       # que si Strava est lié — cf. pages/home.html.erb).
       "show_chain_widget" => true,
+      # Widget « plan du jour » (charge d'entraînement) sur l'accueil (n'apparaît que
+      # s'il y a des activités — cf. pages/home.html.erb).
+      "show_performance_widget" => true,
     },
     # Réglages dépendant de la pratique. Le sport courant est celui de l'itinéraire
     # ouvert (Route#activity), ou `display.default_sport` à défaut — cf. sportPreferences()

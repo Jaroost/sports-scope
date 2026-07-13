@@ -1,19 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
+import {
+  useTrainingPlan, zoneColor, formZone, acwrColor, fmtDuration, fmtSigned, eventDateFmt,
+  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS,
+  type Point, type LoadSummary, type DayActivity,
+} from '../composables/useTrainingPlan'
+import ZoneDistribution from './ZoneDistribution.vue'
 
-// ── Types du payload /api/performance/training_load ──────────────────────────
-interface DayActivity { source: string; external_id: string; name: string; tss: number; source_tss: string }
-interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; activities?: DayActivity[] }
-interface Current extends Point { form_zone: string }
-interface Coverage { power: number; hr: number; estimated: number; total: number }
-interface Thresholds { ftp_current?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; typical_speed_kmh?: number | null }
-interface LoadSummary {
-  current: Current | null
-  series: Point[]
-  coverage: Coverage
-  thresholds: Thresholds
-}
+const props = defineProps({
+  admin: { type: Boolean, default: false },
+})
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -40,6 +37,12 @@ function csrfToken(): string {
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
+// Appareil sans survol (tactile) : un tap déclenchait à la fois le tooltip ET la
+// navigation, empêchant de lire le jour touché. Sur tactile, le tap ouvre seulement
+// le tooltip et les activités y deviennent des liens ; la navigation directe au clic
+// n'est gardée que pour la souris.
+const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
+
 function activityHref(a: { source: string; external_id: string }): string {
   const base = a.source === 'imported' ? '/imported_activities' : '/activities'
   return `${localePrefix}${base}/${a.external_id}`
@@ -64,31 +67,23 @@ async function fetchData() {
   renderChart()
 }
 
-onMounted(fetchData)
+// Ancre : arrivée depuis le widget d'accueil via /performance#training-load. Le
+// panneau se monte de façon asynchrone (après le chargement de PerformanceAnalysis),
+// donc le défilement natif du navigateur ne trouve pas encore l'élément ; on le fait
+// nous-mêmes une fois le panneau monté.
+const rootEl = ref<HTMLElement | null>(null)
+
+onMounted(async () => {
+  await fetchData()
+  if (window.location.hash === '#training-load') {
+    await nextTick()
+    rootEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+})
 
 // ── Zones de fraîcheur (TSB) ─────────────────────────────────────────────────
-const ZONES: Record<string, { color: string }> = {
-  very_fresh: { color: '#0d6efd' },
-  fresh: { color: '#198754' },
-  neutral: { color: '#6c757d' },
-  productive: { color: '#fd7e14' },
-  overreaching: { color: '#dc3545' },
-}
+// `zoneColor` / `formZone` viennent du composable (partagés avec le widget d'accueil).
 const ZONE_ORDER = ['fresh', 'neutral', 'productive', 'overreaching', 'very_fresh']
-
-function zoneColor(key: string): string {
-  return ZONES[key]?.color ?? '#6c757d'
-}
-
-// Zone de fraîcheur d'un TSB (mêmes seuils que TrainingLoad#form_zone côté serveur) —
-// sert au tooltip pour afficher l'état de n'importe quel jour, pas seulement aujourd'hui.
-function formZone(tsb: number): string {
-  if (tsb >= 20) return 'very_fresh'
-  if (tsb >= 5) return 'fresh'
-  if (tsb >= -10) return 'neutral'
-  if (tsb >= -30) return 'productive'
-  return 'overreaching'
-}
 
 // Remplissages translucides des bandes de zones (mêmes couleurs que la légende).
 const ZONE_FILL: Record<string, string> = {
@@ -131,73 +126,13 @@ const tsbZonesPlugin: any = {
   },
 }
 
-const current = computed(() => data.value?.current ?? null)
+// ── Plan d'entraînement (objectif + reco du jour), partagé avec le widget d'accueil ─
+const {
+  current, goal, targetEvent, eventInfo, feasibility, projection,
+  editingEvent, evDate, evDistance, evIntensity, todayISO,
+  openEventEditor, saveEvent, removeEvent, recommendation,
+} = useTrainingPlan(data)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
-
-// ── Recommandation du jour ───────────────────────────────────────────────────
-// Objectif de l'utilisateur → « plancher de fatigue » (TSB) acceptable. Selon la marge
-// entre le TSB du jour et ce plancher, on propose repos / sortie facile / grosse séance.
-// Persisté en localStorage comme le sport sélectionné.
-const GOAL_STORAGE_KEY = 'sportsScope.trainingGoal'
-const GOALS = ['improve_fast', 'improve_slow', 'maintain', 'peak'] as const
-type Goal = typeof GOALS[number]
-const GOAL_FLOOR: Record<Goal, number> = { improve_fast: -30, improve_slow: -20, maintain: -8, peak: 5 }
-
-const storedGoal = (typeof localStorage !== 'undefined' && localStorage.getItem(GOAL_STORAGE_KEY)) as Goal | null
-const goal = ref<Goal>(storedGoal && GOALS.includes(storedGoal) ? storedGoal : 'improve_slow')
-watch(goal, (g) => { try { localStorage.setItem(GOAL_STORAGE_KEY, g) } catch { /* ignore */ } })
-
-const ACTION_STYLE: Record<string, { icon: string; color: string }> = {
-  rest: { icon: 'fa-bed', color: '#6c757d' },
-  easy: { icon: 'fa-person-biking', color: '#198754' },
-  big: { icon: 'fa-fire', color: '#dc3545' },
-}
-
-// Convertit un TSS en durée approx. (min, arrondie au 1/4 h) pour une intensité donnée :
-// TSS = heures × IF² × 100 ⟹ heures = TSS / (IF² × 100). Rend la reco parlante.
-function tssToMinutes(tss: number, intensity: number): number {
-  const minutes = (tss / (intensity * intensity * 100)) * 60
-  return Math.max(15, Math.round(minutes / 15) * 15)
-}
-
-function fmtDuration(min: number): string {
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  if (h && m) return `${h}h${String(m).padStart(2, '0')}`
-  if (h) return `${h}h`
-  return `${m} min`
-}
-
-const recommendation = computed(() => {
-  const c = current.value
-  if (!c) return null
-  const tsb = c.tsb
-  const ctl = c.ctl
-  const headroom = tsb - GOAL_FLOOR[goal.value]
-
-  let action: 'rest' | 'easy' | 'big'
-  let tss = 0
-  let minutes = 0
-  let effort = ''
-  let reason: string
-  if (tsb <= -30) {
-    action = 'rest'; reason = 'reason_overreaching'
-  } else if (headroom < 0) {
-    action = 'rest'; reason = 'reason_rest'
-  } else if (headroom < 12) {
-    action = 'easy'; tss = Math.round(0.6 * ctl); minutes = tssToMinutes(tss, 0.65); effort = 'endurance'; reason = 'reason_easy'
-  } else {
-    action = 'big'; tss = Math.round(1.4 * ctl); minutes = tssToMinutes(tss, 0.80); effort = 'hard'; reason = 'reason_big'
-  }
-  // Distance approximative selon la vitesse habituelle (km/h) × durée.
-  const speed = data.value?.thresholds?.typical_speed_kmh ?? null
-  const distanceKm = speed && minutes ? Math.round((speed * minutes) / 60) : null
-  return { action, tss, minutes, effort, reason, distanceKm, tsb: Math.round(tsb) }
-})
-
-function fmtSigned(v: number): string {
-  return v > 0 ? `+${Math.round(v)}` : String(Math.round(v))
-}
 
 // ── Série affichée selon la fenêtre choisie ──────────────────────────────────
 const displayed = computed<Point[]>(() => {
@@ -205,6 +140,26 @@ const displayed = computed<Point[]>(() => {
   if (!s.length || !Number.isFinite(rangeDays.value)) return s
   return s.slice(-rangeDays.value)
 })
+
+// ── Tendance sur 7 jours (flèche par tuile) ──────────────────────────────────
+// Compare la valeur du jour à celle d'il y a `TREND_WINDOW` jours dans la série
+// (points quotidiens, jours de repos inclus). `goodDir` = sens « favorable » de la
+// métrique → colore la flèche (vert = va dans le bon sens, orange = à surveiller).
+// Le seuil `flat` (adapté à l'échelle) évite d'afficher une tendance sur du bruit.
+const TREND_WINDOW = 7
+type Trend = { dir: 'up' | 'down' | 'flat'; tone: 'good' | 'warn' | 'flat'; icon: string; delta: string }
+function computeTrend(key: 'ctl' | 'atl' | 'tsb', flat: number, goodDir: 'up' | 'down'): Trend | null {
+  const s = data.value?.series ?? []
+  if (s.length < TREND_WINDOW + 1) return null
+  const d = s[s.length - 1][key] - s[s.length - 1 - TREND_WINDOW][key]
+  const dir = Math.abs(d) < flat ? 'flat' : d > 0 ? 'up' : 'down'
+  const tone = dir === 'flat' ? 'flat' : dir === goodDir ? 'good' : 'warn'
+  const icon = dir === 'flat' ? 'fa-arrow-right-long' : dir === 'up' ? 'fa-arrow-trend-up' : 'fa-arrow-trend-down'
+  return { dir, tone, icon: `fa-solid ${icon}`, delta: fmtSigned(d) }
+}
+const ctlTrend = computed(() => computeTrend('ctl', 1, 'up'))   // forme de fond : monter = bien
+const atlTrend = computed(() => computeTrend('atl', 1, 'down')) // fatigue : baisser = bien
+const tsbTrend = computed(() => computeTrend('tsb', 2, 'up'))   // fraîcheur : monter = plus frais
 
 // ── LTHR ─────────────────────────────────────────────────────────────────────
 const lthr = computed(() => data.value?.thresholds?.lthr ?? null)
@@ -237,6 +192,54 @@ async function saveLthr() {
 async function resetLthr() {
   lthrInput.value = ''
   await saveLthr()
+}
+
+// ── Maintenance admin : backfill de la puissance normalisée ──────────────────
+// Recalcule la NP manquante depuis les streams déjà stockés (aucun appel Strava),
+// puis recharge la couverture et les courbes. Réservé aux administrateurs.
+const backfilling = ref(false)
+const backfillResult = ref<{ updated: number; no_power: number; no_streams: number } | null>(null)
+const backfillingZones = ref(false)
+const backfillZonesResult = ref<{ updated: number; no_data: number; no_streams: number } | null>(null)
+
+async function runBackfillNp() {
+  backfilling.value = true
+  backfillResult.value = null
+  try {
+    const res = await fetch('/admin/maintenance/backfill_np', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    backfillResult.value = await res.json()
+    await fetchData()
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    backfilling.value = false
+  }
+}
+
+// Recalcule les histogrammes FC/puissance manquants depuis les streams stockés, puis
+// recharge la répartition par zones. Réservé aux administrateurs.
+async function runBackfillZones() {
+  backfillingZones.value = true
+  backfillZonesResult.value = null
+  try {
+    const res = await fetch('/admin/maintenance/backfill_zones', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    backfillZonesResult.value = await res.json()
+    await fetchData()
+  } catch (e) {
+    error.value = (e as Error).message
+  } finally {
+    backfillingZones.value = false
+  }
 }
 
 // ── Graphique PMC (Chart.js) ─────────────────────────────────────────────────
@@ -298,11 +301,21 @@ function externalTooltip(context: { chart: any; tooltip: any }) {
 
   const zone = formZone(p.tsb)
   const acts = p.activities ?? []
+  // Sur tactile, chaque séance est un lien tappable (pointer-events réactivé alors que
+  // le conteneur du tooltip les ignore) : c'est ainsi qu'on ouvre l'activité, puisque le
+  // tap sur le point ne navigue plus. À la souris, elles restent en texte (le tooltip
+  // disparaît au survol) et on ouvre par le clic sur le point.
+  const actLine = (a: DayActivity) => {
+    const inner = `• ${escapeHtml(a.name)} <span style="opacity:.6">(${Math.round(a.tss)})</span>`
+    return isTouch
+      ? `<a href="${escapeHtml(activityHref(a))}" style="display:block;color:#fff;text-decoration:none;opacity:.95;pointer-events:auto;padding:3px 0">${inner}</a>`
+      : `<div style="opacity:.9">${inner}</div>`
+  }
   const actHtml = acts.length
     ? '<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.15);padding-top:5px">' +
-      acts.slice(0, 4).map((a) => `<div style="opacity:.9">• ${escapeHtml(a.name)} <span style="opacity:.6">(${Math.round(a.tss)})</span></div>`).join('') +
+      acts.slice(0, 4).map(actLine).join('') +
       (acts.length > 4 ? `<div style="opacity:.6">+${acts.length - 4}…</div>` : '') +
-      `<div style="opacity:.7;margin-top:3px"><i>${escapeHtml(t('performance.load.click_activity'))}</i></div>` +
+      `<div style="opacity:.7;margin-top:3px"><i>${escapeHtml(t(isTouch ? 'performance.load.tap_activity' : 'performance.load.click_activity'))}</i></div>` +
       '</div>'
     : ''
 
@@ -341,7 +354,10 @@ function sharedOptions(pts: Point[], extra: Record<string, unknown> = {}) {
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index' as const, intersect: false },
+    // Souris : clic sur le point → séance. Tactile : on ne navigue pas (le tap ouvre le
+    // tooltip, et on ouvre la séance via son lien dedans).
     onClick: (_evt: unknown, els: { index: number }[]) => {
+      if (isTouch) return
       const act = pts[els?.[0]?.index]?.activities?.[0]
       if (act) window.location.href = activityHref(act)
     },
@@ -431,7 +447,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="mb-4">
+  <div id="training-load" ref="rootEl" class="mb-4">
     <h2 class="h5 d-flex align-items-center gap-2 mb-1">
       <i class="fa-solid fa-heart-pulse text-warning" aria-hidden="true"></i>
       <span>{{ t('performance.load.title') }}</span>
@@ -455,30 +471,125 @@ onBeforeUnmount(() => {
         <template v-else>
           <!-- Valeurs du jour -->
           <div class="row g-3 mb-3">
-            <div class="col-12 col-md-4">
+            <div class="col-6 col-lg-3">
               <div class="load-tile" :title="t('performance.load.ctl_help')">
                 <div class="small text-muted">{{ t('performance.load.ctl_label') }} <span class="text-body-tertiary">· {{ t('performance.load.ctl_sub') }}</span></div>
-                <div class="fs-3 fw-bold" style="color:#0d6efd">{{ Math.round(current.ctl) }}</div>
+                <div class="d-flex align-items-baseline gap-2">
+                  <span class="fs-3 fw-bold" style="color:#0d6efd">{{ Math.round(current.ctl) }}</span>
+                  <span v-if="ctlTrend" class="load-trend" :class="`trend-${ctlTrend.tone}`" :title="t('performance.load.trend_tooltip')">
+                    <i :class="ctlTrend.icon" aria-hidden="true"></i>
+                    <span v-if="ctlTrend.dir !== 'flat'" class="ms-1">{{ ctlTrend.delta }}</span>
+                  </span>
+                </div>
                 <div class="load-help">{{ t('performance.load.ctl_help') }}</div>
               </div>
             </div>
-            <div class="col-12 col-md-4">
+            <div class="col-6 col-lg-3">
               <div class="load-tile" :title="t('performance.load.atl_help')">
                 <div class="small text-muted">{{ t('performance.load.atl_label') }} <span class="text-body-tertiary">· {{ t('performance.load.atl_sub') }}</span></div>
-                <div class="fs-3 fw-bold" style="color:#fd7e14">{{ Math.round(current.atl) }}</div>
+                <div class="d-flex align-items-baseline gap-2">
+                  <span class="fs-3 fw-bold" style="color:#fd7e14">{{ Math.round(current.atl) }}</span>
+                  <span v-if="atlTrend" class="load-trend" :class="`trend-${atlTrend.tone}`" :title="t('performance.load.trend_tooltip')">
+                    <i :class="atlTrend.icon" aria-hidden="true"></i>
+                    <span v-if="atlTrend.dir !== 'flat'" class="ms-1">{{ atlTrend.delta }}</span>
+                  </span>
+                </div>
                 <div class="load-help">{{ t('performance.load.atl_help') }}</div>
               </div>
             </div>
-            <div class="col-12 col-md-4">
+            <div class="col-6 col-lg-3">
               <div class="load-tile" :title="t('performance.load.tsb_help')">
                 <div class="small text-muted">{{ t('performance.load.tsb_label') }} <span class="text-body-tertiary">· {{ t('performance.load.tsb_sub') }}</span></div>
-                <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center gap-2 flex-wrap">
                   <span class="fs-3 fw-bold" :style="{ color: zoneColor(currentZone) }">{{ fmtSigned(current.tsb) }}</span>
+                  <span v-if="tsbTrend" class="load-trend" :class="`trend-${tsbTrend.tone}`" :title="t('performance.load.trend_tooltip')">
+                    <i :class="tsbTrend.icon" aria-hidden="true"></i>
+                    <span v-if="tsbTrend.dir !== 'flat'" class="ms-1">{{ tsbTrend.delta }}</span>
+                  </span>
                   <span class="badge" :style="{ backgroundColor: zoneColor(currentZone) }">{{ t(`performance.load.zone_${currentZone}`) }}</span>
                 </div>
                 <div class="load-help">{{ t(`performance.load.zone_${currentZone}_hint`) }}</div>
               </div>
             </div>
+            <!-- ACWR : ratio charge aiguë/chronique (risque de blessure) -->
+            <div class="col-6 col-lg-3">
+              <div class="load-tile" :title="t('performance.load.acwr_help')">
+                <div class="small text-muted">{{ t('performance.load.acwr_label') }} <span class="text-body-tertiary">· {{ t('performance.load.acwr_sub') }}</span></div>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <span class="fs-3 fw-bold" :style="{ color: acwrColor(current.acwr_zone) }">
+                    {{ current.acwr != null ? current.acwr.toFixed(2) : '—' }}
+                  </span>
+                  <span v-if="current.acwr_zone" class="badge" :style="{ backgroundColor: acwrColor(current.acwr_zone) }">{{ t(`performance.load.acwr_${current.acwr_zone}`) }}</span>
+                </div>
+                <div class="load-help">{{ current.acwr_zone ? t(`performance.load.acwr_${current.acwr_zone}_hint`) : t('performance.load.acwr_pending') }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sortie objectif datée -->
+          <div class="mb-3">
+            <!-- Éditeur -->
+            <div v-if="editingEvent" class="event-editor">
+              <div class="d-flex flex-wrap align-items-end gap-3">
+                <div>
+                  <label class="small text-muted d-block mb-1">{{ t('performance.load.event.date_label') }}</label>
+                  <input v-model="evDate" type="date" :min="todayISO" class="form-control form-control-sm" />
+                </div>
+                <div>
+                  <label class="small text-muted d-block mb-1">{{ t('performance.load.event.distance_label') }}</label>
+                  <div class="input-group input-group-sm" style="width:8rem">
+                    <input v-model="evDistance" type="number" min="1" max="1000" class="form-control" />
+                    <span class="input-group-text">km</span>
+                  </div>
+                </div>
+                <div>
+                  <label class="small text-muted d-block mb-1">{{ t('performance.load.event.intensity_label') }}</label>
+                  <select v-model="evIntensity" class="form-select form-select-sm" style="width:auto">
+                    <option value="easy">{{ t('performance.load.event.intensity_easy') }}</option>
+                    <option value="tempo">{{ t('performance.load.event.intensity_tempo') }}</option>
+                    <option value="race">{{ t('performance.load.event.intensity_race') }}</option>
+                  </select>
+                </div>
+                <div class="d-flex gap-2">
+                  <button type="button" class="btn btn-sm btn-primary" :disabled="!evDate || !evDistance" @click="saveEvent">{{ t('performance.load.event.save') }}</button>
+                  <button v-if="targetEvent" type="button" class="btn btn-sm btn-outline-danger" @click="removeEvent">{{ t('performance.load.event.remove') }}</button>
+                  <button type="button" class="btn btn-sm btn-link text-muted" @click="editingEvent = false">{{ t('performance.load.event.cancel') }}</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Résumé de l'événement -->
+            <div v-else-if="eventInfo && eventInfo.phase !== 'past'" class="event-card" :style="{ borderColor: PHASE_COLOR[eventInfo.phase] }">
+              <div class="d-flex flex-wrap align-items-center gap-3">
+                <span class="event-countdown" :style="{ backgroundColor: PHASE_COLOR[eventInfo.phase] }">
+                  <span class="event-countdown-num">{{ eventInfo.days === 0 ? '🎉' : `J-${eventInfo.days}` }}</span>
+                </span>
+                <div class="flex-grow-1">
+                  <div class="fw-bold">
+                    {{ t('performance.load.event.summary', { distance: eventInfo.distanceKm, date: eventDateFmt(eventInfo.date) }) }}
+                    <span class="badge ms-1" :style="{ backgroundColor: PHASE_COLOR[eventInfo.phase] }">{{ t(`performance.load.event.phase_${eventInfo.phase}`) }}</span>
+                  </div>
+                  <div class="small text-muted">
+                    {{ t('performance.load.event.cost', { duration: fmtDuration(eventInfo.durationMin), tss: eventInfo.tss }) }}
+                  </div>
+                  <div v-if="feasibility" class="small mt-1" :style="{ color: FEAS_COLOR[feasibility.level] }">
+                    <i class="fa-solid fa-gauge-high me-1" aria-hidden="true"></i>{{ t(`performance.load.event.feasibility_${feasibility.level}`) }}
+                  </div>
+                  <div v-if="projection" class="small mt-1" :style="{ color: zoneColor(formZone(projection.tsb)) }">
+                    <i class="fa-solid fa-wand-magic-sparkles me-1" aria-hidden="true"></i>{{ t(`performance.load.event.projection_${projection.verdict}`, { tsb: fmtSigned(projection.tsb) }) }}
+                  </div>
+                </div>
+                <div class="d-flex gap-2">
+                  <button type="button" class="btn btn-sm btn-outline-secondary" @click="openEventEditor">{{ t('performance.load.event.edit') }}</button>
+                  <button type="button" class="btn btn-sm btn-link text-danger p-0" @click="removeEvent">{{ t('performance.load.event.remove') }}</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bouton d'ajout -->
+            <button v-else type="button" class="btn btn-sm btn-outline-primary" @click="openEventEditor">
+              <i class="fa-solid fa-calendar-check me-1" aria-hidden="true"></i>{{ t('performance.load.event.set') }}
+            </button>
           </div>
 
           <!-- Recommandation du jour -->
@@ -497,7 +608,7 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
                 <div class="small text-muted">
-                  {{ t(`performance.load.reco.${recommendation.reason}`, { tsb: recommendation.tsb }) }}
+                  {{ t(`performance.load.reco.${recommendation.reason}`, { tsb: recommendation.tsb, days: recommendation.days ?? 0 }) }}
                   <span
                     v-if="recommendation.tss"
                     class="reco-tss"
@@ -505,7 +616,7 @@ onBeforeUnmount(() => {
                   >(~{{ recommendation.tss }} TSS <i class="fa-solid fa-circle-info" aria-hidden="true"></i>)</span>
                 </div>
               </div>
-              <div>
+              <div v-if="!eventInfo || eventInfo.phase === 'past'">
                 <label class="small text-muted d-block mb-1">{{ t('performance.load.reco.goal_label') }}</label>
                 <select v-model="goal" class="form-select form-select-sm reco-goal">
                   <option v-for="g in GOALS" :key="g" :value="g">{{ t(`performance.load.reco.goal_${g}`) }}</option>
@@ -586,13 +697,55 @@ onBeforeUnmount(() => {
           <p class="small text-body-tertiary mt-2 mb-0">
             <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ t('performance.load.seed_hint') }}
           </p>
+
+          <!-- Maintenance (administrateurs seulement) -->
+          <div v-if="props.admin" class="admin-maint mt-3">
+            <div class="d-flex flex-wrap align-items-center gap-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="backfilling" @click="runBackfillNp">
+                <span v-if="backfilling" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                <i v-else class="fa-solid fa-wrench me-1" aria-hidden="true"></i>
+                {{ backfilling ? t('performance.load.admin.backfill_running') : t('performance.load.admin.backfill_np') }}
+              </button>
+              <span
+                v-if="backfillResult"
+                class="small text-muted"
+              >{{ t('performance.load.admin.backfill_result', { updated: backfillResult.updated, no_power: backfillResult.no_power, no_streams: backfillResult.no_streams }) }}</span>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="backfillingZones" @click="runBackfillZones">
+                <span v-if="backfillingZones" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                <i v-else class="fa-solid fa-layer-group me-1" aria-hidden="true"></i>
+                {{ backfillingZones ? t('performance.load.admin.backfill_running') : t('performance.load.admin.backfill_zones') }}
+              </button>
+              <span
+                v-if="backfillZonesResult"
+                class="small text-muted"
+              >{{ t('performance.load.admin.backfill_zones_result', { updated: backfillZonesResult.updated, no_data: backfillZonesResult.no_data, no_streams: backfillZonesResult.no_streams }) }}</span>
+            </div>
+            <div class="small text-body-tertiary mt-1">
+              <i class="fa-solid fa-lock me-1" aria-hidden="true"></i>{{ t('performance.load.admin.backfill_hint') }}
+            </div>
+          </div>
         </template>
       </div>
     </div>
+
+    <!-- Répartition du temps par zone d'intensité (FC & puissance) -->
+    <ZoneDistribution
+      v-if="current"
+      class="mt-4"
+      :zones="data?.zones ?? null"
+      :lthr="lthr"
+      :ftp="data?.thresholds?.ftp_current ?? null"
+    />
   </div>
 </template>
 
 <style scoped>
+/* Décale l'ancre sous la navbar fixe (fixed-top) pour ne pas masquer le titre. */
+#training-load {
+  scroll-margin-top: 5rem;
+}
 .load-tile {
   height: 100%;
   padding: 0.75rem 1rem;
@@ -625,10 +778,53 @@ onBeforeUnmount(() => {
   cursor: help;
   white-space: nowrap;
 }
+.event-card {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--bs-border-color);
+  border-left-width: 4px;
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg);
+}
+.event-editor {
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: 0.5rem;
+}
+.event-countdown {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  flex: 0 0 auto;
+  border-radius: 0.5rem;
+  color: #fff;
+}
+.event-countdown-num {
+  font-weight: 700;
+  font-size: 1rem;
+}
 .load-help {
   font-size: 0.78rem;
   color: var(--bs-secondary-color);
   margin-top: 0.25rem;
+}
+.load-trend {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+.trend-good {
+  color: #198754;
+}
+.trend-warn {
+  color: #fd7e14;
+}
+.trend-flat {
+  color: var(--bs-secondary-color);
 }
 .load-chart-wrap {
   position: relative;

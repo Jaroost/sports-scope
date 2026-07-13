@@ -19,6 +19,14 @@ module TrainingLoad
   ATL_DAYS = 7
   INTENSITY_CAP = 1.5 # borne l'IF pour éviter des TSS absurdes sur données bancales
 
+  # Ratio charge aiguë / chronique (ACWR) : fenêtres de moyenne du TSS quotidien.
+  ACWR_ACUTE_DAYS = 7
+  ACWR_CHRONIC_DAYS = 28
+
+  # Fenêtre (jours) de la répartition du temps par zone d'intensité : ~6 semaines,
+  # comme la FTP, pour refléter l'entraînement RÉCENT et non l'historique complet.
+  ZONE_WINDOW_DAYS = 42
+
   # Facteur d'intensité par défaut (sorties sans puissance ni FC), par sport.
   # TSS/h ≈ IF² × 100 : vélo≈49, course≈56, ski≈30, rando≈25.
   ESTIMATED_IF = {
@@ -80,8 +88,9 @@ module TrainingLoad
     current = series.last
 
     {
-      current: current.merge(form_zone: form_zone(current[:tsb])),
+      current: current.merge(form_zone: form_zone(current[:tsb]), acwr_zone: acwr_zone(current[:acwr])),
       series: series,
+      zones: zone_distribution(user, ftp_at: ftp_at, lthr: lthr_info[:value]),
       coverage: {
         power: coverage['power'], hr: coverage['hr'],
         estimated: coverage['estimated'], total: coverage.values.sum
@@ -91,7 +100,8 @@ module TrainingLoad
         lthr: lthr_info[:value],
         lthr_source: lthr_info[:source],
         lthr_auto: lthr_info[:auto],
-        typical_speed_kmh: typical_cycling_speed(rows)
+        typical_speed_kmh: typical_cycling_speed(rows),
+        longest_ride_min: longest_recent_ride_min(rows)
       }
     }
   end
@@ -130,14 +140,89 @@ module TrainingLoad
 
     ctl = 0.0
     atl = 0.0
+    loads = []
     series = []
     (from..to).each do |day|
       tss = daily[day] || 0.0
+      loads << tss
       ctl += (tss - ctl) * k_ctl
       atl += (tss - atl) * k_atl
-      series << { date: day.iso8601, tss: tss.round(1), ctl: ctl.round(1), atl: atl.round(1), tsb: (ctl - atl).round(1) }
+      series << {
+        date: day.iso8601, tss: tss.round(1),
+        ctl: ctl.round(1), atl: atl.round(1), tsb: (ctl - atl).round(1),
+        acwr: acwr_at(loads)
+      }
     end
     series
+  end
+
+  # Ratio charge aiguë / chronique (rolling) : moyenne du TSS quotidien sur 7 j sur la
+  # moyenne sur 28 j (jours de repos = 0 inclus). nil tant qu'on n'a pas 28 j
+  # d'historique (artefact de démarrage) ou si la charge chronique est nulle.
+  # `loads` = TSS quotidiens dans l'ordre chronologique, jusqu'au jour courant.
+  def acwr_at(loads)
+    return nil if loads.length < ACWR_CHRONIC_DAYS
+
+    acute = loads.last(ACWR_ACUTE_DAYS).sum / ACWR_ACUTE_DAYS.to_f
+    chronic = loads.last(ACWR_CHRONIC_DAYS).sum / ACWR_CHRONIC_DAYS.to_f
+    return nil unless chronic.positive?
+
+    (acute / chronic).round(2)
+  end
+
+  # Zone de risque de l'ACWR (« sweet spot » 0,8–1,3). Clés interprétées côté front.
+  def acwr_zone(acwr)
+    return nil if acwr.nil?
+    return 'detraining' if acwr < 0.8
+    return 'optimal' if acwr <= 1.3
+    return 'caution' if acwr <= 1.5
+
+    'high_risk'
+  end
+
+  # ── Répartition du temps par zone d'intensité (FC & puissance), 6 dernières
+  # semaines. FC : un seul seuil courant (LTHR) → on cumule les histogrammes puis on
+  # classe une fois. Puissance : la FTP varie dans le temps → on classe chaque sortie
+  # avec la FTP de sa date, puis on cumule les secondes par zone. Vélo uniquement pour
+  # la puissance. Renvoie nil pour un canal sans données ou sans seuil. ─────────────
+  def zone_distribution(user, ftp_at:, lthr:)
+    cutoff = ZONE_WINDOW_DAYS.days.ago.to_date
+    hr_hist = Hash.new(0.0)
+    power_zone_secs = Hash.new(0.0)
+
+    zone_rows(user, cutoff).each do |a|
+      ZoneDistribution.merge_zone_seconds(hr_hist, a[:hr_histogram])
+      next unless PerformanceRecords.sport_category(a[:activity_type]) == 'cycling'
+
+      ZoneDistribution.merge_zone_seconds(
+        power_zone_secs,
+        ZoneDistribution.bucketize(a[:power_histogram], ftp_at.call(a[:date]),
+                                   ZoneDistribution::POWER_ZONES, ZoneDistribution::POWER_BUCKET)
+      )
+    end
+
+    hr_zone_secs = ZoneDistribution.bucketize(hr_hist, lthr, ZoneDistribution::HR_ZONES, ZoneDistribution::HR_BUCKET)
+    {
+      window_days: ZONE_WINDOW_DAYS,
+      hr: ZoneDistribution.present(hr_zone_secs, ZoneDistribution::HR_ZONES),
+      power: ZoneDistribution.present(power_zone_secs, ZoneDistribution::POWER_ZONES)
+    }
+  end
+
+  # Activités récentes (les 2 sources) réduites à ce qu'il faut pour les zones :
+  # date, type, et les deux histogrammes pré-calculés. On `select` explicitement pour
+  # ne PAS charger la colonne `streams` (volumineuse).
+  def zone_rows(user, cutoff)
+    cols = %i[started_at activity_type hr_histogram power_histogram]
+    strava = user.strava_activities.where(started_at: cutoff..).select(cols)
+    imported = user.imported_activities.where(started_at: cutoff..).select(cols)
+    (strava.to_a + imported.to_a).filter_map do |a|
+      date = a.started_at&.to_date
+      next unless date
+
+      { date: date, activity_type: a.activity_type,
+        hr_histogram: a.hr_histogram || {}, power_histogram: a.power_histogram || {} }
+    end
   end
 
   # Attache à chaque point de série les activités du jour (triées par TSS décroissant),
@@ -206,6 +291,24 @@ module TrainingLoad
     (median * 3.6).round(1) # m/s → km/h
   end
 
+  # Plus longue sortie vélo récente (min, ~90 derniers jours) — repère de durabilité
+  # pour juger si une grosse distance visée est atteignable. nil sans data.
+  def longest_recent_ride_min(rows)
+    cutoff = 90.days.ago.to_date
+    durations = rows.filter_map do |r|
+      next unless PerformanceRecords.sport_category(r['activity_type']) == 'cycling'
+
+      date = parse_date(r['started_at'])
+      next unless date && date >= cutoff
+
+      secs = r['moving_time_s'].to_i
+      secs if secs.positive?
+    end
+    return nil if durations.empty?
+
+    (durations.max / 60.0).round
+  end
+
   def auto_lthr(rows)
     max_hr = rows.filter_map { |r| numeric(r['average_heartrate']) }.max
     # `average_heartrate` sous-estime la FC max ; on approxime la FC max par le plus
@@ -223,7 +326,7 @@ module TrainingLoad
   end
 
   def empty_summary
-    { current: nil, series: [], coverage: { power: 0, hr: 0, estimated: 0, total: 0 }, thresholds: {} }
+    { current: nil, series: [], zones: nil, coverage: { power: 0, hr: 0, estimated: 0, total: 0 }, thresholds: {} }
   end
 
   def parse_date(value)

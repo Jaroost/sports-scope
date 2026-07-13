@@ -9,6 +9,16 @@
   </div>
 
   <% if user_signed_in? %>
+    <%# Plan du jour : sortie objectif + « que faire aujourd'hui » (charge d'entraînement).
+        Nécessite des activités (Strava ou .fit) ET l'interrupteur du profil (masquable). %>
+    <% if (current_user.strava_linked? || current_user.imported_activities.exists?) &&
+          current_user.preferences_with_defaults.dig("display", "show_performance_widget") %>
+      <div class="row justify-content-center mb-4">
+        <div class="col-lg-8">
+          <div data-vue-component="TodayPlanWidget"></div>
+        </div>
+      </div>
+    <% end %>
     <%# Sans Strava lié, les km des chaînes ne peuvent pas être rafraîchis : widget masqué.
         Avec Strava, il reste masquable depuis le profil (display.show_chain_widget). %>
     <% if current_user.strava_linked? && current_user.preferences_with_defaults.dig("display", "show_chain_widget") %>

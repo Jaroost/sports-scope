@@ -6,9 +6,13 @@ import { t } from '../i18n'
 interface AutoEstimate {
   watts: number
   method: string
-  ftp_20min: number | null
   cp: number | null
+  w_prime?: number | null
+  cp_points?: number
+  ftp_20min: number | null
+  ftp_60min?: number | null
   best_20min: number | null
+  best_60min?: number | null
   best_5min: number | null
   samples: number
 }
@@ -105,7 +109,8 @@ const current = computed(() => data.value?.current ?? null)
 const hasAnything = computed(() => !!(current.value?.watts || data.value?.auto || data.value?.manual.watts))
 
 function methodLabel(method: string | undefined | null): string {
-  if (method === 'cp') return t('performance.ftp.method_cp')
+  if (method === 'cp_model') return t('performance.ftp.method_cp')
+  if (method === 'ftp_60min') return t('performance.ftp.method_60min')
   if (method === 'ftp_20min') return t('performance.ftp.method_20min')
   return ''
 }
@@ -217,6 +222,7 @@ onBeforeUnmount(() => {
                 <div><i class="fa-solid fa-calculator me-1 text-muted"></i>{{ methodLabel(data.auto.method) }} — <strong>{{ data.auto.watts }} W</strong></div>
                 <div class="text-muted">
                   <span v-if="data.auto.best_20min">20&nbsp;min : {{ data.auto.best_20min }} W</span>
+                  <span v-if="data.auto.best_60min"> · 60&nbsp;min : {{ data.auto.best_60min }} W</span>
                   <span v-if="data.auto.cp"> · CP : {{ data.auto.cp }} W</span>
                 </div>
                 <div class="text-muted">{{ t('performance.ftp.samples', { count: data.auto.samples }) }}</div>
@@ -260,6 +266,14 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- Aide : comment la FTP est estimée automatiquement -->
+          <details v-if="data.auto" class="ftp-how mt-3">
+            <summary class="small fw-semibold text-primary">
+              <i class="fa-solid fa-circle-question me-1" aria-hidden="true"></i>{{ t('performance.ftp.how_title') }}
+            </summary>
+            <p class="small text-muted mt-2 mb-0">{{ t('performance.ftp.how_body') }}</p>
+          </details>
+
           <!-- Historique -->
           <template v-if="hasHistory">
             <hr class="my-3" />
@@ -281,5 +295,9 @@ onBeforeUnmount(() => {
 .ftp-chart-wrap {
   position: relative;
   height: 220px;
+}
+.ftp-how summary {
+  cursor: pointer;
+  list-style: revert;
 }
 </style>

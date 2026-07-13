@@ -4,6 +4,10 @@ import { t } from '../i18n'
 import FtpPanel from './FtpPanel.vue'
 import TrainingLoadPanel from './TrainingLoadPanel.vue'
 
+const props = defineProps({
+  admin: { type: Boolean, default: false },
+})
+
 // ── Types du payload /api/performance ───────────────────────────────────────
 interface ActivityRef {
   source: string
@@ -414,13 +418,15 @@ onBeforeUnmount(() => {
         </div>
       </template>
 
+      <!-- FTP & progression (vélo uniquement). Placé AVANT « Forme & fatigue » car la
+           FTP alimente le calcul de la charge (TSS ← IF = NP/FTP) : on montre d'abord
+           le seuil, puis l'état de forme qui en découle. -->
+      <FtpPanel v-if="selectedSport === 'all' || selectedSport === 'cycling'" />
+
       <!-- Forme & fatigue : charge globale (tous sports), donc affichée sur chaque
            onglet. Sans v-if lié au sport, le panneau reste monté et ne se recharge pas
            à chaque changement d'onglet. -->
-      <TrainingLoadPanel />
-
-      <!-- FTP & progression (vélo uniquement) -->
-      <FtpPanel v-if="selectedSport === 'all' || selectedSport === 'cycling'" />
+      <TrainingLoadPanel :admin="props.admin" />
 
       <!-- Meilleures périodes -->
       <template v-if="periodCards.length">

@@ -19,6 +19,7 @@ class StravaController < ApplicationController
     records = current_user.strava_activities.order(started_at: :desc).limit(ACTIVITIES_LIMIT)
     render json: {
       cached_at: current_user.strava_activities.maximum(:updated_at)&.iso8601,
+      total: current_user.strava_activities.count,
       activities: records.map { |a| summary_json(a) }
     }
   rescue StravaSyncService::StravaApiError => e

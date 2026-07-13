@@ -9,7 +9,7 @@
 <p class="text-muted"><%= t("performance.intro") %></p>
 
 <% if current_user.strava_linked? || current_user.imported_activities.exists? %>
-  <div data-vue-component="PerformanceAnalysis"></div>
+  <div data-vue-component="PerformanceAnalysis" data-vue-props='<%= { admin: can?(:manage, :all) }.to_json %>'></div>
 <% else %>
   <div class="alert alert-info d-flex align-items-center gap-2">
     <i class="fa-solid fa-circle-info" aria-hidden="true"></i>

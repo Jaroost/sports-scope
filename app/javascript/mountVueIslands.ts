@@ -12,6 +12,7 @@ import NewRouteButton from './components/NewRouteButton.vue'
 import PwaInstall from './components/PwaInstall.vue'
 import ChainWax from './components/ChainWax.vue'
 import PerformanceAnalysis from './components/PerformanceAnalysis.vue'
+import TodayPlanWidget from './components/TodayPlanWidget.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
@@ -27,6 +28,7 @@ const registry: Record<string, Component> = {
   PwaInstall,
   ChainWax,
   PerformanceAnalysis,
+  TodayPlanWidget,
 }
 
 export function mountVueIslands(): void {

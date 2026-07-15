@@ -203,6 +203,52 @@ async function fetchActivities() {
   }
 }
 
+// ─── Persistance des filtres + vue (localStorage) ────────────────────────────
+// Les filtres et la vue choisie (liste/carte) sont mémorisés d'une visite à
+// l'autre. La restauration se fait avant l'enregistrement des watchers pour ne
+// pas déclencher de requête superflue : le fetch initial (onMounted) part déjà
+// avec les filtres restaurés.
+const STORAGE_KEY = 'sportsScope.activitiesFilters'
+
+function loadPersisted() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return
+    const s = JSON.parse(raw)
+    if (typeof s.sport === 'string') sportFilter.value = s.sport
+    if (s.minDistance != null) minDistance.value = s.minDistance
+    if (s.maxDistance != null) maxDistance.value = s.maxDistance
+    if (s.minElevation != null) minElevation.value = s.minElevation
+    if (s.maxElevation != null) maxElevation.value = s.maxElevation
+    if (s.minDuration != null) minDuration.value = s.minDuration
+    if (s.maxDuration != null) maxDuration.value = s.maxDuration
+    if (typeof s.dateFrom === 'string') dateFrom.value = s.dateFrom
+    if (typeof s.dateTo === 'string') dateTo.value = s.dateTo
+    if (s.view === 'list' || s.view === 'map') view.value = s.view
+    if (typeof s.showFilters === 'boolean') showFilters.value = s.showFilters
+  } catch { /* ignore — corrompu ou indisponible */ }
+}
+
+function persist() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      sport: sportFilter.value,
+      minDistance: minDistance.value,
+      maxDistance: maxDistance.value,
+      minElevation: minElevation.value,
+      maxElevation: maxElevation.value,
+      minDuration: minDuration.value,
+      maxDuration: maxDuration.value,
+      dateFrom: dateFrom.value,
+      dateTo: dateTo.value,
+      view: view.value,
+      showFilters: showFilters.value,
+    }))
+  } catch { /* ignore */ }
+}
+
+loadPersisted()
+
 // Un changement de filtre ramène à la page 1 puis refetch, avec un léger debounce
 // pour ne pas requêter à chaque frappe dans les champs numériques/date. La carte
 // est marquée périmée : rechargée aussitôt si affichée, sinon à sa réouverture.
@@ -228,13 +274,25 @@ watch(view, (v) => {
   if (v === 'map' && !mapLoaded.value && !mapLoading.value) fetchMapActivities()
 })
 
+// Mémorise l'état (filtres + vue + panneau) à chaque changement.
+watch(
+  [sportFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration,
+    dateFrom, dateTo, view, showFilters],
+  persist,
+)
+
 function goToPage(p) {
   if (p < 1 || p > totalPages.value || p === page.value) return
   page.value = p
   fetchActivities()
 }
 
-onMounted(() => fetchActivities())
+onMounted(() => {
+  fetchActivities()
+  // Vue carte restaurée : la watch(view) ne se déclenche pas au montage, on charge
+  // donc les tracés explicitement.
+  if (view.value === 'map') fetchMapActivities()
+})
 
 function formatDistance(meters) {
   return `${(meters / 1000).toFixed(2)} km`

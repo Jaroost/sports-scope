@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
 import { t } from '../i18n'
 import { speedForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
@@ -17,7 +17,16 @@ const routes = ref([])
 const loading = ref(true)
 const error = ref(null)
 // Bascule liste / carte d'ensemble. La carte n'est montée que quand on l'ouvre.
+// La vue choisie est mémorisée d'une visite à l'autre (localStorage).
+const VIEW_STORAGE_KEY = 'sportsScope.routesView'
 const view = ref<'list' | 'map'>('list')
+try {
+  const saved = localStorage.getItem(VIEW_STORAGE_KEY)
+  if (saved === 'list' || saved === 'map') view.value = saved
+} catch { /* ignore — localStorage indisponible */ }
+watch(view, (v) => {
+  try { localStorage.setItem(VIEW_STORAGE_KEY, v) } catch { /* ignore */ }
+})
 // Itinéraire sélectionné depuis la carte : on revient sur la liste, on défile
 // jusqu'à sa ligne et on la fait clignoter le temps de la repérer.
 const selectedRouteId = ref(null)

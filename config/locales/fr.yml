@@ -274,6 +274,9 @@ fr:
     login_required: "Vous devez vous connecter pour accéder à cette page."
     access_denied: "Vous n'êtes pas autorisé à accéder à cette page."
     strava_linked: "Compte Strava lié avec succès."
+  dashboard:
+    tab_strava: "Activités Strava"
+    tab_imported: "Activités importées"
   strava:
     recent_activities: "Activités récentes"
     activity_count: "Nombre total d'activités Strava synchronisées"

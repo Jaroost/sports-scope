@@ -38,6 +38,15 @@ body.fullscreen-page {
   letter-spacing: 0.02em;
 }
 
+/* Onglets du tableau de bord : pastilles comme sur « Mes itinéraires ». Les
+   boutons sont des btn-outline-secondary ; l'onglet actif (toggle Bootstrap pill)
+   passe en jaune (warning) plutôt que le gris par défaut de .active. */
+.dashboard-tabs .dashboard-tab.active {
+  background-color: var(--bs-warning);
+  border-color: var(--bs-warning);
+  color: #000;
+}
+
 .dashboard-badge {
   display: inline-flex;
   align-items: center;

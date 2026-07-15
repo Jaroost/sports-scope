@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'
 
@@ -7,23 +7,93 @@ const props = defineProps({
   endpoint: { type: String, default: '/strava/activities' },
 })
 
-const loading = ref(true)
+const loading = ref(true) // requête en cours (initiale ou refetch après filtre/page)
+const hasLoaded = ref(false) // au moins une requête réussie
 const error = ref(null)
-const activities = ref([])
+const activities = ref([]) // page courante renvoyée par le serveur
 const cachedAt = ref(null)
-const total = ref(null)
+const total = ref(null) // total historique (toutes activités, sans filtre)
 
 const title = computed(() => t('strava.recent_activities'))
 const emptyText = computed(() => t('strava.no_activities'))
 
+// --- Filtres + pagination (pilotés côté serveur) ---
+const showFilters = ref(false)
+const sportFilter = ref('')
+const minDistance = ref(null) // km
+const maxDistance = ref(null)
+const minElevation = ref(null) // m
+const maxElevation = ref(null)
+const minDuration = ref(null) // min
+const maxDuration = ref(null)
+const dateFrom = ref('') // yyyy-mm-dd
+const dateTo = ref('')
+
+// Liste des sports de tout l'historique, fournie par le serveur — alimente le menu.
+const sportOptions = ref([])
+
+// Pagination — page/nombre de pages renvoyés par le serveur.
+const page = ref(1)
+const perPage = ref(50)
+const totalPages = ref(0)
+const filteredTotal = ref(0) // nombre d'activités correspondant aux filtres
+
+function isSet(v) {
+  return v !== null && v !== undefined && v !== ''
+}
+
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (sportFilter.value) n++
+  if (isSet(minDistance.value)) n++
+  if (isSet(maxDistance.value)) n++
+  if (isSet(minElevation.value)) n++
+  if (isSet(maxElevation.value)) n++
+  if (isSet(minDuration.value)) n++
+  if (isSet(maxDuration.value)) n++
+  if (dateFrom.value) n++
+  if (dateTo.value) n++
+  return n
+})
+
+function clearFilters() {
+  sportFilter.value = ''
+  minDistance.value = null
+  maxDistance.value = null
+  minElevation.value = null
+  maxElevation.value = null
+  minDuration.value = null
+  maxDuration.value = null
+  dateFrom.value = ''
+  dateTo.value = ''
+}
+
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
+
+// Construit la query string à partir des filtres actifs + pagination.
+function buildQuery() {
+  const p = new URLSearchParams()
+  if (sportFilter.value) p.set('sport', sportFilter.value)
+  if (isSet(minDistance.value)) p.set('min_dist', String(minDistance.value))
+  if (isSet(maxDistance.value)) p.set('max_dist', String(maxDistance.value))
+  if (isSet(minElevation.value)) p.set('min_elev', String(minElevation.value))
+  if (isSet(maxElevation.value)) p.set('max_elev', String(maxElevation.value))
+  if (isSet(minDuration.value)) p.set('min_dur', String(minDuration.value))
+  if (isSet(maxDuration.value)) p.set('max_dur', String(maxDuration.value))
+  if (dateFrom.value) p.set('from', dateFrom.value)
+  if (dateTo.value) p.set('to', dateTo.value)
+  p.set('page', String(page.value))
+  p.set('per', String(perPage.value))
+  return p.toString()
+}
 
 // Sert la liste depuis la base ; la (re)synchronisation Strava est déclenchée par le
 // bouton « Tout rafraîchir » voisin (composant StravaBackfill → POST /strava/refresh).
 async function fetchActivities() {
+  loading.value = true
   try {
-    const res = await fetch(props.endpoint, {
+    const res = await fetch(`${props.endpoint}?${buildQuery()}`, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })
@@ -32,12 +102,39 @@ async function fetchActivities() {
     activities.value = payload.activities || []
     cachedAt.value = payload.cached_at || null
     total.value = payload.total ?? activities.value.length
+    filteredTotal.value = payload.filtered_total ?? activities.value.length
+    totalPages.value = payload.total_pages ?? 1
+    perPage.value = payload.per_page ?? perPage.value
+    // Le serveur borne la page dans [1, total_pages] : on resynchronise l'état local.
+    if (payload.page) page.value = payload.page
+    if (payload.sports) sportOptions.value = payload.sports
     error.value = null
+    hasLoaded.value = true
   } catch (e) {
     error.value = e.message
   } finally {
     loading.value = false
   }
+}
+
+// Un changement de filtre ramène à la page 1 puis refetch, avec un léger debounce
+// pour ne pas requêter à chaque frappe dans les champs numériques/date.
+let filterTimer
+function onFilterChange() {
+  page.value = 1
+  clearTimeout(filterTimer)
+  filterTimer = setTimeout(fetchActivities, 350)
+}
+
+watch(
+  [sportFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
+  onFilterChange,
+)
+
+function goToPage(p) {
+  if (p < 1 || p > totalPages.value || p === page.value) return
+  page.value = p
+  fetchActivities()
 }
 
 onMounted(() => fetchActivities())
@@ -94,13 +191,87 @@ function activityIcon(type) {
         <span>{{ title }}</span>
         <span v-if="total !== null" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ total }}</span>
       </h2>
-      <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1">
-        <i class="fa-regular fa-clock" aria-hidden="true"></i>
-        {{ t('strava.last_updated') }} {{ formatCachedAt(cachedAt) }}
-      </small>
+      <div class="d-flex align-items-center gap-3">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          :class="{ active: showFilters }"
+          :aria-expanded="showFilters"
+          @click="showFilters = !showFilters"
+        >
+          <i class="fa-solid fa-filter" aria-hidden="true"></i>
+          <span>{{ t('strava.filters.toggle') }}</span>
+          <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
+        </button>
+        <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1">
+          <i class="fa-regular fa-clock" aria-hidden="true"></i>
+          {{ t('strava.last_updated') }} {{ formatCachedAt(cachedAt) }}
+        </small>
+      </div>
+    </div>
+    <div v-if="showFilters && hasLoaded && !error" class="card-body border-bottom activity-filters">
+      <div class="row g-3">
+        <div class="col-12 col-md-4">
+          <label class="form-label small mb-1">{{ t('strava.filters.sport') }}</label>
+          <select v-model="sportFilter" class="form-select form-select-sm">
+            <option value="">{{ t('strava.filters.all_sports') }}</option>
+            <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>
+          </select>
+        </div>
+        <div class="col-6 col-md-4">
+          <label class="form-label small mb-1">{{ t('strava.filters.distance') }}</label>
+          <div class="d-flex align-items-center gap-1">
+            <input v-model="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
+            <span class="text-muted">–</span>
+            <input v-model="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
+          </div>
+        </div>
+        <div class="col-6 col-md-4">
+          <label class="form-label small mb-1">{{ t('strava.filters.elevation') }}</label>
+          <div class="d-flex align-items-center gap-1">
+            <input v-model="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
+            <span class="text-muted">–</span>
+            <input v-model="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
+          </div>
+        </div>
+        <div class="col-6 col-md-4">
+          <label class="form-label small mb-1">{{ t('strava.filters.duration') }}</label>
+          <div class="d-flex align-items-center gap-1">
+            <input v-model="minDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
+            <span class="text-muted">–</span>
+            <input v-model="maxDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
+          </div>
+        </div>
+        <div class="col-6 col-md-4">
+          <label class="form-label small mb-1">{{ t('strava.filters.from') }}</label>
+          <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
+        </div>
+        <div class="col-6 col-md-4">
+          <label class="form-label small mb-1">{{ t('strava.filters.to') }}</label>
+          <input v-model="dateTo" type="date" class="form-control form-control-sm" />
+        </div>
+      </div>
+      <div class="d-flex justify-content-between align-items-center mt-3">
+        <small class="text-muted d-flex align-items-center gap-2">
+          <span
+            v-if="loading"
+            class="spinner-border spinner-border-sm text-warning"
+            aria-hidden="true"
+          ></span>
+          {{ t('strava.filters.results', { count: filteredTotal, total: total ?? 0 }) }}
+        </small>
+        <button
+          type="button"
+          class="btn btn-sm btn-link text-decoration-none"
+          :disabled="!activeFilterCount"
+          @click="clearFilters"
+        >
+          <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('strava.filters.clear') }}
+        </button>
+      </div>
     </div>
     <div class="card-body">
-      <div v-if="loading" class="text-muted d-flex align-items-center gap-2">
+      <div v-if="loading && !hasLoaded" class="text-muted d-flex align-items-center gap-2">
         <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
         <span>Loading…</span>
       </div>
@@ -108,11 +279,15 @@ function activityIcon(type) {
         <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
         <span>{{ error }}</span>
       </div>
-      <div v-else-if="activities.length === 0" class="text-muted d-flex align-items-center gap-2">
+      <div v-else-if="total === 0" class="text-muted d-flex align-items-center gap-2">
         <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
         <span>{{ emptyText }}</span>
       </div>
-      <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1">
+      <div v-else-if="filteredTotal === 0" class="text-muted d-flex align-items-center gap-2">
+        <i class="fa-solid fa-filter-circle-xmark" aria-hidden="true"></i>
+        <span>{{ t('strava.filters.none_match') }}</span>
+      </div>
+      <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1" :class="{ 'opacity-50': loading }">
         <li
           v-for="activity in activities"
           :key="activity.id"
@@ -178,6 +353,27 @@ function activityIcon(type) {
           </a>
         </li>
       </ul>
+      <nav v-if="hasLoaded && !error && totalPages > 1" class="d-flex justify-content-between align-items-center mt-3" :aria-label="t('strava.filters.title')">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          :disabled="page <= 1 || loading"
+          @click="goToPage(page - 1)"
+        >
+          <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+          <span>{{ t('strava.pagination.prev') }}</span>
+        </button>
+        <small class="text-muted">{{ t('strava.pagination.page', { page, total: totalPages }) }}</small>
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          :disabled="page >= totalPages || loading"
+          @click="goToPage(page + 1)"
+        >
+          <span>{{ t('strava.pagination.next') }}</span>
+          <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+        </button>
+      </nav>
     </div>
   </div>
 </template>

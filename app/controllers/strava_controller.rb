@@ -3,7 +3,8 @@ class StravaController < ApplicationController
   before_action :ensure_strava_linked!
 
   ACTIVITIES_TTL = 1.day
-  ACTIVITIES_LIMIT = 200
+  DEFAULT_PER_PAGE = 50
+  MAX_PER_PAGE = 200
 
   # Serves the user's activities straight from `strava_activities`. The first
   # visit (empty table) triggers a full sync; `?refresh=1` runs an incremental
@@ -13,13 +14,29 @@ class StravaController < ApplicationController
       StravaRefreshService.new(current_user).sync_summaries
     end
 
-    records = current_user.strava_activities.order(started_at: :desc).limit(ACTIVITIES_LIMIT)
+    scope = filtered_activities_scope
+    filtered_total = scope.count
+    per_page = activities_per_page
+    total_pages = filtered_total.zero? ? 0 : (filtered_total.to_f / per_page).ceil
+    # Page bornée à [1, total_pages] pour éviter un offset au-delà des données.
+    page = params[:page].to_i
+    page = 1 if page < 1
+    page = total_pages if total_pages.positive? && page > total_pages
+
+    records = scope.order(started_at: :desc).offset((page - 1) * per_page).limit(per_page)
     # TSS par sortie (charge d'entraînement) calculé en une passe, mêmes seuils que
     # la charge d'entraînement (FTP variable, LTHR).
     tss_map = TrainingLoad.tss_by_activity(current_user)
     render json: {
       cached_at: current_user.strava_activities.maximum(:updated_at)&.iso8601,
       total: current_user.strava_activities.count,
+      filtered_total: filtered_total,
+      page: page,
+      per_page: per_page,
+      total_pages: total_pages,
+      # Liste des types de sport présents dans TOUT l'historique (pas seulement la
+      # page courante) pour alimenter le menu déroulant du filtre.
+      sports: current_user.strava_activities.distinct.pluck(:activity_type).compact.sort,
       activities: records.map { |a| summary_json(a, tss: tss_map[['strava', a.strava_id.to_s]]) }
     }
   rescue StravaSyncService::StravaApiError => e
@@ -155,6 +172,43 @@ class StravaController < ApplicationController
   end
 
   private
+
+  # Applique les filtres passés en query params sur les activités de l'utilisateur.
+  # Filtrage en base (colonnes indexées) pour porter sur tout l'historique, pas
+  # seulement la page courante.
+  def filtered_activities_scope
+    scope = current_user.strava_activities
+    scope = scope.where(activity_type: params[:sport]) if params[:sport].present?
+    scope = scope.where(strava_activities: { distance_m: params[:min_dist].to_f * 1000.. }) if params[:min_dist].present?
+    scope = scope.where(strava_activities: { distance_m: ..(params[:max_dist].to_f * 1000) }) if params[:max_dist].present?
+    scope = scope.where(strava_activities: { total_elevation_gain: params[:min_elev].to_f.. }) if params[:min_elev].present?
+    scope = scope.where(strava_activities: { total_elevation_gain: ..params[:max_elev].to_f }) if params[:max_elev].present?
+    scope = scope.where(strava_activities: { moving_time_s: (params[:min_dur].to_f * 60).. }) if params[:min_dur].present?
+    scope = scope.where(strava_activities: { moving_time_s: ..(params[:max_dur].to_f * 60) }) if params[:max_dur].present?
+    if (from = parse_date(params[:from]))
+      scope = scope.where(strava_activities: { started_at: from.beginning_of_day.. })
+    end
+    if (to = parse_date(params[:to]))
+      scope = scope.where(strava_activities: { started_at: ..to.end_of_day })
+    end
+    scope
+  end
+
+  # Parse une date ISO (yyyy-mm-dd) issue d'un <input type="date">. Renvoie nil si
+  # vide ou invalide — le filtre est alors simplement ignoré.
+  def parse_date(value)
+    return nil if value.blank?
+
+    Date.iso8601(value)
+  rescue ArgumentError
+    nil
+  end
+
+  def activities_per_page
+    per = params[:per].to_i
+    per = DEFAULT_PER_PAGE if per <= 0
+    [per, MAX_PER_PAGE].min
+  end
 
   # Sert les streams persistés quand on les a déjà récupérés, sinon tape l'API.
   # La BDD `strava_activities.streams` fait office de cache durable.

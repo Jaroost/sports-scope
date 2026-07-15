@@ -68,6 +68,53 @@ function clearFilters() {
   dateTo.value = ''
 }
 
+// --- Raccourcis de période (année/mois courant ou précédent) ---
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+function isoDate(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+// Renvoie l'intervalle [from, to] (dates locales) correspondant à un raccourci.
+function datePresetRange(preset) {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  switch (preset) {
+    case 'current_year':
+      return [new Date(y, 0, 1), new Date(y, 11, 31)]
+    case 'current_month':
+      return [new Date(y, m, 1), new Date(y, m + 1, 0)]
+    case 'previous_year':
+      return [new Date(y - 1, 0, 1), new Date(y - 1, 11, 31)]
+    case 'previous_month':
+      return [new Date(y, m - 1, 1), new Date(y, m, 0)]
+    default:
+      return null
+  }
+}
+
+const datePresets = ['current_year', 'current_month', 'previous_year', 'previous_month']
+
+function setDatePreset(preset) {
+  const range = datePresetRange(preset)
+  if (!range) return
+  dateFrom.value = isoDate(range[0])
+  dateTo.value = isoDate(range[1])
+}
+
+// Raccourci actuellement actif (pour surligner le bouton), ou null.
+const activeDatePreset = computed(() => {
+  if (!dateFrom.value || !dateTo.value) return null
+  return (
+    datePresets.find((preset) => {
+      const range = datePresetRange(preset)
+      return range && isoDate(range[0]) === dateFrom.value && isoDate(range[1]) === dateTo.value
+    }) || null
+  )
+})
+
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
@@ -249,6 +296,21 @@ function activityIcon(type) {
         <div class="col-6 col-md-4">
           <label class="form-label small mb-1">{{ t('strava.filters.to') }}</label>
           <input v-model="dateTo" type="date" class="form-control form-control-sm" />
+        </div>
+        <div class="col-12">
+          <label class="form-label small mb-1">{{ t('strava.filters.period') }}</label>
+          <div class="d-flex flex-wrap gap-2">
+            <button
+              v-for="preset in datePresets"
+              :key="preset"
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              :class="{ active: activeDatePreset === preset }"
+              @click="setDatePreset(preset)"
+            >
+              {{ t(`strava.filters.${preset}`) }}
+            </button>
+          </div>
         </div>
       </div>
       <div class="d-flex justify-content-between align-items-center mt-3">

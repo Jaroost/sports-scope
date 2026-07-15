@@ -52,6 +52,17 @@ class StravaActivity < ApplicationRecord
       (map['polyline'] || map[:polyline]).presence
   end
 
+  # Tracé cartographiable `[[lng, lat], ...]` décodé du résumé Strava (même ordre
+  # et même forme que `Route#map_polyline`, pour la carte d'ensemble des sorties).
+  # nil si l'activité n'a pas de tracé exploitable (indoor, GPS absent…).
+  def map_polyline
+    encoded = summary_polyline
+    return nil if encoded.blank?
+
+    coords = self.class.decode_polyline(encoded)
+    coords.size >= 2 ? coords : nil
+  end
+
   # Idempotent upsert of one Strava activity summary (the hash returned by
   # `/athlete/activities`). Returns the (re)loaded record. Only summary fields
   # are touched — `streams`/`peak_powers` are left intact for already-synced

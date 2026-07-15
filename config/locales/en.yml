@@ -306,6 +306,9 @@ en:
     tss_hint_hr: "Training load (TSS) estimated from heart rate."
     tss_hint_estimated: "Training load (TSS) estimated from duration and the sport's typical intensity — less precise."
     last_updated: "Updated at"
+    map_empty: "No outing with a track to show on the map."
+    map_count: "%{count} outings"
+    map_capped: "Too many outings: only the 500 most recent matching the filter are shown on the map."
     filters:
       title: "Filters"
       toggle: "Filter"

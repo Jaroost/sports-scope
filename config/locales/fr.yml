@@ -306,6 +306,9 @@ fr:
     tss_hint_hr: "Charge d'entraînement (TSS) estimée depuis la fréquence cardiaque."
     tss_hint_estimated: "Charge d'entraînement (TSS) estimée depuis la durée et l'intensité typique du sport — moins précise."
     last_updated: "Mis à jour à"
+    map_empty: "Aucune sortie avec un tracé à afficher sur la carte."
+    map_count: "%{count} sorties"
+    map_capped: "Trop de sorties : seules les 500 plus récentes du filtre sont affichées sur la carte."
     filters:
       title: "Filtres"
       toggle: "Filtrer"

@@ -2,10 +2,19 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'
+import ActivitiesOverviewMap from './ActivitiesOverviewMap.vue'
 
 const props = defineProps({
   endpoint: { type: String, default: '/strava/activities' },
 })
+
+// Bascule liste / carte d'ensemble. La carte n'est chargée qu'à l'ouverture, et
+// récupère toutes les sorties du filtre courant (pas seulement la page affichée).
+const view = ref('list')
+const mapActivities = ref([])
+const mapLoading = ref(false)
+const mapLoaded = ref(false)
+const mapCapped = ref(false)
 
 const loading = ref(true) // requête en cours (initiale ou refetch après filtre/page)
 const hasLoaded = ref(false) // au moins une requête réussie
@@ -118,8 +127,8 @@ const activeDatePreset = computed(() => {
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
-// Construit la query string à partir des filtres actifs + pagination.
-function buildQuery() {
+// Paramètres de filtre communs à la liste et à la carte.
+function filterParams() {
   const p = new URLSearchParams()
   if (sportFilter.value) p.set('sport', sportFilter.value)
   if (isSet(minDistance.value)) p.set('min_dist', String(minDistance.value))
@@ -130,9 +139,39 @@ function buildQuery() {
   if (isSet(maxDuration.value)) p.set('max_dur', String(maxDuration.value))
   if (dateFrom.value) p.set('from', dateFrom.value)
   if (dateTo.value) p.set('to', dateTo.value)
+  return p
+}
+
+// Construit la query string à partir des filtres actifs + pagination.
+function buildQuery() {
+  const p = filterParams()
   p.set('page', String(page.value))
   p.set('per', String(perPage.value))
   return p.toString()
+}
+
+// Récupère les tracés de toutes les sorties du filtre (pas de pagination) pour la
+// carte d'ensemble. Le serveur plafonne le nombre renvoyé (MAX_MAP_ACTIVITIES).
+async function fetchMapActivities() {
+  mapLoading.value = true
+  try {
+    const p = filterParams()
+    p.set('map', '1')
+    const res = await fetch(`${props.endpoint}?${p.toString()}`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const payload = await res.json()
+    mapActivities.value = payload.activities || []
+    mapCapped.value = (payload.filtered_total ?? 0) > (payload.max ?? Infinity)
+    mapLoaded.value = true
+    error.value = null
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    mapLoading.value = false
+  }
 }
 
 // Sert la liste depuis la base ; la (re)synchronisation Strava est déclenchée par le
@@ -165,18 +204,29 @@ async function fetchActivities() {
 }
 
 // Un changement de filtre ramène à la page 1 puis refetch, avec un léger debounce
-// pour ne pas requêter à chaque frappe dans les champs numériques/date.
+// pour ne pas requêter à chaque frappe dans les champs numériques/date. La carte
+// est marquée périmée : rechargée aussitôt si affichée, sinon à sa réouverture.
 let filterTimer
 function onFilterChange() {
   page.value = 1
+  mapLoaded.value = false
   clearTimeout(filterTimer)
-  filterTimer = setTimeout(fetchActivities, 350)
+  filterTimer = setTimeout(() => {
+    fetchActivities()
+    if (view.value === 'map') fetchMapActivities()
+  }, 350)
 }
 
 watch(
   [sportFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
   onFilterChange,
 )
+
+// À l'ouverture de la carte, charge les tracés si on ne les a pas déjà (ou s'ils
+// sont périmés après un changement de filtre).
+watch(view, (v) => {
+  if (v === 'map' && !mapLoaded.value && !mapLoading.value) fetchMapActivities()
+})
 
 function goToPage(p) {
   if (p < 1 || p > totalPages.value || p === page.value) return
@@ -239,6 +289,28 @@ function activityIcon(type) {
         <span v-if="total !== null" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ total }}</span>
       </h2>
       <div class="d-flex align-items-center gap-3">
+        <div class="btn-group btn-group-sm" role="group" :aria-label="title">
+          <button
+            type="button"
+            class="btn d-flex align-items-center gap-1"
+            :class="view === 'list' ? 'btn-warning' : 'btn-outline-secondary'"
+            :aria-pressed="view === 'list'"
+            @click="view = 'list'"
+          >
+            <i class="fa-solid fa-list-ul" aria-hidden="true"></i>
+            <span>{{ t('routes.view_list') }}</span>
+          </button>
+          <button
+            type="button"
+            class="btn d-flex align-items-center gap-1"
+            :class="view === 'map' ? 'btn-warning' : 'btn-outline-secondary'"
+            :aria-pressed="view === 'map'"
+            @click="view = 'map'"
+          >
+            <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+            <span>{{ t('routes.view_map') }}</span>
+          </button>
+        </div>
         <button
           type="button"
           class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
@@ -332,7 +404,22 @@ function activityIcon(type) {
         </button>
       </div>
     </div>
-    <div class="card-body">
+    <div v-if="view === 'map'" class="card-body p-2">
+      <div v-if="mapCapped" class="alert alert-info d-flex align-items-center gap-2 py-2 px-3 mb-2 small">
+        <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+        <span>{{ t('strava.map_capped') }}</span>
+      </div>
+      <div v-if="mapLoading && !mapLoaded" class="text-muted d-flex align-items-center gap-2 p-2">
+        <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+        <span>Loading…</span>
+      </div>
+      <ActivitiesOverviewMap
+        v-else
+        :activities="mapActivities"
+        :locale-prefix="localePrefix"
+      />
+    </div>
+    <div v-show="view === 'list'" class="card-body">
       <div v-if="loading && !hasLoaded" class="text-muted d-flex align-items-center gap-2">
         <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
         <span>Loading…</span>

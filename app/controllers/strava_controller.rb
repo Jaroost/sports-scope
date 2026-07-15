@@ -5,6 +5,9 @@ class StravaController < ApplicationController
   ACTIVITIES_TTL = 1.day
   DEFAULT_PER_PAGE = 50
   MAX_PER_PAGE = 200
+  # Plafond de tracés renvoyés à la carte d'ensemble : au-delà, le rendu MapLibre
+  # de milliers de polylignes devient lourd — on garde les plus récentes du filtre.
+  MAX_MAP_ACTIVITIES = 500
 
   # Serves the user's activities straight from `strava_activities`. The first
   # visit (empty table) triggers a full sync; `?refresh=1` runs an incremental
@@ -13,6 +16,8 @@ class StravaController < ApplicationController
     if current_user.strava_activities.none? || params[:refresh].present?
       StravaRefreshService.new(current_user).sync_summaries
     end
+
+    return render json: activities_map_payload if params[:map].present?
 
     scope = filtered_activities_scope
     filtered_total = scope.count
@@ -238,6 +243,34 @@ class StravaController < ApplicationController
   # Serialized form consumed by the frontend. We return the stored Strava
   # summary verbatim (`raw`) so list/detail views keep full field parity with
   # the live API; older rows without `raw` fall back to a built hash.
+  # Charge utile de la carte d'ensemble : toutes les activités du filtre (les plus
+  # récentes, plafonnées) réduites à leur tracé + quelques champs pour la popup.
+  # Les sorties sans tracé exploitable (indoor, GPS absent) sont écartées.
+  def activities_map_payload
+    scope = filtered_activities_scope
+    records = scope.order(started_at: :desc).limit(MAX_MAP_ACTIVITIES)
+    {
+      activities: records.filter_map { |a| map_json(a) },
+      filtered_total: scope.count,
+      max: MAX_MAP_ACTIVITIES
+    }
+  end
+
+  def map_json(a)
+    poly = a.map_polyline
+    return nil unless poly
+
+    {
+      'id' => a.strava_id,
+      'name' => a.name,
+      'type' => a.activity_type,
+      'distance' => a.distance_m,
+      'total_elevation_gain' => a.total_elevation_gain,
+      'start_date_local' => a.started_at&.iso8601,
+      'map_polyline' => poly
+    }
+  end
+
   def summary_json(a, tss: nil)
     raw = a.raw.is_a?(Hash) ? a.raw : {}
     base = raw.present? ? raw : built_summary(a)

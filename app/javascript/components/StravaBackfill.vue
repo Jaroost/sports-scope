@@ -13,13 +13,16 @@ interface BackfillRun {
   updated_at: string | null
 }
 
-const ENDPOINT = '/strava/backfill'
+// Statut : lecture via GET /strava/backfill (partie téléchargement des streams) ;
+// « Tout rafraîchir » : POST /strava/refresh (résumés + gear + backfill des streams).
+const STATUS_ENDPOINT = '/strava/backfill'
+const REFRESH_ENDPOINT = '/strava/refresh'
 const POLL_MS = 3000
 
 const run = ref<BackfillRun | null>(null)
 const pending = ref(0)
 const loading = ref(true)
-const starting = ref(false)
+const refreshing = ref(false)
 const error = ref<string | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
 
@@ -32,8 +35,6 @@ const isActive = computed(() => {
   return s === 'pending' || s === 'running' || s === 'rate_limited'
 })
 const isRateLimited = computed(() => run.value?.status === 'rate_limited')
-const isComplete = computed(() => run.value?.status === 'completed')
-const isFailed = computed(() => run.value?.status === 'failed')
 const pct = computed(() => {
   const r = run.value
   if (!r || r.total <= 0) return 0
@@ -51,13 +52,16 @@ function scheduleNext() {
   if (isActive.value) timer = setTimeout(fetchStatus, POLL_MS)
 }
 
+function applyPayload(payload: { run: BackfillRun | null; pending?: number }) {
+  run.value = payload.run || null
+  pending.value = payload.run ? payload.run.pending : (payload.pending ?? 0)
+}
+
 async function fetchStatus() {
   try {
-    const res = await fetch(ENDPOINT, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+    const res = await fetch(STATUS_ENDPOINT, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const payload = await res.json()
-    run.value = payload.run || null
-    pending.value = payload.run ? payload.run.pending : (payload.pending ?? 0)
+    applyPayload(await res.json())
     error.value = null
   } catch (e) {
     error.value = (e as Error).message
@@ -67,24 +71,25 @@ async function fetchStatus() {
   }
 }
 
-async function start() {
-  starting.value = true
+// « Tout rafraîchir » : synchronise les résumés récents + les vélos, puis (ré)enfile
+// le téléchargement des streams manquants. La progression du téléchargement est
+// ensuite suivie par le polling de STATUS_ENDPOINT.
+async function refreshAll() {
+  refreshing.value = true
   try {
-    const res = await fetch(ENDPOINT, {
+    const res = await fetch(REFRESH_ENDPOINT, {
       method: 'POST',
       headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
       credentials: 'same-origin',
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const payload = await res.json()
-    run.value = payload.run || null
-    pending.value = payload.run ? payload.run.pending : pending.value
+    applyPayload(await res.json())
     error.value = null
     scheduleNext()
   } catch (e) {
     error.value = (e as Error).message
   } finally {
-    starting.value = false
+    refreshing.value = false
   }
 }
 
@@ -95,8 +100,8 @@ onUnmounted(() => { if (timer) clearTimeout(timer) })
 <template>
   <div class="card shadow-sm border-0">
     <div class="card-header activity-card-header d-flex align-items-center gap-2">
-      <i class="fa-solid fa-cloud-arrow-down text-warning" aria-hidden="true"></i>
-      <h2 class="h5 mb-0">{{ t('strava.backfill_title') }}</h2>
+      <i class="fa-solid fa-rotate text-warning" aria-hidden="true"></i>
+      <h2 class="h5 mb-0">{{ t('strava.refresh_all_title') }}</h2>
     </div>
     <div class="card-body">
       <div v-if="loading" class="text-muted d-flex align-items-center gap-2">
@@ -105,14 +110,14 @@ onUnmounted(() => { if (timer) clearTimeout(timer) })
       </div>
 
       <template v-else>
-        <p class="text-muted small mb-3">{{ t('strava.backfill_help') }}</p>
+        <p class="text-muted small mb-3">{{ t('strava.refresh_all_help') }}</p>
 
         <div v-if="error" class="alert alert-danger d-flex align-items-center gap-2">
           <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
           <span>{{ error }}</span>
         </div>
 
-        <!-- En cours -->
+        <!-- Téléchargement des streams en cours -->
         <div v-if="isActive">
           <div class="d-flex justify-content-between align-items-center mb-1">
             <span class="fw-semibold d-flex align-items-center gap-2">
@@ -133,31 +138,23 @@ onUnmounted(() => { if (timer) clearTimeout(timer) })
           </small>
         </div>
 
-        <!-- Terminé, plus rien à faire -->
-        <div v-else-if="isComplete && pending === 0" class="alert alert-success mb-0 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
-          <span>{{ t('strava.backfill_complete') }}</span>
-        </div>
-
-        <!-- Rien à télécharger -->
-        <div v-else-if="pending === 0" class="text-muted d-flex align-items-center gap-2">
-          <i class="fa-solid fa-circle-check text-success" aria-hidden="true"></i>
-          <span>{{ t('strava.backfill_up_to_date') }}</span>
-        </div>
-
-        <!-- Idle avec des activités à télécharger -->
+        <!-- Au repos : bouton « Tout rafraîchir » + statut -->
         <div v-else class="d-flex align-items-center gap-3">
           <button
             type="button"
             class="btn btn-warning d-flex align-items-center gap-2"
-            :disabled="starting"
-            @click="start"
+            :disabled="refreshing"
+            @click="refreshAll"
           >
-            <span v-if="starting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-            <i v-else class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i>
-            <span>{{ isFailed ? t('strava.backfill_start') : t('strava.backfill_button') }}</span>
+            <span v-if="refreshing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <i v-else class="fa-solid fa-rotate" aria-hidden="true"></i>
+            <span>{{ refreshing ? t('strava.refresh_all_syncing') : t('strava.refresh_all_button') }}</span>
           </button>
-          <small class="text-muted">{{ t('strava.backfill_progress', { done: 0, total: pending }) }}</small>
+          <small v-if="pending > 0" class="text-muted">{{ t('strava.backfill_progress', { done: 0, total: pending }) }}</small>
+          <small v-else class="text-success d-flex align-items-center gap-1">
+            <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+            {{ t('strava.refresh_all_up_to_date') }}
+          </small>
         </div>
       </template>
     </div>

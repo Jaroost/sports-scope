@@ -43,6 +43,7 @@ Rails.application.routes.draw do
   # Strava activities (JSON consumed by Vue components)
   get "/strava/activities", to: "strava#activities", as: :strava_activities
   post "/strava/sync", to: "strava#sync", as: :strava_sync
+  post "/strava/refresh", to: "strava#refresh", as: :strava_refresh
   get "/strava/backfill", to: "strava#backfill_status", as: :strava_backfill
   post "/strava/backfill", to: "strava#backfill"
   get "/strava/activities/:id", to: "strava#show", as: :strava_activity, constraints: { id: /\d+/ }
@@ -60,8 +61,7 @@ Rails.application.routes.draw do
 
   # Maintenance réservée aux administrateurs (déclenchée depuis l'UI)
   namespace :admin do
-    post "/maintenance/backfill_np", to: "maintenance#backfill_np"
-    post "/maintenance/backfill_zones", to: "maintenance#backfill_zones"
+    post "/maintenance/backfill_derivations", to: "maintenance#backfill_derivations"
   end
 
   # Geocoding proxy (avoids CORS when calling Nominatim from the browser)

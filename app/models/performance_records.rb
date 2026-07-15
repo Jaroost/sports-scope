@@ -44,9 +44,18 @@ module PerformanceRecords
     { key: 'max_cadence',       column: 'max_cadence',          unit: 'rpm' }
   ].freeze
 
+  CACHE_TTL = 12.hours
+
   # Payload complet consommé par la page d'analyse : un onglet « all » agrégé +
   # un groupe par sport présent, plus la liste des sports (triée par volume).
+  # Mis en cache, clé versionnée par les activités (records = données brutes,
+  # aucun seuil athlète en jeu) → invalidé dès qu'une sortie change.
   def for_user(user)
+    key = ['performance_records', user.id, UserActivities.data_version(user.id)].join('/')
+    Rails.cache.fetch(key, expires_in: CACHE_TTL) { compute_for_user(user) }
+  end
+
+  def compute_for_user(user)
     rows = summary_rows(user.id)
     groups = rows.group_by { |r| sport_category(r['activity_type']) }
 

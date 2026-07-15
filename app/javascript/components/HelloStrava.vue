@@ -21,11 +21,25 @@ const refreshLabel = computed(() => (refreshing.value ? t('strava.refreshing') :
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
+function csrfToken() {
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+}
+
 async function fetchActivities({ refresh = false } = {}) {
   if (refresh) refreshing.value = true
   try {
-    const url = refresh ? `${props.endpoint}?refresh=1` : props.endpoint
-    const res = await fetch(url, {
+    // « Rafraîchir » = tout rafraîchir : résumés récents + vélos + téléchargement des
+    // streams manquants en tâche de fond (POST /strava/refresh), puis on recharge la
+    // liste (résumés déjà synchronisés, pas besoin de ?refresh=1).
+    if (refresh) {
+      const sync = await fetch('/strava/refresh', {
+        method: 'POST',
+        headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+        credentials: 'same-origin',
+      })
+      if (!sync.ok) throw new Error(`HTTP ${sync.status}`)
+    }
+    const res = await fetch(props.endpoint, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })

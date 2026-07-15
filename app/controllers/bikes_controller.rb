@@ -12,7 +12,11 @@ class BikesController < ApplicationController
   # `?refresh=1` récupère d'abord les nouvelles activités Strava (les km des chaînes
   # en dépendent) ; `?refresh=gear` y ajoute un resync des vélos (cf. gear_sync_needed?).
   def index
-    sync_strava_activities! if params[:refresh].present? && current_user.strava_linked?
+    if params[:refresh].present? && current_user.strava_linked?
+      refresh = StravaRefreshService.new(current_user)
+      refresh.sync_summaries
+      refresh.sync_gear(force: params[:refresh].to_s == "gear")
+    end
     bootstrap_bikes!
     render json: { bikes: current_user.bikes.order(:id).map { |bike| serialize_bike(bike) } }
   rescue StravaGearSyncService::StravaApiError, StravaSyncService::StravaApiError => e
@@ -64,14 +68,10 @@ class BikesController < ApplicationController
 
   private
 
-  # Sync incrémental (les activités déjà stockées ne sont pas repaginées), sauf
-  # premier passage où l'historique complet est nécessaire.
-  def sync_strava_activities!
-    StravaSyncService.new(current_user).call(full: current_user.strava_activities.none?)
-  end
-
+  # Résout les vélos (gear) via l'orchestrateur — no-op si Strava non lié ou si
+  # aucun nouveau gear n'est apparu — puis garantit un vélo par défaut + une chaîne.
   def bootstrap_bikes!
-    StravaGearSyncService.new(current_user).call if current_user.strava_linked? && gear_sync_needed?
+    StravaRefreshService.new(current_user).sync_gear
 
     # Filet : aucun vélo (pas de Strava, ou Strava sans gear déclaré) → vélo par défaut.
     if current_user.bikes.none?
@@ -79,18 +79,6 @@ class BikesController < ApplicationController
     end
 
     current_user.bikes.each(&:ensure_chain!)
-  end
-
-  # Un vélo n'apparaît ni ne change de nom souvent : on ne résout les `/gear/:id`
-  # (une requête Strava par vélo) que quand une activité référence un `gear_id` pour
-  # lequel on n'a pas encore créé de Bike (nouveau vélo). `?refresh=gear` force le
-  # resync, seul moyen de rattraper un vélo renommé côté Strava.
-  def gear_sync_needed?
-    return true if params[:refresh].to_s == "gear"
-
-    known = current_user.bikes.where.not(strava_gear_id: nil).pluck(:strava_gear_id)
-    used = current_user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
-    (used - known).any?
   end
 
   def make_default(bike)

@@ -194,19 +194,18 @@ async function resetLthr() {
   await saveLthr()
 }
 
-// ── Maintenance admin : backfill de la puissance normalisée ──────────────────
-// Recalcule la NP manquante depuis les streams déjà stockés (aucun appel Strava),
+// ── Maintenance admin : backfill unifié des métriques dérivées ───────────────
+// Recalcule TOUTES les dérivées manquantes/obsolètes (NP, courbe de puissance,
+// histogrammes FC/puissance…) depuis les streams déjà stockés (aucun appel Strava),
 // puis recharge la couverture et les courbes. Réservé aux administrateurs.
 const backfilling = ref(false)
-const backfillResult = ref<{ updated: number; no_power: number; no_streams: number } | null>(null)
-const backfillingZones = ref(false)
-const backfillZonesResult = ref<{ updated: number; no_data: number; no_streams: number } | null>(null)
+const backfillResult = ref<{ updated: number; unchanged: number; scanned: number } | null>(null)
 
-async function runBackfillNp() {
+async function runBackfill() {
   backfilling.value = true
   backfillResult.value = null
   try {
-    const res = await fetch('/admin/maintenance/backfill_np', {
+    const res = await fetch('/admin/maintenance/backfill_derivations', {
       method: 'POST',
       headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
       credentials: 'same-origin',
@@ -218,27 +217,6 @@ async function runBackfillNp() {
     error.value = (e as Error).message
   } finally {
     backfilling.value = false
-  }
-}
-
-// Recalcule les histogrammes FC/puissance manquants depuis les streams stockés, puis
-// recharge la répartition par zones. Réservé aux administrateurs.
-async function runBackfillZones() {
-  backfillingZones.value = true
-  backfillZonesResult.value = null
-  try {
-    const res = await fetch('/admin/maintenance/backfill_zones', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
-      credentials: 'same-origin',
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    backfillZonesResult.value = await res.json()
-    await fetchData()
-  } catch (e) {
-    error.value = (e as Error).message
-  } finally {
-    backfillingZones.value = false
   }
 }
 
@@ -701,26 +679,15 @@ onBeforeUnmount(() => {
           <!-- Maintenance (administrateurs seulement) -->
           <div v-if="props.admin" class="admin-maint mt-3">
             <div class="d-flex flex-wrap align-items-center gap-2">
-              <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="backfilling" @click="runBackfillNp">
+              <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="backfilling" @click="runBackfill">
                 <span v-if="backfilling" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
                 <i v-else class="fa-solid fa-wrench me-1" aria-hidden="true"></i>
-                {{ backfilling ? t('performance.load.admin.backfill_running') : t('performance.load.admin.backfill_np') }}
+                {{ backfilling ? t('performance.load.admin.backfill_running') : t('performance.load.admin.backfill') }}
               </button>
               <span
                 v-if="backfillResult"
                 class="small text-muted"
-              >{{ t('performance.load.admin.backfill_result', { updated: backfillResult.updated, no_power: backfillResult.no_power, no_streams: backfillResult.no_streams }) }}</span>
-            </div>
-            <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
-              <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="backfillingZones" @click="runBackfillZones">
-                <span v-if="backfillingZones" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-                <i v-else class="fa-solid fa-layer-group me-1" aria-hidden="true"></i>
-                {{ backfillingZones ? t('performance.load.admin.backfill_running') : t('performance.load.admin.backfill_zones') }}
-              </button>
-              <span
-                v-if="backfillZonesResult"
-                class="small text-muted"
-              >{{ t('performance.load.admin.backfill_zones_result', { updated: backfillZonesResult.updated, no_data: backfillZonesResult.no_data, no_streams: backfillZonesResult.no_streams }) }}</span>
+              >{{ t('performance.load.admin.backfill_result', { updated: backfillResult.updated, unchanged: backfillResult.unchanged, scanned: backfillResult.scanned }) }}</span>
             </div>
             <div class="small text-body-tertiary mt-1">
               <i class="fa-solid fa-lock me-1" aria-hidden="true"></i>{{ t('performance.load.admin.backfill_hint') }}

@@ -9,11 +9,8 @@ class StravaController < ApplicationController
   # visit (empty table) triggers a full sync; `?refresh=1` runs an incremental
   # sync to pull anything new since the last stored activity.
   def activities
-    sync = current_user.strava_activities.none? ? :full : (params[:refresh].present? ? :incremental : nil)
-
-    case sync
-    when :full        then StravaSyncService.new(current_user).call(full: true)
-    when :incremental then StravaSyncService.new(current_user).call
+    if current_user.strava_activities.none? || params[:refresh].present?
+      StravaRefreshService.new(current_user).sync_summaries
     end
 
     records = current_user.strava_activities.order(started_at: :desc).limit(ACTIVITIES_LIMIT)
@@ -33,7 +30,7 @@ class StravaController < ApplicationController
   # `?full=1` re-paginates the whole history; otherwise it's incremental.
   def sync
     before = current_user.strava_activities.count
-    count = StravaSyncService.new(current_user).call(full: params[:full].present?)
+    count = StravaRefreshService.new(current_user).sync_summaries(full: params[:full].present?)
     total = current_user.strava_activities.count
     # `synced` compte aussi le ré-upsert de l'activité de chevauchement (OVERLAP) ;
     # `created` = vraies nouvelles activités (diff du total), fiable pour l'UI.
@@ -109,18 +106,24 @@ class StravaController < ApplicationController
   # run actif s'il y en a un (idempotent) ; ne (ré)enfile un job que si rien ne
   # tourne déjà, pour ne pas dupliquer le travail.
   def backfill
-    run = current_user.strava_backfill_runs.active.order(created_at: :desc).first
-    if run.nil?
-      run = current_user.strava_backfill_runs.create!(
-        status: 'pending',
-        total: current_user.strava_activities.streams_pending.count
-      )
-      StravaStreamsBackfillJob.perform_later(run.id)
-    elsif run.resumable?
-      StravaStreamsBackfillJob.perform_later(run.id)
-    end
+    run = StravaRefreshService.new(current_user).enqueue_streams_backfill
+    return render json: backfill_json(run) if run
 
-    render json: backfill_json(run)
+    render json: { run: nil, pending: 0 }
+  end
+
+  # POST /strava/refresh — « Tout rafraîchir » : résumés récents + gear + (ré)enfile
+  # le téléchargement des streams manquants, en un seul appel. Renvoie l'état du run
+  # de backfill (suivi de progression) + les compteurs de sync (`synced`/`created`/
+  # `total`, mêmes sémantiques que #sync) pour les widgets qui affichent les nouveautés.
+  def refresh
+    before = current_user.strava_activities.count
+    result = StravaRefreshService.new(current_user).refresh_all
+    total = current_user.strava_activities.count
+    body = result[:run] ? backfill_json(result[:run]) : { run: nil, pending: 0 }
+    render json: body.merge(synced: result[:synced], created: [total - before, 0].max, total: total)
+  rescue StravaSyncService::StravaApiError, StravaGearSyncService::StravaApiError => e
+    render json: { error: e.message }, status: :bad_gateway
   end
 
   # GET /strava/backfill — état du run le plus récent (pour le suivi de progression).

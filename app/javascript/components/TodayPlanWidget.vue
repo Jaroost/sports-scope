@@ -16,8 +16,9 @@ const props = withDefaults(defineProps<{ stravaLinked?: boolean }>(), { stravaLi
 const loading = ref(true)
 const data = ref<LoadSummary | null>(null)
 
-// Synchronisation Strava à la demande : récupère les nouvelles activités puis
-// recharge la charge d'entraînement pour rafraîchir la reco du jour.
+// « Tout rafraîchir » à la demande : résumés récents + vélos + téléchargement des
+// streams manquants (en tâche de fond), puis recharge la charge d'entraînement pour
+// rafraîchir la reco du jour.
 const syncing = ref(false)
 const syncMsg = ref<string | null>(null)
 const syncError = ref(false)
@@ -33,7 +34,7 @@ async function syncStrava() {
   syncMsg.value = null
   syncError.value = false
   try {
-    const res = await fetch('/strava/sync', {
+    const res = await fetch('/strava/refresh', {
       method: 'POST',
       headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
       credentials: 'same-origin',

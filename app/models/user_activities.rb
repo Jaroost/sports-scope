@@ -40,6 +40,18 @@ module UserActivities
     connection.exec_query(sql, name).to_a
   end
 
+  # Empreinte des activités d'un utilisateur, servant de version de cache pour les
+  # analyses calculées à la lecture (charge d'entraînement, FTP, records). Change
+  # dès qu'une activité est créée, modifiée (streams/NP → `updated_at` bumpé) ou
+  # supprimée (le `count` baisse). Une seule requête agrégée par table.
+  def data_version(user_id)
+    [StravaActivity, ImportedActivity].map do |klass|
+      rel = klass.where(user_id: user_id)
+      agg = rel.pick(Arel.sql('COUNT(*), MAX(updated_at)'))
+      "#{agg&.first || 0}:#{agg&.last&.to_f || 0}"
+    end.join('|')
+  end
+
   def quote(value)
     connection.quote(value)
   end

@@ -56,8 +56,20 @@ module TrainingLoad
     np.finite? && np.positive? ? np.round(1) : nil
   end
 
+  # Durée de vie des analyses mises en cache. La clé est versionnée (activités +
+  # seuils athlète) donc l'invalidation est immédiate ; le TTL ne sert qu'à borner
+  # la taille du store pour les versions périmées.
+  CACHE_TTL = 12.hours
+
   # ── Payload complet consommé par le front ───────────────────────────────────
+  # Mis en cache : recalcul lourd (union des 2 tables + EWMA quotidiennes). La clé
+  # inclut la version des activités ET des seuils → invalidé dès qu'une sortie ou
+  # un seuil (FTP/LTHR) change.
   def summary(user)
+    Rails.cache.fetch(cache_key(user, 'summary'), expires_in: CACHE_TTL) { compute_summary(user) }
+  end
+
+  def compute_summary(user)
     rows = load_rows(user)
     return empty_summary if rows.empty?
 
@@ -112,6 +124,10 @@ module TrainingLoad
   # variable dans le temps, LTHR) et ne charge jamais les streams (colonnes de
   # résumé + NP, comme `summary`). Renvoie {} si aucune activité.
   def tss_by_activity(user)
+    Rails.cache.fetch(cache_key(user, 'tss_by_activity'), expires_in: CACHE_TTL) { compute_tss_by_activity(user) }
+  end
+
+  def compute_tss_by_activity(user)
     rows = load_rows(user)
     return {} if rows.empty?
 
@@ -373,5 +389,16 @@ module TrainingLoad
     return value.to_f if value.is_a?(String) && value.match?(/\A-?\d+(\.\d+)?\z/)
 
     nil
+  end
+
+  # Clé de cache versionnée : dépend des activités (via UserActivities.data_version)
+  # ET des seuils athlète (FTP/LTHR/poids), puisque le TSS/la FTP en découlent.
+  def cache_key(user, scope)
+    athlete = FtpEstimator.athlete(user)
+    [
+      'training_load', scope, user.id,
+      UserActivities.data_version(user.id),
+      Digest::MD5.hexdigest(athlete.to_json)
+    ].join('/')
   end
 end

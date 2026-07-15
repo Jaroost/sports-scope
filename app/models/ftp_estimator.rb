@@ -26,8 +26,18 @@ module FtpEstimator
   # domine, au-delà la fatigue/pacing courbe la relation).
   CP_FIT_DURATIONS = [300, 600, 1200].freeze
 
-  # Payload complet consommé par la carte FTP du front.
+  CACHE_TTL = 12.hours
+
+  # Payload complet consommé par la carte FTP du front. Mis en cache, clé versionnée
+  # par les activités ET les seuils athlète (FTP manuelle/poids) → invalidé dès
+  # qu'une sortie ou un réglage change.
   def summary(user)
+    key = ['ftp', user.id, UserActivities.data_version(user.id),
+           Digest::MD5.hexdigest(athlete(user).to_json)].join('/')
+    Rails.cache.fetch(key, expires_in: CACHE_TTL) { compute_summary(user) }
+  end
+
+  def compute_summary(user)
     acts = cycling_power_activities(user)
     manual = manual_ftp(user)
     weight = weight_kg(user)

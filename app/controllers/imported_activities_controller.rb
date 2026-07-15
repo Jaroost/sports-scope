@@ -37,7 +37,7 @@ class ImportedActivitiesController < ApplicationController
     return render json: { error: 'name required' }, status: :unprocessable_entity if attrs[:name].blank?
 
     activity = current_user.imported_activities.create!(attrs)
-    activity.compute_peak_powers!
+    activity.recompute_derivations!
     render json: { activity: summary_json(activity) }, status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
@@ -52,7 +52,7 @@ class ImportedActivitiesController < ApplicationController
     return head :not_found unless activity
 
     # Lazy compute if missing — keeps older imports from showing nothing.
-    activity.compute_peak_powers! if activity.peak_powers.blank? && activity.streams.is_a?(Hash)
+    activity.recompute_derivations! if activity.peak_powers.blank? && activity.streams.is_a?(Hash)
     render json: {
       current: activity.peak_powers,
       bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['imported', activity.id])

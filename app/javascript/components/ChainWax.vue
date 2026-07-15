@@ -65,6 +65,33 @@ async function fetchBikes(refresh?: Refresh) {
   }
 }
 
+// « Tout rafraîchir » (bouton du widget d'accueil) : déclenche le refresh unifié
+// (résumés + vélos + téléchargement des streams en tâche de fond) puis recharge les
+// vélos. Sans Strava lié, on retombe sur un simple recalcul des km.
+async function refreshAll() {
+  if (!props.stravaLinked) return fetchBikes('activities')
+
+  refreshing.value = true
+  error.value = null
+  try {
+    const res = await fetch('/strava/refresh', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) {
+      let msg = `HTTP ${res.status}`
+      try { const p = await res.json(); if (p.error) msg = p.error } catch { /* noop */ }
+      throw new Error(msg)
+    }
+    await fetchBikes()
+  } catch (e: any) {
+    error.value = e.message
+  } finally {
+    refreshing.value = false
+  }
+}
+
 async function api(url: string, method: string, body?: unknown) {
   const res = await fetch(url, {
     method,
@@ -288,7 +315,7 @@ onBeforeUnmount(() => mountModal?.dispose())
           class="btn btn-sm btn-outline-secondary ms-auto"
           :disabled="refreshing"
           :title="t('chains.refresh_hint')"
-          @click="fetchBikes('activities')"
+          @click="refreshAll"
         >
           <i
             class="fa-solid fa-arrows-rotate me-1"

@@ -63,6 +63,15 @@ function tssHint(source) {
   return t(`strava.${key}`)
 }
 
+// Couleur d'un segment de l'aperçu selon la catégorie de pente calculée côté
+// serveur : 1 = montée (rouge), 2 = descente (bleu), 0 = plat (gris neutre).
+// Mêmes teintes que la liste des itinéraires (RoutesList).
+function gradeColor(cat) {
+  if (cat === 1) return '#e0503f'
+  if (cat === 2) return '#2f8fed'
+  return '#9aa0a6'
+}
+
 function activityIcon(type) {
   const t = (type || '').toLowerCase()
   if (t.includes('run')) return 'fa-person-running'
@@ -113,7 +122,28 @@ function activityIcon(type) {
             class="activity-row d-flex justify-content-between align-items-center text-decoration-none text-reset"
           >
             <div class="d-flex align-items-center gap-3">
-              <span class="activity-type-badge">
+              <span
+                v-if="activity.preview_segments && activity.preview_segments.length"
+                class="activity-track-preview"
+                :title="activity.type"
+              >
+                <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                  <path
+                    v-for="(s, i) in activity.preview_segments"
+                    :key="i"
+                    :d="s.d"
+                    fill="none"
+                    :stroke="gradeColor(s.c)"
+                    stroke-width="6"
+                    stroke-linejoin="round"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <span class="activity-track-preview__badge">
+                  <i :class="`fa-solid ${activityIcon(activity.type)}`" aria-hidden="true"></i>
+                </span>
+              </span>
+              <span v-else class="activity-type-badge">
                 <i :class="`fa-solid ${activityIcon(activity.type)}`" aria-hidden="true"></i>
               </span>
               <div>
@@ -151,3 +181,42 @@ function activityIcon(type) {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Vignette du tracé : même encombrement que le badge d'activité (2.25rem), coin
+   arrondi. Les teintes des segments (montée/descente/plat) portent le dénivelé,
+   comme la liste des itinéraires. */
+.activity-track-preview {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg, rgba(0, 0, 0, 0.04));
+}
+.activity-track-preview svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Pastille d'icône du type d'activité, superposée en bas à droite de la
+   vignette : conserve l'identification du sport en plus du tracé. */
+.activity-track-preview__badge {
+  position: absolute;
+  right: -0.25rem;
+  bottom: -0.25rem;
+  width: 1.15rem;
+  height: 1.15rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(13, 110, 253, 0.1);
+  color: #0d6efd;
+  font-size: 0.65rem;
+  border: 1.5px solid var(--bs-body-bg, #fff);
+}
+</style>

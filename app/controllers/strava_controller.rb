@@ -187,6 +187,9 @@ class StravaController < ApplicationController
   def summary_json(a, tss: nil)
     raw = a.raw.is_a?(Hash) ? a.raw : {}
     base = raw.present? ? raw : built_summary(a)
+    # Aperçu SVG du tracé (segments pré-calculés, colorés par le dénivelé) pour
+    # la vignette de la liste — mêmes données que la liste des itinéraires.
+    base = base.merge('preview_segments' => a.preview_segments)
     # TSS ajouté au vol (non persisté) : dépend de seuils modifiables, se recalcule
     # à chaque lecture. Absent si l'activité n'a pas pu être notée.
     tss ? base.merge('tss' => tss[:tss], 'tss_source' => tss[:source]) : base

@@ -25,7 +25,31 @@ class StravaActivity < ApplicationRecord
   # indéfiniment éligible au backfill.
   def store_streams!(streams)
     self.streams_fetched_at = Time.current
+    # Les streams (latlng + altitude) permettent l'aperçu SVG coloré par le
+    # dénivelé — bien plus fidèle que la polyligne résumé (sans altitude) posée
+    # à la synchro. On ne recule jamais vers l'aperçu plat si les streams n'ont
+    # pas de tracé exploitable (activité indoor, etc.).
+    self.preview_segments = self.class.preview_segments_from_streams(streams) || preview_segments
     super
+  end
+
+  # Aperçu SVG du tracé (mêmes segments `{ "c", "d" }` que `Route`) : streams
+  # colorés par dénivelé si disponibles, sinon la polyligne résumé (tracé neutre).
+  # Utilisé pour le (re)calcul et le backfill de migration.
+  def compute_preview_segments
+    self.class.preview_segments_from_streams(streams) ||
+      self.class.preview_segments_from_polyline(summary_polyline)
+  end
+
+  # Polyligne encodée du résumé Strava (`map.summary_polyline`), sans altitude.
+  def summary_polyline
+    return nil unless raw.is_a?(Hash)
+
+    map = raw['map'] || raw[:map]
+    return nil unless map.is_a?(Hash)
+
+    (map['summary_polyline'] || map[:summary_polyline]).presence ||
+      (map['polyline'] || map[:polyline]).presence
   end
 
   # Idempotent upsert of one Strava activity summary (the hash returned by
@@ -39,8 +63,92 @@ class StravaActivity < ApplicationRecord
     record = find_or_initialize_by(user: user, strava_id: strava_id)
     record.assign_attributes(attrs_from_summary(summary))
     record.raw = summary
+    # Aperçu du tracé depuis la polyligne résumé (sans altitude → tracé neutre).
+    # On ne touche pas à l'aperçu quand les streams sont déjà là : il est alors
+    # coloré par le dénivelé (posé par `store_streams!`), bien plus fidèle.
+    record.preview_segments = preview_segments_from_polyline(map_summary_polyline(summary)) if record.streams.blank?
     record.save!
     record
+  end
+
+  # Segments d'aperçu `{ "c", "d" }` construits depuis les streams (latlng +
+  # altitude) : tracé coloré par pente comme un itinéraire. nil si pas de tracé.
+  def self.preview_segments_from_streams(streams)
+    return nil unless streams.is_a?(Hash)
+
+    latlng = stream_data(streams, 'latlng')
+    return nil unless latlng.is_a?(Array) && latlng.size >= 2
+
+    altitude = stream_data(streams, 'altitude')
+    geometry = latlng.each_with_index.map do |pair, i|
+      next unless pair.is_a?(Array) && pair.size >= 2
+
+      lat, lng = pair
+      ele = altitude.is_a?(Array) ? altitude[i] : nil
+      [lng, lat, ele]
+    end.compact
+    Route.build_preview_segments(geometry)
+  end
+
+  # Segments d'aperçu depuis une polyligne encodée Strava (pas d'altitude → tous
+  # les segments sont classés « plat »). nil si polyligne vide/illisible.
+  def self.preview_segments_from_polyline(encoded)
+    return nil if encoded.blank?
+
+    Route.build_preview_segments(decode_polyline(encoded))
+  end
+
+  # Décode une polyligne encodée Google (précision 1e5) en `[[lng, lat], ...]`
+  # (ordre lng, lat comme la géométrie des itinéraires).
+  def self.decode_polyline(encoded)
+    coords = []
+    index = 0
+    lat = 0
+    lng = 0
+    len = encoded.length
+
+    while index < len
+      lat += decode_delta(encoded, index) { |i| index = i }
+      lng += decode_delta(encoded, index) { |i| index = i }
+      coords << [lng / 1e5, lat / 1e5]
+    end
+    coords
+  end
+
+  # Lit un entier zig-zag varint à partir de `start`, renvoie le delta et publie
+  # l'index suivant via le bloc. Extrait pour ne pas dupliquer la boucle lat/lng.
+  def self.decode_delta(encoded, start)
+    shift = 0
+    result = 0
+    index = start
+    loop do
+      b = encoded[index].ord - 63
+      index += 1
+      result |= (b & 0x1f) << shift
+      shift += 5
+      break if b < 0x20
+    end
+    yield index
+    (result & 1) == 1 ? ~(result >> 1) : (result >> 1)
+  end
+
+  # `map.summary_polyline` d'un résumé Strava (hash symboles ou chaînes).
+  def self.map_summary_polyline(summary)
+    map = summary['map'] || summary[:map]
+    return nil unless map.is_a?(Hash)
+
+    (map['summary_polyline'] || map[:summary_polyline]).presence ||
+      (map['polyline'] || map[:polyline]).presence
+  end
+
+  # `streams[key]` peut être un tableau brut ou `{ "data" => [...] }` (même forme
+  # que l'API streams Strava et l'importeur FIT).
+  def self.stream_data(streams, key)
+    raw = streams[key] || streams[key.to_sym]
+    return raw if raw.is_a?(Array)
+    return raw['data'] || raw[:data] if raw.is_a?(Hash)
+
+    nil
   end
 
   def self.attrs_from_summary(s)

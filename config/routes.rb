@@ -19,6 +19,7 @@ Rails.application.routes.draw do
     get "/routes/:token/view", to: "pages#route_view", as: :view_route
     get "/profile", to: "profiles#show", as: :profile
     delete "/profile/strava", to: "profiles#unlink_strava", as: :unlink_strava
+    delete "/profile/strava/activities", to: "profiles#delete_strava_activities", as: :delete_strava_activities
     # Suivi du cirage de chaîne (par vélo)
     get "/chains", to: "pages#chains", as: :chains
   end

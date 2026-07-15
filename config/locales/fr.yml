@@ -785,6 +785,10 @@ fr:
       unlink_confirm: "Délier votre compte Strava ?"
       unlinked: "Compte Strava délié."
       not_allowed: "La liaison d'un compte Strava n'est pas disponible pour votre compte."
+      delete_activities: "Supprimer mes activités"
+      delete_activities_help: "Efface toutes les activités importées depuis Strava (et les données détaillées téléchargées). Elles reviendront à la prochaine synchronisation. N'affecte pas les fichiers .fit importés."
+      delete_activities_confirm: "Supprimer TOUTES vos activités Strava ? Elles reviendront au prochain rafraîchissement."
+      activities_deleted: "%{count} activité(s) Strava supprimée(s)."
     poi:
       title: "Points d'intérêt"
       help: "Choisissez les points d'intérêt détectés le long de vos itinéraires et leur rayon de recherche."

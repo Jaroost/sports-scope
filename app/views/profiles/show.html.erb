@@ -27,6 +27,17 @@
           <i class="fa-solid fa-link-slash me-1" aria-hidden="true"></i><%= t("profile.strava.unlink") %>
         <% end %>
       </div>
+      <% if current_user.strava_activities.exists? %>
+        <hr class="my-3">
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+          <p class="text-muted small mb-0"><%= t("profile.strava.delete_activities_help") %></p>
+          <%= button_to delete_strava_activities_path, method: :delete, class: "btn btn-outline-danger btn-sm ms-sm-auto",
+                data: { turbo: false },
+                form: { onsubmit: "return confirm('#{j(t('profile.strava.delete_activities_confirm'))}')" } do %>
+            <i class="fa-solid fa-trash me-1" aria-hidden="true"></i><%= t("profile.strava.delete_activities") %>
+          <% end %>
+        </div>
+      <% end %>
     <% elsif can? :link, :strava %>
       <p class="text-muted small mb-3"><%= t("profile.strava.help") %></p>
       <%= button_to "/auth/strava", method: :post, class: "btn btn-warning", data: { turbo: false } do %>

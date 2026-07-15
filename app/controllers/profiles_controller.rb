@@ -59,6 +59,17 @@ class ProfilesController < ApplicationController
     redirect_to profile_path, notice: t("profile.strava.unlinked")
   end
 
+  # DELETE /profile/strava/activities — supprime toutes les activités Strava de
+  # l'utilisateur (et ses runs de backfill de streams). Réversible : tout revient à
+  # la prochaine synchronisation. N'affecte pas les imports .fit. Les analyses en
+  # cache (charge, FTP, records) s'invalident seules (clé versionnée par le nombre
+  # d'activités).
+  def delete_strava_activities
+    deleted = current_user.strava_activities.delete_all
+    current_user.strava_backfill_runs.delete_all
+    redirect_to profile_path, notice: t("profile.strava.activities_deleted", count: deleted)
+  end
+
   # PATCH /api/profile/preferences — sauvegarde JSON des préférences.
   def update
     current_user.update!(preferences: sanitize_preferences(params[:preferences]))

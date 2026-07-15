@@ -785,6 +785,10 @@ en:
       unlink_confirm: "Disconnect your Strava account?"
       unlinked: "Strava account disconnected."
       not_allowed: "Linking a Strava account is not available for your account."
+      delete_activities: "Delete my activities"
+      delete_activities_help: "Erases all activities imported from Strava (and the detailed data downloaded). They will come back on the next sync. Does not affect imported .fit files."
+      delete_activities_confirm: "Delete ALL your Strava activities? They will come back on the next refresh."
+      activities_deleted: "%{count} Strava activity(ies) deleted."
     poi:
       title: "Points of interest"
       help: "Choose which points of interest are detected along your routes and their search radius."

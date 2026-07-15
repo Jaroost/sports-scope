@@ -85,9 +85,9 @@
                   </li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
-                    <button type="button" class="dropdown-item" data-profile-trigger>
+                    <%= link_to profile_path, class: "dropdown-item" do %>
                       <i class="fa-solid fa-sliders me-2" aria-hidden="true"></i><%= t("nav.profile") %>
-                    </button>
+                    <% end %>
                   </li>
                   <li>
                     <%= button_to logout_path, method: :delete, class: "dropdown-item", data: { turbo: false } do %>
@@ -136,7 +136,9 @@
             defaults: User::DEFAULT_PREFERENCES,
             stravaLinked: current_user.strava_linked?,
             canLinkStrava: can?(:link, :strava),
-            unlinkPath: unlink_strava_path
+            unlinkPath: unlink_strava_path,
+            deleteActivitiesPath: delete_strava_activities_path,
+            hasStravaActivities: current_user.strava_activities.exists?
           }.to_json %>'></div>
     <% end %>
 

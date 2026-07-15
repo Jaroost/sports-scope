@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Modal } from 'bootstrap'
 import { t } from '../i18n'
+import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
 
 // compact : sur le tableau de bord on n'affiche que la chaîne montée de chaque vélo
 // + un lien vers la page dédiée. En mode complet (/chains) on gère tout.
@@ -61,33 +62,6 @@ async function fetchBikes(refresh?: Refresh) {
     error.value = e.message
   } finally {
     loading.value = false
-    refreshing.value = false
-  }
-}
-
-// « Tout rafraîchir » (bouton du widget d'accueil) : déclenche le refresh unifié
-// (résumés + vélos + téléchargement des streams en tâche de fond) puis recharge les
-// vélos. Sans Strava lié, on retombe sur un simple recalcul des km.
-async function refreshAll() {
-  if (!props.stravaLinked) return fetchBikes('activities')
-
-  refreshing.value = true
-  error.value = null
-  try {
-    const res = await fetch('/strava/refresh', {
-      method: 'POST',
-      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
-      credentials: 'same-origin',
-    })
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`
-      try { const p = await res.json(); if (p.error) msg = p.error } catch { /* noop */ }
-      throw new Error(msg)
-    }
-    await fetchBikes()
-  } catch (e: any) {
-    error.value = e.message
-  } finally {
     refreshing.value = false
   }
 }
@@ -286,8 +260,18 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString()
 }
 
-onMounted(() => fetchBikes())
-onBeforeUnmount(() => mountModal?.dispose())
+// Recharge les vélos (km à jour) quand le bouton unique « Tout rafraîchir » de la
+// page a terminé sa synchronisation Strava (îlots séparés → coordination par événement).
+function onStravaRefreshed() { fetchBikes() }
+
+onMounted(() => {
+  fetchBikes()
+  window.addEventListener(STRAVA_REFRESHED_EVENT, onStravaRefreshed)
+})
+onBeforeUnmount(() => {
+  mountModal?.dispose()
+  window.removeEventListener(STRAVA_REFRESHED_EVENT, onStravaRefreshed)
+})
 </script>
 
 <template>
@@ -310,20 +294,7 @@ onBeforeUnmount(() => mountModal?.dispose())
           <i class="fa-solid fa-link text-warning" aria-hidden="true"></i>
           <span>{{ t('chains.title') }}</span>
         </h2>
-        <button
-          type="button"
-          class="btn btn-sm btn-outline-secondary ms-auto"
-          :disabled="refreshing"
-          :title="t('chains.refresh_hint')"
-          @click="refreshAll"
-        >
-          <i
-            class="fa-solid fa-arrows-rotate me-1"
-            :class="{ 'fa-spin': refreshing }"
-            aria-hidden="true"
-          ></i>{{ t('chains.refresh') }}
-        </button>
-        <a :href="`${localePrefix}/chains`" class="btn btn-sm btn-outline-secondary">
+        <a :href="`${localePrefix}/chains`" class="btn btn-sm btn-outline-secondary ms-auto">
           {{ t('chains.manage') }}
         </a>
       </div>

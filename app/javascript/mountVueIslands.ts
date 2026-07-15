@@ -13,6 +13,7 @@ import PwaInstall from './components/PwaInstall.vue'
 import ChainWax from './components/ChainWax.vue'
 import PerformanceAnalysis from './components/PerformanceAnalysis.vue'
 import TodayPlanWidget from './components/TodayPlanWidget.vue'
+import RefreshAll from './components/RefreshAll.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
@@ -29,6 +30,7 @@ const registry: Record<string, Component> = {
   ChainWax,
   PerformanceAnalysis,
   TodayPlanWidget,
+  RefreshAll,
 }
 
 export function mountVueIslands(): void {

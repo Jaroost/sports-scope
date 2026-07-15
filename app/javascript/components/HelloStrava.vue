@@ -8,7 +8,6 @@ const props = defineProps({
 })
 
 const loading = ref(true)
-const refreshing = ref(false)
 const error = ref(null)
 const activities = ref([])
 const cachedAt = ref(null)
@@ -16,29 +15,14 @@ const total = ref(null)
 
 const title = computed(() => t('strava.recent_activities'))
 const emptyText = computed(() => t('strava.no_activities'))
-const refreshLabel = computed(() => (refreshing.value ? t('strava.refreshing') : t('strava.refresh')))
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
-
-async function fetchActivities({ refresh = false } = {}) {
-  if (refresh) refreshing.value = true
+// Sert la liste depuis la base ; la (re)synchronisation Strava est déclenchée par le
+// bouton « Tout rafraîchir » voisin (composant StravaBackfill → POST /strava/refresh).
+async function fetchActivities() {
   try {
-    // « Rafraîchir » = tout rafraîchir : résumés récents + vélos + téléchargement des
-    // streams manquants en tâche de fond (POST /strava/refresh), puis on recharge la
-    // liste (résumés déjà synchronisés, pas besoin de ?refresh=1).
-    if (refresh) {
-      const sync = await fetch('/strava/refresh', {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
-        credentials: 'same-origin',
-      })
-      if (!sync.ok) throw new Error(`HTTP ${sync.status}`)
-    }
     const res = await fetch(props.endpoint, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
@@ -53,7 +37,6 @@ async function fetchActivities({ refresh = false } = {}) {
     error.value = e.message
   } finally {
     loading.value = false
-    refreshing.value = false
   }
 }
 
@@ -102,22 +85,10 @@ function activityIcon(type) {
         <span>{{ title }}</span>
         <span v-if="total !== null" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ total }}</span>
       </h2>
-      <div class="d-flex align-items-center gap-2">
-        <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1">
-          <i class="fa-regular fa-clock" aria-hidden="true"></i>
-          {{ t('strava.last_updated') }} {{ formatCachedAt(cachedAt) }}
-        </small>
-        <button
-          type="button"
-          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-          :disabled="loading || refreshing"
-          @click="fetchActivities({ refresh: true })"
-        >
-          <span v-if="refreshing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-          <i v-else class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
-          <span>{{ refreshLabel }}</span>
-        </button>
-      </div>
+      <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1">
+        <i class="fa-regular fa-clock" aria-hidden="true"></i>
+        {{ t('strava.last_updated') }} {{ formatCachedAt(cachedAt) }}
+      </small>
     </div>
     <div class="card-body">
       <div v-if="loading" class="text-muted d-flex align-items-center gap-2">

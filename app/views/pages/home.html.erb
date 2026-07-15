@@ -9,6 +9,13 @@
   </div>
 
   <% if user_signed_in? %>
+    <%# Bouton unique « Tout rafraîchir » : synchronise résumés + vélos + streams et
+        notifie les widgets ci-dessous (via un événement window) de se recharger. %>
+    <% if current_user.strava_linked? %>
+      <div class="mb-4">
+        <div data-vue-component="RefreshAll"></div>
+      </div>
+    <% end %>
     <%# Plan du jour : sortie objectif + « que faire aujourd'hui » (charge d'entraînement).
         Nécessite des activités (Strava ou .fit) ET l'interrupteur du profil (masquable). %>
     <% if (current_user.strava_linked? || current_user.imported_activities.exists?) &&

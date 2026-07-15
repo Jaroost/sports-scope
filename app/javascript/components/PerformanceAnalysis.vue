@@ -59,11 +59,74 @@ interface Payload {
   sports: { key: string; count: number }[]
   by_sport: Record<string, SportGroup>
   count: number
+  total_count: number
+  sport_types: string[]
 }
 
 const loading = ref(true)
 const error = ref<string | null>(null)
 const data = ref<Payload | null>(null)
+const hasLoaded = ref(false) // au moins une requête réussie (garde le panneau visible pendant les refetch)
+
+// ── Filtres (mêmes que la liste du dashboard, pilotés côté serveur) ───────────
+const showFilters = ref(false)
+const sportFilter = ref('')
+const minDistance = ref<number | null>(null) // km
+const maxDistance = ref<number | null>(null)
+const minElevation = ref<number | null>(null) // m
+const maxElevation = ref<number | null>(null)
+const minDuration = ref<number | null>(null) // min
+const maxDuration = ref<number | null>(null)
+const dateFrom = ref('') // yyyy-mm-dd
+const dateTo = ref('')
+
+// Liste des types de sport de tout l'historique, fournie par le serveur.
+const sportOptions = ref<string[]>([])
+
+function isSet(v: number | null): boolean {
+  return v !== null && v !== undefined && (v as unknown as string) !== ''
+}
+
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (sportFilter.value) n++
+  if (isSet(minDistance.value)) n++
+  if (isSet(maxDistance.value)) n++
+  if (isSet(minElevation.value)) n++
+  if (isSet(maxElevation.value)) n++
+  if (isSet(minDuration.value)) n++
+  if (isSet(maxDuration.value)) n++
+  if (dateFrom.value) n++
+  if (dateTo.value) n++
+  return n
+})
+
+function clearFilters() {
+  sportFilter.value = ''
+  minDistance.value = null
+  maxDistance.value = null
+  minElevation.value = null
+  maxElevation.value = null
+  minDuration.value = null
+  maxDuration.value = null
+  dateFrom.value = ''
+  dateTo.value = ''
+}
+
+// Construit la query string à partir des filtres actifs.
+function buildQuery(): string {
+  const p = new URLSearchParams()
+  if (sportFilter.value) p.set('sport', sportFilter.value)
+  if (isSet(minDistance.value)) p.set('min_dist', String(minDistance.value))
+  if (isSet(maxDistance.value)) p.set('max_dist', String(maxDistance.value))
+  if (isSet(minElevation.value)) p.set('min_elev', String(minElevation.value))
+  if (isSet(maxElevation.value)) p.set('max_elev', String(maxElevation.value))
+  if (isSet(minDuration.value)) p.set('min_dur', String(minDuration.value))
+  if (isSet(maxDuration.value)) p.set('max_dur', String(maxDuration.value))
+  if (dateFrom.value) p.set('from', dateFrom.value)
+  if (dateTo.value) p.set('to', dateTo.value)
+  return p.toString()
+}
 
 // Onglet de sport sélectionné, mémorisé en localStorage (comme l'onglet d'activité
 // dans ActivityDetail) pour retrouver le même sport au rechargement.
@@ -77,15 +140,18 @@ const localePrefix = lang ? `/${lang}` : ''
 async function fetchData() {
   loading.value = true
   try {
-    const res = await fetch('/api/performance', {
+    const query = buildQuery()
+    const res = await fetch(`/api/performance${query ? `?${query}` : ''}`, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     data.value = (await res.json()) as Payload
-    // Le sport mémorisé peut ne plus exister (aucune activité de ce type) : repli sur « Tout ».
+    sportOptions.value = data.value.sport_types || []
+    // Le sport mémorisé peut ne plus exister (aucune activité de ce type, filtres inclus) : repli sur « Tout ».
     if (!data.value.by_sport[selectedSport.value]) selectedSport.value = 'all'
     error.value = null
+    hasLoaded.value = true
   } catch (e) {
     error.value = (e as Error).message
   } finally {
@@ -98,6 +164,17 @@ async function fetchData() {
 }
 
 onMounted(fetchData)
+
+// Un changement de filtre relance la requête, avec un léger debounce pour ne pas
+// requêter à chaque frappe dans les champs numériques/date.
+let filterTimer: ReturnType<typeof setTimeout> | undefined
+watch(
+  [sportFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
+  () => {
+    clearTimeout(filterTimer)
+    filterTimer = setTimeout(fetchData, 350)
+  },
+)
 
 // ── Sports (onglets) ─────────────────────────────────────────────────────────
 const SPORT_ICONS: Record<string, string> = {
@@ -327,7 +404,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <div v-if="loading" class="text-muted d-flex align-items-center gap-2 py-4">
+    <div v-if="loading && !hasLoaded" class="text-muted d-flex align-items-center gap-2 py-4">
       <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
       <span>{{ t('performance.loading') }}</span>
     </div>
@@ -337,12 +414,93 @@ onBeforeUnmount(() => {
       <span>{{ error }}</span>
     </div>
 
-    <div v-else-if="data && data.count === 0" class="alert alert-info d-flex align-items-center gap-2">
+    <div v-else-if="data && data.total_count === 0" class="alert alert-info d-flex align-items-center gap-2">
       <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
       <span>{{ t('performance.no_data') }}</span>
     </div>
 
-    <template v-else-if="data && group">
+    <template v-else-if="data">
+      <!-- Barre de filtres (mêmes filtres que la liste du dashboard) -->
+      <div class="d-flex justify-content-end mb-3">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          :class="{ active: showFilters }"
+          :aria-expanded="showFilters"
+          @click="showFilters = !showFilters"
+        >
+          <i class="fa-solid fa-filter" aria-hidden="true"></i>
+          <span>{{ t('performance.filters.toggle') }}</span>
+          <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
+        </button>
+      </div>
+      <div v-if="showFilters" class="card shadow-sm border-0 mb-4 activity-filters">
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label small mb-1">{{ t('performance.filters.sport') }}</label>
+              <select v-model="sportFilter" class="form-select form-select-sm">
+                <option value="">{{ t('performance.filters.all_sports') }}</option>
+                <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('performance.filters.distance') }}</label>
+              <div class="d-flex align-items-center gap-1">
+                <input v-model.number="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
+                <span class="text-muted">–</span>
+                <input v-model.number="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
+              </div>
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('performance.filters.elevation') }}</label>
+              <div class="d-flex align-items-center gap-1">
+                <input v-model.number="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
+                <span class="text-muted">–</span>
+                <input v-model.number="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
+              </div>
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('performance.filters.duration') }}</label>
+              <div class="d-flex align-items-center gap-1">
+                <input v-model.number="minDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
+                <span class="text-muted">–</span>
+                <input v-model.number="maxDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
+              </div>
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('performance.filters.from') }}</label>
+              <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('performance.filters.to') }}</label>
+              <input v-model="dateTo" type="date" class="form-control form-control-sm" />
+            </div>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mt-3">
+            <small class="text-muted d-flex align-items-center gap-2">
+              <span v-if="loading" class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+              {{ t('performance.filters.results', { count: data.count, total: data.total_count }) }}
+            </small>
+            <button
+              type="button"
+              class="btn btn-sm btn-link text-decoration-none"
+              :disabled="!activeFilterCount"
+              @click="clearFilters"
+            >
+              <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('performance.filters.clear') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Aucune activité ne correspond aux filtres actifs -->
+      <div v-if="data.count === 0" class="alert alert-info d-flex align-items-center gap-2">
+        <i class="fa-solid fa-filter-circle-xmark" aria-hidden="true"></i>
+        <span>{{ t('performance.filters.none_match') }}</span>
+      </div>
+
+      <template v-else-if="group">
       <!-- Onglets par sport -->
       <ul class="nav nav-pills flex-wrap gap-2 mb-4 performance-sport-tabs">
         <li v-for="tab in tabs" :key="tab.key" class="nav-item">
@@ -479,6 +637,7 @@ onBeforeUnmount(() => {
             </table>
           </div>
         </div>
+      </template>
       </template>
     </template>
   </div>

@@ -50,13 +50,23 @@ module PerformanceRecords
   # un groupe par sport présent, plus la liste des sports (triée par volume).
   # Mis en cache, clé versionnée par les activités (records = données brutes,
   # aucun seuil athlète en jeu) → invalidé dès qu'une sortie change.
-  def for_user(user)
+  #
+  # `filters` (mêmes que la liste du dashboard) restreint les activités agrégées ;
+  # un calcul filtré n'est pas mis en cache (combinaisons illimitées).
+  def for_user(user, filters = {})
+    normalized = normalize_filters(filters)
+    return compute_for_user(user, normalized) if normalized.any?
+
     key = ['performance_records', user.id, UserActivities.data_version(user.id)].join('/')
-    Rails.cache.fetch(key, expires_in: CACHE_TTL) { compute_for_user(user) }
+    Rails.cache.fetch(key, expires_in: CACHE_TTL) { compute_for_user(user, {}) }
   end
 
-  def compute_for_user(user)
-    rows = summary_rows(user.id)
+  def compute_for_user(user, filters = {})
+    all_rows = summary_rows(user.id)
+    # Menu déroulant du filtre « sport » : tous les types présents dans l'historique
+    # (avant filtrage) pour ne jamais perdre une option en cours de filtrage.
+    sport_types = all_rows.filter_map { |r| r['activity_type'].presence }.uniq.sort
+    rows = apply_filters(all_rows, filters)
     groups = rows.group_by { |r| sport_category(r['activity_type']) }
 
     sports = groups
@@ -66,7 +76,69 @@ module PerformanceRecords
     by_sport = { 'all' => compute_group(rows) }
     groups.each { |key, rs| by_sport[key] = compute_group(rs) }
 
-    { sports: sports, by_sport: by_sport, count: rows.length }
+    {
+      sports: sports,
+      by_sport: by_sport,
+      count: rows.length,
+      total_count: all_rows.length,
+      sport_types: sport_types
+    }
+  end
+
+  # Normalise les filtres bruts (query params) : conversions d'unités (km → m,
+  # min → s), bornes de dates, et rejet des valeurs vides. Renvoie un hash prêt à
+  # comparer aux colonnes brutes des lignes.
+  def normalize_filters(filters)
+    f = filters.symbolize_keys
+    out = {}
+    out[:sport] = f[:sport] if f[:sport].present?
+    out[:min_dist] = f[:min_dist].to_f * 1000 if f[:min_dist].present?
+    out[:max_dist] = f[:max_dist].to_f * 1000 if f[:max_dist].present?
+    out[:min_elev] = f[:min_elev].to_f if f[:min_elev].present?
+    out[:max_elev] = f[:max_elev].to_f if f[:max_elev].present?
+    out[:min_dur]  = f[:min_dur].to_f * 60 if f[:min_dur].present?
+    out[:max_dur]  = f[:max_dur].to_f * 60 if f[:max_dur].present?
+    out[:from] = parse_date(f[:from])&.beginning_of_day if f[:from].present?
+    out[:to]   = parse_date(f[:to])&.end_of_day if f[:to].present?
+    out.compact
+  end
+
+  # Garde les lignes qui satisfont tous les filtres normalisés. Une ligne sans
+  # valeur pour une colonne filtrée est exclue (comme le filtrage SQL du dashboard,
+  # où NULL ne satisfait aucune borne).
+  def apply_filters(rows, filters)
+    return rows if filters.blank?
+
+    rows.select do |r|
+      next false if filters[:sport] && r['activity_type'] != filters[:sport]
+
+      dist = numeric(r['distance_m'])
+      next false if filters[:min_dist] && (dist.nil? || dist < filters[:min_dist])
+      next false if filters[:max_dist] && (dist.nil? || dist > filters[:max_dist])
+
+      elev = numeric(r['total_elevation_gain'])
+      next false if filters[:min_elev] && (elev.nil? || elev < filters[:min_elev])
+      next false if filters[:max_elev] && (elev.nil? || elev > filters[:max_elev])
+
+      dur = numeric(r['moving_time_s'])
+      next false if filters[:min_dur] && (dur.nil? || dur < filters[:min_dur])
+      next false if filters[:max_dur] && (dur.nil? || dur > filters[:max_dur])
+
+      time = parse_time(r['started_at'])
+      next false if filters[:from] && (time.nil? || time < filters[:from])
+      next false if filters[:to] && (time.nil? || time > filters[:to])
+
+      true
+    end
+  end
+
+  # Parse une date ISO (yyyy-mm-dd) issue d'un <input type="date">. nil si invalide.
+  def parse_date(value)
+    return nil if value.blank?
+
+    Date.iso8601(value.to_s)
+  rescue ArgumentError
+    nil
   end
 
   # Tous les indicateurs pour un sous-ensemble de lignes (un sport, ou « all »).

@@ -1373,7 +1373,10 @@ function insertWaypointAtHover(hit: { lng: number; lat: number; edgeIdx: number 
     if (hit.edgeIdx >= waypointGeomIndices[i] && hit.edgeIdx < waypointGeomIndices[i + 1]) { insertAt = i + 1; break }
   }
   const next = routeStore.waypoints.value.slice()
-  next.splice(insertAt, 0, { lng: hit.lng, lat: hit.lat })
+  // Si l'un des deux points encadrants est libre, le point inséré l'est aussi :
+  // on prolonge la nature du tronçon plutôt que d'y forcer un bout routé.
+  const inheritFree = next[insertAt - 1]?.free === true || next[insertAt]?.free === true
+  next.splice(insertAt, 0, inheritFree ? { lng: hit.lng, lat: hit.lat, free: true } : { lng: hit.lng, lat: hit.lat })
   routeStore.waypoints.value = next
   hideHoverMarker()
   refreshWaypointMarkers()
@@ -1402,7 +1405,10 @@ function insertWaypointSmart(lng: number, lat: number) {
     if (nearIdx >= waypointGeomIndices[i] && nearIdx <= waypointGeomIndices[i + 1]) { insertAt = i + 1; break }
   }
   const next = wps.slice()
-  next.splice(insertAt, 0, { lng, lat })
+  // Si l'un des deux points encadrants est libre, le point inséré l'est aussi :
+  // on prolonge la nature du tronçon plutôt que d'y forcer un bout routé.
+  const inheritFree = next[insertAt - 1]?.free === true || next[insertAt]?.free === true
+  next.splice(insertAt, 0, inheritFree ? { lng, lat, free: true } : { lng, lat })
   routeStore.waypoints.value = next
   deselectAll()
   refreshWaypointMarkers()

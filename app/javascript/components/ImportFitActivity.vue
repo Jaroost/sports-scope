@@ -238,6 +238,12 @@ function formatDuration(sec) {
   return `${h} h ${String(m).padStart(2, '0')}`
 }
 
+// Aide du badge TSS selon la source du calcul (puissance / FC / estimation).
+function tssHint(source) {
+  const key = source === 'power' ? 'tss_hint_power' : source === 'hr' ? 'tss_hint_hr' : 'tss_hint_estimated'
+  return t(`strava.${key}`)
+}
+
 async function removeActivity(a) {
   if (!window.confirm(t('fit.delete_confirm'))) return
   try {
@@ -320,6 +326,15 @@ onMounted(() => fetchList())
               <span v-if="formatDaysAgo(a.start_date)" class="days-ago-badge ms-1">{{ formatDaysAgo(a.start_date) }}</span>
             </small>
           </a>
+          <span
+            v-if="a.tss != null"
+            class="tss-badge flex-shrink-0"
+            :class="`tss-badge--${a.tss_source || 'estimated'}`"
+            :title="tssHint(a.tss_source)"
+          >
+            <span class="tss-value">{{ Math.round(a.tss) }}</span>
+            <span class="tss-unit">{{ t('strava.tss_label') }}</span>
+          </span>
           <button type="button" class="btn btn-sm btn-outline-danger" :title="t('fit.delete')" @click="removeActivity(a)">
             <i class="fa-solid fa-trash"></i>
           </button>

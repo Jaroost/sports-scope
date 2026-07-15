@@ -11,8 +11,51 @@ import {
 // aujourd'hui » du panneau de performance (même composable, même localStorage) dans
 // un format resserré et éditable. Un lien mène à la page performance pour le détail.
 
+const props = withDefaults(defineProps<{ stravaLinked?: boolean }>(), { stravaLinked: false })
+
 const loading = ref(true)
 const data = ref<LoadSummary | null>(null)
+
+// Synchronisation Strava à la demande : récupère les nouvelles activités puis
+// recharge la charge d'entraînement pour rafraîchir la reco du jour.
+const syncing = ref(false)
+const syncMsg = ref<string | null>(null)
+const syncError = ref(false)
+let syncMsgTimer: ReturnType<typeof setTimeout> | null = null
+
+function csrfToken(): string {
+  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+}
+
+async function syncStrava() {
+  if (syncing.value) return
+  syncing.value = true
+  syncMsg.value = null
+  syncError.value = false
+  try {
+    const res = await fetch('/strava/sync', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const payload = (await res.json()) as { created?: number }
+    const created = payload.created ?? 0
+    // On recharge la charge d'entraînement pour que la reco reflète les nouvelles sorties.
+    await fetchData(true)
+    syncError.value = false
+    syncMsg.value = created > 0
+      ? t('performance.load.widget.sync_new', { count: created })
+      : t('performance.load.widget.sync_done')
+  } catch {
+    syncError.value = true
+    syncMsg.value = t('performance.load.widget.sync_error')
+  } finally {
+    syncing.value = false
+    if (syncMsgTimer) clearTimeout(syncMsgTimer)
+    syncMsgTimer = setTimeout(() => { syncMsg.value = null }, 6000)
+  }
+}
 
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
@@ -25,8 +68,8 @@ const lang = (typeof document !== 'undefined' && document.documentElement.lang) 
 // (ancre gérée dans TrainingLoadPanel.vue, qui se monte de façon asynchrone).
 const performanceHref = `${lang ? `/${lang}` : ''}/performance#training-load`
 
-async function fetchData() {
-  loading.value = true
+async function fetchData(silent = false) {
+  if (!silent) loading.value = true
   try {
     const res = await fetch('/api/performance/training_load', {
       headers: { Accept: 'application/json' },
@@ -38,11 +81,11 @@ async function fetchData() {
     // Widget d'accueil silencieux : en cas d'échec, on n'affiche simplement rien.
     data.value = null
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
-onMounted(fetchData)
+onMounted(() => { fetchData() })
 </script>
 
 <template>
@@ -61,11 +104,34 @@ onMounted(fetchData)
         <i class="fa-solid fa-heart-pulse text-warning" aria-hidden="true"></i>
         <span>{{ t('performance.load.reco.title') }}</span>
       </h2>
-      <a :href="performanceHref" class="btn btn-sm btn-outline-secondary ms-auto">
-        {{ t('performance.load.widget.see_analysis') }}
-      </a>
+      <div class="ms-auto d-flex align-items-center gap-2">
+        <button
+          v-if="props.stravaLinked"
+          type="button"
+          class="btn btn-sm btn-outline-warning d-flex align-items-center gap-2"
+          :disabled="syncing"
+          :title="t('performance.load.widget.sync_hint')"
+          @click="syncStrava"
+        >
+          <span v-if="syncing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+          <i v-else class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+          <span>{{ syncing ? t('performance.load.widget.syncing') : t('performance.load.widget.sync') }}</span>
+        </button>
+        <a :href="performanceHref" class="btn btn-sm btn-outline-secondary">
+          {{ t('performance.load.widget.see_analysis') }}
+        </a>
+      </div>
     </div>
     <div class="card-body d-flex flex-column gap-3">
+      <!-- Confirmation / erreur de la dernière synchronisation Strava -->
+      <div
+        v-if="syncMsg"
+        class="sync-status small d-flex align-items-center gap-2"
+        :class="syncError ? 'text-danger' : 'text-success'"
+      >
+        <i :class="syncError ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-check'" aria-hidden="true"></i>
+        <span>{{ syncMsg }}</span>
+      </div>
       <!-- Fraîcheur du moment -->
       <div class="fresh-tile" :style="{ borderColor: zoneColor(current.form_zone) }">
         <div class="d-flex align-items-center gap-3">

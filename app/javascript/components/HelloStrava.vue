@@ -61,6 +61,11 @@ function formatCachedAt(iso) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+function tssHint(source) {
+  const key = source === 'power' ? 'tss_hint_power' : source === 'hr' ? 'tss_hint_hr' : 'tss_hint_estimated'
+  return t(`strava.${key}`)
+}
+
 function activityIcon(type) {
   const t = (type || '').toLowerCase()
   if (t.includes('run')) return 'fa-person-running'
@@ -136,13 +141,24 @@ function activityIcon(type) {
                 </small>
               </div>
             </div>
-            <div class="text-end">
-              <div class="fw-semibold">
-                <i class="fa-solid fa-route me-1 text-warning" aria-hidden="true"></i>{{ formatDistance(activity.distance) }}
+            <div class="d-flex align-items-center gap-3">
+              <span
+                v-if="activity.tss != null"
+                class="tss-badge"
+                :class="`tss-badge--${activity.tss_source || 'estimated'}`"
+                :title="tssHint(activity.tss_source)"
+              >
+                <span class="tss-value">{{ Math.round(activity.tss) }}</span>
+                <span class="tss-unit">{{ t('strava.tss_label') }}</span>
+              </span>
+              <div class="text-end">
+                <div class="fw-semibold">
+                  <i class="fa-solid fa-route me-1 text-warning" aria-hidden="true"></i>{{ formatDistance(activity.distance) }}
+                </div>
+                <small class="text-muted">
+                  <i class="fa-regular fa-clock me-1" aria-hidden="true"></i>{{ formatDuration(activity.moving_time) }}
+                </small>
               </div>
-              <small class="text-muted">
-                <i class="fa-regular fa-clock me-1" aria-hidden="true"></i>{{ formatDuration(activity.moving_time) }}
-              </small>
             </div>
           </a>
         </li>

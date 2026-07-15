@@ -140,6 +140,12 @@ fr:
       no_data: "Pas encore assez d'activités pour tracer ta charge d'entraînement."
       widget:
         see_analysis: "Voir l'analyse"
+        sync: "Mettre à jour"
+        syncing: "Mise à jour…"
+        sync_hint: "Synchroniser les nouvelles activités Strava et recalculer la reco du jour"
+        sync_done: "Reco à jour"
+        sync_new: "%{count} nouvelle(s) sortie(s) prise(s) en compte"
+        sync_error: "Échec de la mise à jour"
       reco:
         title: "Que faire aujourd'hui ?"
         goal_label: "Ton objectif"
@@ -275,6 +281,10 @@ fr:
     not_linked: "Liez votre compte Strava pour voir vos activités."
     refresh: "Rafraîchir"
     refreshing: "Rafraîchissement…"
+    tss_label: "TSS"
+    tss_hint_power: "Charge d'entraînement (TSS) calculée depuis la puissance — la plus fiable."
+    tss_hint_hr: "Charge d'entraînement (TSS) estimée depuis la fréquence cardiaque."
+    tss_hint_estimated: "Charge d'entraînement (TSS) estimée depuis la durée et l'intensité typique du sport — moins précise."
     last_updated: "Mis à jour à"
     backfill_title: "Historique détaillé"
     backfill_help: "Télécharge les données détaillées (puissance, fréquence cardiaque, altitude…) de toutes vos activités pour l'analyse. Peut prendre un moment : Strava limite le nombre de requêtes."

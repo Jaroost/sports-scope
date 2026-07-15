@@ -158,6 +158,12 @@ function formatDuration(seconds) {
   return h > 0 ? `${h}h ${m}min` : (m > 0 ? `${m}min ${s}s` : `${s}s`)
 }
 
+// Aide de la pilule TSS selon la source du calcul (puissance / FC / estimation).
+function tssHint(source) {
+  const key = source === 'power' ? 'tss_hint_power' : source === 'hr' ? 'tss_hint_hr' : 'tss_hint_estimated'
+  return t(`strava.${key}`)
+}
+
 // Valeur par défaut proposée dans la modale « créer un itinéraire depuis l'activité » :
 // nombre de points max après simplification. Plus de points = re-routage BRouter plus
 // fidèle à la trace d'origine ; 100 reste sous les limites pratiques de BRouter.
@@ -907,6 +913,15 @@ onBeforeUnmount(() => {
             <i class="fa-solid fa-fire" aria-hidden="true"></i>
             <span>{{ Math.round(activity.calories) }} kcal</span>
           </span>
+          <span
+            v-if="activity.tss != null"
+            class="activity-tss-pill d-inline-flex align-items-center gap-1"
+            :class="`activity-tss-pill--${activity.tss_source || 'estimated'}`"
+            :title="tssHint(activity.tss_source)"
+          >
+            <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
+            <span>{{ Math.round(activity.tss) }} {{ t('strava.tss_label') }}</span>
+          </span>
         </div>
       </div>
       <button
@@ -1033,6 +1048,23 @@ onBeforeUnmount(() => {
   padding: 0.1rem 0.55rem;
   border-radius: 999px;
   font-weight: 600;
+}
+/* Charge d'entraînement (TSS) — couleur selon la source : puissance (vert,
+   fiable), FC (rouge), estimation (gris, moins précis). */
+.activity-tss-pill {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-weight: 600;
+  background: rgba(108, 117, 125, 0.15);
+  color: #6c757d;
+}
+.activity-tss-pill--power {
+  background: rgba(25, 135, 84, 0.14);
+  color: #198754;
+}
+.activity-tss-pill--hr {
+  background: rgba(220, 53, 69, 0.12);
+  color: #b02a37;
 }
 .activity-map {
   height: 520px;

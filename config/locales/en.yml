@@ -140,6 +140,12 @@ en:
       no_data: "Not enough activities yet to chart your training load."
       widget:
         see_analysis: "See analysis"
+        sync: "Update"
+        syncing: "Updating…"
+        sync_hint: "Sync new Strava activities and recompute today's recommendation"
+        sync_done: "Recommendation up to date"
+        sync_new: "%{count} new activity(ies) taken into account"
+        sync_error: "Update failed"
       reco:
         title: "What to do today?"
         goal_label: "Your goal"
@@ -275,6 +281,10 @@ en:
     not_linked: "Connect your Strava account to see your activities."
     refresh: "Refresh"
     refreshing: "Refreshing…"
+    tss_label: "TSS"
+    tss_hint_power: "Training load (TSS) from power — most reliable."
+    tss_hint_hr: "Training load (TSS) estimated from heart rate."
+    tss_hint_estimated: "Training load (TSS) estimated from duration and the sport's typical intensity — less precise."
     last_updated: "Updated at"
     backfill_title: "Detailed history"
     backfill_help: "Downloads the detailed data (power, heart rate, elevation…) of all your activities for analysis. May take a while: Strava rate-limits requests."

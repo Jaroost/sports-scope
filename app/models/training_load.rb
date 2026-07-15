@@ -106,6 +106,36 @@ module TrainingLoad
     }
   end
 
+  # TSS par activité, indexé par [source, external_id], pour toutes les sorties de
+  # l'utilisateur — sert à afficher la charge de chaque séance (tableau de bord).
+  # Réutilise les mêmes résolveurs de seuils que la charge d'entraînement (FTP
+  # variable dans le temps, LTHR) et ne charge jamais les streams (colonnes de
+  # résumé + NP, comme `summary`). Renvoie {} si aucune activité.
+  def tss_by_activity(user)
+    rows = load_rows(user)
+    return {} if rows.empty?
+
+    ftp_at = build_ftp_resolver(user)
+    lthr_value = lthr(user, rows)[:value]
+    rows.each_with_object({}) do |row, acc|
+      date = parse_date(row['started_at'])
+      next unless date
+
+      res = activity_tss(row, ftp: ftp_at.call(date), lthr: lthr_value)
+      next unless res
+
+      acc[[row['source'], row['external_id'].to_s]] = { tss: res[:tss], source: res[:source] }
+    end
+  end
+
+  # TSS d'UNE activité (page de détail). Renvoie { tss:, source: } ou nil. Passe
+  # par `tss_by_activity` (une passe sur toutes les sorties) car les seuils
+  # dépendent de l'historique complet (FTP glissante, auto-LTHR) : le coût est le
+  # même que pour une seule activité.
+  def tss_for(user, source, external_id)
+    tss_by_activity(user)[[source, external_id.to_s]]
+  end
+
   # ── TSS d'une activité (cascade puissance → FC → estimation) ─────────────────
   def activity_tss(row, ftp:, lthr:)
     secs = row['moving_time_s'].to_i

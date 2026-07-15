@@ -8,7 +8,10 @@ class ImportedActivitiesController < ApplicationController
   # GET /api/imported_activities
   def index
     activities = current_user.imported_activities.order(started_at: :desc).limit(100)
-    render json: { activities: activities.map { |a| summary_json(a) } }
+    # TSS par sortie (charge d'entraînement) calculé en une passe, mêmes seuils que
+    # la charge d'entraînement (FTP variable, LTHR).
+    tss_map = TrainingLoad.tss_by_activity(current_user)
+    render json: { activities: activities.map { |a| summary_json(a, tss: tss_map[['imported', a.id.to_s]]) } }
   end
 
   # GET /api/imported_activities/:id
@@ -16,7 +19,7 @@ class ImportedActivitiesController < ApplicationController
     activity = current_user.imported_activities.find_by(id: params[:id])
     return head :not_found unless activity
 
-    render json: { activity: summary_json(activity) }
+    render json: { activity: summary_json(activity, tss: TrainingLoad.tss_for(current_user, 'imported', activity.id)) }
   end
 
   # GET /api/imported_activities/:id/streams
@@ -67,10 +70,12 @@ class ImportedActivitiesController < ApplicationController
 
   private
 
-  def summary_json(a)
+  def summary_json(a, tss: nil)
     {
       id: a.id,
       source: a.source,
+      tss: tss&.dig(:tss),
+      tss_source: tss&.dig(:source),
       filename: a.filename,
       name: a.name,
       type: a.activity_type,

@@ -17,10 +17,13 @@ class StravaController < ApplicationController
     end
 
     records = current_user.strava_activities.order(started_at: :desc).limit(ACTIVITIES_LIMIT)
+    # TSS par sortie (charge d'entraînement) calculé en une passe, mêmes seuils que
+    # la charge d'entraînement (FTP variable, LTHR).
+    tss_map = TrainingLoad.tss_by_activity(current_user)
     render json: {
       cached_at: current_user.strava_activities.maximum(:updated_at)&.iso8601,
       total: current_user.strava_activities.count,
-      activities: records.map { |a| summary_json(a) }
+      activities: records.map { |a| summary_json(a, tss: tss_map[['strava', a.strava_id.to_s]]) }
     }
   rescue StravaSyncService::StravaApiError => e
     render json: { error: e.message }, status: :bad_gateway
@@ -29,8 +32,12 @@ class StravaController < ApplicationController
   # POST /strava/sync — force a (re)synchronisation of activity summaries.
   # `?full=1` re-paginates the whole history; otherwise it's incremental.
   def sync
+    before = current_user.strava_activities.count
     count = StravaSyncService.new(current_user).call(full: params[:full].present?)
-    render json: { synced: count, total: current_user.strava_activities.count }
+    total = current_user.strava_activities.count
+    # `synced` compte aussi le ré-upsert de l'activité de chevauchement (OVERLAP) ;
+    # `created` = vraies nouvelles activités (diff du total), fiable pour l'UI.
+    render json: { synced: count, created: [total - before, 0].max, total: total }
   rescue StravaSyncService::StravaApiError => e
     render json: { error: e.message }, status: :bad_gateway
   end
@@ -45,7 +52,9 @@ class StravaController < ApplicationController
       { cached_at: Time.current.iso8601, activity: activity }
     end
 
-    render json: payload
+    # TSS ajouté hors cache : il dépend de seuils modifiables (FTP, LTHR) et se
+    # recalcule à chaque lecture, contrairement au résumé Strava mis en cache.
+    render json: with_activity_tss(payload, 'strava', id)
   rescue StravaApiError => e
     status = e.status == 404 ? :not_found : :bad_gateway
     render json: { error: e.message }, status: status
@@ -172,10 +181,24 @@ class StravaController < ApplicationController
   # Serialized form consumed by the frontend. We return the stored Strava
   # summary verbatim (`raw`) so list/detail views keep full field parity with
   # the live API; older rows without `raw` fall back to a built hash.
-  def summary_json(a)
+  def summary_json(a, tss: nil)
     raw = a.raw.is_a?(Hash) ? a.raw : {}
-    return raw if raw.present?
+    base = raw.present? ? raw : built_summary(a)
+    # TSS ajouté au vol (non persisté) : dépend de seuils modifiables, se recalcule
+    # à chaque lecture. Absent si l'activité n'a pas pu être notée.
+    tss ? base.merge('tss' => tss[:tss], 'tss_source' => tss[:source]) : base
+  end
 
+  # Ajoute `tss`/`tss_source` à l'activité d'un payload `{ activity: {...} }` sans
+  # muter le hash mis en cache (merge = nouveaux hashes). No-op si non notable.
+  def with_activity_tss(payload, source, external_id)
+    tss = TrainingLoad.tss_for(current_user, source, external_id)
+    return payload unless tss
+
+    payload.merge(activity: payload[:activity].merge('tss' => tss[:tss], 'tss_source' => tss[:source]))
+  end
+
+  def built_summary(a)
     {
       'id' => a.strava_id,
       'name' => a.name,

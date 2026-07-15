@@ -121,12 +121,28 @@ function isoDate(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 }
 
+// Lundi (00:00 locale) de la semaine contenant `d` — semaines ISO lundi→dimanche.
+function mondayOf(d: Date): Date {
+  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const dow = (date.getDay() + 6) % 7 // 0 = lundi
+  date.setDate(date.getDate() - dow)
+  return date
+}
+function addDays(d: Date, n: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+}
+
 // Renvoie l'intervalle [from, to] (dates locales) correspondant à un raccourci.
 function datePresetRange(preset: string): [Date, Date] | null {
   const now = new Date()
   const y = now.getFullYear()
   const m = now.getMonth()
+  const monday = mondayOf(now)
   switch (preset) {
+    case 'current_week':
+      return [monday, addDays(monday, 6)]
+    case 'previous_week':
+      return [addDays(monday, -7), addDays(monday, -1)]
     case 'current_year':
       return [new Date(y, 0, 1), new Date(y, 11, 31)]
     case 'current_month':
@@ -140,7 +156,7 @@ function datePresetRange(preset: string): [Date, Date] | null {
   }
 }
 
-const datePresets = ['current_year', 'current_month', 'previous_year', 'previous_month']
+const datePresets = ['current_week', 'previous_week', 'current_month', 'previous_month', 'current_year', 'previous_year']
 
 function setDatePreset(preset: string) {
   const range = datePresetRange(preset)

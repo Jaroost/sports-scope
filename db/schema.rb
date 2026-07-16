@@ -10,9 +10,10 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_15_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_16_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+  enable_extension "pg_trgm"
 
   create_table "bikes", force: :cascade do |t|
     t.datetime "created_at", null: false
@@ -122,6 +123,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_15_000001) do
     t.float "elevation_gain_m"
     t.float "elevation_loss_m"
     t.jsonb "geometry", default: [], null: false
+    t.jsonb "localities", default: [], null: false
     t.jsonb "map_polyline"
     t.string "name", null: false
     t.jsonb "pois", default: [], null: false
@@ -132,6 +134,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_15_000001) do
     t.bigint "user_id", null: false
     t.jsonb "voice_hints", default: [], null: false
     t.jsonb "waypoints", default: [], null: false
+    t.index "((localities)::text) gin_trgm_ops", name: "index_routes_on_localities_trgm", using: :gin
+    t.index ["name"], name: "index_routes_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
     t.index ["share_token"], name: "index_routes_on_share_token", unique: true
     t.index ["user_id", "updated_at"], name: "index_routes_on_user_id_and_updated_at"
     t.index ["user_id"], name: "index_routes_on_user_id"

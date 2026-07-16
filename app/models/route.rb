@@ -19,6 +19,12 @@ class Route < ApplicationRecord
   # géométrie change (création, édition, import GPX, duplication).
   before_save :assign_geometry_derivatives, if: :will_save_change_to_geometry?
 
+  # Lieux traversés (`localities`) : extraits d'Overpass en tâche de fond à chaque
+  # changement de tracé, pour la recherche par lieu dans la liste. after_commit —
+  # le job doit voir la géométrie enregistrée, et ne pas partir si la transaction
+  # est annulée.
+  after_commit :extract_localities_later, on: %i[create update], if: :saved_change_to_geometry?
+
   # Côté SVG rendu : viewBox carré `0 0 100 100`. Le tracé est projeté, mis à
   # l'échelle pour tenir dans la boîte (avec marge), et centré.
   PREVIEW_SIZE = 100.0
@@ -142,5 +148,9 @@ class Route < ApplicationRecord
   def assign_geometry_derivatives
     self.preview_segments = self.class.build_preview_segments(geometry)
     self.map_polyline = self.class.build_map_polyline(geometry)
+  end
+
+  def extract_localities_later
+    ExtractRouteLocalitiesJob.perform_later(id)
   end
 end

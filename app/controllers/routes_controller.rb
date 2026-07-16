@@ -262,7 +262,13 @@ class RoutesController < ApplicationController
     scope = current_user.routes
     if params[:q].present?
       needle = Route.sanitize_sql_like(params[:q].to_s.first(MAX_NAME_LEN))
-      scope = scope.where("routes.name ILIKE ?", "%#{needle}%")
+      # La recherche porte sur le nom ET les lieux traversés (« passe par Gruyères »).
+      # `localities::text` cherche dans le rendu texte du tableau jsonb — c'est cette
+      # expression exacte qui porte l'index GIN trigram (cf. migration).
+      scope = scope.where(
+        "routes.name ILIKE :q OR routes.localities::text ILIKE :q",
+        q: "%#{needle}%",
+      )
     end
     scope = scope.where(activity: params[:sport]) if params[:sport].present?
     scope = scope.where(routes: { distance_m: (params[:min_dist].to_f * 1000).. }) if params[:min_dist].present?

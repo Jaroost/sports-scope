@@ -540,8 +540,8 @@ en:
     view_map: "Map"
     filters:
       toggle: "Filter"
-      search: "Name"
-      search_placeholder: "Search a route…"
+      search: "Name or place"
+      search_placeholder: "Name, town, village…"
       sport: "Type"
       all_sports: "All types"
       distance: "Distance (km)"

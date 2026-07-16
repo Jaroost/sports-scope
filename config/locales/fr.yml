@@ -540,8 +540,8 @@ fr:
     view_map: "Carte"
     filters:
       toggle: "Filtrer"
-      search: "Nom"
-      search_placeholder: "Rechercher un itinéraire…"
+      search: "Nom ou lieu"
+      search_placeholder: "Nom, ville, village…"
       sport: "Type"
       all_sports: "Tous les types"
       distance: "Distance (km)"

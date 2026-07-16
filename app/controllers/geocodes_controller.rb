@@ -68,20 +68,9 @@ class GeocodesController < ApplicationController
       out center;
     OVERPASS
 
-    uri = URI("https://overpass-api.de/api/interpreter")
-    response = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: 5, read_timeout: 30) do |http|
-      req = Net::HTTP::Post.new(uri)
-      req["User-Agent"] = "SportsScope/1.0 (#{request.host})"
-      req.set_form_data("data" => query)
-      http.request(req)
-    end
+    elements = OverpassClient.elements(query, host: request.host)
 
-    # Overpass injoignable / en erreur : on signale un vrai échec (≠ « aucun lieu »)
-    # pour que le front affiche le message d'erreur + bouton réessayer.
-    return render json: { error: "places_unavailable" }, status: :bad_gateway unless response.is_a?(Net::HTTPSuccess)
-
-    data = JSON.parse(response.body)
-    places = data["elements"].filter_map do |el|
+    places = elements.filter_map do |el|
       tags = el["tags"] || {}
       # Ways return a "center" object; nodes have lat/lon at the top level
       lat = el["lat"] || el.dig("center", "lat")
@@ -98,15 +87,12 @@ class GeocodesController < ApplicationController
     end
 
     render json: places
-  # Overpass est un service externe : tout échec réseau (timeout, connexion
-  # refusée, réseau injoignable, DNS, TLS…) ou réponse illisible est un vrai
-  # échec de chargement (≠ « aucun lieu »). On renvoie un statut non-2xx pour
-  # que le front affiche le message d'erreur + bouton réessayer, sans remonter
-  # un 500 (l'échec d'un service externe best-effort n'est pas une erreur serveur).
-  # SystemCallError couvre les Errno::* (ENETUNREACH, ECONNREFUSED, EHOSTUNREACH…).
-  rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, SystemCallError,
-         OpenSSL::SSL::SSLError, JSON::ParserError => e
-    Rails.logger.warn("GeocodesController#places: #{e.class}: #{e.message}")
+  # Overpass injoignable / en erreur (réseau, non-2xx, corps illisible) : c'est un
+  # vrai échec de chargement (≠ « aucun lieu »). On renvoie un statut non-2xx pour
+  # que le front affiche le message d'erreur + bouton réessayer, sans remonter un
+  # 500 (l'échec d'un service externe best-effort n'est pas une erreur serveur).
+  rescue OverpassClient::Error => e
+    Rails.logger.warn("GeocodesController#places: #{e.message}")
     render json: { error: "places_unavailable" }, status: :bad_gateway
   rescue => e
     Rails.logger.error("GeocodesController#places: #{e.class}: #{e.message}")

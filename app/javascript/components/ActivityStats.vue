@@ -100,7 +100,7 @@ function toggleCollapsed() { emit('update:collapsed', !props.collapsed) }
       </button>
     </div>
     <div v-if="!collapsed" class="card-body">
-      <!-- Top-line stats: temps roulé / arrêts / VAM globale -->
+      <!-- Top-line stats: temps actif / arrêts / VAM globale -->
       <div v-if="movingStats || globalVam != null" class="row g-3 mb-3 stats-pills-row">
         <div v-if="movingStats" class="col-6 col-md-3">
           <div class="stat-card">

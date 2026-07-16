@@ -10,8 +10,9 @@ import {
   formatDuration,
   formatHMS,
   formatKm,
-  downsample,
+  downsampleIndices,
   detectPauses,
+  detectRecordingGaps,
   computeElevGain,
   GRADE_BUCKETS,
   bucketGrade,
@@ -214,10 +215,20 @@ function rangeDistance() {
   return Math.max(0, d1 - d0)
 }
 
+// Une activité sans GPS (squash, tapis, muscu…) peut malgré tout porter un stream
+// `altitude` barométrique : il ne mesure alors que la dérive de pression, pas un
+// déplacement. D+, D- et VAM en tireraient des valeurs inventées — on les masque.
+const hasGps = computed(() => {
+  const ll = props.streams?.latlng?.data
+  if (Array.isArray(ll) && ll.length > 0) return true
+  const dist = props.streams?.distance?.data
+  return Array.isArray(dist) && dist.length > 0 && dist[dist.length - 1] > 0
+})
+
 const rangeElevation = computed(() => {
   const b = rangeBounds()
   const alt = props.streams?.altitude?.data
-  if (!b || !alt || alt.length < 2) return null
+  if (!hasGps.value || !b || !alt || alt.length < 2) return null
   const start = Math.max(b.startIdx, 0)
   const end = Math.min(b.endIdx, alt.length - 1)
 
@@ -242,7 +253,7 @@ function rangeVam() {
   const b = rangeBounds()
   const dur = rangeDuration()
   const alt = props.streams?.altitude?.data
-  if (!b || !dur || dur <= 0 || !Array.isArray(alt) || alt.length < 2) return null
+  if (!hasGps.value || !b || !dur || dur <= 0 || !Array.isArray(alt) || alt.length < 2) return null
   const a0 = alt[Math.min(b.startIdx, alt.length - 1)]
   const a1 = alt[Math.min(b.endIdx, alt.length - 1)]
   if (typeof a0 !== 'number' || typeof a1 !== 'number') return null
@@ -400,46 +411,38 @@ const gradeFillPlugin = {
 }
 
 // ─── Pauses ───────────────────────────────────────────────────────────────
-// Une pause n'est visible dans les données que comme un trou du flux `time` (cf.
-// detectPauses). Sans traitement, Chart.js relie les deux bords du trou par une droite
-// interpolée : à l'écran, un arrêt de dix minutes ressemble à un plateau de vraies
-// mesures. On casse donc la ligne (injectPauseGaps) ET on peint la zone, car la coupure
-// seule dirait « données manquantes » là où il faut lire « tu t'es arrêté ici ».
+// Deux traitements, pour deux notions distinctes (cf. detectPauses / detectRecordingGaps) :
+//
+//   • Le TROU d'enregistrement casse la courbe. Sans ça Chart.js relie ses deux bords par
+//     une droite interpolée, et un arrêt de dix minutes ressemble à un plateau de vraies
+//     mesures. La coupure se fait en insérant un point `y: null` (spanGaps est faux par
+//     défaut), placé PAR INDEX : à l'arrêt la distance ne bouge pas, donc une dizaine
+//     d'échantillons partagent le même x et un repérage par valeur d'axe dérape.
+//   • La PAUSE peint la bande hachurée. Elle englobe le trou et déborde sur les
+//     échantillons immobiles alentour, qui eux existent — la couper serait creuser un vide
+//     là où la donnée est présente. La coupure seule dirait d'ailleurs « données
+//     manquantes » là où il faut lire « tu t'es arrêté ici ».
 const PAUSE_LABEL_MIN_PX = 46
 const PAUSE_HATCH_STEP_PX = 8
-
-// Coupe la ligne au milieu de chaque pause en y insérant un point à `y: null` : Chart.js
-// n'a plus rien à relier (`spanGaps` est faux par défaut). L'insertion se fait APRÈS le
-// sous-échantillonnage — un `null` glissé avant aurait toutes les chances d'être jeté par
-// `downsample`. `colors` (les couleurs de pente, indexées sur les points) suit la même
-// insertion, sans quoi $gradeColors se décalerait d'un cran à chaque pause.
-function injectPauseGaps(data, colors, spans) {
-  if (spans.length === 0 || data.length === 0) return { data, colors }
-  const outData = []
-  const outColors = colors ? [] : null
-  let si = 0
-  for (let i = 0; i < data.length; i++) {
-    // Aucun échantillon ne tombe entre x0 et x1 (le trou est par définition entre deux
-    // points consécutifs) : le `null` reste donc bien ordonné en x.
-    while (si < spans.length && spans[si].x1 <= data[i].x) {
-      outData.push({ x: (spans[si].x0 + spans[si].x1) / 2, y: null })
-      outColors?.push(null)
-      si++
-    }
-    outData.push(data[i])
-    outColors?.push(colors ? colors[i] : null)
-  }
-  return { data: outData, colors: outColors }
-}
+// Sur l'axe distance, une pause n'avance par définition d'aucun mètre : sa bande serait
+// large de zéro pixel, donc invisible. On lui garantit une largeur minimale — à cette
+// taille c'est un repère plutôt qu'une étendue, mais un arrêt de trois minutes mérite mieux
+// que rien. Sur l'axe temps les bandes sont bien plus larges : ce plancher n'y joue jamais.
+const PAUSE_MIN_BAND_PX = 3
 
 function pauseSpanPixels(chart, span) {
   const xScale = chart.scales.x
   const area = chart.chartArea
   const p0 = xScale.getPixelForValue(span.x0)
   const p1 = xScale.getPixelForValue(span.x1)
-  const lo = Math.max(area.left, Math.min(p0, p1))
-  const hi = Math.min(area.right, Math.max(p0, p1))
-  return { lo, hi }
+  let lo = Math.min(p0, p1)
+  let hi = Math.max(p0, p1)
+  if (hi - lo < PAUSE_MIN_BAND_PX) {
+    const mid = (lo + hi) / 2
+    lo = mid - PAUSE_MIN_BAND_PX / 2
+    hi = mid + PAUSE_MIN_BAND_PX / 2
+  }
+  return { lo: Math.max(area.left, lo), hi: Math.min(area.right, hi) }
 }
 
 const pauseBandPlugin = {
@@ -652,17 +655,26 @@ async function renderCharts() {
   xMinAll = xRaw.length > 0 ? chartXFromRaw(xRaw[0]) : 0
   xMaxAll = xRaw.length > 0 ? chartXFromRaw(xRaw[xRaw.length - 1]) : 0
 
-  // Les pauses sont détectées sur `time`, mais projetées sur l'axe réellement tracé : les
-  // flux sont indexés par échantillon, donc `xRaw[idx]` donne la position de la pause quel
-  // que soit `xKey`. Sur l'axe distance une pause s'écrase sur un seul X (la distance
-  // n'avance pas) — la bande y est invisible, et c'est correct.
-  const pauseSpans = detectPauses(props.streams.time?.data)
+  // Pauses et trous sont détectés sur `time`, mais projetés sur l'axe réellement tracé :
+  // les flux sont indexés par échantillon, donc `xRaw[idx]` donne la position quel que soit
+  // `xKey`. Sur l'axe distance une pause s'écrase sur un seul X (la distance n'avance pas) ;
+  // PAUSE_MIN_BAND_PX lui garde alors une largeur minimale à l'écran.
+  const gapSegments = detectRecordingGaps(props.streams.time?.data)
+    .filter((g) => xRaw[g.startIdx] != null && xRaw[g.endIdx] != null)
+  const pauseSpans = detectPauses(props.streams.time?.data, props.streams.moving?.data)
     .filter((p) => xRaw[p.startIdx] != null && xRaw[p.endIdx] != null)
     .map((p) => ({
       x0: chartXFromRaw(xRaw[p.startIdx]),
       x1: chartXFromRaw(xRaw[p.endIdx]),
       durationSec: p.durationSec,
     }))
+  // Indice d'échantillon → x du `null` de coupure à insérer juste après lui. Le repérage
+  // par index (et non par valeur d'axe) est ce qui garde la coupure collée au trou réel.
+  const gapNullAfter = new Map(gapSegments.map((g) => [
+    g.startIdx,
+    (chartXFromRaw(xRaw[g.startIdx]) + chartXFromRaw(xRaw[g.endIdx])) / 2,
+  ]))
+  const gapEdges = gapSegments.flatMap((g) => [g.startIdx, g.endIdx])
 
   groups.forEach((group) => {
     if (group.collapsed) return
@@ -681,35 +693,36 @@ async function renderCharts() {
         : `${t('strava.stream.' + def.key)} (${def.unit})`
       const yRaw = props.streams[streamKey].data
       const len = Math.min(xRaw.length, yRaw.length)
-      const pairs = []
-      for (let i = 0; i < len; i++) {
-        pairs.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(yRaw[i]) })
-      }
-      const sampled = downsample(pairs, maxPoints)
 
-      // Coloration par pente du profil d'altitude (« couleur des tracés »). On calcule une
-      // couleur par échantillon puis on sous-échantillonne AVEC LE MÊME `maxPoints` que les
-      // points : les deux tableaux partent de la même longueur, donc `downsample` garde des
-      // indices alignés. `$gradeColors` est lu par gradeFillPlugin (remplissage) et par
-      // `segment.borderColor` (couleur de la ligne).
+      // Coloration par pente du profil d'altitude (« couleur des tracés »), une couleur par
+      // échantillon. Lue par gradeFillPlugin (remplissage) et par `segment.borderColor`
+      // (couleur de la ligne), toutes deux indexées sur les points du dataset.
       const gradeAltitude = props.showGrade && streamKey === 'altitude'
-      let gradeColors = null
+      let rawColors = null
       if (gradeAltitude) {
         const gradeData = props.streams.grade_smooth?.data
         const altData = props.streams.altitude?.data
         const distData = props.streams.distance?.data
-        const colors = new Array(len)
+        rawColors = new Array(len)
         for (let i = 0; i < len; i++) {
           const g = gradeForIndex(Math.min(i, len - 1), gradeData, altData, distData)
-          colors[i] = GRADE_BUCKETS[bucketGrade(g)].color
+          rawColors[i] = GRADE_BUCKETS[bucketGrade(g)].color
         }
-        gradeColors = downsample(colors, maxPoints)
       }
 
-      // Coupe la ligne sur les pauses, en gardant `data` et `gradeColors` alignés.
-      const withGaps = injectPauseGaps(sampled, gradeColors, pauseSpans)
-      const data = withGaps.data
-      gradeColors = withGaps.colors
+      // Points et couleurs sont construits dans la MÊME passe sur les indices retenus, et
+      // reçoivent le `null` de coupure au même rang : c'est ce qui les garde alignés.
+      const data = []
+      const gradeColors = rawColors ? [] : null
+      for (const i of downsampleIndices(len, maxPoints, gapEdges)) {
+        data.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(yRaw[i]) })
+        gradeColors?.push(rawColors[i])
+        const nullX = gapNullAfter.get(i)
+        if (nullX !== undefined) {
+          data.push({ x: nullX, y: null })
+          gradeColors?.push(null)
+        }
+      }
 
       return {
         label,

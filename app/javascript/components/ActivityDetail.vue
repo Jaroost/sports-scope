@@ -118,20 +118,33 @@ const movingStats = computed(() => {
   let stopped = Math.max(0, elapsed - moving)
   // Quand le capteur coupe l'enregistrement au lieu de marquer `moving: false`, le
   // résumé Strava renvoie moving_time == elapsed_time et `stopped` vaut 0 à tort. Les
-  // trous du flux `time` sont alors la seule mesure des arrêts (cf. detectPauses). On
-  // recale `moving` sur ce qui reste, pour que moving + stopped == elapsed reste vrai.
+  // streams sont alors la seule mesure des arrêts (cf. detectPauses). On recale `moving`
+  // sur ce qui reste, pour que moving + stopped == elapsed reste vrai.
   if (stopped <= 0) {
-    const gaps = totalPausedSeconds(detectPauses(streams.value?.time?.data))
-    if (gaps > 0) stopped = Math.min(gaps, elapsed)
+    const detected = totalPausedSeconds(
+      detectPauses(streams.value?.time?.data, streams.value?.moving?.data),
+    )
+    if (detected > 0) stopped = Math.min(detected, elapsed)
   }
   const stopPct = elapsed > 0 ? (stopped / elapsed) * 100 : 0
   return { elapsed, moving: Math.max(0, elapsed - stopped), stopped, stopPct }
+})
+
+// Une activité sans GPS (squash, tapis, muscu…) n'a pas de déplacement à mesurer :
+// son éventuel stream `altitude` n'est que la dérive du baromètre. La VAM globale
+// n'a alors aucun sens — même garde que les pastilles D+/D-/VAM d'ActivityCharts.
+const hasGps = computed(() => {
+  const ll = streams.value?.latlng?.data
+  if (Array.isArray(ll) && ll.length > 0) return true
+  const dist = streams.value?.distance?.data
+  return Array.isArray(dist) && dist.length > 0 && dist[dist.length - 1] > 0
 })
 
 // Global VAM (m/h). Falls back to elapsed_time when moving_time is missing.
 const globalVam = computed(() => {
   const gain = activity.value?.total_elevation_gain
   const denomS = movingStats.value?.moving ?? activity.value?.elapsed_time
+  if (!hasGps.value) return null
   if (!Number.isFinite(gain) || gain <= 0 || !Number.isFinite(denomS) || denomS <= 0) return null
   return (gain / denomS) * 3600
 })

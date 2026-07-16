@@ -169,40 +169,94 @@ export function computeElevGain(alts: (number | null)[], halfWin = 2): { gain: n
   return { gain: up, loss: down }
 }
 
-// ─── Pauses (trous du flux `time`) ────────────────────────────────────────
-// Tous les capteurs ne signalent pas un arrêt dans le flux `moving` : beaucoup coupent
-// simplement l'enregistrement. Le flux `time` devient alors creux et la pause n'est plus
-// qu'un trou entre deux échantillons — c'est le seul signal disponible. Sur l'activité
-// Strava 19313900233 (home-trainer) `moving` est `true` de bout en bout et
-// `moving_time == elapsed_time`, alors que `time` compte 2770 échantillons pour 8394 s.
+// ─── Pauses ───────────────────────────────────────────────────────────────
+// Un arrêt se lit dans DEUX signaux, et aucun des deux ne suffit seul :
 //
-// Le seuil est relatif à la cadence d'échantillonnage réelle (médiane) : un enregistrement
-// à 4 s d'intervalle ne doit pas voir une pause à chaque point. Le plancher absolu écarte
-// les micro-coupures : sur un flux à 1 Hz, une dizaine de secondes manquantes relève du
-// décrochage capteur plus que de l'arrêt, et ne mérite pas de casser la courbe.
-const PAUSE_MIN_GAP_S = 30
-const PAUSE_STEP_FACTOR = 3
+//   • Le capteur coupe l'enregistrement — le flux `time` devient creux et l'arrêt n'est
+//     qu'un trou entre deux échantillons. Sur l'activité Strava 19313900233 (home-trainer),
+//     `moving` est `true` de bout en bout et `moving_time == elapsed_time` : les trous sont
+//     la seule trace des 47 min d'arrêt.
+//   • Le capteur enregistre mais marque l'échantillon immobile (`moving: false`). Sur la
+//     marche 18930174882, les trous ne pèsent que 28 min quand Strava en compte 108.
+//
+// D'où l'union : un intervalle est à l'arrêt si l'enregistrement a été coupé OU si le point
+// est marqué immobile. Les intervalles consécutifs forment un seul run — ce qui fusionne au
+// passage les pauses qui ne « reprennent » pas vraiment entre elles : sur 18930174882 la
+// montre réenregistre parfois un unique point immobile entre deux trous, qu'on lisait à tort
+// comme deux pauses distinctes.
+//
+// PAUSE_GAP_STEP_FACTOR rend le seuil de trou relatif à la cadence réelle (médiane) : un
+// enregistrement à 5 s d'intervalle ne doit pas voir un trou à chaque point. PAUSE_GAP_MIN_S
+// écarte l'inverse — sur du 1 Hz, quelques secondes manquantes relèvent du décrochage
+// capteur. PAUSE_MIN_S écarte enfin les arrêts trop brefs pour valoir une bande à l'écran.
+const PAUSE_GAP_MIN_S = 30
+const PAUSE_GAP_STEP_FACTOR = 3
+const PAUSE_MIN_S = 30
 
-export function detectPauses(
-  time: (number | null)[] | null | undefined,
-  minGapS = PAUSE_MIN_GAP_S,
-): PauseSegment[] {
-  if (!Array.isArray(time) || time.length < 3) return []
+// Écart au-delà duquel deux échantillons consécutifs ne sont plus séparés par du jitter
+// mais par une coupure d'enregistrement.
+function samplingGapThreshold(time: (number | null)[]): number | null {
   const steps: number[] = []
   for (let i = 1; i < time.length; i++) {
     const dt = (time[i] as number) - (time[i - 1] as number)
     if (Number.isFinite(dt) && dt > 0) steps.push(dt)
   }
-  if (steps.length === 0) return []
+  if (steps.length === 0) return null
   const median = [...steps].sort((a, b) => a - b)[steps.length >> 1]
-  const threshold = Math.max(minGapS, median * PAUSE_STEP_FACTOR)
+  return Math.max(PAUSE_GAP_MIN_S, median * PAUSE_GAP_STEP_FACTOR)
+}
+
+// Trous d'enregistrement : les intervalles où le capteur n'a rien écrit du tout. À ne pas
+// confondre avec les pauses de `detectPauses`, qui les englobent : une pause fusionnée
+// contient le plus souvent de vrais échantillons (immobiles, mais enregistrés). Seul un
+// trou justifie de couper une courbe — la couper sur toute la pause creuserait un vide là
+// où la donnée existe, et désordonnerait l'axe X.
+export function detectRecordingGaps(time: (number | null)[] | null | undefined): PauseSegment[] {
+  if (!Array.isArray(time) || time.length < 3) return []
+  const threshold = samplingGapThreshold(time)
+  if (threshold == null) return []
   const out: PauseSegment[] = []
   for (let i = 1; i < time.length; i++) {
-    const t0 = time[i - 1] as number
-    const t1 = time[i] as number
-    const dt = t1 - t0
-    if (!Number.isFinite(dt) || dt < threshold) continue
-    out.push({ startIdx: i - 1, endIdx: i, startSec: t0, endSec: t1, durationSec: dt })
+    const startSec = time[i - 1] as number
+    const endSec = time[i] as number
+    const durationSec = endSec - startSec
+    if (!Number.isFinite(durationSec) || durationSec < threshold) continue
+    out.push({ startIdx: i - 1, endIdx: i, startSec, endSec, durationSec })
+  }
+  return out
+}
+
+export function detectPauses(
+  time: (number | null)[] | null | undefined,
+  moving?: (boolean | null)[] | null,
+  minPauseS = PAUSE_MIN_S,
+): PauseSegment[] {
+  if (!Array.isArray(time) || time.length < 3) return []
+  const gapThreshold = samplingGapThreshold(time)
+  if (gapThreshold == null) return []
+  const hasMoving = Array.isArray(moving) && moving.length >= time.length
+
+  // L'intervalle `k` court de l'échantillon k-1 à k. Un run d'intervalles à l'arrêt
+  // k = a..b couvre donc les échantillons a-1 à b.
+  const out: PauseSegment[] = []
+  let runStart = -1
+  for (let k = 1; k <= time.length; k++) {
+    const dt = k < time.length ? (time[k] as number) - (time[k - 1] as number) : NaN
+    const isStopped = k < time.length
+      && Number.isFinite(dt)
+      && (dt >= gapThreshold || (hasMoving && moving![k] === false))
+    if (isStopped) {
+      if (runStart < 0) runStart = k
+      continue
+    }
+    if (runStart < 0) continue
+    const startIdx = runStart - 1
+    const endIdx = k - 1
+    const startSec = time[startIdx] as number
+    const endSec = time[endIdx] as number
+    const durationSec = endSec - startSec
+    if (durationSec >= minPauseS) out.push({ startIdx, endIdx, startSec, endSec, durationSec })
+    runStart = -1
   }
   return out
 }
@@ -303,14 +357,24 @@ export function decodePolyline(str: string): number[][] {
   return coords
 }
 
-export function downsample<T>(arr: T[], maxPoints: number): T[] {
-  if (arr.length <= maxPoints) return arr
-  const step = arr.length / maxPoints
-  const out: T[] = []
-  for (let i = 0; i < maxPoints; i++) {
-    out.push(arr[Math.floor(i * step)])
-  }
-  return out
+// Indices retenus par un sous-échantillonnage, en garantissant la présence de `keep`.
+// Renvoyer les INDICES plutôt que les points permet à l'appelant de rester ancré sur le
+// flux d'origine — indispensable pour placer une coupure de courbe, qui se repère par
+// index et non par valeur d'axe : à l'arrêt, la distance ne bouge pas et une dizaine
+// d'échantillons partagent le même x, si bien qu'un `x >= x1` tombe au début du plateau
+// immobile au lieu du bord du trou.
+//
+// `keep` sert aux bords des trous d'enregistrement : `downsample` prend un point tous les
+// n et peut jeter les deux, auquel cas la coupure s'élargit jusqu'aux points survivants —
+// sur l'activité 18930174882, un trou réel de 0,1 m se voyait sur 38 m à l'écran.
+export function downsampleIndices(count: number, maxPoints: number, keep: Iterable<number> = []): number[] {
+  if (count <= 0) return []
+  if (count <= maxPoints) return Array.from({ length: count }, (_, i) => i)
+  const idx = new Set<number>()
+  const step = count / maxPoints
+  for (let i = 0; i < maxPoints; i++) idx.add(Math.floor(i * step))
+  for (const k of keep) if (Number.isInteger(k) && k >= 0 && k < count) idx.add(k)
+  return [...idx].sort((a, b) => a - b)
 }
 
 // ─── Grade buckets (route colouring) + climb detection ────────────────────

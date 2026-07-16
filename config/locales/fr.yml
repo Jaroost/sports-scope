@@ -467,7 +467,7 @@ fr:
       avg_grade: "Pente moy."
     stats:
       title: "Statistiques"
-      moving: "Temps roulé"
+      moving: "Temps actif"
       elapsed: "Temps total"
       stopped: "Arrêts"
       stop_percent: "% arrêts"

@@ -714,7 +714,7 @@ en:
     error_elevation: "Elevation error"
     error_shared_not_found: "This shared route can't be found or is no longer available."
     turn_warning_title: "Suspicious turns detected"
-    turn_warning_body: "The route makes a hook: either sharp turns bunched up in one spot, or a u-turn. This usually means a waypoint sits off the road or on a dead end, and navigation may fire contradictory instructions. Open each waypoint below to move or delete it — or, if the out-and-back is intended, mark it \"u-turn expected here\" from its popup."
+    turn_warning_body: "The route makes a hook: either sharp turns bunched up in one spot, or a u-turn. This usually means a waypoint sits off the road or on a dead end, and navigation may fire contradictory instructions. Each spot is flagged on the map; tap it below to jump there, then click the waypoint to move or delete it — or, if the out-and-back is intended, mark it \"u-turn expected here\"."
     turn_warning_item: "Waypoint %{point} · %{count} bunched turns · at %{distance}"
     uturn_warning_item: "Waypoint %{point} · u-turn · at %{distance}"
     uturn_warning_item_orphan: "U-turn · at %{distance}"
@@ -958,8 +958,12 @@ en:
       route_title: "Route line in the builder"
     turn_anomaly:
       title: "Suspicious turn detection"
-      help: "When saving, the builder flags waypoints with several sharp turns bunched up within a small radius — usually a sign of a waypoint dropped off the road. Roundabouts, and junctions you merely ride through, are ignored. A smaller value cuts false alarms on switchback trails (hiking, MTB)."
+      help: "As you edit, the builder flags waypoints with several sharp turns bunched up within a small radius — usually a sign of a waypoint dropped off the road. It also flags u-turns, which betray a waypoint dropped on a dead end. Roundabouts, and junctions you merely ride through, are ignored. A smaller value cuts false alarms on switchback trails (hiking, MTB)."
       diameter: "Diameter of the analysed area"
+    snap_warn:
+      title: "Off-path waypoint detection"
+      help: "Routing follows the paths OpenStreetMap knows about: with no path where you clicked, a waypoint is pulled onto the nearest way and the route drifts from what you intended. The builder flags waypoints whose gap to the resulting route exceeds this distance. A larger value cuts alerts where map data is sparse (trails), at the cost of missing moderate drifts."
+      distance: "Gap that triggers a warning"
   common:
     days_ago_today: "today"
     days_ago_yesterday: "yesterday"

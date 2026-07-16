@@ -1057,9 +1057,15 @@ const UTURN_WP_RADIUS_M = 25
 // demi-tour lui-même, qui suffit : le `turncost` de BRouter le rend si coûteux qu'il n'en
 // fait jamais spontanément — seul un point d'étape à atteindre puis à quitter l'y force.
 //
-// Deux exceptions, toutes deux vérifiées sur la base :
+// Trois exceptions, toutes vérifiées sur la base :
 //   • le demi-tour ancré sur le PREMIER point : sans cap connu, BRouter peut partir à
 //     l'envers puis se retourner (cf. headingParam dans navRoute.ts) — artefact, pas erreur.
+//   • le demi-tour ancré sur le DERNIER point : on y arrive et on s'arrête, le demi-tour
+//     n'est jamais exécuté. Surtout, sur une boucle (le cas le plus courant) l'arrivée est
+//     posée sur le départ : l'artefact du départ est alors à égale distance des deux, et
+//     nearestWaypoint tranche les ex æquo en faveur du dernier index. Sans cette exception
+//     l'artefact ressortirait donc en fin de tracé, là où l'exclusion du premier point ne
+//     le rattrape pas.
 //   • un point marqué `uturn_ok` : l'aller-retour est délibéré (sommet, point de vue), et
 //     la géométrie seule ne distingue pas ce cas d'un point mal posé — l'utilisateur tranche.
 export function detectUturnAnomalies(
@@ -1077,7 +1083,9 @@ export function detectUturnAnomalies(
     if (!g) continue
     const p: LngLat = [g[0], g[1]]
     const waypointIdx = nearestWaypoint([p], waypoints, radiusM)
-    if (waypointIdx === 0) continue
+    // `waypointIdx >= 0` protège le cas sans waypoints : nearestWaypoint renvoie alors -1,
+    // qui vaut aussi `waypoints.length - 1` sur une liste vide.
+    if (waypointIdx >= 0 && (waypointIdx === 0 || waypointIdx === waypoints.length - 1)) continue
     if (waypointIdx >= 0 && opts.uturnOk?.[waypointIdx]) continue
     out.push({ kind: 'uturn', idx: t.idx, lng: p[0], lat: p[1], distM: t.distM, count: 1, waypointIdx })
   }

@@ -714,7 +714,7 @@ fr:
     error_elevation: "Erreur altitude"
     error_shared_not_found: "Cet itinéraire partagé est introuvable ou n'est plus disponible."
     turn_warning_title: "Virages suspects détectés"
-    turn_warning_body: "Le tracé fait un crochet : des virages serrés regroupés au même endroit, ou un demi-tour. C'est souvent le signe d'un point d'étape posé à côté de la route ou sur une impasse, et la navigation risque d'enchaîner des consignes contradictoires. Ouvre chaque point ci-dessous pour le déplacer ou le supprimer — ou, si l'aller-retour est voulu, marque-le « demi-tour normal ici » depuis sa bulle."
+    turn_warning_body: "Le tracé fait un crochet : des virages serrés regroupés au même endroit, ou un demi-tour. C'est souvent le signe d'un point d'étape posé à côté de la route ou sur une impasse, et la navigation risque d'enchaîner des consignes contradictoires. Chaque endroit est repéré sur la carte ; touche-le ci-dessous pour l'y retrouver, puis clique le point en cause pour le déplacer ou le supprimer — ou, si l'aller-retour est voulu, marque-le « demi-tour normal ici »."
     turn_warning_item: "Point %{point} · %{count} virages rapprochés · au %{distance}"
     uturn_warning_item: "Point %{point} · demi-tour · au %{distance}"
     uturn_warning_item_orphan: "Demi-tour · au %{distance}"
@@ -958,8 +958,12 @@ fr:
       route_title: "Tracé dans le créateur"
     turn_anomaly:
       title: "Détection des virages suspects"
-      help: "À l'enregistrement, le créateur signale les points d'étape autour desquels plusieurs virages serrés se groupent sur un petit rayon — souvent le signe d'un point posé à côté de la route. Les ronds-points, et les carrefours simplement traversés, sont ignorés. Une valeur plus petite limite les fausses alertes sur les sentiers à lacets (rando, VTT)."
+      help: "Au fil de l'édition, le créateur signale les points d'étape autour desquels plusieurs virages serrés se groupent sur un petit rayon — souvent le signe d'un point posé à côté de la route. Il signale aussi les demi-tours, qui trahissent un point posé sur une impasse. Les ronds-points, et les carrefours simplement traversés, sont ignorés. Une valeur plus petite limite les fausses alertes sur les sentiers à lacets (rando, VTT)."
       diameter: "Diamètre de la zone analysée"
+    snap_warn:
+      title: "Détection des points hors chemin"
+      help: "Le routage suit les chemins connus d'OpenStreetMap : faute de chemin à l'endroit cliqué, un point d'étape est ramené sur la voie la plus proche, et le tracé s'écarte de ce que tu voulais. Le créateur signale les points dont l'écart avec le tracé obtenu dépasse cette distance. Une valeur plus grande limite les alertes là où les données sont lacunaires (sentiers), au prix de rater les écarts modérés."
+      distance: "Écart signalé"
   common:
     days_ago_today: "aujourd'hui"
     days_ago_yesterday: "hier"

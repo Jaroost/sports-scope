@@ -2280,7 +2280,6 @@ defineExpose({
   showTurnAnomalyMarkers,
   clearTurnAnomalyMarkers,
   showSnapMarkers,
-  clearSnapMarkers,
   showPlaceHoverMarker,
   hidePlaceHoverMarker,
   showPlacePopup,

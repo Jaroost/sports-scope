@@ -10,7 +10,7 @@ import { POI_CATEGORIES, isPointType } from '../poiCategories'
 import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, formatDistanceShort, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex } from '../routeHelpers'
 import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
-import { turnAnomalyDiameterForSport } from '../userPreferences'
+import { turnAnomalyDiameterForSport, snapWarnDistanceForSport } from '../userPreferences'
 import { BROUTER_URL } from '../brouter'
 import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
@@ -58,18 +58,26 @@ const exporting = ref(false)
 // pas sauvegardé, donc pas de navigation possible avant l'enregistrement).
 const routeShareToken = ref<string | null>(null)
 const showExportDialog = ref(false)
-// Avertissement « amas de virages » détecté à l'enregistrement : un point d'étape mal
-// posé (à côté de la route) fait crocheter BRouter et empile plusieurs virages serrés
-// au même endroit, ce qui fausse la navigation. On le signale sans bloquer la sauvegarde.
+// ─── Avertissements sur le tracé ───────────────────────────────────────────────
+// Les deux ne sont calculés qu'à la tentative de sauvegarde (cf. save), et non au fil de
+// l'édition : un tracé en cours de construction passe par des états intermédiaires bancals
+// dont il n'y a rien à dire tant qu'on n'a pas fini. Toute modification du tracé les périme
+// donc (cf. clearRouteWarnings). L'erreur de routage, elle, reste immédiate : elle décrit
+// l'échec du calcul qu'on vient de lancer, pas la qualité du tracé.
+//
+// « Amas de virages » / « demi-tour » : un point d'étape mal posé (à côté de la route, ou
+// sur une impasse) fait crocheter BRouter, ce qui fausse la navigation.
 const turnWarnings = ref<TurnAnomaly[]>([])
 const showTurnWarning = ref(false)
-// Avertissement « point accroché au loin » : BRouter projette chaque waypoint sur la voie
-// routable la plus proche. Quand aucun chemin n'existe à l'endroit cliqué (trou de données
-// OSM, plein champ…), il l'accroche silencieusement des dizaines de mètres plus loin — au
-// pire, plusieurs points atterrissent sur la même voie et le tracé s'écrase en ligne droite.
-// On mesure donc l'écart réel entre chaque point et le tracé obtenu, et on le signale.
-const SNAP_WARN_M = 25
+// « Point accroché au loin » : BRouter projette chaque waypoint sur la voie routable la plus
+// proche. Quand aucun chemin n'existe à l'endroit cliqué (trou de données OSM, plein champ…),
+// il l'accroche silencieusement des dizaines de mètres plus loin — au pire, plusieurs points
+// atterrissent sur la même voie et le tracé s'écrase en ligne droite. Seuil réglable par
+// sport (cf. snapWarnDistanceForSport), comme le diamètre de détection des amas.
 const snapWarnings = ref<Array<{ idx: number; distM: number }>>([])
+// Vrai une fois la sauvegarde tentée malgré des avertissements : fait apparaître
+// « enregistrer quand même ». Retombe à faux dès que le tracé change.
+const saveBlocked = ref(false)
 
 // Fermer une alerte ne fait que la replier : la cause (erreur, points accrochés, amas de
 // virages) est toujours là et l'utilisateur doit pouvoir la relire. On masque donc
@@ -80,11 +88,11 @@ const snapDismissed = ref(false)
 watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
 watch(snapWarnings, () => { snapDismissed.value = false })
 
-// Les points accrochés au loin portent un marqueur tant que l'avertissement est d'actualité :
-// c'est lui qui les situe sur la carte (les puces de l'alerte ne font que cadrer dessus).
-// Replier l'alerte les LAISSE en place, comme le fait closeTurnWarning pour les amas : ils
-// guident la correction, et la pastille rappelle d'où ils viennent. Ils disparaissent avec
-// leur cause, au recalcul du tracé qui repeuple snapWarnings.
+// Les points accrochés au loin portent un marqueur : c'est lui qui les situe sur la carte
+// (les puces de l'alerte ne font que cadrer dessus). Ce watch en est le seul propriétaire,
+// snapWarnings étant leur seule source. Replier l'alerte les LAISSE en place, comme le fait
+// closeTurnWarning pour les amas : ils guident la correction, et la pastille rappelle d'où
+// ils viennent. Ils disparaissent quand le tracé change (cf. clearRouteWarnings).
 watch(snapWarnings, (list) => {
   const wps = routeStore.waypoints.value
   mapRef.value?.showSnapMarkers(
@@ -92,8 +100,12 @@ watch(snapWarnings, (list) => {
   )
 })
 
-// Alertes repliées mais toujours d'actualité (l'amas de virages, lui, garde ses données
-// dans turnWarnings tant que le tracé n'a pas changé — cf. dismissTurnWarning).
+// Ce qui est réellement à l'écran, source unique pour l'affichage comme pour la pastille.
+const snapVisible = computed(() => snapWarnings.value.length > 0 && !snapDismissed.value)
+const turnVisible = computed(() => turnWarnings.value.length > 0 && showTurnWarning.value)
+
+// Alertes repliées mais toujours d'actualité : elles gardent leurs données, seule leur
+// vue est masquée, et la pastille les rappelle.
 const hiddenNoticeCount = computed(() => {
   let n = 0
   if (routeStore.error.value && errorDismissed.value) n++
@@ -301,15 +313,16 @@ function onChangeProfile(profile: string) {
 async function recomputeRoute() {
   const token = ++recomputeToken
   selectionStore.clear()
-  // Toute modification du tracé invalide un éventuel avertissement d'amas de virages.
-  if (showTurnWarning.value || turnWarnings.value.length) dismissTurnWarning()
+  // Le tracé change : les avertissements portaient sur le précédent, et un éventuel
+  // « enregistrer quand même » ne vaut plus. Ils seront recalculés à la prochaine
+  // tentative de sauvegarde.
+  clearRouteWarnings()
 
   if (routeStore.waypoints.value.length < 2) {
     routeStore.geometry.value = []
     routeStore.distanceM.value = 0
     routeStore.elevGainM.value = 0
     routeStore.elevLossM.value = 0
-    snapWarnings.value = []
     mapRef.value?.updateRouteLayer()
     mapRef.value?.installClimbMarkers()
     chartRef.value?.destroy()
@@ -360,12 +373,6 @@ async function recomputeRoute() {
     if (straight.size) geom = densifyGeometry(geom)
     routeStore.geometry.value = geom
 
-    // Écart entre chaque point d'étape et le tracé réellement obtenu. Un point « libre »
-    // est traversé par sa ligne droite, donc son écart est nul : il ne se signale jamais
-    // de lui-même. Un point posé là où aucun chemin n'est cartographié, lui, ressort.
-    snapWarnings.value = wps
-      .map((w, idx) => ({ idx, distM: nearestGeomIndex([w.lng, w.lat], geom).distM }))
-      .filter((s) => s.distM >= SNAP_WARN_M)
 
     // Recalcule d'abord les index géométriques des waypoints : le rendu du tracé
     // (updateRouteLayer → applyColorMode) s'en sert pour repérer les tronçons droits
@@ -392,7 +399,6 @@ async function recomputeRoute() {
   } catch (e: any) {
     if (token === recomputeToken) {
       routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
-      snapWarnings.value = []
       // Le tracé garde l'ancienne géométrie alors que les waypoints, eux, ont déjà changé :
       // on réaligne les index dessus, sinon l'insertion de point resterait bloquée.
       mapRef.value?.recomputeWaypointGeomIndices()
@@ -551,18 +557,41 @@ function turnWarningLabel(a: TurnAnomaly): string {
   return t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count, distance })
 }
 
-// Recalcule la liste affichée après un changement qui ne retouche pas le tracé (marquer un
-// demi-tour comme normal) : sans ça l'alerte continuerait de lister un point déjà réglé.
+// Publie la liste des crochets : alerte + marqueurs, ou table rase. Comme pour les points
+// accrochés au loin, une liste non vide rouvre l'alerte même si elle avait été repliée —
+// le tracé a changé depuis, le repli ne vaut plus.
+function setTurnWarnings(anomalies: TurnAnomaly[]) {
+  turnWarnings.value = anomalies
+  showTurnWarning.value = anomalies.length > 0
+  if (anomalies.length) mapRef.value?.showTurnAnomalyMarkers(anomalies)
+  else mapRef.value?.clearTurnAnomalyMarkers()
+}
+
+// Écart entre chaque point d'étape et le tracé réellement obtenu. Un point « libre » est
+// traversé par sa ligne droite, donc son écart est nul : il ne se signale jamais de
+// lui-même. Un point posé là où aucun chemin n'est cartographié, lui, ressort.
+function computeSnapWarnings(): Array<{ idx: number; distM: number }> {
+  const geom = routeStore.geometry.value
+  if (geom.length < 2) return []
+  const threshold = snapWarnDistanceForSport(routeStore.sport.value)
+  return routeStore.waypoints.value
+    .map((w, idx) => ({ idx, distM: nearestGeomIndex([w.lng, w.lat], geom).distM }))
+    .filter((s) => s.distM >= threshold)
+}
+
+// Périme les avertissements : ils ne décrivaient que le tracé qui les a produits.
+function clearRouteWarnings() {
+  snapWarnings.value = []   // le watch ci-dessus retire les marqueurs correspondants
+  setTurnWarnings([])
+  saveBlocked.value = false
+}
+
+// Recalcule la liste après un changement qui ne retouche pas le tracé (marquer un demi-tour
+// comme normal) : sans ça l'alerte continuerait de lister un point déjà réglé. Ne réveille
+// rien si aucun avertissement n'est affiché — ils n'apparaissent qu'à la sauvegarde.
 function refreshTurnWarnings() {
   if (!turnWarnings.value.length) return
-  const anomalies = computeTurnAnomalies()
-  turnWarnings.value = anomalies
-  if (anomalies.length) {
-    mapRef.value?.showTurnAnomalyMarkers(anomalies)
-  } else {
-    showTurnWarning.value = false
-    mapRef.value?.clearTurnAnomalyMarkers()
-  }
+  setTurnWarnings(computeTurnAnomalies())
 }
 
 async function save() {
@@ -577,13 +606,14 @@ async function save() {
     routeStore.name.value = name
   }
   if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
-  // Avant d'enregistrer, on prévient si le tracé contient des amas de virages (signe
-  // d'un point posé à côté de la route). L'utilisateur peut corriger ou passer outre.
-  const anomalies = computeTurnAnomalies()
-  if (anomalies.length) {
-    turnWarnings.value = anomalies
-    showTurnWarning.value = true
-    mapRef.value?.showTurnAnomalyMarkers(anomalies)
+  // Seul endroit où les avertissements sont calculés : le tracé est terminé, il y a enfin
+  // quelque chose à en dire. S'il y a matière, on fait barrage une fois — l'utilisateur
+  // corrige, ou passe outre.
+  snapWarnings.value = computeSnapWarnings()
+  setTurnWarnings(computeTurnAnomalies())
+  if (snapWarnings.value.length || turnWarnings.value.length) {
+    saveBlocked.value = true
+    snapDismissed.value = false
     return
   }
   await persistAndIndexPlaces()
@@ -596,10 +626,10 @@ async function persistAndIndexPlaces() {
   fetchImportantPlaces()
 }
 
-// Enregistre malgré l'avertissement d'amas de virages : l'utilisateur assume le tracé,
-// on retire donc les marqueurs d'alerte.
+// Enregistre malgré les avertissements : l'utilisateur assume le tracé, on retire donc
+// alertes et marqueurs.
 async function saveAnyway() {
-  dismissTurnWarning()
+  clearRouteWarnings()
   await persistAndIndexPlaces()
 }
 
@@ -625,13 +655,6 @@ function focusSnapWarning(idx: number) {
   const w = routeStore.waypoints.value[idx]
   if (!w) return
   mapRef.value?.flyTo(w.lng, w.lat, 17)
-}
-
-// Réinitialise complètement l'avertissement : modale, liste et marqueurs d'alerte.
-function dismissTurnWarning() {
-  showTurnWarning.value = false
-  turnWarnings.value = []
-  mapRef.value?.clearTurnAnomalyMarkers()
 }
 
 async function persist() {
@@ -1710,8 +1733,8 @@ onBeforeUnmount(() => {
           >
             <template #overlays>
               <!-- Alertes du tracé, empilées en surimpression de la carte plutôt qu'en flux :
-                   elles apparaissent au fil de l'édition et décaleraient la carte sous le
-                   curseur. Placées sous la rangée de contrôles du haut pour ne pas la couvrir. -->
+                   elles décaleraient sinon la carte sous le curseur. Calées à droite, sous la
+                   rangée de contrôles du haut, pour ne rien couvrir. -->
               <div class="map-notices">
                 <TransitionGroup name="map-notice">
 
@@ -1726,7 +1749,7 @@ onBeforeUnmount(() => {
                   </div>
 
                   <!-- Points accrochés loin du clic (aucun chemin cartographié à proximité) -->
-                  <div v-if="snapWarnings.length && !snapDismissed" key="snap" class="map-notice map-notice--warning" role="status">
+                  <div v-if="snapVisible" key="snap" class="map-notice map-notice--warning" role="status">
                     <div class="map-notice-header">
                       <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
                       <strong class="flex-grow-1">{{ t('routes.snap_warning_title', { count: snapWarnings.length }) }}</strong>
@@ -1743,8 +1766,8 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- Amas de virages (point mal placé) — soulevé à l'enregistrement -->
-                  <div v-if="showTurnWarning" key="turns" class="map-notice map-notice--danger" role="alert">
+                  <!-- Crochets : amas de virages / demi-tour (point mal placé) -->
+                  <div v-if="turnVisible" key="turns" class="map-notice map-notice--danger" role="alert">
                     <div class="map-notice-header">
                       <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
                       <strong class="flex-grow-1">{{ t('routes.turn_warning_title') }}</strong>
@@ -1760,12 +1783,15 @@ onBeforeUnmount(() => {
                         {{ turnWarningLabel(a) }}
                       </button>
                     </div>
-                    <div class="map-notice-actions">
-                      <button type="button" class="btn btn-sm btn-warning" :disabled="saving" @click="saveAnyway">
-                        <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-                        {{ t('routes.turn_warning_save_anyway') }}
-                      </button>
-                    </div>
+                  </div>
+
+                  <!-- « Enregistrer quand même » : hors des alertes, car il vaut pour toutes
+                       celles qui font barrage, pas seulement la dernière de la pile. -->
+                  <div v-if="saveBlocked && (snapVisible || turnVisible)" key="save-anyway" class="map-notice-actions">
+                    <button type="button" class="btn btn-sm btn-warning shadow" :disabled="saving" @click="saveAnyway">
+                      <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                      {{ t('routes.turn_warning_save_anyway') }}
+                    </button>
                   </div>
 
                   <!-- Rappel des alertes repliées : seul vestige visible tant qu'elles ne sont
@@ -2203,27 +2229,27 @@ onBeforeUnmount(() => {
 /* ─── Alertes en surimpression de la carte ────────────────────────────────── */
 /* Colonne calée sous la rangée de contrôles du haut (contrôles droite : top 56px) et
    entre les deux colonnes de boutons (34px de large + 10px de marge de chaque côté). */
+/* Colonne calée à DROITE, sous la rangée de contrôles du haut. Le décalage de 54px la
+   laisse passer à gauche de la colonne de boutons de droite (34px de large + 10px de
+   marge), qui commence elle aussi à 56px. */
 .map-notices {
   position: absolute;
   top: 56px;
-  left: 54px;
   right: 54px;
-  /* Au-dessus de TOUT ce que porte la carte, `.wp-tooltip` (z-index 20) compris : cliquer
-     un point de l'alerte ouvre justement la bulle de ce point, qui recouvrirait sinon
-     l'alerte dont elle vient. Ni la carte ni ce conteneur ne créent de contexte
-     d'empilement, donc les deux valeurs se comparent bien directement. */
+  width: min(400px, calc(100% - 64px));
+  /* Au-dessus de TOUT ce que porte la carte, `.wp-tooltip` (z-index 20) compris : une bulle
+     ouverte près du bord recouvrirait sinon l'alerte. */
   z-index: 25;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  align-items: center;
+  align-items: stretch;
   max-height: calc(100% - 76px);
   overflow-y: auto;
   pointer-events: none;
 }
 .map-notice {
   pointer-events: auto;
-  width: min(520px, 100%);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -2273,6 +2299,7 @@ onBeforeUnmount(() => {
 }
 .map-notice-chip:hover { background: #fff; }
 .map-notice-actions {
+  pointer-events: auto;
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
@@ -2283,7 +2310,7 @@ onBeforeUnmount(() => {
    l'alerte n'est pas corrigée) mais assez colorée pour rester repérable. */
 .map-notice-pill {
   pointer-events: auto;
-  align-self: flex-end;
+  align-self: flex-end;   /* la pastille reste compacte dans une pile désormais étirée */
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -2305,12 +2332,14 @@ onBeforeUnmount(() => {
 .map-notice-leave-to { opacity: 0; transform: translateY(-6px); }
 .map-notice-leave-active { position: absolute; }
 
-/* Sur mobile la carte est étroite : on colle les alertes aux bords, sous les contrôles. */
+/* Sur mobile la carte est trop étroite pour une colonne de 400px calée à droite : les
+   alertes reprennent toute la largeur, aux bords près. */
 @media (max-width: 767px), (max-height: 500px) {
   .map-notices {
     left: 8px;
     right: 8px;
     top: 52px;
+    width: auto;
   }
 }
 </style>

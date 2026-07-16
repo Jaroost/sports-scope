@@ -21,6 +21,8 @@ export interface SportPreferences {
   route_profile: string
   // Diamètre (m) de détection d'amas de virages dans le créateur.
   turn_anomaly_m: number
+  // Écart (m) au-delà duquel un point d'étape accroché loin du clic est signalé.
+  snap_warn_m: number
   map: { default_style: MapStyleId; overlays: string[] }
   route: { color: string; opacity: number; width: number }
   climb_detection: {
@@ -88,6 +90,7 @@ function sportDefaults(
     speed,
     route_profile,
     turn_anomaly_m,
+    snap_warn_m: 25,
     map: { default_style: map_style, overlays: [] },
     route: { color: '#7c3aed', opacity: 0.8, width: 5 },
     climb_detection,
@@ -315,6 +318,15 @@ export function turnAnomalyDiameterForSport(sport: Sport): number {
   const v = sportPreferences(sport).turn_anomaly_m
   if (Number.isFinite(v) && v >= 30 && v <= 200) return v
   return DEFAULT_PREFERENCES.sports[sport]?.turn_anomaly_m ?? 100
+}
+
+// Écart (m) au-delà duquel un point d'étape accroché loin de l'endroit cliqué est signalé
+// dans le créateur, configuré pour une catégorie d'activité. Bornes alignées sur
+// ProfilesController::SNAP_WARN_RANGE.
+export function snapWarnDistanceForSport(sport: Sport): number {
+  const v = sportPreferences(sport).snap_warn_m
+  if (Number.isFinite(v) && v >= 10 && v <= 200) return v
+  return DEFAULT_PREFERENCES.sports[sport]?.snap_warn_m ?? 25
 }
 
 // Profil de routage BRouter par défaut pour un sport : préférence compte si elle

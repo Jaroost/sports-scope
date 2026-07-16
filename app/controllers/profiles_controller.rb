@@ -11,6 +11,7 @@ class ProfilesController < ApplicationController
   MERGE_GAP_RANGE = (0..2000)
   SPEED_RANGE = (3.0..80.0)
   TURN_ANOMALY_RANGE = (30..200)
+  SNAP_WARN_RANGE = (10..200)
   NAV_ZOOM_RANGE = (14.0..40.0)
   NAV_PITCH_RANGE = (0..90)
   NAV_FPS_RANGE = (0.5..60.0)
@@ -193,6 +194,7 @@ class ProfilesController < ApplicationController
       "speed" => clamp_float(raw[:speed], SPEED_RANGE, defaults["speed"]),
       "route_profile" => sanitize_route_profile(sport, raw[:route_profile], defaults["route_profile"]),
       "turn_anomaly_m" => clamp_int(raw[:turn_anomaly_m], TURN_ANOMALY_RANGE, defaults["turn_anomaly_m"]),
+      "snap_warn_m" => clamp_int(raw[:snap_warn_m], SNAP_WARN_RANGE, defaults["snap_warn_m"]),
       "map" => {
         "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, defaults.dig("map", "default_style")),
         "overlays" => sanitize_overlays(map[:overlays]),

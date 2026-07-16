@@ -17,6 +17,14 @@ class User < ApplicationRecord
       # (rando/VTT) enchaînent des virages serrés légitimes (lacets) : un diamètre plus
       # petit y limite les faux positifs.
       "turn_anomaly_m" => turn_anomaly_m,
+      # Avertissement « point accroché au loin » dans le créateur : écart (m) au-delà duquel
+      # l'écart entre le point cliqué et le tracé obtenu est signalé. BRouter projette chaque
+      # point sur la voie routable la plus proche ; un grand écart trahit l'absence de chemin
+      # à l'endroit voulu. Commun aux sports faute d'élément justifiant de les différencier :
+      # mesuré sur les itinéraires vélo existants, l'écart normal est de 1,2 m (médiane) à
+      # 7,2 m (p90), donc 25 m ne signale que les vrais trous — à ajuster si les sentiers
+      # (données OSM plus lacunaires) se révèlent trop bavards.
+      "snap_warn_m" => 25,
       "map" => {
         "default_style" => map_style,
         "overlays" => [],   # couches transparentes actives (SuisseMobile/swisstopo)

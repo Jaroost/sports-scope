@@ -993,6 +993,21 @@ function placePreviewMarker(coords: [number, number]) {
             </div>
           </div>
         </div>
+
+        <hr class="my-3">
+        <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2">
+          <i class="fa-solid fa-map-pin me-1" aria-hidden="true"></i>{{ t('profile.snap_warn.title') }}
+        </h3>
+        <p class="text-muted small mb-3">{{ t('profile.snap_warn.help') }}</p>
+        <div class="row g-3">
+          <div class="col-sm-4">
+            <label for="sport-snap-warn" class="form-label mb-1">{{ t('profile.snap_warn.distance') }}</label>
+            <div class="input-group">
+              <input id="sport-snap-warn" v-model.number="sport.snap_warn_m" type="number" class="form-control" min="10" max="200" step="5">
+              <span class="input-group-text">m</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 

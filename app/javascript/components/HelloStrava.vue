@@ -345,13 +345,13 @@ function gradeColor(cat) {
 
 <template>
   <div class="card shadow-sm border-0">
-    <div class="card-header activity-card-header d-flex justify-content-between align-items-center">
+    <div class="card-header activity-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
       <h2 class="h5 mb-0 d-flex align-items-center gap-2">
         <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
         <span>{{ title }}</span>
         <span v-if="total !== null" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ total }}</span>
       </h2>
-      <div class="d-flex align-items-center gap-3">
+      <div class="d-flex align-items-center flex-wrap gap-2 gap-md-3">
         <div class="btn-group btn-group-sm" role="group" :aria-label="title">
           <button
             type="button"
@@ -385,9 +385,10 @@ function gradeColor(cat) {
           <span>{{ t('strava.filters.toggle') }}</span>
           <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
         </button>
-        <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1">
+        <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1" :title="t('strava.last_updated')">
           <i class="fa-regular fa-clock" aria-hidden="true"></i>
-          {{ t('strava.last_updated') }} {{ formatCachedAt(cachedAt) }}
+          <span class="d-none d-md-inline">{{ t('strava.last_updated') }}</span>
+          {{ formatCachedAt(cachedAt) }}
         </small>
       </div>
     </div>

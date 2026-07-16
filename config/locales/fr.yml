@@ -21,6 +21,11 @@ fr:
     loading: "Analyse en cours…"
     no_data: "Aucune activité à analyser pour l'instant. Synchronisez Strava ou importez un fichier .fit."
     no_records: "Aucun record disponible pour ce sport."
+    tabs:
+      records: "Records & volumes"
+      records_hint: "Dépend des filtres"
+      fitness: "Forme & seuils"
+      fitness_hint: "Sur tout l'historique, hors filtres"
     filters:
       toggle: "Filtrer"
       sport: "Sport"

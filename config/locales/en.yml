@@ -21,6 +21,11 @@ en:
     loading: "Analysing…"
     no_data: "No activities to analyse yet. Sync Strava or import a .fit file."
     no_records: "No records available for this sport."
+    tabs:
+      records: "Records & volume"
+      records_hint: "Reflects the active filters"
+      fitness: "Fitness & thresholds"
+      fitness_hint: "Whole history, filters not applied"
     filters:
       toggle: "Filter"
       sport: "Sport"

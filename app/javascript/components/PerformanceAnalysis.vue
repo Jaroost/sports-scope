@@ -197,6 +197,25 @@ const SPORT_STORAGE_KEY = 'sportsScope.performanceSport'
 const storedSport = (typeof localStorage !== 'undefined' && localStorage.getItem(SPORT_STORAGE_KEY)) || 'all'
 const selectedSport = ref(storedSport)
 
+// ── Onglets principaux : ce qui suit les filtres vs ce qui n'en dépend pas ───
+// « Records & volumes » agrège les activités renvoyées par /api/performance, donc
+// les filtres s'y appliquent. « Forme & seuils » (FTP, charge d'entraînement) est
+// calculé sur tout l'historique par ses propres panneaux : les filtres n'y changent
+// rien, d'où la séparation en deux onglets pour lever l'ambiguïté.
+const MAIN_TABS = [
+  { key: 'records', icon: 'fa-medal' },
+  { key: 'fitness', icon: 'fa-heart-pulse' },
+] as const
+type MainTab = (typeof MAIN_TABS)[number]['key']
+
+const TAB_STORAGE_KEY = 'sportsScope.performanceTab'
+const storedTab = (typeof localStorage !== 'undefined' && localStorage.getItem(TAB_STORAGE_KEY)) || 'records'
+const activeTab = ref<MainTab>(storedTab === 'fitness' ? 'fitness' : 'records')
+
+watch(activeTab, (tab) => {
+  try { localStorage.setItem(TAB_STORAGE_KEY, tab) } catch { /* ignore */ }
+})
+
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
@@ -483,11 +502,49 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else-if="data">
-      <!-- Barre de filtres (mêmes filtres que la liste du dashboard) -->
-      <div class="d-flex justify-content-end mb-3">
+      <!-- Onglets principaux : pastilles comme sur le tableau de bord. -->
+      <div class="btn-group btn-group-sm mb-3 dashboard-tabs" role="tablist" :aria-label="t('performance.title')">
+        <button
+          v-for="tab in MAIN_TABS"
+          :key="tab.key"
+          type="button"
+          class="btn btn-outline-secondary dashboard-tab d-flex align-items-center gap-1"
+          :class="{ active: activeTab === tab.key }"
+          role="tab"
+          :aria-selected="activeTab === tab.key"
+          @click="activeTab = tab.key"
+        >
+          <i :class="`fa-solid ${tab.icon}`" aria-hidden="true"></i>
+          <span>{{ t(`performance.tabs.${tab.key}`) }}</span>
+        </button>
+      </div>
+      <p class="text-muted small">
+        {{ activeTab === 'records' ? t('performance.tabs.records_hint') : t('performance.tabs.fitness_hint') }}
+      </p>
+
+      <!-- Les deux panneaux restent montés (v-show) : basculer d'onglet ne relance
+           ni le chargement de FtpPanel/TrainingLoadPanel ni le rendu du graphique. -->
+      <div v-show="activeTab === 'records'">
+      <!-- Barre sticky : onglets de sport à gauche, bouton « Filtrer » à droite. Les
+           deux pilotent le contenu qui défile dessous, d'où le regroupement. -->
+      <div class="performance-sticky-bar d-flex justify-content-between align-items-center gap-3 py-2 mb-3">
+        <ul v-if="tabs.length" class="nav nav-pills flex-wrap gap-2 mb-0 performance-sport-tabs">
+          <li v-for="tab in tabs" :key="tab.key" class="nav-item">
+            <button
+              type="button"
+              class="nav-link d-flex align-items-center gap-2"
+              :class="{ active: selectedSport === tab.key }"
+              @click="selectSport(tab.key)"
+            >
+              <i :class="`fa-solid ${sportIcon(tab.key)}`" aria-hidden="true"></i>
+              <span>{{ sportLabel(tab.key) }}</span>
+              <span class="badge rounded-pill performance-tab-count">{{ tab.count }}</span>
+            </button>
+          </li>
+        </ul>
         <button
           type="button"
-          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 ms-auto flex-shrink-0"
           :class="{ active: showFilters }"
           :aria-expanded="showFilters"
           @click="showFilters = !showFilters"
@@ -579,22 +636,6 @@ onBeforeUnmount(() => {
       </div>
 
       <template v-else-if="group">
-      <!-- Onglets par sport -->
-      <ul class="nav nav-pills flex-wrap gap-2 mb-4 performance-sport-tabs">
-        <li v-for="tab in tabs" :key="tab.key" class="nav-item">
-          <button
-            type="button"
-            class="nav-link d-flex align-items-center gap-2"
-            :class="{ active: selectedSport === tab.key }"
-            @click="selectSport(tab.key)"
-          >
-            <i :class="`fa-solid ${sportIcon(tab.key)}`" aria-hidden="true"></i>
-            <span>{{ sportLabel(tab.key) }}</span>
-            <span class="badge rounded-pill performance-tab-count">{{ tab.count }}</span>
-          </button>
-        </li>
-      </ul>
-
       <!-- Cumuls -->
       <div class="row g-3 mb-4">
         <div v-for="card in totalsCards" :key="card.label" class="col-6 col-lg-3">
@@ -654,16 +695,6 @@ onBeforeUnmount(() => {
         </div>
       </template>
 
-      <!-- FTP & progression (vélo uniquement). Placé AVANT « Forme & fatigue » car la
-           FTP alimente le calcul de la charge (TSS ← IF = NP/FTP) : on montre d'abord
-           le seuil, puis l'état de forme qui en découle. -->
-      <FtpPanel v-if="selectedSport === 'all' || selectedSport === 'cycling'" />
-
-      <!-- Forme & fatigue : charge globale (tous sports), donc affichée sur chaque
-           onglet. Sans v-if lié au sport, le panneau reste monté et ne se recharge pas
-           à chaque changement d'onglet. -->
-      <TrainingLoadPanel :admin="props.admin" />
-
       <!-- Meilleures périodes -->
       <template v-if="periodCards.length">
         <h2 class="h5 d-flex align-items-center gap-2 mb-3">
@@ -717,11 +748,47 @@ onBeforeUnmount(() => {
         </div>
       </template>
       </template>
+      </div>
+
+      <div v-show="activeTab === 'fitness'">
+        <!-- FTP & progression (vélo). Placé AVANT « Forme & fatigue » car la FTP
+             alimente le calcul de la charge (TSS ← IF = NP/FTP) : on montre d'abord
+             le seuil, puis l'état de forme qui en découle. -->
+        <FtpPanel />
+        <TrainingLoadPanel :admin="props.admin" />
+      </div>
     </template>
   </div>
 </template>
 
 <style scoped>
+/* Barre sticky sous la navbar `fixed-top` (3.5rem, même offset que le header de
+   ActivityCharts) : les onglets de sport et le bouton « Filtrer » restent
+   atteignables pendant le défilement des records et des graphiques. */
+.performance-sticky-bar {
+  position: sticky;
+  top: 3.5rem;
+  z-index: 5;
+  background: var(--bs-body-bg);
+  border-bottom: 1px solid var(--bs-border-color);
+}
+
+/* Sur mobile, les onglets défilent horizontalement plutôt que de passer à la ligne :
+   une barre sticky sur plusieurs lignes mangerait la moitié de l'écran. */
+@media (max-width: 767px) {
+  .performance-sticky-bar .performance-sport-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .performance-sticky-bar .performance-sport-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .performance-sticky-bar .nav-item {
+    flex: 0 0 auto;
+  }
+}
+
 .performance-sport-tabs .nav-link {
   border: 1px solid var(--bs-border-color);
   color: var(--bs-body-color);

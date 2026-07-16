@@ -13,7 +13,7 @@
 
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { PEAK_POWER_DURATIONS } from '../activityHelpers'
+import { PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds } from '../activityHelpers'
 // Même détection de cols et même pente lissée (fenêtre du profil) que le créateur
 // d'itinéraire, pour que carte, graphique et tableau de cols soient cohérents.
 import { detectClimbs, gradeForIndex } from '../routeHelpers'
@@ -115,9 +115,17 @@ const movingStats = computed(() => {
   const elapsed = activity.value?.elapsed_time
   const moving = activity.value?.moving_time
   if (!Number.isFinite(elapsed) || !Number.isFinite(moving)) return null
-  const stopped = Math.max(0, elapsed - moving)
+  let stopped = Math.max(0, elapsed - moving)
+  // Quand le capteur coupe l'enregistrement au lieu de marquer `moving: false`, le
+  // résumé Strava renvoie moving_time == elapsed_time et `stopped` vaut 0 à tort. Les
+  // trous du flux `time` sont alors la seule mesure des arrêts (cf. detectPauses). On
+  // recale `moving` sur ce qui reste, pour que moving + stopped == elapsed reste vrai.
+  if (stopped <= 0) {
+    const gaps = totalPausedSeconds(detectPauses(streams.value?.time?.data))
+    if (gaps > 0) stopped = Math.min(gaps, elapsed)
+  }
   const stopPct = elapsed > 0 ? (stopped / elapsed) * 100 : 0
-  return { elapsed, moving, stopped, stopPct }
+  return { elapsed, moving: Math.max(0, elapsed - stopped), stopped, stopPct }
 })
 
 // Global VAM (m/h). Falls back to elapsed_time when moving_time is missing.
@@ -259,6 +267,9 @@ async function fetchStreams() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     streams.value = withSmoothedGrade(payload.streams || {})
+    // Une activité sans GPS (squash, tapis, muscu…) n'a pas de flux `distance` :
+    // l'axe des abscisses par défaut n'a alors rien à mesurer, on bascule sur le temps.
+    if (!streams.value.distance?.data?.length) xAxis.value = 'time'
   } catch (e) {
     streamsError.value = e.message
   } finally {
@@ -399,7 +410,7 @@ onMounted(async () => {
           @click="activeTab = 'power'"
         >
           <i class="fa-solid fa-bolt" aria-hidden="true"></i>
-          <span>{{ t('strava.tabs.power_climbs') }}</span>
+          <span>{{ t('strava.tabs.stats') }}</span>
         </button>
         <button
           type="button"

@@ -359,7 +359,6 @@ en:
     activity_summary: "Activity summary"
     back_to_dashboard: "← Back to dashboard"
     activity_not_found: "Activity not found."
-    no_route_data: "No GPS data for this activity."
     map_3d: "3D view (terrain)"
     map_2d: "2D view"
     map_style_label: "Base map"
@@ -409,10 +408,11 @@ en:
     charts: "Charts"
     tabs:
       photos: "Photos"
-      power_climbs: "Power & climbs"
+      stats: "Statistics"
       analysis: "Analysis charts"
     conditions:
       gear: "Gear used"
+      device: "Recording device"
       weather_loading: "Weather…"
       wind: "Wind"
       gusts: "gusts"

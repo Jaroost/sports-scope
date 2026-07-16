@@ -7,13 +7,16 @@ import {
   defByKey,
   STREAM_CHIP_ORDER,
   fmt,
+  formatDuration,
   formatHMS,
   formatKm,
   downsample,
+  detectPauses,
   computeElevGain,
   GRADE_BUCKETS,
   bucketGrade,
   gradeForIndex,
+  streamIsMeaningful,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -116,7 +119,7 @@ function syncLayoutWithStreams() {
   if (!props.streams) return
   const present = new Set(
     chartDefs
-      .filter((d) => Array.isArray(props.streams[d.key]?.data) && props.streams[d.key].data.length > 0)
+      .filter((d) => streamIsMeaningful(d.key, props.streams[d.key], props.activity))
       .map((d) => d.key),
   )
   const cleaned = chartLayout.value
@@ -132,24 +135,34 @@ function syncLayoutWithStreams() {
 // ─── X-axis unit helpers ─────────────────────────────────────────────────
 function timeFactor() { return 60 } // seconds per X-axis unit (always minutes)
 
+// Axe réellement tracé. `props.xAxis` est un souhait (les boutons radio) : sans le flux
+// correspondant — une activité sans GPS n'a pas de `distance` — on retombe sur le temps.
+// Tout ce qui convertit ou indexe DOIT passer par ici : mélanger les deux (échelle en km,
+// index cherchés dans `distance` absent) casse silencieusement la sélection au drag.
+const xKey = computed(() => {
+  const wanted = props.xAxis
+  if (props.streams?.[wanted]?.data?.length > 0) return wanted
+  return props.streams?.time?.data?.length > 0 ? 'time' : wanted
+})
+
 function chartXFromRaw(rawX) {
-  if (props.xAxis === 'distance') return rawX / 1000
+  if (xKey.value === 'distance') return rawX / 1000
   return rawX / timeFactor()
 }
 
 function chartXToRaw(x) {
-  if (props.xAxis === 'distance') return x * 1000
+  if (xKey.value === 'distance') return x * 1000
   return x * timeFactor()
 }
 
 function xAxisLabel() {
-  if (props.xAxis === 'distance') return t('strava.distance_km')
+  if (xKey.value === 'distance') return t('strava.distance_km')
   return t('strava.time_label_min')
 }
 
 // Binary search the x stream (raw units) for the closest index to `target`.
 function xValueToIndex(target) {
-  const stream = props.streams?.[props.xAxis]?.data
+  const stream = props.streams?.[xKey.value]?.data
   if (!stream || stream.length === 0) return 0
   let lo = 0
   let hi = stream.length - 1
@@ -364,6 +377,9 @@ const gradeFillPlugin = {
       for (let i = 1; i < data.length; i++) {
         const c = colors[i - 1]
         if (!c) continue
+        // Points de coupure des pauses (y null) : pas de quadrilatère à remplir en
+        // travers du trou — leurs pixels seraient NaN.
+        if (data[i - 1].y == null || data[i].y == null) continue
         const x0 = xScale.getPixelForValue(data[i - 1].x)
         const x1 = xScale.getPixelForValue(data[i].x)
         if (x1 < chartArea.left || x0 > chartArea.right) continue
@@ -380,6 +396,140 @@ const gradeFillPlugin = {
       }
       ctx.restore()
     })
+  },
+}
+
+// ─── Pauses ───────────────────────────────────────────────────────────────
+// Une pause n'est visible dans les données que comme un trou du flux `time` (cf.
+// detectPauses). Sans traitement, Chart.js relie les deux bords du trou par une droite
+// interpolée : à l'écran, un arrêt de dix minutes ressemble à un plateau de vraies
+// mesures. On casse donc la ligne (injectPauseGaps) ET on peint la zone, car la coupure
+// seule dirait « données manquantes » là où il faut lire « tu t'es arrêté ici ».
+const PAUSE_LABEL_MIN_PX = 46
+const PAUSE_HATCH_STEP_PX = 8
+
+// Coupe la ligne au milieu de chaque pause en y insérant un point à `y: null` : Chart.js
+// n'a plus rien à relier (`spanGaps` est faux par défaut). L'insertion se fait APRÈS le
+// sous-échantillonnage — un `null` glissé avant aurait toutes les chances d'être jeté par
+// `downsample`. `colors` (les couleurs de pente, indexées sur les points) suit la même
+// insertion, sans quoi $gradeColors se décalerait d'un cran à chaque pause.
+function injectPauseGaps(data, colors, spans) {
+  if (spans.length === 0 || data.length === 0) return { data, colors }
+  const outData = []
+  const outColors = colors ? [] : null
+  let si = 0
+  for (let i = 0; i < data.length; i++) {
+    // Aucun échantillon ne tombe entre x0 et x1 (le trou est par définition entre deux
+    // points consécutifs) : le `null` reste donc bien ordonné en x.
+    while (si < spans.length && spans[si].x1 <= data[i].x) {
+      outData.push({ x: (spans[si].x0 + spans[si].x1) / 2, y: null })
+      outColors?.push(null)
+      si++
+    }
+    outData.push(data[i])
+    outColors?.push(colors ? colors[i] : null)
+  }
+  return { data: outData, colors: outColors }
+}
+
+function pauseSpanPixels(chart, span) {
+  const xScale = chart.scales.x
+  const area = chart.chartArea
+  const p0 = xScale.getPixelForValue(span.x0)
+  const p1 = xScale.getPixelForValue(span.x1)
+  const lo = Math.max(area.left, Math.min(p0, p1))
+  const hi = Math.min(area.right, Math.max(p0, p1))
+  return { lo, hi }
+}
+
+const pauseBandPlugin = {
+  id: 'activityPauseBands',
+  // Sous les courbes : la bande est un décor de fond, pas un calque par-dessus la donnée.
+  beforeDatasetsDraw(chart) {
+    const spans = chart.$pauseSpans
+    if (!spans || spans.length === 0 || !chart.scales.x) return
+    const { ctx, chartArea } = chart
+    const h = chartArea.bottom - chartArea.top
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, h)
+    ctx.clip()
+    for (const span of spans) {
+      const { lo, hi } = pauseSpanPixels(chart, span)
+      if (hi <= lo) continue
+      ctx.fillStyle = 'rgba(108, 117, 125, 0.10)'
+      ctx.fillRect(lo, chartArea.top, hi - lo, h)
+      // Hachures : distinguent la pause du bandeau bleu uni de la sélection.
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(lo, chartArea.top, hi - lo, h)
+      ctx.clip()
+      ctx.strokeStyle = 'rgba(108, 117, 125, 0.22)'
+      ctx.lineWidth = 1
+      for (let x = lo - h; x < hi; x += PAUSE_HATCH_STEP_PX) {
+        ctx.beginPath()
+        ctx.moveTo(x, chartArea.bottom)
+        ctx.lineTo(x + h, chartArea.top)
+        ctx.stroke()
+      }
+      ctx.restore()
+      ctx.strokeStyle = 'rgba(108, 117, 125, 0.55)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+      ctx.beginPath()
+      ctx.moveTo(lo + 0.5, chartArea.top)
+      ctx.lineTo(lo + 0.5, chartArea.bottom)
+      ctx.moveTo(hi - 0.5, chartArea.top)
+      ctx.lineTo(hi - 0.5, chartArea.bottom)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+    ctx.restore()
+  },
+  // Au-dessus des courbes : l'étiquette doit rester lisible quel que soit le tracé.
+  afterDatasetsDraw(chart) {
+    const spans = chart.$pauseSpans
+    if (!spans || spans.length === 0 || !chart.scales.x) return
+    const { ctx, chartArea } = chart
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+    ctx.clip()
+    ctx.font = '600 10px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    for (const span of spans) {
+      const { lo, hi } = pauseSpanPixels(chart, span)
+      const width = hi - lo
+      if (width < PAUSE_LABEL_MIN_PX) continue
+      const label = formatDuration(Math.round(span.durationSec))
+      const textW = ctx.measureText(label).width
+      const barW = 2
+      const barH = 8
+      const iconW = barW * 2 + 2
+      const padX = 5
+      const boxW = padX * 2 + iconW + 4 + textW
+      const boxH = 15
+      if (boxW > width - 4) continue
+      const boxX = (lo + hi) / 2 - boxW / 2
+      const boxY = chartArea.top + 3
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+      ctx.strokeStyle = 'rgba(108, 117, 125, 0.55)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.roundRect(boxX, boxY, boxW, boxH, 3)
+      ctx.fill()
+      ctx.stroke()
+      // Glyphe « pause » dessiné à la main : les icônes FontAwesome sont une police
+      // web, dont le chargement n'est pas garanti au moment où le canvas se peint.
+      ctx.fillStyle = '#495057'
+      const iconX = boxX + padX
+      const iconY = boxY + boxH / 2 - barH / 2
+      ctx.fillRect(iconX, iconY, barW, barH)
+      ctx.fillRect(iconX + barW + 2, iconY, barW, barH)
+      ctx.fillText(label, iconX + iconW + 4, boxY + boxH / 2 + 0.5)
+    }
+    ctx.restore()
   },
 }
 
@@ -492,15 +642,27 @@ async function renderCharts() {
   if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
-  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin)
+  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, pauseBandPlugin)
 
   destroyCharts()
 
-  const xStream = props.streams[props.xAxis]?.data || props.streams.time?.data || []
+  const xStream = props.streams[xKey.value]?.data || []
   const maxPoints = 600
   const xRaw = xStream
   xMinAll = xRaw.length > 0 ? chartXFromRaw(xRaw[0]) : 0
   xMaxAll = xRaw.length > 0 ? chartXFromRaw(xRaw[xRaw.length - 1]) : 0
+
+  // Les pauses sont détectées sur `time`, mais projetées sur l'axe réellement tracé : les
+  // flux sont indexés par échantillon, donc `xRaw[idx]` donne la position de la pause quel
+  // que soit `xKey`. Sur l'axe distance une pause s'écrase sur un seul X (la distance
+  // n'avance pas) — la bande y est invisible, et c'est correct.
+  const pauseSpans = detectPauses(props.streams.time?.data)
+    .filter((p) => xRaw[p.startIdx] != null && xRaw[p.endIdx] != null)
+    .map((p) => ({
+      x0: chartXFromRaw(xRaw[p.startIdx]),
+      x1: chartXFromRaw(xRaw[p.endIdx]),
+      durationSec: p.durationSec,
+    }))
 
   groups.forEach((group) => {
     if (group.collapsed) return
@@ -523,7 +685,7 @@ async function renderCharts() {
       for (let i = 0; i < len; i++) {
         pairs.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(yRaw[i]) })
       }
-      const data = downsample(pairs, maxPoints)
+      const sampled = downsample(pairs, maxPoints)
 
       // Coloration par pente du profil d'altitude (« couleur des tracés »). On calcule une
       // couleur par échantillon puis on sous-échantillonne AVEC LE MÊME `maxPoints` que les
@@ -543,6 +705,11 @@ async function renderCharts() {
         }
         gradeColors = downsample(colors, maxPoints)
       }
+
+      // Coupe la ligne sur les pauses, en gardant `data` et `gradeColors` alignés.
+      const withGaps = injectPauseGaps(sampled, gradeColors, pauseSpans)
+      const data = withGaps.data
+      gradeColors = withGaps.colors
 
       return {
         label,
@@ -604,7 +771,7 @@ async function renderCharts() {
             type: 'linear',
             // Titre d'axe retiré (rappelé dans la légende du panneau, cf. axis-x-hint).
             title: { display: false },
-            ticks: props.xAxis === 'time'
+            ticks: xKey.value === 'time'
               ? {
                   stepSize: 10,
                   maxTicksLimit: 30,
@@ -622,12 +789,14 @@ async function renderCharts() {
       },
     })
 
+    ;(chart as any).$pauseSpans = pauseSpans
+
     ;(chart as any).$onSelect = (v0: number, v1: number) => {
       const r0 = chartXToRaw(Math.min(v0, v1))
       const r1 = chartXToRaw(Math.max(v0, v1))
       const sIdx = xValueToIndex(r0)
       const eIdx = xValueToIndex(r1)
-      const xs = props.streams?.[props.xAxis]?.data || props.streams?.time?.data
+      const xs = props.streams?.[xKey.value]?.data
       const maxIdx = (xs?.length || 1) - 1
       if (sIdx <= 0 && eIdx >= maxIdx) emit('clear-selection')
       else emit('select-segment', sIdx, eIdx)
@@ -642,7 +811,7 @@ async function renderCharts() {
 }
 
 function applySelectionToCharts() {
-  const xs = props.streams?.[props.xAxis]?.data
+  const xs = props.streams?.[xKey.value]?.data
   if (!xs || xs.length === 0) return
   const fullStart = chartXFromRaw(xs[0])
   const fullEnd = chartXFromRaw(xs[xs.length - 1])
@@ -701,7 +870,7 @@ function externalTooltipHandler(context) {
   el.innerHTML = buildTooltipHtml({
     streams: props.streams,
     activity: props.activity,
-    xAxis: props.xAxis,
+    xAxis: xKey.value,
     idx,
     visibleStreams: visibleStreamsLocal.value,
     priorityStreams: priority,
@@ -1115,7 +1284,7 @@ function resetZoom() { emit('update:zoomRange', null) }
 
 function zoomToSelection() {
   if (!props.selection) return
-  const xs = props.streams?.[props.xAxis]?.data || props.streams?.time?.data
+  const xs = props.streams?.[xKey.value]?.data
   if (!xs || xs.length === 0) return
   const a = xs[props.selection.startIdx]
   const b = xs[props.selection.endIdx]
@@ -1269,7 +1438,7 @@ function attachTouchInteraction(canvas: HTMLCanvasElement, chart: any) {
         if (v0 != null && v1 != null) {
           const sIdx = chartValueToIndex(v0)
           const eIdx = chartValueToIndex(v1)
-          const xs = props.streams?.[props.xAxis]?.data || props.streams?.time?.data
+          const xs = props.streams?.[xKey.value]?.data
           const maxIdx = (xs?.length || 1) - 1
           if (sIdx <= 0 && eIdx >= maxIdx) emit('clear-selection')
           else if (eIdx > sIdx) emit('select-segment', sIdx, eIdx)

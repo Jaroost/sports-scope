@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'
+import { activityIcon, sportType } from '../activityHelpers'
 import ActivitiesOverviewMap from './ActivitiesOverviewMap.vue'
 
 const props = defineProps({
@@ -340,18 +341,6 @@ function gradeColor(cat) {
   return '#9aa0a6'
 }
 
-function activityIcon(type) {
-  const t = (type || '').toLowerCase()
-  if (t.includes('run')) return 'fa-person-running'
-  if (t.includes('ride') || t.includes('cycl') || t.includes('bike') || t.includes('velo')) return 'fa-person-biking'
-  if (t.includes('swim')) return 'fa-person-swimming'
-  if (t.includes('walk') || t.includes('hike')) return 'fa-person-hiking'
-  if (t.includes('ski')) return 'fa-person-skiing'
-  if (t.includes('row')) return 'fa-water'
-  if (t.includes('yoga')) return 'fa-spa'
-  if (t.includes('workout') || t.includes('weight')) return 'fa-dumbbell'
-  return 'fa-bolt'
-}
 </script>
 
 <template>
@@ -523,7 +512,7 @@ function activityIcon(type) {
               <span
                 v-if="activity.preview_segments && activity.preview_segments.length"
                 class="activity-track-preview"
-                :title="activity.type"
+                :title="sportType(activity)"
               >
                 <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
                   <path
@@ -538,16 +527,16 @@ function activityIcon(type) {
                   />
                 </svg>
                 <span class="activity-track-preview__badge">
-                  <i :class="`fa-solid ${activityIcon(activity.type)}`" aria-hidden="true"></i>
+                  <i :class="`fa-solid ${activityIcon(sportType(activity))}`" aria-hidden="true"></i>
                 </span>
               </span>
               <span v-else class="activity-type-badge">
-                <i :class="`fa-solid ${activityIcon(activity.type)}`" aria-hidden="true"></i>
+                <i :class="`fa-solid ${activityIcon(sportType(activity))}`" aria-hidden="true"></i>
               </span>
               <div>
                 <div class="fw-semibold">{{ activity.name }}</div>
                 <small class="text-muted">
-                  <i class="fa-solid fa-tag me-1" aria-hidden="true"></i>{{ activity.type }}
+                  <i class="fa-solid fa-tag me-1" aria-hidden="true"></i>{{ sportType(activity) }}
                   <span class="mx-1">·</span>
                   <i class="fa-regular fa-calendar me-1" aria-hidden="true"></i>{{ new Date(activity.start_date_local).toLocaleDateString() }}
                   <span v-if="formatDaysAgo(activity.start_date_local)" class="days-ago-badge ms-1">{{ formatDaysAgo(activity.start_date_local) }}</span>
@@ -564,8 +553,10 @@ function activityIcon(type) {
                 <span class="tss-value">{{ Math.round(activity.tss) }}</span>
                 <span class="tss-unit">{{ t('strava.tss_label') }}</span>
               </span>
-              <div class="text-end">
-                <div class="fw-semibold">
+              <div class="text-start activity-metrics">
+                <!-- Distance masquée à 0 : une activité sans GPS (squash, muscu…) n'en a pas,
+                     et « 0.00 km » se lit comme une mesure alors qu'il n'y a rien à mesurer. -->
+                <div v-if="activity.distance" class="fw-semibold">
                   <i class="fa-solid fa-route me-1 text-warning" aria-hidden="true"></i>{{ formatDistance(activity.distance) }}
                 </div>
                 <small class="text-muted">
@@ -602,6 +593,22 @@ function activityIcon(type) {
 </template>
 
 <style scoped>
+/* Bloc chiffré de droite (distance + durée). Sa taille est réservée pour deux lignes,
+   même quand la distance est masquée (activité sans GPS) : sans ça, le bloc rétrécit et
+   la pastille TSS qui le précède remonte et se décale d'une ligne à l'autre. La largeur
+   couvre la plus longue distance plausible (« 999.99 km » + icône).
+   Contenu calé à gauche : les durées ont des largeurs très variables (« 45min » vs
+   « 1h 05min ») — alignées à droite, leurs icônes se décalaient à chaque ligne. */
+.activity-metrics {
+  min-width: 6.5rem;
+  min-height: 2.75rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  flex-shrink: 0;
+}
+
 /* Vignette du tracé : même encombrement que le badge d'activité (2.25rem), coin
    arrondi. Les teintes des segments (montée/descente/plat) portent le dénivelé,
    comme la liste des itinéraires. */

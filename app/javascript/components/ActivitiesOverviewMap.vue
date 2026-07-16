@@ -4,25 +4,12 @@ import { type PropType } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor, MAP_STYLES, ROUTE_LINE_LAYOUT } from '../mapStyles'
 import MapStyleDropdown from './MapStyleDropdown.vue'
+import { activityIcon } from '../activityHelpers'
 
 const props = defineProps({
   activities: { type: Array as PropType<Record<string, any>[]>, default: () => [] },
   localePrefix: { type: String, default: '' },
 })
-
-// Icône du sport — même logique que la liste (HelloStrava).
-function activityIcon(type: unknown) {
-  const s = String(type || '').toLowerCase()
-  if (s.includes('run')) return 'fa-person-running'
-  if (s.includes('ride') || s.includes('cycl') || s.includes('bike') || s.includes('velo')) return 'fa-person-biking'
-  if (s.includes('swim')) return 'fa-person-swimming'
-  if (s.includes('walk') || s.includes('hike')) return 'fa-person-hiking'
-  if (s.includes('ski')) return 'fa-person-skiing'
-  if (s.includes('row')) return 'fa-water'
-  if (s.includes('yoga')) return 'fa-spa'
-  if (s.includes('workout') || s.includes('weight')) return 'fa-dumbbell'
-  return 'fa-bolt'
-}
 
 // Palette qualitative : une teinte par sortie (cyclée) pour distinguer les tracés
 // qui se croisent. Lisible sur fond clair comme satellite.

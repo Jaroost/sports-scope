@@ -25,6 +25,14 @@ export interface ClimbSegment {
   category: string | null
 }
 
+export interface PauseSegment {
+  startIdx: number // dernier échantillon avant le trou
+  endIdx: number // premier échantillon après le trou
+  startSec: number
+  endSec: number
+  durationSec: number
+}
+
 export interface GeoFeature {
   type: 'Feature'
   geometry: { type: 'LineString'; coordinates: number[][] }
@@ -48,7 +56,13 @@ export function activityIcon(type: string | null | undefined): string {
   if (t.includes('walk') || t.includes('hike')) return 'fa-person-hiking'
   if (t.includes('ski')) return 'fa-person-skiing'
   if (t.includes('row')) return 'fa-water'
-  if (t.includes('yoga')) return 'fa-spa'
+  if (t.includes('yoga') || t.includes('pilates')) return 'fa-spa'
+  // Sports de raquette : à tester avant `workout`, car leur `type` Strava vaut « Workout »
+  // — c'est `sport_type` qui porte « Squash », « Padel »… (cf. sportType()).
+  if (t.includes('squash') || t.includes('tennis') || t.includes('padel') ||
+      t.includes('racquet') || t.includes('badminton') || t.includes('pickleball')) {
+    return 'fa-table-tennis-paddle-ball'
+  }
   if (t.includes('workout') || t.includes('weight')) return 'fa-dumbbell'
   return 'fa-bolt'
 }
@@ -78,6 +92,47 @@ export const chartDefs: ChartDef[] = [
 
 export function defByKey(key: string): ChartDef | undefined {
   return chartDefs.find((d) => d.key === key)
+}
+
+// Sans GPS, Strava renvoie quand même `velocity_smooth` / `grade_smooth`, mais
+// remplis de zéros de bout en bout : un flux entièrement nul (ou vide) ne porte
+// aucune information et ne mérite pas de graphique.
+export function streamHasData(stream: { data?: unknown } | null | undefined): boolean {
+  const data = stream?.data
+  if (!Array.isArray(data) || data.length === 0) return false
+  return data.some((v) => typeof v === 'number' && Number.isFinite(v) && v !== 0)
+}
+
+// Le sport réel de l'activité. Sur une séance de squash, le `type` Strava vaut
+// « Workout » — seul `sport_type` porte « Squash ».
+export function sportType(activity: Record<string, unknown> | null | undefined): string {
+  return String(activity?.sport_type || activity?.type || '')
+}
+
+// Sports de raquette : la cadence remontée par une montre au poignet n'y mesure rien de
+// physiologique. Le jeu est fait de pas chassés, de fentes et d'arrêts, pas d'une foulée
+// régulière — la montre ne détecte un rythme que par intermittence et remplit le reste
+// de zéros. Le flux existe (donc `streamHasData` le laisse passer) mais n'est que du bruit.
+const RACKET_SPORTS = new Set([
+  'Squash',
+  'Racquetball',
+  'Tennis',
+  'TableTennis',
+  'Badminton',
+  'Pickleball',
+  'Padel',
+])
+
+// Un flux mérite-t-il un graphique sur CETTE activité ? Combine « contient des données »
+// et les exclusions propres au sport.
+export function streamIsMeaningful(
+  key: string,
+  stream: { data?: unknown } | null | undefined,
+  activity: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!streamHasData(stream)) return false
+  if (key === 'cadence' && RACKET_SPORTS.has(sportType(activity))) return false
+  return true
 }
 
 // Independent order for the stream-mean chips in the sticky header — kept
@@ -112,6 +167,48 @@ export function computeElevGain(alts: (number | null)[], halfWin = 2): { gain: n
     prev = smooth
   }
   return { gain: up, loss: down }
+}
+
+// ─── Pauses (trous du flux `time`) ────────────────────────────────────────
+// Tous les capteurs ne signalent pas un arrêt dans le flux `moving` : beaucoup coupent
+// simplement l'enregistrement. Le flux `time` devient alors creux et la pause n'est plus
+// qu'un trou entre deux échantillons — c'est le seul signal disponible. Sur l'activité
+// Strava 19313900233 (home-trainer) `moving` est `true` de bout en bout et
+// `moving_time == elapsed_time`, alors que `time` compte 2770 échantillons pour 8394 s.
+//
+// Le seuil est relatif à la cadence d'échantillonnage réelle (médiane) : un enregistrement
+// à 4 s d'intervalle ne doit pas voir une pause à chaque point. Le plancher absolu écarte
+// les micro-coupures : sur un flux à 1 Hz, une dizaine de secondes manquantes relève du
+// décrochage capteur plus que de l'arrêt, et ne mérite pas de casser la courbe.
+const PAUSE_MIN_GAP_S = 30
+const PAUSE_STEP_FACTOR = 3
+
+export function detectPauses(
+  time: (number | null)[] | null | undefined,
+  minGapS = PAUSE_MIN_GAP_S,
+): PauseSegment[] {
+  if (!Array.isArray(time) || time.length < 3) return []
+  const steps: number[] = []
+  for (let i = 1; i < time.length; i++) {
+    const dt = (time[i] as number) - (time[i - 1] as number)
+    if (Number.isFinite(dt) && dt > 0) steps.push(dt)
+  }
+  if (steps.length === 0) return []
+  const median = [...steps].sort((a, b) => a - b)[steps.length >> 1]
+  const threshold = Math.max(minGapS, median * PAUSE_STEP_FACTOR)
+  const out: PauseSegment[] = []
+  for (let i = 1; i < time.length; i++) {
+    const t0 = time[i - 1] as number
+    const t1 = time[i] as number
+    const dt = t1 - t0
+    if (!Number.isFinite(dt) || dt < threshold) continue
+    out.push({ startIdx: i - 1, endIdx: i, startSec: t0, endSec: t1, durationSec: dt })
+  }
+  return out
+}
+
+export function totalPausedSeconds(pauses: PauseSegment[]): number {
+  return pauses.reduce((sum, p) => sum + p.durationSec, 0)
 }
 
 // ─── Formatting ───────────────────────────────────────────────────────────

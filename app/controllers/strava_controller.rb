@@ -3,11 +3,18 @@ class StravaController < ApplicationController
   before_action :ensure_strava_linked!
 
   ACTIVITIES_TTL = 1.day
+  # Longueur max du terme de recherche (nom / lieu), alignée sur celle des
+  # itinéraires : au-delà ce n'est plus un nom de sortie ni de localité.
+  MAX_SEARCH_LEN = 80
   DEFAULT_PER_PAGE = 50
   MAX_PER_PAGE = 200
   # Plafond de tracés renvoyés à la carte d'ensemble : au-delà, le rendu MapLibre
   # de milliers de polylignes devient lourd — on garde les plus récentes du filtre.
   MAX_MAP_ACTIVITIES = 500
+  # Mots-clés par catégorie de sport, repris tels quels de `PerformanceRecords` :
+  # les deux pages doivent regrouper les `activity_type` de la même façon, sinon un
+  # lien depuis l'analyse de performance ne retomberait pas sur les mêmes sorties.
+  SPORT_CATEGORY_KEYWORDS = PerformanceRecords::SPORT_MATCHERS.to_h.freeze
 
   # Serves the user's activities straight from `strava_activities`. The first
   # visit (empty table) triggers a full sync; `?refresh=1` runs an incremental
@@ -32,6 +39,7 @@ class StravaController < ApplicationController
     # TSS par sortie (charge d'entraînement) calculé en une passe, mêmes seuils que
     # la charge d'entraînement (FTP variable, LTHR).
     tss_map = TrainingLoad.tss_by_activity(current_user)
+    sport_types = current_user.strava_activities.distinct.pluck(:activity_type).compact.sort
     render json: {
       cached_at: current_user.strava_activities.maximum(:updated_at)&.iso8601,
       total: current_user.strava_activities.count,
@@ -41,7 +49,10 @@ class StravaController < ApplicationController
       total_pages: total_pages,
       # Liste des types de sport présents dans TOUT l'historique (pas seulement la
       # page courante) pour alimenter le menu déroulant du filtre.
-      sports: current_user.strava_activities.distinct.pluck(:activity_type).compact.sort,
+      sports: sport_types,
+      # Catégories présentes dans l'historique (mêmes regroupements que la page
+      # performance) — le menu du filtre propose les deux granularités.
+      sport_categories: sport_types.map { |t| PerformanceRecords.sport_category(t) }.uniq.sort,
       activities: records.map { |a| summary_json(a, tss: tss_map[['strava', a.strava_id.to_s]]) }
     }
   rescue StravaSyncService::StravaApiError => e
@@ -183,7 +194,20 @@ class StravaController < ApplicationController
   # seulement la page courante.
   def filtered_activities_scope
     scope = current_user.strava_activities
-    scope = scope.where(activity_type: params[:sport]) if params[:sport].present?
+    if params[:q].present?
+      needle = StravaActivity.sanitize_sql_like(params[:q].to_s.first(MAX_SEARCH_LEN))
+      # `localities::text` cherche dans le rendu texte du tableau jsonb — c'est ce
+      # rendu qui est indexé en trigrammes (cf. AddLocalitiesToStravaActivities).
+      scope = scope.where(
+        "strava_activities.name ILIKE :q OR strava_activities.localities::text ILIKE :q",
+        q: "%#{needle}%"
+      )
+    end
+    if params[:sport].present?
+      scope = scope.where(activity_type: params[:sport])
+    elsif params[:sport_category].present?
+      scope = filter_by_sport_category(scope, params[:sport_category])
+    end
     scope = scope.where(strava_activities: { distance_m: params[:min_dist].to_f * 1000.. }) if params[:min_dist].present?
     scope = scope.where(strava_activities: { distance_m: ..(params[:max_dist].to_f * 1000) }) if params[:max_dist].present?
     scope = scope.where(strava_activities: { total_elevation_gain: params[:min_elev].to_f.. }) if params[:min_elev].present?
@@ -197,6 +221,25 @@ class StravaController < ApplicationController
       scope = scope.where(strava_activities: { started_at: ..to.end_of_day })
     end
     scope
+  end
+
+  # Filtre sur une catégorie de sport (« cycling », « running », …) plutôt que sur
+  # un `activity_type` exact : mêmes mots-clés que `PerformanceRecords`, pour que la
+  # liste corresponde exactement à l'onglet de sport de la page performance.
+  # Le SQL reproduit `PerformanceRecords.sport_category` : mot-clé cherché dans le
+  # type (casse ignorée), et « other » = aucun mot-clé d'aucune catégorie — un type
+  # NULL tombe donc dans « other », comme côté Ruby.
+  def filter_by_sport_category(scope, category)
+    if (keywords = SPORT_CATEGORY_KEYWORDS[category])
+      clauses = keywords.map { "COALESCE(strava_activities.activity_type, '') ILIKE ?" }
+      scope.where(clauses.join(' OR '), *keywords.map { |kw| "%#{kw}%" })
+    elsif category == 'other'
+      all = SPORT_CATEGORY_KEYWORDS.values.flatten
+      clauses = all.map { "COALESCE(strava_activities.activity_type, '') NOT ILIKE ?" }
+      scope.where(clauses.join(' AND '), *all.map { |kw| "%#{kw}%" })
+    else
+      scope # catégorie inconnue : filtre ignoré
+    end
   end
 
   # Parse une date ISO (yyyy-mm-dd) issue d'un <input type="date">. Renvoie nil si

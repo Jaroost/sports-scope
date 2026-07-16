@@ -29,6 +29,7 @@ const emptyText = computed(() => t('strava.no_activities'))
 
 // --- Filtres + pagination (pilotés côté serveur) ---
 const showFilters = ref(false)
+const search = ref('') // nom de la sortie ou lieu traversé
 const sportFilter = ref('')
 const minDistance = ref(null) // km
 const maxDistance = ref(null)
@@ -39,8 +40,18 @@ const maxDuration = ref(null)
 const dateFrom = ref('') // yyyy-mm-dd
 const dateTo = ref('')
 
-// Liste des sports de tout l'historique, fournie par le serveur — alimente le menu.
+// Sports de tout l'historique, fournis par le serveur — alimentent le menu : les
+// types Strava bruts (« Ride », « VirtualRide »…) et les catégories qui les
+// regroupent (« cycling »…), comme les onglets de la page performance.
 const sportOptions = ref([])
+const sportCategoryOptions = ref([])
+
+// Une catégorie est portée par le même `sportFilter` qu'un type brut, préfixée pour
+// les distinguer : un seul état à mémoriser, réinitialiser et compter.
+const SPORT_CATEGORY_PREFIX = 'cat:'
+function sportCategoryLabel(key) {
+  return t(`performance.sports.${key}`)
+}
 
 // Pagination — page/nombre de pages renvoyés par le serveur.
 const page = ref(1)
@@ -54,6 +65,7 @@ function isSet(v) {
 
 const activeFilterCount = computed(() => {
   let n = 0
+  if (search.value.trim()) n++
   if (sportFilter.value) n++
   if (isSet(minDistance.value)) n++
   if (isSet(maxDistance.value)) n++
@@ -67,6 +79,7 @@ const activeFilterCount = computed(() => {
 })
 
 function clearFilters() {
+  search.value = ''
   sportFilter.value = ''
   minDistance.value = null
   maxDistance.value = null
@@ -147,7 +160,12 @@ const localePrefix = lang ? `/${lang}` : ''
 // Paramètres de filtre communs à la liste et à la carte.
 function filterParams() {
   const p = new URLSearchParams()
-  if (sportFilter.value) p.set('sport', sportFilter.value)
+  if (search.value.trim()) p.set('q', search.value.trim())
+  if (sportFilter.value.startsWith(SPORT_CATEGORY_PREFIX)) {
+    p.set('sport_category', sportFilter.value.slice(SPORT_CATEGORY_PREFIX.length))
+  } else if (sportFilter.value) {
+    p.set('sport', sportFilter.value)
+  }
   if (isSet(minDistance.value)) p.set('min_dist', String(minDistance.value))
   if (isSet(maxDistance.value)) p.set('max_dist', String(maxDistance.value))
   if (isSet(minElevation.value)) p.set('min_elev', String(minElevation.value))
@@ -211,6 +229,7 @@ async function fetchActivities() {
     // Le serveur borne la page dans [1, total_pages] : on resynchronise l'état local.
     if (payload.page) page.value = payload.page
     if (payload.sports) sportOptions.value = payload.sports
+    if (payload.sport_categories) sportCategoryOptions.value = payload.sport_categories
     error.value = null
     hasLoaded.value = true
   } catch (e) {
@@ -232,6 +251,7 @@ function loadPersisted() {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return
     const s = JSON.parse(raw)
+    if (typeof s.search === 'string') search.value = s.search
     if (typeof s.sport === 'string') sportFilter.value = s.sport
     if (s.minDistance != null) minDistance.value = s.minDistance
     if (s.maxDistance != null) maxDistance.value = s.maxDistance
@@ -249,6 +269,7 @@ function loadPersisted() {
 function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      search: search.value,
       sport: sportFilter.value,
       minDistance: minDistance.value,
       maxDistance: maxDistance.value,
@@ -264,7 +285,40 @@ function persist() {
   } catch { /* ignore */ }
 }
 
+// Filtres passés dans l'URL (liens « meilleures périodes » de la page performance) :
+// ils l'emportent sur les filtres mémorisés — on repart d'une ardoise vide pour que
+// la liste corresponde exactement à ce qui a été cliqué, sans filtre résiduel invisible.
+function applyUrlFilters() {
+  const p = new URLSearchParams(window.location.search)
+  const keys = ['q', 'sport', 'sport_category', 'min_dist', 'max_dist', 'min_elev', 'max_elev', 'min_dur', 'max_dur', 'from', 'to']
+  if (!keys.some((k) => p.has(k))) return false
+
+  clearFilters()
+  const num = (key) => {
+    const raw = p.get(key)
+    if (!raw) return null
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : null
+  }
+  search.value = p.get('q') || ''
+  const category = p.get('sport_category')
+  sportFilter.value = p.get('sport') || (category ? SPORT_CATEGORY_PREFIX + category : '')
+  minDistance.value = num('min_dist')
+  maxDistance.value = num('max_dist')
+  minElevation.value = num('min_elev')
+  maxElevation.value = num('max_elev')
+  minDuration.value = num('min_dur')
+  maxDuration.value = num('max_dur')
+  dateFrom.value = p.get('from') || ''
+  dateTo.value = p.get('to') || ''
+  // Panneau déplié : la période appliquée est visible d'un coup d'œil et modifiable
+  // sur place.
+  showFilters.value = true
+  return true
+}
+
 loadPersisted()
+if (applyUrlFilters()) persist() // sinon un rechargement sans query string ressortirait les anciens filtres
 
 // Un changement de filtre ramène à la page 1 puis refetch, avec un léger debounce
 // pour ne pas requêter à chaque frappe dans les champs numériques/date. La carte
@@ -281,7 +335,7 @@ function onFilterChange() {
 }
 
 watch(
-  [sportFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
+  [search, sportFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
   onFilterChange,
 )
 
@@ -293,7 +347,7 @@ watch(view, (v) => {
 
 // Mémorise l'état (filtres + vue + panneau) à chaque changement.
 watch(
-  [sportFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration,
+  [search, sportFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration,
     dateFrom, dateTo, view, showFilters],
   persist,
 )
@@ -374,17 +428,31 @@ function gradeColor(cat) {
             <span>{{ t('routes.view_map') }}</span>
           </button>
         </div>
-        <button
-          type="button"
-          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-          :class="{ active: showFilters }"
-          :aria-expanded="showFilters"
-          @click="showFilters = !showFilters"
-        >
-          <i class="fa-solid fa-filter" aria-hidden="true"></i>
-          <span>{{ t('strava.filters.toggle') }}</span>
-          <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
-        </button>
+        <div class="btn-group btn-group-sm">
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            :class="{ active: showFilters }"
+            :aria-expanded="showFilters"
+            @click="showFilters = !showFilters"
+          >
+            <i class="fa-solid fa-filter" aria-hidden="true"></i>
+            <span>{{ t('strava.filters.toggle') }}</span>
+            <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
+          </button>
+          <!-- Réinitialisation à portée de main, sans avoir à déplier le panneau.
+               Affiché seulement quand il y a quelque chose à réinitialiser. -->
+          <button
+            v-if="activeFilterCount"
+            type="button"
+            class="btn btn-sm btn-danger d-flex align-items-center"
+            :title="t('strava.filters.clear')"
+            :aria-label="t('strava.filters.clear')"
+            @click="clearFilters"
+          >
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
         <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1" :title="t('strava.last_updated')">
           <i class="fa-regular fa-clock" aria-hidden="true"></i>
           <span class="d-none d-md-inline">{{ t('strava.last_updated') }}</span>
@@ -395,10 +463,28 @@ function gradeColor(cat) {
     <div v-if="showFilters && hasLoaded && !error" class="card-body border-bottom activity-filters">
       <div class="row g-3">
         <div class="col-12 col-md-4">
+          <label class="form-label small mb-1">{{ t('strava.filters.search') }}</label>
+          <input
+            v-model="search"
+            type="search"
+            class="form-control form-control-sm"
+            :placeholder="t('strava.filters.search_placeholder')"
+          />
+        </div>
+        <div class="col-12 col-md-4">
           <label class="form-label small mb-1">{{ t('strava.filters.sport') }}</label>
           <select v-model="sportFilter" class="form-select form-select-sm">
             <option value="">{{ t('strava.filters.all_sports') }}</option>
-            <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>
+            <optgroup v-if="sportCategoryOptions.length" :label="t('strava.filters.sport_categories')">
+              <option
+                v-for="c in sportCategoryOptions"
+                :key="c"
+                :value="SPORT_CATEGORY_PREFIX + c"
+              >{{ sportCategoryLabel(c) }}</option>
+            </optgroup>
+            <optgroup :label="t('strava.filters.sport_types')">
+              <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>
+            </optgroup>
           </select>
         </div>
         <div class="col-6 col-md-4">
@@ -458,14 +544,24 @@ function gradeColor(cat) {
           ></span>
           {{ t('strava.filters.results', { count: filteredTotal, total: total ?? 0 }) }}
         </small>
-        <button
-          type="button"
-          class="btn btn-sm btn-link text-decoration-none"
-          :disabled="!activeFilterCount"
-          @click="clearFilters"
-        >
-          <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('strava.filters.clear') }}
-        </button>
+        <div class="d-flex align-items-center gap-2">
+          <button
+            type="button"
+            class="btn btn-sm btn-link text-decoration-none"
+            :disabled="!activeFilterCount"
+            @click="clearFilters"
+          >
+            <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('strava.filters.clear') }}
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            @click="showFilters = false"
+          >
+            <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+            <span>{{ t('strava.filters.close') }}</span>
+          </button>
+        </div>
       </div>
     </div>
     <div v-if="view === 'map'" class="card-body p-2">
@@ -594,6 +690,22 @@ function gradeColor(cat) {
 </template>
 
 <style scoped>
+/* Panneau de filtres collé sous la navbar `fixed-top` (3.5rem, même offset que
+   PerformanceAnalysis) : la liste est longue, on garde les champs et le compteur
+   de résultats sous la main pendant le défilement.
+   - fond opaque : `card-body` est transparent, la liste défilerait au travers ;
+   - z-index : au-dessus des lignes de la liste et du canvas MapLibre de la vue carte ;
+   - max-height + overflow : sur mobile le panneau dépasse la hauteur d'écran, et
+     un élément sticky plus haut que la fenêtre laisse son bas inaccessible. */
+.activity-filters {
+  position: sticky;
+  top: 3.5rem;
+  z-index: 5;
+  background: var(--bs-card-bg, var(--bs-body-bg));
+  max-height: calc(100dvh - 3.5rem);
+  overflow-y: auto;
+}
+
 /* Bloc chiffré de droite (distance + durée). Sa taille est réservée pour deux lignes,
    même quand la distance est masquée (activité sans GPS) : sans ça, le bloc rétrécit et
    la pastille TSS qui le précède remonte et se décale d'une ligne à l'autre. La largeur

@@ -675,17 +675,31 @@ onMounted(() => {
               <span>{{ t('routes.view_map') }}</span>
             </button>
           </div>
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            :class="{ active: showFilters }"
-            :aria-expanded="showFilters"
-            @click="showFilters = !showFilters"
-          >
-            <i class="fa-solid fa-filter" aria-hidden="true"></i>
-            <span>{{ t('routes.filters.toggle') }}</span>
-            <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
-          </button>
+          <div class="btn-group btn-group-sm">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              :class="{ active: showFilters }"
+              :aria-expanded="showFilters"
+              @click="showFilters = !showFilters"
+            >
+              <i class="fa-solid fa-filter" aria-hidden="true"></i>
+              <span>{{ t('routes.filters.toggle') }}</span>
+              <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
+            </button>
+            <!-- Réinitialisation à portée de main, sans avoir à déplier le panneau.
+                 Affiché seulement quand il y a quelque chose à réinitialiser. -->
+            <button
+              v-if="activeFilterCount"
+              type="button"
+              class="btn btn-sm btn-danger d-flex align-items-center"
+              :title="t('routes.filters.clear')"
+              :aria-label="t('routes.filters.clear')"
+              @click="clearFilters"
+            >
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -752,14 +766,24 @@ onMounted(() => {
             <span v-if="loading" class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
             {{ t('routes.filters.results', { count: filteredTotal, total: total }) }}
           </small>
-          <button
-            type="button"
-            class="btn btn-sm btn-link text-decoration-none"
-            :disabled="!activeFilterCount"
-            @click="clearFilters"
-          >
-            <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('routes.filters.clear') }}
-          </button>
+          <div class="d-flex align-items-center gap-2">
+            <button
+              type="button"
+              class="btn btn-sm btn-link text-decoration-none"
+              :disabled="!activeFilterCount"
+              @click="clearFilters"
+            >
+              <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('routes.filters.clear') }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              @click="showFilters = false"
+            >
+              <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+              <span>{{ t('routes.filters.close') }}</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1008,6 +1032,22 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* Panneau de filtres collé sous la navbar `fixed-top` (3.5rem, même offset que
+   PerformanceAnalysis) : la liste est longue, on garde les champs et le compteur
+   de résultats sous la main pendant le défilement.
+   - fond opaque : `card-body` est transparent, la liste défilerait au travers ;
+   - z-index : au-dessus des lignes de la liste et du canvas MapLibre de la vue carte ;
+   - max-height + overflow : sur mobile le panneau dépasse la hauteur d'écran, et
+     un élément sticky plus haut que la fenêtre laisse son bas inaccessible. */
+.activity-filters {
+  position: sticky;
+  top: 3.5rem;
+  z-index: 5;
+  background: var(--bs-card-bg, var(--bs-body-bg));
+  max-height: calc(100dvh - 3.5rem);
+  overflow-y: auto;
+}
+
 .min-width-0 {
   min-width: 0;
 }

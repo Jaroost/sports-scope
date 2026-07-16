@@ -1,5 +1,5 @@
 # Appel à l'API Overpass (OSM). Partagé par GeocodesController (POI affichés dans
-# le créateur) et RouteLocalitiesExtractor (lieux enregistrés pour la recherche).
+# le créateur) et LocalitiesExtractor (lieux enregistrés pour la recherche).
 class OverpassClient
   # Tout échec d'Overpass : réseau (timeout, DNS, TLS, connexion refusée), réponse
   # non-2xx, ou corps illisible. Overpass est un service externe best-effort — un

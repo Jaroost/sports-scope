@@ -11,6 +11,14 @@ class StravaActivity < ApplicationRecord
   validates :strava_id, presence: true, uniqueness: { scope: :user_id }
   validates :name, presence: true, length: { maximum: 255 }
 
+  # Lieux traversés (`localities`) : extraits d'Overpass en tâche de fond quand le
+  # tracé du résumé change, pour la recherche par lieu dans la liste. after_commit —
+  # le job doit voir l'activité enregistrée, et ne pas partir si la transaction est
+  # annulée. Conditionné au tracé et non à `raw` : une resynchro réécrit `raw` en
+  # entier (kudos, description…) sans que le tracé bouge, et referait un appel
+  # Overpass par activité à chaque « Tout rafraîchir ».
+  after_commit :extract_localities_later, on: %i[create update], if: :saved_change_to_summary_polyline?
+
   # Les gear_id Strava sont préfixés par type : « b… » pour les vélos, « g… » pour
   # les chaussures. Le suivi du cirage ne concerne que les vélos — on écarte donc
   # les chaussures (sinon une sortie course créerait un faux « vélo »).
@@ -61,6 +69,16 @@ class StravaActivity < ApplicationRecord
 
     coords = self.class.decode_polyline(encoded)
     coords.size >= 2 ? coords : nil
+  end
+
+  # Vrai quand la polyligne du résumé vient de changer (création avec tracé, ou
+  # tracé modifié côté Strava). Comparaison sur la polyligne extraite de `raw`
+  # avant/après : c'est la seule partie de `raw` dont dépendent les lieux.
+  def saved_change_to_summary_polyline?
+    return false unless saved_change_to_raw?
+
+    before, after = saved_change_to_raw
+    self.class.map_summary_polyline_from(before) != self.class.map_summary_polyline_from(after)
   end
 
   # Idempotent upsert of one Strava activity summary (the hash returned by
@@ -143,6 +161,12 @@ class StravaActivity < ApplicationRecord
     (result & 1) == 1 ? ~(result >> 1) : (result >> 1)
   end
 
+  # `map.summary_polyline` d'un `raw` éventuellement absent ou illisible (activité
+  # créée avant le stockage de `raw`, valeur d'avant-changement nil).
+  def self.map_summary_polyline_from(raw)
+    raw.is_a?(Hash) ? map_summary_polyline(raw) : nil
+  end
+
   # `map.summary_polyline` d'un résumé Strava (hash symboles ou chaînes).
   def self.map_summary_polyline(summary)
     map = summary['map'] || summary[:map]
@@ -205,6 +229,10 @@ class StravaActivity < ApplicationRecord
     return nil if v.nil? || v == ''
 
     v.to_i
+  end
+
+  def extract_localities_later
+    ExtractActivityLocalitiesJob.perform_later(id)
   end
 
   def self.latlng(v)

@@ -19,7 +19,7 @@ class ExtractRouteLocalitiesJob < ApplicationJob
     route = Route.find_by(id: route_id)
     return if route.nil?
 
-    localities = RouteLocalitiesExtractor.new(route.geometry).call
+    localities = LocalitiesExtractor.new(route.geometry).call
 
     # update_column : pas de callbacks (sinon on ré-enfilerait ce job), pas de
     # bump d'`updated_at` — la liste des itinéraires est triée dessus et une

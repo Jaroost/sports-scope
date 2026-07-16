@@ -360,11 +360,57 @@ const totalsCards = computed(() => {
   ]
 })
 
+// Intervalle [from, to] (ISO) couvrant le seau : une année pleine, ou le mois
+// « YYYY-MM » du premier au dernier jour.
+function bucketRange(label: string | number, monthly: boolean): [string, string] | null {
+  const s = String(label)
+  if (monthly) {
+    const m = s.match(/^(\d{4})-(\d{2})$/)
+    if (!m) return null
+    const year = Number(m[1])
+    const month = Number(m[2]) - 1
+    return [isoDate(new Date(year, month, 1)), isoDate(new Date(year, month + 1, 0))]
+  }
+  if (!/^\d{4}$/.test(s)) return null
+  const year = Number(s)
+  return [isoDate(new Date(year, 0, 1)), isoDate(new Date(year, 11, 31))]
+}
+
+// Lien vers la liste du dashboard filtrée sur la période du seau : on repart des
+// filtres actifs (le seau a été calculé sur ces mêmes activités), on remplace les
+// bornes de dates, et on ajoute l'onglet de sport courant. `sport_category` regroupe
+// les `activity_type` comme les onglets ici ; le filtre `sport` (type exact) du
+// panneau reste prioritaire côté serveur, on ne l'ajoute donc que s'il est absent.
+function periodHref(label: string | number, monthly: boolean): string | null {
+  const range = bucketRange(label, monthly)
+  if (!range) return null
+  const p = new URLSearchParams(buildQuery())
+  p.set('from', range[0])
+  p.set('to', range[1])
+  if (!sportFilter.value && selectedSport.value !== 'all') p.set('sport_category', selectedSport.value)
+  return `${localePrefix}/dashboard?${p.toString()}`
+}
+
+// Lignes de l'historique par année : même destination que les cartes de période.
+function yearHref(year: number): string | null {
+  return periodHref(year, false)
+}
+
+// Clic n'importe où sur la ligne (le lien sur l'année couvre le clavier). On laisse
+// passer les clics sur le lien lui-même et les clics modifiés (ctrl/cmd = nouvel
+// onglet), que le navigateur gère mieux que nous.
+function openYear(year: number, evt: MouseEvent) {
+  if (evt.ctrlKey || evt.metaKey || evt.shiftKey) return
+  if ((evt.target as HTMLElement | null)?.closest('a')) return
+  const href = yearHref(year)
+  if (href) window.location.href = href
+}
+
 // Meilleures périodes présentées comme une liste ordonnée.
 const periodCards = computed(() => {
   const bp = group.value?.best_periods
   if (!bp) return []
-  const items: { icon: string; label: string; period: string; value: string }[] = []
+  const items: { icon: string; label: string; period: string; value: string; href: string | null }[] = []
   const push = (bucket: Bucket | null | undefined, icon: string, labelKey: string, unit: 'distance' | 'elevation', monthly: boolean) => {
     if (!bucket) return
     items.push({
@@ -372,6 +418,7 @@ const periodCards = computed(() => {
       label: t(labelKey),
       period: monthly ? formatMonthLabel(bucket.label) : String(bucket.label),
       value: unit === 'distance' ? formatDistanceKm(bucket.value) : `${Math.round(bucket.value).toLocaleString()} m`,
+      href: periodHref(bucket.label, monthly),
     })
   }
   push(bp.best_year_distance, 'fa-route', 'performance.periods.best_year_distance', 'distance', false)
@@ -525,106 +572,136 @@ onBeforeUnmount(() => {
       <!-- Les deux panneaux restent montés (v-show) : basculer d'onglet ne relance
            ni le chargement de FtpPanel/TrainingLoadPanel ni le rendu du graphique. -->
       <div v-show="activeTab === 'records'">
-      <!-- Barre sticky : onglets de sport à gauche, bouton « Filtrer » à droite. Les
-           deux pilotent le contenu qui défile dessous, d'où le regroupement. -->
-      <div class="performance-sticky-bar d-flex justify-content-between align-items-center gap-3 py-2 mb-3">
-        <ul v-if="tabs.length" class="nav nav-pills flex-wrap gap-2 mb-0 performance-sport-tabs">
-          <li v-for="tab in tabs" :key="tab.key" class="nav-item">
+      <!-- Barre + panneau de filtres collés ensemble : ils pilotent tous deux le
+           contenu qui défile dessous. Un seul conteneur sticky pour les deux —
+           empiler deux sticky obligerait à caler le panneau sur la hauteur de la
+           barre, valeur en dur qui casserait dès que la barre change de taille
+           (onglets de sport qui passent sur deux lignes). -->
+      <div class="performance-filters-sticky">
+        <!-- Barre : onglets de sport à gauche, bouton « Filtrer » à droite. -->
+        <div class="performance-sticky-bar d-flex justify-content-between align-items-center gap-3 py-2 mb-3">
+          <ul v-if="tabs.length" class="nav nav-pills flex-wrap gap-2 mb-0 performance-sport-tabs">
+            <li v-for="tab in tabs" :key="tab.key" class="nav-item">
+              <button
+                type="button"
+                class="nav-link d-flex align-items-center gap-2"
+                :class="{ active: selectedSport === tab.key }"
+                @click="selectSport(tab.key)"
+              >
+                <i :class="`fa-solid ${sportIcon(tab.key)}`" aria-hidden="true"></i>
+                <span>{{ sportLabel(tab.key) }}</span>
+                <span class="badge rounded-pill performance-tab-count">{{ tab.count }}</span>
+              </button>
+            </li>
+          </ul>
+          <div class="btn-group btn-group-sm ms-auto flex-shrink-0">
             <button
               type="button"
-              class="nav-link d-flex align-items-center gap-2"
-              :class="{ active: selectedSport === tab.key }"
-              @click="selectSport(tab.key)"
+              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              :class="{ active: showFilters }"
+              :aria-expanded="showFilters"
+              @click="showFilters = !showFilters"
             >
-              <i :class="`fa-solid ${sportIcon(tab.key)}`" aria-hidden="true"></i>
-              <span>{{ sportLabel(tab.key) }}</span>
-              <span class="badge rounded-pill performance-tab-count">{{ tab.count }}</span>
+              <i class="fa-solid fa-filter" aria-hidden="true"></i>
+              <span>{{ t('performance.filters.toggle') }}</span>
+              <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
             </button>
-          </li>
-        </ul>
-        <button
-          type="button"
-          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 ms-auto flex-shrink-0"
-          :class="{ active: showFilters }"
-          :aria-expanded="showFilters"
-          @click="showFilters = !showFilters"
-        >
-          <i class="fa-solid fa-filter" aria-hidden="true"></i>
-          <span>{{ t('performance.filters.toggle') }}</span>
-          <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
-        </button>
-      </div>
-      <div v-if="showFilters" class="card shadow-sm border-0 mb-4 activity-filters">
-        <div class="card-body">
-          <div class="row g-3">
-            <div class="col-12 col-md-4">
-              <label class="form-label small mb-1">{{ t('performance.filters.sport') }}</label>
-              <select v-model="sportFilter" class="form-select form-select-sm">
-                <option value="">{{ t('performance.filters.all_sports') }}</option>
-                <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>
-              </select>
-            </div>
-            <div class="col-6 col-md-4">
-              <label class="form-label small mb-1">{{ t('performance.filters.distance') }}</label>
-              <div class="d-flex align-items-center gap-1">
-                <input v-model.number="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
-                <span class="text-muted">–</span>
-                <input v-model.number="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
+            <!-- Réinitialisation à portée de main, sans avoir à déplier le panneau.
+                 Affiché seulement quand il y a quelque chose à réinitialiser. -->
+            <button
+              v-if="activeFilterCount"
+              type="button"
+              class="btn btn-sm btn-danger d-flex align-items-center"
+              :title="t('performance.filters.clear')"
+              :aria-label="t('performance.filters.clear')"
+              @click="clearFilters"
+            >
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+        <div v-if="showFilters" class="card shadow-sm border-0 mb-4 activity-filters">
+          <div class="card-body">
+            <div class="row g-3">
+              <div class="col-12 col-md-4">
+                <label class="form-label small mb-1">{{ t('performance.filters.sport') }}</label>
+                <select v-model="sportFilter" class="form-select form-select-sm">
+                  <option value="">{{ t('performance.filters.all_sports') }}</option>
+                  <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-4">
+                <label class="form-label small mb-1">{{ t('performance.filters.distance') }}</label>
+                <div class="d-flex align-items-center gap-1">
+                  <input v-model.number="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
+                  <span class="text-muted">–</span>
+                  <input v-model.number="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
+                </div>
+              </div>
+              <div class="col-6 col-md-4">
+                <label class="form-label small mb-1">{{ t('performance.filters.elevation') }}</label>
+                <div class="d-flex align-items-center gap-1">
+                  <input v-model.number="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
+                  <span class="text-muted">–</span>
+                  <input v-model.number="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
+                </div>
+              </div>
+              <div class="col-6 col-md-4">
+                <label class="form-label small mb-1">{{ t('performance.filters.duration') }}</label>
+                <div class="d-flex align-items-center gap-1">
+                  <input v-model.number="minDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
+                  <span class="text-muted">–</span>
+                  <input v-model.number="maxDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
+                </div>
+              </div>
+              <div class="col-6 col-md-4">
+                <label class="form-label small mb-1">{{ t('performance.filters.from') }}</label>
+                <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
+              </div>
+              <div class="col-6 col-md-4">
+                <label class="form-label small mb-1">{{ t('performance.filters.to') }}</label>
+                <input v-model="dateTo" type="date" class="form-control form-control-sm" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">{{ t('performance.filters.period') }}</label>
+                <div class="d-flex flex-wrap gap-2">
+                  <button
+                    v-for="preset in datePresets"
+                    :key="preset"
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    :class="{ active: activeDatePreset === preset }"
+                    @click="setDatePreset(preset)"
+                  >
+                    {{ t(`performance.filters.${preset}`) }}
+                  </button>
+                </div>
               </div>
             </div>
-            <div class="col-6 col-md-4">
-              <label class="form-label small mb-1">{{ t('performance.filters.elevation') }}</label>
-              <div class="d-flex align-items-center gap-1">
-                <input v-model.number="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
-                <span class="text-muted">–</span>
-                <input v-model.number="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
-              </div>
-            </div>
-            <div class="col-6 col-md-4">
-              <label class="form-label small mb-1">{{ t('performance.filters.duration') }}</label>
-              <div class="d-flex align-items-center gap-1">
-                <input v-model.number="minDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('performance.filters.min')" />
-                <span class="text-muted">–</span>
-                <input v-model.number="maxDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('performance.filters.max')" />
-              </div>
-            </div>
-            <div class="col-6 col-md-4">
-              <label class="form-label small mb-1">{{ t('performance.filters.from') }}</label>
-              <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
-            </div>
-            <div class="col-6 col-md-4">
-              <label class="form-label small mb-1">{{ t('performance.filters.to') }}</label>
-              <input v-model="dateTo" type="date" class="form-control form-control-sm" />
-            </div>
-            <div class="col-12">
-              <label class="form-label small mb-1">{{ t('performance.filters.period') }}</label>
-              <div class="d-flex flex-wrap gap-2">
+            <div class="d-flex justify-content-between align-items-center mt-3">
+              <small class="text-muted d-flex align-items-center gap-2">
+                <span v-if="loading" class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+                {{ t('performance.filters.results', { count: data.count, total: data.total_count }) }}
+              </small>
+              <div class="d-flex align-items-center gap-2">
                 <button
-                  v-for="preset in datePresets"
-                  :key="preset"
                   type="button"
-                  class="btn btn-sm btn-outline-secondary"
-                  :class="{ active: activeDatePreset === preset }"
-                  @click="setDatePreset(preset)"
+                  class="btn btn-sm btn-link text-decoration-none"
+                  :disabled="!activeFilterCount"
+                  @click="clearFilters"
                 >
-                  {{ t(`performance.filters.${preset}`) }}
+                  <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('performance.filters.clear') }}
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                  @click="showFilters = false"
+                >
+                  <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+                  <span>{{ t('performance.filters.close') }}</span>
                 </button>
               </div>
             </div>
-          </div>
-          <div class="d-flex justify-content-between align-items-center mt-3">
-            <small class="text-muted d-flex align-items-center gap-2">
-              <span v-if="loading" class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
-              {{ t('performance.filters.results', { count: data.count, total: data.total_count }) }}
-            </small>
-            <button
-              type="button"
-              class="btn btn-sm btn-link text-decoration-none"
-              :disabled="!activeFilterCount"
-              @click="clearFilters"
-            >
-              <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('performance.filters.clear') }}
-            </button>
           </div>
         </div>
       </div>
@@ -703,15 +780,26 @@ onBeforeUnmount(() => {
         </h2>
         <div class="row g-3 mb-4">
           <div v-for="(p, i) in periodCards" :key="i" class="col-12 col-md-6 col-xl-3">
-            <div class="card shadow-sm border-0 h-100">
+            <!-- Carte cliquable → liste des activités de cette période. `component`
+                 dynamique : sans lien exploitable (étiquette inattendue) on retombe
+                 sur une simple carte non cliquable. -->
+            <component
+              :is="p.href ? 'a' : 'div'"
+              :href="p.href || undefined"
+              class="card shadow-sm border-0 h-100 text-decoration-none text-reset"
+              :class="{ 'performance-record-card': p.href }"
+            >
               <div class="card-body">
                 <div class="text-muted small d-flex align-items-center gap-2">
                   <i :class="`fa-solid ${p.icon}`" aria-hidden="true"></i>{{ p.label }}
                 </div>
-                <div class="fs-5 fw-bold text-capitalize">{{ p.period }}</div>
+                <div class="fs-5 fw-bold text-capitalize d-flex align-items-center justify-content-between gap-2">
+                  <span>{{ p.period }}</span>
+                  <i v-if="p.href" class="fa-solid fa-chevron-right text-muted fs-6" aria-hidden="true"></i>
+                </div>
                 <div class="text-warning fw-semibold">{{ p.value }}</div>
               </div>
-            </div>
+            </component>
           </div>
         </div>
       </template>
@@ -735,8 +823,26 @@ onBeforeUnmount(() => {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in group.by_year" :key="row.year">
-                  <td class="fw-semibold">{{ row.year }}</td>
+                <!-- Ligne cliquable → activités de l'année. Le lien porté par la
+                     cellule « année » assure l'accès clavier ; le clic sur le reste
+                     de la ligne est un raccourci à la souris. -->
+                <tr
+                  v-for="row in group.by_year"
+                  :key="row.year"
+                  :class="{ 'performance-year-row': yearHref(row.year) }"
+                  @click="openYear(row.year, $event)"
+                >
+                  <td class="fw-semibold">
+                    <a
+                      v-if="yearHref(row.year)"
+                      :href="yearHref(row.year) || undefined"
+                      class="text-reset text-decoration-none d-inline-flex align-items-center gap-2"
+                    >
+                      {{ row.year }}
+                      <i class="fa-solid fa-chevron-right text-muted small" aria-hidden="true"></i>
+                    </a>
+                    <template v-else>{{ row.year }}</template>
+                  </td>
                   <td class="text-end">{{ row.count }}</td>
                   <td class="text-end">{{ formatDistanceKm(row.distance_m) }}</td>
                   <td class="text-end">{{ Math.round(row.elevation).toLocaleString() }} m</td>
@@ -762,13 +868,22 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* Barre sticky sous la navbar `fixed-top` (3.5rem, même offset que le header de
-   ActivityCharts) : les onglets de sport et le bouton « Filtrer » restent
-   atteignables pendant le défilement des records et des graphiques. */
-.performance-sticky-bar {
+/* Barre + panneau de filtres collés sous la navbar `fixed-top` (3.5rem, même
+   offset que le header de ActivityCharts) : les onglets de sport, le bouton
+   « Filtrer » et les champs du panneau restent atteignables pendant le défilement
+   des records et des graphiques.
+   max-height + overflow : panneau déplié, l'ensemble dépasse la hauteur d'écran sur
+   mobile, et un élément sticky plus haut que la fenêtre laisse son bas inaccessible. */
+.performance-filters-sticky {
   position: sticky;
   top: 3.5rem;
   z-index: 5;
+  background: var(--bs-body-bg);
+  max-height: calc(100dvh - 3.5rem);
+  overflow-y: auto;
+}
+
+.performance-sticky-bar {
   background: var(--bs-body-bg);
   border-bottom: 1px solid var(--bs-border-color);
 }
@@ -823,6 +938,12 @@ onBeforeUnmount(() => {
 .performance-record-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.12) !important;
+}
+.performance-year-row {
+  cursor: pointer;
+}
+.performance-year-row:hover {
+  background: rgba(252, 76, 2, 0.06);
 }
 .performance-chart-wrap {
   position: relative;

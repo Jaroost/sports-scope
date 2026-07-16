@@ -28,6 +28,7 @@ fr:
       fitness_hint: "Sur tout l'historique, hors filtres"
     filters:
       toggle: "Filtrer"
+      close: "Fermer"
       sport: "Sport"
       all_sports: "Tous les sports"
       distance: "Distance (km)"
@@ -319,8 +320,13 @@ fr:
     filters:
       title: "Filtres"
       toggle: "Filtrer"
+      close: "Fermer"
+      search: "Nom ou lieu"
+      search_placeholder: "Nom, ville, village…"
       sport: "Sport"
       all_sports: "Tous les sports"
+      sport_categories: "Catégories"
+      sport_types: "Types Strava"
       distance: "Distance (km)"
       elevation: "Dénivelé (m)"
       duration: "Durée (min)"
@@ -540,6 +546,7 @@ fr:
     view_map: "Carte"
     filters:
       toggle: "Filtrer"
+      close: "Fermer"
       search: "Nom ou lieu"
       search_placeholder: "Nom, ville, village…"
       sport: "Type"

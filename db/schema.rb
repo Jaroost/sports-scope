@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_16_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_16_000002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -154,6 +154,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_000001) do
     t.jsonb "end_latlng"
     t.string "gear_id"
     t.jsonb "hr_histogram", default: {}, null: false
+    t.jsonb "localities"
     t.float "max_cadence"
     t.float "max_heartrate"
     t.float "max_speed"
@@ -173,6 +174,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_000001) do
     t.float "total_elevation_gain"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.index "((localities)::text) gin_trgm_ops", name: "index_strava_activities_on_localities_trgm", using: :gin
+    t.index ["name"], name: "index_strava_activities_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
     t.index ["user_id", "gear_id"], name: "index_strava_activities_on_user_id_and_gear_id"
     t.index ["user_id", "started_at"], name: "index_strava_activities_on_user_id_and_started_at"
     t.index ["user_id", "strava_id"], name: "index_strava_activities_on_user_id_and_strava_id", unique: true

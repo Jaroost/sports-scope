@@ -1,13 +1,14 @@
-# Extrait les localités (villes, villages, hameaux) traversées par un itinéraire,
-# pour alimenter `routes.localities` et rendre les itinéraires cherchables par lieu
-# (« mes sorties qui passent par Gruyères »).
+# Extrait les localités (villes, villages, hameaux) traversées par un tracé, pour
+# alimenter `routes.localities` / `strava_activities.localities` et rendre les
+# itinéraires et les sorties cherchables par lieu (« mes sorties qui passent par
+# Gruyères »).
 #
 # L'extraction est faite côté serveur, et non depuis les POI postés par le créateur
 # (`routes.pois`) : ceux-ci reflètent les préférences d'affichage du profil
 # (`points_of_interest`), donc un utilisateur ayant masqué les localités n'en
 # enregistrerait aucune et ses itinéraires seraient introuvables. La recherche ne
 # doit pas dépendre d'un réglage d'affichage.
-class RouteLocalitiesExtractor
+class LocalitiesExtractor
   PLACE_TYPES = %w[city town village hamlet].freeze
   # Distance max (m) entre une localité et le tracé pour la considérer traversée.
   # Aligné sur le seuil des localités du créateur (RouteBuilder.vue, THRESHOLD_M).

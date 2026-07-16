@@ -3,6 +3,11 @@ class RoutesController < ApplicationController
   # an account. Every other action stays scoped to the signed-in owner.
   before_action :require_login!, except: %i[shared export_gpx_shared]
 
+  DEFAULT_PER_PAGE = 20
+  MAX_PER_PAGE = 200
+  # Plafond de tracés renvoyés à la carte d'ensemble — même raison que côté
+  # activités : au-delà, le rendu MapLibre devient lourd.
+  MAX_MAP_ROUTES = 500
   MAX_WAYPOINTS = 500
   MAX_GEOMETRY_POINTS = 10_000
   MAX_NAME_LEN = 80
@@ -12,11 +17,46 @@ class RoutesController < ApplicationController
   ALLOWED_ACTIVITIES = Route::ACTIVITIES
 
   # GET /api/routes
+  # Trois formes de réponse selon les params :
+  #   - `?page=…`  : page filtrée + méta de pagination (liste des itinéraires)
+  #   - `?map=1`   : tous les itinéraires du filtre (plafonnés), pour la carte d'ensemble
+  #   - aucun      : historique complet, sans pagination — le sélecteur d'itinéraire
+  #                  de la navigation (NavRoutePicker) liste tout d'un coup.
   def index
-    routes = current_user.routes.order(updated_at: :desc)
+    return render json: routes_map_payload if params[:map].present?
+
+    scope = filtered_routes_scope
+    total = current_user.routes.count
+
+    if params[:page].blank?
+      return render json: {
+        routes: scope.order(updated_at: :desc).map { |r| serialize_summary(r) },
+        opened: opened_routes_summaries,
+        total: total,
+        filtered_total: scope.count,
+      }
+    end
+
+    filtered_total = scope.count
+    per_page = routes_per_page
+    total_pages = filtered_total.zero? ? 0 : (filtered_total.to_f / per_page).ceil
+    # Page bornée à [1, total_pages] pour éviter un offset au-delà des données.
+    page = params[:page].to_i
+    page = 1 if page < 1
+    page = total_pages if total_pages.positive? && page > total_pages
+
+    records = scope.order(updated_at: :desc).offset((page - 1) * per_page).limit(per_page)
     render json: {
-      routes: routes.map { |r| serialize_summary(r) },
+      routes: records.map { |r| serialize_summary(r) },
       opened: opened_routes_summaries,
+      total: total,
+      filtered_total: filtered_total,
+      page: page,
+      per_page: per_page,
+      total_pages: total_pages,
+      # Types présents dans TOUT l'historique (pas seulement la page) — alimente
+      # le menu du filtre.
+      activities: current_user.routes.distinct.pluck(:activity).compact.sort,
     }
   end
 
@@ -213,6 +253,57 @@ class RoutesController < ApplicationController
       next if lat.abs > 90 || lng.abs > 180
       { "name" => name, "type" => type, "lat" => lat.to_f, "lng" => lng.to_f }
     end
+  end
+
+  # Applique les filtres passés en query params. Filtrage en base pour porter sur
+  # tout l'historique, pas seulement la page courante. Les bornes de date portent
+  # sur `updated_at` (dernière modification), la date affichée dans la liste.
+  def filtered_routes_scope
+    scope = current_user.routes
+    if params[:q].present?
+      needle = Route.sanitize_sql_like(params[:q].to_s.first(MAX_NAME_LEN))
+      scope = scope.where("routes.name ILIKE ?", "%#{needle}%")
+    end
+    scope = scope.where(activity: params[:sport]) if params[:sport].present?
+    scope = scope.where(routes: { distance_m: (params[:min_dist].to_f * 1000).. }) if params[:min_dist].present?
+    scope = scope.where(routes: { distance_m: ..(params[:max_dist].to_f * 1000) }) if params[:max_dist].present?
+    scope = scope.where(routes: { elevation_gain_m: params[:min_elev].to_f.. }) if params[:min_elev].present?
+    scope = scope.where(routes: { elevation_gain_m: ..params[:max_elev].to_f }) if params[:max_elev].present?
+    if (from = parse_date(params[:from]))
+      scope = scope.where(routes: { updated_at: from.beginning_of_day.. })
+    end
+    if (to = parse_date(params[:to]))
+      scope = scope.where(routes: { updated_at: ..to.end_of_day })
+    end
+    scope
+  end
+
+  # Parse une date ISO (yyyy-mm-dd) issue d'un <input type="date">. Renvoie nil si
+  # vide ou invalide — le filtre est alors simplement ignoré.
+  def parse_date(value)
+    return nil if value.blank?
+
+    Date.iso8601(value)
+  rescue ArgumentError
+    nil
+  end
+
+  def routes_per_page
+    per = params[:per].to_i
+    per = DEFAULT_PER_PAGE if per <= 0
+    [per, MAX_PER_PAGE].min
+  end
+
+  # Carte d'ensemble : tous les itinéraires du filtre, hors pagination. Plafonné —
+  # au-delà, MapLibre rame à afficher les polylignes ; on garde les plus récents.
+  def routes_map_payload
+    scope = filtered_routes_scope
+    records = scope.order(updated_at: :desc).limit(MAX_MAP_ROUTES)
+    {
+      routes: records.map { |r| serialize_summary(r) },
+      filtered_total: scope.count,
+      max: MAX_MAP_ROUTES,
+    }
   end
 
   def serialize_summary(route)

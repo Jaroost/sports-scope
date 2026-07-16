@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { t } from '../i18n'
 import { speedForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
@@ -13,10 +13,15 @@ import RoutesOverviewMap from './RoutesOverviewMap.vue'
 // pour les vraies montres (limite de points). Voir routes_controller#gpx (?step).
 const props = defineProps<{ canDense?: boolean }>()
 
-const routes = ref([])
-const loading = ref(true)
+const routes = ref([]) // page courante renvoyée par le serveur
+const loading = ref(true) // requête en cours (initiale ou refetch après filtre/page)
+const hasLoaded = ref(false) // au moins une requête réussie
 const error = ref(null)
-// Bascule liste / carte d'ensemble. La carte n'est montée que quand on l'ouvre.
+const total = ref(0) // total historique (tous itinéraires, sans filtre)
+const filteredTotal = ref(0) // nombre d'itinéraires correspondant aux filtres
+
+// Bascule liste / carte d'ensemble. La carte n'est montée que quand on l'ouvre,
+// et reçoit tous les itinéraires du filtre (pas seulement la page affichée).
 // La vue choisie est mémorisée d'une visite à l'autre (localStorage).
 const VIEW_STORAGE_KEY = 'sportsScope.routesView'
 const view = ref<'list' | 'map'>('list')
@@ -27,6 +32,167 @@ try {
 watch(view, (v) => {
   try { localStorage.setItem(VIEW_STORAGE_KEY, v) } catch { /* ignore */ }
 })
+
+const mapRoutes = ref([])
+const mapLoading = ref(false)
+const mapLoaded = ref(false)
+const mapCapped = ref(false)
+
+// ─── Filtres + pagination (pilotés côté serveur) ──────────────────────────────
+const showFilters = ref(false)
+const search = ref('')
+const sportFilter = ref('')
+const minDistance = ref(null) // km
+const maxDistance = ref(null)
+const minElevation = ref(null) // m
+const maxElevation = ref(null)
+const dateFrom = ref('') // yyyy-mm-dd, sur updated_at
+const dateTo = ref('')
+
+// Types présents dans tout l'historique, fournis par le serveur — alimentent le
+// menu. Repli sur le catalogue complet tant que rien n'est chargé.
+const activityOptions = ref<Sport[]>([])
+
+// Pagination — page/nombre de pages renvoyés par le serveur.
+const page = ref(1)
+const perPage = ref(20)
+const totalPages = ref(0)
+
+function isSet(v) {
+  return v !== null && v !== undefined && v !== ''
+}
+
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (search.value.trim()) n++
+  if (sportFilter.value) n++
+  if (isSet(minDistance.value)) n++
+  if (isSet(maxDistance.value)) n++
+  if (isSet(minElevation.value)) n++
+  if (isSet(maxElevation.value)) n++
+  if (dateFrom.value) n++
+  if (dateTo.value) n++
+  return n
+})
+
+function clearFilters() {
+  search.value = ''
+  sportFilter.value = ''
+  minDistance.value = null
+  maxDistance.value = null
+  minElevation.value = null
+  maxElevation.value = null
+  dateFrom.value = ''
+  dateTo.value = ''
+}
+
+// --- Raccourcis de période (semaine/mois/année courante ou précédente) ---
+function pad2(n) {
+  return String(n).padStart(2, '0')
+}
+function isoDate(d: Date) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+// Lundi (00:00 locale) de la semaine contenant `d` — semaines ISO lundi→dimanche.
+function mondayOf(d: Date) {
+  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7))
+  return date
+}
+function addDays(d: Date, n: number) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
+}
+
+function datePresetRange(preset: string): [Date, Date] | null {
+  const now = new Date()
+  const y = now.getFullYear()
+  const m = now.getMonth()
+  const monday = mondayOf(now)
+  switch (preset) {
+    case 'current_week': return [monday, addDays(monday, 6)]
+    case 'previous_week': return [addDays(monday, -7), addDays(monday, -1)]
+    case 'current_month': return [new Date(y, m, 1), new Date(y, m + 1, 0)]
+    case 'previous_month': return [new Date(y, m - 1, 1), new Date(y, m, 0)]
+    case 'current_year': return [new Date(y, 0, 1), new Date(y, 11, 31)]
+    case 'previous_year': return [new Date(y - 1, 0, 1), new Date(y - 1, 11, 31)]
+    default: return null
+  }
+}
+
+const datePresets = ['current_week', 'previous_week', 'current_month', 'previous_month', 'current_year', 'previous_year']
+
+function setDatePreset(preset: string) {
+  const range = datePresetRange(preset)
+  if (!range) return
+  dateFrom.value = isoDate(range[0])
+  dateTo.value = isoDate(range[1])
+}
+
+// Raccourci actuellement actif (pour surligner le bouton), ou null.
+const activeDatePreset = computed(() => {
+  if (!dateFrom.value || !dateTo.value) return null
+  return datePresets.find((preset) => {
+    const range = datePresetRange(preset)
+    return range && isoDate(range[0]) === dateFrom.value && isoDate(range[1]) === dateTo.value
+  }) || null
+})
+
+// Paramètres de filtre communs à la liste et à la carte. Les bornes de date
+// portent sur `updated_at` (dernière modification), la date affichée sur chaque
+// ligne ; `to` est inclusif côté serveur.
+function filterParams() {
+  const p = new URLSearchParams()
+  if (search.value.trim()) p.set('q', search.value.trim())
+  if (sportFilter.value) p.set('sport', sportFilter.value)
+  if (isSet(minDistance.value)) p.set('min_dist', String(minDistance.value))
+  if (isSet(maxDistance.value)) p.set('max_dist', String(maxDistance.value))
+  if (isSet(minElevation.value)) p.set('min_elev', String(minElevation.value))
+  if (isSet(maxElevation.value)) p.set('max_elev', String(maxElevation.value))
+  if (dateFrom.value) p.set('from', dateFrom.value)
+  if (dateTo.value) p.set('to', dateTo.value)
+  return p
+}
+
+// Mémorise les filtres + l'état du panneau d'une visite à l'autre. La
+// restauration se fait avant l'enregistrement des watchers pour ne pas
+// déclencher de requête superflue : le fetch initial (onMounted) part déjà avec
+// les filtres restaurés.
+const FILTERS_STORAGE_KEY = 'sportsScope.routesFilters'
+try {
+  const raw = localStorage.getItem(FILTERS_STORAGE_KEY)
+  if (raw) {
+    const s = JSON.parse(raw)
+    if (typeof s.search === 'string') search.value = s.search
+    if (typeof s.sport === 'string') sportFilter.value = s.sport
+    if (s.minDistance != null) minDistance.value = s.minDistance
+    if (s.maxDistance != null) maxDistance.value = s.maxDistance
+    if (s.minElevation != null) minElevation.value = s.minElevation
+    if (s.maxElevation != null) maxElevation.value = s.maxElevation
+    if (typeof s.dateFrom === 'string') dateFrom.value = s.dateFrom
+    if (typeof s.dateTo === 'string') dateTo.value = s.dateTo
+    if (typeof s.showFilters === 'boolean') showFilters.value = s.showFilters
+  }
+} catch { /* ignore — corrompu ou indisponible */ }
+
+watch(
+  [search, sportFilter, minDistance, maxDistance, minElevation, maxElevation, dateFrom, dateTo, showFilters],
+  () => {
+    try {
+      localStorage.setItem(FILTERS_STORAGE_KEY, JSON.stringify({
+        search: search.value,
+        sport: sportFilter.value,
+        minDistance: minDistance.value,
+        maxDistance: maxDistance.value,
+        minElevation: minElevation.value,
+        maxElevation: maxElevation.value,
+        dateFrom: dateFrom.value,
+        dateTo: dateTo.value,
+        showFilters: showFilters.value,
+      }))
+    } catch { /* ignore */ }
+  },
+)
+
 // Itinéraire sélectionné depuis la carte : on revient sur la liste, on défile
 // jusqu'à sa ligne et on la fait clignoter le temps de la repérer.
 const selectedRouteId = ref(null)
@@ -89,21 +255,101 @@ function csrfToken() {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 }
 
+// Construit la query string à partir des filtres actifs + pagination.
+function buildQuery() {
+  const p = filterParams()
+  p.set('page', String(page.value))
+  p.set('per', String(perPage.value))
+  return p.toString()
+}
+
 async function fetchRoutes() {
   loading.value = true
   try {
-    const res = await fetch('/api/routes', {
+    const res = await fetch(`/api/routes?${buildQuery()}`, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     routes.value = Array.isArray(payload.routes) ? payload.routes : []
+    total.value = payload.total ?? routes.value.length
+    filteredTotal.value = payload.filtered_total ?? routes.value.length
+    totalPages.value = payload.total_pages ?? 1
+    perPage.value = payload.per_page ?? perPage.value
+    // Le serveur borne la page dans [1, total_pages] : on resynchronise l'état local.
+    if (payload.page) page.value = payload.page
+    if (Array.isArray(payload.activities)) activityOptions.value = payload.activities
+    error.value = null
+    hasLoaded.value = true
   } catch (e) {
     error.value = e.message
   } finally {
     loading.value = false
   }
+}
+
+// Récupère les tracés de tous les itinéraires du filtre (hors pagination) pour la
+// carte d'ensemble. Le serveur plafonne le nombre renvoyé (MAX_MAP_ROUTES).
+async function fetchMapRoutes() {
+  mapLoading.value = true
+  try {
+    const p = filterParams()
+    p.set('map', '1')
+    const res = await fetch(`/api/routes?${p.toString()}`, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const payload = await res.json()
+    mapRoutes.value = Array.isArray(payload.routes) ? payload.routes : []
+    mapCapped.value = (payload.filtered_total ?? 0) > (payload.max ?? Infinity)
+    mapLoaded.value = true
+    error.value = null
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    mapLoading.value = false
+  }
+}
+
+// Un changement de filtre ramène à la page 1 puis refetch, avec un léger debounce
+// pour ne pas requêter à chaque frappe. La carte est marquée périmée : rechargée
+// aussitôt si affichée, sinon à sa réouverture.
+let filterTimer
+function onFilterChange() {
+  page.value = 1
+  mapLoaded.value = false
+  clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => {
+    fetchRoutes()
+    if (view.value === 'map') fetchMapRoutes()
+  }, 350)
+}
+
+watch(
+  [search, sportFilter, minDistance, maxDistance, minElevation, maxElevation, dateFrom, dateTo],
+  onFilterChange,
+)
+
+// À l'ouverture de la carte, charge les tracés si on ne les a pas déjà (ou s'ils
+// sont périmés après un changement de filtre).
+watch(view, (v) => {
+  if (v === 'map' && !mapLoaded.value && !mapLoading.value) fetchMapRoutes()
+})
+
+function goToPage(p) {
+  if (p < 1 || p > totalPages.value || p === page.value) return
+  page.value = p
+  fetchRoutes()
+}
+
+// Après une création/suppression, la page courante et les totaux sont périmés :
+// on refait la requête plutôt que de rafistoler la liste locale.
+function refreshAfterMutation() {
+  mapLoaded.value = false
+  fetchRoutes()
+  if (view.value === 'map') fetchMapRoutes()
 }
 
 function startEdit(route) {
@@ -159,7 +405,7 @@ async function removeRoute(route) {
       credentials: 'same-origin',
     })
     if (!res.ok && res.status !== 204) throw new Error(`HTTP ${res.status}`)
-    routes.value = routes.value.filter((r) => r.id !== route.id)
+    refreshAfterMutation()
   } catch (e) {
     error.value = e.message
   }
@@ -182,8 +428,9 @@ async function duplicateRoute(route) {
       body: JSON.stringify({ name }),
     })
     if (!res.ok && res.status !== 201) throw new Error(`HTTP ${res.status}`)
-    const payload = await res.json()
-    if (payload.route) routes.value = [payload.route, ...routes.value]
+    // La copie est la plus récemment modifiée : elle arrive en tête de la page 1.
+    page.value = 1
+    refreshAfterMutation()
   } catch (e) {
     error.value = e.message
   }
@@ -357,7 +604,12 @@ function formatDuration(totalSec) {
   return `${h} h ${String(m).padStart(2, '0')}`
 }
 
-onMounted(() => fetchRoutes())
+onMounted(() => {
+  fetchRoutes()
+  // Vue carte restaurée : la watch(view) ne se déclenche pas au montage, on charge
+  // donc les tracés explicitement.
+  if (view.value === 'map') fetchMapRoutes()
+})
 </script>
 
 <template>
@@ -393,54 +645,143 @@ onMounted(() => fetchRoutes())
       />
     </div>
 
-    <div class="btn-group btn-group-sm mb-3" role="group" :aria-label="t('routes.list_title')">
-      <button
-        type="button"
-        class="btn d-flex align-items-center gap-1"
-        :class="view === 'list' ? 'btn-warning' : 'btn-outline-secondary'"
-        :aria-pressed="view === 'list'"
-        @click="view = 'list'"
-      >
-        <i class="fa-solid fa-list-ul" aria-hidden="true"></i>
-        <span>{{ t('routes.view_list') }}</span>
-      </button>
-      <button
-        type="button"
-        class="btn d-flex align-items-center gap-1"
-        :class="view === 'map' ? 'btn-warning' : 'btn-outline-secondary'"
-        :aria-pressed="view === 'map'"
-        @click="view = 'map'"
-      >
-        <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
-        <span>{{ t('routes.view_map') }}</span>
-      </button>
-    </div>
+    <div class="card shadow-sm border-0">
+      <div class="card-header activity-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="h5 mb-0 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
+          <span>{{ t('routes.list_title') }}</span>
+          <span v-if="hasLoaded && !error" class="badge rounded-pill text-bg-secondary">{{ total }}</span>
+        </h2>
+        <div class="d-flex align-items-center gap-3">
+          <div class="btn-group btn-group-sm" role="group" :aria-label="t('routes.list_title')">
+            <button
+              type="button"
+              class="btn d-flex align-items-center gap-1"
+              :class="view === 'list' ? 'btn-warning' : 'btn-outline-secondary'"
+              :aria-pressed="view === 'list'"
+              @click="view = 'list'"
+            >
+              <i class="fa-solid fa-list-ul" aria-hidden="true"></i>
+              <span>{{ t('routes.view_list') }}</span>
+            </button>
+            <button
+              type="button"
+              class="btn d-flex align-items-center gap-1"
+              :class="view === 'map' ? 'btn-warning' : 'btn-outline-secondary'"
+              :aria-pressed="view === 'map'"
+              @click="view = 'map'"
+            >
+              <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+              <span>{{ t('routes.view_map') }}</span>
+            </button>
+          </div>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            :class="{ active: showFilters }"
+            :aria-expanded="showFilters"
+            @click="showFilters = !showFilters"
+          >
+            <i class="fa-solid fa-filter" aria-hidden="true"></i>
+            <span>{{ t('routes.filters.toggle') }}</span>
+            <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
+          </button>
+        </div>
+      </div>
 
-    <div v-if="view === 'map'" class="card shadow-sm border-0 mb-0">
-      <div class="card-body p-2">
-        <div v-if="loading" class="text-muted d-flex align-items-center gap-2 p-2">
+      <div v-if="showFilters && hasLoaded && !error" class="card-body border-bottom activity-filters">
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">{{ t('routes.filters.search') }}</label>
+            <input
+              v-model="search"
+              type="search"
+              class="form-control form-control-sm"
+              :placeholder="t('routes.filters.search_placeholder')"
+            />
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">{{ t('routes.filters.sport') }}</label>
+            <select v-model="sportFilter" class="form-select form-select-sm">
+              <option value="">{{ t('routes.filters.all_sports') }}</option>
+              <option v-for="s in activityOptions" :key="s" :value="s">{{ t(`routes.wt_sport_${s}`) }}</option>
+            </select>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('routes.filters.distance') }}</label>
+            <div class="d-flex align-items-center gap-1">
+              <input v-model="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('routes.filters.min')" />
+              <span class="text-muted">–</span>
+              <input v-model="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('routes.filters.max')" />
+            </div>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('routes.filters.elevation') }}</label>
+            <div class="d-flex align-items-center gap-1">
+              <input v-model="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('routes.filters.min')" />
+              <span class="text-muted">–</span>
+              <input v-model="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('routes.filters.max')" />
+            </div>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('routes.filters.from') }}</label>
+            <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('routes.filters.to') }}</label>
+            <input v-model="dateTo" type="date" class="form-control form-control-sm" />
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-1">{{ t('routes.filters.period') }}</label>
+            <div class="d-flex flex-wrap gap-2">
+              <button
+                v-for="preset in datePresets"
+                :key="preset"
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                :class="{ active: activeDatePreset === preset }"
+                @click="setDatePreset(preset)"
+              >
+                {{ t(`routes.filters.${preset}`) }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mt-3">
+          <small class="text-muted d-flex align-items-center gap-2">
+            <span v-if="loading" class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+            {{ t('routes.filters.results', { count: filteredTotal, total: total }) }}
+          </small>
+          <button
+            type="button"
+            class="btn btn-sm btn-link text-decoration-none"
+            :disabled="!activeFilterCount"
+            @click="clearFilters"
+          >
+            <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('routes.filters.clear') }}
+          </button>
+        </div>
+      </div>
+
+      <div v-if="view === 'map'" class="card-body p-2">
+        <div v-if="mapCapped" class="alert alert-info d-flex align-items-center gap-2 py-2 px-3 mb-2 small">
+          <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+          <span>{{ t('routes.map_capped') }}</span>
+        </div>
+        <div v-if="mapLoading && !mapLoaded" class="text-muted d-flex align-items-center gap-2 p-2">
           <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
           <span>Loading…</span>
         </div>
         <RoutesOverviewMap
           v-else
-          :routes="routes"
+          :routes="mapRoutes"
           :locale-prefix="localePrefix"
           @select-route="onSelectRouteFromMap"
         />
       </div>
-    </div>
 
-    <div v-show="view === 'list'" class="card shadow-sm border-0">
-      <div class="card-header activity-card-header d-flex align-items-center gap-2 flex-wrap">
-        <h2 class="h5 mb-0 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
-          <span>{{ t('routes.list_title') }}</span>
-        </h2>
-        <span v-if="!loading && !error" class="badge bg-light text-muted ms-1">{{ routes.length }}</span>
-      </div>
-      <div class="card-body">
-        <div v-if="loading" class="text-muted d-flex align-items-center gap-2">
+      <div v-show="view === 'list'" class="card-body">
+        <div v-if="loading && !hasLoaded" class="text-muted d-flex align-items-center gap-2">
           <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
           <span>Loading…</span>
         </div>
@@ -449,11 +790,15 @@ onMounted(() => fetchRoutes())
           <span class="flex-grow-1">{{ error }}</span>
           <button type="button" class="btn-close" @click="error = null" aria-label="dismiss"></button>
         </div>
-        <div v-else-if="routes.length === 0" class="text-muted d-flex align-items-center gap-2">
+        <div v-else-if="total === 0" class="text-muted d-flex align-items-center gap-2">
           <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
           <span>{{ t('routes.empty') }}</span>
         </div>
-        <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1">
+        <div v-else-if="filteredTotal === 0" class="text-muted d-flex align-items-center gap-2">
+          <i class="fa-solid fa-filter-circle-xmark" aria-hidden="true"></i>
+          <span>{{ t('routes.filters.none_match') }}</span>
+        </div>
+        <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1" :class="{ 'opacity-50': loading }">
           <li
             v-for="r in routes"
             :key="r.id"
@@ -625,6 +970,31 @@ onMounted(() => fetchRoutes())
             </div>
           </li>
         </ul>
+        <nav
+          v-if="hasLoaded && !error && totalPages > 1"
+          class="d-flex justify-content-between align-items-center mt-3"
+          :aria-label="t('routes.list_title')"
+        >
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            :disabled="page <= 1 || loading"
+            @click="goToPage(page - 1)"
+          >
+            <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
+            <span>{{ t('routes.pagination.prev') }}</span>
+          </button>
+          <small class="text-muted">{{ t('routes.pagination.page', { page, total: totalPages }) }}</small>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+            :disabled="page >= totalPages || loading"
+            @click="goToPage(page + 1)"
+          >
+            <span>{{ t('routes.pagination.next') }}</span>
+            <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+          </button>
+        </nav>
       </div>
     </div>
 

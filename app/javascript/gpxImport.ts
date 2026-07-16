@@ -11,7 +11,7 @@
 //     raisonnable de waypoints, en épinglant les extrémités d'origine.
 // Dans les deux cas, le créateur relance BRouter pour le calage routier + altitude.
 
-export type ImportWaypoint = { lng: number; lat: number; free?: boolean }
+export type ImportWaypoint = { lng: number; lat: number; free?: boolean; uturn_ok?: boolean }
 
 // Plafond des waypoints transmis au créateur en échantillonnant une trace étrangère.
 // 25 laisse de la marge pour en insérer d'autres au glisser une fois l'itinéraire chargé.
@@ -45,6 +45,7 @@ function parseSportsScopeWaypoints(doc: Document): ImportWaypoint[] {
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) continue
     const wp: ImportWaypoint = { lng, lat }
     if (nodes[i].getAttribute('free') === 'true') wp.free = true
+    if (nodes[i].getAttribute('uturn_ok') === 'true') wp.uturn_ok = true
     out.push(wp)
   }
   return out

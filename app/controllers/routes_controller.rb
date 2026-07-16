@@ -165,6 +165,7 @@ class RoutesController < ApplicationController
       next nil if lat.abs > 90 || lng.abs > 180
       wp = { "lat" => lat.to_f, "lng" => lng.to_f }
       wp["free"] = true if h["free"] || h[:free]
+      wp["uturn_ok"] = true if h["uturn_ok"] || h[:uturn_ok]
       wp
     end.compact
   end
@@ -306,6 +307,7 @@ class RoutesController < ApplicationController
       next unless lat && lng
       attrs = %(lat="#{lat}" lon="#{lng}")
       attrs << ' free="true"' if w["free"] || w[:free]
+      attrs << ' uturn_ok="true"' if w["uturn_ok"] || w[:uturn_ok]
       "      <ss:wp #{attrs}/>"
     end
     return [] if rows.empty?

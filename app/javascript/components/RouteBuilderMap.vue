@@ -28,6 +28,7 @@ import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 const props = defineProps<{ state: RouteBuilderState }>()
 const emit = defineEmits<{
   'waypoints-changed': []
+  'uturn-ok-changed': []
   'select-place': [place: Place]
   'hover-place': [place: Place | null]
   'retry-places': []
@@ -85,6 +86,7 @@ let selectionMarkerDragging = false
 const climbMarkers: any[] = []
 const climbMarkerObservers: MutationObserver[] = []
 const turnAnomalyMarkers: any[] = []
+const snapMarkers: any[] = []
 const placeMarkers: any[] = []
 const placeMarkerObservers: MutationObserver[] = []
 // Permet de retrouver l'élément DOM d'un POI à partir de ses coordonnées, pour
@@ -1014,17 +1016,43 @@ function clearTurnAnomalyMarkers() {
   turnAnomalyMarkers.length = 0
 }
 
-function showTurnAnomalyMarkers(anomalies: Array<{ lng: number; lat: number }>) {
+function showTurnAnomalyMarkers(anomalies: Array<{ lng: number; lat: number; kind?: string }>) {
   if (!_maplibregl || !mapInstance) return
   clearTurnAnomalyMarkers()
   for (const a of anomalies) {
     const el = document.createElement('div')
     el.className = 'turn-anomaly-marker'
-    el.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>'
+    // Même icône que la puce correspondante dans l'alerte, pour relier les deux d'un coup d'œil.
+    el.innerHTML = a.kind === 'uturn'
+      ? '<i class="fa-solid fa-arrows-turn-to-dots"></i>'
+      : '<i class="fa-solid fa-triangle-exclamation"></i>'
     const marker = new _maplibregl.Marker({ element: el, anchor: 'center' })
       .setLngLat([a.lng, a.lat])
       .addTo(mapInstance)
     turnAnomalyMarkers.push(marker)
+  }
+}
+
+// Marqueurs d'alerte « point accroché au loin » : même rôle que ci-dessus pour l'autre
+// avertissement, afin que les points en cause se repèrent sur la carte sans avoir à
+// ouvrir leur bulle. Posés à l'endroit CLIQUÉ (et non sur le tracé) : c'est l'écart entre
+// les deux que l'avertissement dénonce.
+function clearSnapMarkers() {
+  snapMarkers.forEach((m) => m.remove())
+  snapMarkers.length = 0
+}
+
+function showSnapMarkers(points: Array<{ lng: number; lat: number }>) {
+  if (!_maplibregl || !mapInstance) return
+  clearSnapMarkers()
+  for (const p of points) {
+    const el = document.createElement('div')
+    el.className = 'snap-warning-marker'
+    el.innerHTML = '<i class="fa-solid fa-map-pin"></i>'
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' })
+      .setLngLat([p.lng, p.lat])
+      .addTo(mapInstance)
+    snapMarkers.push(marker)
   }
 }
 
@@ -1334,15 +1362,31 @@ function toggleWaypointFree(idx: number) {
   emit('waypoints-changed')
 }
 
+// Marque (ou non) le demi-tour provoqué par ce point comme délibéré. Purement informatif :
+// le drapeau ne change pas le tracé, donc on n'émet PAS `waypoints-changed` — un recalcul
+// BRouter serait inutile et ferait perdre l'alerte en cours. On demande juste à l'éditeur
+// de relister ses anomalies.
+function toggleWaypointUturnOk(idx: number) {
+  const wps = routeStore.waypoints.value
+  if (idx < 0 || idx >= wps.length) return
+  const next = wps.slice()
+  next[idx] = { ...next[idx], uturn_ok: !next[idx].uturn_ok }
+  routeStore.waypoints.value = next
+  deselectAll()
+  refreshWaypointMarkers()
+  emit('uturn-ok-changed')
+}
+
 // Inverse le sens du parcours. Le drapeau `free` d'un point marque son tronçon
 // ENTRANT comme droit (waypoint[i] → waypoint[i+1] droit ssi waypoint[i+1].free) :
 // après inversion, on réaffecte les drapeaux pour que chaque tronçon garde sa nature
-// (droit / routé) et que la géométrie soit préservée à l'identique.
+// (droit / routé) et que la géométrie soit préservée à l'identique. `uturn_ok`, lui,
+// qualifie le point lui-même (et non un tronçon) : il le suit tel quel.
 function reverseWaypoints() {
   const wps = routeStore.waypoints.value
   if (wps.length < 2) return
   const n = wps.length
-  const reversed = wps.slice().reverse().map((w) => ({ lng: w.lng, lat: w.lat })) as Array<{ lng: number; lat: number; free?: boolean }>
+  const reversed = wps.slice().reverse().map((w) => ({ lng: w.lng, lat: w.lat, ...(w.uturn_ok ? { uturn_ok: true } : {}) })) as Array<{ lng: number; lat: number; free?: boolean; uturn_ok?: boolean }>
   // Le tronçon j du tableau inversé (reversed[j] → reversed[j+1]) correspond au
   // tronçon original (n-2-j) ; il est droit ssi l'ancien waypoint[n-1-j] était libre.
   for (let j = 0; j < n - 1; j++) {
@@ -1369,6 +1413,9 @@ function addReturnTo(idx: number) {
 // le tronçon entre waypoint i et i+1 couvre les arêtes [wgi[i], wgi[i+1][.
 function insertWaypointAtHover(hit: { lng: number; lat: number; edgeIdx: number }) {
   if (atWaypointLimit()) return
+  // Les index ne sont rafraîchis que par un routage réussi : après un échec BRouter ils
+  // restent désynchronisés des waypoints, et l'insertion se bloquerait en silence.
+  recomputeWaypointGeomIndices()
   if (waypointGeomIndices.length !== routeStore.waypoints.value.length) return
   let insertAt = routeStore.waypoints.value.length
   for (let i = 0; i < waypointGeomIndices.length - 1; i++) {
@@ -1391,6 +1438,7 @@ function insertWaypointAtHover(hit: { lng: number; lat: number; edgeIdx: number 
 // tracé encore routé (moins de deux points, ou index pas à jour), on ajoute à la fin.
 function insertWaypointSmart(lng: number, lat: number) {
   if (atWaypointLimit()) return
+  recomputeWaypointGeomIndices()
   const wps = routeStore.waypoints.value
   const geom = routeStore.geometry.value
   if (wps.length < 2 || geom.length < 2 || waypointGeomIndices.length !== wps.length) {
@@ -1509,15 +1557,6 @@ function selectWaypoint(idx: number) {
   }
 }
 
-// Ouvre la bulle d'un point d'étape depuis l'extérieur (avertissement d'amas de virages).
-// Passe par deselectAll pour ne pas retomber sur la bascule de selectWaypoint, qui
-// refermerait la bulle si ce point était déjà sélectionné.
-function focusWaypoint(idx: number) {
-  if (idx < 0 || idx >= waypointMarkers.length) return
-  deselectAll()
-  selectWaypoint(idx)
-}
-
 function deselectAll() {
   waypointMarkers.forEach((m) => {
     if (!m) return
@@ -1616,6 +1655,10 @@ function refreshWaypointMarkers() {
           <i class="fa-solid fa-bezier-curve" aria-hidden="true"></i>
           <span>${w.free ? t('routes.anchor_to_road') : t('routes.make_free')}</span>
         </button>
+        <button type="button" class="wp-tooltip-action wp-tooltip-action--uturn-ok">
+          <i class="fa-solid fa-arrows-turn-to-dots" aria-hidden="true"></i>
+          <span>${w.uturn_ok ? t('routes.uturn_flag_again') : t('routes.uturn_is_expected')}</span>
+        </button>
         <button type="button" class="wp-tooltip-action wp-tooltip-action--delete">
           <i class="fa-solid fa-trash" aria-hidden="true"></i>
           <span>${t('routes.remove_waypoint')}</span>
@@ -1634,7 +1677,7 @@ function refreshWaypointMarkers() {
     })
     el.querySelector('.wp-tooltip-close')!.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     // Actions purement informatives : présentes aussi en lecture seule (vue partagée).
-    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--copy):not(.wp-tooltip-action--reverse)').forEach((a) => {
+    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--uturn-ok):not(.wp-tooltip-action--copy):not(.wp-tooltip-action--reverse)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     })
     el.querySelectorAll('.wp-tooltip-action--copy').forEach((btn) => {
@@ -1665,6 +1708,9 @@ function refreshWaypointMarkers() {
       numInput.addEventListener('change', commitNum)
       el.querySelector('.wp-tooltip-action--free')!.addEventListener('click', (ev: any) => {
         ev.stopPropagation(); ev.preventDefault(); toggleWaypointFree(idx)
+      })
+      el.querySelector('.wp-tooltip-action--uturn-ok')!.addEventListener('click', (ev: any) => {
+        ev.stopPropagation(); ev.preventDefault(); toggleWaypointUturnOk(idx)
       })
       el.querySelector('.wp-tooltip-action--reverse')!.addEventListener('click', (ev: any) => {
         ev.stopPropagation(); ev.preventDefault(); reverseWaypoints()
@@ -2225,7 +2271,6 @@ defineExpose({
   applyAlternative,
   refreshWaypointMarkers,
   recomputeWaypointGeomIndices,
-  focusWaypoint,
   fitMapToRoute,
   fitMapToSelection,
   flyTo,
@@ -2234,6 +2279,8 @@ defineExpose({
   hideChartCrossMarker,
   showTurnAnomalyMarkers,
   clearTurnAnomalyMarkers,
+  showSnapMarkers,
+  clearSnapMarkers,
   showPlaceHoverMarker,
   hidePlaceHoverMarker,
   showPlacePopup,
@@ -2511,6 +2558,12 @@ defineExpose({
         </div>
       </div>
     </div>
+
+    <!-- Surimpressions du parent (pile d'alertes). Elles vivent DANS .map-wrap et non à
+         côté : en plein écran .map-wrap passe en position:fixed + z-index 1020, donc tout
+         élément resté dehors se retrouve à la fois mal positionné et derrière la carte.
+         En dernier dans le DOM pour passer au-dessus du reste de la carte. -->
+    <slot name="overlays"></slot>
   </div>
 </template>
 
@@ -3077,6 +3130,22 @@ defineExpose({
   background: #fc4c02;
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  pointer-events: none;
+}
+/* Repère d'un point accroché au loin. Même gabarit que le marqueur d'amas mais en jaune,
+   pour reprendre le code couleur de son alerte (map-notice--warning). */
+.snap-warning-marker {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 2px solid #fff;
+  color: #422006;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.45);
   pointer-events: none;
 }
 .turn-anomaly-marker {

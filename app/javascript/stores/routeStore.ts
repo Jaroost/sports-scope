@@ -12,7 +12,10 @@ export const MAX_WAYPOINTS = 200
 class RouteStore {
   // ─── Core route data ────────────────────────────────────────────────────────
   readonly geometry = ref<Coord[]>([])
-  readonly waypoints = ref<Array<{ lng: number; lat: number; free?: boolean }>>([])
+  // `free` : le tronçon ENTRANT du point est tracé en ligne droite (cf. reverseWaypoints).
+  // `uturn_ok` : l'utilisateur assume le demi-tour que ce point provoque (aller-retour
+  // délibéré) — purement informatif, n'affecte pas le routage (cf. detectUturnAnomalies).
+  readonly waypoints = ref<Array<{ lng: number; lat: number; free?: boolean; uturn_ok?: boolean }>>([])
   readonly voiceHints = ref<VoiceHint[]>([])
   readonly distanceM = ref(0)
   readonly elevGainM = ref(0)

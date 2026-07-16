@@ -7,7 +7,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, formatDistanceShort, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, nearestGeomIndex } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, formatDistanceShort, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex } from '../routeHelpers'
 import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport } from '../userPreferences'
@@ -70,6 +70,43 @@ const showTurnWarning = ref(false)
 // On mesure donc l'écart réel entre chaque point et le tracé obtenu, et on le signale.
 const SNAP_WARN_M = 25
 const snapWarnings = ref<Array<{ idx: number; distM: number }>>([])
+
+// Fermer une alerte ne fait que la replier : la cause (erreur, points accrochés, amas de
+// virages) est toujours là et l'utilisateur doit pouvoir la relire. On masque donc
+// l'affichage sans jeter les données, et une pastille propose de tout rouvrir. Chaque
+// drapeau se relève de lui-même dès que l'alerte a un nouveau contenu à montrer.
+const errorDismissed = ref(false)
+const snapDismissed = ref(false)
+watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
+watch(snapWarnings, () => { snapDismissed.value = false })
+
+// Les points accrochés au loin portent un marqueur tant que l'avertissement est d'actualité :
+// c'est lui qui les situe sur la carte (les puces de l'alerte ne font que cadrer dessus).
+// Replier l'alerte les LAISSE en place, comme le fait closeTurnWarning pour les amas : ils
+// guident la correction, et la pastille rappelle d'où ils viennent. Ils disparaissent avec
+// leur cause, au recalcul du tracé qui repeuple snapWarnings.
+watch(snapWarnings, (list) => {
+  const wps = routeStore.waypoints.value
+  mapRef.value?.showSnapMarkers(
+    list.map((s) => wps[s.idx]).filter((w): w is { lng: number; lat: number } => !!w),
+  )
+})
+
+// Alertes repliées mais toujours d'actualité (l'amas de virages, lui, garde ses données
+// dans turnWarnings tant que le tracé n'a pas changé — cf. dismissTurnWarning).
+const hiddenNoticeCount = computed(() => {
+  let n = 0
+  if (routeStore.error.value && errorDismissed.value) n++
+  if (snapWarnings.value.length && snapDismissed.value) n++
+  if (turnWarnings.value.length && !showTurnWarning.value) n++
+  return n
+})
+
+function reopenNotices() {
+  errorDismissed.value = false
+  snapDismissed.value = false
+  if (turnWarnings.value.length) showTurnWarning.value = true
+}
 const exportStyleId = ref('')
 const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
@@ -356,6 +393,9 @@ async function recomputeRoute() {
     if (token === recomputeToken) {
       routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
       snapWarnings.value = []
+      // Le tracé garde l'ancienne géométrie alors que les waypoints, eux, ont déjà changé :
+      // on réaligne les index dessus, sinon l'insertion de point resterait bloquée.
+      mapRef.value?.recomputeWaypointGeomIndices()
     }
   } finally {
     if (token === recomputeToken) routeStore.isFetchingRoute.value = false
@@ -479,14 +519,50 @@ async function fetchSharedRoute(token: string) {
 
 // Recherche les amas de virages (point mal placé) sur le tracé courant à partir des
 // voicehints BRouter déjà calculés. Vide tant que la géométrie est trop courte.
+// Les deux signatures d'un point d'étape mal posé, réunies en une liste : l'amas de virages
+// (crochet compact) et le demi-tour (crochet étalé sur une impasse, que l'amas ne voit pas).
+// Un même crochet peut déclencher les deux ; on ne garde alors que l'amas, plus informatif
+// (il compte les virages), pour ne pas signaler deux fois le même point.
 function computeTurnAnomalies(): TurnAnomaly[] {
   const geom = routeStore.geometry.value
   if (geom.length < 3) return []
   const cumDistM = buildDistancesM(geom)
   const turns = turnsFromVoiceHints(routeStore.voiceHints.value, geom, cumDistM)
   const diameterM = turnAnomalyDiameterForSport(routeStore.sport.value)
-  const waypoints = routeStore.waypoints.value.map((w) => [w.lng, w.lat] as LngLat)
-  return detectTurnAnomalies(turns, geom, { diameterM, waypoints })
+  const wps = routeStore.waypoints.value
+  const waypoints = wps.map((w) => [w.lng, w.lat] as LngLat)
+  const uturnOk = wps.map((w) => w.uturn_ok === true)
+  const clusters = detectTurnAnomalies(turns, geom, { diameterM, waypoints })
+  const claimed = new Set(clusters.map((a) => a.waypointIdx).filter((i) => i >= 0))
+  const uturns = detectUturnAnomalies(turns, geom, { waypoints, uturnOk })
+    .filter((a) => a.waypointIdx < 0 || !claimed.has(a.waypointIdx))
+  return [...clusters, ...uturns].sort((a, b) => a.distM - b.distM)
+}
+
+// Un demi-tour sans point d'étape à portée n'accuse personne : on le situe à la distance
+// parcourue plutôt que d'annoncer un numéro de point qui n'existe pas.
+function turnWarningLabel(a: TurnAnomaly): string {
+  const distance = formatDistancePrecise(a.distM)
+  if (a.kind === 'uturn') {
+    return a.waypointIdx >= 0
+      ? t('routes.uturn_warning_item', { point: a.waypointIdx + 1, distance })
+      : t('routes.uturn_warning_item_orphan', { distance })
+  }
+  return t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count, distance })
+}
+
+// Recalcule la liste affichée après un changement qui ne retouche pas le tracé (marquer un
+// demi-tour comme normal) : sans ça l'alerte continuerait de lister un point déjà réglé.
+function refreshTurnWarnings() {
+  if (!turnWarnings.value.length) return
+  const anomalies = computeTurnAnomalies()
+  turnWarnings.value = anomalies
+  if (anomalies.length) {
+    mapRef.value?.showTurnAnomalyMarkers(anomalies)
+  } else {
+    showTurnWarning.value = false
+    mapRef.value?.clearTurnAnomalyMarkers()
+  }
 }
 
 async function save() {
@@ -527,30 +603,28 @@ async function saveAnyway() {
   await persistAndIndexPlaces()
 }
 
-// Ferme la modale mais LAISSE les marqueurs d'alerte sur la carte : ils guident
-// l'utilisateur vers les points à corriger et disparaissent au prochain recalcul du
-// tracé (cf. recomputeRoute).
+// Ferme l'alerte mais LAISSE les marqueurs sur la carte : ils guident l'utilisateur vers
+// les points à corriger et disparaissent au prochain recalcul du tracé (cf. recomputeRoute).
 function closeTurnWarning() {
   showTurnWarning.value = false
 }
 
-// Recentre la carte sur un amas pour le corriger (marqueurs conservés) et ouvre le point
-// d'étape en cause : sa bulle porte les actions de correction (déplacer, supprimer), ce
-// qui évite à l'utilisateur de deviner lequel des points voisins a produit le crochet.
+// Recentre la carte sur un amas. On se contente de cadrer : le marqueur d'alerte déjà posé
+// désigne l'endroit, et ouvrir la bulle du point la ferait recouvrir l'alerte dont elle
+// vient (elle s'affiche au-dessus du marqueur, donc en plein milieu de la pile). À
+// l'utilisateur de cliquer le point s'il veut ses actions de correction.
+// L'alerte reste ouverte : contrairement à une modale, elle ne masque pas la carte et
+// sert de liste de tâches tant que les amas ne sont pas corrigés.
 function focusTurnAnomaly(a: TurnAnomaly) {
-  closeTurnWarning()
   mapRef.value?.flyTo(a.lng, a.lat, 17)
-  if (a.waypointIdx >= 0) mapRef.value?.focusWaypoint(a.waypointIdx)
 }
 
-// Recentre sur un point accroché au loin et ouvre sa bulle : elle porte les actions de
-// correction (déplacer, supprimer, « rendre libre » — la bonne réponse quand le chemin
-// n'existe tout simplement pas dans les données).
+// Recentre sur un point accroché au loin — repéré sur la carte par son propre marqueur
+// (cf. le watch ci-dessous), même logique que pour les amas.
 function focusSnapWarning(idx: number) {
   const w = routeStore.waypoints.value[idx]
   if (!w) return
   mapRef.value?.flyTo(w.lng, w.lat, 17)
-  mapRef.value?.focusWaypoint(idx)
 }
 
 // Réinitialise complètement l'avertissement : modale, liste et marqueurs d'alerte.
@@ -1584,35 +1658,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Error -->
-    <div v-if="routeStore.error.value" class="alert alert-warning d-flex align-items-center gap-2">
-      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-      <span class="flex-grow-1">{{ routeStore.error.value }}</span>
-      <button type="button" class="btn-close" @click="routeStore.error.value = null" aria-label="dismiss"></button>
-    </div>
-
-    <!-- Points accrochés loin du clic (aucun chemin cartographié à proximité) -->
-    <div v-if="snapWarnings.length" class="alert alert-warning d-flex flex-column gap-2" role="status">
-      <div class="d-flex align-items-center gap-2">
-        <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
-        <strong class="flex-grow-1">{{ t('routes.snap_warning_title', { count: snapWarnings.length }) }}</strong>
-        <button type="button" class="btn-close" @click="snapWarnings = []" :aria-label="t('routes.snap_warning_dismiss')"></button>
-      </div>
-      <p class="small text-muted mb-0">{{ t('routes.snap_warning_body') }}</p>
-      <div class="d-flex flex-wrap gap-2">
-        <button
-          v-for="s in snapWarnings"
-          :key="s.idx"
-          type="button"
-          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-          @click="focusSnapWarning(s.idx)"
-        >
-          <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
-          {{ t('routes.snap_warning_item', { point: s.idx + 1, distance: formatDistancePrecise(s.distM) }) }}
-        </button>
-      </div>
-    </div>
-
     <!-- Indicateur transitoire d'enregistrement réussi -->
     <Transition name="saved-toast">
       <div v-if="saved" class="saved-toast" role="status" aria-live="polite">
@@ -1654,6 +1699,7 @@ onBeforeUnmount(() => {
             ref="mapRef"
             :state="state"
             @waypoints-changed="recomputeRoute()"
+            @uturn-ok-changed="refreshTurnWarnings"
             @select-place="onSelectPlace"
             @hover-place="onHoverPlace"
             @retry-places="fetchImportantPlaces"
@@ -1661,7 +1707,79 @@ onBeforeUnmount(() => {
             @select-alternative="onSelectAlternative"
             @toggle-chart="state.showElevationChart = !state.showElevationChart; nextTick(() => mapRef?.resize())"
             @toggle-mobile-sheet="mobileSheetOpen = !mobileSheetOpen"
-          />
+          >
+            <template #overlays>
+              <!-- Alertes du tracé, empilées en surimpression de la carte plutôt qu'en flux :
+                   elles apparaissent au fil de l'édition et décaleraient la carte sous le
+                   curseur. Placées sous la rangée de contrôles du haut pour ne pas la couvrir. -->
+              <div class="map-notices">
+                <TransitionGroup name="map-notice">
+
+                  <!-- Erreur (routage, altitude, enregistrement…) -->
+                  <div v-if="routeStore.error.value && !errorDismissed" key="error" class="map-notice map-notice--danger" role="alert">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ routeStore.error.value }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="errorDismissed = true"
+                        :aria-label="t('routes.snap_warning_dismiss')"></button>
+                    </div>
+                  </div>
+
+                  <!-- Points accrochés loin du clic (aucun chemin cartographié à proximité) -->
+                  <div v-if="snapWarnings.length && !snapDismissed" key="snap" class="map-notice map-notice--warning" role="status">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ t('routes.snap_warning_title', { count: snapWarnings.length }) }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="snapDismissed = true"
+                        :aria-label="t('routes.snap_warning_dismiss')"></button>
+                    </div>
+                    <p class="map-notice-body">{{ t('routes.snap_warning_body') }}</p>
+                    <div class="map-notice-chips">
+                      <button v-for="s in snapWarnings" :key="s.idx" type="button" class="map-notice-chip"
+                        @click="focusSnapWarning(s.idx)">
+                        <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
+                        {{ t('routes.snap_warning_item', { point: s.idx + 1, distance: formatDistancePrecise(s.distM) }) }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Amas de virages (point mal placé) — soulevé à l'enregistrement -->
+                  <div v-if="showTurnWarning" key="turns" class="map-notice map-notice--danger" role="alert">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ t('routes.turn_warning_title') }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="closeTurnWarning"
+                        :aria-label="t('routes.turn_warning_dismiss')"></button>
+                    </div>
+                    <p class="map-notice-body">{{ t('routes.turn_warning_body') }}</p>
+                    <div class="map-notice-chips">
+                      <button v-for="(a, i) in turnWarnings" :key="i" type="button" class="map-notice-chip"
+                        @click="focusTurnAnomaly(a)">
+                        <i :class="a.kind === 'uturn' ? 'fa-solid fa-arrows-turn-to-dots' : 'fa-solid fa-location-crosshairs'"
+                          aria-hidden="true"></i>
+                        {{ turnWarningLabel(a) }}
+                      </button>
+                    </div>
+                    <div class="map-notice-actions">
+                      <button type="button" class="btn btn-sm btn-warning" :disabled="saving" @click="saveAnyway">
+                        <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                        {{ t('routes.turn_warning_save_anyway') }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Rappel des alertes repliées : seul vestige visible tant qu'elles ne sont
+                       pas corrigées, sinon l'utilisateur perdrait l'info sans recours. -->
+                  <button v-if="hiddenNoticeCount" key="reopen" type="button" class="map-notice-pill"
+                    @click="reopenNotices" :title="t('routes.notices_reopen')">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <span>{{ t('routes.notices_reopen_count', { count: hiddenNoticeCount }) }}</span>
+                  </button>
+
+                </TransitionGroup>
+              </div>
+            </template>
+          </RouteBuilderMap>
 
           <!-- Panneau des variantes de tronçon (proposées sur une sélection) -->
           <Transition name="alt-panel">
@@ -1754,44 +1872,6 @@ onBeforeUnmount(() => {
             @propose-alternatives="proposeAlternatives"
             @collapse="mobileSheetOpen = false"
           />
-          </div>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- Avertissement amas de virages (point mal placé) -->
-    <Transition name="modal">
-      <div v-if="showTurnWarning" class="modal-backdrop-custom" @click.self="closeTurnWarning">
-        <div class="modal-dialog-custom shadow-lg">
-          <div class="modal-header-custom">
-            <strong class="d-flex align-items-center gap-2">
-              <i class="fa-solid fa-triangle-exclamation text-danger" aria-hidden="true"></i>
-              {{ t('routes.turn_warning_title') }}
-            </strong>
-            <button type="button" class="btn-close" @click="closeTurnWarning" :aria-label="t('routes.turn_warning_dismiss')"></button>
-          </div>
-          <div class="modal-body-custom d-flex flex-column gap-3">
-            <p class="small text-muted mb-0">{{ t('routes.turn_warning_body') }}</p>
-            <ul class="turn-warning-list">
-              <li v-for="(a, i) in turnWarnings" :key="i">
-                <button type="button" class="turn-warning-item" @click="focusTurnAnomaly(a)">
-                  <span class="turn-warning-item-label">
-                    <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
-                    {{ t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count, distance: formatDistancePrecise(a.distM) }) }}
-                  </span>
-                  <i class="fa-solid fa-chevron-right text-muted" aria-hidden="true"></i>
-                </button>
-              </li>
-            </ul>
-            <div class="d-flex gap-2">
-              <button type="button" class="btn btn-outline-secondary flex-fill" @click="closeTurnWarning">
-                {{ t('routes.turn_warning_fix') }}
-              </button>
-              <button type="button" class="btn btn-warning flex-fill" :disabled="saving" @click="saveAnyway">
-                <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-                {{ t('routes.turn_warning_save_anyway') }}
-              </button>
-            </div>
           </div>
         </div>
       </div>
@@ -2120,33 +2200,117 @@ onBeforeUnmount(() => {
 .modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
 
-/* ─── Avertissement amas de virages ───────────────────────────────────────── */
-.turn-warning-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ─── Alertes en surimpression de la carte ────────────────────────────────── */
+/* Colonne calée sous la rangée de contrôles du haut (contrôles droite : top 56px) et
+   entre les deux colonnes de boutons (34px de large + 10px de marge de chaque côté). */
+.map-notices {
+  position: absolute;
+  top: 56px;
+  left: 54px;
+  right: 54px;
+  /* Au-dessus de TOUT ce que porte la carte, `.wp-tooltip` (z-index 20) compris : cliquer
+     un point de l'alerte ouvre justement la bulle de ce point, qui recouvrirait sinon
+     l'alerte dont elle vient. Ni la carte ni ce conteneur ne créent de contexte
+     d'empilement, donc les deux valeurs se comparent bien directement. */
+  z-index: 25;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  max-height: 240px;
+  gap: 0.5rem;
+  align-items: center;
+  max-height: calc(100% - 76px);
   overflow-y: auto;
+  pointer-events: none;
 }
-.turn-warning-item {
-  width: 100%;
+.map-notice {
+  pointer-events: auto;
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+.map-notice--warning {
+  background: #fff8e6;
+  border-color: #ffe08a;
+  color: #664d03;
+}
+.map-notice--danger {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #7f1d1d;
+}
+.map-notice-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #fde0e0;
-  border-radius: 0.5rem;
+}
+.map-notice-body {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+.map-notice-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.map-notice-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.map-notice-chip:hover { background: #fff; }
+.map-notice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.btn-close-sm { --bs-btn-close-focus-shadow: none; padding: 0.25rem; background-size: 0.65em; }
+
+/* Pastille de réouverture : discrète (elle vit en permanence sur la carte tant que
+   l'alerte n'est pas corrigée) mais assez colorée pour rester repérable. */
+.map-notice-pill {
+  pointer-events: auto;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #fca5a5;
+  border-radius: 999px;
   background: #fef2f2;
   color: #7f1d1d;
-  font-size: 0.875rem;
-  text-align: left;
+  font-size: 0.8rem;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: background 0.12s;
 }
-.turn-warning-item:hover { background: #fee2e2; border-color: #fca5a5; }
-.turn-warning-item-label { display: flex; align-items: center; gap: 0.5rem; }
+.map-notice-pill:hover { background: #fee2e2; }
+
+.map-notice-enter-active,
+.map-notice-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.map-notice-enter-from,
+.map-notice-leave-to { opacity: 0; transform: translateY(-6px); }
+.map-notice-leave-active { position: absolute; }
+
+/* Sur mobile la carte est étroite : on colle les alertes aux bords, sous les contrôles. */
+@media (max-width: 767px), (max-height: 500px) {
+  .map-notices {
+    left: 8px;
+    right: 8px;
+    top: 52px;
+  }
+}
 </style>

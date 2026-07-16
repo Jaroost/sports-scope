@@ -7,7 +7,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, formatDistanceShort, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, formatDistanceShort, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, nearestGeomIndex } from '../routeHelpers'
 import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport } from '../userPreferences'
@@ -63,6 +63,13 @@ const showExportDialog = ref(false)
 // au même endroit, ce qui fausse la navigation. On le signale sans bloquer la sauvegarde.
 const turnWarnings = ref<TurnAnomaly[]>([])
 const showTurnWarning = ref(false)
+// Avertissement « point accroché au loin » : BRouter projette chaque waypoint sur la voie
+// routable la plus proche. Quand aucun chemin n'existe à l'endroit cliqué (trou de données
+// OSM, plein champ…), il l'accroche silencieusement des dizaines de mètres plus loin — au
+// pire, plusieurs points atterrissent sur la même voie et le tracé s'écrase en ligne droite.
+// On mesure donc l'écart réel entre chaque point et le tracé obtenu, et on le signale.
+const SNAP_WARN_M = 25
+const snapWarnings = ref<Array<{ idx: number; distM: number }>>([])
 const exportStyleId = ref('')
 const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
@@ -265,6 +272,7 @@ async function recomputeRoute() {
     routeStore.distanceM.value = 0
     routeStore.elevGainM.value = 0
     routeStore.elevLossM.value = 0
+    snapWarnings.value = []
     mapRef.value?.updateRouteLayer()
     mapRef.value?.installClimbMarkers()
     chartRef.value?.destroy()
@@ -315,6 +323,13 @@ async function recomputeRoute() {
     if (straight.size) geom = densifyGeometry(geom)
     routeStore.geometry.value = geom
 
+    // Écart entre chaque point d'étape et le tracé réellement obtenu. Un point « libre »
+    // est traversé par sa ligne droite, donc son écart est nul : il ne se signale jamais
+    // de lui-même. Un point posé là où aucun chemin n'est cartographié, lui, ressort.
+    snapWarnings.value = wps
+      .map((w, idx) => ({ idx, distM: nearestGeomIndex([w.lng, w.lat], geom).distM }))
+      .filter((s) => s.distM >= SNAP_WARN_M)
+
     // Recalcule d'abord les index géométriques des waypoints : le rendu du tracé
     // (updateRouteLayer → applyColorMode) s'en sert pour repérer les tronçons droits
     // (points libres) à dessiner en traitillé.
@@ -338,7 +353,10 @@ async function recomputeRoute() {
       await fetchElevation(token)
     }
   } catch (e: any) {
-    if (token === recomputeToken) routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
+    if (token === recomputeToken) {
+      routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
+      snapWarnings.value = []
+    }
   } finally {
     if (token === recomputeToken) routeStore.isFetchingRoute.value = false
   }
@@ -523,6 +541,16 @@ function focusTurnAnomaly(a: TurnAnomaly) {
   closeTurnWarning()
   mapRef.value?.flyTo(a.lng, a.lat, 17)
   if (a.waypointIdx >= 0) mapRef.value?.focusWaypoint(a.waypointIdx)
+}
+
+// Recentre sur un point accroché au loin et ouvre sa bulle : elle porte les actions de
+// correction (déplacer, supprimer, « rendre libre » — la bonne réponse quand le chemin
+// n'existe tout simplement pas dans les données).
+function focusSnapWarning(idx: number) {
+  const w = routeStore.waypoints.value[idx]
+  if (!w) return
+  mapRef.value?.flyTo(w.lng, w.lat, 17)
+  mapRef.value?.focusWaypoint(idx)
 }
 
 // Réinitialise complètement l'avertissement : modale, liste et marqueurs d'alerte.
@@ -1561,6 +1589,28 @@ onBeforeUnmount(() => {
       <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
       <span class="flex-grow-1">{{ routeStore.error.value }}</span>
       <button type="button" class="btn-close" @click="routeStore.error.value = null" aria-label="dismiss"></button>
+    </div>
+
+    <!-- Points accrochés loin du clic (aucun chemin cartographié à proximité) -->
+    <div v-if="snapWarnings.length" class="alert alert-warning d-flex flex-column gap-2" role="status">
+      <div class="d-flex align-items-center gap-2">
+        <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
+        <strong class="flex-grow-1">{{ t('routes.snap_warning_title', { count: snapWarnings.length }) }}</strong>
+        <button type="button" class="btn-close" @click="snapWarnings = []" :aria-label="t('routes.snap_warning_dismiss')"></button>
+      </div>
+      <p class="small text-muted mb-0">{{ t('routes.snap_warning_body') }}</p>
+      <div class="d-flex flex-wrap gap-2">
+        <button
+          v-for="s in snapWarnings"
+          :key="s.idx"
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          @click="focusSnapWarning(s.idx)"
+        >
+          <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
+          {{ t('routes.snap_warning_item', { point: s.idx + 1, distance: formatDistancePrecise(s.distM) }) }}
+        </button>
+      </div>
     </div>
 
     <!-- Indicateur transitoire d'enregistrement réussi -->

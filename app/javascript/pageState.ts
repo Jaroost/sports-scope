@@ -26,12 +26,16 @@ export class MapPageState {
   }
 
   // Subclasses override to declare which fields survive a page reload.
-  protected persistedFields(): string[] {
+  // Public (et non `protected`) à dessein : une instance passée en prop traverse
+  // `reactive()`, dont le type `UnwrapNestedRefs` ne conserve que les membres publics.
+  // En `protected`, le proxy réactif n'est plus assignable au type de la classe.
+  persistedFields(): string[] {
     return ['mapStyleId', 'showClimbs']
   }
 
-  // Subclasses override to use a distinct localStorage key.
-  protected storageKey(): string {
+  // Subclasses override to use a distinct localStorage key. Public pour la même
+  // raison que persistedFields().
+  storageKey(): string {
     return 'sportsScope.mapPageState'
   }
 
@@ -69,11 +73,11 @@ export class ActivityMapState extends MapPageState {
     super('cyclosm')
   }
 
-  protected override storageKey(): string {
+  override storageKey(): string {
     return 'sportsScope.activityMapState'
   }
 
-  protected override persistedFields(): string[] {
+  override persistedFields(): string[] {
     return [...super.persistedFields(), 'showPhotos', 'showGrade']
   }
 }
@@ -102,7 +106,7 @@ export class RouteBuilderState extends MapPageState {
     return this.colorMode === 'grade'
   }
 
-  protected override storageKey(): string {
+  override storageKey(): string {
     return 'sportsScope.routeBuilderState'
   }
 
@@ -110,7 +114,7 @@ export class RouteBuilderState extends MapPageState {
   // préférences du profil (cf. constructeur) : on ne les persiste pas en localStorage,
   // sinon une ancienne valeur de session écraserait silencieusement le profil. Les autres
   // réglages de vue (épingles, panneau, cols) restent locaux à la session.
-  protected override persistedFields(): string[] {
+  override persistedFields(): string[] {
     return ['showClimbs', 'showWaypoints', 'showPois', 'showStatsSidebar']
   }
 }

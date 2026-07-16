@@ -719,6 +719,12 @@ fr:
     turn_warning_fix: "Corriger"
     turn_warning_save_anyway: "Enregistrer quand même"
     turn_warning_dismiss: "Fermer"
+    snap_warning_title:
+      one: "1 point accroché loin de l'endroit cliqué"
+      other: "%{count} points accrochés loin de l'endroit cliqué"
+    snap_warning_body: "Le routage suit les chemins connus des données OpenStreetMap. Faute de chemin à l'endroit cliqué, ces points ont été ramenés sur la voie la plus proche — le tracé peut donc s'écarter de ce que tu voulais, voire écraser une boucle en ligne droite. Déplace le point sur un chemin existant, ou passe-le en « libre » pour tracer une ligne droite qui passe vraiment par lui."
+    snap_warning_item: "Point %{point} · %{distance}"
+    snap_warning_dismiss: "Fermer"
     no_cycling_here: "Sens interdit à vélo (détour cyclable)"
     selection: "Sélection"
     reset_zoom: "Réinitialiser zoom"

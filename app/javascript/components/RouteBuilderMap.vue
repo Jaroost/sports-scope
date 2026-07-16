@@ -21,7 +21,7 @@ import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
   streetViewUrl, bearingFromRoute, bearingAlongRoute, downsampleByDistance,
 } from '../routeHelpers'
-import type { Climb, Coord } from '../routeHelpers'
+import type { Climb, Coord, LngLat } from '../routeHelpers'
 import type { RouteAlternative } from '../routeAlternatives'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 
@@ -33,6 +33,8 @@ const emit = defineEmits<{
   'retry-places': []
   'hover-alternative': [altId: number | null]
   'select-alternative': [altId: number]
+  'toggle-chart': []
+  'toggle-mobile-sheet': []
 }>()
 
 // Palette des variantes de tracé (une couleur par position dans la liste proposée).
@@ -511,7 +513,7 @@ function applyColorMode() {
   const straightSrc = mapInstance.getSource('builder-route-straight')
   if (!src) return
   const geom = routeStore.geometry.value
-  const coords = geom.map(([lng, lat]: any) => [lng, lat])
+  const coords: LngLat[] = geom.map((c) => [c[0], c[1]])
   const gradeMode = props.state.colorMode === 'grade'
   const routedFeatures: any[] = []
   const straightFeatures: any[] = []

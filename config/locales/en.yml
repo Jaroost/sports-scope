@@ -719,6 +719,12 @@ en:
     turn_warning_fix: "Fix"
     turn_warning_save_anyway: "Save anyway"
     turn_warning_dismiss: "Close"
+    snap_warning_title:
+      one: "1 point snapped away from where you clicked"
+      other: "%{count} points snapped away from where you clicked"
+    snap_warning_body: "Routing follows paths known to OpenStreetMap data. With no path where you clicked, these points were pulled onto the nearest way — so the route may drift from what you intended, or even flatten a loop into a line. Move the point onto an existing path, or make it \"free\" to draw a straight line that really goes through it."
+    snap_warning_item: "Point %{point} · %{distance}"
+    snap_warning_dismiss: "Close"
     no_cycling_here: "No-cycling section (one-way against bikes)"
     selection: "Selection"
     reset_zoom: "Reset zoom"

@@ -37,12 +37,6 @@ function csrfToken(): string {
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
-// Appareil sans survol (tactile) : un tap déclenchait à la fois le tooltip ET la
-// navigation, empêchant de lire le jour touché. Sur tactile, le tap ouvre seulement
-// le tooltip et les activités y deviennent des liens ; la navigation directe au clic
-// n'est gardée que pour la souris.
-const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
-
 function activityHref(a: { source: string; external_id: string }): string {
   const base = a.source === 'imported' ? '/imported_activities' : '/activities'
   return `${localePrefix}${base}/${a.external_id}`
@@ -236,117 +230,78 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
 }
 
-// ── Tooltip HTML externe (permet un badge coloré pour l'état du jour) ────────
-let tooltipEl: HTMLElement | null = null
+// ── Panneau de détail (sous les graphes) ─────────────────────────────────────
+// Un tooltip flottant recouvrait presque tout le tracé (les graphes ne font que
+// ~200 px de haut, et la liste des séances allonge la bulle) : le détail vit donc
+// dans un bloc dédié sous les courbes. Le survol/tap ne fait que déplacer l'index.
+const hoverIndex = ref<number | null>(null)
 
-function escapeHtml(s: string): string {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
-}
-function dot(color: string): string {
-  return `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle"></span>`
-}
 function dateLong(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
 }
 
+// Hors survol, on montre le dernier jour de la fenêtre : le bloc garde sa hauteur
+// (pas de saut de mise en page) et affiche l'info la plus utile par défaut.
+const detail = computed<Point | null>(() => {
+  const pts = displayed.value
+  if (!pts.length) return null
+  return pts[hoverIndex.value ?? pts.length - 1] ?? null
+})
+const detailZone = computed(() => (detail.value ? formZone(detail.value.tsb) : 'neutral'))
+const detailActivities = computed<DayActivity[]>(() => detail.value?.activities ?? [])
+
+// Repère vertical sur les DEUX graphes au jour lu, puisque le détail n'est plus
+// ancré au curseur : sans lui, on ne saurait pas quel point le bloc décrit.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getTooltipEl(chart: any): HTMLElement {
-  const parent = chart.canvas.parentNode as HTMLElement
-  if (!tooltipEl) {
-    tooltipEl = document.createElement('div')
-    Object.assign(tooltipEl.style, {
-      position: 'absolute', pointerEvents: 'none', opacity: '0',
-      transform: 'translate(-50%, -100%)', transition: 'opacity .1s ease',
-      background: 'rgba(17,24,39,0.92)', color: '#fff', padding: '8px 10px',
-      borderRadius: '6px', fontSize: '12px', lineHeight: '1.4', width: '240px',
-      boxSizing: 'border-box', zIndex: '20', boxShadow: '0 4px 12px rgba(0,0,0,0.25)', whiteSpace: 'normal',
-    } as Partial<CSSStyleDeclaration>)
-    parent.appendChild(tooltipEl)
-  } else if (tooltipEl.parentNode !== parent) {
-    parent.appendChild(tooltipEl)
-  }
-  return tooltipEl
+const hoverLinePlugin: any = {
+  id: 'hoverLine',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  afterDatasetsDraw(c: any) {
+    if (hoverIndex.value == null) return
+    const pt = c.getDatasetMeta(0)?.data?.[hoverIndex.value]
+    const area = c.chartArea
+    if (!pt || !area) return
+    const { ctx } = c
+    ctx.save()
+    ctx.beginPath()
+    ctx.moveTo(pt.x, area.top)
+    ctx.lineTo(pt.x, area.bottom)
+    ctx.lineWidth = 1
+    ctx.setLineDash([4, 3])
+    ctx.strokeStyle = 'rgba(33,37,41,0.5)'
+    ctx.stroke()
+    ctx.restore()
+  },
 }
 
+// Chart.js n'expose pas d'événement « index survolé » : on détourne le hook du
+// tooltip (désactivé visuellement) qui, lui, connaît le point actif.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function externalTooltip(context: { chart: any; tooltip: any }) {
-  const { chart, tooltip } = context
-  const el = getTooltipEl(chart)
-  if (!tooltip.opacity) { el.style.opacity = '0'; return }
-
-  const p = displayed.value[tooltip.dataPoints?.[0]?.dataIndex]
-  if (!p) { el.style.opacity = '0'; return }
-
-  const zone = formZone(p.tsb)
-  const acts = p.activities ?? []
-  // Sur tactile, chaque séance est un lien tappable (pointer-events réactivé alors que
-  // le conteneur du tooltip les ignore) : c'est ainsi qu'on ouvre l'activité, puisque le
-  // tap sur le point ne navigue plus. À la souris, elles restent en texte (le tooltip
-  // disparaît au survol) et on ouvre par le clic sur le point.
-  const actLine = (a: DayActivity) => {
-    const inner = `• ${escapeHtml(a.name)} <span style="opacity:.6">(${Math.round(a.tss)})</span>`
-    return isTouch
-      ? `<a href="${escapeHtml(activityHref(a))}" style="display:block;color:#fff;text-decoration:none;opacity:.95;pointer-events:auto;padding:3px 0">${inner}</a>`
-      : `<div style="opacity:.9">${inner}</div>`
-  }
-  const actHtml = acts.length
-    ? '<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.15);padding-top:5px">' +
-      acts.slice(0, 4).map(actLine).join('') +
-      (acts.length > 4 ? `<div style="opacity:.6">+${acts.length - 4}…</div>` : '') +
-      `<div style="opacity:.7;margin-top:3px"><i>${escapeHtml(t(isTouch ? 'performance.load.tap_activity' : 'performance.load.click_activity'))}</i></div>` +
-      '</div>'
-    : ''
-
-  el.innerHTML =
-    `<div style="font-weight:600;margin-bottom:5px;text-transform:capitalize">${escapeHtml(dateLong(p.date))}</div>` +
-    `<div>${dot('#0d6efd')}${escapeHtml(t('performance.load.ctl_label'))} : <b>${Math.round(p.ctl)}</b></div>` +
-    `<div>${dot('#fd7e14')}${escapeHtml(t('performance.load.atl_label'))} : <b>${Math.round(p.atl)}</b></div>` +
-    `<div style="margin-bottom:6px">${dot('#adb5bd')}${escapeHtml(t('performance.load.tsb_label'))} : <b>${p.tsb > 0 ? '+' : ''}${Math.round(p.tsb)}</b></div>` +
-    `<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:${zoneColor(zone)};color:#fff;font-weight:600;font-size:11px">${escapeHtml(t(`performance.load.zone_${zone}`))}</span>` +
-    actHtml
-
-  // Positionne le tooltip du côté OPPOSÉ au survol (coin haut), pour qu'il ne soit
-  // jamais masqué par le curseur : souris à gauche → tooltip à droite, et inversement.
-  const area = chart.chartArea
-  const left = chart.canvas.offsetLeft
-  const top = chart.canvas.offsetTop
-  const onLeftHalf = tooltip.caretX <= (area.left + area.right) / 2
-
-  el.style.opacity = '1'
-  el.style.top = `${top + area.top + 6}px`
-  if (onLeftHalf) {
-    el.style.left = `${left + area.right - 6}px`
-    el.style.transform = 'translate(-100%, 0)'
-  } else {
-    el.style.left = `${left + area.left + 6}px`
-    el.style.transform = 'translate(0, 0)'
-  }
+function syncDetail(context: { tooltip: any }) {
+  const idx = context.tooltip?.dataPoints?.[0]?.dataIndex
+  // `opacity: 0` = sortie de survol : on garde le dernier index tant que le curseur
+  // reste sur le graphe (le repli sur le dernier jour se fait au mouseleave).
+  if (idx != null) hoverIndex.value = idx
 }
+
+// Le graphe non survolé doit redessiner son repère : Chart.js ne le sait pas.
+watch(hoverIndex, () => {
+  loadChart?.render()
+  tsbChart?.render()
+})
 
 // Aligne l'aire de tracé des deux graphes : même largeur d'axe Y à gauche.
 const Y_AXIS_WIDTH = 46
 
-// Interactions communes aux deux graphes (clic → séance, curseur, tooltip externe).
-function sharedOptions(pts: Point[], extra: Record<string, unknown> = {}) {
+// Interactions communes aux deux graphes : les deux alimentent le même panneau.
+function sharedOptions(extra: Record<string, unknown> = {}) {
   return {
     responsive: true,
     maintainAspectRatio: false,
     interaction: { mode: 'index' as const, intersect: false },
-    // Souris : clic sur le point → séance. Tactile : on ne navigue pas (le tap ouvre le
-    // tooltip, et on ouvre la séance via son lien dedans).
-    onClick: (_evt: unknown, els: { index: number }[]) => {
-      if (isTouch) return
-      const act = pts[els?.[0]?.index]?.activities?.[0]
-      if (act) window.location.href = activityHref(act)
-    },
-    onHover: (evt: { native?: Event }, els: { index: number }[]) => {
-      const target = evt.native?.target as HTMLElement | undefined
-      if (!target) return
-      target.style.cursor = pts[els?.[0]?.index]?.activities?.length ? 'pointer' : 'default'
-    },
     plugins: {
       legend: { position: 'top' as const, labels: { usePointStyle: true, boxWidth: 8 } },
-      tooltip: { enabled: false, external: externalTooltip },
+      tooltip: { enabled: false, external: syncDetail },
     },
     ...extra,
   }
@@ -367,6 +322,7 @@ async function renderChart() {
   if (loadCtx) {
     loadChart = new Chart(loadCtx, {
       type: 'line',
+      plugins: [hoverLinePlugin],
       data: {
         labels,
         datasets: [
@@ -380,7 +336,7 @@ async function renderChart() {
           },
         ],
       },
-      options: sharedOptions(pts, {
+      options: sharedOptions({
         scales: {
           y: { beginAtZero: true, position: 'left', afterFit: (s: { width: number }) => { s.width = Y_AXIS_WIDTH }, title: { display: true, text: t('performance.load.axis_load') } },
           x: { ticks: { display: false }, grid: { display: false } },
@@ -394,7 +350,7 @@ async function renderChart() {
   if (tsbCtx) {
     tsbChart = new Chart(tsbCtx, {
       type: 'line',
-      plugins: [tsbZonesPlugin],
+      plugins: [tsbZonesPlugin, hoverLinePlugin],
       data: {
         labels,
         datasets: [
@@ -404,7 +360,7 @@ async function renderChart() {
           },
         ],
       },
-      options: sharedOptions(pts, {
+      options: sharedOptions({
         scales: {
           tsb: { type: 'linear', position: 'left', afterFit: (s: { width: number }) => { s.width = Y_AXIS_WIDTH }, title: { display: true, text: t('performance.load.axis_tsb') } },
           x: { ticks: { maxTicksLimit: 12, autoSkip: true } },
@@ -414,13 +370,13 @@ async function renderChart() {
   }
 }
 
-// Re-render quand la fenêtre change.
-watch(rangeDays, async () => { await nextTick(); renderChart() })
+// Re-render quand la fenêtre change. L'index survolé désigne une position dans la
+// série affichée : il ne veut plus rien dire une fois la fenêtre changée.
+watch(rangeDays, async () => { hoverIndex.value = null; await nextTick(); renderChart() })
 
 onBeforeUnmount(() => {
   if (loadChart) { loadChart.destroy(); loadChart = null }
   if (tsbChart) { tsbChart.destroy(); tsbChart = null }
-  if (tooltipEl) { tooltipEl.remove(); tooltipEl = null }
 })
 </script>
 
@@ -621,11 +577,37 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Graphiques : charge en haut, fraîcheur (+ zones) en bas -->
-          <div class="load-chart-wrap load-chart-top">
-            <canvas ref="loadCanvas"></canvas>
+          <div @mouseleave="hoverIndex = null">
+            <div class="load-chart-wrap load-chart-top">
+              <canvas ref="loadCanvas"></canvas>
+            </div>
+            <div class="load-chart-wrap load-chart-bottom">
+              <canvas ref="tsbCanvas"></canvas>
+            </div>
           </div>
-          <div class="load-chart-wrap load-chart-bottom">
-            <canvas ref="tsbCanvas"></canvas>
+
+          <!-- Détail du jour lu : sous les graphes plutôt qu'en bulle par-dessus -->
+          <div v-if="detail" class="load-detail">
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+              <span class="fw-semibold text-capitalize">{{ dateLong(detail.date) }}</span>
+              <span class="badge" :style="{ backgroundColor: zoneColor(detailZone) }">{{ t(`performance.load.zone_${detailZone}`) }}</span>
+              <span v-if="hoverIndex === null" class="small text-body-tertiary ms-auto">{{ t('performance.load.detail_hint') }}</span>
+            </div>
+            <div class="d-flex flex-wrap gap-3 small">
+              <span><span class="load-dot" style="background:#0d6efd"></span>{{ t('performance.load.ctl_label') }} : <b>{{ Math.round(detail.ctl) }}</b></span>
+              <span><span class="load-dot" style="background:#fd7e14"></span>{{ t('performance.load.atl_label') }} : <b>{{ Math.round(detail.atl) }}</b></span>
+              <span><span class="load-dot" style="background:#343a40"></span>{{ t('performance.load.tsb_label') }} : <b>{{ fmtSigned(detail.tsb) }}</b></span>
+            </div>
+            <div v-if="detailActivities.length" class="mt-2 pt-2 border-top">
+              <a
+                v-for="a in detailActivities" :key="`${a.source}-${a.external_id}`"
+                :href="activityHref(a)" class="load-detail-act small"
+              >
+                <i class="fa-solid fa-arrow-right-long me-1 text-muted" aria-hidden="true"></i>{{ a.name }}
+                <span class="text-body-tertiary">({{ Math.round(a.tss) }} TSS)</span>
+              </a>
+            </div>
+            <div v-else class="small text-body-tertiary mt-2">{{ t('performance.load.detail_rest') }}</div>
           </div>
 
           <!-- Légende des zones -->
@@ -802,6 +784,31 @@ onBeforeUnmount(() => {
 .load-chart-bottom {
   height: 180px;
   margin-top: 0.25rem;
+}
+.load-detail {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg);
+}
+.load-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.load-detail-act {
+  display: block;
+  padding: 2px 0;
+  color: var(--bs-body-color);
+  text-decoration: none;
+}
+.load-detail-act:hover {
+  color: var(--bs-primary);
+  text-decoration: underline;
 }
 .zone-chip {
   cursor: help;

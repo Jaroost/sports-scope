@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 
 // ── Types du payload /api/performance/ftp ───────────────────────────────────
@@ -38,11 +38,6 @@ interface FtpSummary {
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
-
-// Appareil sans survol : le tooltip ne peut pas être atteint à la souris (il se ferme
-// quand on quitte le point), donc les liens ne sont tappables que sur tactile. À la
-// souris, on ouvre via le clic sur le point — cf. TrainingLoadPanel, même compromis.
-const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
 
 function activityHref(a: { source: string; external_id: string }): string {
   const base = a.source === 'imported' ? '/imported_activities' : '/activities'
@@ -172,89 +167,54 @@ function formatDay(iso: string | null): string {
   return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: '2-digit' })
 }
 
-// ── Tooltip externe (HTML) ───────────────────────────────────────────────────
-// Un tooltip canvas ne peut pas porter de liens : on rend le nôtre en HTML à côté
-// du canvas, comme TrainingLoadPanel.
-let tooltipEl: HTMLElement | null = null
+// ── Panneau de détail (sous le graphe) ───────────────────────────────────────
+// Un tooltip flottant listant les efforts déterminants recouvrait presque tout le
+// tracé (220 px de haut) : le détail vit dans un bloc dédié sous la courbe, où les
+// efforts sont de vrais liens — à la souris comme au doigt.
+const hoverIndex = ref<number | null>(null)
 
-function escapeHtml(s: string): string {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
-}
+// Hors survol : le dernier mois, pour que le bloc soit informatif au repos et garde
+// sa hauteur.
+const detail = computed(() => {
+  const hist = data.value?.history ?? []
+  if (!hist.length) return null
+  return hist[hoverIndex.value ?? hist.length - 1] ?? null
+})
+const detailContributors = computed<Contributor[]>(() => detail.value?.contributors ?? [])
 
+// Repère vertical sur le mois lu : le détail n'étant plus ancré au curseur, il faut
+// montrer quel point il décrit.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getTooltipEl(c: any): HTMLElement {
-  const parent = c.canvas.parentNode as HTMLElement
-  if (!tooltipEl) {
-    tooltipEl = document.createElement('div')
-    Object.assign(tooltipEl.style, {
-      position: 'absolute', pointerEvents: 'none', opacity: '0',
-      transition: 'opacity .1s ease', background: 'rgba(17,24,39,0.92)', color: '#fff',
-      padding: '8px 10px', borderRadius: '6px', fontSize: '12px', lineHeight: '1.4',
-      width: '250px', boxSizing: 'border-box', zIndex: '20',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.25)', whiteSpace: 'normal',
-    } as Partial<CSSStyleDeclaration>)
-    parent.appendChild(tooltipEl)
-  } else if (tooltipEl.parentNode !== parent) {
-    parent.appendChild(tooltipEl)
-  }
-  return tooltipEl
+const hoverLinePlugin: any = {
+  id: 'hoverLine',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  afterDatasetsDraw(c: any) {
+    if (hoverIndex.value == null) return
+    const pt = c.getDatasetMeta(0)?.data?.[hoverIndex.value]
+    const area = c.chartArea
+    if (!pt || !area) return
+    const { ctx } = c
+    ctx.save()
+    ctx.beginPath()
+    ctx.moveTo(pt.x, area.top)
+    ctx.lineTo(pt.x, area.bottom)
+    ctx.lineWidth = 1
+    ctx.setLineDash([4, 3])
+    ctx.strokeStyle = 'rgba(33,37,41,0.5)'
+    ctx.stroke()
+    ctx.restore()
+  },
 }
 
+// Chart.js n'expose pas d'événement « index survolé » : on détourne le hook du
+// tooltip (désactivé visuellement), seul à connaître le point actif.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function externalTooltip(context: { chart: any; tooltip: any }) {
-  const { chart: c, tooltip } = context
-  const el = getTooltipEl(c)
-  if (!tooltip.opacity) { el.style.opacity = '0'; return }
-
-  const point = data.value?.history?.[tooltip.dataPoints?.[0]?.dataIndex]
-  if (!point) { el.style.opacity = '0'; return }
-
-  const contribs = point.contributors ?? []
-  const line = (ct: Contributor) => {
-    const head = `<b>${escapeHtml(formatShortDuration(ct.duration))}</b> : ${ct.watts} W`
-    const sub = `<div style="opacity:.75">${escapeHtml(ct.name)}${ct.started_at ? ` · ${escapeHtml(formatDay(ct.started_at))}` : ''}</div>`
-    const inner = `<div style="padding:3px 0">${head}${sub}</div>`
-    return isTouch
-      ? `<a href="${escapeHtml(activityHref(ct))}" style="display:block;color:#fff;text-decoration:none;pointer-events:auto">${inner}</a>`
-      : inner
-  }
-  const hintKey = isTouch ? 'performance.ftp.tap_activity' : 'performance.ftp.click_activity'
-  const hint = contribs.length === 1 || isTouch
-    ? `<div style="opacity:.7;margin-top:3px"><i>${escapeHtml(t(hintKey))}</i></div>`
-    : ''
-  const contribHtml = contribs.length
-    ? '<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.15);padding-top:5px">' +
-      `<div style="opacity:.7;margin-bottom:2px">${escapeHtml(t('performance.ftp.based_on'))}</div>` +
-      contribs.map(line).join('') + hint + '</div>'
-    : ''
-
-  el.innerHTML =
-    `<div style="font-weight:600;margin-bottom:4px;text-transform:capitalize">${escapeHtml(formatMonth(point.date))}</div>` +
-    `<div>FTP : <b>${point.watts} W</b></div>` +
-    `<div style="opacity:.75">${escapeHtml(methodLabel(point.method))}</div>` +
-    contribHtml
-
-  // Tooltip du côté opposé au curseur pour ne jamais être masqué par la souris.
-  const area = c.chartArea
-  const onLeftHalf = tooltip.caretX <= (area.left + area.right) / 2
-  el.style.opacity = '1'
-  el.style.top = `${c.canvas.offsetTop + area.top + 6}px`
-  if (onLeftHalf) {
-    el.style.left = `${c.canvas.offsetLeft + area.right - 6}px`
-    el.style.transform = 'translate(-100%, 0)'
-  } else {
-    el.style.left = `${c.canvas.offsetLeft + area.left + 6}px`
-    el.style.transform = 'translate(0, 0)'
-  }
+function syncDetail(context: { tooltip: any }) {
+  const idx = context.tooltip?.dataPoints?.[0]?.dataIndex
+  if (idx != null) hoverIndex.value = idx
 }
 
-// À la souris, on n'ouvre que si UN seul effort explique le point (ancres 20/60 min) :
-// avec le modèle CP, plusieurs sorties se partagent le résultat, choisir pour
-// l'utilisateur serait arbitraire — le tooltip les liste, le tactile les lie.
-function soleContributor(index: number): Contributor | null {
-  const contribs = data.value?.history?.[index]?.contributors ?? []
-  return contribs.length === 1 ? contribs[0] : null
-}
+watch(hoverIndex, () => chart?.render())
 
 async function renderChart() {
   if (chart) { chart.destroy(); chart = null }
@@ -267,6 +227,7 @@ async function renderChart() {
   if (!ctx) return
   chart = new Chart(ctx, {
     type: 'line',
+    plugins: [hoverLinePlugin],
     data: {
       labels: hist.map((p) => formatMonth(p.date)),
       datasets: [{
@@ -286,19 +247,9 @@ async function renderChart() {
       maintainAspectRatio: false,
       // Le point le plus proche en X répond au survol, sans avoir à le toucher.
       interaction: { mode: 'index', intersect: false },
-      onClick: (_evt: unknown, els: { index: number }[]) => {
-        if (isTouch) return
-        const ct = els?.[0] ? soleContributor(els[0].index) : null
-        if (ct) window.location.href = activityHref(ct)
-      },
-      onHover: (evt: { native?: Event }, els: { index: number }[]) => {
-        const target = evt.native?.target as HTMLElement | undefined
-        if (!target) return
-        target.style.cursor = !isTouch && els?.[0] && soleContributor(els[0].index) ? 'pointer' : 'default'
-      },
       plugins: {
         legend: { display: false },
-        tooltip: { enabled: false, external: externalTooltip },
+        tooltip: { enabled: false, external: syncDetail },
       },
       scales: {
         y: { beginAtZero: false, title: { display: true, text: 'W' } },
@@ -309,8 +260,6 @@ async function renderChart() {
 
 onBeforeUnmount(() => {
   if (chart) { chart.destroy(); chart = null }
-  tooltipEl?.remove()
-  tooltipEl = null
 })
 </script>
 
@@ -414,8 +363,28 @@ onBeforeUnmount(() => {
             <div class="text-muted small mb-2">
               <i class="fa-solid fa-chart-line me-1"></i>{{ t('performance.ftp.history_title') }}
             </div>
-            <div class="ftp-chart-wrap">
+            <div class="ftp-chart-wrap" @mouseleave="hoverIndex = null">
               <canvas ref="chartCanvas"></canvas>
+            </div>
+
+            <!-- Détail du mois lu : sous le graphe plutôt qu'en bulle par-dessus -->
+            <div v-if="detail" class="ftp-detail">
+              <div class="d-flex flex-wrap align-items-baseline gap-2 mb-1">
+                <span class="fw-semibold text-capitalize">{{ formatMonth(detail.date) }}</span>
+                <span>FTP : <b>{{ detail.watts }} W</b></span>
+                <span class="small text-muted">{{ methodLabel(detail.method) }}</span>
+                <span v-if="hoverIndex === null" class="small text-body-tertiary ms-auto">{{ t('performance.ftp.detail_hint') }}</span>
+              </div>
+              <div v-if="detailContributors.length" class="pt-2 border-top">
+                <div class="small text-muted mb-1">{{ t('performance.ftp.based_on') }}</div>
+                <a
+                  v-for="ct in detailContributors" :key="`${ct.source}-${ct.external_id}-${ct.duration}`"
+                  :href="activityHref(ct)" class="ftp-detail-act small"
+                >
+                  <b>{{ formatShortDuration(ct.duration) }}</b> : {{ ct.watts }} W
+                  <span class="text-body-tertiary">— {{ ct.name }}<template v-if="ct.started_at"> · {{ formatDay(ct.started_at) }}</template></span>
+                </a>
+              </div>
             </div>
           </template>
           <p v-else-if="!hasAnything" class="text-muted small mb-0 mt-2">{{ t('performance.ftp.no_power_hint') }}</p>
@@ -429,6 +398,23 @@ onBeforeUnmount(() => {
 .ftp-chart-wrap {
   position: relative;
   height: 220px;
+}
+.ftp-detail {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  background: var(--bs-tertiary-bg);
+}
+.ftp-detail-act {
+  display: block;
+  padding: 2px 0;
+  color: var(--bs-body-color);
+  text-decoration: none;
+}
+.ftp-detail-act:hover {
+  color: var(--bs-primary);
+  text-decoration: underline;
 }
 .ftp-how summary {
   cursor: pointer;

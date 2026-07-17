@@ -89,6 +89,12 @@ Rails.application.routes.draw do
   patch "/api/pois/:id", to: "pois#update", constraints: { id: /\d+/ }
   delete "/api/pois/:id", to: "pois#destroy", constraints: { id: /\d+/ }
 
+  # Itinéraires prévus sur un jour (planification de la semaine — JSON pour Vue)
+  get "/api/planned_rides", to: "planned_rides#index"
+  post "/api/planned_rides", to: "planned_rides#create"
+  patch "/api/planned_rides/:id", to: "planned_rides#update", constraints: { id: /\d+/ }
+  delete "/api/planned_rides/:id", to: "planned_rides#destroy", constraints: { id: /\d+/ }
+
   # Imported (FIT) activities (JSON consumed by Vue components)
   get "/api/imported_activities", to: "imported_activities#index"
   post "/api/imported_activities", to: "imported_activities#create"

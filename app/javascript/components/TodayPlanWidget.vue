@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
 import {
   useTrainingPlan, zoneColor, formZone, fmtDuration, fmtSigned, eventDateFmt,
-  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS, WEEK_PACE_COLOR,
+  athleteFromSummary,
+  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS, WEEK_PACE_COLOR, WEEK_SEGMENT_COLOR,
   type LoadSummary,
 } from '../composables/useTrainingPlan'
+import { usePlannedLoads } from '../composables/usePlannedRides'
 
 // Widget compact de la page d'accueil : reprend « sortie objectif » + « que faire
 // aujourd'hui » du panneau de performance (même composable, même localStorage) dans
@@ -24,11 +26,16 @@ const data = ref<LoadSummary | null>(null)
 // de chargement, mise à jour silencieuse).
 function onStravaRefreshed() { fetchData(true) }
 
+// Seuils athlète dérivés de la charge déjà chargée : ils servent à estimer le TSS
+// des itinéraires prévus, qui alimente le segment orange de la barre.
+const athlete = computed(() => athleteFromSummary(data.value))
+const { plannedLoads } = usePlannedLoads(athlete)
+
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
   openEventEditor, saveEvent, removeEvent, recommendation, weekPlan,
-} = useTrainingPlan(data)
+} = useTrainingPlan(data, plannedLoads)
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 // Le lien « voir l'analyse » descend directement sur la section Forme & fatigue
@@ -130,10 +137,15 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
           <div class="d-flex align-items-baseline gap-2 small">
             <span class="text-muted">{{ t('performance.load.week.title') }}</span>
             <span class="fw-semibold">{{ t('performance.load.week.progress', { done: weekPlan.done, target: weekPlan.target }) }}</span>
+            <span v-if="weekPlan.planned > 0" :style="{ color: WEEK_SEGMENT_COLOR.planned }">
+              {{ t('performance.load.week.planned', { tss: weekPlan.planned }) }}
+            </span>
             <span class="ms-auto" :style="{ color: WEEK_PACE_COLOR[weekPlan.pace] }">{{ t(`performance.load.week.pace_${weekPlan.pace}`) }}</span>
           </div>
-          <div class="progress week-progress mt-1" role="progressbar" :aria-valuenow="weekPlan.pct" aria-valuemin="0" aria-valuemax="100">
-            <div class="progress-bar" :style="{ width: `${weekPlan.pct}%`, backgroundColor: WEEK_PACE_COLOR[weekPlan.pace] }"></div>
+          <!-- Vert = fait, orange = prévu, gris = à placer (détail sur /performance). -->
+          <div class="progress week-progress mt-1" role="progressbar" :aria-valuenow="weekPlan.donePct" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar" :style="{ width: `${weekPlan.donePct}%`, backgroundColor: WEEK_SEGMENT_COLOR.done }"></div>
+            <div class="progress-bar progress-bar-striped" :style="{ width: `${weekPlan.plannedPct}%`, backgroundColor: WEEK_SEGMENT_COLOR.planned }"></div>
           </div>
         </div>
       </div>

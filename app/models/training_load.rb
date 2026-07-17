@@ -60,6 +60,11 @@ module TrainingLoad
   # seuils athlète) donc l'invalidation est immédiate ; le TTL ne sert qu'à borner
   # la taille du store pour les versions périmées.
   CACHE_TTL = 12.hours
+  # À incrémenter quand la FORME du payload change : sans ça, les entrées déjà en
+  # cache (12 h) resserviraient sans les nouveaux champs. v2 = ajout de `weight_kg`
+  # aux seuils (estimation du TSS d'un itinéraire, cf. routeLoad.ts) ;
+  # v3 = ajout de `typical_speed_samples`.
+  CACHE_VERSION = 'v3'
 
   # ── Payload complet consommé par le front ───────────────────────────────────
   # Mis en cache : recalcul lourd (union des 2 tables + EWMA quotidiennes). La clé
@@ -109,10 +114,16 @@ module TrainingLoad
       },
       thresholds: {
         ftp_current: ftp_at.call(Time.zone.today),
+        # Poids athlète : le front en a besoin pour estimer la puissance (donc le TSS)
+        # d'un itinéraire à partir de sa vitesse et de son D+.
+        weight_kg: FtpEstimator.weight_kg(user),
         lthr: lthr_info[:value],
         lthr_source: lthr_info[:source],
         lthr_auto: lthr_info[:auto],
         typical_speed_kmh: typical_cycling_speed(rows),
+        # Nombre de sorties derrière la médiane : le front en fait un indice de
+        # fiabilité avant de proposer cette vitesse.
+        typical_speed_samples: cycling_speeds(rows).length,
         longest_ride_min: longest_recent_ride_min(rows)
       }
     }
@@ -320,15 +331,23 @@ module TrainingLoad
     { value: value, auto: auto, source: (manual&.positive? ? 'manual' : (auto ? 'auto' : nil)) }
   end
 
-  # Vitesse « habituelle » à vélo (km/h) = médiane des vitesses moyennes des sorties
-  # vélo. Sert à traduire une durée recommandée en distance approximative. nil sans data.
-  def typical_cycling_speed(rows)
-    speeds = rows.filter_map do |r|
+  # Vitesses moyennes (m/s) des sorties vélo, telles qu'enregistrées. Attention :
+  # la catégorie « cycling » agrège route ET VTT (cf. PerformanceRecords::SPORT_MATCHERS),
+  # la médiane qui en découle mélange donc les deux pratiques.
+  def cycling_speeds(rows)
+    rows.filter_map do |r|
       next unless PerformanceRecords.sport_category(r['activity_type']) == 'cycling'
 
       v = numeric(r['average_speed'])
       v if v&.positive?
     end
+  end
+
+  # Vitesse « habituelle » à vélo (km/h) = médiane des vitesses moyennes des sorties
+  # vélo. Sert à traduire une durée recommandée en distance approximative, et à
+  # proposer une vitesse réaliste dans le créateur d'itinéraire. nil sans data.
+  def typical_cycling_speed(rows)
+    speeds = cycling_speeds(rows)
     return nil if speeds.empty?
 
     sorted = speeds.sort
@@ -396,7 +415,7 @@ module TrainingLoad
   def cache_key(user, scope)
     athlete = FtpEstimator.athlete(user)
     [
-      'training_load', scope, user.id,
+      'training_load', CACHE_VERSION, scope, user.id,
       UserActivities.data_version(user.id),
       Digest::MD5.hexdigest(athlete.to_json)
     ].join('/')

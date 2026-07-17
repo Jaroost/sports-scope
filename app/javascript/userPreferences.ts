@@ -208,7 +208,7 @@ export function persistDefaultMapStyle(styleId: MapStyleId, sport: Sport = curre
   const map = prefs.sports[sport].map
   if (map.default_style === styleId) return
   map.default_style = styleId
-  patchPreferences(prefs)
+  patchPreferencesQuietly(prefs)
 }
 
 // Style de carte de la navigation guidée : global, contrairement à celui du créateur.
@@ -217,7 +217,7 @@ export function persistNavigationStyle(styleId: MapStyleId): void {
   const prefs = userPreferences()
   if (prefs.navigation.default_style === styleId) return
   prefs.navigation.default_style = styleId
-  patchPreferences(prefs)
+  patchPreferencesQuietly(prefs)
 }
 
 // Reporte sur le profil le zoom, l'inclinaison et le relief 3D de la caméra réglés
@@ -230,7 +230,7 @@ export function persistNavCamera(zoom: number, pitch: number, terrain: boolean):
   prefs.navigation.zoom = zoom
   prefs.navigation.pitch = pitch
   prefs.navigation.terrain = terrain
-  patchPreferences(prefs)
+  patchPreferencesQuietly(prefs)
 }
 
 // Miroir des overlays actifs sur le profil, pour le sport courant (même contrat que
@@ -239,14 +239,34 @@ export function persistOverlays(overlays: string[], sport: Sport = currentSport(
   if (!isLoggedIn()) return
   const prefs = userPreferences()
   prefs.sports[sport].map.overlays = [...overlays]
-  patchPreferences(prefs)
+  patchPreferencesQuietly(prefs)
 }
 
-// PATCH best-effort de l'objet complet de préférences. Silencieux pour les visiteurs
-// déconnectés (garde en amont) et tolérant aux erreurs réseau — ce n'est qu'un miroir
-// de réglages de vue.
-function patchPreferences(prefs: UserPreferences): void {
-  void fetch('/api/profile/preferences', {
+// Vitesse moyenne d'un sport, enregistrée sur le profil depuis la page des
+// itinéraires (elle pilote le temps de parcours estimé ET le TSS estimé, cf.
+// routeLoad.ts). Contrairement aux miroirs de réglages de vue ci-dessus, c'est ici
+// une saisie explicite de l'utilisateur : on renvoie la promesse pour que
+// l'appelant puisse signaler l'échec plutôt que de le perdre en silence.
+export function persistSportSpeed(sport: Sport, speed: number): Promise<void> {
+  if (!isLoggedIn()) return Promise.resolve()
+  const prefs = userPreferences()
+  const previous = prefs.sports[sport].speed
+  if (previous === speed) return Promise.resolve()
+
+  // Le cache doit porter la nouvelle valeur pour être envoyé — mais un échec doit
+  // la remettre comme avant, sinon la garde ci-dessus prendrait une nouvelle
+  // tentative pour un no-op et la vitesse ne serait jamais enregistrée.
+  prefs.sports[sport].speed = speed
+  return patchPreferences(prefs).catch((e) => {
+    prefs.sports[sport].speed = previous
+    throw e
+  })
+}
+
+// PATCH de l'objet complet de préférences — l'endpoint attend tout l'objet et
+// assainit le reste. Rejette sur échec : à l'appelant de décider quoi en faire.
+function patchPreferences(prefs: UserPreferences): Promise<void> {
+  return fetch('/api/profile/preferences', {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -255,7 +275,16 @@ function patchPreferences(prefs: UserPreferences): void {
     },
     credentials: 'same-origin',
     body: JSON.stringify({ preferences: prefs }),
-  }).catch(() => { /* ignore — miroir best-effort */ })
+  }).then((res) => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  })
+}
+
+// Variante des miroirs de réglages de vue : silencieuse pour les visiteurs
+// déconnectés (garde en amont) et tolérante aux erreurs réseau — perdre le miroir
+// d'un fond de carte ne mérite pas d'embêter l'utilisateur.
+function patchPreferencesQuietly(prefs: UserPreferences): void {
+  void patchPreferences(prefs).catch(() => { /* ignore — miroir best-effort */ })
 }
 
 function parse(): UserPreferences {

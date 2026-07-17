@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_16_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_17_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -102,6 +102,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_000002) do
     t.index ["user_id", "last_opened_at"], name: "index_opened_routes_on_user_id_and_last_opened_at"
     t.index ["user_id", "route_id"], name: "index_opened_routes_on_user_id_and_route_id", unique: true
     t.index ["user_id"], name: "index_opened_routes_on_user_id"
+  end
+
+  create_table "planned_rides", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.date "planned_on", null: false
+    t.bigint "route_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["route_id"], name: "index_planned_rides_on_route_id"
+    t.index ["user_id", "planned_on"], name: "index_planned_rides_on_user_id_and_planned_on"
+    t.index ["user_id", "route_id", "planned_on"], name: "index_planned_rides_on_user_id_and_route_id_and_planned_on", unique: true
+    t.index ["user_id"], name: "index_planned_rides_on_user_id"
   end
 
   create_table "pois", force: :cascade do |t|
@@ -224,6 +236,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_16_000002) do
   add_foreign_key "imported_activities", "users"
   add_foreign_key "opened_routes", "routes"
   add_foreign_key "opened_routes", "users"
+  add_foreign_key "planned_rides", "routes"
+  add_foreign_key "planned_rides", "users"
   add_foreign_key "pois", "users"
   add_foreign_key "routes", "users"
   add_foreign_key "strava_activities", "users"

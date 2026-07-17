@@ -8,6 +8,7 @@ import { usePointerSort } from '../composables/usePointerSort'
 import { profilesForSport } from '../brouter'
 import { SPORTS } from '../userPreferences'
 import type { Sport, UserPreferences } from '../userPreferences'
+import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -73,6 +74,25 @@ const editedSport = ref<Sport>(prefs.display.default_sport)
 
 // Bloc de réglages du sport en cours d'édition.
 const sport = computed(() => prefs.sports[editedSport.value])
+
+// ── Vitesse réellement tenue, proposée en un clic ───────────────────────────
+// Médiane des vitesses moyennes de tes sorties, applicable au champ « vitesse
+// moyenne » du sport édité — le nombre de sorties derrière la médiane est indiqué
+// dans l'infobulle, car une médiane sur 2 sorties ne vaut pas une médiane sur 50.
+// Comme le reste du formulaire, ça n'écrit rien tant qu'on n'enregistre pas.
+const { athlete } = useAthleteState()
+
+// SPEED_STEP doit rester le `step` du champ (cf. template) : la suggestion y est
+// alignée pour que le champ reste valide et n'empêche pas l'envoi du formulaire.
+const SPEED_STEP = 0.5
+
+const speedSuggestion = computed(() =>
+  speedSuggestionFor(athlete.value, editedSport.value, sport.value.speed, SPEED_STEP),
+)
+
+function applySpeedSuggestion() {
+  if (speedSuggestion.value) sport.value.speed = speedSuggestion.value.speed
+}
 
 // Sections dont le contenu dépend du sport : le sélecteur n'apparaît que si l'une d'elles
 // est affichée (ProfileDialog peut n'en ouvrir qu'un sous-ensemble).
@@ -929,8 +949,20 @@ function placePreviewMarker(coords: [number, number]) {
           <div class="col-sm-6">
             <label for="sport-speed" class="form-label mb-1">{{ t('profile.sport.speed') }}</label>
             <div class="input-group">
-              <input id="sport-speed" v-model.number="sport.speed" type="number" class="form-control" min="3" max="80" step="0.5">
+              <input id="sport-speed" v-model.number="sport.speed" type="number" class="form-control" min="3" max="80" :step="SPEED_STEP">
               <span class="input-group-text">km/h</span>
+              <!-- Ta vitesse réelle, en un clic. Prise en compte à l'enregistrement,
+                   comme le reste du formulaire. -->
+              <button
+                v-if="speedSuggestion"
+                type="button"
+                class="btn btn-outline-primary"
+                :title="t('routes.speed_suggestion_hint', { speed: speedSuggestion.speed, count: speedSuggestion.samples })"
+                @click="applySpeedSuggestion"
+              >
+                <i class="fa-solid fa-wand-magic-sparkles me-1" aria-hidden="true"></i>
+                {{ t('routes.speed_suggestion', { speed: speedSuggestion.speed }) }}
+              </button>
             </div>
             <p class="text-muted small mb-0 mt-1">{{ t('profile.sport.speed_help') }}</p>
           </div>
@@ -1037,10 +1069,15 @@ function placePreviewMarker(coords: [number, number]) {
 
 /* Le formulaire est long et plusieurs sections dépendent du sport sélectionné : le
    sélecteur reste visible pendant qu'on fait défiler, sans quoi on édite les réglages
-   d'un sport sans plus voir lequel. */
+   d'un sport sans plus voir lequel.
+
+   Le point de collage dépend du conteneur de défilement, et ce composant sert dans
+   les deux cas : sur /profile c'est la fenêtre, sous la navbar fixe (3.5rem, comme
+   les en-têtes de liste) ; dans ProfileDialog c'est le .modal-body, qui pose sa
+   propre origine à 0 via --sport-picker-top. */
 .sport-picker {
   position: sticky;
-  top: 0;
+  top: var(--sport-picker-top, 3.5rem);
   z-index: 3;
 }
 

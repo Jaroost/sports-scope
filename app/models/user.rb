@@ -229,6 +229,8 @@ class User < ApplicationRecord
   # Itinéraires d'autrui ouverts via un lien partagé (cf. OpenedRoute).
   has_many :opened_routes, dependent: :destroy
   has_many :pois, dependent: :destroy
+  # Itinéraires accrochés à un jour (planification de la semaine, cf. PlannedRide).
+  has_many :planned_rides, dependent: :destroy
   has_many :imported_activities, dependent: :destroy
   has_many :strava_activities, dependent: :destroy
   has_many :strava_backfill_runs, dependent: :destroy

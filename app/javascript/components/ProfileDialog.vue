@@ -95,7 +95,10 @@ onBeforeUnmount(() => {
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" :aria-label="t('strava.close')"></button>
         </div>
-        <div class="modal-body">
+        <!-- Ici le conteneur de défilement est le .modal-body lui-même, pas la fenêtre :
+             le sélecteur de sport de UserProfile se colle à son bord haut, sans l'offset
+             de navbar qu'il applique sur la page /profile. -->
+        <div class="modal-body" style="--sport-picker-top: 0">
           <!-- Compte Strava — mêmes actions que la page /profile (navigation pleine page). -->
           <section v-if="showSection('strava')" class="card mb-3 shadow-sm">
             <div class="card-header d-flex align-items-center gap-2">

@@ -3,10 +3,13 @@ import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import {
   useTrainingPlan, zoneColor, formZone, acwrColor, fmtDuration, fmtSigned, eventDateFmt,
-  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS, WEEK_PACE_COLOR,
+  athleteFromSummary,
+  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS, WEEK_PACE_COLOR, WEEK_SEGMENT_COLOR,
   type Point, type LoadSummary, type DayActivity,
 } from '../composables/useTrainingPlan'
+import { usePlannedLoads } from '../composables/usePlannedRides'
 import ZoneDistribution from './ZoneDistribution.vue'
+import WeekPlanner from './WeekPlanner.vue'
 
 const props = defineProps({
   admin: { type: Boolean, default: false },
@@ -121,11 +124,16 @@ const tsbZonesPlugin: any = {
 }
 
 // ── Plan d'entraînement (objectif + reco du jour), partagé avec le widget d'accueil ─
+// Les seuils athlète sont dérivés de la charge déjà chargée (pas de seconde requête),
+// et servent à estimer le TSS des itinéraires prévus → segment orange de la barre.
+const athlete = computed(() => athleteFromSummary(data.value))
+const { plannedLoads } = usePlannedLoads(athlete)
+
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
   openEventEditor, saveEvent, removeEvent, recommendation, weekPlan,
-} = useTrainingPlan(data)
+} = useTrainingPlan(data, plannedLoads)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
 
 // ── Série affichée selon la fenêtre choisie ──────────────────────────────────
@@ -580,19 +588,30 @@ onBeforeUnmount(() => {
               </span>
             </div>
 
-            <div class="progress week-progress" role="progressbar" :aria-valuenow="weekPlan.pct" aria-valuemin="0" aria-valuemax="100">
-              <div class="progress-bar" :style="{ width: `${weekPlan.pct}%`, backgroundColor: WEEK_PACE_COLOR[weekPlan.pace] }"></div>
+            <!-- Vert = fait, orange = prévu (itinéraires planifiés), gris = à placer. -->
+            <div class="progress week-progress" role="progressbar" :aria-valuenow="weekPlan.donePct" aria-valuemin="0" aria-valuemax="100">
+              <div class="progress-bar" :style="{ width: `${weekPlan.donePct}%`, backgroundColor: WEEK_SEGMENT_COLOR.done }"></div>
+              <div class="progress-bar progress-bar-striped" :style="{ width: `${weekPlan.plannedPct}%`, backgroundColor: WEEK_SEGMENT_COLOR.planned }"></div>
             </div>
 
             <div class="d-flex flex-wrap gap-2 justify-content-between small mt-2">
-              <span class="fw-semibold">{{ t('performance.load.week.progress', { done: weekPlan.done, target: weekPlan.target }) }}</span>
+              <span class="fw-semibold">
+                <i class="fa-solid fa-square me-1" :style="{ color: WEEK_SEGMENT_COLOR.done }" aria-hidden="true"></i>
+                {{ t('performance.load.week.progress', { done: weekPlan.done, target: weekPlan.target }) }}
+                <span v-if="weekPlan.planned > 0" class="fw-normal ms-2">
+                  <i class="fa-solid fa-square me-1" :style="{ color: WEEK_SEGMENT_COLOR.planned }" aria-hidden="true"></i>
+                  {{ t('performance.load.week.planned', { tss: weekPlan.planned }) }}
+                </span>
+              </span>
               <span v-if="weekPlan.remaining > 0" class="text-muted">
-                {{ t('performance.load.week.remaining', { tss: weekPlan.remaining, days: weekPlan.daysLeft, duration: fmtDuration(weekPlan.minutesLeft) }) }}
+                {{ t('performance.load.week.remaining_to_plan', { tss: weekPlan.remaining, days: weekPlan.daysLeft, duration: fmtDuration(weekPlan.minutesLeft) }) }}
               </span>
               <span v-else class="text-success">
                 <i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>{{ t('performance.load.week.done_label') }}
               </span>
             </div>
+
+            <WeekPlanner :athlete="athlete" class="mt-3" />
 
             <div class="small text-body-tertiary mt-2">
               <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>{{ t(weekPlan.ramp === null ? 'performance.load.week.explain_event' : 'performance.load.week.explain') }}

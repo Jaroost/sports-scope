@@ -1,4 +1,5 @@
 import { ref, computed, watch, type Ref } from 'vue'
+import type { AthleteState } from '../routeLoad'
 
 // ─── Plan d'entraînement : « sortie objectif » + « que faire aujourd'hui » ─────
 // Logique partagée entre le panneau complet de la page performance
@@ -16,7 +17,7 @@ export interface DayActivity { source: string; external_id: string; name: string
 export interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; acwr: number | null; activities?: DayActivity[] }
 export interface Current extends Point { form_zone: string; acwr_zone: string | null }
 export interface Coverage { power: number; hr: number; estimated: number; total: number }
-export interface Thresholds { ftp_current?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; typical_speed_kmh?: number | null; longest_ride_min?: number | null }
+export interface Thresholds { ftp_current?: number | null; weight_kg?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; typical_speed_kmh?: number | null; longest_ride_min?: number | null }
 // Répartition du temps par zone d'intensité (cf. ZoneDistribution côté serveur).
 export interface ZoneBucket { zone: string; seconds: number; pct: number }
 export interface ZoneChannel { total_seconds: number; zones: ZoneBucket[] }
@@ -27,6 +28,19 @@ export interface LoadSummary {
   zones: ZoneSummary | null
   coverage: Coverage
   thresholds: Thresholds
+}
+
+// Seuils + forme du jour extraits d'une charge DÉJÀ chargée, de quoi estimer le TSS
+// d'un itinéraire (cf. routeLoad.ts). Même forme que `useAthleteState`, mais sans
+// requête : les composants qui ont déjà le payload complet n'ont pas à le redemander.
+export function athleteFromSummary(data: LoadSummary | null): AthleteState | null {
+  if (!data) return null
+  return {
+    ftp: data.thresholds?.ftp_current ?? null,
+    weightKg: data.thresholds?.weight_kg ?? null,
+    ctl: data.current?.ctl ?? null,
+    atl: data.current?.atl ?? null,
+  }
 }
 
 // ── Zones de fraîcheur (TSB) ─────────────────────────────────────────────────
@@ -111,6 +125,10 @@ export type Reco = { action: string; tss: number; minutes: number; effort: strin
 const K_CTL = 1 - Math.exp(-1 / 42)
 const GOAL_RAMP: Record<Goal, number> = { improve_fast: 5, improve_slow: 3, maintain: 0, peak: -5 }
 
+// Segments de la barre de la semaine. Le vert du fait et l'orange du prévu reprennent
+// la sémantique déjà en place dans ce fichier (cf. WEEK_PACE_COLOR, FEAS_COLOR).
+export const WEEK_SEGMENT_COLOR = { done: '#198754', planned: '#fd7e14' } as const
+
 export type WeekPace = 'ahead' | 'on_track' | 'behind'
 // « En avance » n'est pas un compliment : dépasser sa cible, c'est encaisser plus de
 // charge que prévu — d'où l'orange, comme la fatigue.
@@ -120,8 +138,10 @@ export const WEEK_PACE_COLOR: Record<WeekPace, string> = {
 export type WeekPlan = {
   target: number
   done: number
-  remaining: number
-  pct: number
+  planned: number // TSS des itinéraires prévus sur les jours à venir
+  remaining: number // ce qu'il reste à PLACER : target − done − planned
+  donePct: number
+  plannedPct: number
   daysLeft: number
   minutesLeft: number
   ramp: number | null // null pendant une prépa datée : c'est l'affûtage qui pilote
@@ -129,14 +149,14 @@ export type WeekPlan = {
 }
 
 // Lundi (local) de la semaine contenant `d`. `Date#getDay()` renvoie 0 le dimanche.
-function mondayOf(d: Date): Date {
+export function mondayOf(d: Date): Date {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
   x.setDate(x.getDate() - ((x.getDay() + 6) % 7))
   return x
 }
 
 // Date locale en ISO. `toISOString()` passerait par UTC et décalerait le jour.
-function isoLocal(d: Date): string {
+export function isoLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
@@ -158,7 +178,11 @@ export function eventDateFmt(iso: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: '2-digit', month: 'long', year: 'numeric' })
 }
 
-export function useTrainingPlan(data: Ref<LoadSummary | null>) {
+// `plannedLoads` : TSS prévu par jour (ISO → TSS), cf. usePlannedRides. Optionnel —
+// sans lui la barre garde ses deux états (fait / restant), comme avant. Ce
+// composable ne fait toujours AUCUN fetch : c'est l'appelant qui compose les
+// sources (charge, plans, seuils athlète).
+export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Ref<Map<string, number>>) {
   const current = computed<Current | null>(() => data.value?.current ?? null)
 
   // ── Objectif générique (persisté) ──────────────────────────────────────────
@@ -354,7 +378,30 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>) {
     const done = Math.round(
       series.filter((p) => p.date >= mondayISO && p.date <= todayLocalISO).reduce((sum, p) => sum + p.tss, 0)
     )
-    const remaining = Math.max(0, target - done)
+
+    // Charge prévue restant à encaisser. On ne compte QUE les jours à venir : un
+    // plan d'un jour passé n'a pas été tenu, il ne promet plus rien.
+    // Aujourd'hui est le cas limite — le TSS réel du jour est déjà dans `done`, donc
+    // on ne prend que ce que le plan ajoute PAR-DESSUS, sinon la sortie déjà faite
+    // serait comptée deux fois (une fois en vert, une fois en orange).
+    let planned = 0
+    if (plannedLoads?.value.size) {
+      const realToday = series.find((p) => p.date === todayLocalISO)?.tss ?? 0
+      for (let i = 0; i < 7; i++) {
+        const day = new Date(monday)
+        day.setDate(day.getDate() + i)
+        const iso = isoLocal(day)
+        const tss = plannedLoads.value.get(iso) ?? 0
+        if (!tss) continue
+        if (iso > todayLocalISO) planned += tss
+        else if (iso === todayLocalISO) planned += Math.max(0, tss - realToday)
+      }
+    }
+    planned = Math.round(planned)
+
+    // Ce qu'il reste à PLACER une fois le prévu déduit — la question que se pose
+    // l'utilisateur en composant sa semaine.
+    const remaining = Math.max(0, target - done - planned)
     // Équivalent en durée du reste, à intensité endurance (même conversion que la reco).
     const minutesLeft = remaining > 0 ? Math.round(remaining / (0.65 * 0.65 * 100) * 60) : 0
 
@@ -367,11 +414,19 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>) {
       else if (done > expected * 1.25) pace = 'ahead'
     }
 
+    // Largeurs des segments. Le vert est servi en premier (le fait prime), puis
+    // l'orange prend ce qui reste de la barre : dépasser la cible ne doit pas faire
+    // déborder le total au-delà de 100 %.
+    const donePct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0
+    const plannedPct = target > 0 ? Math.min(100 - donePct, Math.round((planned / target) * 100)) : 0
+
     return {
       target,
       done,
+      planned,
       remaining,
-      pct: target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0,
+      donePct,
+      plannedPct,
       daysLeft,
       minutesLeft,
       ramp: onEvent ? null : GOAL_RAMP[goal.value],

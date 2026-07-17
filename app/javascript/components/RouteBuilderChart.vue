@@ -9,8 +9,28 @@ import {
   computeSegmentGrades, formatDuration,
 } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
+import { useAthleteState } from '../composables/useAthleteState'
+import { estimateRouteLoad } from '../routeLoad'
+import { FEAS_COLOR } from '../composables/useTrainingPlan'
 
 const props = defineProps<{ simplified?: boolean }>()
+
+// TSS estimé de l'itinéraire ENTIER (comme le temps estimé voisin, et non la
+// sélection) : la barre mobile remplace le panneau latéral. Null = non estimable
+// (visiteur non connecté, compte sans activité) → pastille masquée.
+const { athlete } = useAthleteState()
+const routeLoad = computed(() => {
+  if (!athlete.value) return null
+  return estimateRouteLoad(
+    {
+      distanceM: routeStore.distanceM.value,
+      elevGainM: routeStore.elevGainM.value,
+      speedKmh: routeStore.avgSpeedKmh.value,
+      sport: routeStore.sport.value,
+    },
+    athlete.value,
+  )
+})
 
 // Catégories d'activité — enregistrées avec l'itinéraire, pilotent la vitesse
 // moyenne. Réexposées ici car la barre de stats mobile remplace le panneau latéral.
@@ -809,6 +829,17 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
             <small>km/h</small>
           </span>
         </span>
+        <span
+          v-if="routeLoad"
+          class="stat-pill stat-pill-tss"
+          :title="t('routes.tss.hint_short')"
+        >
+          <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+          <strong>{{ t('routes.tss.label') }} ≈ {{ routeLoad.tss }}</strong>
+          <small v-if="routeLoad.level" :style="{ color: FEAS_COLOR[routeLoad.level] }">
+            {{ t(`routes.tss.level_${routeLoad.level}`) }}
+          </small>
+        </span>
       </div>
       <div class="card-body route-builder-chart-card-body">
         <div v-if="routeStore.isFetchingElevation.value" class="mobile-chart-loading">
@@ -970,6 +1001,8 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
 .stat-pill-up       { background: rgba(25, 135, 84, 0.12); color: #15803d; }
 .stat-pill-down     { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
 .stat-pill-grade    { background: rgba(108, 117, 125, 0.12); color: #495057; }
+.stat-pill-tss      { background: rgba(111, 66, 193, 0.12); color: #6f42c1; gap: 0.4rem; }
+.stat-pill-tss small { font-weight: 600; font-size: 0.72rem; }
 .grade-icon {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 700;

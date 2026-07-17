@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { t } from '../i18n'
-import { speedForSport } from '../userPreferences'
+import { speedForSport, persistSportSpeed, isLoggedIn, SPORTS } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { buildNewRouteUrl } from '../routeHelpers'
+import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
+import { usePlannedRides } from '../composables/usePlannedRides'
+import { estimateRouteLoad } from '../routeLoad'
+import { FEAS_COLOR, mondayOf, isoLocal } from '../composables/useTrainingPlan'
 import { parseGpxWaypoints, GpxImportError } from '../gpxImport'
 import { useStickyListHeader } from '../composables/useStickyListHeader'
 import NewRouteModal from './NewRouteModal.vue'
@@ -99,18 +103,8 @@ function clearFilters() {
 }
 
 // --- Raccourcis de période (semaine/mois/année courante ou précédente) ---
-function pad2(n) {
-  return String(n).padStart(2, '0')
-}
-function isoDate(d: Date) {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
-}
-// Lundi (00:00 locale) de la semaine contenant `d` — semaines ISO lundi→dimanche.
-function mondayOf(d: Date) {
-  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  date.setDate(date.getDate() - ((date.getDay() + 6) % 7))
-  return date
-}
+// `mondayOf` / `isoLocal` viennent de useTrainingPlan : mêmes semaines ISO
+// lundi→dimanche et même date locale que la barre de charge, une seule définition.
 function addDays(d: Date, n: number) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
 }
@@ -136,8 +130,8 @@ const datePresets = ['current_week', 'previous_week', 'current_month', 'previous
 function setDatePreset(preset: string) {
   const range = datePresetRange(preset)
   if (!range) return
-  dateFrom.value = isoDate(range[0])
-  dateTo.value = isoDate(range[1])
+  dateFrom.value = isoLocal(range[0])
+  dateTo.value = isoLocal(range[1])
 }
 
 // Raccourci actuellement actif (pour surligner le bouton), ou null.
@@ -145,7 +139,7 @@ const activeDatePreset = computed(() => {
   if (!dateFrom.value || !dateTo.value) return null
   return datePresets.find((preset) => {
     const range = datePresetRange(preset)
-    return range && isoDate(range[0]) === dateFrom.value && isoDate(range[1]) === dateTo.value
+    return range && isoLocal(range[0]) === dateFrom.value && isoLocal(range[1]) === dateTo.value
   }) || null
 })
 
@@ -599,13 +593,115 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString()
 }
 
+// ─── Vitesses moyennes du profil ─────────────────────────────────────────────
+// Elles pilotent le temps de parcours ET le TSS estimés de chaque itinéraire de la
+// liste : on les règle donc ici, là où on lit les chiffres, plutôt qu'en imposant
+// un aller-retour par la page profil. Copie réactive locale car `speedForSport`
+// lit un cache non réactif : sans elle, les estimations ne se recalculeraient pas.
+const speeds = reactive(
+  Object.fromEntries(SPORTS.map((s) => [s, speedForSport(s)])) as Record<Sport, number>,
+)
+const canEditSpeeds = isLoggedIn()
+const speedError = ref(false)
+
+// Enregistrement sur le profil, après une pause dans la saisie (le champ change à
+// chaque frappe). Une valeur hors bornes n'est pas envoyée : le serveur la
+// clamperait et l'affichage mentirait jusqu'au prochain chargement.
+let speedTimer
+function onSpeedInput(sport) {
+  const v = speeds[sport]
+  clearTimeout(speedTimer)
+  if (!Number.isFinite(v) || v < 3 || v > 80) return
+  speedTimer = setTimeout(() => {
+    persistSportSpeed(sport, v)
+      .then(() => { speedError.value = false })
+      .catch(() => { speedError.value = true })
+  }, 600)
+}
+
+// Vitesse réellement tenue (médiane des sorties vélo), applicable en un clic.
+// SPEED_STEP doit rester le `step` du champ (cf. template) : la suggestion y est
+// alignée, sinon le navigateur refuse la valeur.
+const SPEED_STEP = 0.5
+
+function speedSuggestion(sport) {
+  return speedSuggestionFor(athlete.value, sport, speeds[sport], SPEED_STEP)
+}
+
+function applySpeedSuggestion(sport) {
+  const suggestion = speedSuggestion(sport)
+  if (!suggestion) return
+  speeds[sport] = suggestion.speed
+  onSpeedInput(sport)
+}
+
 // Estimated ride time: distance / speed. Mirrors the builder — the chosen
 // avg speed already accounts for terrain, so no climb penalty is added.
 function estimatedSecondsFor(r) {
   const d = r?.distance_m
-  const v = speedForSport(activityOf(r))
+  const v = speeds[activityOf(r)]
   if (!d || !Number.isFinite(v) || v <= 0) return 0
   return Math.round(((d / 1000) / v) * 3600)
+}
+
+// TSS estimé : même modèle que le créateur (routeLoad.ts), avec la vitesse du
+// profil pour le sport de l'itinéraire. null tant que la charge n'est pas chargée
+// ou si l'estimation est impossible (compte sans activité) → pastille masquée.
+const { athlete } = useAthleteState()
+
+// Indexé par itinéraire : recalculé quand la page change ou quand la charge
+// arrive, pas à chaque rendu de ligne.
+const routeLoads = computed(() => {
+  const out = new Map()
+  if (!athlete.value) return out
+  for (const r of routes.value) {
+    const sport = activityOf(r)
+    const load = estimateRouteLoad(
+      {
+        distanceM: r?.distance_m ?? 0,
+        elevGainM: r?.elevation_gain_m ?? 0,
+        speedKmh: speeds[sport],
+        sport,
+      },
+      athlete.value,
+    )
+    if (load) out.set(r.id, load)
+  }
+  return out
+})
+
+// ─── Planification sur la semaine ────────────────────────────────────────────
+// Accrocher un itinéraire à un jour depuis la liste : c'est ici qu'on lit son coût,
+// donc ici qu'on décide de le caser. La barre de la page performance s'en nourrit.
+const { plannedRides, addPlan, removePlan } = usePlannedRides()
+const canPlan = isLoggedIn()
+
+// Jours restants de la semaine en cours, aujourd'hui inclus. Le passé n'est plus
+// planifiable : sa charge est déjà écrite.
+const planDays = computed(() => {
+  const today = new Date()
+  const sunday = mondayOf(today)
+  sunday.setDate(sunday.getDate() + 6)
+  const out = []
+  for (const d = new Date(today.getFullYear(), today.getMonth(), today.getDate()); d <= sunday; d.setDate(d.getDate() + 1)) {
+    out.push({ iso: isoLocal(d), label: d.toLocaleDateString(undefined, { weekday: 'long' }) })
+  }
+  return out
+})
+
+function plannedEntry(routeId, iso) {
+  return plannedRides.value.find((p) => p.route.id === routeId && p.planned_on === iso)
+}
+
+function isPlanned(routeId, iso) {
+  return !!plannedEntry(routeId, iso)
+}
+
+// Bascule : un second clic sur un jour déjà coché retire le plan — sans ça, il
+// faudrait aller sur la page performance pour corriger une erreur de clic.
+function togglePlan(routeId, iso) {
+  const existing = plannedEntry(routeId, iso)
+  return existing ? removePlan(existing.id) : addPlan(routeId, iso)
 }
 
 function formatDuration(totalSec) {
@@ -773,6 +869,47 @@ onMounted(() => {
                 </button>
               </div>
             </div>
+            <!-- Réglage du profil, pas un filtre : les vitesses pilotent le temps et le
+                 TSS estimés affichés dans la liste, d'où leur présence ici. -->
+            <div v-if="canEditSpeeds" class="col-12 border-top pt-3">
+              <label class="form-label small mb-1">{{ t('routes.speeds.title') }}</label>
+              <p class="text-muted small mb-2">{{ t('routes.speeds.help') }}</p>
+              <div class="d-flex flex-wrap gap-3">
+                <div v-for="s in SPORTS" :key="s" class="d-flex align-items-center gap-2">
+                  <label :for="`speed-${s}`" class="small text-nowrap mb-0 d-flex align-items-center gap-1">
+                    <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+                    {{ t(`routes.wt_sport_${s}`) }}
+                  </label>
+                  <div class="input-group input-group-sm speed-input-group">
+                    <input
+                      :id="`speed-${s}`"
+                      v-model.number="speeds[s]"
+                      type="number"
+                      min="3"
+                      max="80"
+                      :step="SPEED_STEP"
+                      class="form-control"
+                      @input="onSpeedInput(s)"
+                    />
+                    <span class="input-group-text">km/h</span>
+                  </div>
+                  <button
+                    v-if="speedSuggestion(s)"
+                    type="button"
+                    class="btn btn-sm btn-outline-primary py-0 px-2 text-nowrap"
+                    :title="t('routes.speed_suggestion_hint', { speed: speedSuggestion(s).speed, count: speedSuggestion(s).samples })"
+                    @click="applySpeedSuggestion(s)"
+                  >
+                    <i class="fa-solid fa-wand-magic-sparkles me-1" aria-hidden="true"></i>
+                    {{ t('routes.speed_suggestion', { speed: speedSuggestion(s).speed }) }}
+                  </button>
+                </div>
+              </div>
+              <p v-if="speedError" class="text-danger small mb-0 mt-2">
+                <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+                {{ t('routes.speeds.save_error') }}
+              </p>
+            </div>
           </div>
           <div class="d-flex justify-content-between align-items-center mt-3">
             <small class="text-muted d-flex align-items-center gap-2">
@@ -918,6 +1055,20 @@ onMounted(() => {
                     >
                       <i class="fa-regular fa-clock" aria-hidden="true"></i>{{ formatDuration(estimatedSecondsFor(r)) }}
                     </span>
+                    <span
+                      v-if="routeLoads.get(r.id)"
+                      class="d-inline-flex align-items-center gap-1"
+                      :title="t('routes.tss.hint_short')"
+                    >
+                      <i class="fa-solid fa-bolt" style="color: #6f42c1" aria-hidden="true"></i>
+                      <span>{{ t('routes.tss.label') }} ≈ {{ routeLoads.get(r.id).tss }}</span>
+                      <span
+                        v-if="routeLoads.get(r.id).level"
+                        class="fw-semibold"
+                        :style="{ color: FEAS_COLOR[routeLoads.get(r.id).level] }"
+                        :title="t(`routes.tss.level_${routeLoads.get(r.id).level}_hint`)"
+                      >{{ t(`routes.tss.level_${routeLoads.get(r.id).level}`) }}</span>
+                    </span>
                     <span class="d-inline-flex align-items-center gap-1">
                       <i class="fa-regular fa-calendar" aria-hidden="true"></i>{{ formatDate(r.updated_at) }}
                     </span>
@@ -933,6 +1084,39 @@ onMounted(() => {
                 >
                   <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
                 </a>
+
+                <!-- Planifier : le flux décrit par l'utilisateur — créer un itinéraire,
+                     lire son TSS, l'accrocher à un jour. Seuls les jours restants de la
+                     semaine sont proposés ; le passé n'est plus planifiable. -->
+                <div v-if="canPlan" class="dropdown">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    data-bs-toggle="dropdown"
+                    data-bs-auto-close="true"
+                    aria-expanded="false"
+                    :title="t('routes.plan.add_to_week')"
+                    :aria-label="t('routes.plan.add_to_week')"
+                  >
+                    <i class="fa-regular fa-calendar-plus" aria-hidden="true"></i>
+                  </button>
+                  <ul class="dropdown-menu dropdown-menu-end">
+                    <li><h6 class="dropdown-header">{{ t('routes.plan.pick_day') }}</h6></li>
+                    <li v-for="d in planDays" :key="d.iso">
+                      <button
+                        type="button"
+                        class="dropdown-item d-flex align-items-center gap-2"
+                        @click="togglePlan(r.id, d.iso)"
+                      >
+                        <i
+                          :class="isPlanned(r.id, d.iso) ? 'fa-solid fa-check text-success' : 'fa-regular fa-calendar'"
+                          aria-hidden="true"
+                        ></i>
+                        <span class="text-capitalize">{{ d.label }}</span>
+                      </button>
+                    </li>
+                  </ul>
+                </div>
 
                 <div class="dropdown">
                   <button

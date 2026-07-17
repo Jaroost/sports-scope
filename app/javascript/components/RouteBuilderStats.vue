@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { t } from '../i18n'
 import { routeStore } from '../stores/routeStore'
 import { placesStore } from '../stores/placesStore'
@@ -9,6 +9,9 @@ import type { Place } from '../stores/placesStore'
 import { categoryForType } from '../poiCategories'
 import type { Sport } from '../userPreferences'
 import { profilesForSport } from '../brouter'
+import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
+import { estimateRouteLoad } from '../routeLoad'
+import { formZone, zoneColor, FEAS_COLOR } from '../composables/useTrainingPlan'
 
 // Catégories d'activité — pilotent la vitesse moyenne (via le profil) et sont
 // enregistrées avec l'itinéraire.
@@ -33,6 +36,39 @@ const emit = defineEmits<{
 }>()
 
 const climbsExpanded = ref(true)
+
+// ── TSS estimé ───────────────────────────────────────────────────────────────
+// Recalculé à chaque changement de tracé, de sport ou de vitesse saisie. `athlete`
+// est null tant que la charge n'est pas chargée, et le reste pour un visiteur non
+// connecté (lien de partage) ou un compte sans activité → pastille masquée.
+const { athlete } = useAthleteState()
+const tssExpanded = ref(false)
+
+// Vitesse réellement tenue sur tes sorties (médiane), proposée en un clic quand elle
+// s'écarte de celle du profil. SPEED_STEP doit rester le `step` du champ (cf.
+// template) : la suggestion y est alignée, sinon le navigateur refuse la valeur.
+const SPEED_STEP = 1
+
+const speedSuggestion = computed(() =>
+  speedSuggestionFor(athlete.value, routeStore.sport.value, routeStore.avgSpeedKmh.value, SPEED_STEP),
+)
+
+function applySpeedSuggestion() {
+  if (speedSuggestion.value) routeStore.avgSpeedKmh.value = speedSuggestion.value.speed
+}
+
+const routeLoad = computed(() => {
+  if (!athlete.value) return null
+  return estimateRouteLoad(
+    {
+      distanceM: routeStore.distanceM.value,
+      elevGainM: routeStore.elevGainM.value,
+      speedKmh: routeStore.avgSpeedKmh.value,
+      sport: routeStore.sport.value,
+    },
+    athlete.value,
+  )
+})
 </script>
 
 <template>
@@ -143,14 +179,71 @@ const climbsExpanded = ref(true)
             type="number"
             min="3"
             max="80"
-            step="1"
+            :step="SPEED_STEP"
             class="speed-input"
             :title="t('routes.avg_speed_hint')"
             :aria-label="t('routes.avg_speed_hint')"
           />
           <small>km/h</small>
         </span>
+        <!-- Ta vitesse réelle, applicable en un clic — informe le choix sans l'imposer. -->
+        <button
+          v-if="speedSuggestion"
+          type="button"
+          class="speed-suggestion"
+          :title="t('routes.speed_suggestion_hint', { speed: speedSuggestion.speed, count: speedSuggestion.samples })"
+          @click="applySpeedSuggestion"
+        >
+          <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+          {{ t('routes.speed_suggestion', { speed: speedSuggestion.speed }) }}
+        </button>
       </span>
+
+      <!-- TSS estimé — charge de la sortie, situé par rapport à la forme actuelle -->
+      <button
+        v-if="routeLoad"
+        type="button"
+        class="stat-pill stat-pill-tss"
+        :title="t('routes.tss.hint')"
+        @click="tssExpanded = !tssExpanded"
+      >
+        <span class="tss-head">
+          <span class="d-flex align-items-center gap-2">
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+            <strong>{{ t('routes.tss.label') }} ≈ {{ routeLoad.tss }}</strong>
+          </span>
+          <span
+            v-if="routeLoad.level"
+            class="tss-level"
+            :style="{ color: FEAS_COLOR[routeLoad.level] }"
+            :title="t(`routes.tss.level_${routeLoad.level}_hint`)"
+          >
+            {{ t(`routes.tss.level_${routeLoad.level}`) }}
+          </span>
+        </span>
+        <span v-if="tssExpanded" class="tss-details">
+          <span>
+            {{ routeLoad.watts
+              ? t('routes.tss.power', { if: routeLoad.intensity.toFixed(2), watts: routeLoad.watts })
+              : t('routes.tss.intensity_only', { if: routeLoad.intensity.toFixed(2) }) }}
+          </span>
+          <span v-if="routeLoad.ctlRatio != null">
+            {{ t('routes.tss.ctl_ratio', { ratio: routeLoad.ctlRatio.toFixed(1) }) }}
+          </span>
+          <span v-if="routeLoad.tsbAfter != null" class="tss-form">
+            {{ t('routes.tss.form', { before: routeLoad.tsbNow, after: routeLoad.tsbAfter }) }}
+            <i
+              class="fa-solid fa-circle tss-form-dot"
+              :style="{ color: zoneColor(formZone(routeLoad.tsbAfter)) }"
+              :title="t(`performance.load.zone_${formZone(routeLoad.tsbAfter)}`)"
+              aria-hidden="true"
+            ></i>
+          </span>
+          <span v-if="routeLoad.source === 'estimated'" class="tss-note">
+            {{ t('routes.tss.estimated_note') }}
+          </span>
+        </span>
+      </button>
 
       <!-- Lieux -->
       <template v-if="placesStore.importantPlaces.value.length || placesStore.isFetchingPlaces.value || placesStore.placesFetchFailed.value">
@@ -271,6 +364,51 @@ const climbsExpanded = ref(true)
 .stat-pill-time .speed-input::-webkit-inner-spin-button,
 .stat-pill-time .speed-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .stat-pill-time .speed-input:focus { outline: none; border-color: #0d6efd; }
+.speed-suggestion {
+  border: 1px dashed rgba(13, 110, 253, 0.4);
+  background: transparent;
+  color: inherit;
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.speed-suggestion:hover { background: rgba(13, 110, 253, 0.15); }
+
+.stat-pill-tss {
+  background: rgba(111, 66, 193, 0.12);
+  color: #6f42c1;
+  border: none;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  text-align: left;
+  cursor: pointer;
+}
+.stat-pill-tss:hover { background: rgba(111, 66, 193, 0.2); }
+.tss-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.tss-level { font-size: 0.72rem; font-weight: 600; }
+.tss-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  opacity: 0.9;
+}
+.tss-form { display: inline-flex; align-items: center; gap: 0.3rem; }
+.tss-form-dot { font-size: 0.5rem; }
+.tss-note { opacity: 0.75; font-style: italic; }
 
 .climbs-section-toggle {
   display: flex;

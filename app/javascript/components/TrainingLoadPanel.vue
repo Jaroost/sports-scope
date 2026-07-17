@@ -3,7 +3,7 @@ import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import {
   useTrainingPlan, zoneColor, formZone, acwrColor, fmtDuration, fmtSigned, eventDateFmt,
-  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS,
+  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS, WEEK_PACE_COLOR,
   type Point, type LoadSummary, type DayActivity,
 } from '../composables/useTrainingPlan'
 import ZoneDistribution from './ZoneDistribution.vue'
@@ -124,7 +124,7 @@ const tsbZonesPlugin: any = {
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
-  openEventEditor, saveEvent, removeEvent, recommendation,
+  openEventEditor, saveEvent, removeEvent, recommendation, weekPlan,
 } = useTrainingPlan(data)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
 
@@ -537,7 +537,10 @@ onBeforeUnmount(() => {
                 <div class="fs-5 fw-bold" :style="{ color: ACTION_STYLE[recommendation.action].color }">
                   {{ t(`performance.load.reco.action_${recommendation.action}`) }}
                   <span v-if="recommendation.minutes" class="text-body fw-normal fs-6">·
-                    ≈ {{ fmtDuration(recommendation.minutes) }}<template v-if="recommendation.distanceKm"> (~{{ recommendation.distanceKm }} km)</template>
+                    ≈ {{ fmtDuration(recommendation.minutes) }}<template v-if="recommendation.distanceKm"> (<span
+                      class="reco-distance"
+                      :title="t('performance.load.reco.distance_cycling_hint', { speed: data?.thresholds?.typical_speed_kmh })"
+                    >{{ t('performance.load.reco.distance_cycling', { km: recommendation.distanceKm }) }}</span>)</template>
                     {{ t(`performance.load.reco.effort_${recommendation.effort}`) }}
                   </span>
                 </div>
@@ -556,6 +559,43 @@ onBeforeUnmount(() => {
                   <option v-for="g in GOALS" :key="g" :value="g">{{ t(`performance.load.reco.goal_${g}`) }}</option>
                 </select>
               </div>
+            </div>
+          </div>
+
+          <!-- Cible de volume de la semaine -->
+          <div v-if="weekPlan" class="week-card mb-3">
+            <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">
+              <span class="fw-bold">{{ t('performance.load.week.title') }}</span>
+              <span class="text-body-secondary">
+                {{ t('performance.load.week.target', { tss: weekPlan.target }) }}
+                <span class="text-body-tertiary">·
+                  <template v-if="weekPlan.ramp === null">{{ t('performance.load.week.ramp_event') }}</template>
+                  <template v-else-if="weekPlan.ramp > 0">{{ t('performance.load.week.ramp_up', { ctl: weekPlan.ramp }) }}</template>
+                  <template v-else-if="weekPlan.ramp === 0">{{ t('performance.load.week.ramp_flat') }}</template>
+                  <template v-else>{{ t('performance.load.week.ramp_down') }}</template>
+                </span>
+              </span>
+              <span class="badge ms-auto" :style="{ backgroundColor: WEEK_PACE_COLOR[weekPlan.pace] }">
+                {{ t(`performance.load.week.pace_${weekPlan.pace}`) }}
+              </span>
+            </div>
+
+            <div class="progress week-progress" role="progressbar" :aria-valuenow="weekPlan.pct" aria-valuemin="0" aria-valuemax="100">
+              <div class="progress-bar" :style="{ width: `${weekPlan.pct}%`, backgroundColor: WEEK_PACE_COLOR[weekPlan.pace] }"></div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-2 justify-content-between small mt-2">
+              <span class="fw-semibold">{{ t('performance.load.week.progress', { done: weekPlan.done, target: weekPlan.target }) }}</span>
+              <span v-if="weekPlan.remaining > 0" class="text-muted">
+                {{ t('performance.load.week.remaining', { tss: weekPlan.remaining, days: weekPlan.daysLeft, duration: fmtDuration(weekPlan.minutesLeft) }) }}
+              </span>
+              <span v-else class="text-success">
+                <i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>{{ t('performance.load.week.done_label') }}
+              </span>
+            </div>
+
+            <div class="small text-body-tertiary mt-2">
+              <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>{{ t(weekPlan.ramp === null ? 'performance.load.week.explain_event' : 'performance.load.week.explain') }}
             </div>
           </div>
 
@@ -654,6 +694,32 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
+          <!-- Méthode de calcul du TSS et du seuil FC -->
+          <details class="load-how mt-2">
+            <summary class="small fw-semibold text-primary">
+              <i class="fa-solid fa-calculator me-1" aria-hidden="true"></i>{{ t('performance.load.methods_title') }}
+            </summary>
+            <div class="methods-body small text-muted mt-2">
+              <div class="fw-semibold text-body">{{ t('performance.load.tss_method_title') }}</div>
+              <p class="mb-1">{{ t('performance.load.tss_method_formula') }}</p>
+              <p class="mb-1">{{ t('performance.load.tss_method_intro') }}</p>
+              <ol class="mb-1 ps-3">
+                <li>{{ t('performance.load.tss_method_power') }}</li>
+                <li>{{ t('performance.load.tss_method_hr') }}</li>
+                <li>{{ t('performance.load.tss_method_estimated') }}</li>
+              </ol>
+              <p class="mb-3">{{ t('performance.load.tss_method_cap') }}</p>
+
+              <div class="fw-semibold text-body">{{ t('performance.load.lthr_method_title') }}</div>
+              <p class="mb-1 text-body">{{ t('performance.load.lthr_method_what') }}</p>
+              <p class="mb-1">{{ t('performance.load.lthr_method_manual') }}</p>
+              <p class="mb-1">{{ t('performance.load.lthr_method_auto') }}</p>
+              <p class="mb-0 text-body-tertiary">
+                <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ t('performance.load.lthr_method_auto_warning') }}
+              </p>
+            </div>
+          </details>
+
           <p class="small text-body-tertiary mt-2 mb-0">
             <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ t('performance.load.seed_hint') }}
           </p>
@@ -723,9 +789,18 @@ onBeforeUnmount(() => {
   width: auto;
   min-width: 11rem;
 }
-.reco-tss {
+.reco-tss,
+.reco-distance {
   cursor: help;
   white-space: nowrap;
+}
+.week-card {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+}
+.week-progress {
+  height: 0.75rem;
 }
 .event-card {
   padding: 0.75rem 1rem;
@@ -816,5 +891,12 @@ onBeforeUnmount(() => {
 .load-how summary {
   cursor: pointer;
   list-style: revert;
+}
+/* Texte explicatif : borné en largeur, une ligne trop longue devient illisible. */
+.methods-body {
+  max-width: 68ch;
+}
+.methods-body li {
+  margin-bottom: 0.35rem;
 }
 </style>

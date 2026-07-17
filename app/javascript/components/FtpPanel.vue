@@ -350,11 +350,16 @@ onBeforeUnmount(() => {
           </div>
 
           <!-- Aide : comment la FTP est estimée automatiquement -->
-          <details v-if="data.auto" class="ftp-how mt-3">
+          <!-- La définition vaut aussi pour une FTP saisie à la main : seule l'explication
+               de l'estimation auto dépend de `data.auto`. -->
+          <details class="ftp-how mt-3">
             <summary class="small fw-semibold text-primary">
               <i class="fa-solid fa-circle-question me-1" aria-hidden="true"></i>{{ t('performance.ftp.how_title') }}
             </summary>
-            <p class="small text-muted mt-2 mb-0">{{ t('performance.ftp.how_body') }}</p>
+            <div class="ftp-how-body small mt-2">
+              <p :class="data.auto ? 'mb-2' : 'mb-0'">{{ t('performance.ftp.what_body') }}</p>
+              <p v-if="data.auto" class="text-muted mb-0">{{ t('performance.ftp.how_body') }}</p>
+            </div>
           </details>
 
           <!-- Historique -->
@@ -419,5 +424,9 @@ onBeforeUnmount(() => {
 .ftp-how summary {
   cursor: pointer;
   list-style: revert;
+}
+/* Texte explicatif : borné en largeur, une ligne trop longue devient illisible. */
+.ftp-how-body {
+  max-width: 68ch;
 }
 </style>

@@ -101,6 +101,45 @@ export const FEAS_COLOR: Record<string, string> = { ok: '#198754', demanding: '#
 
 export type Reco = { action: string; tss: number; minutes: number; effort: string; distanceKm: number | null; reason: string; tsb: number; days?: number }
 
+// ── Cible de volume hebdomadaire ─────────────────────────────────────────────
+// La CTL est une EWMA du TSS quotidien : à l'équilibre, TSS/jour = CTL, donc
+// maintenir sa forme coûte 7 × CTL par semaine. Pour la faire monter de ΔCTL en une
+// semaine, il faut en plus ΔCTL / k_ctl (≈ 42 TSS par point de CTL) :
+//   cible = 7 × CTL + ΔCTL / k_ctl
+// La CTL de référence est celle du DÉBUT de semaine, pas celle du jour : sinon la
+// cible se déplacerait chaque jour et ne serait plus une cible.
+const K_CTL = 1 - Math.exp(-1 / 42)
+const GOAL_RAMP: Record<Goal, number> = { improve_fast: 5, improve_slow: 3, maintain: 0, peak: -5 }
+
+export type WeekPace = 'ahead' | 'on_track' | 'behind'
+// « En avance » n'est pas un compliment : dépasser sa cible, c'est encaisser plus de
+// charge que prévu — d'où l'orange, comme la fatigue.
+export const WEEK_PACE_COLOR: Record<WeekPace, string> = {
+  ahead: '#fd7e14', on_track: '#198754', behind: '#6c757d',
+}
+export type WeekPlan = {
+  target: number
+  done: number
+  remaining: number
+  pct: number
+  daysLeft: number
+  minutesLeft: number
+  ramp: number | null // null pendant une prépa datée : c'est l'affûtage qui pilote
+  pace: WeekPace
+}
+
+// Lundi (local) de la semaine contenant `d`. `Date#getDay()` renvoie 0 le dimanche.
+function mondayOf(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7))
+  return x
+}
+
+// Date locale en ISO. `toISOString()` passerait par UTC et décalerait le jour.
+function isoLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 // ── Formatage ────────────────────────────────────────────────────────────────
 export function fmtDuration(min: number): string {
   const h = Math.floor(min / 60)
@@ -274,6 +313,72 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>) {
     return fatigueReco(c, GOAL_FLOOR[goal.value], { rest: 'reason_rest', easy: 'reason_easy', big: 'reason_big' })
   })
 
+  // ── Semaine en cours : cible de volume + avancée réelle ────────────────────
+  // Volontairement fondé sur les données réelles (TSS déjà encaissé depuis lundi)
+  // plutôt que sur un plan simulé : une projection jour par jour serait fausse dès
+  // le premier écart, alors qu'une cible reste vraie quoi que tu fasses.
+  const weekPlan = computed<WeekPlan | null>(() => {
+    const series = data.value?.series ?? []
+    const c = current.value
+    if (!series.length || !c) return null
+
+    const today = new Date()
+    const monday = mondayOf(today)
+    const mondayISO = isoLocal(monday)
+    const todayLocalISO = isoLocal(today)
+
+    // Référence : la CTL de la veille du lundi. Si la série démarre après (historique
+    // trop court), on prend le premier point connu.
+    const beforeWeek = series.filter((p) => p.date < mondayISO)
+    const baselineCtl = (beforeWeek.length ? beforeWeek[beforeWeek.length - 1] : series[0]).ctl
+
+    // Jours écoulés AVANT aujourd'hui (lundi = 0) et jours restants, aujourd'hui inclus.
+    const elapsed = (today.getDay() + 6) % 7
+    const daysLeft = 7 - elapsed
+
+    // Pendant une prépa datée, l'affûtage pilote : la cible de la semaine est la somme
+    // du TSS planifié pour chacun de ses jours, cohérente avec la reco du jour.
+    const ev = eventInfo.value
+    const onEvent = !!ev && ev.phase !== 'past'
+    let target: number
+    if (onEvent && ev) {
+      // Le jour `i` de la semaine (lundi = 0) est à `i - elapsed` jours d'aujourd'hui,
+      // donc à `ev.days - (i - elapsed)` jours de l'objectif.
+      target = 0
+      for (let i = 0; i < 7; i++) target += plannedTss(ev.days - (i - elapsed), baselineCtl)
+    } else {
+      target = 7 * baselineCtl + GOAL_RAMP[goal.value] / K_CTL
+    }
+    target = Math.max(0, Math.round(target))
+
+    const done = Math.round(
+      series.filter((p) => p.date >= mondayISO && p.date <= todayLocalISO).reduce((sum, p) => sum + p.tss, 0)
+    )
+    const remaining = Math.max(0, target - done)
+    // Équivalent en durée du reste, à intensité endurance (même conversion que la reco).
+    const minutesLeft = remaining > 0 ? Math.round(remaining / (0.65 * 0.65 * 100) * 60) : 0
+
+    // Rythme : on compare à ce qui devrait être fait à l'ENTRÉE dans la journée (les
+    // jours pleinement écoulés). Le lundi, il n'y a rien à juger.
+    const expected = (target * elapsed) / 7
+    let pace: WeekPace = 'on_track'
+    if (expected > 0) {
+      if (done < expected * 0.9) pace = 'behind'
+      else if (done > expected * 1.25) pace = 'ahead'
+    }
+
+    return {
+      target,
+      done,
+      remaining,
+      pct: target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0,
+      daysLeft,
+      minutesLeft,
+      ramp: onEvent ? null : GOAL_RAMP[goal.value],
+      pace,
+    }
+  })
+
   return {
     current,
     // objectif générique
@@ -284,6 +389,6 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>) {
     editingEvent, evDate, evDistance, evIntensity, todayISO,
     openEventEditor, saveEvent, removeEvent,
     // recommandation
-    recommendation,
+    recommendation, weekPlan,
   }
 }

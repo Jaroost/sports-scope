@@ -4,7 +4,7 @@ import { t } from '../i18n'
 import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
 import {
   useTrainingPlan, zoneColor, formZone, fmtDuration, fmtSigned, eventDateFmt,
-  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS,
+  ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS, WEEK_PACE_COLOR,
   type LoadSummary,
 } from '../composables/useTrainingPlan'
 
@@ -27,7 +27,7 @@ function onStravaRefreshed() { fetchData(true) }
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
-  openEventEditor, saveEvent, removeEvent, recommendation,
+  openEventEditor, saveEvent, removeEvent, recommendation, weekPlan,
 } = useTrainingPlan(data)
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
@@ -106,7 +106,10 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
             <div class="fw-bold" :style="{ color: ACTION_STYLE[recommendation.action].color }">
               {{ t(`performance.load.reco.action_${recommendation.action}`) }}
               <span v-if="recommendation.minutes" class="text-body fw-normal small">·
-                ≈ {{ fmtDuration(recommendation.minutes) }}<template v-if="recommendation.distanceKm"> (~{{ recommendation.distanceKm }} km)</template>
+                ≈ {{ fmtDuration(recommendation.minutes) }}<template v-if="recommendation.distanceKm"> (<span
+                  class="reco-distance"
+                  :title="t('performance.load.reco.distance_cycling_hint', { speed: data?.thresholds?.typical_speed_kmh })"
+                >{{ t('performance.load.reco.distance_cycling', { km: recommendation.distanceKm }) }}</span>)</template>
               </span>
             </div>
             <div class="small text-muted">
@@ -120,6 +123,18 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
           <select v-model="goal" class="form-select form-select-sm reco-goal">
             <option v-for="g in GOALS" :key="g" :value="g">{{ t(`performance.load.reco.goal_${g}`) }}</option>
           </select>
+        </div>
+
+        <!-- Semaine en cours : version resserrée (barre + avancée), détail sur /performance -->
+        <div v-if="weekPlan" class="week-strip mt-2 pt-2">
+          <div class="d-flex align-items-baseline gap-2 small">
+            <span class="text-muted">{{ t('performance.load.week.title') }}</span>
+            <span class="fw-semibold">{{ t('performance.load.week.progress', { done: weekPlan.done, target: weekPlan.target }) }}</span>
+            <span class="ms-auto" :style="{ color: WEEK_PACE_COLOR[weekPlan.pace] }">{{ t(`performance.load.week.pace_${weekPlan.pace}`) }}</span>
+          </div>
+          <div class="progress week-progress mt-1" role="progressbar" :aria-valuenow="weekPlan.pct" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar" :style="{ width: `${weekPlan.pct}%`, backgroundColor: WEEK_PACE_COLOR[weekPlan.pace] }"></div>
+          </div>
         </div>
       </div>
 
@@ -226,6 +241,16 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
 .reco-goal {
   width: auto;
   min-width: 11rem;
+}
+.reco-distance {
+  cursor: help;
+  white-space: nowrap;
+}
+.week-strip {
+  border-top: 1px solid var(--bs-border-color);
+}
+.week-progress {
+  height: 0.5rem;
 }
 .event-countdown {
   display: inline-flex;

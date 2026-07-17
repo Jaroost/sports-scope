@@ -3,9 +3,21 @@ import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import { t } from '../i18n'
 
 // ── Types du payload /api/performance/ftp ───────────────────────────────────
+// Effort ayant déterminé une estimation : une FTP agrège plusieurs sorties (le
+// modèle CP ajuste 5/10/20 min, potentiellement issus de trois sorties distinctes),
+// d'où une liste plutôt qu'une activité unique.
+interface Contributor {
+  duration: number
+  watts: number
+  name: string
+  source: string
+  external_id: string
+  started_at: string | null
+}
 interface AutoEstimate {
   watts: number
   method: string
+  contributors?: Contributor[]
   cp: number | null
   w_prime?: number | null
   cp_points?: number
@@ -21,7 +33,20 @@ interface FtpSummary {
   auto: AutoEstimate | null
   manual: { watts: number | null; at: string | null }
   weight_kg: number | null
-  history: { date: string; watts: number; method: string }[]
+  history: { date: string; watts: number; method: string; contributors?: Contributor[] }[]
+}
+
+const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
+const localePrefix = lang ? `/${lang}` : ''
+
+// Appareil sans survol : le tooltip ne peut pas être atteint à la souris (il se ferme
+// quand on quitte le point), donc les liens ne sont tappables que sur tactile. À la
+// souris, on ouvre via le clic sur le point — cf. TrainingLoadPanel, même compromis.
+const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches
+
+function activityHref(a: { source: string; external_id: string }): string {
+  const base = a.source === 'imported' ? '/imported_activities' : '/activities'
+  return `${localePrefix}${base}/${a.external_id}`
 }
 
 const loading = ref(true)
@@ -136,6 +161,101 @@ function formatMonth(ym: string): string {
   return new Date(Number(m[1]), Number(m[2]) - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
 }
 
+function formatShortDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  const m = seconds / 60
+  return Number.isInteger(m) ? `${m}min` : `${m.toFixed(1)}min`
+}
+
+function formatDay(iso: string | null): string {
+  if (!iso) return ''
+  return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: '2-digit' })
+}
+
+// ── Tooltip externe (HTML) ───────────────────────────────────────────────────
+// Un tooltip canvas ne peut pas porter de liens : on rend le nôtre en HTML à côté
+// du canvas, comme TrainingLoadPanel.
+let tooltipEl: HTMLElement | null = null
+
+function escapeHtml(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getTooltipEl(c: any): HTMLElement {
+  const parent = c.canvas.parentNode as HTMLElement
+  if (!tooltipEl) {
+    tooltipEl = document.createElement('div')
+    Object.assign(tooltipEl.style, {
+      position: 'absolute', pointerEvents: 'none', opacity: '0',
+      transition: 'opacity .1s ease', background: 'rgba(17,24,39,0.92)', color: '#fff',
+      padding: '8px 10px', borderRadius: '6px', fontSize: '12px', lineHeight: '1.4',
+      width: '250px', boxSizing: 'border-box', zIndex: '20',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.25)', whiteSpace: 'normal',
+    } as Partial<CSSStyleDeclaration>)
+    parent.appendChild(tooltipEl)
+  } else if (tooltipEl.parentNode !== parent) {
+    parent.appendChild(tooltipEl)
+  }
+  return tooltipEl
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function externalTooltip(context: { chart: any; tooltip: any }) {
+  const { chart: c, tooltip } = context
+  const el = getTooltipEl(c)
+  if (!tooltip.opacity) { el.style.opacity = '0'; return }
+
+  const point = data.value?.history?.[tooltip.dataPoints?.[0]?.dataIndex]
+  if (!point) { el.style.opacity = '0'; return }
+
+  const contribs = point.contributors ?? []
+  const line = (ct: Contributor) => {
+    const head = `<b>${escapeHtml(formatShortDuration(ct.duration))}</b> : ${ct.watts} W`
+    const sub = `<div style="opacity:.75">${escapeHtml(ct.name)}${ct.started_at ? ` · ${escapeHtml(formatDay(ct.started_at))}` : ''}</div>`
+    const inner = `<div style="padding:3px 0">${head}${sub}</div>`
+    return isTouch
+      ? `<a href="${escapeHtml(activityHref(ct))}" style="display:block;color:#fff;text-decoration:none;pointer-events:auto">${inner}</a>`
+      : inner
+  }
+  const hintKey = isTouch ? 'performance.ftp.tap_activity' : 'performance.ftp.click_activity'
+  const hint = contribs.length === 1 || isTouch
+    ? `<div style="opacity:.7;margin-top:3px"><i>${escapeHtml(t(hintKey))}</i></div>`
+    : ''
+  const contribHtml = contribs.length
+    ? '<div style="margin-top:6px;border-top:1px solid rgba(255,255,255,.15);padding-top:5px">' +
+      `<div style="opacity:.7;margin-bottom:2px">${escapeHtml(t('performance.ftp.based_on'))}</div>` +
+      contribs.map(line).join('') + hint + '</div>'
+    : ''
+
+  el.innerHTML =
+    `<div style="font-weight:600;margin-bottom:4px;text-transform:capitalize">${escapeHtml(formatMonth(point.date))}</div>` +
+    `<div>FTP : <b>${point.watts} W</b></div>` +
+    `<div style="opacity:.75">${escapeHtml(methodLabel(point.method))}</div>` +
+    contribHtml
+
+  // Tooltip du côté opposé au curseur pour ne jamais être masqué par la souris.
+  const area = c.chartArea
+  const onLeftHalf = tooltip.caretX <= (area.left + area.right) / 2
+  el.style.opacity = '1'
+  el.style.top = `${c.canvas.offsetTop + area.top + 6}px`
+  if (onLeftHalf) {
+    el.style.left = `${c.canvas.offsetLeft + area.right - 6}px`
+    el.style.transform = 'translate(-100%, 0)'
+  } else {
+    el.style.left = `${c.canvas.offsetLeft + area.left + 6}px`
+    el.style.transform = 'translate(0, 0)'
+  }
+}
+
+// À la souris, on n'ouvre que si UN seul effort explique le point (ancres 20/60 min) :
+// avec le modèle CP, plusieurs sorties se partagent le résultat, choisir pour
+// l'utilisateur serait arbitraire — le tooltip les liste, le tactile les lie.
+function soleContributor(index: number): Contributor | null {
+  const contribs = data.value?.history?.[index]?.contributors ?? []
+  return contribs.length === 1 ? contribs[0] : null
+}
+
 async function renderChart() {
   if (chart) { chart.destroy(); chart = null }
   if (!hasHistory.value || !chartCanvas.value) return
@@ -164,9 +284,21 @@ async function renderChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      // Le point le plus proche en X répond au survol, sans avoir à le toucher.
+      interaction: { mode: 'index', intersect: false },
+      onClick: (_evt: unknown, els: { index: number }[]) => {
+        if (isTouch) return
+        const ct = els?.[0] ? soleContributor(els[0].index) : null
+        if (ct) window.location.href = activityHref(ct)
+      },
+      onHover: (evt: { native?: Event }, els: { index: number }[]) => {
+        const target = evt.native?.target as HTMLElement | undefined
+        if (!target) return
+        target.style.cursor = !isTouch && els?.[0] && soleContributor(els[0].index) ? 'pointer' : 'default'
+      },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (i: { parsed: { y: number } }) => `${i.parsed.y} W` } },
+        tooltip: { enabled: false, external: externalTooltip },
       },
       scales: {
         y: { beginAtZero: false, title: { display: true, text: 'W' } },
@@ -177,6 +309,8 @@ async function renderChart() {
 
 onBeforeUnmount(() => {
   if (chart) { chart.destroy(); chart = null }
+  tooltipEl?.remove()
+  tooltipEl = null
 })
 </script>
 

@@ -41,7 +41,6 @@ class StravaController < ApplicationController
     tss_map = TrainingLoad.tss_by_activity(current_user)
     sport_types = current_user.strava_activities.distinct.pluck(:activity_type).compact.sort
     render json: {
-      cached_at: current_user.strava_activities.maximum(:updated_at)&.iso8601,
       total: current_user.strava_activities.count,
       filtered_total: filtered_total,
       page: page,
@@ -142,7 +141,7 @@ class StravaController < ApplicationController
     run = StravaRefreshService.new(current_user).enqueue_streams_backfill
     return render json: backfill_json(run) if run
 
-    render json: { run: nil, pending: 0 }
+    render json: { cached_at: strava_cached_at, run: nil, pending: 0 }
   end
 
   # POST /strava/refresh — « Tout rafraîchir » : résumés récents + gear + (ré)enfile
@@ -153,7 +152,7 @@ class StravaController < ApplicationController
     before = current_user.strava_activities.count
     result = StravaRefreshService.new(current_user).refresh_all
     total = current_user.strava_activities.count
-    body = result[:run] ? backfill_json(result[:run]) : { run: nil, pending: 0 }
+    body = result[:run] ? backfill_json(result[:run]) : { cached_at: strava_cached_at, run: nil, pending: 0 }
     render json: body.merge(synced: result[:synced], created: [total - before, 0].max, total: total)
   rescue StravaSyncService::StravaApiError, StravaGearSyncService::StravaApiError => e
     render json: { error: e.message }, status: :bad_gateway
@@ -164,7 +163,7 @@ class StravaController < ApplicationController
     run = current_user.strava_backfill_runs.order(created_at: :desc).first
     return render json: backfill_json(run) if run
 
-    render json: { run: nil, pending: current_user.strava_activities.streams_pending.count }
+    render json: { cached_at: strava_cached_at, run: nil, pending: current_user.strava_activities.streams_pending.count }
   end
 
   def photos
@@ -267,9 +266,17 @@ class StravaController < ApplicationController
     StravaStreamsFetcher.new(current_user).fetch(id)
   end
 
+  # Fraîcheur du miroir local des activités Strava : dernière écriture d'une ligne,
+  # soit la fin de la dernière synchro. Affiché par la carte « Tout rafraîchir »
+  # (« Mis à jour à … »), à côté du bouton qui la déclenche.
+  def strava_cached_at
+    current_user.strava_activities.maximum(:updated_at)&.iso8601
+  end
+
   def backfill_json(run)
     pending = current_user.strava_activities.streams_pending.count
     {
+      cached_at: strava_cached_at,
       run: {
         id: run.id,
         status: run.status,

@@ -110,6 +110,9 @@ en:
       cancel: "Cancel"
       manual_since: "Manually set since %{date}"
       history_title: "FTP trend (6-week rolling window)"
+      based_on: "Key efforts"
+      click_activity: "Click to open the ride"
+      tap_activity: "Tap a ride to open it"
     load:
       title: "Fitness & fatigue"
       intro: "Your training load over time, across all sports. Three metrics to steer progression and recovery."

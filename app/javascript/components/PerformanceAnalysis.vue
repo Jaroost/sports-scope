@@ -478,6 +478,8 @@ async function renderChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      // Le point le plus proche en X répond au survol, sans avoir à le toucher.
+      interaction: { mode: 'index', intersect: false },
       // Clic sur un point → ouvre l'activité qui détient ce record de puissance.
       onClick: (_evt: unknown, els: { index: number }[]) => {
         const el = els && els[0]

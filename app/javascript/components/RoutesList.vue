@@ -5,6 +5,7 @@ import { speedForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { buildNewRouteUrl } from '../routeHelpers'
 import { parseGpxWaypoints, GpxImportError } from '../gpxImport'
+import { useStickyListHeader } from '../composables/useStickyListHeader'
 import NewRouteModal from './NewRouteModal.vue'
 import RoutesOverviewMap from './RoutesOverviewMap.vue'
 
@@ -12,6 +13,10 @@ import RoutesOverviewMap from './RoutesOverviewMap.vue'
 // densifié (1 point / 5 m) — utile pour les simulateurs de position GPS, à éviter
 // pour les vraies montres (limite de points). Voir routes_controller#gpx (?step).
 const props = defineProps<{ canDense?: boolean }>()
+
+// Header collé sous la navbar ; expose --sticky-header-h pour borner le panneau
+// de filtres en superposition.
+const { stickyEl } = useStickyListHeader()
 
 const routes = ref([]) // page courante renvoyée par le serveur
 const loading = ref(true) // requête en cours (initiale ou refetch après filtre/page)
@@ -73,6 +78,13 @@ const activeFilterCount = computed(() => {
   if (dateFrom.value) n++
   if (dateTo.value) n++
   return n
+})
+
+// Badge du header : « filtrés / total » dès qu'un filtre restreint la liste,
+// sinon le seul total historique.
+const countBadge = computed(() => {
+  if (!activeFilterCount.value) return String(total.value)
+  return `${filteredTotal.value} / ${total.value}`
 })
 
 function clearFilters() {
@@ -646,143 +658,145 @@ onMounted(() => {
     </div>
 
     <div class="card shadow-sm border-0">
-      <div class="card-header activity-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <h2 class="h5 mb-0 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
-          <span>{{ t('routes.list_title') }}</span>
-          <span v-if="hasLoaded && !error" class="badge rounded-pill text-bg-secondary">{{ total }}</span>
-        </h2>
-        <div class="d-flex align-items-center gap-3">
-          <div class="btn-group btn-group-sm" role="group" :aria-label="t('routes.list_title')">
-            <button
-              type="button"
-              class="btn d-flex align-items-center gap-1"
-              :class="view === 'list' ? 'btn-warning' : 'btn-outline-secondary'"
-              :aria-pressed="view === 'list'"
-              @click="view = 'list'"
-            >
-              <i class="fa-solid fa-list-ul" aria-hidden="true"></i>
-              <span>{{ t('routes.view_list') }}</span>
-            </button>
-            <button
-              type="button"
-              class="btn d-flex align-items-center gap-1"
-              :class="view === 'map' ? 'btn-warning' : 'btn-outline-secondary'"
-              :aria-pressed="view === 'map'"
-              @click="view = 'map'"
-            >
-              <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
-              <span>{{ t('routes.view_map') }}</span>
-            </button>
-          </div>
-          <div class="btn-group btn-group-sm">
-            <button
-              type="button"
-              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-              :class="{ active: showFilters }"
-              :aria-expanded="showFilters"
-              @click="showFilters = !showFilters"
-            >
-              <i class="fa-solid fa-filter" aria-hidden="true"></i>
-              <span>{{ t('routes.filters.toggle') }}</span>
-              <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
-            </button>
-            <!-- Réinitialisation à portée de main, sans avoir à déplier le panneau.
-                 Affiché seulement quand il y a quelque chose à réinitialiser. -->
-            <button
-              v-if="activeFilterCount"
-              type="button"
-              class="btn btn-sm btn-danger d-flex align-items-center"
-              :title="t('routes.filters.clear')"
-              :aria-label="t('routes.filters.clear')"
-              @click="clearFilters"
-            >
-              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div v-if="showFilters && hasLoaded && !error" class="card-body border-bottom activity-filters">
-        <div class="row g-3">
-          <div class="col-12 col-md-4">
-            <label class="form-label small mb-1">{{ t('routes.filters.search') }}</label>
-            <input
-              v-model="search"
-              type="search"
-              class="form-control form-control-sm"
-              :placeholder="t('routes.filters.search_placeholder')"
-            />
-          </div>
-          <div class="col-12 col-md-4">
-            <label class="form-label small mb-1">{{ t('routes.filters.sport') }}</label>
-            <select v-model="sportFilter" class="form-select form-select-sm">
-              <option value="">{{ t('routes.filters.all_sports') }}</option>
-              <option v-for="s in activityOptions" :key="s" :value="s">{{ t(`routes.wt_sport_${s}`) }}</option>
-            </select>
-          </div>
-          <div class="col-6 col-md-4">
-            <label class="form-label small mb-1">{{ t('routes.filters.distance') }}</label>
-            <div class="d-flex align-items-center gap-1">
-              <input v-model="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('routes.filters.min')" />
-              <span class="text-muted">–</span>
-              <input v-model="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('routes.filters.max')" />
-            </div>
-          </div>
-          <div class="col-6 col-md-4">
-            <label class="form-label small mb-1">{{ t('routes.filters.elevation') }}</label>
-            <div class="d-flex align-items-center gap-1">
-              <input v-model="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('routes.filters.min')" />
-              <span class="text-muted">–</span>
-              <input v-model="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('routes.filters.max')" />
-            </div>
-          </div>
-          <div class="col-6 col-md-4">
-            <label class="form-label small mb-1">{{ t('routes.filters.from') }}</label>
-            <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
-          </div>
-          <div class="col-6 col-md-4">
-            <label class="form-label small mb-1">{{ t('routes.filters.to') }}</label>
-            <input v-model="dateTo" type="date" class="form-control form-control-sm" />
-          </div>
-          <div class="col-12">
-            <label class="form-label small mb-1">{{ t('routes.filters.period') }}</label>
-            <div class="d-flex flex-wrap gap-2">
+      <div ref="stickyEl" class="activity-sticky-top">
+        <div class="card-header activity-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <h2 class="h5 mb-0 d-flex align-items-center gap-2">
+            <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
+            <span>{{ t('routes.list_title') }}</span>
+            <span v-if="hasLoaded && !error" class="badge rounded-pill text-bg-secondary">{{ countBadge }}</span>
+          </h2>
+          <div class="d-flex align-items-center gap-3">
+            <div class="btn-group btn-group-sm" role="group" :aria-label="t('routes.list_title')">
               <button
-                v-for="preset in datePresets"
-                :key="preset"
                 type="button"
-                class="btn btn-sm btn-outline-secondary"
-                :class="{ active: activeDatePreset === preset }"
-                @click="setDatePreset(preset)"
+                class="btn d-flex align-items-center gap-1"
+                :class="view === 'list' ? 'btn-warning' : 'btn-outline-secondary'"
+                :aria-pressed="view === 'list'"
+                @click="view = 'list'"
               >
-                {{ t(`routes.filters.${preset}`) }}
+                <i class="fa-solid fa-list-ul" aria-hidden="true"></i>
+                <span>{{ t('routes.view_list') }}</span>
+              </button>
+              <button
+                type="button"
+                class="btn d-flex align-items-center gap-1"
+                :class="view === 'map' ? 'btn-warning' : 'btn-outline-secondary'"
+                :aria-pressed="view === 'map'"
+                @click="view = 'map'"
+              >
+                <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+                <span>{{ t('routes.view_map') }}</span>
+              </button>
+            </div>
+            <div class="btn-group btn-group-sm">
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                :class="{ active: showFilters }"
+                :aria-expanded="showFilters"
+                @click="showFilters = !showFilters"
+              >
+                <i class="fa-solid fa-filter" aria-hidden="true"></i>
+                <span>{{ t('routes.filters.toggle') }}</span>
+                <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
+              </button>
+              <!-- Réinitialisation à portée de main, sans avoir à déplier le panneau.
+                   Affiché seulement quand il y a quelque chose à réinitialiser. -->
+              <button
+                v-if="activeFilterCount"
+                type="button"
+                class="btn btn-sm btn-danger d-flex align-items-center"
+                :title="t('routes.filters.clear')"
+                :aria-label="t('routes.filters.clear')"
+                @click="clearFilters"
+              >
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
               </button>
             </div>
           </div>
         </div>
-        <div class="d-flex justify-content-between align-items-center mt-3">
-          <small class="text-muted d-flex align-items-center gap-2">
-            <span v-if="loading" class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
-            {{ t('routes.filters.results', { count: filteredTotal, total: total }) }}
-          </small>
-          <div class="d-flex align-items-center gap-2">
-            <button
-              type="button"
-              class="btn btn-sm btn-link text-decoration-none"
-              :disabled="!activeFilterCount"
-              @click="clearFilters"
-            >
-              <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('routes.filters.clear') }}
-            </button>
-            <button
-              type="button"
-              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-              @click="showFilters = false"
-            >
-              <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
-              <span>{{ t('routes.filters.close') }}</span>
-            </button>
+
+        <div v-if="showFilters && hasLoaded && !error" class="card-body border-bottom activity-filters-overlay">
+          <div class="row g-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label small mb-1">{{ t('routes.filters.search') }}</label>
+              <input
+                v-model="search"
+                type="search"
+                class="form-control form-control-sm"
+                :placeholder="t('routes.filters.search_placeholder')"
+              />
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label small mb-1">{{ t('routes.filters.sport') }}</label>
+              <select v-model="sportFilter" class="form-select form-select-sm">
+                <option value="">{{ t('routes.filters.all_sports') }}</option>
+                <option v-for="s in activityOptions" :key="s" :value="s">{{ t(`routes.wt_sport_${s}`) }}</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('routes.filters.distance') }}</label>
+              <div class="d-flex align-items-center gap-1">
+                <input v-model="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('routes.filters.min')" />
+                <span class="text-muted">–</span>
+                <input v-model="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('routes.filters.max')" />
+              </div>
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('routes.filters.elevation') }}</label>
+              <div class="d-flex align-items-center gap-1">
+                <input v-model="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('routes.filters.min')" />
+                <span class="text-muted">–</span>
+                <input v-model="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('routes.filters.max')" />
+              </div>
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('routes.filters.from') }}</label>
+              <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
+            </div>
+            <div class="col-6 col-md-4">
+              <label class="form-label small mb-1">{{ t('routes.filters.to') }}</label>
+              <input v-model="dateTo" type="date" class="form-control form-control-sm" />
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-1">{{ t('routes.filters.period') }}</label>
+              <div class="d-flex flex-wrap gap-2">
+                <button
+                  v-for="preset in datePresets"
+                  :key="preset"
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary"
+                  :class="{ active: activeDatePreset === preset }"
+                  @click="setDatePreset(preset)"
+                >
+                  {{ t(`routes.filters.${preset}`) }}
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mt-3">
+            <small class="text-muted d-flex align-items-center gap-2">
+              <span v-if="loading" class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+              {{ t('routes.filters.results', { count: filteredTotal, total: total }) }}
+            </small>
+            <div class="d-flex align-items-center gap-2">
+              <button
+                type="button"
+                class="btn btn-sm btn-link text-decoration-none"
+                :disabled="!activeFilterCount"
+                @click="clearFilters"
+              >
+                <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('routes.filters.clear') }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                @click="showFilters = false"
+              >
+                <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+                <span>{{ t('routes.filters.close') }}</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1032,19 +1046,35 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* Panneau de filtres collé sous la navbar `fixed-top` (3.5rem, même offset que
-   PerformanceAnalysis) : la liste est longue, on garde les champs et le compteur
-   de résultats sous la main pendant le défilement.
-   - fond opaque : `card-body` est transparent, la liste défilerait au travers ;
-   - z-index : au-dessus des lignes de la liste et du canvas MapLibre de la vue carte ;
-   - max-height + overflow : sur mobile le panneau dépasse la hauteur d'écran, et
-     un élément sticky plus haut que la fenêtre laisse son bas inaccessible. */
-.activity-filters {
+/* Header collé sous la navbar `fixed-top` (3.5rem, même offset que
+   PerformanceAnalysis) : la liste est longue, on garde le titre, le compteur et la
+   bascule liste/carte sous la main pendant le défilement. Le conteneur ne réserve
+   que la hauteur du header — le panneau de filtres, hors flux, flotte par-dessus la
+   liste (voir .activity-filters-overlay).
+   - fond opaque : `card-header` est semi-transparent, la liste défilerait au travers ;
+   - z-index : au-dessus des lignes de la liste et du canvas MapLibre de la vue carte. */
+.activity-sticky-top {
   position: sticky;
   top: 3.5rem;
   z-index: 5;
   background: var(--bs-card-bg, var(--bs-body-bg));
-  max-height: calc(100dvh - 3.5rem);
+}
+
+/* Panneau de filtres en superposition, ancré sous le header. Sorti du flux pour ne
+   pas rogner la hauteur visible de la liste : celle-ci défile derrière lui.
+   - max-height + overflow : sur mobile le panneau dépasse l'écran, et son bas
+     deviendrait inaccessible (le défilement de la page ne le ramène pas, il est
+     collé au header). `--sticky-header-h` est mesurée par useStickyListHeader ;
+     le repli couvre le header sur une ligne, avant la première mesure.
+   - ombre : marque le détachement au-dessus de la liste. */
+.activity-filters-overlay {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bs-card-bg, var(--bs-body-bg));
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+  max-height: calc(100dvh - 3.5rem - var(--sticky-header-h, 3.5rem));
   overflow-y: auto;
 }
 

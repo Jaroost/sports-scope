@@ -21,6 +21,9 @@ const POLL_MS = 3000
 
 const run = ref<BackfillRun | null>(null)
 const pending = ref(0)
+// Fraîcheur du miroir local : heure de la dernière synchro, affichée à côté du
+// bouton qui la déclenche. Rafraîchie par le polling comme le reste du statut.
+const cachedAt = ref<string | null>(null)
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref<string | null>(null)
@@ -52,9 +55,14 @@ function scheduleNext() {
   if (isActive.value) timer = setTimeout(fetchStatus, POLL_MS)
 }
 
-function applyPayload(payload: { run: BackfillRun | null; pending?: number }) {
+function applyPayload(payload: { run: BackfillRun | null; pending?: number; cached_at?: string | null }) {
   run.value = payload.run || null
   pending.value = payload.run ? payload.run.pending : (payload.pending ?? 0)
+  cachedAt.value = payload.cached_at ?? null
+}
+
+function formatCachedAt(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 async function fetchStatus() {
@@ -154,6 +162,11 @@ onUnmounted(() => { if (timer) clearTimeout(timer) })
           <small v-else class="text-success d-flex align-items-center gap-1">
             <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
             {{ t('strava.refresh_all_up_to_date') }}
+          </small>
+          <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1 ms-auto" :title="t('strava.last_updated')">
+            <i class="fa-regular fa-clock" aria-hidden="true"></i>
+            <span class="d-none d-md-inline">{{ t('strava.last_updated') }}</span>
+            {{ formatCachedAt(cachedAt) }}
           </small>
         </div>
       </template>

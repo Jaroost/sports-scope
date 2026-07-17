@@ -3,11 +3,16 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'
 import { activityIcon, sportType } from '../activityHelpers'
+import { useStickyListHeader } from '../composables/useStickyListHeader'
 import ActivitiesOverviewMap from './ActivitiesOverviewMap.vue'
 
 const props = defineProps({
   endpoint: { type: String, default: '/strava/activities' },
 })
+
+// Header collé sous la navbar ; expose --sticky-header-h pour borner le panneau
+// de filtres en superposition.
+const { stickyEl } = useStickyListHeader()
 
 // Bascule liste / carte d'ensemble. La carte n'est chargée qu'à l'ouverture, et
 // récupère toutes les sorties du filtre courant (pas seulement la page affichée).
@@ -21,7 +26,6 @@ const loading = ref(true) // requête en cours (initiale ou refetch après filtr
 const hasLoaded = ref(false) // au moins une requête réussie
 const error = ref(null)
 const activities = ref([]) // page courante renvoyée par le serveur
-const cachedAt = ref(null)
 const total = ref(null) // total historique (toutes activités, sans filtre)
 
 const title = computed(() => t('strava.recent_activities'))
@@ -76,6 +80,14 @@ const activeFilterCount = computed(() => {
   if (dateFrom.value) n++
   if (dateTo.value) n++
   return n
+})
+
+// Badge du header : « filtrées / total » dès qu'un filtre restreint la liste,
+// sinon le seul total historique.
+const countBadge = computed(() => {
+  if (total.value === null) return null
+  if (!activeFilterCount.value) return String(total.value)
+  return `${filteredTotal.value} / ${total.value}`
 })
 
 function clearFilters() {
@@ -221,7 +233,6 @@ async function fetchActivities() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     activities.value = payload.activities || []
-    cachedAt.value = payload.cached_at || null
     total.value = payload.total ?? activities.value.length
     filteredTotal.value = payload.filtered_total ?? activities.value.length
     totalPages.value = payload.total_pages ?? 1
@@ -311,9 +322,9 @@ function applyUrlFilters() {
   maxDuration.value = num('max_dur')
   dateFrom.value = p.get('from') || ''
   dateTo.value = p.get('to') || ''
-  // Panneau déplié : la période appliquée est visible d'un coup d'œil et modifiable
-  // sur place.
-  showFilters.value = true
+  // Panneau replié : on arrive ici pour voir les activités, pas les filtres (le
+  // compteur du bouton signale déjà qu'il y en a d'actifs).
+  showFilters.value = false
   return true
 }
 
@@ -375,12 +386,6 @@ function formatDuration(seconds) {
   return h > 0 ? `${h}h ${m}min` : `${m}min`
 }
 
-function formatCachedAt(iso) {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
 function tssHint(source) {
   const key = source === 'power' ? 'tss_hint_power' : source === 'hr' ? 'tss_hint_hr' : 'tss_hint_estimated'
   return t(`strava.${key}`)
@@ -399,168 +404,165 @@ function gradeColor(cat) {
 
 <template>
   <div class="card shadow-sm border-0">
-    <div class="card-header activity-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-      <h2 class="h5 mb-0 d-flex align-items-center gap-2">
-        <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
-        <span>{{ title }}</span>
-        <span v-if="total !== null" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ total }}</span>
-      </h2>
-      <div class="d-flex align-items-center flex-wrap gap-2 gap-md-3">
-        <div class="btn-group btn-group-sm" role="group" :aria-label="title">
-          <button
-            type="button"
-            class="btn d-flex align-items-center gap-1"
-            :class="view === 'list' ? 'btn-warning' : 'btn-outline-secondary'"
-            :aria-pressed="view === 'list'"
-            @click="view = 'list'"
-          >
-            <i class="fa-solid fa-list-ul" aria-hidden="true"></i>
-            <span>{{ t('routes.view_list') }}</span>
-          </button>
-          <button
-            type="button"
-            class="btn d-flex align-items-center gap-1"
-            :class="view === 'map' ? 'btn-warning' : 'btn-outline-secondary'"
-            :aria-pressed="view === 'map'"
-            @click="view = 'map'"
-          >
-            <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
-            <span>{{ t('routes.view_map') }}</span>
-          </button>
-        </div>
-        <div class="btn-group btn-group-sm">
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            :class="{ active: showFilters }"
-            :aria-expanded="showFilters"
-            @click="showFilters = !showFilters"
-          >
-            <i class="fa-solid fa-filter" aria-hidden="true"></i>
-            <span>{{ t('strava.filters.toggle') }}</span>
-            <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
-          </button>
-          <!-- Réinitialisation à portée de main, sans avoir à déplier le panneau.
-               Affiché seulement quand il y a quelque chose à réinitialiser. -->
-          <button
-            v-if="activeFilterCount"
-            type="button"
-            class="btn btn-sm btn-danger d-flex align-items-center"
-            :title="t('strava.filters.clear')"
-            :aria-label="t('strava.filters.clear')"
-            @click="clearFilters"
-          >
-            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
-          </button>
-        </div>
-        <small v-if="cachedAt" class="text-muted d-flex align-items-center gap-1" :title="t('strava.last_updated')">
-          <i class="fa-regular fa-clock" aria-hidden="true"></i>
-          <span class="d-none d-md-inline">{{ t('strava.last_updated') }}</span>
-          {{ formatCachedAt(cachedAt) }}
-        </small>
-      </div>
-    </div>
-    <div v-if="showFilters && hasLoaded && !error" class="card-body border-bottom activity-filters">
-      <div class="row g-3">
-        <div class="col-12 col-md-4">
-          <label class="form-label small mb-1">{{ t('strava.filters.search') }}</label>
-          <input
-            v-model="search"
-            type="search"
-            class="form-control form-control-sm"
-            :placeholder="t('strava.filters.search_placeholder')"
-          />
-        </div>
-        <div class="col-12 col-md-4">
-          <label class="form-label small mb-1">{{ t('strava.filters.sport') }}</label>
-          <select v-model="sportFilter" class="form-select form-select-sm">
-            <option value="">{{ t('strava.filters.all_sports') }}</option>
-            <optgroup v-if="sportCategoryOptions.length" :label="t('strava.filters.sport_categories')">
-              <option
-                v-for="c in sportCategoryOptions"
-                :key="c"
-                :value="SPORT_CATEGORY_PREFIX + c"
-              >{{ sportCategoryLabel(c) }}</option>
-            </optgroup>
-            <optgroup :label="t('strava.filters.sport_types')">
-              <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>
-            </optgroup>
-          </select>
-        </div>
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">{{ t('strava.filters.distance') }}</label>
-          <div class="d-flex align-items-center gap-1">
-            <input v-model="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
-            <span class="text-muted">–</span>
-            <input v-model="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
-          </div>
-        </div>
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">{{ t('strava.filters.elevation') }}</label>
-          <div class="d-flex align-items-center gap-1">
-            <input v-model="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
-            <span class="text-muted">–</span>
-            <input v-model="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
-          </div>
-        </div>
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">{{ t('strava.filters.duration') }}</label>
-          <div class="d-flex align-items-center gap-1">
-            <input v-model="minDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
-            <span class="text-muted">–</span>
-            <input v-model="maxDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
-          </div>
-        </div>
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">{{ t('strava.filters.from') }}</label>
-          <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
-        </div>
-        <div class="col-6 col-md-4">
-          <label class="form-label small mb-1">{{ t('strava.filters.to') }}</label>
-          <input v-model="dateTo" type="date" class="form-control form-control-sm" />
-        </div>
-        <div class="col-12">
-          <label class="form-label small mb-1">{{ t('strava.filters.period') }}</label>
-          <div class="d-flex flex-wrap gap-2">
+    <div ref="stickyEl" class="activity-sticky-top">
+      <div class="card-header activity-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h2 class="h5 mb-0 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
+          <span>{{ title }}</span>
+          <span v-if="countBadge" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ countBadge }}</span>
+        </h2>
+        <div class="d-flex align-items-center flex-wrap gap-2 gap-md-3">
+          <div class="btn-group btn-group-sm" role="group" :aria-label="title">
             <button
-              v-for="preset in datePresets"
-              :key="preset"
               type="button"
-              class="btn btn-sm btn-outline-secondary"
-              :class="{ active: activeDatePreset === preset }"
-              @click="setDatePreset(preset)"
+              class="btn d-flex align-items-center gap-1"
+              :class="view === 'list' ? 'btn-warning' : 'btn-outline-secondary'"
+              :aria-pressed="view === 'list'"
+              @click="view = 'list'"
             >
-              {{ t(`strava.filters.${preset}`) }}
+              <i class="fa-solid fa-list-ul" aria-hidden="true"></i>
+              <span>{{ t('routes.view_list') }}</span>
+            </button>
+            <button
+              type="button"
+              class="btn d-flex align-items-center gap-1"
+              :class="view === 'map' ? 'btn-warning' : 'btn-outline-secondary'"
+              :aria-pressed="view === 'map'"
+              @click="view = 'map'"
+            >
+              <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+              <span>{{ t('routes.view_map') }}</span>
+            </button>
+          </div>
+          <div class="btn-group btn-group-sm">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              :class="{ active: showFilters }"
+              :aria-expanded="showFilters"
+              @click="showFilters = !showFilters"
+            >
+              <i class="fa-solid fa-filter" aria-hidden="true"></i>
+              <span>{{ t('strava.filters.toggle') }}</span>
+              <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
+            </button>
+            <!-- Réinitialisation à portée de main, sans avoir à déplier le panneau.
+                 Affiché seulement quand il y a quelque chose à réinitialiser. -->
+            <button
+              v-if="activeFilterCount"
+              type="button"
+              class="btn btn-sm btn-danger d-flex align-items-center"
+              :title="t('strava.filters.clear')"
+              :aria-label="t('strava.filters.clear')"
+              @click="clearFilters"
+            >
+              <i class="fa-solid fa-xmark" aria-hidden="true"></i>
             </button>
           </div>
         </div>
       </div>
-      <div class="d-flex justify-content-between align-items-center mt-3">
-        <small class="text-muted d-flex align-items-center gap-2">
-          <span
-            v-if="loading"
-            class="spinner-border spinner-border-sm text-warning"
-            aria-hidden="true"
-          ></span>
-          {{ t('strava.filters.results', { count: filteredTotal, total: total ?? 0 }) }}
-        </small>
-        <div class="d-flex align-items-center gap-2">
-          <button
-            type="button"
-            class="btn btn-sm btn-link text-decoration-none"
-            :disabled="!activeFilterCount"
-            @click="clearFilters"
-          >
-            <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('strava.filters.clear') }}
-          </button>
-          <button
-            type="button"
-            class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="showFilters = false"
-          >
-            <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
-            <span>{{ t('strava.filters.close') }}</span>
-          </button>
+      <div v-if="showFilters && hasLoaded && !error" class="card-body border-bottom activity-filters-overlay">
+        <div class="row g-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">{{ t('strava.filters.search') }}</label>
+            <input
+              v-model="search"
+              type="search"
+              class="form-control form-control-sm"
+              :placeholder="t('strava.filters.search_placeholder')"
+            />
+          </div>
+          <div class="col-12 col-md-4">
+            <label class="form-label small mb-1">{{ t('strava.filters.sport') }}</label>
+            <select v-model="sportFilter" class="form-select form-select-sm">
+              <option value="">{{ t('strava.filters.all_sports') }}</option>
+              <optgroup v-if="sportCategoryOptions.length" :label="t('strava.filters.sport_categories')">
+                <option
+                  v-for="c in sportCategoryOptions"
+                  :key="c"
+                  :value="SPORT_CATEGORY_PREFIX + c"
+                >{{ sportCategoryLabel(c) }}</option>
+              </optgroup>
+              <optgroup :label="t('strava.filters.sport_types')">
+                <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('strava.filters.distance') }}</label>
+            <div class="d-flex align-items-center gap-1">
+              <input v-model="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
+              <span class="text-muted">–</span>
+              <input v-model="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
+            </div>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('strava.filters.elevation') }}</label>
+            <div class="d-flex align-items-center gap-1">
+              <input v-model="minElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
+              <span class="text-muted">–</span>
+              <input v-model="maxElevation" type="number" min="0" step="10" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
+            </div>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('strava.filters.duration') }}</label>
+            <div class="d-flex align-items-center gap-1">
+              <input v-model="minDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
+              <span class="text-muted">–</span>
+              <input v-model="maxDuration" type="number" min="0" step="5" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
+            </div>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('strava.filters.from') }}</label>
+            <input v-model="dateFrom" type="date" class="form-control form-control-sm" />
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1">{{ t('strava.filters.to') }}</label>
+            <input v-model="dateTo" type="date" class="form-control form-control-sm" />
+          </div>
+          <div class="col-12">
+            <label class="form-label small mb-1">{{ t('strava.filters.period') }}</label>
+            <div class="d-flex flex-wrap gap-2">
+              <button
+                v-for="preset in datePresets"
+                :key="preset"
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                :class="{ active: activeDatePreset === preset }"
+                @click="setDatePreset(preset)"
+              >
+                {{ t(`strava.filters.${preset}`) }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mt-3">
+          <small class="text-muted d-flex align-items-center gap-2">
+            <span
+              v-if="loading"
+              class="spinner-border spinner-border-sm text-warning"
+              aria-hidden="true"
+            ></span>
+            {{ t('strava.filters.results', { count: filteredTotal, total: total ?? 0 }) }}
+          </small>
+          <div class="d-flex align-items-center gap-2">
+            <button
+              type="button"
+              class="btn btn-sm btn-link text-decoration-none"
+              :disabled="!activeFilterCount"
+              @click="clearFilters"
+            >
+              <i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>{{ t('strava.filters.clear') }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              @click="showFilters = false"
+            >
+              <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+              <span>{{ t('strava.filters.close') }}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -690,19 +692,35 @@ function gradeColor(cat) {
 </template>
 
 <style scoped>
-/* Panneau de filtres collé sous la navbar `fixed-top` (3.5rem, même offset que
-   PerformanceAnalysis) : la liste est longue, on garde les champs et le compteur
-   de résultats sous la main pendant le défilement.
-   - fond opaque : `card-body` est transparent, la liste défilerait au travers ;
-   - z-index : au-dessus des lignes de la liste et du canvas MapLibre de la vue carte ;
-   - max-height + overflow : sur mobile le panneau dépasse la hauteur d'écran, et
-     un élément sticky plus haut que la fenêtre laisse son bas inaccessible. */
-.activity-filters {
+/* Header collé sous la navbar `fixed-top` (3.5rem, même offset que
+   PerformanceAnalysis) : la liste est longue, on garde le titre, le compteur et la
+   bascule liste/carte sous la main pendant le défilement. Le conteneur ne réserve
+   que la hauteur du header — le panneau de filtres, hors flux, flotte par-dessus la
+   liste (voir .activity-filters-overlay).
+   - fond opaque : `card-header` est semi-transparent, la liste défilerait au travers ;
+   - z-index : au-dessus des lignes de la liste et du canvas MapLibre de la vue carte. */
+.activity-sticky-top {
   position: sticky;
   top: 3.5rem;
   z-index: 5;
   background: var(--bs-card-bg, var(--bs-body-bg));
-  max-height: calc(100dvh - 3.5rem);
+}
+
+/* Panneau de filtres en superposition, ancré sous le header. Sorti du flux pour ne
+   pas rogner la hauteur visible de la liste : celle-ci défile derrière lui.
+   - max-height + overflow : sur mobile le panneau dépasse l'écran, et son bas
+     deviendrait inaccessible (le défilement de la page ne le ramène pas, il est
+     collé au header). `--sticky-header-h` est mesurée par useStickyListHeader ;
+     le repli couvre le header sur une ligne, avant la première mesure.
+   - ombre : marque le détachement au-dessus de la liste. */
+.activity-filters-overlay {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bs-card-bg, var(--bs-body-bg));
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+  max-height: calc(100dvh - 3.5rem - var(--sticky-header-h, 3.5rem));
   overflow-y: auto;
 }
 

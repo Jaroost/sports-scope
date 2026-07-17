@@ -27,12 +27,15 @@ module FtpEstimator
   CP_FIT_DURATIONS = [300, 600, 1200].freeze
 
   CACHE_TTL = 12.hours
+  # À incrémenter quand la FORME du payload change : sans ça, les entrées déjà en
+  # cache (12 h) resserviraient sans les nouveaux champs. v2 = ajout de `contributors`.
+  CACHE_VERSION = 'v2'
 
   # Payload complet consommé par la carte FTP du front. Mis en cache, clé versionnée
   # par les activités ET les seuils athlète (FTP manuelle/poids) → invalidé dès
   # qu'une sortie ou un réglage change.
   def summary(user)
-    key = ['ftp', user.id, UserActivities.data_version(user.id),
+    key = ['ftp', CACHE_VERSION, user.id, UserActivities.data_version(user.id),
            Digest::MD5.hexdigest(athlete(user).to_json)].join('/')
     Rails.cache.fetch(key, expires_in: CACHE_TTL) { compute_summary(user) }
   end
@@ -62,19 +65,23 @@ module FtpEstimator
   end
 
   # Activités vélo (les 2 sources) portant une courbe de puissance, réduites au
-  # strict nécessaire : date + courbe `peak_powers`. On `select` explicitement pour
-  # ne PAS charger la colonne `streams` (volumineuse) inutile ici.
+  # strict nécessaire : identité (pour lier vers l'activité) + date + courbe
+  # `peak_powers`. On `select` explicitement pour ne PAS charger la colonne
+  # `streams` (volumineuse) inutile ici.
   def cycling_power_activities(user)
-    strava = user.strava_activities.select(:started_at, :activity_type, :peak_powers)
-    imported = user.imported_activities.select(:started_at, :activity_type, :peak_powers)
-    (strava.to_a + imported.to_a).filter_map do |a|
+    strava = user.strava_activities.select(:strava_id, :name, :started_at, :activity_type, :peak_powers)
+    imported = user.imported_activities.select(:id, :name, :started_at, :activity_type, :peak_powers)
+    rows = strava.to_a.map { |a| [a, 'strava', a.strava_id] } +
+           imported.to_a.map { |a| [a, 'imported', a.id] }
+    rows.filter_map do |a, source, external_id|
       next unless PerformanceRecords.sport_category(a.activity_type) == 'cycling'
       next unless a.started_at
 
       curve = a.peak_powers
       next unless curve.is_a?(Hash) && curve.any?
 
-      { started_at: a.started_at, peak: curve }
+      { started_at: a.started_at, peak: curve,
+        name: a.name, source: source, external_id: external_id.to_s }
     end
   end
 
@@ -91,7 +98,8 @@ module FtpEstimator
   def estimate_from(subset)
     return nil if subset.empty?
 
-    curve = mean_max_curve(subset)
+    entries = mean_max_entries(subset)
+    curve = entries.transform_values { |e| e[:watts] }
     best20 = curve[1200]
     best60 = curve[3600]
 
@@ -113,6 +121,7 @@ module FtpEstimator
     {
       watts: watts.round,
       method: method,
+      contributors: contributors(method, entries, fit),
       cp: cp&.round,
       w_prime: fit && fit[:w_prime].round,
       cp_points: fit ? fit[:points] : 0,
@@ -126,12 +135,40 @@ module FtpEstimator
   end
 
   # Courbe puissance-durée agrégée du sous-ensemble : pour chaque durée standard, la
-  # meilleure puissance atteinte, toutes sorties confondues (façon « mean-max curve »).
+  # meilleure puissance atteinte, toutes sorties confondues (façon « mean-max curve »),
+  # AVEC l'activité qui la détient (deux durées peuvent venir de sorties différentes).
+  # Clés = durées en secondes (Integer), valeurs = { watts:, activity: }.
+  def mean_max_entries(subset)
+    PeakPowerCurve::DURATIONS.each_with_object({}) do |d, out|
+      best = subset.filter_map do |a|
+        value = numeric(a[:peak][d.to_s])
+        [value, a] if value&.positive?
+      end.max_by { |value, _| value }
+      out[d] = { watts: best[0], activity: best[1] } if best
+    end
+  end
+
   # Clés = durées en secondes (Integer), valeurs = watts (Float).
   def mean_max_curve(subset)
-    PeakPowerCurve::DURATIONS.each_with_object({}) do |d, out|
-      best = subset.filter_map { |a| numeric(a[:peak][d.to_s]) }.max
-      out[d] = best if best&.positive?
+    mean_max_entries(subset).transform_values { |e| e[:watts] }
+  end
+
+  # Efforts ayant réellement déterminé l'estimation, pour les afficher/lier côté front.
+  # Dépend de la méthode retenue : les ancres 20/60 min reposent sur UN seul effort,
+  # le modèle CP sur les 2–3 durées effectivement ajustées.
+  def contributors(method, entries, fit)
+    durations = case method
+                when 'ftp_20min' then [1200]
+                when 'ftp_60min' then [3600]
+                else fit ? fit[:durations] : []
+                end
+    durations.filter_map do |d|
+      entry = entries[d]
+      next unless entry
+
+      act = entry[:activity]
+      { duration: d, watts: entry[:watts].round, name: act[:name], source: act[:source],
+        external_id: act[:external_id], started_at: act[:started_at]&.iso8601 }
     end
   end
 
@@ -158,7 +195,7 @@ module FtpEstimator
     # CP = P(∞) doit rester sous la plus faible puissance ajustée (P décroît avec t).
     return nil if cp >= points.map { |_, p| p }.min
 
-    { cp: cp, w_prime: wprime, points: n }
+    { cp: cp, w_prime: wprime, points: n, durations: points.map { |t, _| t } }
   end
 
   # Série mensuelle : à chaque fin de mois, estimation sur les 6 semaines précédentes.
@@ -172,7 +209,10 @@ module FtpEstimator
     while cursor <= now
       window_end = [cursor.end_of_month, now].min
       est = estimate_between(acts, window_end - WINDOW_DAYS.days, window_end)
-      points << { date: cursor.strftime('%Y-%m'), watts: est[:watts], method: est[:method] } if est
+      if est
+        points << { date: cursor.strftime('%Y-%m'), watts: est[:watts], method: est[:method],
+                    contributors: est[:contributors] }
+      end
       cursor = (cursor + 1.month).beginning_of_month
     end
     points

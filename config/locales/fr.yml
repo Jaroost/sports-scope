@@ -110,6 +110,9 @@ fr:
       cancel: "Annuler"
       manual_since: "Saisie manuelle depuis le %{date}"
       history_title: "Évolution de la FTP (fenêtre glissante de 6 semaines)"
+      based_on: "Efforts déterminants"
+      click_activity: "Cliquez pour ouvrir la sortie"
+      tap_activity: "Touchez une sortie pour l'ouvrir"
     load:
       title: "Forme & fatigue"
       intro: "Ta charge d'entraînement dans le temps, tous sports confondus. Trois indicateurs pour piloter progression et récupération."

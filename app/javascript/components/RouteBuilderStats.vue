@@ -168,7 +168,7 @@ const routeLoad = computed(() => {
       </div>
 
       <!-- Temps estimé -->
-      <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint')">
+      <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint', { speed: routeStore.avgSpeedKmh.value })">
         <span class="d-flex align-items-center gap-2">
           <i class="fa-solid fa-clock" aria-hidden="true"></i>
           <strong>{{ formatDuration(routeStore.estimatedSeconds.value) }}</strong>

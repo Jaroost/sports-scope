@@ -647,7 +647,7 @@ fr:
     places_loading: "Recherche des lieux…"
     places_error: "Impossible de charger les lieux."
     places_retry: "Réessayer"
-    estimated_time_hint: "Temps estimé (distance ÷ vitesse moyenne)"
+    estimated_time_hint: "Temps estimé (distance ÷ vitesse moyenne de %{speed} km/h)"
     avg_speed_hint: "Vitesse moyenne (km/h)"
     speed_suggestion: "réel : %{speed}"
     speed_suggestion_hint:

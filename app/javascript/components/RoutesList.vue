@@ -1051,7 +1051,7 @@ onMounted(() => {
                     <span
                       v-if="estimatedSecondsFor(r) > 0"
                       class="d-inline-flex align-items-center gap-1"
-                      :title="t('routes.estimated_time_hint')"
+                      :title="t('routes.estimated_time_hint', { speed: speeds[activityOf(r)] })"
                     >
                       <i class="fa-regular fa-clock" aria-hidden="true"></i>{{ formatDuration(estimatedSecondsFor(r)) }}
                     </span>

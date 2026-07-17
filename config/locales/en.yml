@@ -647,7 +647,7 @@ en:
     places_loading: "Looking up places…"
     places_error: "Couldn't load places."
     places_retry: "Retry"
-    estimated_time_hint: "Estimated time (distance ÷ average speed)"
+    estimated_time_hint: "Estimated time (distance ÷ %{speed} km/h average speed)"
     avg_speed_hint: "Average speed (km/h)"
     speed_suggestion: "actual: %{speed}"
     speed_suggestion_hint:

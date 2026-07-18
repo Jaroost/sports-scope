@@ -19,6 +19,7 @@ import { speedForSport } from '../userPreferences'
 
 export interface PlannedRouteSummary {
   id: number
+  share_token: string
   name: string
   activity: Sport
   distance_m: number | null

@@ -594,7 +594,7 @@ watch(rangeDays, () => { hoverIndex.value = null })
               </span>
             </div>
 
-            <WeekPlanner :athlete="athlete" :done-by-day="doneByDay" class="mt-3" />
+            <WeekPlanner :athlete="athlete" :done-by-day="doneByDay" fluid class="mt-3" />
 
             <div class="small text-body-tertiary mt-2">
               <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>{{ t(weekPlan.ramp === null ? 'performance.load.week.explain_event' : 'performance.load.week.explain') }}

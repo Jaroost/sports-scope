@@ -107,20 +107,6 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
       </div>
     </div>
     <div class="card-body d-flex flex-column gap-3">
-      <!-- Fraîcheur du moment -->
-      <div class="fresh-tile" :style="{ borderColor: zoneColor(current.form_zone) }">
-        <div class="d-flex align-items-center gap-3">
-          <span class="fresh-value" :style="{ color: zoneColor(current.form_zone) }">{{ fmtSigned(current.tsb) }}</span>
-          <div class="flex-grow-1">
-            <div class="small text-muted">
-              {{ t('performance.load.tsb_label') }}
-              <span class="text-body-tertiary">· {{ t('performance.load.tsb_sub') }}</span>
-            </div>
-            <span class="badge" :style="{ backgroundColor: zoneColor(current.form_zone) }">{{ t(`performance.load.zone_${current.form_zone}`) }}</span>
-          </div>
-        </div>
-      </div>
-
       <!-- Recommandation du jour -->
       <div v-if="recommendation" class="reco-card" :style="{ borderColor: ACTION_STYLE[recommendation.action].color }">
         <div class="d-flex align-items-center gap-3">
@@ -139,6 +125,11 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
             </div>
             <div class="small text-muted">
               {{ t(`performance.load.reco.${recommendation.reason}`, { tsb: recommendation.tsb, days: recommendation.days ?? 0 }) }}
+              <span
+                v-if="recommendation.tss"
+                class="reco-tss"
+                :title="t('performance.load.reco.tss_explain')"
+              >(~{{ recommendation.tss }} TSS <i class="fa-solid fa-circle-info" aria-hidden="true"></i>)</span>
             </div>
           </div>
         </div>
@@ -214,6 +205,9 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
               {{ t('performance.load.event.summary', { distance: eventInfo.distanceKm, date: eventDateFmt(eventInfo.date) }) }}
               <span class="badge ms-1" :style="{ backgroundColor: PHASE_COLOR[eventInfo.phase] }">{{ t(`performance.load.event.phase_${eventInfo.phase}`) }}</span>
             </div>
+            <div class="small text-muted">
+              {{ t('performance.load.event.cost', { duration: fmtDuration(eventInfo.durationMin), tss: eventInfo.tss }) }}
+            </div>
             <div v-if="feasibility" class="small" :style="{ color: FEAS_COLOR[feasibility.level] }">
               <i class="fa-solid fa-gauge-high me-1" aria-hidden="true"></i>{{ t(`performance.load.event.feasibility_${feasibility.level}`) }}
             </div>
@@ -234,20 +228,6 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
 </template>
 
 <style scoped>
-.fresh-tile {
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--bs-border-color);
-  border-left-width: 4px;
-  border-radius: 0.5rem;
-}
-.fresh-value {
-  font-size: 1.75rem;
-  font-weight: 700;
-  line-height: 1;
-  flex: 0 0 auto;
-  min-width: 2.5rem;
-  text-align: center;
-}
 .reco-card,
 .event-card {
   padding: 0.75rem 1rem;
@@ -276,6 +256,7 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
   width: auto;
   min-width: 11rem;
 }
+.reco-tss,
 .reco-distance {
   cursor: help;
   white-space: nowrap;

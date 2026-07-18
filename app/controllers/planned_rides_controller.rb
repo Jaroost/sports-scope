@@ -113,6 +113,9 @@ class PlannedRidesController < ApplicationController
       created_at: plan.created_at.iso8601,
       route: {
         id: plan.route.id,
+        # Token de partage : sert au lien « naviguer » (/routes/:token/navigate), qui
+        # s'ouvre par token et non par id.
+        share_token: plan.route.share_token,
         name: plan.route.name,
         activity: plan.route.activity,
         distance_m: plan.route.distance_m,

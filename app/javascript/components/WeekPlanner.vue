@@ -214,6 +214,32 @@ function openMove(plan: PlannedRide) {
   moveTarget.value = plan
 }
 
+// En mode fluide (widget), toute la carte est cliquable et ouvre la feuille d'options
+// (déplacer / voir / supprimer) : plus de petits boutons croix/déplacer sur la carte.
+function onPlanClick(plan: PlannedRide) {
+  if (props.fluid) openMove(plan)
+}
+
+// « Voir l'itinéraire » : on ne dispose que de l'id (pas du token de partage), donc on
+// ouvre l'éditeur/carte par id — la voie id-based pour visualiser un itinéraire.
+const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
+const localePrefix = lang ? `/${lang}` : ''
+function routeHref(plan: PlannedRide): string {
+  return `${localePrefix}/routes/${plan.route.id}/edit`
+}
+
+// « Naviguer » : mode GPS turn-by-turn, ouvert par token de partage (pas par id).
+function navigateHref(plan: PlannedRide): string {
+  return `${localePrefix}/routes/${plan.route.share_token}/navigate`
+}
+
+// Suppression depuis la feuille : on retire le plan puis on ferme.
+function removeFromSheet() {
+  const plan = moveTarget.value
+  moveTarget.value = null
+  if (plan) removePlan(plan.id)
+}
+
 // Contexte du plan en cours de déplacement : ses voisins du jour + son rang (pour
 // griser Monter/Descendre aux extrémités). Recalculé après chaque réordonnancement.
 const moveContext = computed(() => {
@@ -276,9 +302,11 @@ async function moveToDay(iso: string) {
               v-for="plan in plansFor(d.iso)"
               :key="plan.id"
               class="planner-plan"
-              :class="{ 'is-done': isPlanDone(plan), 'is-dragging': dragId === plan.id }"
-              :title="isPlanDone(plan) ? t('performance.load.week.plan_done') : t('performance.load.week.drag_hint')"
+              :class="{ 'is-done': isPlanDone(plan), 'is-dragging': dragId === plan.id, 'is-clickable': props.fluid }"
+              :title="props.fluid ? t('performance.load.week.open_plan') : (isPlanDone(plan) ? t('performance.load.week.plan_done') : t('performance.load.week.drag_hint'))"
+              :role="props.fluid ? 'button' : undefined"
               draggable="true"
+              @click="onPlanClick(plan)"
               @dragstart="onDragStart(plan, $event)"
               @dragend="onDragEnd"
             >
@@ -294,21 +322,25 @@ async function moveToDay(iso: string) {
                 :title="t('performance.load.week.day_tss')"
               >{{ doneTssFor(d.iso) }}</span>
               <span v-else-if="!isPlanDone(plan) && tssOf(plan) !== null" class="planner-plan-tss">≈ {{ tssOf(plan) }}</span>
-              <button
-                type="button"
-                class="planner-plan-move"
-                :aria-label="t('performance.load.week.move')"
-                :title="t('performance.load.week.move')"
-                @click.stop="openMove(plan)"
-              >
-                <i class="fa-solid fa-up-down-left-right" aria-hidden="true"></i>
-              </button>
-              <button
-                type="button"
-                class="btn-close btn-close-sm planner-plan-remove"
-                :aria-label="t('performance.load.week.remove_plan')"
-                @click="removePlan(plan.id)"
-              ></button>
+              <!-- Mode fluide : la carte entière ouvre la feuille d'options, donc plus de
+                   boutons déplacer/croix ici. Mode grille : on garde les deux. -->
+              <template v-if="!props.fluid">
+                <button
+                  type="button"
+                  class="planner-plan-move"
+                  :aria-label="t('performance.load.week.move')"
+                  :title="t('performance.load.week.move')"
+                  @click.stop="openMove(plan)"
+                >
+                  <i class="fa-solid fa-up-down-left-right" aria-hidden="true"></i>
+                </button>
+                <button
+                  type="button"
+                  class="btn-close btn-close-sm planner-plan-remove"
+                  :aria-label="t('performance.load.week.remove_plan')"
+                  @click="removePlan(plan.id)"
+                ></button>
+              </template>
             </div>
 
             <!-- Jour où l'on est sorti sans itinéraire planifié : on le signale quand même. -->
@@ -392,6 +424,19 @@ async function moveToDay(iso: string) {
                   </button>
                 </div>
               </div>
+            </div>
+
+            <!-- Voir / naviguer / retirer de la semaine. -->
+            <div class="move-section move-actions">
+              <a :href="routeHref(moveTarget)" class="btn btn-sm btn-outline-primary flex-fill">
+                <i class="fa-solid fa-map-location-dot me-1" aria-hidden="true"></i>{{ t('performance.load.week.view_route') }}
+              </a>
+              <a :href="navigateHref(moveTarget)" class="btn btn-sm btn-outline-success flex-fill">
+                <i class="fa-solid fa-location-arrow me-1" aria-hidden="true"></i>{{ t('performance.load.week.navigate_route') }}
+              </a>
+              <button type="button" class="btn btn-sm btn-outline-danger flex-fill" @click="removeFromSheet">
+                <i class="fa-solid fa-trash-can me-1" aria-hidden="true"></i>{{ t('performance.load.week.remove_plan') }}
+              </button>
             </div>
           </div>
         </div>
@@ -544,6 +589,10 @@ async function moveToDay(iso: string) {
   opacity: 0.4;
   cursor: grabbing;
 }
+/* Mode fluide : la carte entière est un bouton d'ouverture de la feuille d'options. */
+.planner-plan.is-clickable {
+  cursor: pointer;
+}
 .planner-plan-icon {
   flex: 0 0 auto;
   color: #fd7e14;
@@ -651,6 +700,16 @@ async function moveToDay(iso: string) {
 }
 .move-section + .move-section {
   margin-top: 1rem;
+}
+/* Rangée d'actions bas de feuille : voir / naviguer / supprimer. Chaque bouton garde
+   une largeur lisible ; ils passent à la ligne si la feuille est trop étroite. */
+.move-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.move-actions > * {
+  flex: 1 1 8rem;
 }
 .move-label {
   font-size: 0.8rem;

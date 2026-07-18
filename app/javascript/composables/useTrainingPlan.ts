@@ -173,6 +173,10 @@ export type WeekPlan = {
   remaining: number // ce qu'il reste à PLACER : target − done − planned
   donePct: number
   plannedPct: number
+  // Vrai quand fait + prévu dépasse la cible : la barre se cale alors sur le total
+  // (fait + prévu) plutôt que sur la cible, et `targetPct` situe la cible à l'intérieur.
+  overPlanned: boolean
+  targetPct: number // position de la cible sur la barre, en % de sa largeur (0–100)
   daysLeft: number
   minutesLeft: number
   ramp: number | null // null pendant une prépa datée : c'est l'affûtage qui pilote
@@ -446,11 +450,15 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
       else if (done > expected * 1.25) pace = 'ahead'
     }
 
-    // Largeurs des segments. Le vert est servi en premier (le fait prime), puis
-    // l'orange prend ce qui reste de la barre : dépasser la cible ne doit pas faire
-    // déborder le total au-delà de 100 %.
-    const donePct = target > 0 ? Math.min(100, Math.round((done / target) * 100)) : 0
-    const plannedPct = target > 0 ? Math.min(100 - donePct, Math.round((planned / target) * 100)) : 0
+    // Largeurs des segments. Tant que fait + prévu tient sous la cible, la barre se cale
+    // sur la cible (le reste à placer apparaît en gris). Dès qu'on planifie AU-DELÀ de la
+    // cible, la barre se cale sur le total (fait + prévu) : on voit alors tout le prévu,
+    // et un repère marque où se situe la cible (`targetPct`).
+    const overPlanned = done + planned > target
+    const barMax = Math.max(target, done + planned)
+    const donePct = barMax > 0 ? Math.round((done / barMax) * 100) : 0
+    const plannedPct = barMax > 0 ? Math.round((planned / barMax) * 100) : 0
+    const targetPct = barMax > 0 ? Math.min(100, Math.round((target / barMax) * 100)) : 0
 
     return {
       target,
@@ -459,6 +467,8 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
       remaining,
       donePct,
       plannedPct,
+      overPlanned,
+      targetPct,
       daysLeft,
       minutesLeft,
       ramp: onEvent ? null : GOAL_RAMP[goal.value],

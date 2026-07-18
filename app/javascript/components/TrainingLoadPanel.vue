@@ -572,10 +572,20 @@ watch(rangeDays, () => { hoverIndex.value = null })
               </span>
             </div>
 
-            <!-- Vert = fait, orange = prévu (itinéraires planifiés), gris = à placer. -->
-            <div class="progress week-progress" role="progressbar" :aria-valuenow="weekPlan.donePct" aria-valuemin="0" aria-valuemax="100">
-              <div class="progress-bar" :style="{ width: `${weekPlan.donePct}%`, backgroundColor: WEEK_SEGMENT_COLOR.done }"></div>
-              <div class="progress-bar progress-bar-striped" :style="{ width: `${weekPlan.plannedPct}%`, backgroundColor: WEEK_SEGMENT_COLOR.planned }"></div>
+            <!-- Vert = fait, orange = prévu (itinéraires planifiés), gris = à placer.
+                 Si fait + prévu dépasse la cible, la barre se cale sur le total et un
+                 repère marque la position de la cible. -->
+            <div class="week-progress-wrap">
+              <div class="progress week-progress" role="progressbar" :aria-valuenow="weekPlan.donePct" aria-valuemin="0" aria-valuemax="100">
+                <div class="progress-bar" :style="{ width: `${weekPlan.donePct}%`, backgroundColor: WEEK_SEGMENT_COLOR.done }"></div>
+                <div class="progress-bar progress-bar-striped" :style="{ width: `${weekPlan.plannedPct}%`, backgroundColor: WEEK_SEGMENT_COLOR.planned }"></div>
+              </div>
+              <div
+                v-if="weekPlan.overPlanned"
+                class="week-target-marker"
+                :style="{ left: `${weekPlan.targetPct}%` }"
+                :title="t('performance.load.week.target', { tss: weekPlan.target })"
+              ></div>
             </div>
 
             <div class="d-flex flex-wrap gap-2 justify-content-between small mt-2">
@@ -786,6 +796,31 @@ watch(rangeDays, () => { hoverIndex.value = null })
 }
 .week-progress {
   height: 0.75rem;
+}
+/* Repère « objectif » : trait vertical qui déborde légèrement la barre, coiffé d'un
+   petit fanion, posé à la position de la cible quand on planifie au-delà. */
+.week-progress-wrap {
+  position: relative;
+}
+.week-target-marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--bs-body-color, #212529);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.week-target-marker::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--bs-body-color, #212529);
 }
 .event-card {
   padding: 0.75rem 1rem;

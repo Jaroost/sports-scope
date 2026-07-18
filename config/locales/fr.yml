@@ -23,9 +23,12 @@ fr:
     no_records: "Aucun record disponible pour ce sport."
     tabs:
       records: "Records & volumes"
-      records_hint: "Dépend des filtres"
       fitness: "Forme & seuils"
       fitness_hint: "Sur tout l'historique, hors filtres"
+    fitness_subs:
+      ftp: "FTP"
+      load: "Forme & fatigue"
+      zones: "Zones d'intensité"
     filters:
       toggle: "Filtrer"
       close: "Fermer"
@@ -122,6 +125,7 @@ fr:
       today_state: "État ce jour-là"
       detail_hint: "Survolez le graphique pour voir un autre jour"
       detail_rest: "Aucune séance ce jour-là"
+      toggle_curve: "Afficher / masquer la courbe"
       ctl_label: "Forme de fond"
       ctl_sub: "CTL · 42 jours"
       ctl_help: "Ton niveau d'entraînement accumulé. Monte lentement quand tu t'entraînes régulièrement — c'est ta progression."

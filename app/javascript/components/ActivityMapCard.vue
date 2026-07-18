@@ -1026,8 +1026,10 @@ onBeforeUnmount(() => {
 .map-wrap.expanded {
   position: fixed;
   /* Sits below the fixed-top navbar (z-index 1030) and above anything else.
-     left=0/right=0 spans the full viewport width. */
-  top: 4rem;
+     left=0/right=0 spans the full viewport width. Offset = real navbar height
+     (--navbar-h, mesurée par trackNavbar) : elle wrappe sur deux lignes avec
+     beaucoup de menus, un offset fixe passerait dessous. Fallback 4rem. */
+  top: var(--navbar-h, 4rem);
   left: 0;
   right: 0;
   bottom: 0;

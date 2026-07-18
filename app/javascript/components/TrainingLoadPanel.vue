@@ -1,19 +1,28 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, watchEffect, nextTick } from 'vue'
 import { t } from '../i18n'
 import {
   useTrainingPlan, zoneColor, formZone, acwrColor, fmtDuration, fmtSigned, eventDateFmt,
-  athleteFromSummary,
+  athleteFromSummary, polarize,
   ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS, WEEK_PACE_COLOR, WEEK_SEGMENT_COLOR,
   type Point, type LoadSummary, type DayActivity,
 } from '../composables/useTrainingPlan'
 import { usePlannedLoads } from '../composables/usePlannedRides'
 import ZoneDistribution from './ZoneDistribution.vue'
 import WeekPlanner from './WeekPlanner.vue'
+import MetricChart from './MetricChart.vue'
 
 const props = defineProps({
   admin: { type: Boolean, default: false },
+  // Sous-onglet actif de « Forme & seuils » côté parent : 'load' (charge/forme) ou
+  // 'zones' (répartition d'intensité). Une seule instance, un seul fetch — on ne fait
+  // qu'afficher l'un ou l'autre. FTP est un panneau à part (FtpPanel).
+  section: { type: String, default: 'load' },
 })
+
+// Résumé remonté au parent pour les badges de sous-onglets : la reco du jour (badge
+// « Forme & fatigue ») et le verdict de polarisation des zones (badge « Zones »).
+const emit = defineEmits<{ summary: [payload: { recoAction: string | null; zonesVerdict: string | null }] }>()
 
 const loading = ref(true)
 const error = ref<string | null>(null)
@@ -60,8 +69,6 @@ async function fetchData() {
   } finally {
     loading.value = false
   }
-  await nextTick()
-  renderChart()
 }
 
 // Ancre : arrivée depuis le widget d'accueil via /performance#training-load. Le
@@ -81,47 +88,6 @@ onMounted(async () => {
 // ── Zones de fraîcheur (TSB) ─────────────────────────────────────────────────
 // `zoneColor` / `formZone` viennent du composable (partagés avec le widget d'accueil).
 const ZONE_ORDER = ['fresh', 'neutral', 'productive', 'overreaching', 'very_fresh']
-
-// Remplissages translucides des bandes de zones (mêmes couleurs que la légende).
-const ZONE_FILL: Record<string, string> = {
-  very_fresh: 'rgba(13,110,253,0.20)',
-  fresh: 'rgba(25,135,84,0.20)',
-  neutral: 'rgba(108,117,125,0.14)',
-  productive: 'rgba(253,126,20,0.22)',
-  overreaching: 'rgba(220,53,69,0.24)',
-}
-
-// Plugin Chart.js : peint en fond les bandes de zones TSB, calées sur l'axe droit
-// (`tsb`), derrière les courbes. Bornes = seuils de formZone.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const tsbZonesPlugin: any = {
-  id: 'tsbZones',
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  beforeDatasetsDraw(c: any) {
-    const scale = c.scales?.tsb
-    const area = c.chartArea
-    if (!scale || !area) return
-    const bands = [
-      { from: 20, to: Infinity, fill: ZONE_FILL.very_fresh },
-      { from: 5, to: 20, fill: ZONE_FILL.fresh },
-      { from: -10, to: 5, fill: ZONE_FILL.neutral },
-      { from: -30, to: -10, fill: ZONE_FILL.productive },
-      { from: -Infinity, to: -30, fill: ZONE_FILL.overreaching },
-    ]
-    const { ctx } = c
-    ctx.save()
-    for (const b of bands) {
-      let yTop = b.to === Infinity ? area.top : scale.getPixelForValue(b.to)
-      let yBot = b.from === -Infinity ? area.bottom : scale.getPixelForValue(b.from)
-      yTop = Math.max(area.top, Math.min(area.bottom, yTop))
-      yBot = Math.max(area.top, Math.min(area.bottom, yBot))
-      if (yBot - yTop <= 0.5) continue
-      ctx.fillStyle = b.fill
-      ctx.fillRect(area.left, yTop, area.right - area.left, yBot - yTop)
-    }
-    ctx.restore()
-  },
-}
 
 // ── Plan d'entraînement (objectif + reco du jour), partagé avec le widget d'accueil ─
 // Les seuils athlète sont dérivés de la charge déjà chargée (pas de seconde requête),
@@ -156,6 +122,16 @@ const {
   openEventEditor, saveEvent, removeEvent, recommendation, weekPlan,
 } = useTrainingPlan(data, plannedLoads)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
+
+// Remonte le résumé au parent dès que la reco ou les zones changent. Verdict des zones :
+// on privilégie la puissance (vélo), à défaut la FC — un seul canal pour un badge.
+watchEffect(() => {
+  const zoneChannel = data.value?.zones?.power ?? data.value?.zones?.hr ?? null
+  emit('summary', {
+    recoAction: recommendation.value?.action ?? null,
+    zonesVerdict: zoneChannel ? polarize(zoneChannel).verdict : null,
+  })
+})
 
 // ── Série affichée selon la fenêtre choisie ──────────────────────────────────
 const displayed = computed<Point[]>(() => {
@@ -243,26 +219,29 @@ async function runBackfill() {
   }
 }
 
-// ── Graphique PMC (Chart.js) ─────────────────────────────────────────────────
-// Deux graphiques empilés : « charge » (CTL+ATL) en haut, « fraîcheur » (TSB + zones)
-// en bas. Ainsi chaque bande de couleur ne va qu'avec la seule courbe sous elle.
-const loadCanvas = ref<HTMLCanvasElement | null>(null)
-const tsbCanvas = ref<HTMLCanvasElement | null>(null)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let loadChart: any = null
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let tsbChart: any = null
+// ── Courbes par métrique, rangées « derrière » leur case ─────────────────────
+// Chaque case (forme de fond, fatigue, fraîcheur, ratio) ouvre/ferme sa propre courbe
+// (MetricChart) sous les cases. Les échelles diffèrent (charge / fraîcheur signée /
+// ratio) → un graphe autonome par case plutôt qu'un axe partagé. Rien n'est affiché
+// par défaut : les cases restent le résumé, la courbe est le détail à la demande.
+type Metric = 'ctl' | 'atl' | 'tsb' | 'acwr'
+const METRIC_ORDER: Metric[] = ['ctl', 'atl', 'tsb', 'acwr']
+const openMetrics = ref<Set<Metric>>(new Set())
 
-const hasData = computed(() => (data.value?.series?.length ?? 0) >= 2)
-
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short' })
+function toggleMetric(m: Metric) {
+  const s = new Set(openMetrics.value)
+  if (s.has(m)) s.delete(m)
+  else s.add(m)
+  openMetrics.value = s
 }
+function isMetricOpen(m: Metric): boolean {
+  return openMetrics.value.has(m)
+}
+const openMetricsOrdered = computed<Metric[]>(() => METRIC_ORDER.filter((m) => openMetrics.value.has(m)))
 
-// ── Panneau de détail (sous les graphes) ─────────────────────────────────────
-// Un tooltip flottant recouvrait presque tout le tracé (les graphes ne font que
-// ~200 px de haut, et la liste des séances allonge la bulle) : le détail vit donc
-// dans un bloc dédié sous les courbes. Le survol/tap ne fait que déplacer l'index.
+// ── Panneau de détail (sous les courbes) ─────────────────────────────────────
+// Le survol d'une courbe déplace `hoverIndex` (remonté par MetricChart) ; le bloc de
+// détail commun décrit alors le jour lu, quel que soit le graphe survolé.
 const hoverIndex = ref<number | null>(null)
 
 function dateLong(iso: string): string {
@@ -279,138 +258,15 @@ const detail = computed<Point | null>(() => {
 const detailZone = computed(() => (detail.value ? formZone(detail.value.tsb) : 'neutral'))
 const detailActivities = computed<DayActivity[]>(() => detail.value?.activities ?? [])
 
-// Repère vertical sur les DEUX graphes au jour lu, puisque le détail n'est plus
-// ancré au curseur : sans lui, on ne saurait pas quel point le bloc décrit.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const hoverLinePlugin: any = {
-  id: 'hoverLine',
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  afterDatasetsDraw(c: any) {
-    if (hoverIndex.value == null) return
-    const pt = c.getDatasetMeta(0)?.data?.[hoverIndex.value]
-    const area = c.chartArea
-    if (!pt || !area) return
-    const { ctx } = c
-    ctx.save()
-    ctx.beginPath()
-    ctx.moveTo(pt.x, area.top)
-    ctx.lineTo(pt.x, area.bottom)
-    ctx.lineWidth = 1
-    ctx.setLineDash([4, 3])
-    ctx.strokeStyle = 'rgba(33,37,41,0.5)'
-    ctx.stroke()
-    ctx.restore()
-  },
-}
-
-// Chart.js n'expose pas d'événement « index survolé » : on détourne le hook du
-// tooltip (désactivé visuellement) qui, lui, connaît le point actif.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function syncDetail(context: { tooltip: any }) {
-  const idx = context.tooltip?.dataPoints?.[0]?.dataIndex
-  // `opacity: 0` = sortie de survol : on garde le dernier index tant que le curseur
-  // reste sur le graphe (le repli sur le dernier jour se fait au mouseleave).
-  if (idx != null) hoverIndex.value = idx
-}
-
-// Le graphe non survolé doit redessiner son repère : Chart.js ne le sait pas.
-watch(hoverIndex, () => {
-  loadChart?.render()
-  tsbChart?.render()
-})
-
-// Aligne l'aire de tracé des deux graphes : même largeur d'axe Y à gauche.
-const Y_AXIS_WIDTH = 46
-
-// Interactions communes aux deux graphes : les deux alimentent le même panneau.
-function sharedOptions(extra: Record<string, unknown> = {}) {
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    interaction: { mode: 'index' as const, intersect: false },
-    plugins: {
-      legend: { position: 'top' as const, labels: { usePointStyle: true, boxWidth: 8 } },
-      tooltip: { enabled: false, external: syncDetail },
-    },
-    ...extra,
-  }
-}
-
-async function renderChart() {
-  if (loadChart) { loadChart.destroy(); loadChart = null }
-  if (tsbChart) { tsbChart.destroy(); tsbChart = null }
-  if (!hasData.value || !loadCanvas.value || !tsbCanvas.value) return
-  const { Chart, registerables } = await import('chart.js')
-  Chart.register(...registerables)
-
-  const pts = displayed.value
-  const labels = pts.map((p) => fmtDate(p.date))
-
-  // ── Graphe du haut : charge (forme de fond + fatigue) ──────────────────────
-  const loadCtx = loadCanvas.value.getContext('2d')
-  if (loadCtx) {
-    loadChart = new Chart(loadCtx, {
-      type: 'line',
-      plugins: [hoverLinePlugin],
-      data: {
-        labels,
-        datasets: [
-          {
-            label: t('performance.load.ctl_label'), data: pts.map((p) => p.ctl),
-            borderColor: '#0d6efd', pointRadius: 0, borderWidth: 2, tension: 0.3,
-          },
-          {
-            label: t('performance.load.atl_label'), data: pts.map((p) => p.atl),
-            borderColor: '#fd7e14', pointRadius: 0, borderWidth: 1.5, tension: 0.3, borderDash: [5, 3],
-          },
-        ],
-      },
-      options: sharedOptions({
-        scales: {
-          y: { beginAtZero: true, position: 'left', afterFit: (s: { width: number }) => { s.width = Y_AXIS_WIDTH }, title: { display: true, text: t('performance.load.axis_load') } },
-          x: { ticks: { display: false }, grid: { display: false } },
-        },
-      }),
-    })
-  }
-
-  // ── Graphe du bas : fraîcheur (TSB) seule, avec les bandes de zones ─────────
-  const tsbCtx = tsbCanvas.value.getContext('2d')
-  if (tsbCtx) {
-    tsbChart = new Chart(tsbCtx, {
-      type: 'line',
-      plugins: [tsbZonesPlugin, hoverLinePlugin],
-      data: {
-        labels,
-        datasets: [
-          {
-            label: t('performance.load.tsb_label'), data: pts.map((p) => p.tsb), yAxisID: 'tsb',
-            borderColor: '#343a40', pointRadius: 0, borderWidth: 2, tension: 0.3,
-          },
-        ],
-      },
-      options: sharedOptions({
-        scales: {
-          tsb: { type: 'linear', position: 'left', afterFit: (s: { width: number }) => { s.width = Y_AXIS_WIDTH }, title: { display: true, text: t('performance.load.axis_tsb') } },
-          x: { ticks: { maxTicksLimit: 12, autoSkip: true } },
-        },
-      }),
-    })
-  }
-}
-
-// Re-render quand la fenêtre change. L'index survolé désigne une position dans la
-// série affichée : il ne veut plus rien dire une fois la fenêtre changée.
-watch(rangeDays, async () => { hoverIndex.value = null; await nextTick(); renderChart() })
-
-onBeforeUnmount(() => {
-  if (loadChart) { loadChart.destroy(); loadChart = null }
-  if (tsbChart) { tsbChart.destroy(); tsbChart = null }
-})
+// Fenêtre changée : l'index survolé désigne une position dans la série affichée, il ne
+// veut plus rien dire une fois la fenêtre changée.
+watch(rangeDays, () => { hoverIndex.value = null })
 </script>
 
 <template>
   <div id="training-load" ref="rootEl" class="mb-4">
+    <!-- Sous-onglet « Forme & fatigue » : titre, tuiles, reco, planificateur, courbes PMC. -->
+    <div v-show="section === 'load'">
     <h2 class="h5 d-flex align-items-center gap-2 mb-1">
       <i class="fa-solid fa-heart-pulse text-warning" aria-hidden="true"></i>
       <span>{{ t('performance.load.title') }}</span>
@@ -435,7 +291,17 @@ onBeforeUnmount(() => {
           <!-- Valeurs du jour -->
           <div class="row g-3 mb-3">
             <div class="col-6 col-lg-3">
-              <div class="load-tile" :title="t('performance.load.ctl_help')">
+              <div
+                class="load-tile load-tile-toggle"
+                :class="{ 'is-open': isMetricOpen('ctl') }"
+                role="button"
+                tabindex="0"
+                :aria-expanded="isMetricOpen('ctl')"
+                :title="t('performance.load.toggle_curve')"
+                @click="toggleMetric('ctl')"
+                @keydown.enter.prevent="toggleMetric('ctl')"
+                @keydown.space.prevent="toggleMetric('ctl')"
+              >
                 <div class="small text-muted">{{ t('performance.load.ctl_label') }} <span class="text-body-tertiary">· {{ t('performance.load.ctl_sub') }}</span></div>
                 <div class="d-flex align-items-baseline gap-2">
                   <span class="fs-3 fw-bold" style="color:#0d6efd">{{ Math.round(current.ctl) }}</span>
@@ -448,7 +314,17 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="col-6 col-lg-3">
-              <div class="load-tile" :title="t('performance.load.atl_help')">
+              <div
+                class="load-tile load-tile-toggle"
+                :class="{ 'is-open': isMetricOpen('atl') }"
+                role="button"
+                tabindex="0"
+                :aria-expanded="isMetricOpen('atl')"
+                :title="t('performance.load.toggle_curve')"
+                @click="toggleMetric('atl')"
+                @keydown.enter.prevent="toggleMetric('atl')"
+                @keydown.space.prevent="toggleMetric('atl')"
+              >
                 <div class="small text-muted">{{ t('performance.load.atl_label') }} <span class="text-body-tertiary">· {{ t('performance.load.atl_sub') }}</span></div>
                 <div class="d-flex align-items-baseline gap-2">
                   <span class="fs-3 fw-bold" style="color:#fd7e14">{{ Math.round(current.atl) }}</span>
@@ -461,7 +337,17 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div class="col-6 col-lg-3">
-              <div class="load-tile" :title="t('performance.load.tsb_help')">
+              <div
+                class="load-tile load-tile-toggle"
+                :class="{ 'is-open': isMetricOpen('tsb') }"
+                role="button"
+                tabindex="0"
+                :aria-expanded="isMetricOpen('tsb')"
+                :title="t('performance.load.toggle_curve')"
+                @click="toggleMetric('tsb')"
+                @keydown.enter.prevent="toggleMetric('tsb')"
+                @keydown.space.prevent="toggleMetric('tsb')"
+              >
                 <div class="small text-muted">{{ t('performance.load.tsb_label') }} <span class="text-body-tertiary">· {{ t('performance.load.tsb_sub') }}</span></div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                   <span class="fs-3 fw-bold" :style="{ color: zoneColor(currentZone) }">{{ fmtSigned(current.tsb) }}</span>
@@ -476,7 +362,17 @@ onBeforeUnmount(() => {
             </div>
             <!-- ACWR : ratio charge aiguë/chronique (risque de blessure) -->
             <div class="col-6 col-lg-3">
-              <div class="load-tile" :title="t('performance.load.acwr_help')">
+              <div
+                class="load-tile load-tile-toggle"
+                :class="{ 'is-open': isMetricOpen('acwr') }"
+                role="button"
+                tabindex="0"
+                :aria-expanded="isMetricOpen('acwr')"
+                :title="t('performance.load.toggle_curve')"
+                @click="toggleMetric('acwr')"
+                @keydown.enter.prevent="toggleMetric('acwr')"
+                @keydown.space.prevent="toggleMetric('acwr')"
+              >
                 <div class="small text-muted">{{ t('performance.load.acwr_label') }} <span class="text-body-tertiary">· {{ t('performance.load.acwr_sub') }}</span></div>
                 <div class="d-flex align-items-center gap-2 flex-wrap">
                   <span class="fs-3 fw-bold" :style="{ color: acwrColor(current.acwr_zone) }">
@@ -487,6 +383,72 @@ onBeforeUnmount(() => {
                 <div class="load-help">{{ current.acwr_zone ? t(`performance.load.acwr_${current.acwr_zone}_hint`) : t('performance.load.acwr_pending') }}</div>
               </div>
             </div>
+          </div>
+
+          <!-- Courbes « derrière » les cases : chaque case ci-dessus ouvre/ferme la
+               sienne. Rien tant qu'aucune n'est ouverte — les cases restent le résumé. -->
+          <div v-if="openMetricsOrdered.length" class="metric-curves mb-3">
+            <!-- Fenêtre temporelle commune à toutes les courbes ouvertes. -->
+            <div class="btn-group btn-group-sm mb-2" role="group">
+              <button
+                v-for="r in RANGES" :key="r.key" type="button"
+                class="btn" :class="rangeDays === r.days ? 'btn-primary' : 'btn-outline-secondary'"
+                @click="rangeDays = r.days"
+              >{{ t(`performance.load.${r.key}`) }}</button>
+            </div>
+
+            <div @mouseleave="hoverIndex = null">
+              <MetricChart
+                v-for="m in openMetricsOrdered" :key="m"
+                :metric="m" :points="displayed" :hover-index="hoverIndex"
+                @hover="hoverIndex = $event"
+              />
+            </div>
+
+            <!-- Détail du jour lu, commun à toutes les courbes ouvertes. -->
+            <div v-if="detail" class="load-detail mt-2">
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <span class="fw-semibold text-capitalize">{{ dateLong(detail.date) }}</span>
+                <span class="badge" :style="{ backgroundColor: zoneColor(detailZone) }">{{ t(`performance.load.zone_${detailZone}`) }}</span>
+                <span v-if="hoverIndex === null" class="small text-body-tertiary ms-auto">{{ t('performance.load.detail_hint') }}</span>
+              </div>
+              <div class="d-flex flex-wrap gap-3 small">
+                <span><span class="load-dot" style="background:#0d6efd"></span>{{ t('performance.load.ctl_label') }} : <b>{{ Math.round(detail.ctl) }}</b></span>
+                <span><span class="load-dot" style="background:#fd7e14"></span>{{ t('performance.load.atl_label') }} : <b>{{ Math.round(detail.atl) }}</b></span>
+                <span><span class="load-dot" style="background:#343a40"></span>{{ t('performance.load.tsb_label') }} : <b>{{ fmtSigned(detail.tsb) }}</b></span>
+              </div>
+              <div v-if="detailActivities.length" class="mt-2 pt-2 border-top">
+                <a
+                  v-for="a in detailActivities" :key="`${a.source}-${a.external_id}`"
+                  :href="activityHref(a)" class="load-detail-act small"
+                >
+                  <i class="fa-solid fa-arrow-right-long me-1 text-muted" aria-hidden="true"></i>{{ a.name }}
+                  <span class="text-body-tertiary">({{ Math.round(a.tss) }} TSS)</span>
+                </a>
+              </div>
+              <div v-else class="small text-body-tertiary mt-2">{{ t('performance.load.detail_rest') }}</div>
+            </div>
+
+            <!-- Légende des zones : sous le point sélectionné, pour lire les bandes de
+                 couleur des courbes Fraîcheur / Ratio. -->
+            <div class="mt-3">
+              <div class="small text-muted mb-1">{{ t('performance.load.zones_title') }}</div>
+              <div class="d-flex flex-wrap gap-2">
+                <span
+                  v-for="z in ZONE_ORDER" :key="z"
+                  class="badge rounded-pill zone-chip" :style="{ backgroundColor: zoneColor(z) }"
+                  :title="t(`performance.load.zone_${z}_hint`)"
+                >{{ t(`performance.load.zone_${z}`) }}</span>
+              </div>
+            </div>
+
+            <!-- Aide « comment lire ces courbes ». -->
+            <details class="mt-3 load-how">
+              <summary class="small fw-semibold text-primary">
+                <i class="fa-solid fa-circle-question me-1" aria-hidden="true"></i>{{ t('performance.load.how_title') }}
+              </summary>
+              <p class="small text-muted mt-2 mb-0">{{ t('performance.load.how_body') }}</p>
+            </details>
           </div>
 
           <!-- Sortie objectif datée -->
@@ -639,68 +601,6 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <!-- Aide « comment lire » -->
-          <details class="mb-3 load-how">
-            <summary class="small fw-semibold text-primary">
-              <i class="fa-solid fa-circle-question me-1" aria-hidden="true"></i>{{ t('performance.load.how_title') }}
-            </summary>
-            <p class="small text-muted mt-2 mb-0">{{ t('performance.load.how_body') }}</p>
-          </details>
-
-          <!-- Sélecteur de période -->
-          <div class="btn-group btn-group-sm mb-2" role="group">
-            <button
-              v-for="r in RANGES" :key="r.key" type="button"
-              class="btn" :class="rangeDays === r.days ? 'btn-primary' : 'btn-outline-secondary'"
-              @click="rangeDays = r.days"
-            >{{ t(`performance.load.${r.key}`) }}</button>
-          </div>
-
-          <!-- Graphiques : charge en haut, fraîcheur (+ zones) en bas -->
-          <div @mouseleave="hoverIndex = null">
-            <div class="load-chart-wrap load-chart-top">
-              <canvas ref="loadCanvas"></canvas>
-            </div>
-            <div class="load-chart-wrap load-chart-bottom">
-              <canvas ref="tsbCanvas"></canvas>
-            </div>
-          </div>
-
-          <!-- Détail du jour lu : sous les graphes plutôt qu'en bulle par-dessus -->
-          <div v-if="detail" class="load-detail">
-            <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
-              <span class="fw-semibold text-capitalize">{{ dateLong(detail.date) }}</span>
-              <span class="badge" :style="{ backgroundColor: zoneColor(detailZone) }">{{ t(`performance.load.zone_${detailZone}`) }}</span>
-              <span v-if="hoverIndex === null" class="small text-body-tertiary ms-auto">{{ t('performance.load.detail_hint') }}</span>
-            </div>
-            <div class="d-flex flex-wrap gap-3 small">
-              <span><span class="load-dot" style="background:#0d6efd"></span>{{ t('performance.load.ctl_label') }} : <b>{{ Math.round(detail.ctl) }}</b></span>
-              <span><span class="load-dot" style="background:#fd7e14"></span>{{ t('performance.load.atl_label') }} : <b>{{ Math.round(detail.atl) }}</b></span>
-              <span><span class="load-dot" style="background:#343a40"></span>{{ t('performance.load.tsb_label') }} : <b>{{ fmtSigned(detail.tsb) }}</b></span>
-            </div>
-            <div v-if="detailActivities.length" class="mt-2 pt-2 border-top">
-              <a
-                v-for="a in detailActivities" :key="`${a.source}-${a.external_id}`"
-                :href="activityHref(a)" class="load-detail-act small"
-              >
-                <i class="fa-solid fa-arrow-right-long me-1 text-muted" aria-hidden="true"></i>{{ a.name }}
-                <span class="text-body-tertiary">({{ Math.round(a.tss) }} TSS)</span>
-              </a>
-            </div>
-            <div v-else class="small text-body-tertiary mt-2">{{ t('performance.load.detail_rest') }}</div>
-          </div>
-
-          <!-- Légende des zones -->
-          <div class="mt-3">
-            <div class="small text-muted mb-1">{{ t('performance.load.zones_title') }}</div>
-            <div class="d-flex flex-wrap gap-2">
-              <span
-                v-for="z in ZONE_ORDER" :key="z"
-                class="badge rounded-pill zone-chip" :style="{ backgroundColor: zoneColor(z) }"
-                :title="t(`performance.load.zone_${z}_hint`)"
-              >{{ t(`performance.load.zone_${z}`) }}</span>
-            </div>
-          </div>
 
           <hr class="my-3" />
 
@@ -784,28 +684,72 @@ onBeforeUnmount(() => {
         </template>
       </div>
     </div>
+    </div><!-- /section forme -->
 
-    <!-- Répartition du temps par zone d'intensité (FC & puissance) -->
-    <ZoneDistribution
-      v-if="current"
-      class="mt-4"
-      :zones="data?.zones ?? null"
-      :lthr="lthr"
-      :ftp="data?.thresholds?.ftp_current ?? null"
-    />
+    <!-- Sous-onglet « Zones d'intensité » : même donnée (fetch partagé), vue à part. -->
+    <div v-show="section === 'zones'">
+      <div v-if="loading" class="text-muted d-flex align-items-center gap-2 py-3">
+        <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
+        <span>{{ t('performance.loading') }}</span>
+      </div>
+      <div v-else-if="error" class="alert alert-danger mb-0 d-flex align-items-center gap-2">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        <span>{{ error }}</span>
+      </div>
+      <ZoneDistribution
+        v-else-if="current"
+        :zones="data?.zones ?? null"
+        :lthr="lthr"
+        :ftp="data?.thresholds?.ftp_current ?? null"
+      />
+      <div v-else class="text-muted mb-0">{{ t('performance.load.no_data') }}</div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* Décale l'ancre sous la navbar fixe (fixed-top) pour ne pas masquer le titre. */
+/* Décale l'ancre sous la navbar fixe (fixed-top) pour ne pas masquer le titre.
+   `--navbar-h` = hauteur réelle (mesurée par trackNavbar) : la navbar wrappe
+   sur deux lignes avec beaucoup de menus. Marge de 1.5rem sous la barre. */
 #training-load {
-  scroll-margin-top: 5rem;
+  scroll-margin-top: calc(var(--navbar-h, 3.5rem) + 1.5rem);
 }
 .load-tile {
   height: 100%;
   padding: 0.75rem 1rem;
   border: 1px solid var(--bs-border-color);
   border-radius: 0.5rem;
+}
+/* Case cliquable : ouvre/ferme sa courbe. Chevron CSS (pas de dépendance police) qui
+   pivote quand la courbe est ouverte ; la bordure passe à l'accent. */
+.load-tile-toggle {
+  position: relative;
+  cursor: pointer;
+  padding-right: 1.75rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+.load-tile-toggle:hover {
+  background: var(--bs-tertiary-bg);
+}
+.load-tile-toggle::after {
+  content: '';
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid var(--bs-secondary-color);
+  border-bottom: 2px solid var(--bs-secondary-color);
+  transform: rotate(45deg);
+  transition: transform 0.15s;
+  opacity: 0.55;
+}
+.load-tile-toggle.is-open {
+  border-color: var(--bs-primary);
+}
+.load-tile-toggle.is-open::after {
+  transform: rotate(-135deg);
+  opacity: 0.9;
 }
 .reco-card {
   padding: 0.75rem 1rem;
@@ -889,16 +833,6 @@ onBeforeUnmount(() => {
 }
 .trend-flat {
   color: var(--bs-secondary-color);
-}
-.load-chart-wrap {
-  position: relative;
-}
-.load-chart-top {
-  height: 210px;
-}
-.load-chart-bottom {
-  height: 180px;
-  margin-top: 0.25rem;
 }
 .load-detail {
   margin-top: 0.5rem;

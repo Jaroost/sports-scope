@@ -1913,7 +1913,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .charts-sticky-header {
   position: sticky;
-  top: 3.5rem;
+  /* Offset = hauteur réelle de la navbar `fixed-top` (mesurée par trackNavbar,
+     application.ts) : elle wrappe sur deux lignes avec beaucoup de menus, un offset
+     fixe passerait dessous. Fallback 3.5rem avant la première mesure. */
+  top: var(--navbar-h, 3.5rem);
   z-index: 5;
   background: #ffffff;
   backdrop-filter: saturate(140%);

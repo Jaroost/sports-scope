@@ -55,7 +55,7 @@
                     <span data-vue-component="NewRouteButton" data-vue-props='<%= { variant: "nav" }.to_json %>'></span>
                   <% else %>
                     <%= link_to item[:path], class: "nav-link" do %>
-                      <i class="fa-solid <%= item[:icon] %> me-1" aria-hidden="true"></i><%= item[:label] %>
+                      <i class="fa-solid <%= item[:icon] %> me-1" aria-hidden="true"></i><span class="nav-label"><%= item[:label] %></span>
                     <% end %>
                   <% end %>
                 </li>
@@ -67,7 +67,7 @@
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle d-flex align-items-center gap-2" href="#" id="userMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                   <i class="fa-solid fa-circle-user fa-lg" aria-hidden="true"></i>
-                  <span><%= current_user.display_name %></span>
+                  <span class="nav-label"><%= current_user.display_name %></span>
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenu">
                   <li><h6 class="dropdown-header"><%= t("nav.language") %></h6></li>

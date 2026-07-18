@@ -81,6 +81,37 @@ export function intensityZoneColor(zone: string): string {
   return INTENSITY_ZONE_COLORS[zone] ?? '#6c757d'
 }
 
+// ── Polarisation d'un canal de zones (facile / modéré / intense) + verdict ────
+// Facile = base aérobie (z1+z2), Modéré = « zone grise » tempo (z3), Intense = seuil
+// et au-delà (z4+). Modèle polarisé visé : ~80 / ~5 / ~15. Le verdict priorise le
+// problème le plus important. Partagé entre ZoneDistribution (barre + badge) et le
+// badge de sous-onglet (PerformanceAnalysis).
+export type ZoneVerdict = 'well_polarized' | 'too_much_intensity' | 'too_much_grey' | 'too_easy' | 'balanced'
+export const ZONE_VERDICT_COLOR: Record<ZoneVerdict, string> = {
+  well_polarized: '#198754', too_much_intensity: '#dc3545',
+  too_much_grey: '#fd7e14', too_easy: '#0d6efd', balanced: '#6c757d',
+}
+export function polarize(channel: ZoneChannel): { easy: number; moderate: number; hard: number; verdict: ZoneVerdict } {
+  let easy = 0
+  let moderate = 0
+  let hard = 0
+  for (const z of channel.zones) {
+    if (z.zone === 'z1' || z.zone === 'z2') easy += z.pct
+    else if (z.zone === 'z3') moderate += z.pct
+    else hard += z.pct
+  }
+  easy = Math.round(easy)
+  moderate = Math.round(moderate)
+  hard = Math.round(hard)
+  let verdict: ZoneVerdict
+  if (easy < 60) verdict = 'too_much_intensity'
+  else if (moderate > 20) verdict = 'too_much_grey'
+  else if (hard < 5) verdict = 'too_easy'
+  else if (easy >= 75 && moderate <= 12) verdict = 'well_polarized'
+  else verdict = 'balanced'
+  return { easy, moderate, hard, verdict }
+}
+
 // Durée lisible depuis des secondes (ex. « 12 h 30 », « 45 min »).
 export function fmtSeconds(seconds: number): string {
   const h = Math.floor(seconds / 3600)

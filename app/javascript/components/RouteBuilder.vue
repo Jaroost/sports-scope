@@ -1997,8 +1997,11 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  height: calc(100vh - 4rem);
-  height: calc(100dvh - 4rem);
+  /* Hauteur = viewport moins la navbar réelle (--rb-navbar-h, mesurée en JS) : un
+     4rem figé faisait déborder la page de 3rem quand la navbar wrappe sur deux lignes
+     (contrôles du bas coupés). Fallback 4rem avant la première mesure. */
+  height: calc(100vh - var(--rb-navbar-h, 4rem));
+  height: calc(100dvh - var(--rb-navbar-h, 4rem));
   padding: 0.5rem 0.75rem 0;
   gap: 0.5rem;
   overflow: hidden;
@@ -2171,7 +2174,9 @@ onBeforeUnmount(() => {
 /* ─── Saved toast ─────────────────────────────────────────────────────────── */
 .saved-toast {
   position: fixed;
-  top: 4.5rem;
+  /* Sous la navbar réelle (--rb-navbar-h, mesurée en JS) : un offset fixe passerait
+     dessous quand la navbar wrappe sur deux lignes avec beaucoup de menus. */
+  top: calc(var(--rb-navbar-h, 4rem) + 0.5rem);
   left: 50%;
   transform: translateX(-50%);
   z-index: 1060;

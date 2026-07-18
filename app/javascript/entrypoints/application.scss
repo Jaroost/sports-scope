@@ -6,9 +6,26 @@
 @import "@fortawesome/fontawesome-free/css/all.min.css";
 
 body {
-  padding-top: 4rem;
+  // Hauteur réelle de la navbar `fixed-top`, mesurée par trackNavbar() (application.ts).
+  // Fallback 4rem avant le premier calcul / sur page sans navbar.
+  padding-top: var(--navbar-h, 4rem);
   background: linear-gradient(180deg, rgba(252, 76, 2, 0.04), transparent 360px), #f8f9fb;
   min-height: 100vh;
+}
+
+// Navbar « icônes seules » : ajoutée par trackNavbar() quand les libellés feraient
+// wrapper la barre sur deux lignes. Ne s'applique qu'en mode horizontal étendu (≥ md) —
+// sous md la navbar se replie dans le tiroir hamburger, où les libellés ont la place.
+@include media-breakpoint-up(md) {
+  .navbar-compact .nav-label {
+    display: none;
+  }
+  // Libellé masqué : l'écart après l'icône (`me-1`, utilitaire `!important`) n'a plus
+  // lieu d'être — on le neutralise pour centrer l'icône.
+  .navbar-compact .navbar-nav .nav-link .fa-solid,
+  .navbar-compact .navbar-nav .dropdown-toggle .fa-solid {
+    margin-right: 0 !important;
+  }
 }
 
 // Full-screen pages (e.g. route navigation) render without the fixed navbar,

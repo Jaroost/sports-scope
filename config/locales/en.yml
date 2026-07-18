@@ -23,9 +23,12 @@ en:
     no_records: "No records available for this sport."
     tabs:
       records: "Records & volume"
-      records_hint: "Reflects the active filters"
       fitness: "Fitness & thresholds"
       fitness_hint: "Whole history, filters not applied"
+    fitness_subs:
+      ftp: "FTP"
+      load: "Fitness & fatigue"
+      zones: "Intensity zones"
     filters:
       toggle: "Filter"
       close: "Close"
@@ -122,6 +125,7 @@ en:
       today_state: "State that day"
       detail_hint: "Hover the chart to see another day"
       detail_rest: "No session that day"
+      toggle_curve: "Show / hide the curve"
       ctl_label: "Fitness"
       ctl_sub: "CTL · 42 days"
       ctl_help: "Your accumulated training level. Rises slowly with consistent training — this is your progression."

@@ -1072,12 +1072,13 @@ function placePreviewMarker(coords: [number, number]) {
    d'un sport sans plus voir lequel.
 
    Le point de collage dépend du conteneur de défilement, et ce composant sert dans
-   les deux cas : sur /profile c'est la fenêtre, sous la navbar fixe (3.5rem, comme
-   les en-têtes de liste) ; dans ProfileDialog c'est le .modal-body, qui pose sa
+   les deux cas : sur /profile c'est la fenêtre, sous la navbar fixe (hauteur réelle
+   `--navbar-h`, mesurée par trackNavbar — la navbar wrappe avec beaucoup de
+   menus ; fallback 3.5rem) ; dans ProfileDialog c'est le .modal-body, qui pose sa
    propre origine à 0 via --sport-picker-top. */
 .sport-picker {
   position: sticky;
-  top: var(--sport-picker-top, 3.5rem);
+  top: var(--sport-picker-top, var(--navbar-h, 3.5rem));
   z-index: 3;
 }
 

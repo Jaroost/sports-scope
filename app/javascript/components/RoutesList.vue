@@ -1230,8 +1230,9 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* Header collé sous la navbar `fixed-top` (3.5rem, même offset que
-   PerformanceAnalysis) : la liste est longue, on garde le titre, le compteur et la
+/* Header collé sous la navbar `fixed-top` (offset `--navbar-h`, hauteur réelle
+   mesurée par trackNavbar — la navbar wrappe sur deux lignes avec beaucoup de
+   menus ; fallback 3.5rem) : la liste est longue, on garde le titre, le compteur et la
    bascule liste/carte sous la main pendant le défilement. Le conteneur ne réserve
    que la hauteur du header — le panneau de filtres, hors flux, flotte par-dessus la
    liste (voir .activity-filters-overlay).
@@ -1239,7 +1240,7 @@ onMounted(() => {
    - z-index : au-dessus des lignes de la liste et du canvas MapLibre de la vue carte. */
 .activity-sticky-top {
   position: sticky;
-  top: 3.5rem;
+  top: var(--navbar-h, 3.5rem);
   z-index: 5;
   background: var(--bs-card-bg, var(--bs-body-bg));
 }
@@ -1258,7 +1259,7 @@ onMounted(() => {
   right: 0;
   background: var(--bs-card-bg, var(--bs-body-bg));
   box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-  max-height: calc(100dvh - 3.5rem - var(--sticky-header-h, 3.5rem));
+  max-height: calc(100dvh - var(--navbar-h, 3.5rem) - var(--sticky-header-h, 3.5rem));
   overflow-y: auto;
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch, watchEffect, nextTick } from 'vue'
 import { t } from '../i18n'
 
 // ── Types du payload /api/performance/ftp ───────────────────────────────────
@@ -126,6 +126,10 @@ async function resetToAuto() {
 
 // ── Affichage ────────────────────────────────────────────────────────────────
 const current = computed(() => data.value?.current ?? null)
+
+// Remonte la FTP courante au parent, pour le badge du sous-onglet FTP.
+const emit = defineEmits<{ summary: [payload: { ftpWatts: number | null }] }>()
+watchEffect(() => emit('summary', { ftpWatts: current.value?.watts ?? null }))
 const hasAnything = computed(() => !!(current.value?.watts || data.value?.auto || data.value?.manual.watts))
 
 function methodLabel(method: string | undefined | null): string {

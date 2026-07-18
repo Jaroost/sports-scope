@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { intensityZoneColor, fmtSeconds, type ZoneChannel, type ZoneSummary } from '../composables/useTrainingPlan'
+import { intensityZoneColor, fmtSeconds, polarize, ZONE_VERDICT_COLOR, type ZoneChannel, type ZoneSummary } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
   zones: ZoneSummary | null
@@ -25,7 +25,7 @@ const channels = computed(() => {
       title: t('performance.zones.hr_title'),
       ref: props.lthr ? t('performance.zones.hr_ref', { bpm: props.lthr }) : '',
       channel: z?.hr ?? null,
-      polar: z?.hr ? polarization(z.hr) : null,
+      polar: z?.hr ? polarize(z.hr) : null,
       desc: t('performance.zones.hr_desc'),
       empty: props.lthr ? t('performance.zones.no_hr') : t('performance.zones.set_lthr_hint'),
     },
@@ -34,7 +34,7 @@ const channels = computed(() => {
       title: t('performance.zones.power_title'),
       ref: props.ftp ? t('performance.zones.power_ref', { watts: props.ftp }) : '',
       channel: z?.power ?? null,
-      polar: z?.power ? polarization(z.power) : null,
+      polar: z?.power ? polarize(z.power) : null,
       desc: '',
       empty: t('performance.zones.no_power'),
     },
@@ -47,43 +47,12 @@ function segments(channel: ZoneChannel | null) {
   return channel ? channel.zones.filter((z) => z.pct > 0) : []
 }
 
-// ── Polarisation : regroupement en facile / modéré / intense ─────────────────
-// Facile = base aérobie (z1+z2), Modéré = « zone grise » tempo (z3), Intense = seuil
-// et au-delà (z4+). Le modèle polarisé vise ~80 / ~5 / ~15 : beaucoup de facile, très
-// peu de zone grise, un peu d'intensité — plus efficace que « toujours moyen ».
+// Réel vs idéal : ~80 / ~5 / ~15 (beaucoup de facile, peu de zone grise, un peu
+// d'intensité). Le calcul de polarisation + verdict est partagé (cf. useTrainingPlan).
 const GROUP_COLOR = { easy: '#198754', moderate: '#ffc107', hard: '#dc3545' }
 const IDEAL = { easy: 80, moderate: 5, hard: 15 }
-const VERDICT_COLOR: Record<string, string> = {
-  well_polarized: '#198754', too_much_intensity: '#dc3545',
-  too_much_grey: '#fd7e14', too_easy: '#0d6efd', balanced: '#6c757d',
-}
 function verdictColor(v: string): string {
-  return VERDICT_COLOR[v] ?? '#6c757d'
-}
-
-function polarization(channel: ZoneChannel) {
-  let easy = 0
-  let moderate = 0
-  let hard = 0
-  for (const z of channel.zones) {
-    if (z.zone === 'z1' || z.zone === 'z2') easy += z.pct
-    else if (z.zone === 'z3') moderate += z.pct
-    else hard += z.pct
-  }
-  easy = Math.round(easy)
-  moderate = Math.round(moderate)
-  hard = Math.round(hard)
-  return { easy, moderate, hard, verdict: verdictFor(easy, moderate, hard) }
-}
-
-// Verdict, du problème le plus prioritaire au meilleur cas. Ordre volontaire :
-// trop peu de facile > trop de zone grise > pas assez d'intensité > polarisé > correct.
-function verdictFor(easy: number, moderate: number, hard: number): string {
-  if (easy < 60) return 'too_much_intensity'
-  if (moderate > 20) return 'too_much_grey'
-  if (hard < 5) return 'too_easy'
-  if (easy >= 75 && moderate <= 12) return 'well_polarized'
-  return 'balanced'
+  return ZONE_VERDICT_COLOR[v as keyof typeof ZONE_VERDICT_COLOR] ?? '#6c757d'
 }
 </script>
 

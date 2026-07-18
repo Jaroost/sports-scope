@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
+import { ACTION_STYLE, ZONE_VERDICT_COLOR } from '../composables/useTrainingPlan'
 import FtpPanel from './FtpPanel.vue'
 import TrainingLoadPanel from './TrainingLoadPanel.vue'
 
@@ -215,6 +216,51 @@ const activeTab = ref<MainTab>(storedTab === 'fitness' ? 'fitness' : 'records')
 watch(activeTab, (tab) => {
   try { localStorage.setItem(TAB_STORAGE_KEY, tab) } catch { /* ignore */ }
 })
+
+// ── Sous-onglets de « Forme & seuils » ───────────────────────────────────────
+// Trois vues rangées : FTP (seuils), Forme & fatigue (charge), Zones d'intensité.
+// FtpPanel et TrainingLoadPanel restent montés (v-show) : un seul fetch chacun, et
+// TrainingLoadPanel bascule forme↔zones via son prop `section` sans recharger.
+const FITNESS_SUBS = [
+  { key: 'ftp', icon: 'fa-bolt' },
+  { key: 'load', icon: 'fa-heart-pulse' },
+  { key: 'zones', icon: 'fa-layer-group' },
+] as const
+type FitnessSub = (typeof FITNESS_SUBS)[number]['key']
+
+const FITNESS_SUB_STORAGE_KEY = 'sportsScope.performanceFitnessSub'
+const storedSub = (typeof localStorage !== 'undefined' && localStorage.getItem(FITNESS_SUB_STORAGE_KEY)) || 'load'
+const fitnessSub = ref<FitnessSub>(
+  storedSub === 'ftp' || storedSub === 'zones' ? storedSub : 'load',
+)
+watch(fitnessSub, (s) => {
+  try { localStorage.setItem(FITNESS_SUB_STORAGE_KEY, s) } catch { /* ignore */ }
+})
+
+// Indicateurs remontés par les panneaux enfants (montés en permanence), pour afficher
+// un badge sous chaque sous-onglet : FTP courante, reco du jour, verdict des zones.
+const ftpWatts = ref<number | null>(null)
+const recoAction = ref<string | null>(null)
+const zonesVerdict = ref<string | null>(null)
+
+function onFtpSummary(p: { ftpWatts: number | null }) { ftpWatts.value = p.ftpWatts }
+function onFitnessSummary(p: { recoAction: string | null; zonesVerdict: string | null }) {
+  recoAction.value = p.recoAction
+  zonesVerdict.value = p.zonesVerdict
+}
+
+// Contenu du badge (texte + couleur) d'un sous-onglet, ou null si pas encore d'info.
+function subBadge(key: FitnessSub): { text: string; color: string } | null {
+  if (key === 'ftp') {
+    return ftpWatts.value != null ? { text: `${ftpWatts.value} W`, color: '#fc4c02' } : null
+  }
+  if (key === 'load') {
+    const a = recoAction.value
+    return a ? { text: t(`performance.load.reco.action_${a}`), color: ACTION_STYLE[a]?.color ?? '#6c757d' } : null
+  }
+  const v = zonesVerdict.value
+  return v ? { text: t(`performance.zones.verdict_${v}`), color: ZONE_VERDICT_COLOR[v as keyof typeof ZONE_VERDICT_COLOR] ?? '#6c757d' } : null
+}
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
@@ -567,8 +613,8 @@ onBeforeUnmount(() => {
           <span>{{ t(`performance.tabs.${tab.key}`) }}</span>
         </button>
       </div>
-      <p class="text-muted small">
-        {{ activeTab === 'records' ? t('performance.tabs.records_hint') : t('performance.tabs.fitness_hint') }}
+      <p v-if="activeTab === 'fitness'" class="text-muted small">
+        {{ t('performance.tabs.fitness_hint') }}
       </p>
 
       <!-- Les deux panneaux restent montés (v-show) : basculer d'onglet ne relance
@@ -859,35 +905,77 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-show="activeTab === 'fitness'">
-        <!-- FTP & progression (vélo). Placé AVANT « Forme & fatigue » car la FTP
-             alimente le calcul de la charge (TSS ← IF = NP/FTP) : on montre d'abord
-             le seuil, puis l'état de forme qui en découle. -->
-        <FtpPanel />
-        <TrainingLoadPanel :admin="props.admin" />
+        <!-- Sous-onglets : FTP · Forme & fatigue · Zones d'intensité. -->
+        <ul class="nav nav-pills flex-wrap gap-2 mb-3 performance-sport-tabs" role="tablist">
+          <li v-for="sub in FITNESS_SUBS" :key="sub.key" class="nav-item">
+            <button
+              type="button"
+              class="nav-link fitness-sub-link"
+              :class="{ active: fitnessSub === sub.key }"
+              role="tab"
+              :aria-selected="fitnessSub === sub.key"
+              @click="fitnessSub = sub.key"
+            >
+              <span class="d-flex align-items-center gap-1">
+                <i :class="`fa-solid ${sub.icon}`" aria-hidden="true"></i>
+                <span>{{ t(`performance.fitness_subs.${sub.key}`) }}</span>
+              </span>
+              <!-- Badge indicateur (FTP courante / reco du jour / verdict des zones). -->
+              <span
+                v-if="subBadge(sub.key)"
+                class="badge fitness-sub-badge"
+                :style="{ backgroundColor: subBadge(sub.key)!.color }"
+              >{{ subBadge(sub.key)!.text }}</span>
+            </button>
+          </li>
+        </ul>
+
+        <!-- Panneaux montés en permanence (v-show) : un seul fetch chacun. FTP est à
+             part ; TrainingLoadPanel bascule forme↔zones via `section`, sans recharger.
+             Les deux remontent leur résumé (@summary) pour les badges ci-dessus. -->
+        <div v-show="fitnessSub === 'ftp'">
+          <FtpPanel @summary="onFtpSummary" />
+        </div>
+        <TrainingLoadPanel
+          v-show="fitnessSub !== 'ftp'"
+          :admin="props.admin"
+          :section="fitnessSub === 'zones' ? 'zones' : 'load'"
+          @summary="onFitnessSummary"
+        />
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-/* Barre + panneau de filtres collés sous la navbar `fixed-top` (3.5rem, même
-   offset que le header de ActivityCharts) : les onglets de sport, le bouton
-   « Filtrer » et les champs du panneau restent atteignables pendant le défilement
-   des records et des graphiques.
+/* Barre + panneau de filtres collés sous la navbar `fixed-top` : les onglets de
+   sport, le bouton « Filtrer » et les champs du panneau restent atteignables pendant
+   le défilement des records et des graphiques. `--navbar-h` est la hauteur réelle de
+   la navbar (mesurée par trackNavbar, application.ts) — la navbar wrappe sur
+   deux lignes avec beaucoup de menus, un offset fixe passerait dessous.
    max-height + overflow : panneau déplié, l'ensemble dépasse la hauteur d'écran sur
    mobile, et un élément sticky plus haut que la fenêtre laisse son bas inaccessible. */
 .performance-filters-sticky {
   position: sticky;
-  top: 3.5rem;
+  top: var(--navbar-h, 3.5rem);
   z-index: 5;
   background: var(--bs-body-bg);
-  max-height: calc(100dvh - 3.5rem);
-  overflow-y: auto;
+  max-height: calc(100dvh - var(--navbar-h, 3.5rem));
 }
 
 .performance-sticky-bar {
   background: var(--bs-body-bg);
   border-bottom: 1px solid var(--bs-border-color);
+}
+
+/* Bootstrap applique `margin-top: -1rem` à `.row.g-3` : sans contre-mesure, la
+   première rangée de cartes remonte contre la barre de filtres collée (qui finit par
+   passer par-dessus au défilement, z-index 5). On rétablit un écart franc sous la zone
+   de filtres pour décaler les cartes vers le bas. `.alert` couvre le cas « aucun
+   résultat » qui prend la place de la première rangée. */
+.performance-filters-sticky + .row,
+.performance-filters-sticky + .alert {
+  margin-top: 1rem;
 }
 
 /* Sur mobile, les onglets défilent horizontalement plutôt que de passer à la ligne :
@@ -921,6 +1009,21 @@ onBeforeUnmount(() => {
 }
 .performance-sport-tabs .nav-link.active .performance-tab-count {
   background: rgba(255, 255, 255, 0.28);
+}
+/* Sous-onglet forme : libellé au-dessus, badge indicateur en dessous. */
+.fitness-sub-link {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+.fitness-sub-badge {
+  max-width: 13rem;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: normal;
+  line-height: 1.2;
 }
 .performance-record-badge {
   display: inline-flex;

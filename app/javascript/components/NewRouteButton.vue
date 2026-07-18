@@ -26,7 +26,7 @@ function onConfirm({ name, sport, profile }: { name: string; sport: Sport; profi
     class="nav-link border-0 bg-transparent"
     @click="showModal = true"
   >
-    <i class="fa-solid fa-map-location-dot me-1" aria-hidden="true"></i>{{ t('nav.new_route') }}
+    <i class="fa-solid fa-map-location-dot me-1" aria-hidden="true"></i><span class="nav-label">{{ t('nav.new_route') }}</span>
   </button>
   <button v-else type="button" class="btn btn-warning btn-lg home-button" @click="showModal = true">
     <i class="fa-solid fa-map-location-dot me-2" aria-hidden="true"></i>{{ t('pages.feature_builder_cta') }}

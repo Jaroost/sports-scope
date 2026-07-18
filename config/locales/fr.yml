@@ -567,6 +567,7 @@ fr:
       altitude: "Altitude"
       heartrate: "Fréquence cardiaque"
       velocity_smooth: "Vitesse"
+      pace: "Allure"
       cadence: "Cadence"
       watts: "Puissance"
       temp: "Température"

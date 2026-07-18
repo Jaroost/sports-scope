@@ -98,18 +98,18 @@ export function buildTooltipHtml({ streams, activity, xAxis, idx, visibleStreams
   const rendered = new Set<string>()
   const renderRow = (streamKey: string): string => {
     if (rendered.has(streamKey)) return ''
-    const def = defByKey(streamKey)
+    const def = defByKey(streamKey, activity)
     if (!def) return ''
     const rawArr = streams?.[streamKey]?.data as unknown[] | undefined
     const raw = rawArr?.[idx]
     if (raw == null) return ''
     const y = def.transform(raw as number)
     const digits = def.digits ?? 1
-    const value = Number.isNaN(y) ? '–' : y.toFixed(digits)
+    const value = Number.isNaN(y) ? '–' : (def.format ? def.format(y) : y.toFixed(digits))
     rendered.add(streamKey)
     return `<div class="chart-tooltip-row">
       <span class="chart-tooltip-swatch" style="background:${def.color}"></span>
-      <span class="chart-tooltip-name">${escapeHtml(t('strava.stream.' + streamKey))}</span>
+      <span class="chart-tooltip-name">${escapeHtml(t('strava.stream.' + (def.labelKey || streamKey)))}</span>
       <span class="chart-tooltip-value">${escapeHtml(value)} ${escapeHtml(def.unit || '')}</span>
     </div>`
   }

@@ -5,6 +5,7 @@ import {
   chartIcons,
   chartDefs,
   defByKey,
+  paceMinPerKm,
   STREAM_CHIP_ORDER,
   fmt,
   formatDuration,
@@ -276,6 +277,23 @@ function rangeGrade() {
   return ((a1 - a0) / (d1 - d0)) * 100
 }
 
+// Résout la définition de flux pour l'activité courante (ex. vitesse → allure sur une course).
+function vdef(key) {
+  return defByKey(key, props.activity)
+}
+
+// Libellé traduit du flux, avec le nom propre au sport si la def en fournit un (allure).
+function streamLabel(key) {
+  const d = vdef(key)
+  return t('strava.stream.' + (d?.labelKey || key))
+}
+
+// Formate une stat selon la définition : « m:ss » pour l'allure, sinon N décimales + unité.
+function fmtStat(def, value) {
+  if (!def) return '–'
+  return def.format ? def.format(value) : fmt(value, def.digits)
+}
+
 function chartStats(def) {
   const data = props.streams?.[def.key]?.data
   if (!data || data.length === 0) return null
@@ -300,6 +318,19 @@ function chartStats(def) {
   if (def.key === 'grade_smooth') {
     const rg = rangeGrade()
     if (rg != null) mean = rg
+  }
+  // Allure : la moyenne des allures instantanées (1/v) est biaisée vers le haut
+  // (Jensen) et n'est pas l'allure vécue. On la recalcule comme l'allure de la
+  // vitesse moyenne — soit distance/temps sur un flux échantillonné à pas de temps
+  // constant. min/max restent justes (transform monotone : mn = plus rapide).
+  if (def.isPace) {
+    let sSum = 0
+    let sCnt = 0
+    for (let i = s; i <= e && i < data.length; i++) {
+      const sp = data[i]
+      if (typeof sp === 'number' && Number.isFinite(sp) && sp >= 0.5) { sSum += sp; sCnt++ }
+    }
+    if (sCnt > 0) mean = paceMinPerKm(sSum / sCnt)
   }
   return { count, mean, min: mn, max: mx }
 }
@@ -683,14 +714,14 @@ async function renderCharts() {
 
     const occurrences = new Map()
     const datasets = group.streams.map((streamKey, idx) => {
-      const def = defByKey(streamKey)
+      const def = vdef(streamKey)
       if (!def) return null
       const count = (occurrences.get(streamKey) || 0) + 1
       occurrences.set(streamKey, count)
       const totalForKey = group.streams.filter((s) => s === streamKey).length
       const label = totalForKey > 1
-        ? `${t('strava.stream.' + def.key)} #${count} (${def.unit})`
-        : `${t('strava.stream.' + def.key)} (${def.unit})`
+        ? `${t('strava.stream.' + (def.labelKey || def.key))} #${count} (${def.unit})`
+        : `${t('strava.stream.' + (def.labelKey || def.key))} (${def.unit})`
       const yRaw = props.streams[streamKey].data
       const len = Math.min(xRaw.length, yRaw.length)
 
@@ -745,7 +776,7 @@ async function renderCharts() {
 
     const yScales = {}
     group.streams.forEach((streamKey, idx) => {
-      const def = defByKey(streamKey)
+      const def = vdef(streamKey)
       if (!def) return
       yScales[`y-${idx}`] = {
         type: 'linear',
@@ -753,7 +784,12 @@ async function renderCharts() {
         // Titre d'axe retiré pour gagner de la place — l'unité est rappelée dans la
         // légende du panneau. Les graduations restent colorées pour repérer l'axe.
         title: { display: false },
-        ticks: { maxTicksLimit: 6, color: def.color },
+        ticks: {
+          maxTicksLimit: 6,
+          color: def.color,
+          // L'allure est un temps décimal (min) : on affiche les graduations en « m:ss ».
+          ...(def.format ? { callback: (v) => def.format(v) } : {}),
+        },
         grid: { drawOnChartArea: idx === 0 },
       }
     })
@@ -1708,34 +1744,34 @@ onBeforeUnmount(() => {
             v-for="streamKey in chipStreams"
             :key="`mean-${streamKey}`"
             class="range-chip range-chip-stream"
-            :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
+            :style="{ background: vdef(streamKey)?.color + '1f', color: vdef(streamKey)?.color }"
           >
             <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-            <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
+            <strong v-if="chartStats(vdef(streamKey))">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).mean) }} {{ vdef(streamKey).unit }}</strong>
             <strong v-else>–</strong>
-            <i v-if="chartStats(defByKey(streamKey))" class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
-            <span v-if="chartStats(defByKey(streamKey))" class="chip-popover">
+            <i v-if="chartStats(vdef(streamKey))" class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
+            <span v-if="chartStats(vdef(streamKey))" class="chip-popover">
               <div class="chart-tooltip-title">
                 <div class="chart-tooltip-title-main">
                   <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-                  {{ t('strava.stream.' + streamKey) }}
+                  {{ streamLabel(streamKey) }}
                 </div>
               </div>
               <div class="chart-tooltip-section">
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-arrow-down-short-wide chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.min') }}</span>
-                  <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).min) }} {{ vdef(streamKey).unit }}</span>
                 </div>
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-equals chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.mean') }}</span>
-                  <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).mean) }} {{ vdef(streamKey).unit }}</span>
                 </div>
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-arrow-up-wide-short chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.max') }}</span>
-                  <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).max) }} {{ vdef(streamKey).unit }}</span>
                 </div>
               </div>
             </span>
@@ -1805,10 +1841,10 @@ onBeforeUnmount(() => {
                     >
                       <i
                         :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'} legend-icon`"
-                        :style="{ color: defByKey(streamKey)?.color }"
+                        :style="{ color: vdef(streamKey)?.color }"
                         aria-hidden="true"
                       ></i>
-                      <span>{{ t('strava.stream.' + streamKey) }} <span class="legend-unit">[{{ defByKey(streamKey)?.unit }}]</span></span>
+                      <span>{{ streamLabel(streamKey) }} <span class="legend-unit">[{{ vdef(streamKey)?.unit }}]</span></span>
                     </button>
                   </template>
                   <template v-else>
@@ -1819,10 +1855,10 @@ onBeforeUnmount(() => {
                     >
                       <i
                         :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'} legend-icon`"
-                        :style="{ color: defByKey(streamKey)?.color }"
+                        :style="{ color: vdef(streamKey)?.color }"
                         aria-hidden="true"
                       ></i>
-                      <span>{{ t('strava.stream.' + streamKey) }} <span class="legend-unit">[{{ defByKey(streamKey)?.unit }}]</span></span>
+                      <span>{{ streamLabel(streamKey) }} <span class="legend-unit">[{{ vdef(streamKey)?.unit }}]</span></span>
                     </span>
                   </template>
                   <!-- Axe X (commun au panneau) rappelé ici, les titres d'axes ayant été

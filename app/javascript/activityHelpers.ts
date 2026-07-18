@@ -9,6 +9,14 @@ export interface ChartDef {
   unit: string
   transform: (v: number) => number
   digits: number
+  // Allure (min/km) : la valeur transformée est un temps décimal en minutes, pas un
+  // nombre à afficher tel quel. `format` la rend en « m:ss » ; `isPace` signale aux
+  // consommateurs (stats, axe) le traitement propre à une grandeur inverse de la vitesse.
+  format?: (v: number) => string
+  isPace?: boolean
+  // Suffixe de clé i18n `strava.stream.*` à préférer à `key` pour le libellé affiché
+  // (ex. « Allure » plutôt que « Vitesse » sur une course).
+  labelKey?: string
 }
 
 export interface GradeBucket {
@@ -90,7 +98,24 @@ export const chartDefs: ChartDef[] = [
   { key: 'grade_smooth',    color: '#6c757d', unit: '%',    transform: (v) => v,       digits: 1 },
 ]
 
-export function defByKey(key: string): ChartDef | undefined {
+// Sur une activité de course, la « vitesse » se lit en allure (min/km) plutôt qu'en km/h.
+// Le flux Strava reste `velocity_smooth` (des m/s) — seul son rendu change : transform
+// vers un temps par km, unité et formatage dédiés (cf. paceMinPerKm / formatPace).
+const VELOCITY_PACE_DEF: ChartDef = {
+  key: 'velocity_smooth',
+  color: '#0d6efd',
+  unit: 'min/km',
+  transform: paceMinPerKm,
+  digits: 2,
+  format: formatPace,
+  isPace: true,
+  labelKey: 'pace',
+}
+
+// `activity` optionnel : sans lui, on garde les défauts (vélo → km/h). Fourni, il permet
+// de basculer la vitesse en allure sur les courses. Les autres flux ne dépendent pas du sport.
+export function defByKey(key: string, activity?: Record<string, unknown> | null): ChartDef | undefined {
+  if (key === 'velocity_smooth' && isRun(activity)) return VELOCITY_PACE_DEF
   return chartDefs.find((d) => d.key === key)
 }
 
@@ -107,6 +132,12 @@ export function streamHasData(stream: { data?: unknown } | null | undefined): bo
 // « Workout » — seul `sport_type` porte « Squash ».
 export function sportType(activity: Record<string, unknown> | null | undefined): string {
   return String(activity?.sport_type || activity?.type || '')
+}
+
+// Course à pied (Run, TrailRun, VirtualRun) — tous portent « run » dans leur sport_type.
+// C'est ce test qui fait basculer la vitesse en allure (min/km) partout où elle s'affiche.
+export function isRun(activity: Record<string, unknown> | null | undefined): boolean {
+  return sportType(activity).toLowerCase().includes('run')
 }
 
 // Sports de raquette : la cadence remontée par une montre au poignet n'y mesure rien de
@@ -292,6 +323,23 @@ export function formatHMS(seconds: number | null | undefined): string {
 export function formatKm(meters: number | null | undefined): string {
   if (meters == null || Number.isNaN(meters)) return '–'
   return `${(meters / 1000).toFixed(2)} km`
+}
+
+// Allure de course en minutes par km, à partir d'une vitesse en m/s. Sous ~0,5 m/s
+// (1,8 km/h) l'échantillon est un arrêt : l'allure y diverge, on renvoie NaN pour l'exclure
+// des courbes (coupure) et des stats plutôt que d'afficher une valeur aberrante.
+export function paceMinPerKm(speedMps: number): number {
+  if (!Number.isFinite(speedMps) || speedMps < 0.5) return NaN
+  return 1000 / speedMps / 60
+}
+
+// Allure (min/km décimales) → « m:ss ». 5.5 → « 5:30 ».
+export function formatPace(minPerKm: number | null | undefined): string {
+  if (minPerKm == null || !Number.isFinite(minPerKm)) return '–'
+  const totalSec = Math.round(minPerKm * 60)
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  return `${m}:${String(s).padStart(2, '0')}`
 }
 
 export function formatPowerDuration(sec: number): string {

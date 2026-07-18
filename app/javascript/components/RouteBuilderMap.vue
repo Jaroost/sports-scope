@@ -7,7 +7,6 @@ import {
 } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
-import MapOverlayDropdown from './MapOverlayDropdown.vue'
 import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
 import { persistDefaultMapStyle, persistOverlays, sportPreferences, userPreferences } from '../userPreferences'
 import type { MapStyleId } from '../userPreferences'
@@ -17,6 +16,8 @@ import type { Place } from '../stores/placesStore'
 import { savedPoisStore } from '../stores/savedPoisStore'
 import type { SavedPoi } from '../savedPois'
 import { categoryForType, POI_CATEGORIES } from '../poiCategories'
+import { MARKER_KINDS, markerMeta, markerKindLabel } from '../routeMarkers'
+import type { MarkerKind } from '../routeMarkers'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
   streetViewUrl, bearingFromRoute, bearingAlongRoute, downsampleByDistance,
@@ -99,12 +100,40 @@ const placeMarkerEls = new Map<string, HTMLElement>()
 const savedPoiMarkers: any[] = []
 const savedPoiMarkerObservers: MutationObserver[] = []
 let savedPoiPopup: any = null
-// Mode « poser un POI » : un clic carte pose un POI sauvegardé au lieu d'ajouter un
-// point au tracé. Basculé par un bouton de la toolbar (hors lecture seule).
-const placePoiMode = ref(false)
+// Mode d'édition courant, piloté par le dropdown « Mode d'édition » (hors lecture
+// seule) : 'route' modifie le tracé au clic, 'poi' pose un POI, 'marker' pose un
+// repère. Par défaut on édite l'itinéraire.
+type EditMode = 'route' | 'poi' | 'marker'
+const editMode = ref<EditMode>('route')
+// Dérivés conservés pour les gardes de clic/survol de la carte.
+const placePoiMode = computed(() => editMode.value === 'poi')
+const placeMarkerMode = computed(() => editMode.value === 'marker')
 // Dialogue de création d'un POI (nom + catégorie) ouvert au clic en mode « poser ».
 const poiDialog = ref<{ lng: number; lat: number; name: string; category: string } | null>(null)
 const POI_CATS = POI_CATEGORIES
+
+// ── Repères d'itinéraire (départ / arrivée / parking) ────────────────────────
+// Posés à la main et enregistrés avec l'itinéraire (routeStore.markers). Rendus en
+// permanence, déplaçables, éditables via popup. Distincts des POI (cf. routeMarkers.ts).
+const MARKER_KIND_LIST = MARKER_KINDS
+const routeMarkerObjs: any[] = []
+let routeMarkerPopup: any = null
+// Dialogue de création d'un repère (type + libellé optionnel).
+const markerDialog = ref<{ lng: number; lat: number; kind: MarkerKind; label: string } | null>(null)
+
+// Menu déroulant « Affichage » : regroupe les bascules de calques (points, cols,
+// repères, POI, pente…) façon menu des couches. Le choix du mode d'édition est un
+// dropdown distinct.
+const displayMenuOpen = ref(false)
+
+// Menu déroulant « Mode d'édition » : sélectionne ce que fait un clic sur la carte.
+const editMenuOpen = ref(false)
+const EDIT_MODES: Array<{ mode: EditMode; icon: string; labelKey: string }> = [
+  { mode: 'route',  icon: 'fa-route',            labelKey: 'routes.edit_mode_route' },
+  { mode: 'poi',    icon: 'fa-map-location-dot', labelKey: 'routes.edit_mode_poi' },
+  { mode: 'marker', icon: 'fa-signs-post',       labelKey: 'routes.edit_mode_marker' },
+]
+const currentEditMode = computed(() => EDIT_MODES.find((m) => m.mode === editMode.value) ?? EDIT_MODES[0])
 let hoveredPlaceEl: HTMLElement | null = null
 let selectedPlaceEl: HTMLElement | null = null
 let placePopup: any = null
@@ -126,21 +155,6 @@ const searching = ref(false)
 const searchExpanded = ref(false)
 const searchInputEl = useTemplateRef('searchInputEl')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
-
-const wtExpanded = ref(false)
-const wtQuery = ref('')
-const wtResults = ref<any[]>([])
-const wtSearching = ref(false)
-const wtImportingId = ref<number | null>(null)
-const wtGeomCache = new Map<number, Array<[number, number]>>()
-let wtPreviewTimeout: ReturnType<typeof setTimeout> | null = null
-// Waymarked Trails sépare ses bases par sport (un sous-domaine par sport, même API).
-const WT_SPORTS = ['cycling', 'mtb', 'hiking'] as const
-type WtSport = typeof WT_SPORTS[number]
-// Catégorie d'activité partagée avec le routeStore : le même sélecteur pilote le
-// fond de cartes de sentiers (Waymarked Trails) et la vitesse moyenne d'estimation.
-const wtSport = routeStore.sport
-const WT_BASE = computed(() => `https://${wtSport.value}.waymarkedtrails.org/api/v1`)
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
@@ -257,7 +271,6 @@ async function initMap() {
   await new Promise<void>((resolve) => {
     mapInstance.on('load', () => {
       installRouteLayer()
-      installPreviewLayer()
       installOverlays()
       mapInstance.on('click', (e: any) => {
         if (suppressNextMapClick) { suppressNextMapClick = false; return }
@@ -269,6 +282,13 @@ async function initMap() {
         if (placePoiMode.value && !routeStore.readOnly.value) {
           if (savedPoiPopup) closeSavedPoiPopup()
           openPoiDialog(e.lngLat.lng, e.lngLat.lat)
+          return
+        }
+        // Mode « poser un repère » : le clic ouvre le dialogue de création (type +
+        // libellé) au point cliqué, sans toucher au tracé.
+        if (placeMarkerMode.value && !routeStore.readOnly.value) {
+          if (routeMarkerPopup) closeRouteMarkerPopup()
+          openMarkerDialog(e.lngLat.lng, e.lngLat.lat)
           return
         }
         // Lecture seule : le clic ne modifie jamais le tracé. Il referme une tooltip
@@ -309,7 +329,7 @@ async function initMap() {
       })
       mapInstance.on('mousemove', (e: any) => {
         // Mode « poser un POI » : curseur viseur, pas de marqueur d'insertion de point.
-        if (placePoiMode.value && !routeStore.readOnly.value) {
+        if ((placePoiMode.value || placeMarkerMode.value) && !routeStore.readOnly.value) {
           hideHoverMarker()
           mapInstance.getCanvas().style.cursor = 'crosshair'
           return
@@ -359,6 +379,8 @@ async function initMap() {
       mapInstance.getCanvas().style.cursor = routeStore.readOnly.value ? '' : 'crosshair'
       // POI sauvegardés de l'utilisateur : chargés une fois, rendus en permanence.
       void savedPoisStore.load().then(() => installSavedPoiMarkers())
+      // Repères de l'itinéraire (déjà chargés si l'on rouvre un itinéraire existant).
+      installRouteMarkers()
       resolve()
     })
   })
@@ -1201,6 +1223,135 @@ async function savePlaceAsPoi(place: Place) {
   if (poi) installSavedPoiMarkers()
 }
 
+// ─── Repères d'itinéraire (départ / arrivée / parking) ──────────────────────────
+// Rendu permanent des repères posés à la main (routeStore.markers), déplaçables et
+// éditables hors lecture seule. Réinstallés à chaque mutation (ajout / drag / édition
+// / suppression) et au chargement d'un itinéraire (refreshRouteMarkers).
+
+function clearRouteMarkers() {
+  routeMarkerObjs.forEach((m) => m.remove()); routeMarkerObjs.length = 0
+}
+
+function installRouteMarkers() {
+  if (!_maplibregl || !mapInstance) return
+  clearRouteMarkers()
+  if (!props.state.showMarkers) return
+  const editable = !routeStore.readOnly.value
+  routeStore.markers.value.forEach((marker, idx) => {
+    const el = buildRouteMarkerEl(marker)
+    const m = new _maplibregl.Marker({ element: el, anchor: 'bottom-left', draggable: editable })
+      .setLngLat([marker.lng, marker.lat])
+      .addTo(mapInstance)
+    if (editable) {
+      // Fige le déplacement de la carte pendant le drag et écrit la nouvelle position
+      // dans le store à la fin (le tableau reste indexé comme au rendu).
+      m.on('dragstart', () => { overClimbMarker = true; if (routeMarkerPopup) closeRouteMarkerPopup() })
+      m.on('dragend', () => {
+        const { lng, lat } = m.getLngLat()
+        const cur = routeStore.markers.value[idx]
+        if (cur) routeStore.markers.value[idx] = { ...cur, lng, lat }
+        overClimbMarker = false
+      })
+    }
+    routeMarkerObjs.push(m)
+  })
+}
+
+function buildRouteMarkerEl(marker: { kind: string; lng: number; lat: number; label?: string }) {
+  const el = document.createElement('div')
+  const meta = markerMeta(marker.kind)
+  const icon = meta?.icon ?? 'fa-location-dot'
+  const kindLabel = markerKindLabel(marker.kind)
+  // Libellé toujours visible (pastille type « col ») : type + libellé libre éventuel.
+  const text = marker.label ? `${escapeHtml(kindLabel)} · ${escapeHtml(marker.label)}` : escapeHtml(kindLabel)
+  el.className = 'route-marker'
+  el.style.color = meta?.color ?? '#6b7280'
+  el.title = marker.label ? `${kindLabel} · ${marker.label}` : kindLabel
+  el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i><span class="route-marker-label">${text}</span>`
+  el.addEventListener('click', (ev) => { ev.stopPropagation(); showRouteMarkerPopup(marker) })
+  el.addEventListener('mousedown', (ev) => ev.stopPropagation())
+  el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker() })
+  el.addEventListener('mouseleave', () => { overClimbMarker = false })
+  return el
+}
+
+function closeRouteMarkerPopup() {
+  if (routeMarkerPopup) { routeMarkerPopup.remove(); routeMarkerPopup = null }
+}
+
+// Popup d'un repère : titre = libellé (ou type), et — hors lecture seule — actions
+// renommer / supprimer. Retrouve le repère par identité de coordonnées.
+function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; label?: string }) {
+  if (!_maplibregl || !mapInstance) return
+  closeRouteMarkerPopup()
+  const title = marker.label ? `${markerKindLabel(marker.kind)} — ${marker.label}` : markerKindLabel(marker.kind)
+  const wrap = document.createElement('div')
+  wrap.className = 'place-popup'
+  const editActions = routeStore.readOnly.value ? '' : `
+    <button type="button" class="place-popup-link place-popup-link--rename">
+      <i class="fa-solid fa-pen" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.marker_edit_label'))}</span>
+    </button>
+    <button type="button" class="place-popup-link place-popup-link--delete">
+      <i class="fa-solid fa-trash" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.marker_delete'))}</span>
+    </button>`
+  wrap.innerHTML = `
+    <div class="place-popup-header">
+      <span class="place-popup-name">${escapeHtml(title)}</span>
+      <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
+    </div>
+    ${editActions}`
+  routeMarkerPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([marker.lng, marker.lat])
+    .setDOMContent(wrap)
+    .addTo(mapInstance)
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', closeRouteMarkerPopup)
+  wrap.querySelector('.place-popup-link--rename')?.addEventListener('click', () => {
+    const label = window.prompt(t('routes.marker_label'), marker.label || '')
+    if (label == null) return
+    const idx = routeStore.markers.value.indexOf(marker as any)
+    closeRouteMarkerPopup()
+    if (idx < 0) return
+    const clean = label.trim()
+    const cur = routeStore.markers.value[idx]
+    routeStore.markers.value[idx] = clean ? { ...cur, label: clean } : { kind: cur.kind, lng: cur.lng, lat: cur.lat }
+    installRouteMarkers()
+  })
+  wrap.querySelector('.place-popup-link--delete')?.addEventListener('click', () => {
+    const idx = routeStore.markers.value.indexOf(marker as any)
+    closeRouteMarkerPopup()
+    if (idx < 0) return
+    routeStore.markers.value.splice(idx, 1)
+    installRouteMarkers()
+  })
+}
+
+// Sélectionne le mode d'édition (dropdown). Ferme les dialogues/popups de pose en
+// cours pour repartir d'un état propre, et referme le menu.
+function setEditMode(mode: EditMode) {
+  editMode.value = mode
+  editMenuOpen.value = false
+  if (mode !== 'poi') poiDialog.value = null
+  if (mode !== 'marker') markerDialog.value = null
+}
+
+// Ouvre le dialogue de création (type + libellé) au point cliqué en mode « poser ».
+function openMarkerDialog(lng: number, lat: number) {
+  markerDialog.value = { lng, lat, kind: MARKER_KINDS[0].kind, label: '' }
+}
+
+// Enregistre le repère saisi dans le dialogue et le rend immédiatement.
+function saveMarkerFromDialog() {
+  const d = markerDialog.value
+  if (!d) return
+  const label = d.label.trim()
+  const marker = label ? { kind: d.kind, lng: d.lng, lat: d.lat, label } : { kind: d.kind, lng: d.lng, lat: d.lat }
+  routeStore.markers.value.push(marker)
+  markerDialog.value = null
+  installRouteMarkers()
+}
+
 // ─── Selection markers ────────────────────────────────────────────────────────
 
 function updateSelectionMarkers() {
@@ -1897,7 +2048,7 @@ function applyMapStyle(id: string) {
   if (!mapInstance) return
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
-    installRouteLayer(); installPreviewLayer(); installOverlays()
+    installRouteLayer(); installOverlays()
     updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); installClimbMarkers(); installPlaceMarkers(); installSavedPoiMarkers()
     if (locationVisible.value && lastLocationCoords) installLocationLayers(lastLocationCoords, lastLocationAccuracy)
     if (props.state.is3D) {
@@ -1935,6 +2086,15 @@ function setOverlays(ids: string[]) {
   props.state.overlays = ids
   persistOverlays(ids, routeStore.sport.value)
   installOverlays()
+}
+
+// Bascule d'une couche depuis le menu Affichage (multi-sélection : plusieurs couches
+// peuvent être actives). Délègue à setOverlays pour la persistance et le rendu.
+function toggleOverlay(id: string) {
+  const next = props.state.overlays.includes(id)
+    ? props.state.overlays.filter((x) => x !== id)
+    : [...props.state.overlays, id]
+  setOverlays(next)
 }
 
 // Le sport gouverne le fond de carte, les overlays et l'aspect du tracé : en changer
@@ -1990,6 +2150,14 @@ function toggleClimbs() {
   installClimbMarkers()
 }
 
+// Affiche/masque les repères d'itinéraire (départ / arrivée / parking). Ferme un
+// éventuel popup pour qu'il ne flotte pas sans marqueur après masquage.
+function toggleMarkers() {
+  props.state.showMarkers = !props.state.showMarkers
+  if (!props.state.showMarkers && routeMarkerPopup) closeRouteMarkerPopup()
+  installRouteMarkers()
+}
+
 // Affiche/masque tous les marqueurs de POI : ceux trouvés le long du tracé
 // (Overpass) et ceux enregistrés manuellement. La fermeture d'un éventuel popup
 // évite qu'il flotte sans marqueur après le masquage.
@@ -2012,6 +2180,9 @@ function toggleReadOnly() {
   if (routeStore.shareLocked.value) return
   routeStore.readOnly.value = !routeStore.readOnly.value
   if (routeStore.readOnly.value) {
+    // La lecture seule masque le dropdown de mode : on revient au mode par défaut
+    // pour ne pas rester bloqué en pose de POI/repère au retour en édition.
+    setEditMode('route')
     deselectAll()
     hideHoverMarker()
     closePlacePopup()
@@ -2019,133 +2190,6 @@ function toggleReadOnly() {
   }
   refreshWaypointMarkers()
   if (mapInstance) mapInstance.getCanvas().style.cursor = routeStore.readOnly.value ? '' : 'crosshair'
-}
-
-// ─── Waymarked Trails preview ─────────────────────────────────────────────────
-
-function installPreviewLayer() {
-  if (!mapInstance || mapInstance.getSource('wt-preview')) return
-  mapInstance.addSource('wt-preview', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
-  mapInstance.addLayer({ id: 'wt-preview-border', type: 'line', source: 'wt-preview', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': 'rgba(0,0,0,0.25)', 'line-width': 8 } })
-  mapInstance.addLayer({ id: 'wt-preview-line', type: 'line', source: 'wt-preview', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a855f7', 'line-width': 5, 'line-dasharray': [2, 1.5] } })
-}
-
-function setPreviewCoords(coords: Array<[number, number]>) {
-  if (!mapInstance) return
-  const src = mapInstance.getSource('wt-preview') as any
-  if (!src) return
-  src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
-}
-
-function wtMercatorToLngLat(x: number, y: number): [number, number] {
-  return [(x / 20037508.342) * 180, (Math.atan(Math.exp((y / 20037508.342) * Math.PI)) * 360) / Math.PI - 90]
-}
-
-function wtExtractCoords(node: any, out: Array<[number, number]>) {
-  if (!node) return
-  if (node.geometry?.type === 'LineString' && Array.isArray(node.geometry.coordinates)) {
-    for (const c of node.geometry.coordinates) {
-      if (Array.isArray(c) && c.length >= 2) out.push(wtMercatorToLngLat(c[0], c[1]))
-    }
-  }
-  if (Array.isArray(node.ways)) node.ways.forEach((w: any) => wtExtractCoords(w, out))
-  if (Array.isArray(node.main)) node.main.forEach((m: any) => wtExtractCoords(m, out))
-}
-
-async function wtSearch(url: string) {
-  wtSearching.value = true; wtResults.value = []
-  try {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    wtResults.value = Array.isArray(data.results) ? data.results : []
-  } catch { wtResults.value = [] }
-  finally { wtSearching.value = false }
-}
-
-function wtSearchByQuery() {
-  const q = wtQuery.value.trim()
-  if (q.length < 2) return
-  wtSearch(`${WT_BASE.value}/list/search?query=${encodeURIComponent(q)}&limit=15`)
-}
-
-// Changer de sport relance la recherche courante sur la nouvelle base WT.
-function setWtSport(sport: WtSport) {
-  if (sport === wtSport.value) return
-  routeStore.setSport(sport)
-  wtHidePreview()
-  wtGeomCache.clear()
-  if (wtQuery.value.trim().length >= 2) wtSearchByQuery()
-  else if (wtResults.value.length > 0) wtSearchByArea()
-}
-
-function lngLatToMercator(lng: number, lat: number): [number, number] {
-  return [(lng / 180) * 20037508.342, Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) * 6378137]
-}
-
-function wtSearchByArea() {
-  if (!mapInstance) return
-  const b = mapInstance.getBounds()
-  const [x1, y1] = lngLatToMercator(b.getWest(), b.getSouth())
-  const [x2, y2] = lngLatToMercator(b.getEast(), b.getNorth())
-  wtSearch(`${WT_BASE.value}/list/by_area?bbox=${x1.toFixed(0)},${y1.toFixed(0)},${x2.toFixed(0)},${y2.toFixed(0)}&limit=20`)
-}
-
-async function wtImport(route: { id: number; type: string; name: string }) {
-  if (wtImportingId.value != null) return
-  wtHidePreview()
-  wtImportingId.value = route.id
-  try {
-    const res = await fetch(`${WT_BASE.value}/details/${route.type}/${route.id}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    const pts: Array<[number, number]> = []
-    wtExtractCoords(data.route, pts)
-    if (pts.length < 2) throw new Error('Pas assez de points')
-    const MAX = 25
-    const step = pts.length / MAX
-    const sampled: Array<[number, number]> = pts.length <= MAX ? pts.slice()
-      : Array.from({ length: MAX }, (_, i) => pts[Math.floor(i * step)])
-    sampled[0] = pts[0]; sampled[sampled.length - 1] = pts[pts.length - 1]
-    if (!routeStore.name.value.trim()) routeStore.name.value = (data.name || route.name).slice(0, 80)
-    routeStore.waypoints.value = sampled.map(([lng, lat]) => ({ lng, lat }))
-    refreshWaypointMarkers()
-    const lngs = sampled.map(([lng]) => lng)
-    const lats = sampled.map(([, lat]) => lat)
-    mapInstance?.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 40, duration: 600 })
-    emit('waypoints-changed')
-    wtExpanded.value = false
-  } catch (e: any) {
-    routeStore.error.value = `Waymarked Trails : ${e.message}`
-  } finally { wtImportingId.value = null }
-}
-
-async function wtShowPreview(route: { id: number; type: string; name: string }) {
-  if (wtPreviewTimeout) { clearTimeout(wtPreviewTimeout); wtPreviewTimeout = null }
-  wtPreviewTimeout = setTimeout(async () => {
-    wtPreviewTimeout = null
-    if (!mapInstance) return
-    let pts = wtGeomCache.get(route.id)
-    if (!pts) {
-      try {
-        const res = await fetch(`${WT_BASE.value}/details/${route.type}/${route.id}`)
-        if (!res.ok) return
-        const data = await res.json()
-        pts = []
-        wtExtractCoords(data.route, pts)
-        if (pts!.length >= 2) wtGeomCache.set(route.id, pts!)
-      } catch { return }
-    }
-    if (!pts || pts.length < 2) return
-    setPreviewCoords(pts)
-    const lngs = pts.map(([lng]) => lng), lats = pts.map(([, lat]) => lat)
-    mapInstance.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: 60, duration: 400, maxZoom: 14 })
-  }, 300)
-}
-
-function wtHidePreview() {
-  if (wtPreviewTimeout) { clearTimeout(wtPreviewTimeout); wtPreviewTimeout = null }
-  setPreviewCoords([])
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────
@@ -2270,6 +2314,7 @@ defineExpose({
   clearAlternatives,
   applyAlternative,
   refreshWaypointMarkers,
+  refreshRouteMarkers: installRouteMarkers,
   recomputeWaypointGeomIndices,
   fitMapToRoute,
   fitMapToSelection,
@@ -2295,43 +2340,90 @@ defineExpose({
 
     <div class="map-controls">
       <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
-      <MapOverlayDropdown :model-value="state.overlays" @update:model-value="setOverlays" />
-      <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
-        <button type="button" class="btn map-ctrl-btn"
-          :class="state.showWaypoints ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="toggleWaypoints"
-          :title="state.showWaypoints ? t('routes.hide_waypoints') : t('routes.show_waypoints')"
-          :aria-pressed="state.showWaypoints">
-          <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
+      <!-- Menu « Affichage » : bascules de calques regroupées (façon menu des couches).
+           Les actions de pose (POI / repère) restent des boutons dédiés, hors de ce menu. -->
+      <div class="position-relative shadow-sm">
+        <button type="button"
+          class="btn btn-sm map-ctrl-btn map-ctrl-btn--labeled d-flex align-items-center gap-1"
+          :class="displayMenuOpen ? 'btn-warning text-dark' : 'btn-light'"
+          :title="t('routes.display_label')"
+          @click="displayMenuOpen = !displayMenuOpen">
+          <i class="fa-solid fa-eye" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">{{ t('routes.display_label') }}</span>
+          <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
         </button>
-        <button type="button" class="btn map-ctrl-btn"
-          :class="state.showClimbs ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="toggleClimbs"
-          :title="state.showClimbs ? t('strava.hide_climbs') : t('strava.show_climbs')"
-          :aria-pressed="state.showClimbs">
-          <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-        </button>
-        <button type="button" class="btn map-ctrl-btn"
-          :class="state.showPois ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="togglePois"
-          :title="state.showPois ? t('routes.hide_pois') : t('routes.show_pois')"
-          :aria-pressed="state.showPois">
-          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-        </button>
-        <button type="button" class="btn map-ctrl-btn"
-          :class="state.showGrade ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="toggleGrade"
-          :title="state.showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
-          :aria-pressed="state.showGrade">
-          <i class="fa-solid fa-palette" aria-hidden="true"></i>
-        </button>
-        <button v-if="!routeStore.shareLocked.value" type="button" class="btn map-ctrl-btn"
-          :class="routeStore.readOnly.value ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="toggleReadOnly"
-          :title="routeStore.readOnly.value ? t('routes.disable_readonly') : t('routes.enable_readonly')"
-          :aria-pressed="routeStore.readOnly.value">
-          <i class="fa-solid" :class="routeStore.readOnly.value ? 'fa-lock' : 'fa-lock-open'" aria-hidden="true"></i>
-        </button>
+        <ul v-if="displayMenuOpen" class="dropdown-menu show mt-1" style="min-width: 14rem; z-index: 10;">
+          <li><h6 class="dropdown-header">{{ t('routes.display_label') }}</h6></li>
+          <li>
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.showWaypoints }" @click="toggleWaypoints">
+              <i class="fa-solid" :class="state.showWaypoints ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-map-pin fa-fw" aria-hidden="true"></i>{{ t('routes.layer_waypoints') }}
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.showClimbs }" @click="toggleClimbs">
+              <i class="fa-solid" :class="state.showClimbs ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-mountain fa-fw" aria-hidden="true"></i>{{ t('routes.layer_climbs') }}
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.showMarkers }" @click="toggleMarkers">
+              <i class="fa-solid" :class="state.showMarkers ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-flag fa-fw" aria-hidden="true"></i>{{ t('routes.layer_markers') }}
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.showPois }" @click="togglePois">
+              <i class="fa-solid" :class="state.showPois ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-location-dot fa-fw" aria-hidden="true"></i>{{ t('routes.layer_pois') }}
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.showGrade }" @click="toggleGrade">
+              <i class="fa-solid" :class="state.showGrade ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-palette fa-fw" aria-hidden="true"></i>{{ t('routes.layer_grade') }}
+            </button>
+          </li>
+          <template v-if="!routeStore.shareLocked.value">
+            <li><hr class="dropdown-divider" /></li>
+            <li>
+              <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+                :class="{ active: routeStore.readOnly.value }" @click="toggleReadOnly">
+                <i class="fa-solid" :class="routeStore.readOnly.value ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+                <i class="fa-solid fa-lock fa-fw" aria-hidden="true"></i>{{ t('routes.layer_readonly') }}
+              </button>
+            </li>
+          </template>
+          <li><hr class="dropdown-divider" /></li>
+          <li><h6 class="dropdown-header">{{ t('strava.overlay_label') }}</h6></li>
+          <li v-for="o in MAP_OVERLAYS" :key="o.id">
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.overlays.includes(o.id) }" @click="toggleOverlay(o.id)">
+              <i class="fa-solid" :class="state.overlays.includes(o.id) ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-fw" :class="o.icon" aria-hidden="true"></i>{{ t(`strava.overlay_${o.id}`) }}
+            </button>
+          </li>
+          <li class="d-none d-md-block"><hr class="dropdown-divider" /></li>
+          <li class="d-none d-md-block">
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.showStatsSidebar }" @click="state.showStatsSidebar = !state.showStatsSidebar">
+              <i class="fa-solid" :class="state.showStatsSidebar ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-chart-simple fa-fw" aria-hidden="true"></i>{{ t('routes.layer_stats_sidebar') }}
+            </button>
+          </li>
+          <li class="d-none d-md-block">
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.showElevationChart }" @click="$emit('toggle-chart')">
+              <i class="fa-solid" :class="state.showElevationChart ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-chart-area fa-fw" aria-hidden="true"></i>{{ t('routes.layer_elevation_chart') }}
+            </button>
+          </li>
+        </ul>
       </div>
       <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
         <button type="button" class="btn btn-light map-ctrl-btn"
@@ -2341,30 +2433,28 @@ defineExpose({
           <i class="fa-solid fa-route" aria-hidden="true"></i>
         </button>
       </div>
-      <div v-if="!routeStore.readOnly.value" class="btn-group-vertical btn-group-sm shadow-sm" role="group">
-        <button type="button" class="btn map-ctrl-btn"
-          :class="placePoiMode ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="placePoiMode = !placePoiMode"
-          :title="placePoiMode ? t('routes.place_poi_done') : t('routes.place_poi')"
-          :aria-pressed="placePoiMode">
-          <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+      <!-- Menu « Mode d'édition » : détermine l'effet d'un clic sur la carte (modifier
+           l'itinéraire / poser un POI / poser un repère). Masqué en lecture seule. -->
+      <div v-if="!routeStore.readOnly.value" class="position-relative shadow-sm">
+        <button type="button"
+          class="btn btn-sm map-ctrl-btn map-ctrl-btn--labeled d-flex align-items-center gap-1"
+          :class="editMode === 'route' ? 'btn-light' : 'btn-warning text-dark'"
+          :title="t('routes.edit_mode_label')"
+          @click="editMenuOpen = !editMenuOpen">
+          <i class="fa-solid" :class="currentEditMode.icon" aria-hidden="true"></i>
+          <span class="d-none d-md-inline">{{ t(currentEditMode.labelKey) }}</span>
+          <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
         </button>
-      </div>
-      <div class="btn-group-vertical btn-group-sm shadow-sm d-none d-md-flex" role="group">
-        <button type="button" class="btn map-ctrl-btn"
-          :class="state.showStatsSidebar ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="state.showStatsSidebar = !state.showStatsSidebar"
-          :title="state.showStatsSidebar ? t('routes.hide_stats_sidebar') : t('routes.show_stats_sidebar')"
-          :aria-pressed="state.showStatsSidebar">
-          <i class="fa-solid fa-chart-simple" aria-hidden="true"></i>
-        </button>
-        <button type="button" class="btn map-ctrl-btn"
-          :class="state.showElevationChart ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="$emit('toggle-chart')"
-          :title="state.showElevationChart ? t('routes.hide_elevation_chart') : t('routes.show_elevation_chart')"
-          :aria-pressed="state.showElevationChart">
-          <i class="fa-solid fa-chart-area" aria-hidden="true"></i>
-        </button>
+        <ul v-if="editMenuOpen" class="dropdown-menu show mt-1" style="min-width: 13rem; z-index: 10;">
+          <li><h6 class="dropdown-header">{{ t('routes.edit_mode_label') }}</h6></li>
+          <li v-for="m in EDIT_MODES" :key="m.mode">
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: editMode === m.mode }" @click="setEditMode(m.mode)">
+              <i class="fa-solid" :class="editMode === m.mode ? 'fa-circle-dot' : 'fa-circle'" aria-hidden="true"></i>
+              <i class="fa-solid fa-fw" :class="m.icon" aria-hidden="true"></i>{{ t(m.labelKey) }}
+            </button>
+          </li>
+        </ul>
       </div>
     </div>
 
@@ -2392,15 +2482,6 @@ defineExpose({
           :title="state.mapExpanded ? t('strava.shrink_map') : t('strava.expand_map')"
           :aria-pressed="state.mapExpanded">
           <i :class="state.mapExpanded ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" aria-hidden="true"></i>
-        </button>
-      </div>
-      <div v-if="!routeStore.readOnly.value" class="btn-group-vertical btn-group-sm shadow-sm" role="group">
-        <button type="button" class="btn map-ctrl-btn"
-          :class="wtExpanded ? 'btn-primary active' : 'btn-light'"
-          @click="wtExpanded = !wtExpanded"
-          :title="t('routes.wt_title')"
-          :aria-pressed="wtExpanded">
-          <i class="fa-solid fa-route" aria-hidden="true"></i>
         </button>
       </div>
     </div>
@@ -2475,71 +2556,6 @@ defineExpose({
       <span v-else>Stats</span>
     </button>
 
-    <!-- Waymarked Trails drawer -->
-    <Transition name="wt-drawer">
-      <div v-if="wtExpanded" class="wt-drawer">
-        <div class="wt-drawer-header">
-          <span class="wt-drawer-title">
-            <i class="fa-solid fa-route" aria-hidden="true"></i>
-            {{ t('routes.wt_title') }}
-          </span>
-          <button type="button" class="btn-close btn-close-sm" @click="wtExpanded = false; wtHidePreview()" aria-label="Fermer"></button>
-        </div>
-        <div class="wt-drawer-body">
-          <div class="btn-group btn-group-sm w-100 mb-2" role="group" :aria-label="t('routes.wt_sport')">
-            <button
-              v-for="s in WT_SPORTS"
-              :key="s"
-              type="button"
-              class="btn"
-              :class="wtSport === s ? 'btn-primary' : 'btn-outline-secondary'"
-              :disabled="wtSearching"
-              @click="setWtSport(s)"
-            >
-              <i :class="`fa-solid ${s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'}`" aria-hidden="true"></i>
-              <span class="ms-1 d-none d-sm-inline">{{ t(`routes.wt_sport_${s}`) }}</span>
-            </button>
-          </div>
-          <div class="input-group input-group-sm mb-1">
-            <input v-model="wtQuery" type="text" class="form-control" :placeholder="t('routes.wt_search_placeholder')" @keydown.enter="wtSearchByQuery" />
-            <button class="btn btn-outline-secondary" type="button" @click="wtSearchByQuery" :disabled="wtSearching">
-              <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-            </button>
-          </div>
-          <button type="button" class="btn btn-sm btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-1 mb-2" @click="wtSearchByArea" :disabled="wtSearching">
-            <span v-if="wtSearching" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-            <i v-else class="fa-solid fa-expand" aria-hidden="true"></i>
-            <span>{{ t('routes.wt_search_area') }}</span>
-          </button>
-          <div v-if="!wtSearching && wtResults.length === 0" class="wt-no-results">
-            <span v-if="wtQuery">{{ t('routes.wt_no_results') }}</span>
-            <span v-else class="text-muted" style="font-size:0.78rem">{{ t('routes.wt_search_placeholder') }}</span>
-          </div>
-          <div class="wt-results-list">
-            <div
-              v-for="r in wtResults"
-              :key="r.id"
-              class="wt-result-pill"
-              :class="{ 'wt-result-pill--loading': wtImportingId === r.id }"
-              :title="r.name || r.ref || `#${r.id}`"
-              @mouseenter="wtShowPreview({ id: r.id, type: r.type, name: r.name || r.ref || `#${r.id}` })"
-              @mouseleave="wtHidePreview()"
-              @click="wtImport({ id: r.id, type: r.type, name: r.name || r.ref || `#${r.id}` })"
-            >
-              <span class="wt-result-name">{{ r.name || r.ref || `#${r.id}` }}</span>
-              <span class="wt-result-meta">
-                <span v-if="wtImportingId === r.id" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                <template v-else>
-                  <span v-if="r.length">{{ (r.length / 1000).toFixed(0) }} km</span>
-                  <span v-if="r.ascent">· +{{ Math.round(r.ascent) }} m</span>
-                </template>
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Transition>
-
     <!-- Dialogue de création d'un POI sauvegardé (mode « poser un POI ») -->
     <div v-if="poiDialog" class="poi-dialog-backdrop" @click.self="poiDialog = null">
       <div class="poi-dialog card shadow">
@@ -2553,6 +2569,24 @@ defineExpose({
           <div class="d-flex gap-2 justify-content-end">
             <button type="button" class="btn btn-sm btn-light" @click="poiDialog = null">{{ t('routes.cancel') }}</button>
             <button type="button" class="btn btn-sm btn-primary" @click="savePoiFromDialog">{{ t('routes.save_poi') }}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dialogue de création d'un repère (mode « poser un repère ») -->
+    <div v-if="markerDialog" class="poi-dialog-backdrop" @click.self="markerDialog = null">
+      <div class="poi-dialog card shadow">
+        <div class="card-body">
+          <h6 class="mb-2">{{ t('routes.place_marker') }}</h6>
+          <select v-model="markerDialog.kind" class="form-select form-select-sm mb-2">
+            <option v-for="m in MARKER_KIND_LIST" :key="m.kind" :value="m.kind">{{ t(m.labelKey) }}</option>
+          </select>
+          <input v-model="markerDialog.label" class="form-control form-control-sm mb-3"
+            :placeholder="t('routes.marker_label')" @keyup.enter="saveMarkerFromDialog" />
+          <div class="d-flex gap-2 justify-content-end">
+            <button type="button" class="btn btn-sm btn-light" @click="markerDialog = null">{{ t('routes.cancel') }}</button>
+            <button type="button" class="btn btn-sm btn-primary" @click="saveMarkerFromDialog">{{ t('routes.save_poi') }}</button>
           </div>
         </div>
       </div>
@@ -2622,6 +2656,13 @@ defineExpose({
   align-items: center;
   justify-content: center;
   aspect-ratio: 1;
+}
+/* Déclencheur de menu avec libellé (« Affichage ») : on relâche le carré fixe pour
+   laisser la place à l'icône + le texte, comme le bouton « Fond de carte ». */
+.map-ctrl-btn--labeled {
+  width: auto;
+  aspect-ratio: auto;
+  padding: 0.25rem 0.5rem;
 }
 .map-ctrl-btn.active,
 .map-ctrl-btn.active:hover,
@@ -2729,55 +2770,6 @@ defineExpose({
 }
 .map-overlay-places-retry { color: #6ea8fe; font-weight: 600; white-space: nowrap; }
 @media (max-width: 767px) { .map-overlay-places-error { display: flex; } }
-
-.wt-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 280px;
-  background: #fff;
-  box-shadow: -4px 0 16px rgba(0,0,0,0.18);
-  display: flex;
-  flex-direction: column;
-  z-index: 10;
-}
-.wt-drawer-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.6rem 0.75rem 0.5rem;
-  border-bottom: 1px solid #e5e7eb;
-  flex-shrink: 0;
-}
-.wt-drawer-title { font-size: 0.82rem; font-weight: 600; color: #374151; display: flex; align-items: center; gap: 0.4rem; }
-.wt-drawer-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-height: 0;
-}
-.wt-results-list { display: flex; flex-direction: column; gap: 0.25rem; overflow-y: auto; min-height: 0; }
-.wt-no-results { color: #9ca3af; font-size: 0.78rem; padding: 0.4rem 0.2rem; }
-.wt-result-pill {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 0.5rem;
-  cursor: pointer;
-  background: rgba(13,110,253,0.06);
-  transition: background 0.15s;
-}
-.wt-result-pill:hover { background: rgba(13,110,253,0.15); }
-.wt-result-pill--loading { opacity: 0.6; pointer-events: none; }
-.wt-result-name { font-size: 0.78rem; font-weight: 500; color: #212529; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.wt-result-meta { font-size: 0.72rem; color: #6b7280; display: flex; align-items: center; gap: 0.25rem; }
-.wt-drawer-enter-active, .wt-drawer-leave-active { transition: transform 0.22s ease; }
-.wt-drawer-enter-from, .wt-drawer-leave-to { transform: translateX(100%); }
 
 /* Dialogue de création d'un POI sauvegardé (mode « poser un POI »). */
 .poi-dialog-backdrop {
@@ -2984,6 +2976,29 @@ defineExpose({
 .climb-cat-3     { color: #ca8a04; }
 .climb-cat-4     { color: #16a34a; }
 .climb-cat-uncat { color: #6c757d; }
+/* Repère d'itinéraire (départ / arrivée / parking) : pastille à libellé toujours
+   visible, calquée sur .climb-marker, colorée par le type (currentColor). */
+.route-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  background: rgba(255,255,255,0.96);
+  padding: 0.18rem 0.5rem 0.18rem 0.42rem;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1.5px solid currentColor;
+  box-shadow: 0 3px 8px -3px rgba(0,0,0,0.35);
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  transform-origin: bottom left;
+  transition: box-shadow 0.1s ease;
+}
+.route-marker:hover { box-shadow: 0 6px 14px -3px rgba(0,0,0,0.45); }
+.route-marker i { font-size: 0.74rem; }
+.route-marker .route-marker-label { color: #212529; }
 .place-marker {
   display: flex;
   align-items: center;

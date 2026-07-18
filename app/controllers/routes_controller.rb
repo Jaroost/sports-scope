@@ -15,6 +15,10 @@ class RoutesController < ApplicationController
   # PROFILES_BY_SPORT). Le profil enregistré pilote le tracé BRouter au rechargement.
   ALLOWED_PROFILES = %w[trekking fastbike fastbike-lowtraffic shortest gravel hiking-mountain].freeze
   ALLOWED_ACTIVITIES = Route::ACTIVITIES
+  # Repères posés à la main (cf. routeMarkers.ts côté front) — types acceptés et
+  # libellé GPX associé (repli quand l'utilisateur n'a pas saisi de libellé).
+  MARKER_KINDS = %w[start finish parking].freeze
+  MARKER_GPX_NAMES = { "start" => "Départ", "finish" => "Arrivée", "parking" => "Parking" }.freeze
 
   # GET /api/routes
   # Trois formes de réponse selon les params :
@@ -136,6 +140,7 @@ class RoutesController < ApplicationController
       geometry: src.geometry,
       voice_hints: src.voice_hints,
       pois: src.pois,
+      markers: src.markers,
       distance_m: src.distance_m,
       elevation_gain_m: src.elevation_gain_m,
       elevation_loss_m: src.elevation_loss_m,
@@ -189,6 +194,7 @@ class RoutesController < ApplicationController
     out[:geometry] = clean_geometry(p[:geometry]) if p.key?(:geometry)
     out[:voice_hints] = clean_voice_hints(p[:voice_hints]) if p.key?(:voice_hints)
     out[:pois] = clean_pois(p[:pois]) if p.key?(:pois)
+    out[:markers] = clean_markers(p[:markers]) if p.key?(:markers)
     out[:distance_m] = p[:distance_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:distance_m)
     out[:elevation_gain_m] = p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_gain_m)
     out[:elevation_loss_m] = p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_loss_m)
@@ -223,6 +229,7 @@ class RoutesController < ApplicationController
 
   MAX_VOICE_HINTS = 2_000
   MAX_POIS = 2_000
+  MAX_MARKERS = 50
 
   def clean_voice_hints(raw)
     return [] unless raw.is_a?(Array)
@@ -252,6 +259,27 @@ class RoutesController < ApplicationController
       next unless lat.is_a?(Numeric) && lng.is_a?(Numeric)
       next if lat.abs > 90 || lng.abs > 180
       { "name" => name, "type" => type, "lat" => lat.to_f, "lng" => lng.to_f }
+    end
+  end
+
+  # Repères posés à la main : `kind` restreint (MARKER_KINDS), coordonnées bornées,
+  # `label` libre optionnel. Distinct de clean_pois — ces repères ne sont jamais
+  # écrasés par la recherche Overpass.
+  def clean_markers(raw)
+    return [] unless raw.is_a?(Array)
+    raw.take(MAX_MARKERS).filter_map do |item|
+      h = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
+      next unless h.is_a?(Hash)
+      kind = (h["kind"] || h[:kind]).to_s
+      next unless MARKER_KINDS.include?(kind)
+      lat = h["lat"] || h[:lat]
+      lng = h["lng"] || h[:lng]
+      next unless lat.is_a?(Numeric) && lng.is_a?(Numeric)
+      next if lat.abs > 90 || lng.abs > 180
+      marker = { "kind" => kind, "lat" => lat.to_f, "lng" => lng.to_f }
+      label = (h["label"] || h[:label]).to_s.strip.first(100)
+      marker["label"] = label if label.present?
+      marker
     end
   end
 
@@ -334,6 +362,7 @@ class RoutesController < ApplicationController
       geometry: route.geometry || [],
       voice_hints: route.voice_hints || [],
       pois: route.pois || [],
+      markers: route.markers || [],
     )
   end
 
@@ -377,6 +406,9 @@ class RoutesController < ApplicationController
     parts << '<?xml version="1.0" encoding="UTF-8"?>'
     parts << %(<gpx version="1.1" creator="Sports Scope" xmlns="http://www.topografix.com/GPX/1/1" xmlns:ss="#{GPX_NS}">)
     parts << "  <metadata><name>#{name}</name></metadata>"
+    # Repères posés à la main → waypoints GPX nommés. Placés avant <trk> (ordre
+    # imposé par le schéma GPX 1.1 : metadata, wpt*, rte*, trk*).
+    parts.concat(build_gpx_markers(route.markers))
     parts << "  <trk><name>#{name}</name><trkseg>"
     pts.each do |pt|
       lng, lat, ele = pt
@@ -390,6 +422,22 @@ class RoutesController < ApplicationController
     parts.concat(build_gpx_extensions(wps))
     parts << "</gpx>"
     parts.join("\n")
+  end
+
+  # Repères posés à la main (départ / arrivée / parking) → <wpt> GPX nommés. Le nom
+  # est le libellé saisi, sinon le libellé du type. `sym` reste indicatif : peu de
+  # lecteurs le respectent, mais le nom passe partout (montre, Garmin, Komoot).
+  def build_gpx_markers(markers)
+    Array(markers).filter_map do |m|
+      lat = m["lat"] || m[:lat]
+      lng = m["lng"] || m[:lng]
+      kind = (m["kind"] || m[:kind]).to_s
+      next unless lat && lng
+      label = (m["label"] || m[:label]).to_s.strip
+      label = MARKER_GPX_NAMES.fetch(kind, kind) if label.empty?
+      name = ERB::Util.html_escape(label)
+      %(  <wpt lat="#{lat}" lon="#{lng}"><name>#{name}</name><sym>#{ERB::Util.html_escape(kind)}</sym></wpt>)
+    end
   end
 
   # Waypoints d'origine (sommets cliqués) + flag « libre » : la trace <trkpt>

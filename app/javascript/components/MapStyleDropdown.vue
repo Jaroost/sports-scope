@@ -33,7 +33,7 @@ function select(id) {
       @click="open = !open"
     >
       <i :class="`fa-solid ${MAP_STYLES.find(s => s.id === modelValue)?.icon ?? 'fa-map'}`" aria-hidden="true"></i>
-      <span class="d-none d-md-inline">{{ t(`strava.map_style_${modelValue}`) }}</span>
+      <span class="d-none d-md-inline">{{ t('strava.map_style_label') }}</span>
       <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
     </button>
     <ul v-if="open" class="dropdown-menu show mt-1" style="min-width: 9rem; z-index: 10;">

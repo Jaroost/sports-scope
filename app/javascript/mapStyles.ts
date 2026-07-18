@@ -23,7 +23,7 @@ export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss']
 // ─── Overlays (couches transparentes superposables) ───────────────────────────
 // Couches WMTS swisstopo/ASTRA (SuisseMobile), format PNG transparent, à empiler
 // par-dessus le fond actif. Suisse uniquement (vides ailleurs). Plusieurs peuvent
-// être actives simultanément — cf. MapOverlayDropdown.
+// être actives simultanément — cf. le menu « Affichage » de RouteBuilderMap.
 export interface MapOverlay {
   id: string
   icon: string

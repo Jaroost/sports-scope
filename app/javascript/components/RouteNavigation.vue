@@ -37,6 +37,7 @@ import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
 import NavRoutingPicker from './NavRoutingPicker.vue'
 import { useNavPois } from '../composables/useNavPois'
 import type { NavPlace } from '../composables/useNavPois'
+import type { RouteMarker } from '../routeMarkers'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
 import { useNavSound } from '../composables/useNavSound'
 import { useRadarAlerts } from '../composables/useRadarAlerts'
@@ -988,6 +989,7 @@ async function loadSharedRouteData(token: string) {
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
   if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
+  pois.setRouteMarkers((route.markers || []) as RouteMarker[])
   hasRoute.value = true
   syncEditable()
 }
@@ -1259,6 +1261,7 @@ function loadRoute(route: any) {
   offlinePois.value = savedPois
   void syncOfflineState()
   if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
+  pois.setRouteMarkers((route.markers || []) as RouteMarker[])
   resetRouteTracking(false)
   hasRoute.value = true
   syncEditable()

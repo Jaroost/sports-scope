@@ -460,6 +460,7 @@ async function fetchRoute(id: number) {
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
+    routeStore.markers.value = Array.isArray(r.markers) ? r.markers : []
     routeStore.distanceM.value = r.distance_m || 0
     routeStore.elevGainM.value = r.elevation_gain_m || 0
     routeStore.elevLossM.value = r.elevation_loss_m || 0
@@ -469,6 +470,7 @@ async function fetchRoute(id: number) {
       mapRef.value?.fitBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)], { padding: 40, duration: 0 })
     }
     mapRef.value?.refreshWaypointMarkers()
+    mapRef.value?.refreshRouteMarkers()
     mapRef.value?.recomputeWaypointGeomIndices()
     mapRef.value?.updateRouteLayer()
     await nextTick()
@@ -502,6 +504,7 @@ async function fetchSharedRoute(token: string) {
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
+    routeStore.markers.value = Array.isArray(r.markers) ? r.markers : []
     routeStore.distanceM.value = r.distance_m || 0
     routeStore.elevGainM.value = r.elevation_gain_m || 0
     routeStore.elevLossM.value = r.elevation_loss_m || 0
@@ -513,6 +516,7 @@ async function fetchSharedRoute(token: string) {
     mapRef.value?.applyColorMode()
     mapRef.value?.installClimbMarkers()
     mapRef.value?.refreshWaypointMarkers()
+    mapRef.value?.refreshRouteMarkers()
     mapRef.value?.updateRouteLayer()
     await nextTick()
     chartRef.value?.render()
@@ -668,6 +672,7 @@ async function persist() {
       geometry: routeStore.geometry.value,
       voice_hints: routeStore.voiceHints.value,
       pois: placesStore.importantPlaces.value.map(({ name, type, lat, lng }) => ({ name, type, lat, lng })),
+      markers: routeStore.markers.value,
       distance_m: routeStore.distanceM.value,
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,
@@ -1517,6 +1522,11 @@ onMounted(async () => {
     // En lecture seule, les points sont affichés par défaut (le bouton reste là
     // pour les masquer), sans tenir compte d'un éventuel réglage de session.
     state.showWaypoints = true
+    // Sur un lien partagé, on met en avant les repères posés par l'auteur (départ /
+    // arrivée / parking) et on masque les cols détectés, moins pertinents pour un
+    // destinataire qui découvre le tracé. Les deux restent débrayables.
+    state.showMarkers = true
+    state.showClimbs = false
     await mapRef.value?.initMap()
     await fetchSharedRoute(props.shareToken as string)
     return

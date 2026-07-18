@@ -4,6 +4,7 @@ import type { Coord, Climb, VoiceHint } from '../routeHelpers'
 import { userPreferences, speedForSport, routeProfileForSport, setActiveSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { isProfileValidForSport } from '../brouter'
+import type { RouteMarker } from '../routeMarkers'
 
 // Plafond du nombre de waypoints — doit rester ≤ MAX_WAYPOINTS côté serveur
 // (RoutesController = 500), qui tronque silencieusement au-delà à la sauvegarde.
@@ -17,6 +18,10 @@ class RouteStore {
   // délibéré) — purement informatif, n'affecte pas le routage (cf. detectUturnAnomalies).
   readonly waypoints = ref<Array<{ lng: number; lat: number; free?: boolean; uturn_ok?: boolean }>>([])
   readonly voiceHints = ref<VoiceHint[]>([])
+  // Repères posés à la main (départ / arrivée / parking + libellé optionnel),
+  // enregistrés avec l'itinéraire (colonne `routes.markers`). Distincts des POI
+  // Overpass, cf. routeMarkers.ts.
+  readonly markers = ref<RouteMarker[]>([])
   readonly distanceM = ref(0)
   readonly elevGainM = ref(0)
   readonly elevLossM = ref(0)
@@ -99,6 +104,7 @@ class RouteStore {
     this.geometry.value = []
     this.waypoints.value = []
     this.voiceHints.value = []
+    this.markers.value = []
     this.distanceM.value = 0
     this.elevGainM.value = 0
     this.elevLossM.value = 0

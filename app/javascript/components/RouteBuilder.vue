@@ -78,6 +78,10 @@ const snapWarnings = ref<Array<{ idx: number; distM: number }>>([])
 // Vrai une fois la sauvegarde tentée malgré des avertissements : fait apparaître
 // « enregistrer quand même ». Retombe à faux dès que le tracé change.
 const saveBlocked = ref(false)
+// « Aucun repère » : à l'enregistrement, si l'itinéraire n'a aucun repère posé, on
+// prévient qu'un lien partagé n'affiche par défaut que le parcours et les repères.
+// Purement informatif — la sauvegarde reste possible via « enregistrer quand même ».
+const noMarkersWarn = ref(false)
 
 // Fermer une alerte ne fait que la replier : la cause (erreur, points accrochés, amas de
 // virages) est toujours là et l'utilisateur doit pouvoir la relire. On masque donc
@@ -85,6 +89,7 @@ const saveBlocked = ref(false)
 // drapeau se relève de lui-même dès que l'alerte a un nouveau contenu à montrer.
 const errorDismissed = ref(false)
 const snapDismissed = ref(false)
+const noMarkersDismissed = ref(false)
 watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
 watch(snapWarnings, () => { snapDismissed.value = false })
 
@@ -103,6 +108,7 @@ watch(snapWarnings, (list) => {
 // Ce qui est réellement à l'écran, source unique pour l'affichage comme pour la pastille.
 const snapVisible = computed(() => snapWarnings.value.length > 0 && !snapDismissed.value)
 const turnVisible = computed(() => turnWarnings.value.length > 0 && showTurnWarning.value)
+const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismissed.value)
 
 // Alertes repliées mais toujours d'actualité : elles gardent leurs données, seule leur
 // vue est masquée, et la pastille les rappelle.
@@ -111,12 +117,14 @@ const hiddenNoticeCount = computed(() => {
   if (routeStore.error.value && errorDismissed.value) n++
   if (snapWarnings.value.length && snapDismissed.value) n++
   if (turnWarnings.value.length && !showTurnWarning.value) n++
+  if (noMarkersWarn.value && noMarkersDismissed.value) n++
   return n
 })
 
 function reopenNotices() {
   errorDismissed.value = false
   snapDismissed.value = false
+  noMarkersDismissed.value = false
   if (turnWarnings.value.length) showTurnWarning.value = true
 }
 const exportStyleId = ref('')
@@ -587,6 +595,7 @@ function computeSnapWarnings(): Array<{ idx: number; distM: number }> {
 function clearRouteWarnings() {
   snapWarnings.value = []   // le watch ci-dessus retire les marqueurs correspondants
   setTurnWarnings([])
+  noMarkersWarn.value = false
   saveBlocked.value = false
 }
 
@@ -615,9 +624,13 @@ async function save() {
   // corrige, ou passe outre.
   snapWarnings.value = computeSnapWarnings()
   setTurnWarnings(computeTurnAnomalies())
-  if (snapWarnings.value.length || turnWarnings.value.length) {
+  // Rappel informatif : un itinéraire sans repère perd de sa lisibilité une fois
+  // partagé (le lecteur ne voit par défaut que le parcours et les repères).
+  noMarkersWarn.value = routeStore.markers.value.length === 0
+  if (snapWarnings.value.length || turnWarnings.value.length || noMarkersWarn.value) {
     saveBlocked.value = true
     snapDismissed.value = false
+    noMarkersDismissed.value = false
     return
   }
   await persistAndIndexPlaces()
@@ -1519,14 +1532,15 @@ onMounted(async () => {
   // Mode lecture seule (lien de partage) : on charge l'itinéraire via le jeton
   // public, sans brancher la sauvegarde ni lire les paramètres de pré-remplissage.
   if (props.shareToken) {
-    // En lecture seule, les points sont affichés par défaut (le bouton reste là
-    // pour les masquer), sans tenir compte d'un éventuel réglage de session.
-    state.showWaypoints = true
-    // Sur un lien partagé, on met en avant les repères posés par l'auteur (départ /
-    // arrivée / parking) et on masque les cols détectés, moins pertinents pour un
-    // destinataire qui découvre le tracé. Les deux restent débrayables.
+    // Sur un lien partagé, on sélectionne par défaut uniquement les repères posés par
+    // l'auteur (départ / arrivée / parking) et les couleurs de pente ; les autres
+    // calques (points, cols, POI) partent masqués. Le menu Affichage reste complet,
+    // le destinataire peut donc tout réactiver.
     state.showMarkers = true
+    state.colorMode = 'grade'
+    state.showWaypoints = false
     state.showClimbs = false
+    state.showPois = false
     await mapRef.value?.initMap()
     await fetchSharedRoute(props.shareToken as string)
     return
@@ -1795,9 +1809,20 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
+                  <!-- Aucun repère posé : rappel informatif sur le rendu d'un lien partagé -->
+                  <div v-if="noMarkersVisible" key="no-markers" class="map-notice map-notice--warning" role="status">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-flag" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ t('routes.no_markers_warning_title') }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="noMarkersDismissed = true"
+                        :aria-label="t('routes.snap_warning_dismiss')"></button>
+                    </div>
+                    <p class="map-notice-body">{{ t('routes.no_markers_warning_body') }}</p>
+                  </div>
+
                   <!-- « Enregistrer quand même » : hors des alertes, car il vaut pour toutes
                        celles qui font barrage, pas seulement la dernière de la pile. -->
-                  <div v-if="saveBlocked && (snapVisible || turnVisible)" key="save-anyway" class="map-notice-actions">
+                  <div v-if="saveBlocked && (snapVisible || turnVisible || noMarkersVisible)" key="save-anyway" class="map-notice-actions">
                     <button type="button" class="btn btn-sm btn-warning shadow" :disabled="saving" @click="saveAnyway">
                       <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
                       {{ t('routes.turn_warning_save_anyway') }}

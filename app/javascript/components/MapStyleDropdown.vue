@@ -11,15 +11,27 @@ const groupedStyles = computed(() =>
 
 const props = defineProps({
   modelValue: { type: String, required: true },
+  // Libellé court affiché sur mobile (ex. « Carte »). Absent → aucun libellé sur
+  // mobile (icône seule), comportement d'origine conservé pour les autres vues.
+  mobileLabel: { type: String, default: '' },
+  // Contrôle optionnel de l'ouverture (v-model:open) : permet à un parent de
+  // coordonner plusieurs dropdowns (fermer celui-ci quand un autre s'ouvre).
+  // Absent (null) → le composant gère son ouverture en interne, comme avant.
+  open: { type: [Boolean], default: null },
 })
 
-const emit = defineEmits(['update:modelValue'])
+const emit = defineEmits(['update:modelValue', 'update:open'])
 
-const open = ref(false)
+const internalOpen = ref(false)
+const controlled = computed(() => props.open !== null)
+const isOpen = computed({
+  get: () => (controlled.value ? props.open : internalOpen.value),
+  set: (v) => { if (controlled.value) emit('update:open', v); else internalOpen.value = v },
+})
 
 function select(id) {
   emit('update:modelValue', id)
-  open.value = false
+  isOpen.value = false
 }
 </script>
 
@@ -28,15 +40,16 @@ function select(id) {
     <button
       type="button"
       class="btn btn-sm map-ctrl-btn d-flex align-items-center gap-1"
-      :class="open ? 'btn-warning text-dark' : 'btn-light'"
+      :class="isOpen ? 'btn-warning text-dark' : 'btn-light'"
       :title="t('strava.map_style_label')"
-      @click="open = !open"
+      @click="isOpen = !isOpen"
     >
       <i :class="`fa-solid ${MAP_STYLES.find(s => s.id === modelValue)?.icon ?? 'fa-map'}`" aria-hidden="true"></i>
+      <span v-if="mobileLabel" class="d-md-none">{{ mobileLabel }}</span>
       <span class="d-none d-md-inline">{{ t('strava.map_style_label') }}</span>
       <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
     </button>
-    <ul v-if="open" class="dropdown-menu show mt-1" style="min-width: 9rem; z-index: 10;">
+    <ul v-if="isOpen" class="dropdown-menu show mt-1" style="min-width: 9rem; z-index: 10;">
       <template v-for="(g, gi) in groupedStyles" :key="g.group">
         <li v-if="gi > 0"><hr class="dropdown-divider" /></li>
         <li>

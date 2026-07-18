@@ -117,17 +117,15 @@ const POI_CATS = POI_CATEGORIES
 // permanence, déplaçables, éditables via popup. Distincts des POI (cf. routeMarkers.ts).
 const MARKER_KIND_LIST = MARKER_KINDS
 const routeMarkerObjs: any[] = []
+const routeMarkerObservers: MutationObserver[] = []
 let routeMarkerPopup: any = null
 // Dialogue de création d'un repère (type + libellé optionnel).
 const markerDialog = ref<{ lng: number; lat: number; kind: MarkerKind; label: string } | null>(null)
 
-// Menu déroulant « Affichage » : regroupe les bascules de calques (points, cols,
-// repères, POI, pente…) façon menu des couches. Le choix du mode d'édition est un
-// dropdown distinct.
-const displayMenuOpen = ref(false)
-
-// Menu déroulant « Mode d'édition » : sélectionne ce que fait un clic sur la carte.
-const editMenuOpen = ref(false)
+// Dropdown ouvert dans la toolbar de la carte, ou null. Un seul à la fois : ouvrir
+// un dropdown (style de carte / « Affichage » / « Mode d'édition ») ferme l'autre.
+// 'style' est piloté par MapStyleDropdown via v-model:open.
+const openMenu = ref<'style' | 'display' | 'edit' | null>(null)
 const EDIT_MODES: Array<{ mode: EditMode; icon: string; labelKey: string }> = [
   { mode: 'route',  icon: 'fa-route',            labelKey: 'routes.edit_mode_route' },
   { mode: 'poi',    icon: 'fa-map-location-dot', labelKey: 'routes.edit_mode_poi' },
@@ -1229,6 +1227,7 @@ async function savePlaceAsPoi(place: Place) {
 // / suppression) et au chargement d'un itinéraire (refreshRouteMarkers).
 
 function clearRouteMarkers() {
+  routeMarkerObservers.forEach((obs) => obs.disconnect()); routeMarkerObservers.length = 0
   routeMarkerObjs.forEach((m) => m.remove()); routeMarkerObjs.length = 0
 }
 
@@ -1242,6 +1241,8 @@ function installRouteMarkers() {
     const m = new _maplibregl.Marker({ element: el, anchor: 'bottom-left', draggable: editable })
       .setLngLat([marker.lng, marker.lat])
       .addTo(mapInstance)
+    // Réduit le repère quand on dézoome (comme les cols), via --wp-scale.
+    routeMarkerObservers.push(attachClimbMarkerScaleObserver(el))
     if (editable) {
       // Fige le déplacement de la carte pendant le drag et écrit la nouvelle position
       // dans le store à la fin (le tableau reste indexé comme au rendu).
@@ -1268,7 +1269,13 @@ function buildRouteMarkerEl(marker: { kind: string; lng: number; lat: number; la
   el.style.color = meta?.color ?? '#6b7280'
   el.title = marker.label ? `${kindLabel} · ${marker.label}` : kindLabel
   el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i><span class="route-marker-label">${text}</span>`
-  el.addEventListener('click', (ev) => { ev.stopPropagation(); showRouteMarkerPopup(marker) })
+  el.addEventListener('click', (ev) => {
+    ev.stopPropagation()
+    // Zoome raisonnablement sur le repère (sans jamais dézoomer). En lecture seule on
+    // s'arrête là ; en édition on ouvre en plus le popup renommer / supprimer.
+    flyTo(marker.lng, marker.lat, Math.max(mapInstance?.getZoom() ?? 15, 15))
+    if (!routeStore.readOnly.value) showRouteMarkerPopup(marker)
+  })
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker() })
   el.addEventListener('mouseleave', () => { overClimbMarker = false })
@@ -1331,7 +1338,7 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
 // cours pour repartir d'un état propre, et referme le menu.
 function setEditMode(mode: EditMode) {
   editMode.value = mode
-  editMenuOpen.value = false
+  openMenu.value = null
   if (mode !== 'poi') poiDialog.value = null
   if (mode !== 'marker') markerDialog.value = null
 }
@@ -2339,20 +2346,21 @@ defineExpose({
     <div ref="mapEl" class="route-builder-map"></div>
 
     <div class="map-controls">
-      <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
+      <MapStyleDropdown :model-value="state.mapStyleId" :mobile-label="t('strava.map_style_short')" @update:model-value="setMapStyle"
+        :open="openMenu === 'style'" @update:open="(v) => openMenu = v ? 'style' : null" />
       <!-- Menu « Affichage » : bascules de calques regroupées (façon menu des couches).
            Les actions de pose (POI / repère) restent des boutons dédiés, hors de ce menu. -->
       <div class="position-relative shadow-sm">
         <button type="button"
           class="btn btn-sm map-ctrl-btn map-ctrl-btn--labeled d-flex align-items-center gap-1"
-          :class="displayMenuOpen ? 'btn-warning text-dark' : 'btn-light'"
+          :class="openMenu === 'display' ? 'btn-warning text-dark' : 'btn-light'"
           :title="t('routes.display_label')"
-          @click="displayMenuOpen = !displayMenuOpen">
+          @click="openMenu = openMenu === 'display' ? null : 'display'">
           <i class="fa-solid fa-eye" aria-hidden="true"></i>
-          <span class="d-none d-md-inline">{{ t('routes.display_label') }}</span>
+          <span>{{ t('routes.display_label') }}</span>
           <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
         </button>
-        <ul v-if="displayMenuOpen" class="dropdown-menu show mt-1" style="min-width: 14rem; z-index: 10;">
+        <ul v-if="openMenu === 'display'" class="dropdown-menu show mt-1" style="min-width: 14rem; z-index: 10;">
           <li><h6 class="dropdown-header">{{ t('routes.display_label') }}</h6></li>
           <li>
             <button type="button" class="dropdown-item d-flex align-items-center gap-2"
@@ -2387,6 +2395,13 @@ defineExpose({
               :class="{ active: state.showGrade }" @click="toggleGrade">
               <i class="fa-solid" :class="state.showGrade ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
               <i class="fa-solid fa-palette fa-fw" aria-hidden="true"></i>{{ t('routes.layer_grade') }}
+            </button>
+          </li>
+          <li>
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.is3D }" @click="toggleMap3D">
+              <i class="fa-solid" :class="state.is3D ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-cube fa-fw" aria-hidden="true"></i>{{ t('strava.map_3d') }}
             </button>
           </li>
           <template v-if="!routeStore.shareLocked.value">
@@ -2425,14 +2440,6 @@ defineExpose({
           </li>
         </ul>
       </div>
-      <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
-        <button type="button" class="btn btn-light map-ctrl-btn"
-          :disabled="!routeStore.hasGeometry.value"
-          @click="fitMapToRoute"
-          title="Recentrer sur le trajet">
-          <i class="fa-solid fa-route" aria-hidden="true"></i>
-        </button>
-      </div>
       <!-- Menu « Mode d'édition » : détermine l'effet d'un clic sur la carte (modifier
            l'itinéraire / poser un POI / poser un repère). Masqué en lecture seule. -->
       <div v-if="!routeStore.readOnly.value" class="position-relative shadow-sm">
@@ -2440,12 +2447,12 @@ defineExpose({
           class="btn btn-sm map-ctrl-btn map-ctrl-btn--labeled d-flex align-items-center gap-1"
           :class="editMode === 'route' ? 'btn-light' : 'btn-warning text-dark'"
           :title="t('routes.edit_mode_label')"
-          @click="editMenuOpen = !editMenuOpen">
+          @click="openMenu = openMenu === 'edit' ? null : 'edit'">
           <i class="fa-solid" :class="currentEditMode.icon" aria-hidden="true"></i>
-          <span class="d-none d-md-inline">{{ t(currentEditMode.labelKey) }}</span>
+          <span>{{ t('routes.edit_mode_short') }}</span>
           <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
         </button>
-        <ul v-if="editMenuOpen" class="dropdown-menu show mt-1" style="min-width: 13rem; z-index: 10;">
+        <ul v-if="openMenu === 'edit'" class="dropdown-menu show mt-1" style="min-width: 13rem; z-index: 10;">
           <li><h6 class="dropdown-header">{{ t('routes.edit_mode_label') }}</h6></li>
           <li v-for="m in EDIT_MODES" :key="m.mode">
             <button type="button" class="dropdown-item d-flex align-items-center gap-2"
@@ -2460,12 +2467,11 @@ defineExpose({
 
     <div class="map-controls-right">
       <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
-        <button type="button" class="btn map-ctrl-btn"
-          :class="state.is3D ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="toggleMap3D"
-          :title="state.is3D ? t('strava.map_2d') : t('strava.map_3d')"
-          :aria-pressed="state.is3D">
-          <i class="fa-solid fa-cube" aria-hidden="true"></i>
+        <button type="button" class="btn btn-light map-ctrl-btn"
+          :disabled="!routeStore.hasGeometry.value"
+          @click="fitMapToRoute"
+          title="Recentrer sur le trajet">
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
         </button>
         <button type="button" class="btn map-ctrl-btn"
           :class="locationVisible ? 'btn-warning text-dark active' : 'btn-light'"
@@ -2664,6 +2670,18 @@ defineExpose({
   aspect-ratio: auto;
   padding: 0.25rem 0.5rem;
 }
+/* Les trois menus de la colonne gauche (Fond de carte, Affichage, Mode) partagent la
+   même largeur sur desktop, et leur chevron est aligné au bord droit. Le bouton du
+   fond de carte vit dans un composant enfant → :deep pour l'atteindre. Ciblé au
+   contexte de la carte du créateur (MapStyleDropdown est réutilisé ailleurs). */
+.map-controls :deep(.map-ctrl-btn) > i:last-child { margin-left: auto; }
+/* Largeur commune aux trois menus, chevron aligné à droite. Plus compacte sur mobile
+   (libellés courts : « Carte » / « Affichage » / « Mode ») que sur desktop
+   (« Fond de carte »). */
+.map-controls :deep(.map-ctrl-btn) { min-width: 7.5rem; }
+@media (min-width: 768px) {
+  .map-controls :deep(.map-ctrl-btn) { min-width: 9.5rem; }
+}
 .map-ctrl-btn.active,
 .map-ctrl-btn.active:hover,
 .map-ctrl-btn.active:focus {
@@ -2674,9 +2692,11 @@ defineExpose({
 .map-search {
   position: absolute;
   top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
+  right: 10px;
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
 }
 .map-search--expanded { width: min(420px, calc(100% - 220px)); }
 .map-search-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; }

@@ -180,6 +180,8 @@ fr:
         done_label: "Cible atteinte : tout ce que tu ajoutes est du bonus."
         planner_title: "Organise ta semaine"
         planner_help: "Accroche tes itinéraires à un jour : leur TSS estimé apparaît en orange sur la barre."
+        this_week: "Cette semaine"
+        next_week: "Semaine prochaine"
         remove_plan: "Retirer de la semaine"
         search_route: "Chercher un itinéraire…"
         no_route: "Aucun itinéraire"

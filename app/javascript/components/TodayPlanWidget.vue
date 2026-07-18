@@ -9,6 +9,7 @@ import {
   type LoadSummary,
 } from '../composables/useTrainingPlan'
 import { usePlannedLoads } from '../composables/usePlannedRides'
+import WeekPlanner from './WeekPlanner.vue'
 
 // Widget compact de la page d'accueil : reprend « sortie objectif » + « que faire
 // aujourd'hui » du panneau de performance (même composable, même localStorage) dans
@@ -147,6 +148,10 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
             <div class="progress-bar" :style="{ width: `${weekPlan.donePct}%`, backgroundColor: WEEK_SEGMENT_COLOR.done }"></div>
             <div class="progress-bar progress-bar-striped" :style="{ width: `${weekPlan.plannedPct}%`, backgroundColor: WEEK_SEGMENT_COLOR.planned }"></div>
           </div>
+
+          <!-- Planificateur : accrocher un itinéraire à un jour, comme sur /performance.
+               Même composable partagé — un plan ajouté ici met à jour la barre juste au-dessus. -->
+          <WeekPlanner :athlete="athlete" class="mt-2" />
         </div>
       </div>
 

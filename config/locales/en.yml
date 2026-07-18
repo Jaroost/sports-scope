@@ -180,6 +180,8 @@ en:
         done_label: "Target reached: anything more is a bonus."
         planner_title: "Plan your week"
         planner_help: "Pin your routes to a day: their estimated TSS shows up in orange on the bar."
+        this_week: "This week"
+        next_week: "Next week"
         remove_plan: "Remove from the week"
         search_route: "Search a route…"
         no_route: "No route"

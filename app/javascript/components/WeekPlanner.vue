@@ -29,18 +29,29 @@ const today = new Date()
 const todayISO = isoLocal(today)
 const monday = mondayOf(today)
 
-// Les 7 jours de la semaine en cours, avec leur libellé localisé.
-const days = computed(() =>
-  Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday)
-    d.setDate(d.getDate() + i)
-    const iso = isoLocal(d)
+// Deux semaines glissantes (en cours + prochaine) : on planifie toujours à
+// l'avance, donc la semaine suivante est visible en permanence. Chaque semaine
+// porte son libellé et ses 7 jours localisés.
+const weeks = computed(() =>
+  Array.from({ length: 2 }, (_, w) => {
+    const weekMonday = new Date(monday)
+    weekMonday.setDate(weekMonday.getDate() + w * 7)
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(weekMonday)
+      d.setDate(d.getDate() + i)
+      const iso = isoLocal(d)
+      return {
+        iso,
+        label: d.toLocaleDateString(undefined, { weekday: 'short' }),
+        dayNum: d.getDate(),
+        past: iso < todayISO,
+        isToday: iso === todayISO,
+      }
+    })
     return {
-      iso,
-      label: d.toLocaleDateString(undefined, { weekday: 'short' }),
-      dayNum: d.getDate(),
-      past: iso < todayISO,
-      isToday: iso === todayISO,
+      key: w,
+      label: t(w === 0 ? 'performance.load.week.this_week' : 'performance.load.week.next_week'),
+      days,
     }
   }),
 )
@@ -119,34 +130,37 @@ function fmtKm(m: number | null): string {
       <span class="small text-body-tertiary">{{ t('performance.load.week.planner_help') }}</span>
     </div>
 
-    <div class="planner-grid">
-      <div v-for="d in days" :key="d.iso" class="planner-day" :class="{ 'is-past': d.past, 'is-today': d.isToday }">
-        <div class="planner-day-head">
-          <span class="text-capitalize">{{ d.label }}</span>
-          <span class="text-body-tertiary">{{ d.dayNum }}</span>
-        </div>
+    <div v-for="week in weeks" :key="week.key" class="planner-week">
+      <div class="planner-week-label small text-body-tertiary text-uppercase">{{ week.label }}</div>
+      <div class="planner-grid">
+        <div v-for="d in week.days" :key="d.iso" class="planner-day" :class="{ 'is-past': d.past, 'is-today': d.isToday }">
+          <div class="planner-day-head">
+            <span class="text-capitalize">{{ d.label }}</span>
+            <span class="text-body-tertiary">{{ d.dayNum }}</span>
+          </div>
 
-        <div v-for="plan in plansFor(d.iso)" :key="plan.id" class="planner-plan">
-          <i :class="`fa-solid ${sportIcon(plan.route.activity)} planner-plan-icon`" aria-hidden="true"></i>
-          <span class="planner-plan-name" :title="plan.route.name">{{ plan.route.name }}</span>
-          <span v-if="tssOf(plan) !== null" class="planner-plan-tss">≈ {{ tssOf(plan) }}</span>
+          <div v-for="plan in plansFor(d.iso)" :key="plan.id" class="planner-plan">
+            <i :class="`fa-solid ${sportIcon(plan.route.activity)} planner-plan-icon`" aria-hidden="true"></i>
+            <span class="planner-plan-name" :title="plan.route.name">{{ plan.route.name }}</span>
+            <span v-if="tssOf(plan) !== null" class="planner-plan-tss">≈ {{ tssOf(plan) }}</span>
+            <button
+              type="button"
+              class="btn-close btn-close-sm planner-plan-remove"
+              :aria-label="t('performance.load.week.remove_plan')"
+              @click="removePlan(plan.id)"
+            ></button>
+          </div>
+
+          <!-- Les jours passés ne se planifient plus : leur charge est déjà écrite. -->
           <button
+            v-if="!d.past"
             type="button"
-            class="btn-close btn-close-sm planner-plan-remove"
-            :aria-label="t('performance.load.week.remove_plan')"
-            @click="removePlan(plan.id)"
-          ></button>
+            class="btn btn-sm btn-outline-secondary planner-add"
+            @click="openPicker(d.iso)"
+          >
+            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+          </button>
         </div>
-
-        <!-- Les jours passés ne se planifient plus : leur charge est déjà écrite. -->
-        <button
-          v-if="!d.past"
-          type="button"
-          class="btn btn-sm btn-outline-secondary planner-add"
-          @click="openPicker(d.iso)"
-        >
-          <i class="fa-solid fa-plus" aria-hidden="true"></i>
-        </button>
       </div>
     </div>
 
@@ -186,6 +200,13 @@ function fmtKm(m: number | null): string {
 </template>
 
 <style scoped>
+.planner-week + .planner-week {
+  margin-top: 0.625rem;
+}
+.planner-week-label {
+  margin-bottom: 0.25rem;
+  letter-spacing: 0.03em;
+}
 .planner-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));

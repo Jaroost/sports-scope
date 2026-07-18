@@ -310,37 +310,43 @@ async function moveToDay(iso: string) {
               @dragstart="onDragStart(plan, $event)"
               @dragend="onDragEnd"
             >
-              <i
-                :class="isPlanDone(plan) ? 'fa-solid fa-circle-check planner-plan-icon' : `fa-solid ${sportIcon(plan.route.activity)} planner-plan-icon`"
-                aria-hidden="true"
-              ></i>
-              <span class="planner-plan-name" :title="plan.route.name">{{ plan.route.name }}</span>
-              <!-- Réalisé : TSS réel du jour. Sinon : TSS estimé de l'itinéraire (≈). -->
+              <div class="planner-plan-main">
+                <i
+                  :class="isPlanDone(plan) ? 'fa-solid fa-circle-check planner-plan-icon' : `fa-solid ${sportIcon(plan.route.activity)} planner-plan-icon`"
+                  aria-hidden="true"
+                ></i>
+                <span class="planner-plan-name" :title="plan.route.name">{{ plan.route.name }}</span>
+                <!-- Réalisé : TSS réel du jour reste sur la ligne du nom. -->
+                <span
+                  v-if="isPlanDone(plan) && doneTssFor(d.iso) !== null"
+                  class="planner-plan-tss"
+                  :title="t('performance.load.week.day_tss')"
+                >{{ doneTssFor(d.iso) }}</span>
+                <!-- Mode fluide : la carte entière ouvre la feuille d'options, donc plus de
+                     boutons déplacer/croix ici. Mode grille : on garde les deux. -->
+                <template v-if="!props.fluid">
+                  <button
+                    type="button"
+                    class="planner-plan-move"
+                    :aria-label="t('performance.load.week.move')"
+                    :title="t('performance.load.week.move')"
+                    @click.stop="openMove(plan)"
+                  >
+                    <i class="fa-solid fa-up-down-left-right" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-close btn-close-sm planner-plan-remove"
+                    :aria-label="t('performance.load.week.remove_plan')"
+                    @click="removePlan(plan.id)"
+                  ></button>
+                </template>
+              </div>
+              <!-- Prévu (non réalisé) : le TSS estimé passe sous le nom pour lui laisser la place. -->
               <span
-                v-if="isPlanDone(plan) && doneTssFor(d.iso) !== null"
-                class="planner-plan-tss"
-                :title="t('performance.load.week.day_tss')"
-              >{{ doneTssFor(d.iso) }}</span>
-              <span v-else-if="!isPlanDone(plan) && tssOf(plan) !== null" class="planner-plan-tss">≈ {{ tssOf(plan) }}</span>
-              <!-- Mode fluide : la carte entière ouvre la feuille d'options, donc plus de
-                   boutons déplacer/croix ici. Mode grille : on garde les deux. -->
-              <template v-if="!props.fluid">
-                <button
-                  type="button"
-                  class="planner-plan-move"
-                  :aria-label="t('performance.load.week.move')"
-                  :title="t('performance.load.week.move')"
-                  @click.stop="openMove(plan)"
-                >
-                  <i class="fa-solid fa-up-down-left-right" aria-hidden="true"></i>
-                </button>
-                <button
-                  type="button"
-                  class="btn-close btn-close-sm planner-plan-remove"
-                  :aria-label="t('performance.load.week.remove_plan')"
-                  @click="removePlan(plan.id)"
-                ></button>
-              </template>
+                v-if="!isPlanDone(plan) && tssOf(plan) !== null"
+                class="planner-plan-tss planner-plan-tss-est"
+              >≈ {{ tssOf(plan) }} TSS</span>
             </div>
 
             <!-- Jour où l'on est sorti sans itinéraire planifié : on le signale quand même. -->
@@ -575,8 +581,8 @@ async function moveToDay(iso: string) {
 }
 .planner-plan {
   display: flex;
-  align-items: center;
-  gap: 0.25rem;
+  flex-direction: column;
+  gap: 0.1rem;
   padding: 0.2rem 0.3rem;
   border-radius: 0.25rem;
   background: rgba(253, 126, 20, 0.14);
@@ -593,9 +599,22 @@ async function moveToDay(iso: string) {
 .planner-plan.is-clickable {
   cursor: pointer;
 }
+/* Ligne principale de la carte : icône + nom + TSS réel + boutons. */
+.planner-plan-main {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
 .planner-plan-icon {
   flex: 0 0 auto;
   color: #fd7e14;
+}
+/* TSS estimé rejeté sur sa propre ligne, aligné à droite sous le nom. */
+.planner-plan-tss-est {
+  align-self: flex-end;
+  color: #fd7e14;
+  font-size: 0.65rem;
 }
 /* Plan accompli : la carte passe d'orange (à faire) à vert (fait), bien marqué. */
 .planner-plan.is-done {

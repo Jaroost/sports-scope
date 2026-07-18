@@ -377,23 +377,36 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
   // Volontairement fondé sur les données réelles (TSS déjà encaissé depuis lundi)
   // plutôt que sur un plan simulé : une projection jour par jour serait fausse dès
   // le premier écart, alors qu'une cible reste vraie quoi que tu fasses.
-  const weekPlan = computed<WeekPlan | null>(() => {
+  // Bilan d'une semaine (offset 0 = en cours, 1 = suivante, …). Généralisé pour que la
+  // semaine suivante ait sa propre cible et sa propre barre : sans ça, on planifie « à
+  // l'aveugle » les jours à venir. On ne SIMULE pas la charge future (fidèle à la
+  // philosophie « une cible reste vraie ») — pour une semaine future, la base de calcul
+  // est la CTL réelle d'aujourd'hui et le « fait » vaut 0.
+  function buildWeekPlan(weekOffset: number): WeekPlan | null {
     const series = data.value?.series ?? []
     const c = current.value
     if (!series.length || !c) return null
 
     const today = new Date()
     const monday = mondayOf(today)
+    monday.setDate(monday.getDate() + weekOffset * 7)
     const mondayISO = isoLocal(monday)
     const todayLocalISO = isoLocal(today)
 
-    // Référence : la CTL de la veille du lundi. Si la série démarre après (historique
-    // trop court), on prend le premier point connu.
-    const beforeWeek = series.filter((p) => p.date < mondayISO)
-    const baselineCtl = (beforeWeek.length ? beforeWeek[beforeWeek.length - 1] : series[0]).ctl
+    // Référence de CTL : semaine en cours → la veille du lundi (réelle) ; semaine future
+    // → la dernière CTL réelle connue (aujourd'hui), faute de projeter la charge à venir.
+    let baselineCtl: number
+    if (weekOffset === 0) {
+      const beforeWeek = series.filter((p) => p.date < mondayISO)
+      baselineCtl = (beforeWeek.length ? beforeWeek[beforeWeek.length - 1] : series[0]).ctl
+    } else {
+      baselineCtl = c.ctl
+    }
 
-    // Jours écoulés AVANT aujourd'hui (lundi = 0) et jours restants, aujourd'hui inclus.
-    const elapsed = (today.getDay() + 6) % 7
+    // Jours écoulés dans la semaine considérée (0 pour une semaine future) et jours
+    // restants à planifier. `elapsedToday` sert au décalage jour↔objectif.
+    const elapsedToday = (today.getDay() + 6) % 7
+    const elapsed = weekOffset === 0 ? elapsedToday : 0
     const daysLeft = 7 - elapsed
 
     // Pendant une prépa datée, l'affûtage pilote : la cible de la semaine est la somme
@@ -402,18 +415,24 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
     const onEvent = !!ev && ev.phase !== 'past'
     let target: number
     if (onEvent && ev) {
-      // Le jour `i` de la semaine (lundi = 0) est à `i - elapsed` jours d'aujourd'hui,
-      // donc à `ev.days - (i - elapsed)` jours de l'objectif.
+      // Le jour `i` de la semaine (lundi = 0) est à `(i - elapsedToday) + 7·offset` jours
+      // d'aujourd'hui, donc à `ev.days - …` jours de l'objectif.
       target = 0
-      for (let i = 0; i < 7; i++) target += plannedTss(ev.days - (i - elapsed), baselineCtl)
+      for (let i = 0; i < 7; i++) {
+        const offsetFromToday = (i - elapsedToday) + weekOffset * 7
+        target += plannedTss(ev.days - offsetFromToday, baselineCtl)
+      }
     } else {
       target = 7 * baselineCtl + GOAL_RAMP[goal.value] / K_CTL
     }
     target = Math.max(0, Math.round(target))
 
-    const done = Math.round(
-      series.filter((p) => p.date >= mondayISO && p.date <= todayLocalISO).reduce((sum, p) => sum + p.tss, 0)
-    )
+    // « Fait » : seulement la semaine en cours porte du réel ; une semaine future = 0.
+    const done = weekOffset === 0
+      ? Math.round(
+          series.filter((p) => p.date >= mondayISO && p.date <= todayLocalISO).reduce((sum, p) => sum + p.tss, 0)
+        )
+      : 0
 
     // Charge prévue restant à encaisser. On ne compte QUE les jours à venir : un
     // plan d'un jour passé n'a pas été tenu, il ne promet plus rien.
@@ -477,7 +496,12 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
       rampTss: onEvent ? null : Math.round(GOAL_RAMP[goal.value] / K_CTL),
       pace,
     }
-  })
+  }
+
+  const weekPlan = computed<WeekPlan | null>(() => buildWeekPlan(0))
+  // Semaine suivante : tout est « à prévoir » (aucun réel), pour piloter la planification
+  // à l'avance dans le WeekPlanner.
+  const nextWeekPlan = computed<WeekPlan | null>(() => buildWeekPlan(1))
 
   return {
     current,
@@ -489,6 +513,6 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
     editingEvent, evDate, evDistance, evIntensity, todayISO,
     openEventEditor, saveEvent, removeEvent,
     // recommandation
-    recommendation, weekPlan,
+    recommendation, weekPlan, nextWeekPlan,
   }
 }

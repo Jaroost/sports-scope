@@ -53,7 +53,7 @@ const doneByDay = computed<Record<string, DayDone>>(() => {
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
-  openEventEditor, saveEvent, removeEvent, recommendation, weekPlan,
+  openEventEditor, saveEvent, removeEvent, recommendation, weekPlan, nextWeekPlan,
 } = useTrainingPlan(data, plannedLoads)
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
@@ -169,7 +169,7 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
 
           <!-- Planificateur : accrocher un itinéraire à un jour, comme sur /performance.
                Même composable partagé — un plan ajouté ici met à jour la barre juste au-dessus. -->
-          <WeekPlanner :athlete="athlete" :done-by-day="doneByDay" fluid class="mt-2" />
+          <WeekPlanner :athlete="athlete" :done-by-day="doneByDay" :week-plans="[null, nextWeekPlan]" fluid class="mt-2" />
         </div>
       </div>
 

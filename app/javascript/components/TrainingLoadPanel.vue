@@ -120,7 +120,7 @@ const doneByDay = computed<Record<string, DayDone>>(() => {
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
-  openEventEditor, saveEvent, removeEvent, recommendation, weekPlan,
+  openEventEditor, saveEvent, removeEvent, recommendation, weekPlan, nextWeekPlan,
 } = useTrainingPlan(data, plannedLoads)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
 
@@ -605,7 +605,9 @@ watch(rangeDays, () => { hoverIndex.value = null })
               </span>
             </div>
 
-            <WeekPlanner :athlete="athlete" :done-by-day="doneByDay" fluid class="mt-3" />
+            <!-- La semaine en cours a sa grande carte ci-dessus → on ne passe le bilan
+                 QUE pour la semaine suivante (null en position 0). -->
+            <WeekPlanner :athlete="athlete" :done-by-day="doneByDay" :week-plans="[null, nextWeekPlan]" fluid class="mt-3" />
 
             <div class="small text-body-tertiary mt-2">
               <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>{{ t(weekPlan.ramp === null ? 'performance.load.week.explain_event' : 'performance.load.week.explain') }}

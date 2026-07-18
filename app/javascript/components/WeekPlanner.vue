@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
-import { mondayOf, isoLocal } from '../composables/useTrainingPlan'
+import { mondayOf, isoLocal, fmtDuration, WEEK_SEGMENT_COLOR, type WeekPlan } from '../composables/useTrainingPlan'
 import { usePlannedRides, planTss, type PlannedRide } from '../composables/usePlannedRides'
 import type { AthleteState } from '../routeLoad'
 import RoutePickerModal from './RoutePickerModal.vue'
@@ -27,10 +27,24 @@ interface DayDone { tss: number; count: number; at: string | null; activities?: 
 // mettent en ligne côte à côte tant qu'ils tiennent (largeur minimale garantie par
 // jour, cf. --planner-day-min) et se replient sur plusieurs rangs sinon. Utile dans un
 // widget dont la largeur varie. Sur petit écran, la liste verticale prend le relais.
+// `weekPlans` : bilan (cible / prévu / reste à placer) par semaine, indexé comme `weeks`
+// (0 = en cours, 1 = suivante). Optionnel — quand fourni pour une semaine, un mini-résumé
+// (barre + reste à placer) s'affiche sous son libellé. On passe `null` pour une semaine
+// déjà résumée ailleurs (la semaine en cours a sa grande carte au-dessus).
 const props = withDefaults(
-  defineProps<{ athlete: AthleteState | null; doneByDay?: Record<string, DayDone>; fluid?: boolean }>(),
-  { doneByDay: () => ({}), fluid: false },
+  defineProps<{
+    athlete: AthleteState | null
+    doneByDay?: Record<string, DayDone>
+    fluid?: boolean
+    weekPlans?: (WeekPlan | null)[]
+  }>(),
+  { doneByDay: () => ({}), fluid: false, weekPlans: () => [] },
 )
+
+// Résumé de planification d'une semaine (ou null si non fourni / pas de données).
+function weekPlanFor(key: number): WeekPlan | null {
+  return props.weekPlans?.[key] ?? null
+}
 
 // Bascule liste verticale : imposée par un écran étroit (téléphone). On écoute la media
 // query pour rester réactif au redimensionnement / à la rotation.
@@ -305,6 +319,39 @@ async function moveToDay(iso: string) {
 
     <div v-for="week in weeks" :key="week.key" class="planner-week">
       <div class="planner-week-label small text-body-tertiary text-uppercase">{{ week.label }}</div>
+
+      <!-- Mini-résumé de la semaine : cible, prévu et reste à placer + barre. Affiché
+           quand un bilan est fourni pour cette semaine (typiquement la semaine suivante,
+           qui n'a pas de grande carte au-dessus). -->
+      <div v-if="weekPlanFor(week.key)" class="planner-week-plan">
+        <template v-for="wp in [weekPlanFor(week.key)!]" :key="'wp'">
+          <div class="week-progress-wrap">
+            <div class="progress planner-week-progress" role="progressbar" :aria-valuenow="wp.donePct" aria-valuemin="0" aria-valuemax="100">
+              <div v-if="wp.donePct > 0" class="progress-bar" :style="{ width: `${wp.donePct}%`, backgroundColor: WEEK_SEGMENT_COLOR.done }"></div>
+              <div class="progress-bar progress-bar-striped" :style="{ width: `${wp.plannedPct}%`, backgroundColor: WEEK_SEGMENT_COLOR.planned }"></div>
+            </div>
+            <div
+              v-if="wp.overPlanned"
+              class="week-target-marker"
+              :style="{ left: `${wp.targetPct}%` }"
+              :title="t('performance.load.week.target', { tss: wp.target })"
+            ></div>
+          </div>
+          <div class="planner-week-plan-labels small">
+            <span>
+              {{ t('performance.load.week.target', { tss: wp.target }) }}
+              <span v-if="wp.planned > 0" class="text-body-tertiary">· {{ t('performance.load.week.planned', { tss: wp.planned }) }}</span>
+            </span>
+            <span v-if="wp.remaining > 0" class="text-muted">
+              {{ t('performance.load.week.remaining_to_plan', { tss: wp.remaining, days: wp.daysLeft, duration: fmtDuration(wp.minutesLeft) }) }}
+            </span>
+            <span v-else class="text-success">
+              <i class="fa-solid fa-circle-check me-1" aria-hidden="true"></i>{{ t('performance.load.week.done_label') }}
+            </span>
+          </div>
+        </template>
+      </div>
+
       <div class="planner-grid">
         <div
           v-for="d in week.days"
@@ -535,6 +582,45 @@ async function moveToDay(iso: string) {
 .planner-week-label {
   margin-bottom: 0.25rem;
   letter-spacing: 0.03em;
+}
+/* Mini-résumé de planification d'une semaine (barre + reste à placer). */
+.planner-week-plan {
+  margin-bottom: 0.4rem;
+}
+.planner-week-progress {
+  height: 0.5rem;
+}
+.planner-week-plan-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  justify-content: space-between;
+  margin-top: 0.25rem;
+}
+/* Repère « objectif » : trait vertical coiffé d'un fanion, à la position de la cible
+   quand fait + prévu la dépasse (même repère que la carte de la semaine en cours). */
+.week-progress-wrap {
+  position: relative;
+}
+.week-target-marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--bs-body-color, #212529);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.week-target-marker::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--bs-body-color, #212529);
 }
 .planner-grid {
   display: grid;

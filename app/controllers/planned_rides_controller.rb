@@ -14,7 +14,9 @@ class PlannedRidesController < ApplicationController
     scope = scope.where(planned_on: parse_date(params[:from])..) if params[:from].present?
     scope = scope.where(planned_on: ..parse_date(params[:to])) if params[:to].present?
 
-    plans = scope.order(:planned_on).limit(MAX_PLANS)
+    # `position` d'abord : l'ordre intra-jour choisi par l'utilisateur pilote l'affichage
+    # ET l'appariement « réalisé ». `id` départage les ex æquo (plans jamais réordonnés).
+    plans = scope.order(:planned_on, :position, :id).limit(MAX_PLANS)
     render json: { planned_rides: plans.map { |p| serialize(p) } }
   end
 
@@ -28,7 +30,7 @@ class PlannedRidesController < ApplicationController
     date = parse_date(params[:planned_on])
     return render json: { error: "planned_on invalide" }, status: :unprocessable_entity unless date
 
-    plan = current_user.planned_rides.create!(route: route, planned_on: date)
+    plan = current_user.planned_rides.create!(route: route, planned_on: date, position: next_position(date))
     render json: { planned_ride: serialize(plan) }, status: :created
   rescue ActiveRecord::RecordNotUnique
     # Déjà prévu ce jour-là (index unique) : l'état voulu est atteint, on renvoie
@@ -47,7 +49,11 @@ class PlannedRidesController < ApplicationController
     date = parse_date(params[:planned_on])
     return render json: { error: "planned_on invalide" }, status: :unprocessable_entity unless date
 
-    plan.update!(planned_on: date)
+    # Changement de jour = on empile en fin du jour cible (sa place dans l'ancien jour
+    # n'a plus de sens). Même jour (simple réordonnancement ailleurs) = position inchangée.
+    attrs = { planned_on: date }
+    attrs[:position] = next_position(date) if plan.planned_on != date
+    plan.update!(attrs)
     render json: { planned_ride: serialize(plan) }
   rescue ActiveRecord::RecordNotUnique
     # Déplacé sur un jour où le même itinéraire est déjà prévu : la cible existe
@@ -56,6 +62,20 @@ class PlannedRidesController < ApplicationController
     head :no_content
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/planned_rides/reorder — nouvel ordre intra-jour.
+  # Corps : { ordered_ids: [id, id, …] }. On réaffecte position = index. Scopé au
+  # propriétaire : un id étranger est simplement ignoré (index_by ne le trouve pas).
+  def reorder
+    ids = Array(params[:ordered_ids]).map(&:to_i).reject(&:zero?)
+    return head :bad_request if ids.empty?
+
+    by_id = current_user.planned_rides.where(id: ids).index_by(&:id)
+    PlannedRide.transaction do
+      ids.each_with_index { |id, idx| by_id[id]&.update_column(:position, idx) }
+    end
+    head :no_content
   end
 
   # DELETE /api/planned_rides/:id
@@ -69,6 +89,11 @@ class PlannedRidesController < ApplicationController
 
   private
 
+  # Prochaine position libre dans un jour (empile en fin). -1 + 1 = 0 pour un jour vide.
+  def next_position(date)
+    (current_user.planned_rides.where(planned_on: date).maximum(:position) || -1) + 1
+  end
+
   def parse_date(raw)
     Date.parse(raw.to_s)
   rescue ArgumentError, TypeError
@@ -81,6 +106,11 @@ class PlannedRidesController < ApplicationController
     {
       id: plan.id,
       planned_on: plan.planned_on.iso8601,
+      position: plan.position,
+      # Horodatage de création : le front ne marque un plan « réalisé » que si une
+      # activité du jour a eu lieu APRÈS (sinon un plan ajouté après la sortie, ou une
+      # intention nouvelle sur un jour déjà couru, passerait à tort pour fait).
+      created_at: plan.created_at.iso8601,
       route: {
         id: plan.route.id,
         name: plan.route.name,

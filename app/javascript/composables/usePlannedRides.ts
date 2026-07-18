@@ -28,6 +28,8 @@ export interface PlannedRouteSummary {
 export interface PlannedRide {
   id: number
   planned_on: string // ISO local (YYYY-MM-DD)
+  position: number // ordre intra-jour choisi par l'utilisateur
+  created_at: string // ISO8601 (horodatage complet) — date à laquelle le plan a été posé
   route: PlannedRouteSummary
 }
 
@@ -112,6 +114,26 @@ export function usePlannedRides() {
     }
   }
 
+  // Réordonne les plans d'un jour. `orderedIds` = ids dans le nouvel ordre. Mise à jour
+  // optimiste des positions locales (l'affichage suit `position`), puis persistance.
+  async function reorderPlans(orderedIds: number[]): Promise<boolean> {
+    orderedIds.forEach((id, idx) => {
+      const p = plannedRides.value.find((x) => x.id === id)
+      if (p) p.position = idx
+    })
+    try {
+      const res = await fetch('/api/planned_rides/reorder', {
+        method: 'POST',
+        headers: JSON_HEADERS(),
+        credentials: 'same-origin',
+        body: JSON.stringify({ ordered_ids: orderedIds }),
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+
   async function removePlan(id: number): Promise<boolean> {
     try {
       const res = await fetch(`/api/planned_rides/${id}`, {
@@ -127,7 +149,7 @@ export function usePlannedRides() {
     }
   }
 
-  return { plannedRides, loaded, addPlan, movePlan, removePlan }
+  return { plannedRides, loaded, addPlan, movePlan, reorderPlans, removePlan }
 }
 
 // TSS estimé d'un plan, avec les seuils du moment. null si l'estimation est

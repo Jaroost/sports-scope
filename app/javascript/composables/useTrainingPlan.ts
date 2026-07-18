@@ -13,7 +13,7 @@ import type { AthleteState } from '../routeLoad'
 // forme de Ref ; ce composable ne fait aucun fetch et ne s'occupe pas du rendu.
 
 // ── Types du payload /api/performance/training_load ──────────────────────────
-export interface DayActivity { source: string; external_id: string; name: string; tss: number; source_tss: string }
+export interface DayActivity { source: string; external_id: string; name: string; tss: number; source_tss: string; started_at?: string | null }
 export interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; acwr: number | null; activities?: DayActivity[] }
 export interface Current extends Point { form_zone: string; acwr_zone: string | null }
 export interface Coverage { power: number; hr: number; estimated: number; total: number }
@@ -145,6 +145,7 @@ export type WeekPlan = {
   daysLeft: number
   minutesLeft: number
   ramp: number | null // null pendant une prépa datée : c'est l'affûtage qui pilote
+  rampTss: number | null // ramp converti en TSS (ramp / K_CTL) : le « + / − X TSS » affiché
   pace: WeekPace
 }
 
@@ -430,6 +431,9 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
       daysLeft,
       minutesLeft,
       ramp: onEvent ? null : GOAL_RAMP[goal.value],
+      // Le coût en TSS de la progression visée : c'est ce que le ramp ajoute (ou retire)
+      // à la base 7 × CTL. K_CTL ≈ 1/42,5, d'où « ~42 TSS par point de forme ».
+      rampTss: onEvent ? null : Math.round(GOAL_RAMP[goal.value] / K_CTL),
       pace,
     }
   })

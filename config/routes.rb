@@ -92,6 +92,7 @@ Rails.application.routes.draw do
   # Itinéraires prévus sur un jour (planification de la semaine — JSON pour Vue)
   get "/api/planned_rides", to: "planned_rides#index"
   post "/api/planned_rides", to: "planned_rides#create"
+  post "/api/planned_rides/reorder", to: "planned_rides#reorder"
   patch "/api/planned_rides/:id", to: "planned_rides#update", constraints: { id: /\d+/ }
   delete "/api/planned_rides/:id", to: "planned_rides#destroy", constraints: { id: /\d+/ }
 

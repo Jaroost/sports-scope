@@ -63,8 +63,9 @@ module TrainingLoad
   # À incrémenter quand la FORME du payload change : sans ça, les entrées déjà en
   # cache (12 h) resserviraient sans les nouveaux champs. v2 = ajout de `weight_kg`
   # aux seuils (estimation du TSS d'un itinéraire, cf. routeLoad.ts) ;
-  # v3 = ajout de `typical_speed_samples`.
-  CACHE_VERSION = 'v3'
+  # v3 = ajout de `typical_speed_samples` ; v4 = ajout de `started_at` par activité
+  # (le front en fait l'heure de la dernière sortie du jour pour dater le « réalisé »).
+  CACHE_VERSION = 'v4'
 
   # ── Payload complet consommé par le front ───────────────────────────────────
   # Mis en cache : recalcul lourd (union des 2 tables + EWMA quotidiennes). La clé
@@ -95,7 +96,10 @@ module TrainingLoad
       coverage[res[:source]] += 1
       daily_activities[date] << {
         source: row['source'], external_id: row['external_id'],
-        name: row['name'], tss: res[:tss], source_tss: res[:source]
+        name: row['name'], tss: res[:tss], source_tss: res[:source],
+        # Heure de départ (ISO) : le front compare la plus tardive du jour à la date de
+        # création d'un plan pour décider s'il a réellement été réalisé (cf. WeekPlanner).
+        started_at: iso_time(row['started_at'])
       }
     end
     return empty_summary if daily.empty?
@@ -399,6 +403,17 @@ module TrainingLoad
     return nil if value.blank?
 
     Time.zone.parse(value.to_s)&.to_date
+  rescue ArgumentError
+    nil
+  end
+
+  # Horodatage complet en ISO8601 (avec l'heure), pour comparer au created_at d'un
+  # plan côté front. nil si non parsable.
+  def iso_time(value)
+    return value.iso8601 if value.respond_to?(:iso8601) && !value.is_a?(String)
+    return nil if value.blank?
+
+    Time.zone.parse(value.to_s)&.iso8601
   rescue ArgumentError
     nil
   end

@@ -129,6 +129,27 @@ const tsbZonesPlugin: any = {
 const athlete = computed(() => athleteFromSummary(data.value))
 const { plannedLoads } = usePlannedLoads(athlete)
 
+// Bilan des sorties RÉELLES par jour (ISO → { tss, count, at }), pour le planificateur :
+//   • tss   : charge encaissée ce jour-là (RÉEL de la série, pas l'estimé) ;
+//   • count : nombre de sorties → combien d'itinéraires planifiés marquer « réalisés » ;
+//   • at    : heure de la sortie la plus tardive → un plan n'est fait que si une sortie
+//             a eu lieu APRÈS sa pose (sinon un plan ajouté après coup passerait pour fait).
+// On se fie aux activités attachées à la série (cf. attach_activities côté serveur), pas
+// au tracé prévu — rouler « en gros » le tour planifié suffit à le compter.
+const doneByDay = computed<Record<string, { tss: number; count: number; at: string | null }>>(() => {
+  const out: Record<string, { tss: number; count: number; at: string | null }> = {}
+  for (const p of data.value?.series ?? []) {
+    const acts = p.activities ?? []
+    if (!acts.length) continue
+    let at: string | null = null
+    for (const a of acts) {
+      if (a.started_at && (!at || new Date(a.started_at).getTime() > new Date(at).getTime())) at = a.started_at
+    }
+    out[p.date] = { tss: Math.round(p.tss), count: acts.length, at }
+  }
+  return out
+})
+
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
@@ -578,9 +599,9 @@ onBeforeUnmount(() => {
                 {{ t('performance.load.week.target', { tss: weekPlan.target }) }}
                 <span class="text-body-tertiary">·
                   <template v-if="weekPlan.ramp === null">{{ t('performance.load.week.ramp_event') }}</template>
-                  <template v-else-if="weekPlan.ramp > 0">{{ t('performance.load.week.ramp_up', { ctl: weekPlan.ramp }) }}</template>
+                  <template v-else-if="weekPlan.ramp > 0">{{ t('performance.load.week.ramp_up', { tss: weekPlan.rampTss, ctl: weekPlan.ramp }) }}</template>
                   <template v-else-if="weekPlan.ramp === 0">{{ t('performance.load.week.ramp_flat') }}</template>
-                  <template v-else>{{ t('performance.load.week.ramp_down') }}</template>
+                  <template v-else>{{ t('performance.load.week.ramp_down', { tss: Math.abs(weekPlan.rampTss ?? 0) }) }}</template>
                 </span>
               </span>
               <span class="badge ms-auto" :style="{ backgroundColor: WEEK_PACE_COLOR[weekPlan.pace] }">
@@ -611,7 +632,7 @@ onBeforeUnmount(() => {
               </span>
             </div>
 
-            <WeekPlanner :athlete="athlete" class="mt-3" />
+            <WeekPlanner :athlete="athlete" :done-by-day="doneByDay" class="mt-3" />
 
             <div class="small text-body-tertiary mt-2">
               <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>{{ t(weekPlan.ramp === null ? 'performance.load.week.explain_event' : 'performance.load.week.explain') }}

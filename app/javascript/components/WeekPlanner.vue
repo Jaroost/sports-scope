@@ -20,7 +20,9 @@ import RoutePickerModal from './RoutePickerModal.vue'
 //     On prend les N premiers plans (N = nombre de sorties du jour), par ordre de
 //     création, parmi ceux posés AVANT la dernière sortie. Ainsi : 2 plans prévus + 1
 //     sortie → seul le premier passe vert ; un plan ajouté après la sortie reste orange.
-interface DayDone { tss: number; count: number; at: string | null }
+// Une sortie réelle attachée à un jour : de quoi l'afficher et lier vers sa page.
+interface DoneActivity { source: string; external_id: string; name: string; tss: number }
+interface DayDone { tss: number; count: number; at: string | null; activities?: DoneActivity[] }
 // `fluid` : grille responsive « auto-fit » — au lieu des 7 colonnes fixes, les jours se
 // mettent en ligne côte à côte tant qu'ils tiennent (largeur minimale garantie par
 // jour, cf. --planner-day-min) et se replient sur plusieurs rangs sinon. Utile dans un
@@ -54,6 +56,33 @@ function isDayTrained(iso: string): boolean {
 }
 function doneTssFor(iso: string): number | null {
   return props.doneByDay[iso]?.tss ?? null
+}
+
+// Sorties réelles enregistrées ce jour-là (pour remplacer le repère « Sortie faite »
+// générique par les activités elles-mêmes, cliquables).
+function activitiesFor(iso: string): DoneActivity[] {
+  return props.doneByDay[iso]?.activities ?? []
+}
+
+// Lien vers la page d'une activité (Strava ou importée), en respectant le préfixe de
+// langue de l'URL courante (`localePrefix` déjà défini plus bas, cf. routeHref).
+function activityHref(a: DoneActivity): string {
+  const base = a.source === 'imported' ? '/imported_activities' : '/activities'
+  return `${localePrefix}${base}/${a.external_id}`
+}
+
+// Dialogue « sorties du jour » : le jour inspecté (ISO) ou null (fermé). On y liste les
+// activités réelles, chacune renvoyant vers sa page.
+const detailDay = ref<string | null>(null)
+const detailActivities = computed<DoneActivity[]>(() =>
+  detailDay.value ? activitiesFor(detailDay.value) : [],
+)
+function openDoneDetail(iso: string) { detailDay.value = iso }
+function closeDoneDetail() { detailDay.value = null }
+function dateLong(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
+  })
 }
 
 // Ids des plans considérés réalisés : comptage pur. Par jour, on marque fait les
@@ -349,12 +378,31 @@ async function moveToDay(iso: string) {
               >≈ {{ tssOf(plan) }} TSS</span>
             </div>
 
-            <!-- Jour où l'on est sorti sans itinéraire planifié : on le signale quand même. -->
-            <div v-if="isDayTrained(d.iso) && !plansFor(d.iso).length" class="planner-done-mark" :title="t('performance.load.week.day_tss')">
-              <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
-              <span>{{ t('performance.load.week.day_done') }}</span>
-              <span v-if="doneTssFor(d.iso) !== null" class="planner-done-tss">{{ doneTssFor(d.iso) }}</span>
-            </div>
+            <!-- Jour où l'on est sorti sans itinéraire planifié : on montre les sorties
+                 réelles elles-mêmes (cliquables → dialogue avec lien vers l'activité). -->
+            <template v-if="isDayTrained(d.iso) && !plansFor(d.iso).length">
+              <button
+                v-for="act in activitiesFor(d.iso)"
+                :key="`${act.source}-${act.external_id}`"
+                type="button"
+                class="planner-done-mark planner-done-mark-btn"
+                :title="t('performance.load.week.view_activity')"
+                @click="openDoneDetail(d.iso)"
+              >
+                <div class="planner-done-main">
+                  <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                  <span class="planner-done-name">{{ act.name }}</span>
+                </div>
+                <!-- TSS réalisé sur sa propre ligne, comme le TSS estimé des plans. -->
+                <span class="planner-done-tss planner-done-tss-line">{{ Math.round(act.tss) }} TSS</span>
+              </button>
+              <!-- Repli : sortie enregistrée mais activité non détaillée (données partielles). -->
+              <div v-if="!activitiesFor(d.iso).length" class="planner-done-mark" :title="t('performance.load.week.day_tss')">
+                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                <span>{{ t('performance.load.week.day_done') }}</span>
+                <span v-if="doneTssFor(d.iso) !== null" class="planner-done-tss">{{ doneTssFor(d.iso) }}</span>
+              </div>
+            </template>
 
             <!-- Les jours passés ne se planifient plus : leur charge est déjà écrite. -->
             <button
@@ -444,6 +492,35 @@ async function moveToDay(iso: string) {
                 <i class="fa-solid fa-trash-can me-1" aria-hidden="true"></i>{{ t('performance.load.week.remove_plan') }}
               </button>
             </div>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Dialogue « sorties du jour » : la liste des activités réelles enregistrées ce
+         jour-là, chacune renvoyant vers sa page de détail. -->
+    <Transition name="modal">
+      <div v-if="detailDay" class="planner-detail-backdrop" @click.self="closeDoneDetail">
+        <div class="planner-detail-dialog shadow-lg">
+          <div class="planner-detail-head">
+            <div class="min-width-0">
+              <strong class="d-block">{{ t('performance.load.week.done_detail_title') }}</strong>
+              <span class="small text-body-tertiary text-capitalize">{{ dateLong(detailDay) }}</span>
+            </div>
+            <button type="button" class="btn-close" @click="closeDoneDetail" :aria-label="t('performance.load.week.cancel')"></button>
+          </div>
+          <div class="planner-detail-body">
+            <a
+              v-for="act in detailActivities"
+              :key="`${act.source}-${act.external_id}`"
+              :href="activityHref(act)"
+              class="planner-detail-row"
+            >
+              <i class="fa-solid fa-circle-check planner-detail-icon" aria-hidden="true"></i>
+              <span class="planner-detail-name">{{ act.name }}</span>
+              <span class="planner-detail-tss">{{ Math.round(act.tss) }} TSS</span>
+              <i class="fa-solid fa-arrow-up-right-from-square planner-detail-go" aria-hidden="true"></i>
+            </a>
           </div>
         </div>
       </div>
@@ -633,17 +710,138 @@ async function moveToDay(iso: string) {
   align-items: center;
   gap: 0.25rem;
   margin-top: auto;
-  padding: 0.2rem 0.35rem;
+  padding: 0.2rem 0.3rem;
   border-radius: 0.25rem;
   background: rgba(25, 135, 84, 0.22);
   border-left: 3px solid #198754;
   color: #146c43;
   font-size: 0.7rem;
   font-weight: 600;
+  line-height: 1.2;
 }
 .planner-done-tss {
   margin-left: auto;
   font-weight: 700;
+  flex: 0 0 auto;
+}
+/* Repère « sortie faite » devenu bouton : porte le nom réel de l'activité et ouvre le
+   dialogue de détail. On neutralise le style bouton natif tout en gardant la barre verte. */
+.planner-done-mark-btn {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.1rem;
+  width: 100%;
+  border: none;
+  border-left: 3px solid #198754;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.planner-done-mark-btn + .planner-done-mark-btn {
+  margin-top: 0.15rem;
+}
+.planner-done-mark-btn:hover,
+.planner-done-mark-btn:focus-visible {
+  background: rgba(25, 135, 84, 0.34);
+}
+/* Ligne principale de la pastille sortie : ✓ + nom de l'activité. */
+.planner-done-main {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.planner-done-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* TSS réalisé rejeté sous le nom, aligné à droite (miroir de planner-plan-tss-est). */
+.planner-done-tss-line {
+  align-self: flex-end;
+  margin-left: 0;
+  font-size: 0.65rem;
+}
+/* ── Dialogue « sorties du jour » ─────────────────────────────────────────────── */
+.planner-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1060;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.5);
+}
+.planner-detail-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100dvh - 2rem);
+  background: var(--bs-body-bg, #fff);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.planner-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+}
+.planner-detail-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.5rem 0.75rem;
+}
+.planner-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.6rem 0.5rem;
+  border-radius: 0.5rem;
+  color: inherit;
+  text-decoration: none;
+}
+.planner-detail-row + .planner-detail-row {
+  margin-top: 0.15rem;
+}
+.planner-detail-row:hover,
+.planner-detail-row:focus-visible {
+  background: var(--bs-tertiary-bg);
+}
+.planner-detail-icon {
+  flex: 0 0 auto;
+  color: #198754;
+}
+.planner-detail-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.planner-detail-tss {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: #146c43;
+}
+.planner-detail-go {
+  flex: 0 0 auto;
+  color: var(--bs-secondary-color);
+}
+.planner-detail-row:hover .planner-detail-go,
+.planner-detail-row:focus-visible .planner-detail-go {
+  color: var(--bs-primary);
+}
+.min-width-0 {
+  min-width: 0;
 }
 .planner-plan-name {
   flex: 1 1 auto;

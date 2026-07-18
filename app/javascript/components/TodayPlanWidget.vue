@@ -6,7 +6,7 @@ import {
   useTrainingPlan, zoneColor, formZone, fmtDuration, fmtSigned, eventDateFmt,
   athleteFromSummary,
   ACTION_STYLE, PHASE_COLOR, FEAS_COLOR, GOALS, WEEK_PACE_COLOR, WEEK_SEGMENT_COLOR,
-  type LoadSummary,
+  type LoadSummary, type DayActivity,
 } from '../composables/useTrainingPlan'
 import { usePlannedLoads } from '../composables/usePlannedRides'
 import WeekPlanner from './WeekPlanner.vue'
@@ -35,8 +35,9 @@ const { plannedLoads } = usePlannedLoads(athlete)
 // Bilan des sorties réelles par jour (cf. TrainingLoadPanel) : nourrit le vert des
 // jours/itinéraires réalisés et l'historique de la semaine dans WeekPlanner. Sans
 // cette prop, le planificateur ne colorie rien.
-const doneByDay = computed<Record<string, { tss: number; count: number; at: string | null }>>(() => {
-  const out: Record<string, { tss: number; count: number; at: string | null }> = {}
+type DayDone = { tss: number; count: number; at: string | null; activities: DayActivity[] }
+const doneByDay = computed<Record<string, DayDone>>(() => {
+  const out: Record<string, DayDone> = {}
   for (const p of data.value?.series ?? []) {
     const acts = p.activities ?? []
     if (!acts.length) continue
@@ -44,7 +45,7 @@ const doneByDay = computed<Record<string, { tss: number; count: number; at: stri
     for (const a of acts) {
       if (a.started_at && (!at || new Date(a.started_at).getTime() > new Date(at).getTime())) at = a.started_at
     }
-    out[p.date] = { tss: Math.round(p.tss), count: acts.length, at }
+    out[p.date] = { tss: Math.round(p.tss), count: acts.length, at, activities: acts }
   }
   return out
 })

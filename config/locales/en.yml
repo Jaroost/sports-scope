@@ -200,6 +200,8 @@ en:
         plan_done: "Activity recorded that day"
         day_done: "Ride done"
         day_tss: "TSS actually earned that day"
+        view_activity: "View activity"
+        done_detail_title: "That day's activities"
         search_route: "Search a route…"
         no_route: "No route"
         cancel: "Cancel"

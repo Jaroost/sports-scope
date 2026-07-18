@@ -102,8 +102,9 @@ const { plannedLoads } = usePlannedLoads(athlete)
 //             a eu lieu APRÈS sa pose (sinon un plan ajouté après coup passerait pour fait).
 // On se fie aux activités attachées à la série (cf. attach_activities côté serveur), pas
 // au tracé prévu — rouler « en gros » le tour planifié suffit à le compter.
-const doneByDay = computed<Record<string, { tss: number; count: number; at: string | null }>>(() => {
-  const out: Record<string, { tss: number; count: number; at: string | null }> = {}
+type DayDone = { tss: number; count: number; at: string | null; activities: DayActivity[] }
+const doneByDay = computed<Record<string, DayDone>>(() => {
+  const out: Record<string, DayDone> = {}
   for (const p of data.value?.series ?? []) {
     const acts = p.activities ?? []
     if (!acts.length) continue
@@ -111,7 +112,7 @@ const doneByDay = computed<Record<string, { tss: number; count: number; at: stri
     for (const a of acts) {
       if (a.started_at && (!at || new Date(a.started_at).getTime() > new Date(at).getTime())) at = a.started_at
     }
-    out[p.date] = { tss: Math.round(p.tss), count: acts.length, at }
+    out[p.date] = { tss: Math.round(p.tss), count: acts.length, at, activities: acts }
   }
   return out
 })

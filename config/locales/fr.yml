@@ -200,6 +200,8 @@ fr:
         plan_done: "Sortie enregistrée ce jour-là"
         day_done: "Sortie faite"
         day_tss: "TSS réellement encaissé ce jour-là"
+        view_activity: "Voir l'activité"
+        done_detail_title: "Sorties du jour"
         search_route: "Chercher un itinéraire…"
         no_route: "Aucun itinéraire"
         cancel: "Annuler"

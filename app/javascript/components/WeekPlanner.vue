@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mondayOf, isoLocal } from '../composables/useTrainingPlan'
 import { usePlannedRides, planTss, type PlannedRide } from '../composables/usePlannedRides'
@@ -21,10 +21,30 @@ import RoutePickerModal from './RoutePickerModal.vue'
 //     création, parmi ceux posés AVANT la dernière sortie. Ainsi : 2 plans prévus + 1
 //     sortie → seul le premier passe vert ; un plan ajouté après la sortie reste orange.
 interface DayDone { tss: number; count: number; at: string | null }
+// `fluid` : grille responsive « auto-fit » — au lieu des 7 colonnes fixes, les jours se
+// mettent en ligne côte à côte tant qu'ils tiennent (largeur minimale garantie par
+// jour, cf. --planner-day-min) et se replient sur plusieurs rangs sinon. Utile dans un
+// widget dont la largeur varie. Sur petit écran, la liste verticale prend le relais.
 const props = withDefaults(
-  defineProps<{ athlete: AthleteState | null; doneByDay?: Record<string, DayDone> }>(),
-  { doneByDay: () => ({}) },
+  defineProps<{ athlete: AthleteState | null; doneByDay?: Record<string, DayDone>; fluid?: boolean }>(),
+  { doneByDay: () => ({}), fluid: false },
 )
+
+// Bascule liste verticale : imposée par un écran étroit (téléphone). On écoute la media
+// query pour rester réactif au redimensionnement / à la rotation.
+const isNarrow = ref(false)
+let mql: MediaQueryList | null = null
+function syncNarrow() { isNarrow.value = mql?.matches ?? false }
+onMounted(() => {
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    mql = window.matchMedia('(max-width: 575.98px)')
+    syncNarrow()
+    mql.addEventListener('change', syncNarrow)
+  }
+})
+onBeforeUnmount(() => { mql?.removeEventListener('change', syncNarrow) })
+
+const isVertical = computed(() => isNarrow.value)
 
 const { plannedRides, addPlan, movePlan, reorderPlans, removePlan } = usePlannedRides()
 
@@ -222,7 +242,7 @@ async function moveToDay(iso: string) {
 </script>
 
 <template>
-  <div class="week-planner">
+  <div class="week-planner" :class="{ 'is-vertical': isVertical, 'is-fluid': props.fluid }">
     <div class="d-flex align-items-baseline gap-2 mb-2">
       <span class="fw-semibold small">{{ t('performance.load.week.planner_title') }}</span>
       <span class="small text-body-tertiary">{{ t('performance.load.week.planner_help') }}</span>
@@ -393,65 +413,71 @@ async function moveToDay(iso: string) {
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 0.375rem;
 }
-/* Sur téléphone : liste verticale, un jour par ligne pleine largeur. La grille 7
-   colonnes rendait les cases minuscules — nom illisible et × impossible à viser. En
-   ligne, le nom d'itinéraire respire et le bouton supprimer devient une vraie cible. */
-@media (max-width: 575.98px) {
-  .planner-grid {
-    grid-template-columns: 1fr;
-    gap: 0.375rem;
-  }
-  .planner-day {
-    flex-direction: row;
-    align-items: center;
-    min-height: 0;
-    gap: 0.5rem;
-    padding: 0.4rem 0.6rem;
-  }
-  /* En-tête réduit à une étiquette « lun 14 » calée à gauche, largeur fixe. */
-  .planner-day-head {
-    flex: 0 0 3.25rem;
-    justify-content: flex-start;
-    gap: 0.35rem;
-  }
-  .planner-day-body {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.4rem;
-  }
-  .planner-plan {
-    flex: 1 1 auto;
-    min-width: 0;
-    padding: 0.4rem 0.5rem;
-  }
-  /* La largeur le permet : nom complet, plus de troncature. */
-  .planner-plan-name {
-    overflow: visible;
-    white-space: normal;
-  }
-  .planner-plan-remove {
-    font-size: 0.9rem;
-    padding: 0.4rem;
-    margin: -0.25rem -0.15rem -0.25rem 0.15rem;
-    border-radius: 50%;
-  }
-  .planner-plan-move {
-    font-size: 0.9rem;
-    padding: 0.4rem;
-    margin: -0.25rem 0;
-  }
-  .planner-done-mark {
-    flex: 1 1 auto;
-    margin-top: 0;
-  }
-  /* Jour vide : le « + » se cale à droite de la ligne, en cible confortable. */
-  .planner-add {
-    margin-top: 0;
-    margin-left: auto;
-    padding: 0.45rem 1rem;
-    font-size: 0.9rem;
-  }
+/* Mode fluide : autant de jours par ligne que la largeur le permet, avec une largeur
+   minimale par jour (sous laquelle on passe au rang suivant). Le nombre de colonnes
+   s'adapte donc au conteneur, au lieu d'être figé à 7. */
+.week-planner.is-fluid .planner-grid {
+  grid-template-columns: repeat(auto-fit, minmax(var(--planner-day-min, 8rem), 1fr));
+}
+/* Liste verticale, un jour par ligne pleine largeur. La grille 7 colonnes rend les
+   cases minuscules — nom illisible et × impossible à viser. En ligne, le nom
+   d'itinéraire respire et le bouton supprimer devient une vraie cible. Déclenchée soit
+   par la prop `vertical` (widget étroit), soit automatiquement sur téléphone : les
+   deux posent la classe `.is-vertical` sur la racine (cf. isVertical). */
+.week-planner.is-vertical .planner-grid {
+  grid-template-columns: 1fr;
+  gap: 0.375rem;
+}
+.week-planner.is-vertical .planner-day {
+  flex-direction: row;
+  align-items: center;
+  min-height: 0;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+}
+/* En-tête réduit à une étiquette « lun 14 » calée à gauche, largeur fixe. */
+.week-planner.is-vertical .planner-day-head {
+  flex: 0 0 3.25rem;
+  justify-content: flex-start;
+  gap: 0.35rem;
+}
+.week-planner.is-vertical .planner-day-body {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+.week-planner.is-vertical .planner-plan {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+}
+/* La largeur le permet : nom complet, plus de troncature. */
+.week-planner.is-vertical .planner-plan-name {
+  overflow: visible;
+  white-space: normal;
+}
+.week-planner.is-vertical .planner-plan-remove {
+  font-size: 0.9rem;
+  padding: 0.4rem;
+  margin: -0.25rem -0.15rem -0.25rem 0.15rem;
+  border-radius: 50%;
+}
+.week-planner.is-vertical .planner-plan-move {
+  font-size: 0.9rem;
+  padding: 0.4rem;
+  margin: -0.25rem 0;
+}
+.week-planner.is-vertical .planner-done-mark {
+  flex: 1 1 auto;
+  margin-top: 0;
+}
+/* Jour vide : le « + » se cale à droite de la ligne, en cible confortable. */
+.week-planner.is-vertical .planner-add {
+  margin-top: 0;
+  margin-left: auto;
+  padding: 0.45rem 1rem;
+  font-size: 0.9rem;
 }
 .planner-day {
   display: flex;

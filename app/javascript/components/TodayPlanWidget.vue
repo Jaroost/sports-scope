@@ -32,6 +32,23 @@ function onStravaRefreshed() { fetchData(true) }
 const athlete = computed(() => athleteFromSummary(data.value))
 const { plannedLoads } = usePlannedLoads(athlete)
 
+// Bilan des sorties réelles par jour (cf. TrainingLoadPanel) : nourrit le vert des
+// jours/itinéraires réalisés et l'historique de la semaine dans WeekPlanner. Sans
+// cette prop, le planificateur ne colorie rien.
+const doneByDay = computed<Record<string, { tss: number; count: number; at: string | null }>>(() => {
+  const out: Record<string, { tss: number; count: number; at: string | null }> = {}
+  for (const p of data.value?.series ?? []) {
+    const acts = p.activities ?? []
+    if (!acts.length) continue
+    let at: string | null = null
+    for (const a of acts) {
+      if (a.started_at && (!at || new Date(a.started_at).getTime() > new Date(at).getTime())) at = a.started_at
+    }
+    out[p.date] = { tss: Math.round(p.tss), count: acts.length, at }
+  }
+  return out
+})
+
 const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
@@ -151,7 +168,7 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
 
           <!-- Planificateur : accrocher un itinéraire à un jour, comme sur /performance.
                Même composable partagé — un plan ajouté ici met à jour la barre juste au-dessus. -->
-          <WeekPlanner :athlete="athlete" class="mt-2" />
+          <WeekPlanner :athlete="athlete" :done-by-day="doneByDay" fluid class="mt-2" />
         </div>
       </div>
 

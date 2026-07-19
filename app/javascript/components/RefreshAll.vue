@@ -8,9 +8,13 @@ import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
 // notifie les widgets d'accueil — îlots Vue séparés, sans état partagé — via un
 // événement `window` pour qu'ils rechargent leurs données.
 
+type DeviceBackfill = { status: string; total: number; done: number; pending: number }
+
 const syncing = ref(false)
 const msg = ref<string | null>(null)
-const isError = ref(false)
+// Tonalité du message : succès (données à jour / nouveautés), info (backfill du
+// matériel d'enregistrement encore en cours en arrière-plan) ou erreur.
+const tone = ref<'success' | 'info' | 'error'>('success')
 let msgTimer: ReturnType<typeof setTimeout> | null = null
 
 function csrfToken(): string {
@@ -21,7 +25,7 @@ async function refreshAll() {
   if (syncing.value) return
   syncing.value = true
   msg.value = null
-  isError.value = false
+  tone.value = 'success'
   try {
     const res = await fetch('/strava/refresh', {
       method: 'POST',
@@ -29,18 +33,28 @@ async function refreshAll() {
       credentials: 'same-origin',
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const payload = (await res.json()) as { created?: number }
+    const payload = (await res.json()) as { created?: number; device_backfill?: DeviceBackfill | null }
     const created = payload.created ?? 0
     window.dispatchEvent(new CustomEvent(STRAVA_REFRESHED_EVENT, { detail: payload }))
-    isError.value = false
-    msg.value = created > 0 ? t('strava.refresh_all_new', { count: created }) : t('strava.refresh_all_synced')
+    // Le matériel d'enregistrement se récupère activité par activité (limité par le
+    // rate limit Strava) : tant qu'il en reste, on le signale plutôt que d'annoncer
+    // « données à jour », qui ne vaut que pour les résumés.
+    const device = payload.device_backfill
+    if (device && device.pending > 0) {
+      tone.value = 'info'
+      msg.value = t('strava.refresh_all_device', { done: device.done, total: device.total })
+    } else {
+      tone.value = 'success'
+      msg.value = created > 0 ? t('strava.refresh_all_new', { count: created }) : t('strava.refresh_all_synced')
+    }
   } catch {
-    isError.value = true
+    tone.value = 'error'
     msg.value = t('strava.refresh_all_error')
   } finally {
     syncing.value = false
     if (msgTimer) clearTimeout(msgTimer)
-    msgTimer = setTimeout(() => { msg.value = null }, 6000)
+    // Le message « en cours » reste un peu plus longtemps : le backfill dure.
+    msgTimer = setTimeout(() => { msg.value = null }, tone.value === 'info' ? 12000 : 6000)
   }
 }
 
@@ -59,8 +73,15 @@ onUnmounted(() => { if (msgTimer) clearTimeout(msgTimer) })
       <i v-else class="fa-solid fa-rotate" aria-hidden="true"></i>
       <span>{{ syncing ? t('strava.refresh_all_syncing') : t('strava.refresh_all_button') }}</span>
     </button>
-    <small v-if="msg" class="d-flex align-items-center gap-1" :class="isError ? 'text-danger' : 'text-success'">
-      <i :class="isError ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-check'" aria-hidden="true"></i>
+    <small
+      v-if="msg"
+      class="d-flex align-items-center gap-1"
+      :class="tone === 'error' ? 'text-danger' : tone === 'info' ? 'text-info' : 'text-success'"
+    >
+      <i
+        :class="tone === 'error' ? 'fa-solid fa-triangle-exclamation' : tone === 'info' ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-circle-check'"
+        aria-hidden="true"
+      ></i>
       <span>{{ msg }}</span>
     </small>
   </div>

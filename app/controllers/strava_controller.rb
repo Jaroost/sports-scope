@@ -52,8 +52,11 @@ class StravaController < ApplicationController
       # Catégories présentes dans l'historique (mêmes regroupements que la page
       # performance) — le menu du filtre propose les deux granularités.
       sport_categories: sport_types.map { |t| PerformanceRecords.sport_category(t) }.uniq.sort,
-      # Matériel (vélos) référencé par au moins une activité, pour le menu du filtre.
+      # Matériel (vélos + chaussures) référencé par au moins une activité, pour le
+      # menu du filtre. Chaque entrée porte son `type` (bike/shoe) pour le groupement.
       gears: available_gears,
+      # Matériel d'enregistrement présent dans l'historique (device_name).
+      devices: available_devices,
       activities: records.map { |a| summary_json(a, tss: tss_map[['strava', a.strava_id.to_s]]) }
     }
   rescue StravaSyncService::StravaApiError => e
@@ -82,6 +85,10 @@ class StravaController < ApplicationController
       activity = strava_get("https://www.strava.com/api/v3/activities/#{id}")
       { cached_at: Time.current.iso8601, activity: activity }
     end
+
+    # Capture opportuniste du matériel d'enregistrement : le détail est déjà là, on
+    # renseigne `device_name` pour le filtre sans coût API supplémentaire.
+    capture_device_name(id, payload[:activity])
 
     # TSS ajouté hors cache : il dépend de seuils modifiables (FTP, LTHR) et se
     # recalcule à chaque lecture, contrairement au résumé Strava mis en cache.
@@ -155,14 +162,19 @@ class StravaController < ApplicationController
     result = StravaRefreshService.new(current_user).refresh_all
     total = current_user.strava_activities.count
     body = result[:run] ? backfill_json(result[:run]) : { cached_at: strava_cached_at, run: nil, pending: 0 }
-    render json: body.merge(synced: result[:synced], created: [total - before, 0].max, total: total)
+    render json: body.merge(
+      synced: result[:synced],
+      created: [total - before, 0].max,
+      total: total,
+      device_backfill: device_backfill_json(result[:device_run])
+    )
   rescue StravaSyncService::StravaApiError, StravaGearSyncService::StravaApiError => e
     render json: { error: e.message }, status: :bad_gateway
   end
 
   # GET /strava/backfill — état du run le plus récent (pour le suivi de progression).
   def backfill_status
-    run = current_user.strava_backfill_runs.order(created_at: :desc).first
+    run = current_user.strava_backfill_runs.streams.order(created_at: :desc).first
     return render json: backfill_json(run) if run
 
     render json: { cached_at: strava_cached_at, run: nil, pending: current_user.strava_activities.streams_pending.count }
@@ -210,6 +222,7 @@ class StravaController < ApplicationController
       scope = filter_by_sport_category(scope, params[:sport_category])
     end
     scope = scope.where(gear_id: params[:gear]) if params[:gear].present?
+    scope = scope.where(device_name: params[:device]) if params[:device].present?
     scope = scope.where(strava_activities: { distance_m: params[:min_dist].to_f * 1000.. }) if params[:min_dist].present?
     scope = scope.where(strava_activities: { distance_m: ..(params[:max_dist].to_f * 1000) }) if params[:max_dist].present?
     scope = scope.where(strava_activities: { total_elevation_gain: params[:min_elev].to_f.. }) if params[:min_elev].present?
@@ -244,17 +257,46 @@ class StravaController < ApplicationController
     end
   end
 
-  # Matériel proposé au filtre : les vélos (gear Strava) référencés par au moins une
-  # activité, avec leur nom lisible résolu depuis la table `bikes` (via `strava_gear_id`).
-  # On se limite aux gear de vélo (préfixe « b… ») car ce sont les seuls que l'app
-  # nomme (le suivi de cirage ne concerne que les vélos) ; les gear sans vélo connu
-  # sont écartés pour ne pas afficher d'identifiant brut dans le menu.
+  # Matériel proposé au filtre : vélos (table `bikes`) et chaussures (cache
+  # `strava_gears`) référencés par au moins une activité, avec leur nom lisible. Les
+  # gear dont on n'a pas encore résolu le nom sont écartés pour ne pas afficher
+  # d'identifiant brut ; ils apparaîtront après le prochain « Tout rafraîchir ».
   def available_gears
-    used = current_user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
-    return [] if used.empty?
+    bikes = gear_options(
+      current_user.strava_activities.with_bike_gear.distinct.pluck(:gear_id),
+      current_user.bikes.where.not(strava_gear_id: nil).pluck(:strava_gear_id, :name).to_h,
+      "bike"
+    )
+    shoes = gear_options(
+      current_user.strava_activities.with_shoe_gear.distinct.pluck(:gear_id),
+      current_user.strava_gears.pluck(:gear_id, :name).to_h,
+      "shoe"
+    )
+    bikes + shoes
+  end
 
-    names = current_user.bikes.where(strava_gear_id: used).pluck(:strava_gear_id, :name).to_h
-    used.filter_map { |id| { id: id, name: names[id] } if names[id] }.sort_by { |g| g[:name].downcase }
+  def gear_options(used_ids, names, type)
+    used_ids.filter_map { |id| { id: id, name: names[id], type: type } if names[id] }
+            .sort_by { |g| g[:name].downcase }
+  end
+
+  # Matériel d'enregistrement proposé au filtre : les `device_name` réellement
+  # présents (non NULL = vérifié, non vide = appareil déclaré), triés alphabétiquement.
+  def available_devices
+    current_user.strava_activities
+                .where.not(device_name: [nil, ""])
+                .distinct.pluck(:device_name)
+                .sort_by(&:downcase)
+  end
+
+  # Persiste `device_name` depuis un payload d'activité détaillée. Best-effort :
+  # l'affichage d'une activité ne doit jamais échouer à cause de cette capture.
+  def capture_device_name(strava_id, detail)
+    return unless detail.is_a?(Hash)
+
+    current_user.strava_activities.find_by(strava_id: strava_id)&.store_device_name!(detail)
+  rescue StandardError => e
+    Rails.logger.warn("[strava-device] capture #{strava_id} failed: #{e.message}")
   end
 
   # Parse une date ISO (yyyy-mm-dd) issue d'un <input type="date">. Renvoie nil si
@@ -287,6 +329,21 @@ class StravaController < ApplicationController
   # (« Mis à jour à … »), à côté du bouton qui la déclenche.
   def strava_cached_at
     current_user.strava_activities.maximum(:updated_at)&.iso8601
+  end
+
+  # Progression du backfill du matériel d'enregistrement, pour le retour de « Tout
+  # rafraîchir ». `pending` = activités dont le device n'a pas encore été vérifié
+  # (device_name NULL). nil s'il n'y a aucun run device (rien à récupérer).
+  def device_backfill_json(run)
+    return nil unless run
+
+    pending = current_user.strava_activities.device_unchecked.count
+    {
+      status: run.status,
+      total: run.total,
+      done: [run.total - pending, 0].max,
+      pending: pending
+    }
   end
 
   def backfill_json(run)

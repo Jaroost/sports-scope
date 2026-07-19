@@ -20,7 +20,8 @@ class StravaRefreshService
   def refresh_all
     synced = sync_summaries
     sync_gear
-    { synced: synced, run: enqueue_streams_backfill }
+    device_run = enqueue_device_backfill
+    { synced: synced, run: enqueue_streams_backfill, device_run: device_run }
   end
 
   # Résumés d'activités. `full` : true = repagine tout l'historique, false =
@@ -47,11 +48,11 @@ class StravaRefreshService
   def enqueue_streams_backfill
     pending = @user.strava_activities.streams_pending.count
 
-    run = @user.strava_backfill_runs.active.order(created_at: :desc).first
+    run = @user.strava_backfill_runs.streams.active.order(created_at: :desc).first
     if run.nil?
       return nil if pending.zero?
 
-      run = @user.strava_backfill_runs.create!(status: 'pending', total: pending)
+      run = @user.strava_backfill_runs.create!(kind: 'streams', status: 'pending', total: pending)
       StravaStreamsBackfillJob.perform_later(run.id)
     elsif run.resumable?
       StravaStreamsBackfillJob.perform_later(run.id)
@@ -60,14 +61,40 @@ class StravaRefreshService
     run
   end
 
+  # (Ré)enfile la récupération du matériel d'enregistrement (`device_name`) des
+  # activités jamais vérifiées, via l'activité détaillée. Idempotent : réutilise un
+  # run device actif, n'enfile un job que si rien ne tourne déjà. Renvoie le run, ou
+  # nil si rien à récupérer / Strava non lié.
+  def enqueue_device_backfill
+    return nil unless @user.strava_linked?
+
+    pending = @user.strava_activities.device_unchecked.count
+
+    run = @user.strava_backfill_runs.device.active.order(created_at: :desc).first
+    if run.nil?
+      return nil if pending.zero?
+
+      run = @user.strava_backfill_runs.create!(kind: "device", status: "pending", total: pending)
+      StravaDeviceBackfillJob.perform_later(run.id)
+    elsif run.resumable?
+      StravaDeviceBackfillJob.perform_later(run.id)
+    end
+
+    run
+  end
+
   private
 
-  # Un vélo n'apparaît ni ne change de nom souvent : on ne résout les `/gear/:id`
-  # (une requête Strava par vélo) que quand une activité référence un `gear_id`
-  # pour lequel on n'a pas encore créé de Bike.
+  # Un matériel n'apparaît ni ne change de nom souvent : on ne résout les `/gear/:id`
+  # (une requête Strava par matériel) que quand une activité référence un `gear_id`
+  # (vélo ou chaussure) pour lequel on n'a pas encore de nom en base.
   def gear_sync_needed?
-    known = @user.bikes.where.not(strava_gear_id: nil).pluck(:strava_gear_id)
-    used = @user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
-    (used - known).any?
+    known_bikes = @user.bikes.where.not(strava_gear_id: nil).pluck(:strava_gear_id)
+    used_bikes = @user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
+    return true if (used_bikes - known_bikes).any?
+
+    known_shoes = @user.strava_gears.pluck(:gear_id)
+    used_shoes = @user.strava_activities.with_shoe_gear.distinct.pluck(:gear_id)
+    (used_shoes - known_shoes).any?
   end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_18_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_19_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -163,6 +163,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_18_000002) do
     t.float "average_temp"
     t.float "average_watts"
     t.datetime "created_at", null: false
+    t.string "device_name"
     t.float "distance_m"
     t.integer "elapsed_time_s"
     t.jsonb "end_latlng"
@@ -190,6 +191,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_18_000002) do
     t.bigint "user_id", null: false
     t.index "((localities)::text) gin_trgm_ops", name: "index_strava_activities_on_localities_trgm", using: :gin
     t.index ["name"], name: "index_strava_activities_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
+    t.index ["user_id", "device_name"], name: "index_strava_activities_on_user_id_and_device_name", where: "((device_name IS NOT NULL) AND ((device_name)::text <> ''::text))"
     t.index ["user_id", "gear_id"], name: "index_strava_activities_on_user_id_and_gear_id"
     t.index ["user_id", "started_at"], name: "index_strava_activities_on_user_id_and_started_at"
     t.index ["user_id", "strava_id"], name: "index_strava_activities_on_user_id_and_strava_id", unique: true
@@ -199,6 +201,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_18_000002) do
 
   create_table "strava_backfill_runs", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.string "kind", default: "streams", null: false
     t.string "last_error"
     t.datetime "rate_limited_until"
     t.string "status", default: "pending", null: false
@@ -207,6 +210,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_18_000002) do
     t.bigint "user_id", null: false
     t.index ["user_id", "status"], name: "index_strava_backfill_runs_on_user_id_and_status"
     t.index ["user_id"], name: "index_strava_backfill_runs_on_user_id"
+  end
+
+  create_table "strava_gears", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "gear_id", null: false
+    t.string "gear_type", default: "shoe", null: false
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "gear_id"], name: "index_strava_gears_on_user_id_and_gear_id", unique: true
+    t.index ["user_id"], name: "index_strava_gears_on_user_id"
   end
 
   create_table "users", force: :cascade do |t|
@@ -244,5 +258,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_18_000002) do
   add_foreign_key "routes", "users"
   add_foreign_key "strava_activities", "users"
   add_foreign_key "strava_backfill_runs", "users"
+  add_foreign_key "strava_gears", "users"
   add_foreign_key "users", "chart_layouts", column: "last_chart_layout_id", on_delete: :nullify
 end

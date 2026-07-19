@@ -35,7 +35,8 @@ const emptyText = computed(() => t('strava.no_activities'))
 const showFilters = ref(false)
 const search = ref('') // nom de la sortie ou lieu traversé
 const sportFilter = ref('')
-const gearFilter = ref('') // gear_id Strava du vélo (matériel)
+const gearFilter = ref('') // gear_id Strava (vélo ou chaussure)
+const deviceFilter = ref('') // matériel d'enregistrement (device_name)
 const minDistance = ref(null) // km
 const maxDistance = ref(null)
 const minElevation = ref(null) // m
@@ -51,9 +52,13 @@ const dateTo = ref('')
 const sportOptions = ref([])
 const sportCategoryOptions = ref([])
 
-// Matériel (vélos) présent dans l'historique, fourni par le serveur : liste
-// { id: gear_id, name } pour le menu déroulant du filtre.
+// Matériel présent dans l'historique, fourni par le serveur : liste
+// { id: gear_id, name, type } (type ∈ bike|shoe) pour le menu déroulant du filtre,
+// groupée par type. `deviceOptions` : noms d'appareils d'enregistrement (device_name).
 const gearOptions = ref([])
+const deviceOptions = ref([])
+const bikeGears = computed(() => gearOptions.value.filter((g) => g.type === 'bike'))
+const shoeGears = computed(() => gearOptions.value.filter((g) => g.type === 'shoe'))
 
 // Une catégorie est portée par le même `sportFilter` qu'un type brut, préfixée pour
 // les distinguer : un seul état à mémoriser, réinitialiser et compter.
@@ -77,6 +82,7 @@ const activeFilterCount = computed(() => {
   if (search.value.trim()) n++
   if (sportFilter.value) n++
   if (gearFilter.value) n++
+  if (deviceFilter.value) n++
   if (isSet(minDistance.value)) n++
   if (isSet(maxDistance.value)) n++
   if (isSet(minElevation.value)) n++
@@ -100,6 +106,7 @@ function clearFilters() {
   search.value = ''
   sportFilter.value = ''
   gearFilter.value = ''
+  deviceFilter.value = ''
   minDistance.value = null
   maxDistance.value = null
   minElevation.value = null
@@ -186,6 +193,7 @@ function filterParams() {
     p.set('sport', sportFilter.value)
   }
   if (gearFilter.value) p.set('gear', gearFilter.value)
+  if (deviceFilter.value) p.set('device', deviceFilter.value)
   if (isSet(minDistance.value)) p.set('min_dist', String(minDistance.value))
   if (isSet(maxDistance.value)) p.set('max_dist', String(maxDistance.value))
   if (isSet(minElevation.value)) p.set('min_elev', String(minElevation.value))
@@ -250,6 +258,7 @@ async function fetchActivities() {
     if (payload.sports) sportOptions.value = payload.sports
     if (payload.sport_categories) sportCategoryOptions.value = payload.sport_categories
     if (payload.gears) gearOptions.value = payload.gears
+    if (payload.devices) deviceOptions.value = payload.devices
     error.value = null
     hasLoaded.value = true
   } catch (e) {
@@ -274,6 +283,7 @@ function loadPersisted() {
     if (typeof s.search === 'string') search.value = s.search
     if (typeof s.sport === 'string') sportFilter.value = s.sport
     if (typeof s.gear === 'string') gearFilter.value = s.gear
+    if (typeof s.device === 'string') deviceFilter.value = s.device
     if (s.minDistance != null) minDistance.value = s.minDistance
     if (s.maxDistance != null) maxDistance.value = s.maxDistance
     if (s.minElevation != null) minElevation.value = s.minElevation
@@ -293,6 +303,7 @@ function persist() {
       search: search.value,
       sport: sportFilter.value,
       gear: gearFilter.value,
+      device: deviceFilter.value,
       minDistance: minDistance.value,
       maxDistance: maxDistance.value,
       minElevation: minElevation.value,
@@ -312,7 +323,7 @@ function persist() {
 // la liste corresponde exactement à ce qui a été cliqué, sans filtre résiduel invisible.
 function applyUrlFilters() {
   const p = new URLSearchParams(window.location.search)
-  const keys = ['q', 'sport', 'sport_category', 'gear', 'min_dist', 'max_dist', 'min_elev', 'max_elev', 'min_dur', 'max_dur', 'from', 'to']
+  const keys = ['q', 'sport', 'sport_category', 'gear', 'device', 'min_dist', 'max_dist', 'min_elev', 'max_elev', 'min_dur', 'max_dur', 'from', 'to']
   if (!keys.some((k) => p.has(k))) return false
 
   clearFilters()
@@ -326,6 +337,7 @@ function applyUrlFilters() {
   const category = p.get('sport_category')
   sportFilter.value = p.get('sport') || (category ? SPORT_CATEGORY_PREFIX + category : '')
   gearFilter.value = p.get('gear') || ''
+  deviceFilter.value = p.get('device') || ''
   minDistance.value = num('min_dist')
   maxDistance.value = num('max_dist')
   minElevation.value = num('min_elev')
@@ -358,7 +370,7 @@ function onFilterChange() {
 }
 
 watch(
-  [search, sportFilter, gearFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
+  [search, sportFilter, gearFilter, deviceFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
   onFilterChange,
 )
 
@@ -370,7 +382,7 @@ watch(view, (v) => {
 
 // Mémorise l'état (filtres + vue + panneau) à chaque changement.
 watch(
-  [search, sportFilter, gearFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration,
+  [search, sportFilter, gearFilter, deviceFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration,
     dateFrom, dateTo, view, showFilters],
   persist,
 )
@@ -500,12 +512,27 @@ function gradeColor(cat) {
               </optgroup>
             </select>
           </div>
-          <!-- Matériel : n'apparaît que si l'historique contient des vélos identifiés. -->
+          <!-- Matériel : n'apparaît que si l'historique contient du matériel identifié.
+               Groupé par type (vélos / chaussures). -->
           <div v-if="gearOptions.length" class="col-12 col-md-4">
             <label class="form-label small mb-1">{{ t('strava.filters.gear') }}</label>
             <select v-model="gearFilter" class="form-select form-select-sm">
               <option value="">{{ t('strava.filters.all_gears') }}</option>
-              <option v-for="g in gearOptions" :key="g.id" :value="g.id">{{ g.name }}</option>
+              <optgroup v-if="bikeGears.length" :label="t('strava.filters.gear_bikes')">
+                <option v-for="g in bikeGears" :key="g.id" :value="g.id">{{ g.name }}</option>
+              </optgroup>
+              <optgroup v-if="shoeGears.length" :label="t('strava.filters.gear_shoes')">
+                <option v-for="g in shoeGears" :key="g.id" :value="g.id">{{ g.name }}</option>
+              </optgroup>
+            </select>
+          </div>
+          <!-- Matériel d'enregistrement : n'apparaît que si des appareils sont connus
+               (remplis à l'ouverture des activités et par « Tout rafraîchir »). -->
+          <div v-if="deviceOptions.length" class="col-12 col-md-4">
+            <label class="form-label small mb-1">{{ t('strava.filters.device') }}</label>
+            <select v-model="deviceFilter" class="form-select form-select-sm">
+              <option value="">{{ t('strava.filters.all_devices') }}</option>
+              <option v-for="d in deviceOptions" :key="d" :value="d">{{ d }}</option>
             </select>
           </div>
           <div class="col-6 col-md-4">

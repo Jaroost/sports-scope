@@ -24,9 +24,34 @@ class StravaActivity < ApplicationRecord
   # les chaussures (sinon une sortie course créerait un faux « vélo »).
   scope :with_bike_gear, -> { where("gear_id LIKE 'b%'") }
 
+  # Chaussures de course (gear « g… ») : nom résolu à part dans `strava_gears`.
+  scope :with_shoe_gear, -> { where("gear_id LIKE 'g%'") }
+
   # Activités dont les streams n'ont jamais été récupérés (ni via consultation,
   # ni via backfill). Cible du backfill de masse.
   scope :streams_pending, -> { where(streams_fetched_at: nil) }
+
+  # Activités dont le matériel d'enregistrement n'a jamais été vérifié : `device_name`
+  # NULL (par opposition à "" = vérifié, aucun appareil). Cible du backfill device.
+  scope :device_unchecked, -> { where(device_name: nil) }
+
+  # Enregistre le matériel d'enregistrement lu dans l'activité détaillée. On stocke
+  # "" quand l'activité n'en déclare pas (saisie manuelle) pour la marquer vérifiée
+  # et ne pas la re-télécharger à chaque backfill. Écrit directement (update_column)
+  # pour un backfill léger, sans toucher aux callbacks ni à `updated_at`.
+  def store_device_name!(detail)
+    name = self.class.device_name_from(detail)
+    update_column(:device_name, name) if device_name != name
+    name
+  end
+
+  # Nom de l'appareil dans un payload d'activité détaillée Strava. Renvoie "" (et non
+  # nil) si absent : nil est réservé à « pas encore vérifié ».
+  def self.device_name_from(detail)
+    return "" unless detail.is_a?(Hash)
+
+    (detail["device_name"] || detail[:device_name]).to_s.strip.first(255)
+  end
 
   # Marque la date de récupération en plus du write-through partagé (`Activityable`),
   # pour qu'une activité sans données de streams (200 vide ou 404) ne reste pas

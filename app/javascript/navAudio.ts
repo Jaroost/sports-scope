@@ -61,41 +61,66 @@ function beep(freq: number, start: number, durationS: number, gainPeak = 0.18): 
 
 import type { Maneuver } from './routeHelpers'
 
-// Distinct audio cue per maneuver. Across every cue, a rising pitch means right
-// and a falling pitch means left, so the side is recognisable without looking;
-// the rhythm/shape conveys the maneuver type (slight, sharp, roundabout…).
-export function playManeuver(kind: Maneuver, direction: 'left' | 'right'): void {
+// Exécute `render` une fois le contexte audio réellement en marche. unlockAudio()
+// recrée/réveille le contexte, mais resume() est ASYNCHRONE : appeler beep() dans la
+// foulée alors que le contexte est encore `suspended` (cas classique sur mobile quand
+// l'écran s'est mis en veille entre deux virages) fait tomber tous les bips (beep sort si
+// l'état n'est pas `running`). On planifie donc le rendu après la reprise. Quand le
+// contexte tourne déjà, rendu synchrone immédiat — aucun délai.
+function whenAudioReady(render: () => void): void {
   unlockAudio()
-  const right = direction === 'right'
-  switch (kind) {
-    case 'slight':
-      // A single soft note — a gentle nudge.
-      beep(right ? 760 : 560, 0, 0.18, 0.13)
-      break
-    case 'sharp':
-      // Three quick, louder notes climbing/falling steeply — urgent.
-      if (right) { beep(600, 0, 0.1, 0.2); beep(820, 0.12, 0.1, 0.2); beep(1060, 0.24, 0.22, 0.2) }
-      else { beep(1060, 0, 0.1, 0.2); beep(820, 0.12, 0.1, 0.2); beep(600, 0.24, 0.22, 0.2) }
-      break
-    case 'keep':
-      // Two very short, quiet notes close together — a subtle "stay this side".
-      beep(right ? 700 : 620, 0, 0.09, 0.1)
-      beep(right ? 780 : 540, 0.11, 0.11, 0.1)
-      break
-    case 'uturn':
-      // Low descending triple — unmistakably "turn around".
-      beep(520, 0, 0.16, 0.2); beep(400, 0.18, 0.16, 0.2); beep(300, 0.36, 0.26, 0.2)
-      break
-    case 'roundabout':
-      // Even triplet on one pitch — like going round.
-      beep(700, 0, 0.1, 0.18); beep(700, 0.14, 0.1, 0.18); beep(700, 0.28, 0.18, 0.18)
-      break
-    case 'turn':
-    default:
-      // Two notes; rising for right, falling for left.
-      if (right) { beep(620, 0, 0.16); beep(900, 0.18, 0.22) }
-      else { beep(900, 0, 0.16); beep(620, 0.18, 0.22) }
-  }
+  if (!ctx) return
+  if (ctx.state === 'running') { render(); return }
+  void ctx.resume().then(render).catch(() => { /* contexte bloqué — silencieux */ })
+}
+
+// Tempo des signaux de virage : multiplie les temps (position + durée des notes du
+// motif ET écart entre lectures d'un paquet, cf. MANEUVER_BURST_GAP_S). < 1 = plus
+// rapide. Ne touche ni les fréquences ni le gain. Plancher pratique : chaque note reste
+// au-dessus de ~0,06 s (l'attaque de beep dure 0,02 s), sinon le bip devient un « clic ».
+const MANEUVER_TEMPO = 0.65
+
+// Planifie le signal sonore d'un virage à l'instant `atS` (secondes) après
+// ctx.currentTime, via les temps absolus de beep(). Découplé de playManeuver pour que
+// la répétition « à la suite » (playManeuverBurst) empile plusieurs motifs en une seule
+// passe de planification Web Audio, sans timer.
+//
+// Signal UNIQUE pour tous les virages : on réutilise l'ancien motif « virage à droite »
+// (deux notes montantes 620 → 900 Hz) quels que soient le type de manœuvre et le côté.
+// `kind`/`direction` sont donc ignorés mais gardés dans la signature (appelants inchangés,
+// et pour pouvoir re-différencier les signaux plus tard sans re-toucher aux appels).
+function renderManeuver(_kind: Maneuver, _direction: 'left' | 'right', atS: number): void {
+  // Applique le tempo au motif (position `start` + durée `dur`), pas au paquet : `atS`
+  // est déjà à l'écart compressé (MANEUVER_BURST_GAP_S). Gain par défaut aligné sur beep.
+  const b = (freq: number, start: number, dur: number, gain = 0.18) =>
+    beep(freq, atS + start * MANEUVER_TEMPO, dur * MANEUVER_TEMPO, gain)
+  // Deux notes montantes très rapprochées : la 2ᵉ démarre à 0,09, avant la fin de la
+  // 1ʳᵉ (0,11) — léger chevauchement, effet glissando plutôt que deux bips distincts.
+  b(620, 0, 0.11)
+  b(900, 0.09, 0.2)
+}
+
+// Distinct audio cue per maneuver — une lecture unique.
+export function playManeuver(kind: Maneuver, direction: 'left' | 'right'): void {
+  whenAudioReady(() => renderManeuver(kind, direction, 0))
+}
+
+// Écart (s) entre les débuts de deux lectures consécutives d'un même signal de virage
+// dans un « paquet » (cf. playManeuverBurst). Compressé au même tempo que le motif pour
+// rester au-dessus de sa durée (signal unique ~0,20 s au tempo courant) : les lectures
+// s'enchaînent serré sans se chevaucher.
+const MANEUVER_BURST_GAP_S = 0.7 * MANEUVER_TEMPO
+
+// Joue le signal d'un virage `count` fois à la suite (1–10). Tout le paquet est PLANIFIÉ
+// EN UNE PASSE via les temps absolus de Web Audio (renderManeuver à i × gap) : pas de
+// setTimeout — donc aucune dérive quand l'onglet/l'écran est en veille (les timers JS y
+// sont fortement bridés) et le son sort d'un bloc, sans latence entre les lectures.
+// count = 1 revient à une seule annonce.
+export function playManeuverBurst(kind: Maneuver, direction: 'left' | 'right', count: number): void {
+  const n = Math.max(1, Math.min(10, Math.round(count) || 1))
+  whenAudioReady(() => {
+    for (let i = 0; i < n; i++) renderManeuver(kind, direction, i * MANEUVER_BURST_GAP_S)
+  })
 }
 
 // Low, doubled buzz — an unmistakable warning that you have left the route.

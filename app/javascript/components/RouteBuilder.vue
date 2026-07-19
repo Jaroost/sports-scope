@@ -399,6 +399,10 @@ async function recomputeRoute() {
     // copiables) doivent refléter la nouvelle position, pas celle d'avant le drag.
     mapRef.value?.refreshWaypointMarkers()
 
+    // Correction en cours après une sauvegarde bloquée : le tracé vient d'être recalculé,
+    // on ré-évalue les avertissements (qui ne dépendent que de la géométrie et des points).
+    if (wasReviewing) reevaluateWarnings()
+
     // BRouter ne renvoie pas d'altitude pour les tronçons « straight » (points libres).
     // On ne se fie aux altitudes inline que si TOUS les points en ont ; sinon on
     // interroge open-meteo pour combler les trous (sans quoi le dénivelé serait faux).
@@ -611,6 +615,17 @@ function clearRouteWarnings() {
 function refreshTurnWarnings() {
   if (!turnWarnings.value.length) return
   setTurnWarnings(computeTurnAnomalies())
+}
+
+// Ré-évalue tous les avertissements après un recalcul du tracé, pendant que l'utilisateur
+// corrige les points signalés par une sauvegarde bloquée (cf. recomputeRoute). Chaque point
+// réglé sort de la liste et le barrage (saveBlocked) tombe de lui-même quand il ne reste
+// rien — l'utilisateur n'a plus à re-sauvegarder juste pour voir ce qu'il reste à corriger.
+function reevaluateWarnings() {
+  snapWarnings.value = computeSnapWarnings()
+  setTurnWarnings(computeTurnAnomalies())
+  noMarkersWarn.value = routeStore.markers.value.length === 0
+  saveBlocked.value = snapWarnings.value.length > 0 || turnWarnings.value.length > 0 || noMarkersWarn.value
 }
 
 async function save() {

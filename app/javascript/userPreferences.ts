@@ -45,7 +45,11 @@ export interface SportPreferences {
     turn_hint_m: number
     turn_urgent_m: number
     turn_now_m: number
+    turn_repeat_count: number
+    turn_repeat: boolean
     turn_repeat_ms: number
+    turn_repeat_urgent_count: number
+    turn_repeat_urgent: boolean
     turn_repeat_urgent_ms: number
     turn_green_hold_m: number
     turn_green_hold_s: number
@@ -105,7 +109,11 @@ function sportDefaults(
       turn_hint_m: 150,
       turn_urgent_m: 50,
       turn_now_m: 15,
+      turn_repeat_count: 1,
+      turn_repeat: true,
       turn_repeat_ms: 2000,
+      turn_repeat_urgent_count: 1,
+      turn_repeat_urgent: true,
       turn_repeat_urgent_ms: 1000,
       turn_green_hold_m: 100,
       turn_green_hold_s: 10,

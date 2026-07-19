@@ -830,16 +830,38 @@ function placePreviewMarker(coords: [number, number]) {
             <input id="nav-turn-urgent" v-model.number="sport.navigation.turn_urgent_m" type="range" class="form-range" min="5" max="50" step="1">
           </div>
           <div class="col-sm-6">
-            <label for="nav-turn-repeat" class="form-label mb-1">
-              {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (sport.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
-            </label>
-            <input id="nav-turn-repeat" v-model.number="sport.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500">
+            <div class="border rounded p-2 h-100">
+              <div class="fw-semibold small mb-2">{{ t('profile.navigation.turn_repeat_far_title') }}</div>
+              <label for="nav-turn-repeat-count" class="form-label mb-1">
+                {{ t('profile.navigation.turn_repeat_count') }} : <strong>{{ sport.navigation.turn_repeat_count }}×</strong>
+              </label>
+              <input id="nav-turn-repeat-count" v-model.number="sport.navigation.turn_repeat_count" type="range" class="form-range" min="1" max="10" step="1">
+              <div class="form-check mt-2 mb-1">
+                <input id="nav-turn-repeat-enabled" v-model="sport.navigation.turn_repeat" type="checkbox" class="form-check-input">
+                <label for="nav-turn-repeat-enabled" class="form-check-label">{{ t('profile.navigation.turn_repeat_enabled') }}</label>
+              </div>
+              <label for="nav-turn-repeat" class="form-label mb-1">
+                {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (sport.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
+              </label>
+              <input id="nav-turn-repeat" v-model.number="sport.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500" :disabled="!sport.navigation.turn_repeat">
+            </div>
           </div>
           <div class="col-sm-6">
-            <label for="nav-turn-repeat-urgent" class="form-label mb-1">
-              {{ t('profile.navigation.turn_repeat_urgent_ms') }} : <strong>{{ (sport.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
-            </label>
-            <input id="nav-turn-repeat-urgent" v-model.number="sport.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500">
+            <div class="border rounded p-2 h-100">
+              <div class="fw-semibold small mb-2">{{ t('profile.navigation.turn_repeat_near_title') }}</div>
+              <label for="nav-turn-repeat-urgent-count" class="form-label mb-1">
+                {{ t('profile.navigation.turn_repeat_count') }} : <strong>{{ sport.navigation.turn_repeat_urgent_count }}×</strong>
+              </label>
+              <input id="nav-turn-repeat-urgent-count" v-model.number="sport.navigation.turn_repeat_urgent_count" type="range" class="form-range" min="1" max="10" step="1">
+              <div class="form-check mt-2 mb-1">
+                <input id="nav-turn-repeat-urgent-enabled" v-model="sport.navigation.turn_repeat_urgent" type="checkbox" class="form-check-input">
+                <label for="nav-turn-repeat-urgent-enabled" class="form-check-label">{{ t('profile.navigation.turn_repeat_enabled') }}</label>
+              </div>
+              <label for="nav-turn-repeat-urgent" class="form-label mb-1">
+                {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (sport.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
+              </label>
+              <input id="nav-turn-repeat-urgent" v-model.number="sport.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500" :disabled="!sport.navigation.turn_repeat_urgent">
+            </div>
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-now" class="form-label mb-1">

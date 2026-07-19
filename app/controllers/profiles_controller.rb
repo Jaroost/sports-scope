@@ -26,6 +26,8 @@ class ProfilesController < ApplicationController
   NAV_TURN_URGENT_RANGE = (5..50)
   NAV_TURN_REPEAT_RANGE = (500..10000)
   NAV_TURN_REPEAT_URGENT_RANGE = (500..10000)
+  NAV_TURN_REPEAT_COUNT_RANGE = (1..10) # nombre de lectures à la suite du son de virage
+
   NAV_TURN_NOW_RANGE = (0..50)
   NAV_TURN_GREEN_HOLD_RANGE = (0..500)
   NAV_TURN_GREEN_HOLD_S_RANGE = (2..60)
@@ -227,7 +229,11 @@ class ProfilesController < ApplicationController
       "turn_hint_m" => clamp_int(navigation[:turn_hint_m], NAV_TURN_HINT_RANGE, defaults["turn_hint_m"]),
       "turn_urgent_m" => clamp_int(navigation[:turn_urgent_m], NAV_TURN_URGENT_RANGE, defaults["turn_urgent_m"]),
       "turn_now_m" => clamp_int(navigation[:turn_now_m], NAV_TURN_NOW_RANGE, defaults["turn_now_m"]),
+      "turn_repeat_count" => clamp_int(navigation[:turn_repeat_count], NAV_TURN_REPEAT_COUNT_RANGE, defaults["turn_repeat_count"]),
+      "turn_repeat" => to_bool(navigation[:turn_repeat], defaults["turn_repeat"]),
       "turn_repeat_ms" => clamp_int(navigation[:turn_repeat_ms], NAV_TURN_REPEAT_RANGE, defaults["turn_repeat_ms"]),
+      "turn_repeat_urgent_count" => clamp_int(navigation[:turn_repeat_urgent_count], NAV_TURN_REPEAT_COUNT_RANGE, defaults["turn_repeat_urgent_count"]),
+      "turn_repeat_urgent" => to_bool(navigation[:turn_repeat_urgent], defaults["turn_repeat_urgent"]),
       "turn_repeat_urgent_ms" => clamp_int(navigation[:turn_repeat_urgent_ms], NAV_TURN_REPEAT_URGENT_RANGE, defaults["turn_repeat_urgent_ms"]),
       "turn_green_hold_m" => clamp_int(navigation[:turn_green_hold_m], NAV_TURN_GREEN_HOLD_RANGE, defaults["turn_green_hold_m"]),
       "turn_green_hold_s" => clamp_int(navigation[:turn_green_hold_s], NAV_TURN_GREEN_HOLD_S_RANGE, defaults["turn_green_hold_s"]),

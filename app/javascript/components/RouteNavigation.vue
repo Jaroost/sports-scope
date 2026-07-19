@@ -16,7 +16,7 @@ import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
-import { unlockAudio, playManeuver, playOffRoute, playPoi } from '../navAudio'
+import { unlockAudio, playManeuver, playManeuverBurst, playOffRoute, playPoi } from '../navAudio'
 import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
 import RadarOverlay from './RadarOverlay.vue'
@@ -2775,16 +2775,27 @@ function updateTurns(): boolean {
     activeTurn = { kind: turn.kind, direction: turn.direction }
     activeTurnUrgent = dist <= sportNav.value.turn_urgent_m
     // Entrée dans la zone orange : double buzz distinct, une seule fois par virage.
-    if (activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr) {
+    const enteringUrgent = activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr
+    if (enteringUrgent) {
       urgentBuzzedTurn = nextTurnPtr
       if (!alertsMuted.value && !turnAlertMuted.value) vibrateApproach()
     }
-    if (announcedTurn !== nextTurnPtr) {
+    // Deux déclencheurs d'annonce sonore par virage, chacun rejoué UNE fois à l'entrée
+    // de sa zone : la première détection (zone lointaine) et le passage en zone proche
+    // (orange). Chaque zone joue son propre paquet (turn_repeat[_urgent]_count lectures),
+    // indépendamment de la répétition périodique — sans quoi, répétition coupée, la zone
+    // proche resterait muette puisque seule tickTurnRepeat y sonnait. Si le virage
+    // apparaît déjà dans la zone proche, les deux déclencheurs coïncident : une seule
+    // annonce (compteur de la zone proche), pas de doublon.
+    const firstAnnounce = announcedTurn !== nextTurnPtr
+    if (firstAnnounce || enteringUrgent) {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()
-      if (soundOn.value && !audioMuted.value && !turnAlertMuted.value) playManeuver(turn.kind, turn.direction)
-      // Vibration indépendante du son (perceptible téléphone en poche, vent fort).
-      if (!alertsMuted.value && !turnAlertMuted.value) vibrateManeuver(turn.kind)
+      const burst = activeTurnUrgent ? sportNav.value.turn_repeat_urgent_count : sportNav.value.turn_repeat_count
+      if (soundOn.value && !audioMuted.value && !turnAlertMuted.value) playManeuverBurst(turn.kind, turn.direction, burst)
+      // Vibration de manœuvre à la première détection seulement (l'entrée en zone orange
+      // a sa propre vibration, vibrateApproach ci-dessus).
+      if (firstAnnounce && !alertsMuted.value && !turnAlertMuted.value) vibrateManeuver(turn.kind)
       fired = true
     }
   } else {
@@ -2877,14 +2888,21 @@ function muteTurnAlert() {
 
 // Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.
 // Un poll court (250 ms) suffit : la préférence est plafonnée à 500 ms mini.
+// Le paquet d'annonces (turn_repeat_count lectures à la suite) n'est rejoué que si la
+// répétition périodique est activée pour la zone courante (turn_repeat / turn_repeat_urgent) ;
+// sinon le virage n'est annoncé qu'une fois (au passage dans la zone d'alerte).
 function tickTurnRepeat() {
   updateAutoRerouteCountdown()
   if (!activeTurn || !soundOn.value || audioMuted.value || turnAlertMuted.value) return
+  const nav = sportNav.value
+  const enabled = activeTurnUrgent ? nav.turn_repeat_urgent : nav.turn_repeat
+  if (!enabled) return
   const now = Date.now()
-  const interval = activeTurnUrgent ? sportNav.value.turn_repeat_urgent_ms : sportNav.value.turn_repeat_ms
+  const interval = activeTurnUrgent ? nav.turn_repeat_urgent_ms : nav.turn_repeat_ms
   if (now - lastTurnReminderMs >= interval) {
     lastTurnReminderMs = now
-    playManeuver(activeTurn.kind, activeTurn.direction)
+    const burst = activeTurnUrgent ? nav.turn_repeat_urgent_count : nav.turn_repeat_count
+    playManeuverBurst(activeTurn.kind, activeTurn.direction, burst)
   }
 }
 

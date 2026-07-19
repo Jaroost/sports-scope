@@ -51,7 +51,11 @@ class User < ApplicationRecord
         "turn_hint_m" => 150,    # distance à laquelle l'indicateur visuel apparaît
         "turn_urgent_m" => 50,   # distance à laquelle la card passe en orange
         "turn_now_m" => 15,      # distance avant un virage à partir de laquelle la pastille bascule en confirmation verte (« maintenant »)
+        "turn_repeat_count" => 1, # nombre de lectures du son à la suite à chaque annonce d'un virage lointain (1–10)
+        "turn_repeat" => true,    # rejouer périodiquement le paquet d'annonces d'un virage lointain (sinon une seule fois)
         "turn_repeat_ms" => 2000, # intervalle entre deux répétitions du son de virage
+        "turn_repeat_urgent_count" => 1, # nombre de lectures du son à la suite à chaque annonce d'un virage proche (zone orange)
+        "turn_repeat_urgent" => true,    # rejouer périodiquement le paquet d'annonces d'un virage proche
         "turn_repeat_urgent_ms" => 1000, # intervalle entre deux répétitions quand le virage est proche (zone orange)
         "turn_green_hold_m" => 100, # distance parcourue après un virage pendant laquelle la confirmation verte reste affichée
         "turn_green_hold_s" => 10,  # durée max (s) d'affichage de la confirmation verte — elle disparaît au premier des deux : distance ou temps

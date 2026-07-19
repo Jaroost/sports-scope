@@ -234,7 +234,7 @@ fr:
         sync_new: "%{count} nouvelle(s) sortie(s) prise(s) en compte"
         sync_error: "Échec de la mise à jour"
       reco:
-        title: "Que faire aujourd'hui ?"
+        title: "Calendrier"
         goal_label: "Ton objectif"
         goal_improve_fast: "Progresser vite"
         goal_improve_slow: "Progresser en douceur"

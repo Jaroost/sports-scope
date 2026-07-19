@@ -234,7 +234,7 @@ en:
         sync_new: "%{count} new activity(ies) taken into account"
         sync_error: "Update failed"
       reco:
-        title: "What to do today?"
+        title: "Calendar"
         goal_label: "Your goal"
         goal_improve_fast: "Improve fast"
         goal_improve_slow: "Improve gradually"

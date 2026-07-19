@@ -269,7 +269,7 @@ watch(rangeDays, () => { hoverIndex.value = null })
     <!-- Sous-onglet « Forme & fatigue » : titre, tuiles, reco, planificateur, courbes PMC. -->
     <div v-show="section === 'load'">
     <h2 class="h5 d-flex align-items-center gap-2 mb-1">
-      <i class="fa-solid fa-heart-pulse text-warning" aria-hidden="true"></i>
+      <i class="fa-solid fa-calendar-days text-warning" aria-hidden="true"></i>
       <span>{{ t('performance.load.title') }}</span>
     </h2>
     <p class="text-muted small mb-3">{{ t('performance.load.intro') }}</p>

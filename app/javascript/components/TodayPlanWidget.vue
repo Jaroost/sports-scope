@@ -98,7 +98,7 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
   <div v-else-if="current" class="card border-0 shadow-sm text-start">
     <div class="card-header activity-card-header d-flex align-items-center gap-2">
       <h2 class="h5 mb-0 d-flex align-items-center gap-2">
-        <i class="fa-solid fa-heart-pulse text-warning" aria-hidden="true"></i>
+        <i class="fa-solid fa-calendar-days text-warning" aria-hidden="true"></i>
         <span>{{ t('performance.load.reco.title') }}</span>
       </h2>
       <div class="ms-auto d-flex align-items-center gap-2">

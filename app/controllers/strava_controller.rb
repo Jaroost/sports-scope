@@ -143,6 +143,25 @@ class StravaController < ApplicationController
     render json: { error: e.message }, status: status
   end
 
+  # GET /strava/activities/:id/zones
+  # Répartition du temps par zone d'intensité (FC + puissance) pour CETTE sortie,
+  # avec les seuils courants — même modèle que la page performance. On garantit au
+  # passage que les streams sont persistés (histogrammes) dès la première ouverture.
+  def zones
+    id = params[:id]
+    activity = current_user.strava_activities.find_by(strava_id: id)
+    return head :not_found unless activity
+
+    if activity.hr_histogram.blank? && activity.power_histogram.blank? && activity.streams_fetched_at.blank?
+      activity.store_streams!(load_streams_for(id))
+    end
+
+    render json: TrainingLoad.zones_for_activity(current_user, activity)
+  rescue StravaStreamsFetcher::ApiError => e
+    status = e.status == 404 ? :not_found : :bad_gateway
+    render json: { error: e.message }, status: status
+  end
+
   # POST /strava/backfill — récupère en masse les streams manquants. Réutilise un
   # run actif s'il y en a un (idempotent) ; ne (ré)enfile un job que si rien ne
   # tourne déjà, pour ne pas dupliquer le travail.

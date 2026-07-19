@@ -59,6 +59,18 @@ class ImportedActivitiesController < ApplicationController
     }
   end
 
+  # GET /api/imported_activities/:id/zones
+  # Répartition du temps par zone d'intensité (FC + puissance) pour cette sortie,
+  # avec les seuils courants — même modèle que la page performance.
+  def zones
+    activity = current_user.imported_activities.find_by(id: params[:id])
+    return head :not_found unless activity
+
+    # Recalcule les dérivations (dont les histogrammes) si un import ancien ne les a pas.
+    activity.recompute_derivations! if activity.hr_histogram.blank? && activity.power_histogram.blank? && activity.streams.is_a?(Hash)
+    render json: TrainingLoad.zones_for_activity(current_user, activity)
+  end
+
   # DELETE /api/imported_activities/:id
   def destroy
     activity = current_user.imported_activities.find_by(id: params[:id])

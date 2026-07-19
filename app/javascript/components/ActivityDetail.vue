@@ -22,6 +22,7 @@ import ActivityStats from './ActivityStats.vue'
 import ActivityMapCard from './ActivityMapCard.vue'
 import ActivityCharts from './ActivityCharts.vue'
 import ActivityConditions from './ActivityConditions.vue'
+import ActivityZones from './ActivityZones.vue'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -96,7 +97,7 @@ const hoveredPeakDuration = ref(null)
 // La carte reste toujours affichée au-dessus ; photos / puissance & cols /
 // graphiques basculent dans des onglets pour libérer de la place verticale.
 // L'onglet actif est persisté comme les toggles « collapsed » ci-dessus.
-const TABS = ['photos', 'power', 'analysis']
+const TABS = ['photos', 'power', 'analysis', 'zones']
 const savedTab = (typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.activityTab')) || ''
 const activeTab = ref(TABS.includes(savedTab) ? savedTab : 'analysis')
 const hasPhotos = computed(() => photos.value.length > 0)
@@ -435,6 +436,16 @@ onMounted(async () => {
           <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
           <span>{{ t('strava.tabs.analysis') }}</span>
         </button>
+        <button
+          type="button"
+          class="btn d-flex align-items-center gap-2"
+          :class="effectiveTab === 'zones' ? 'btn-warning' : 'btn-outline-secondary'"
+          :aria-pressed="effectiveTab === 'zones'"
+          @click="activeTab = 'zones'"
+        >
+          <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
+          <span>{{ t('strava.tabs.zones') }}</span>
+        </button>
       </div>
 
       <!-- PhotoGallery reste toujours monté (même hors onglet) pour que la
@@ -477,6 +488,16 @@ onMounted(async () => {
         v-model:collapsed="chartsCollapsed"
         @select-segment="(s, e) => setSelection(s, e)"
         @clear-selection="clearSelection"
+      />
+
+      <!-- Zones d'intensité de la sortie : chargé paresseusement à l'affichage de
+           l'onglet (la logique de zonage + les seuils viennent du serveur). -->
+      <ActivityZones
+        v-if="effectiveTab === 'zones'"
+        class="mb-3"
+        :activity-id="props.activityId"
+        :source="props.source"
+        :active="effectiveTab === 'zones'"
       />
     </div>
   </div>

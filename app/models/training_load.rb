@@ -289,6 +289,47 @@ module TrainingLoad
     end
   end
 
+  # ── Répartition par zone d'intensité d'UNE activité (onglet « Zones » du détail) ─
+  # Reprend les histogrammes pré-calculés de la sortie et les MÊMES seuils courants
+  # que la page performance (LTHR courant, FTP de la date de la sortie), pour une
+  # répartition cohérente entre les deux pages. Puissance : seulement pour le vélo.
+  # Renvoie `{ hr:, power:, lthr:, ftp: }` — hr/power nil si le canal manque.
+  def zones_for_activity(user, activity)
+    return nil unless activity
+
+    lthr_value = lthr(user, load_rows(user))[:value]
+    date = activity.started_at&.to_date || Time.zone.today
+    cycling = PerformanceRecords.sport_category(activity.activity_type) == 'cycling'
+    ftp = cycling ? build_ftp_resolver(user).call(date) : nil
+
+    hr_secs = ZoneDistribution.bucketize(
+      activity_histogram(activity, 'heartrate', ZoneDistribution::HR_BUCKET),
+      lthr_value, ZoneDistribution::HR_ZONES, ZoneDistribution::HR_BUCKET
+    )
+    power_secs = cycling ? ZoneDistribution.bucketize(
+      activity_histogram(activity, 'watts', ZoneDistribution::POWER_BUCKET),
+      ftp, ZoneDistribution::POWER_ZONES, ZoneDistribution::POWER_BUCKET
+    ) : {}
+
+    {
+      hr: ZoneDistribution.present(hr_secs, ZoneDistribution::HR_ZONES),
+      power: ZoneDistribution.present(power_secs, ZoneDistribution::POWER_ZONES),
+      lthr: lthr_value,
+      ftp: ftp
+    }
+  end
+
+  # Histogramme d'un canal pour une sortie : le pré-calculé (store_streams!) s'il
+  # existe, sinon recalculé à la volée depuis les streams (sorties consultées avant
+  # que le backfill d'histogrammes n'ait tourné). {} sans streams.
+  def activity_histogram(activity, channel, bucket)
+    stored = channel == 'heartrate' ? activity.hr_histogram : activity.power_histogram
+    return stored if stored.present?
+    return {} unless activity.streams.is_a?(Hash)
+
+    ZoneDistribution.histogram(activity.streams, channel, bucket)
+  end
+
   # Attache à chaque point de série les activités du jour (triées par TSS décroissant),
   # pour permettre au front d'ouvrir la séance principale au clic. Jours de repos → [].
   def attach_activities(series, daily_activities)

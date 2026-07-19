@@ -2834,12 +2834,14 @@ function updateTurns(): boolean {
     // Approche classique : prochain virage en grand + sa rafale en dessous.
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
     followTurns.value = chain
-  } else if (turn && dist > 0 && dist <= sportNav.value.turn_now_m && chain.length) {
-    // On est SUR le virage (vert), mais un autre le suit de près : on affiche déjà le
-    // suivant (plus utile qu'un maintien vert du virage qu'on est en train de prendre).
+  } else if (turn && dist <= sportNav.value.turn_now_m && chain.length) {
+    // On est SUR le virage (zone verte), mais un autre le suit de près : on affiche déjà
+    // le suivant (plus utile qu'un maintien vert du virage qu'on est en train de prendre).
+    // On couvre aussi la fenêtre `dist` ∈ [−5, 0] (virage tout juste passé, pointeur pas
+    // encore avancé) — sinon le vert flasherait le premier virage à cet instant précis.
     turnHint.value = chain[0]
     followTurns.value = chain.slice(1)
-  } else if (turn && dist > 0 && dist <= sportNav.value.turn_now_m) {
+  } else if (turn && dist <= sportNav.value.turn_now_m) {
     // Virage sur nous, sans virage rapproché derrière : confirmation verte.
     turnHint.value = { direction: turn.direction, distM: 0, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'now' }
     followTurns.value = []

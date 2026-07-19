@@ -23,3 +23,8 @@ export const BEARING_EPS = 0.1    // ° — en dessous, le cap est « convergé 
 // droite. Deux virages sont « enchaînés » s'ils sont espacés d'au plus TURN_CHAIN_GAP_M.
 export const TURN_CHAIN_GAP_M = 50 // ≤ cette distance entre deux virages → même rafale
 export const TURN_CHAIN_MAX = 4    // nombre total de virages affichés dans la rafale
+
+// ─── Arrivée ──────────────────────────────────────────────────────────────────
+// Distance restante (le long du tracé) sous laquelle on considère le coureur arrivé
+// à destination. Une notification « vous êtes arrivé » s'affiche alors (éveillé + veille).
+export const ARRIVAL_M = 25

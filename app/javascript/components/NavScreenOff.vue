@@ -7,6 +7,7 @@ import type { TurnHint, ClimbInfo } from '../navHelpers'
 const props = defineProps<{
   turnHint: TurnHint | null
   followTurns?: TurnHint[]
+  arrived?: boolean
   hasFix: boolean
   offRoute: boolean
   climbInfo: ClimbInfo | null
@@ -23,8 +24,13 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
 <template>
   <!-- Battery saver: black screen — GPS and turn sounds still active -->
   <div class="nav-screen-off" @click="$emit('resume')">
+    <!-- Arrivée à destination : prioritaire sur l'indicateur de virage. -->
+    <div v-if="arrived && hasFix" class="nav-arrived-sleep shadow">
+      <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+      <span class="nav-arrived-sleep-text">{{ t('routes.arrived') }}</span>
+    </div>
     <div
-      v-if="turnHint && hasFix && !offRoute"
+      v-if="turnHint && hasFix && !offRoute && !arrived"
       class="nav-turn-sleep shadow"
       :class="{
         'nav-turn-sleep--urgent': isUrgent(),
@@ -111,6 +117,15 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
 /* Virage lointain (veille) : même gris-bleu discret qu'en navigation, pour distinguer
    d'un coup d'œil un virage encore loin (gris) d'un virage en approche (violet). */
 .nav-turn-sleep.nav-turn-sleep--far { background: rgba(51, 65, 85, 0.92); }
+/* Arrivée (veille) : carte verte centrée, drapeau à damier + « vous êtes arrivé ». */
+.nav-arrived-sleep {
+  display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
+  background: #16a34a; color: #fff;
+  padding: 3rem 4rem; border-radius: 1.5rem;
+  width: calc(100% - 1.5rem); box-sizing: border-box; text-align: center;
+}
+.nav-arrived-sleep i { font-size: 5.5rem; line-height: 1; }
+.nav-arrived-sleep-text { font-size: 2.8rem; font-weight: 700; line-height: 1.1; }
 /* Rafale (veille) : virages secondaires enchaînés, en petit sous le virage principal. */
 .nav-turn-sleep-follow {
   display: flex; align-items: center; justify-content: center; flex-wrap: wrap;

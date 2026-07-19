@@ -837,6 +837,7 @@ en:
     turn_right: "Turn right"
     turn_now: "Now"
     then: "then"
+    arrived: "You have arrived"
     mute_turn_alerts: "Mute turn alerts"
     unmute_turn_alerts: "Unmute turn alerts"
     climb_in_progress: "Climb in progress"

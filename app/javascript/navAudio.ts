@@ -131,6 +131,20 @@ export function playPoi(): void {
   beep(1319, 0.5, 0.2, 0.1)
 }
 
+// Petite fanfare ascendante — destination atteinte. Un arpège majeur qui monte
+// (do-mi-sol-do) puis une quinte tenue par-dessus (sol), plus triomphant et plus long
+// que la ritournelle POI : ça s'entend clairement comme « c'est fini, tu es arrivé ».
+export function playArrival(): void {
+  unlockAudio()
+  whenAudioReady(() => {
+    beep(523, 0, 0.12, 0.12)     // do5
+    beep(659, 0.13, 0.12, 0.12)  // mi5
+    beep(784, 0.26, 0.12, 0.12)  // sol5
+    beep(1047, 0.39, 0.18, 0.14) // do6
+    beep(784, 0.6, 0.35, 0.14)   // sol5 tenu
+  })
+}
+
 // Two quick rising notes — a car has just entered radar range behind you. Kept
 // distinct from the turn cues (which carry a left/right pitch direction) so it
 // reads clearly as "vehicle approaching", not a maneuver.

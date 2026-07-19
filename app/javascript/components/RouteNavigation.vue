@@ -16,8 +16,8 @@ import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb, buildTurnChain,
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
-import { unlockAudio, playManeuver, playManeuverBurst, playOffRoute, playPoi } from '../navAudio'
-import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi } from '../navHaptics'
+import { unlockAudio, playManeuver, playManeuverBurst, playOffRoute, playPoi, playArrival } from '../navAudio'
+import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
 import RadarOverlay from './RadarOverlay.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
@@ -46,7 +46,7 @@ import {
 } from '../composables/useNavCamera'
 import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
-import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX } from '../navConstants'
+import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX, ARRIVAL_M } from '../navConstants'
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
@@ -404,6 +404,12 @@ const remainingM = ref(0)
 const remainingGainM = ref(0)
 const doneRatio = ref(0)
 const speedKmh = ref(0)
+// Arrivée à destination : bascule à vrai (une seule fois) quand la distance restante le
+// long du tracé passe sous ARRIVAL_M. `seenEnRoute` garantit qu'on a d'abord été
+// franchement en route — évite un faux « arrivé » au tout premier fix (tracé minuscule
+// ou boucle dont le départ se projette près de la fin).
+const arrived = ref(false)
+let seenEnRoute = false
 // Vitesse lissée (EMA) dédiée à l'heure d'arrivée : la vitesse instantanée saute
 // trop pour une ETA stable, et tomber à 0 à chaque feu rouge la ferait exploser.
 // On n'alimente la moyenne qu'en roulant (> ETA_SPEED_FLOOR) pour ignorer les arrêts.
@@ -1217,6 +1223,9 @@ function resetRouteTracking(atStart: boolean) {
   followTurns.value = []
   turnAlertMuted.value = false
   mutedTurnPtr = -1
+  // Nouveau tracé (ou reroutage) : on réarme la détection d'arrivée.
+  arrived.value = false
+  seenEnRoute = false
   // Recalculé au prochain fix ; remis à faux pour que le bandeau hors-tracé disparaisse.
   offRoute.value = false
   // La progression mémorisée pointe un passage de l'ancien tracé : on l'efface.
@@ -1333,6 +1342,8 @@ function unloadRoute() {
   mutedTurnPtr = -1
   climbInfo.value = null
   offRoute.value = false
+  arrived.value = false
+  seenEnRoute = false
   remainingM.value = 0
   remainingGainM.value = 0
   doneRatio.value = 0
@@ -3073,6 +3084,14 @@ function updateProgress(idx: number) {
   remainingM.value = p.remainingM
   remainingGainM.value = p.remainingGainM
   doneRatio.value = p.doneRatio
+  // Détection d'arrivée : on a été clairement en route (au-delà de la zone d'arrivée),
+  // puis la distance restante retombe sous ARRIVAL_M, en étant toujours sur le tracé.
+  if (hasRoute.value && p.remainingM > ARRIVAL_M + 50) seenEnRoute = true
+  if (!arrived.value && seenEnRoute && !offRoute.value && p.remainingM <= ARRIVAL_M) {
+    arrived.value = true
+    if (soundOn.value && !audioMuted.value) playArrival()
+    if (!alertsMuted.value) vibrateArrival()
+  }
   // Débug : une carte de col factice est épinglée, on ne la réécrit pas depuis le GPS.
   if (dbgClimb.value) { refreshRemaining(); return }
   const ac = activeClimb(idx, climbs, cumDistM, snapDistAlongM)
@@ -3207,6 +3226,7 @@ function onScreenOffTap() {
       v-if="screenOff"
       :turn-hint="turnHint"
       :follow-turns="followTurns"
+      :arrived="arrived"
       :has-fix="hasFix"
       :off-route="offRoute"
       :climb-info="isClimbing ? climbInfo : null"
@@ -3444,7 +3464,7 @@ function onScreenOffTap() {
     <!-- Upcoming turn indicator. Masqué en mode recherche : l'utilisateur a la tête
          dans la carte pour choisir une nouvelle destination, pas sur le tracé courant. -->
     <NavTurnBanner
-      v-if="turnHint && hasFix && !offRoute && !placeNavActive && !editMode && !poiBrowseActive"
+      v-if="turnHint && hasFix && !offRoute && !arrived && !placeNavActive && !editMode && !poiBrowseActive"
       :turn-hint="turnHint"
       :follow-turns="followTurns"
       :urgent-m="sportNav.turn_urgent_m"
@@ -3453,6 +3473,17 @@ function onScreenOffTap() {
       :muted="turnAlertMuted"
       @mute="muteTurnAlert"
     />
+
+    <!-- Arrivée à destination : carte centrée « vous êtes arrivé » (éveillé ; la version
+         veille est rendue par NavScreenOff). Masquée en édition / recherche / navigation
+         libre vers un POI, où la notion d'arrivée au tracé ne s'applique pas. -->
+    <div
+      v-if="arrived && hasFix && !placeNavActive && !editMode && !poiBrowseActive"
+      class="nav-arrived shadow"
+    >
+      <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+      <span class="nav-arrived-text">{{ t('routes.arrived') }}</span>
+    </div>
 
     <!-- GPS / off-route banners -->
     <div v-if="gpsError" class="nav-banner nav-banner--warn">
@@ -3674,6 +3705,20 @@ function onScreenOffTap() {
 .nav-offroute-bigarrow--sleep { z-index: 21; opacity: 1; }
 .nav-banner--warn { background: #fff3cd; color: #664d03; }
 .nav-banner--info { background: #cfe2ff; color: #084298; }
+
+/* Arrivée à destination : carte centrée, verte (cohérente avec le vert « virage atteint »),
+   drapeau à damier + « vous êtes arrivé ». z-index 8 : au-dessus des overlays de virage/POI
+   mais sous le tiroir de commandes (9). pointer-events: none — purement informatif. */
+.nav-arrived {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 8; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
+  background: #16a34a; color: #fff;
+  padding: 2.5rem 3.5rem; border-radius: 1.5rem;
+  text-align: center;
+}
+.nav-arrived i { font-size: 5rem; line-height: 1; }
+.nav-arrived-text { font-size: 2.4rem; font-weight: 700; line-height: 1.1; }
 
 /* Toast transitoire de résultat de recherche POI : centré en haut, au-dessus des
    panneaux (z 10), non interactif. Vert si abouti, rouge si échec. */

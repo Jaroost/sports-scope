@@ -49,6 +49,18 @@ const mapCapped = ref(false)
 
 // ─── Filtres + pagination (pilotés côté serveur) ──────────────────────────────
 const showFilters = ref(false)
+// Panneau paramètres (vitesses moyennes du profil), distinct des filtres. Les deux
+// sont des overlays ancrés sous le même header : mutuellement exclusifs pour ne pas
+// se superposer.
+const showSettings = ref(false)
+function toggleFilters() {
+  showFilters.value = !showFilters.value
+  if (showFilters.value) showSettings.value = false
+}
+function toggleSettings() {
+  showSettings.value = !showSettings.value
+  if (showSettings.value) showFilters.value = false
+}
 const search = ref('')
 const sportFilter = ref('')
 const minDistance = ref(null) // km
@@ -790,7 +802,7 @@ onMounted(() => {
                 class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
                 :class="{ active: showFilters }"
                 :aria-expanded="showFilters"
-                @click="showFilters = !showFilters"
+                @click="toggleFilters"
               >
                 <i class="fa-solid fa-filter" aria-hidden="true"></i>
                 <span>{{ t('routes.filters.toggle') }}</span>
@@ -809,6 +821,21 @@ onMounted(() => {
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
               </button>
             </div>
+            <!-- Paramètres du profil (vitesses moyennes) : réglages, pas des filtres,
+                 d'où un bouton dédié. Réservé aux utilisateurs connectés (seul contenu
+                 du panneau). -->
+            <button
+              v-if="canEditSpeeds"
+              type="button"
+              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              :class="{ active: showSettings }"
+              :aria-expanded="showSettings"
+              :title="t('routes.settings.toggle')"
+              @click="toggleSettings"
+            >
+              <i class="fa-solid fa-gear" aria-hidden="true"></i>
+              <span class="d-none d-sm-inline">{{ t('routes.settings.toggle') }}</span>
+            </button>
           </div>
         </div>
 
@@ -869,47 +896,6 @@ onMounted(() => {
                 </button>
               </div>
             </div>
-            <!-- Réglage du profil, pas un filtre : les vitesses pilotent le temps et le
-                 TSS estimés affichés dans la liste, d'où leur présence ici. -->
-            <div v-if="canEditSpeeds" class="col-12 border-top pt-3">
-              <label class="form-label small mb-1">{{ t('routes.speeds.title') }}</label>
-              <p class="text-muted small mb-2">{{ t('routes.speeds.help') }}</p>
-              <div class="d-flex flex-wrap gap-3">
-                <div v-for="s in SPORTS" :key="s" class="d-flex align-items-center gap-2">
-                  <label :for="`speed-${s}`" class="small text-nowrap mb-0 d-flex align-items-center gap-1">
-                    <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
-                    {{ t(`routes.wt_sport_${s}`) }}
-                  </label>
-                  <div class="input-group input-group-sm speed-input-group">
-                    <input
-                      :id="`speed-${s}`"
-                      v-model.number="speeds[s]"
-                      type="number"
-                      min="3"
-                      max="80"
-                      :step="SPEED_STEP"
-                      class="form-control"
-                      @input="onSpeedInput(s)"
-                    />
-                    <span class="input-group-text">km/h</span>
-                  </div>
-                  <button
-                    v-if="speedSuggestion(s)"
-                    type="button"
-                    class="btn btn-sm btn-outline-primary py-0 px-2 text-nowrap"
-                    :title="t('routes.speed_suggestion_hint', { speed: speedSuggestion(s).speed, count: speedSuggestion(s).samples })"
-                    @click="applySpeedSuggestion(s)"
-                  >
-                    <i class="fa-solid fa-wand-magic-sparkles me-1" aria-hidden="true"></i>
-                    {{ t('routes.speed_suggestion', { speed: speedSuggestion(s).speed }) }}
-                  </button>
-                </div>
-              </div>
-              <p v-if="speedError" class="text-danger small mb-0 mt-2">
-                <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
-                {{ t('routes.speeds.save_error') }}
-              </p>
-            </div>
           </div>
           <div class="d-flex justify-content-between align-items-center mt-3">
             <small class="text-muted d-flex align-items-center gap-2">
@@ -934,6 +920,59 @@ onMounted(() => {
                 <span>{{ t('routes.filters.close') }}</span>
               </button>
             </div>
+          </div>
+        </div>
+
+        <!-- Panneau paramètres : vitesses moyennes du profil. Réglages (pas des
+             filtres) qui pilotent le temps de parcours et le TSS estimés affichés dans
+             la liste, d'où leur réglage ici. Même overlay ancré que les filtres. -->
+        <div v-if="showSettings && canEditSpeeds" class="card-body border-bottom activity-filters-overlay">
+          <label class="form-label small mb-1">{{ t('routes.speeds.title') }}</label>
+          <p class="text-muted small mb-2">{{ t('routes.speeds.help') }}</p>
+          <div class="d-flex flex-wrap gap-3">
+            <div v-for="s in SPORTS" :key="s" class="d-flex align-items-center gap-2">
+              <label :for="`speed-${s}`" class="small text-nowrap mb-0 d-flex align-items-center gap-1">
+                <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+                {{ t(`routes.wt_sport_${s}`) }}
+              </label>
+              <div class="input-group input-group-sm speed-input-group">
+                <input
+                  :id="`speed-${s}`"
+                  v-model.number="speeds[s]"
+                  type="number"
+                  min="3"
+                  max="80"
+                  :step="SPEED_STEP"
+                  class="form-control"
+                  @input="onSpeedInput(s)"
+                />
+                <span class="input-group-text">km/h</span>
+              </div>
+              <button
+                v-if="speedSuggestion(s)"
+                type="button"
+                class="btn btn-sm btn-outline-primary py-0 px-2 text-nowrap"
+                :title="t('routes.speed_suggestion_hint', { speed: speedSuggestion(s).speed, count: speedSuggestion(s).samples })"
+                @click="applySpeedSuggestion(s)"
+              >
+                <i class="fa-solid fa-wand-magic-sparkles me-1" aria-hidden="true"></i>
+                {{ t('routes.speed_suggestion', { speed: speedSuggestion(s).speed }) }}
+              </button>
+            </div>
+          </div>
+          <p v-if="speedError" class="text-danger small mb-0 mt-2">
+            <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+            {{ t('routes.speeds.save_error') }}
+          </p>
+          <div class="d-flex justify-content-end mt-3">
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              @click="showSettings = false"
+            >
+              <i class="fa-solid fa-chevron-up" aria-hidden="true"></i>
+              <span>{{ t('routes.settings.close') }}</span>
+            </button>
           </div>
         </div>
       </div>

@@ -52,6 +52,8 @@ class StravaController < ApplicationController
       # Catégories présentes dans l'historique (mêmes regroupements que la page
       # performance) — le menu du filtre propose les deux granularités.
       sport_categories: sport_types.map { |t| PerformanceRecords.sport_category(t) }.uniq.sort,
+      # Matériel (vélos) référencé par au moins une activité, pour le menu du filtre.
+      gears: available_gears,
       activities: records.map { |a| summary_json(a, tss: tss_map[['strava', a.strava_id.to_s]]) }
     }
   rescue StravaSyncService::StravaApiError => e
@@ -207,6 +209,7 @@ class StravaController < ApplicationController
     elsif params[:sport_category].present?
       scope = filter_by_sport_category(scope, params[:sport_category])
     end
+    scope = scope.where(gear_id: params[:gear]) if params[:gear].present?
     scope = scope.where(strava_activities: { distance_m: params[:min_dist].to_f * 1000.. }) if params[:min_dist].present?
     scope = scope.where(strava_activities: { distance_m: ..(params[:max_dist].to_f * 1000) }) if params[:max_dist].present?
     scope = scope.where(strava_activities: { total_elevation_gain: params[:min_elev].to_f.. }) if params[:min_elev].present?
@@ -239,6 +242,19 @@ class StravaController < ApplicationController
     else
       scope # catégorie inconnue : filtre ignoré
     end
+  end
+
+  # Matériel proposé au filtre : les vélos (gear Strava) référencés par au moins une
+  # activité, avec leur nom lisible résolu depuis la table `bikes` (via `strava_gear_id`).
+  # On se limite aux gear de vélo (préfixe « b… ») car ce sont les seuls que l'app
+  # nomme (le suivi de cirage ne concerne que les vélos) ; les gear sans vélo connu
+  # sont écartés pour ne pas afficher d'identifiant brut dans le menu.
+  def available_gears
+    used = current_user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
+    return [] if used.empty?
+
+    names = current_user.bikes.where(strava_gear_id: used).pluck(:strava_gear_id, :name).to_h
+    used.filter_map { |id| { id: id, name: names[id] } if names[id] }.sort_by { |g| g[:name].downcase }
   end
 
   # Parse une date ISO (yyyy-mm-dd) issue d'un <input type="date">. Renvoie nil si

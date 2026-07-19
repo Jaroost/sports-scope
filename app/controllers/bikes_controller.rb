@@ -37,6 +37,22 @@ class BikesController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # DELETE /api/bikes/:id — supprime un vélo et ses chaînes. Si c'était le vélo
+  # par défaut et qu'il en reste, on promeut le suivant pour que les km des imports
+  # .fit / sorties Strava sans gear restent rattachés à un vélo.
+  def destroy
+    bike = current_user.bikes.find_by(id: params[:id])
+    return head :not_found unless bike
+
+    was_default = bike.is_default
+    bike.destroy!
+    if was_default
+      next_default = current_user.bikes.order(:id).first
+      next_default&.update!(is_default: true)
+    end
+    head :no_content
+  end
+
   # POST /api/bikes/:id/chains — ajoute une chaîne au vélo.
   def add_chain
     bike = current_user.bikes.find_by(id: params[:id])

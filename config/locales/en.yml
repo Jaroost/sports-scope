@@ -355,6 +355,8 @@ en:
     threshold: "Threshold"
     add_chain: "Add a chain"
     delete_confirm: "Delete this chain?"
+    delete_bike: "Delete bike"
+    delete_bike_confirm: "Delete this bike and all its chains?"
     uses_wax: "Waxed chain"
     no_wax_note: "This bike has no waxed chain — tracking disabled."
   auth:
@@ -391,6 +393,8 @@ en:
       all_sports: "All sports"
       sport_categories: "Categories"
       sport_types: "Strava types"
+      gear: "Gear"
+      all_gears: "All gear"
       distance: "Distance (km)"
       elevation: "Elevation (m)"
       duration: "Duration (min)"
@@ -677,6 +681,9 @@ en:
     speed_suggestion_hint:
       one: "Median of %{count} ride: you actually hold about %{speed} km/h. A single ride — not reliable. Click to apply."
       other: "Median of %{count} rides: you actually hold about %{speed} km/h. Click to apply."
+    settings:
+      toggle: "Settings"
+      close: "Close"
     speeds:
       title: "Average speeds"
       help: "Saved to your profile. Used to estimate the ride time and TSS of each route."

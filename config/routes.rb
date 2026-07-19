@@ -107,6 +107,7 @@ Rails.application.routes.draw do
   # Bike chain waxing tracker (JSON consumed by Vue components)
   get    "/api/bikes", to: "bikes#index"
   patch  "/api/bikes/:id", to: "bikes#update", constraints: { id: /\d+/ }
+  delete "/api/bikes/:id", to: "bikes#destroy", constraints: { id: /\d+/ }
   post   "/api/bikes/:id/chains", to: "bikes#add_chain", constraints: { id: /\d+/ }
   post   "/api/bikes/:id/mount", to: "bikes#mount", constraints: { id: /\d+/ }
   patch  "/api/chains/:id", to: "chains#update", constraints: { id: /\d+/ }

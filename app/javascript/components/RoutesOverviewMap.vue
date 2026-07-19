@@ -274,6 +274,12 @@ onBeforeUnmount(() => {
 <style scoped>
 .routes-map-wrap {
   position: relative;
+  /* Contexte d'empilement isolé : les z-index internes de la carte (contrôles,
+     badge, canvas MapLibre) restent piégés ici et ne remontent pas dans la page.
+     Sans ça, `.routes-map-controls` (z-index 5) rivalise avec le header sticky de
+     la liste (`.activity-sticky-top`, z-index 5) et, à égalité, passe par-dessus le
+     panneau de filtres à cause de l'ordre du DOM. */
+  isolation: isolate;
 }
 .routes-map {
   height: min(70vh, 640px);

@@ -355,6 +355,8 @@ fr:
     threshold: "Seuil"
     add_chain: "Ajouter une chaîne"
     delete_confirm: "Supprimer cette chaîne ?"
+    delete_bike: "Supprimer le vélo"
+    delete_bike_confirm: "Supprimer ce vélo et toutes ses chaînes ?"
     uses_wax: "Chaîne cirée"
     no_wax_note: "Ce vélo n'a pas de chaîne cirée — suivi désactivé."
   auth:
@@ -391,6 +393,8 @@ fr:
       all_sports: "Tous les sports"
       sport_categories: "Catégories"
       sport_types: "Types Strava"
+      gear: "Matériel"
+      all_gears: "Tout le matériel"
       distance: "Distance (km)"
       elevation: "Dénivelé (m)"
       duration: "Durée (min)"
@@ -677,6 +681,9 @@ fr:
     speed_suggestion_hint:
       one: "Médiane de %{count} sortie vélo : tu tiens plutôt %{speed} km/h. Une seule sortie — peu fiable. Clique pour appliquer."
       other: "Médiane de %{count} sorties vélo : tu tiens plutôt %{speed} km/h. Clique pour appliquer."
+    settings:
+      toggle: "Paramètres"
+      close: "Fermer"
     speeds:
       title: "Vitesses moyennes"
       help: "Enregistrées sur ton profil. Elles servent à estimer le temps de parcours et le TSS de chaque itinéraire."

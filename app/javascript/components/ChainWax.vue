@@ -224,6 +224,19 @@ function confirmMountNext() {
 function setDefault(bike: any) {
   run(() => api(`/api/bikes/${bike.id}`, 'PATCH', { is_default: true }))
 }
+async function removeBike(bike: any) {
+  if (!window.confirm(t('chains.delete_bike_confirm'))) return
+  error.value = null
+  try {
+    await api(`/api/bikes/${bike.id}`, 'DELETE')
+    bikes.value = bikes.value.filter((b) => b.id !== bike.id)
+    // Le vélo par défaut supprimé est promu côté serveur : on relit pour refléter
+    // le nouveau vélo par défaut (badge + rattachement des km).
+    if (bike.is_default && bikes.value.length) fetchBikes()
+  } catch (e: any) {
+    error.value = e.message
+  }
+}
 function toggleWax(bike: any) {
   run(() => api(`/api/bikes/${bike.id}`, 'PATCH', { uses_wax: bike.uses_wax === false }))
 }
@@ -384,6 +397,15 @@ onBeforeUnmount(() => {
               />
               <label :for="`wax-${bike.id}`" class="form-check-label small">{{ t('chains.uses_wax') }}</label>
             </div>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-danger"
+              :title="t('chains.delete_bike')"
+              :aria-label="t('chains.delete_bike')"
+              @click="removeBike(bike)"
+            >
+              <i class="fa-solid fa-trash" aria-hidden="true"></i>
+            </button>
           </div>
         </div>
 

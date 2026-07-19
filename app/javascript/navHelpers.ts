@@ -2,7 +2,7 @@
 // réactif ni à MapLibre : tout est passé en paramètre, pour rester testable et
 // réutilisable par les sous-composants (NavTurnBanner, NavClimbCard, NavScreenOff…).
 import { colorForGrade, gradeForIndex } from './routeHelpers'
-import type { Climb, LngLat, Maneuver } from './routeHelpers'
+import type { Climb, LngLat, Maneuver, TurnPoint } from './routeHelpers'
 
 // ─── Types partagés des overlays de navigation ─────────────────────────────────
 
@@ -62,6 +62,37 @@ export function turnIcon(h: { direction: 'left' | 'right'; kind: Maneuver; angle
   if (h.kind === 'uturn') return 'fa-arrow-down'
   if (Math.abs(h.angle) < 20) return 'fa-arrow-up'
   return h.direction === 'left' ? 'fa-arrow-left' : 'fa-arrow-right'
+}
+
+// Rafale de virages enchaînés à partir du virage `ptr` : renvoie les virages SUIVANTS
+// qui se succèdent de près (au plus `gapM` entre deux consécutifs). Le virage `ptr`
+// lui-même reste le principal (affiché en grand) et n'est PAS inclus ; le tableau ne
+// contient donc que les virages secondaires, chacun avec sa distance depuis la position
+// courante `here`. Total plafonné à `max` virages (donc au plus `max - 1` suivants).
+export function buildTurnChain(
+  turns: TurnPoint[],
+  ptr: number,
+  here: number,
+  gapM: number,
+  max: number,
+): TurnHint[] {
+  const out: TurnHint[] = []
+  if (ptr < 0 || ptr >= turns.length) return out
+  let prevDistM = turns[ptr].distM
+  for (let i = ptr + 1; i < turns.length && out.length < max - 1; i++) {
+    const tn = turns[i]
+    if (tn.distM - prevDistM > gapM) break
+    out.push({
+      direction: tn.direction,
+      distM: tn.distM - here,
+      kind: tn.kind,
+      angle: tn.angle,
+      exitNumber: tn.exitNumber,
+      state: 'near',
+    })
+    prevDistM = tn.distM
+  }
+  return out
 }
 
 // Temps estimé jusqu'au prochain virage, à la vitesse actuelle. Renvoie null tant

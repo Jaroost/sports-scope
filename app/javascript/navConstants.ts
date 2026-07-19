@@ -16,3 +16,10 @@ export const MIN_SPEED_MS = 0.8   // en dessous, on garde le cap précédent
 export const MAX_EXTRAP_S = 2.5   // on cesse d'extrapoler si les fixes s'arrêtent
 export const BEARING_SMOOTH = 0.18 // lissage par frame vers le cap cible
 export const BEARING_EPS = 0.1    // ° — en dessous, le cap est « convergé »
+
+// ─── Enchaînement de virages ──────────────────────────────────────────────────
+// Quand le prochain virage est en approche, les virages qui le suivent de très près
+// sont ajoutés au bandeau (éveillé ET en veille) pour anticiper une rafale gauche-
+// droite. Deux virages sont « enchaînés » s'ils sont espacés d'au plus TURN_CHAIN_GAP_M.
+export const TURN_CHAIN_GAP_M = 50 // ≤ cette distance entre deux virages → même rafale
+export const TURN_CHAIN_MAX = 4    // nombre total de virages affichés dans la rafale

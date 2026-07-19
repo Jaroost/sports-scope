@@ -13,7 +13,7 @@ import { fetchRouteToPlace, fetchRouteVia, fetchRouteFromWaypoints } from '../na
 import type { Waypoint } from '../navRoute'
 import { MAX_WAYPOINTS } from '../stores/routeStore'
 import {
-  textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
+  textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb, buildTurnChain,
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
 import { unlockAudio, playManeuver, playManeuverBurst, playOffRoute, playPoi } from '../navAudio'
@@ -46,7 +46,7 @@ import {
 } from '../composables/useNavCamera'
 import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
-import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS } from '../navConstants'
+import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX } from '../navConstants'
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
@@ -511,6 +511,9 @@ const climbInfo = ref<ClimbInfo | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
 const turnHint = ref<TurnHint | null>(null)
+// Virages secondaires enchaînés au prochain (rafale gauche-droite) : affichés en petit
+// sous le bandeau principal, éveillé comme en veille. Vide hors approche (état « near »).
+const followTurns = ref<TurnHint[]>([])
 
 // ─── Notification de proximité d'un point d'intérêt ────────────────────────────
 // Quand le coureur passe à portée (≤ points_of_interest.alert_m, 100 m par défaut)
@@ -833,11 +836,15 @@ const dbgPoi = ref(false)
 // Scénarios de virage parcourus en boucle (un clic = scénario suivant, puis « off »).
 // Couvre chaque état visuel : lointain (gris), approche (violet), urgent (orange),
 // rond-point (numéro de sortie) et virage atteint (vert).
-const DBG_TURNS: { label: string; state: 'far' | 'near' | 'now'; kind: Maneuver; direction: 'left' | 'right'; angle: number; distM: number; exitNumber?: number }[] = [
+const DBG_TURNS: { label: string; state: 'far' | 'near' | 'now'; kind: Maneuver; direction: 'left' | 'right'; angle: number; distM: number; exitNumber?: number; follow?: TurnHint[] }[] = [
   { label: 'Lointain', state: 'far', kind: 'turn', direction: 'right', angle: 60, distM: 850 },
   { label: 'Approche', state: 'near', kind: 'turn', direction: 'left', angle: -70, distM: 180 },
   { label: 'Urgent', state: 'near', kind: 'sharp', direction: 'right', angle: 110, distM: Math.min(sportNav.value.turn_urgent_m, 40) },
   { label: 'Rond-point', state: 'near', kind: 'roundabout', direction: 'right', angle: 90, distM: 120, exitNumber: 2 },
+  { label: 'Rafale', state: 'near', kind: 'turn', direction: 'left', angle: -80, distM: 90, follow: [
+    { direction: 'right', distM: 120, kind: 'turn', angle: 85, state: 'near' },
+    { direction: 'left', distM: 155, kind: 'sharp', angle: -110, state: 'near' },
+  ] },
   { label: 'Maintenant', state: 'now', kind: 'turn', direction: 'left', angle: -70, distM: 0 },
 ]
 const dbgTurnIdx = ref(0)
@@ -849,12 +856,14 @@ function cycleDebugTurn() {
   if (dbgTurnIdx.value >= DBG_TURNS.length) {
     dbgTurn.value = false
     turnHint.value = null
+    followTurns.value = []
     return
   }
   dbgTurn.value = true
   hasFix.value = true
   const p = DBG_TURNS[dbgTurnIdx.value]
   turnHint.value = { direction: p.direction, distM: p.distM, kind: p.kind, angle: p.angle, exitNumber: p.exitNumber, state: p.state }
+  followTurns.value = p.follow ?? []
   // Prévisualisation sonore : joue le bip du virage correspondant (comme en vrai).
   if (soundOn.value) playManeuver(p.kind, p.direction)
 }
@@ -1205,6 +1214,7 @@ function resetRouteTracking(atStart: boolean) {
   reachedTurnIdx = -1
   activeTurn = null
   turnHint.value = null
+  followTurns.value = []
   turnAlertMuted.value = false
   mutedTurnPtr = -1
   // Recalculé au prochain fix ; remis à faux pour que le bandeau hors-tracé disparaisse.
@@ -1307,6 +1317,7 @@ function unloadRoute() {
   turns = []
   rawHints = []
   turnHint.value = null
+  followTurns.value = []
   // État de suivi des virages : sans ça, `activeTurn` reste pointé sur le dernier
   // virage et le timer de répétition (tickTurnRepeat) continue de jouer l'alerte sonore
   // indéfiniment après l'effacement du tracé (typiquement quand on efface à un carrefour,
@@ -2744,12 +2755,13 @@ function updateTurns(): boolean {
   // hors-tracé prend le relais. autoWakeForTurns gère déjà la mise en veille hors-tracé.
   if (offRoute.value) {
     turnHint.value = null
+    followTurns.value = []
     activeTurn = null
     activeTurnUrgent = false
     autoWakeForTurns(null)
     return false
   }
-  if (!turns.length) { turnHint.value = null; activeTurn = null; reachedTurn = null; return false }
+  if (!turns.length) { turnHint.value = null; followTurns.value = []; activeTurn = null; reachedTurn = null; return false }
   const here = snapDistAlongM
   // Avance le pointeur sur les virages dépassés (>5 m derrière), en mémorisant chacun
   // pour le maintien vert. Le décompte ne démarre donc qu'une fois le virage vraiment
@@ -2816,14 +2828,30 @@ function updateTurns(): boolean {
   const greenActive = reachedTurn != null
     && here - reachedTurn.distM < greenHoldM.value
     && Date.now() - reachedAtMs < greenHoldMs.value
+  // Rafale des virages qui suivent le prochain de près (≤ TURN_CHAIN_GAP_M entre chacun).
+  const chain = buildTurnChain(turns, nextTurnPtr, here, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX)
   if (turn && dist > sportNav.value.turn_now_m && dist <= sportNav.value.turn_hint_m) {
+    // Approche classique : prochain virage en grand + sa rafale en dessous.
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
+    followTurns.value = chain
+  } else if (turn && dist > 0 && dist <= sportNav.value.turn_now_m && chain.length) {
+    // On est SUR le virage (vert), mais un autre le suit de près : on affiche déjà le
+    // suivant (plus utile qu'un maintien vert du virage qu'on est en train de prendre).
+    turnHint.value = chain[0]
+    followTurns.value = chain.slice(1)
+  } else if (turn && dist > 0 && dist <= sportNav.value.turn_now_m) {
+    // Virage sur nous, sans virage rapproché derrière : confirmation verte.
+    turnHint.value = { direction: turn.direction, distM: 0, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'now' }
+    followTurns.value = []
   } else if (greenActive && reachedTurn) {
     turnHint.value = { direction: reachedTurn.direction, distM: 0, kind: reachedTurn.kind, angle: reachedTurn.angle, exitNumber: reachedTurn.exitNumber, state: 'now' }
+    followTurns.value = []
   } else if (turn && dist > 0) {
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'far' }
+    followTurns.value = []
   } else {
     turnHint.value = null
+    followTurns.value = []
   }
 
   // Confirmation verte (« now ») : on colore en vert SA pastille sur la carte, en
@@ -3176,6 +3204,7 @@ function onScreenOffTap() {
     <NavScreenOff
       v-if="screenOff"
       :turn-hint="turnHint"
+      :follow-turns="followTurns"
       :has-fix="hasFix"
       :off-route="offRoute"
       :climb-info="isClimbing ? climbInfo : null"
@@ -3415,6 +3444,7 @@ function onScreenOffTap() {
     <NavTurnBanner
       v-if="turnHint && hasFix && !offRoute && !placeNavActive && !editMode && !poiBrowseActive"
       :turn-hint="turnHint"
+      :follow-turns="followTurns"
       :urgent-m="sportNav.turn_urgent_m"
       :radar-banner-visible="radarBannerVisible"
       :speed-kmh="speedKmh"

@@ -836,6 +836,7 @@ fr:
     turn_left: "Tourner à gauche"
     turn_right: "Tourner à droite"
     turn_now: "Maintenant"
+    then: "puis"
     mute_turn_alerts: "Couper les alertes de virage"
     unmute_turn_alerts: "Réactiver les alertes de virage"
     climb_in_progress: "Col en cours"

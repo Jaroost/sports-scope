@@ -85,6 +85,7 @@ const emit = defineEmits<{
   (e: 'toggle-debug-climb'): void
   (e: 'cycle-debug-turn'): void
   (e: 'toggle-debug-poi'): void
+  (e: 'reset-storage'): void
   (e: 'update:camPitch', v: number): void
   (e: 'update:camZoom', v: number): void
   (e: 'start-offline'): void
@@ -123,6 +124,13 @@ function goBack() {
   const target = prevPanel.value
   prevPanel.value = null
   emit('update:activePanel', target)
+}
+
+// Réinitialise l'état de navigation persisté (progressions de reprise mémorisées). Utile
+// quand les alertes de virage/arrivée déraillent sur un tracé auto-recoupant. Confirmation
+// car l'action efface la reprise en cours.
+function onResetStorage() {
+  if (window.confirm(t('routes.nav_reset_confirm'))) emit('reset-storage')
 }
 
 const panelTitle = computed(() => {
@@ -280,6 +288,12 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
               @change="$emit('change-routing', $event)"
             />
           </div>
+          <!-- Dépannage : réinitialise l'état de navigation persisté (progressions de reprise)
+               quand les alertes de virage/arrivée déraillent sur un tracé auto-recoupant. -->
+          <button type="button" class="nav-route-action nav-route-action--danger" @click="onResetStorage()">
+            <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+            <span>{{ t('routes.nav_reset') }}</span>
+          </button>
         </template>
 
         <!-- Hors-ligne -->

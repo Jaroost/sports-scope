@@ -1232,6 +1232,23 @@ function resetRouteTracking(atStart: boolean) {
   try { localStorage.removeItem(progressKey()) } catch { /* quota / private mode */ }
 }
 
+// Réinitialisation manuelle depuis Réglages : efface TOUTES les progressions mémorisées
+// (`sportsScope.navProgress.*`, une par tracé), pas seulement celle du tracé actif. Une
+// entrée corrompue ou obsolète peut faire repartir la navigation sur le mauvais passage
+// d'un tracé auto-recoupant et donc dérailler les alertes de virage/arrivée ; on repart
+// d'une ardoise propre. Le suivi en cours est relancé (recherche globale au prochain fix).
+function resetNavigationState() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('sportsScope.navProgress.')) localStorage.removeItem(k)
+    }
+  } catch { /* stockage indisponible */ }
+  if (hasRoute.value) resetRouteTracking(false)
+  activePanel.value = null
+  showPoiToast(true, t('routes.nav_reset_done'))
+}
+
 // Installe (ou met à jour) les couches du tracé sur la carte. En mode libre, aucune
 // source n'existe encore : on les crée. Si elles existent déjà (reroutage en séance),
 // on se contente de remplacer les données. Puis on (re)pose les marqueurs de virage.
@@ -3337,6 +3354,7 @@ function onScreenOffTap() {
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
       @toggle-debug-poi="toggleDebugPoi"
+      @reset-storage="resetNavigationState"
     />
 
     <!-- Toast transitoire : résultat d'une recherche POI (« autour de moi » / trajet). -->

@@ -890,6 +890,9 @@ fr:
     alternatives_none: "Aucune autre variante trouvée pour ce tronçon"
     alternatives_too_short: "Sélectionne un tronçon plus long"
     alternatives_error: "Erreur lors de la recherche de variantes"
+    alternatives_hint: "Cliquez sur une variante pour voir ses stats, puis choisissez-la."
+    alternatives_current: "Tracé actuel"
+    alternatives_variant: "Variante %{n}"
     apply_alternative: "Choisir"
     # Libellés de type d'activité, réutilisés par plusieurs composants (sélecteurs de
     # sport). Nom hérité de l'ancien sélecteur Waymarked Trails, désormais générique.

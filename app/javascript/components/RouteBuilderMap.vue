@@ -20,10 +20,9 @@ import { MARKER_KINDS, markerMeta, markerKindLabel } from '../routeMarkers'
 import type { MarkerKind } from '../routeMarkers'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
-  streetViewUrl, bearingFromRoute, bearingAlongRoute, downsampleByDistance,
+  streetViewUrl, bearingFromRoute, bearingAlongRoute, simplifyTrack,
 } from '../routeHelpers'
 import type { Climb, Coord, LngLat } from '../routeHelpers'
-import type { RouteAlternative } from '../routeAlternatives'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 
 const props = defineProps<{ state: RouteBuilderState }>()
@@ -33,14 +32,9 @@ const emit = defineEmits<{
   'select-place': [place: Place]
   'hover-place': [place: Place | null]
   'retry-places': []
-  'hover-alternative': [altId: number | null]
-  'select-alternative': [altId: number]
   'toggle-chart': []
   'toggle-mobile-sheet': []
 }>()
-
-// Palette des variantes de tracé (une couleur par position dans la liste proposée).
-const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828']
 
 const mapEl = useTemplateRef('mapEl')
 
@@ -424,29 +418,6 @@ function installRouteLayer() {
     mapInstance.addSource('builder-route-selected', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
     mapInstance.addLayer({ id: 'builder-route-selected-line', type: 'line', source: 'builder-route-selected', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#00b4d8', 'line-width': 7 } })
   }
-  // Variantes de tracé proposées pour le tronçon sélectionné (cf. showAlternatives).
-  // Chaque feature porte `altId` (position dans la liste) et sa couleur ; la variante
-  // survolée/active est élargie via l'état de feature `active`.
-  if (!mapInstance.getSource('builder-alternatives')) {
-    mapInstance.addSource('builder-alternatives', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-    mapInstance.addLayer({
-      id: 'builder-alternatives-border', type: 'line', source: 'builder-alternatives',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: { 'line-color': 'rgba(0,0,0,0.45)', 'line-width': ['case', ['boolean', ['feature-state', 'active'], false], 11, 8] },
-    })
-    mapInstance.addLayer({
-      id: 'builder-alternatives-line', type: 'line', source: 'builder-alternatives',
-      layout: { 'line-join': 'round', 'line-cap': 'round' },
-      paint: {
-        'line-color': ['get', 'color'],
-        'line-width': ['case', ['boolean', ['feature-state', 'active'], false], 7, 4.5],
-        'line-opacity': ['case', ['boolean', ['feature-state', 'active'], false], 1, 0.8],
-      },
-    })
-    mapInstance.on('mousemove', 'builder-alternatives-line', onAltMouseMove)
-    mapInstance.on('mouseleave', 'builder-alternatives-line', onAltMouseLeave)
-    mapInstance.on('click', 'builder-alternatives-line', onAltClick)
-  }
   // Flèches de sens de parcours : espacées en pixels écran (constantes au zoom) et
   // posées au-dessus du tracé, sur la géométrie continue de `builder-route`.
   if (!mapInstance.hasImage('route-arrow')) {
@@ -591,64 +562,8 @@ function applyColorMode() {
 }
 
 // ─── Alternatives de tronçon ──────────────────────────────────────────────────
-// Variantes de tracé proposées entre les deux extrémités d'une sélection. Rendues en
-// superposition (couches builder-alternatives) et choisissables ; la variante retenue
-// remplace le tronçon via applyAlternative.
-
-let activeAltId: number | null = null
-
-function altColor(altId: number) { return ALT_COLORS[altId % ALT_COLORS.length] }
-
-function onAltMouseMove(e: any) {
-  if (!mapInstance) return
-  const f = e.features?.[0]
-  if (!f) return
-  mapInstance.getCanvas().style.cursor = 'pointer'
-  emit('hover-alternative', f.properties?.altId ?? null)
-}
-
-function onAltMouseLeave() {
-  if (!mapInstance) return
-  mapInstance.getCanvas().style.cursor = routeStore.readOnly.value ? '' : 'crosshair'
-  emit('hover-alternative', null)
-}
-
-function onAltClick(e: any) {
-  const f = e.features?.[0]
-  if (!f) return
-  suppressNextMapClick = true
-  emit('select-alternative', f.properties?.altId ?? 0)
-}
-
-// Affiche les variantes en superposition. Chaque variante reçoit un altId = sa
-// position dans la liste, qui sert aussi de couleur et d'id de feature (feature-state).
-function showAlternatives(alts: RouteAlternative[]) {
-  if (!mapInstance) return
-  const src = mapInstance.getSource('builder-alternatives')
-  if (!src) return
-  activeAltId = null
-  const features = alts.map((alt, i) => ({
-    type: 'Feature',
-    id: i,
-    properties: { altId: i, color: altColor(i) },
-    geometry: { type: 'LineString', coordinates: alt.coords.map(([lng, lat]) => [lng, lat]) },
-  }))
-  src.setData({ type: 'FeatureCollection', features })
-}
-
-function highlightAlternative(altId: number | null) {
-  if (!mapInstance) return
-  if (activeAltId != null) mapInstance.setFeatureState({ source: 'builder-alternatives', id: activeAltId }, { active: false })
-  activeAltId = altId
-  if (altId != null) mapInstance.setFeatureState({ source: 'builder-alternatives', id: altId }, { active: true })
-}
-
-function clearAlternatives() {
-  if (!mapInstance) return
-  activeAltId = null
-  const src = mapInstance.getSource('builder-alternatives')
-  if (src) src.setData({ type: 'FeatureCollection', features: [] })
-}
+// La comparaison/choix des variantes se fait dans RouteAlternativesDialog (carte
+// dédiée) ; ici on ne conserve que l'application de la variante retenue au tracé.
 
 // Remplace la portion du tracé entre les index géométrie lo..hi par la variante
 // choisie : on retire les waypoints intérieurs, on ancre les deux extrémités (en
@@ -677,19 +592,18 @@ function applyAlternative(lo: number, hi: number, altCoords: Coord[]) {
     ? [] : [{ lng: endPt[0], lat: endPt[1] }]
 
   // Points de passage le long de la variante (hors extrémités, déjà couvertes par les
-  // ancres), ~1 point / 200 m, plafonnés pour respecter MAX_WAYPOINTS.
+  // ancres). On ne garde que les sommets significatifs (virages/jonctions) via une
+  // simplification Ramer-Douglas-Peucker : bien moins de points qu'un échantillonnage
+  // régulier, tout en épinglant la variante à ses jonctions, de sorte que le re-routage
+  // à travers les vias la reproduise sans que BRouter recoupe droit. Plafonné pour
+  // respecter MAX_WAYPOINTS.
   const budget = MAX_WAYPOINTS - before.length - after.length - startAnchor.length - endAnchor.length
   if (budget < 0) { routeStore.error.value = t('routes.error_max_waypoints', { count: MAX_WAYPOINTS }); return }
-  const distanceM = altCoords.reduce((acc, c, i) => i === 0 ? 0 : acc + haversine(altCoords[i - 1], c), 0)
-  // ~1 point / 200 m, avec un minimum de points intérieurs pour que le re-routage à
-  // travers les vias reproduise fidèlement la variante (sinon BRouter recouperait droit).
-  const byDistance = Math.max(4, Math.round(distanceM / 200))
-  const sampleCount = Math.min(byDistance, budget + 2)
-  const sampled = downsampleByDistance(altCoords, sampleCount)
-  const vias = sampled.slice(1, -1).map((c) => ({ lng: c[0], lat: c[1] }))
+  const VIA_SIMPLIFY_TOL_M = 25
+  const simplified = simplifyTrack(altCoords, VIA_SIMPLIFY_TOL_M, budget + 2)
+  const vias = simplified.slice(1, -1).map((c) => ({ lng: c[0], lat: c[1] }))
 
   routeStore.waypoints.value = [...before, ...startAnchor, ...vias, ...endAnchor, ...after]
-  clearAlternatives()
   deselectAll()
   refreshWaypointMarkers()
   emit('waypoints-changed')
@@ -2356,9 +2270,6 @@ defineExpose({
   installPlaceMarkers,
   updateSelectionLayer,
   updateSelectionMarkers,
-  showAlternatives,
-  highlightAlternative,
-  clearAlternatives,
   applyAlternative,
   refreshWaypointMarkers,
   refreshRouteMarkers: installRouteMarkers,

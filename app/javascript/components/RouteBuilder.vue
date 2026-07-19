@@ -7,7 +7,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, formatDistanceShort, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex } from '../routeHelpers'
 import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport } from '../userPreferences'
@@ -19,6 +19,7 @@ import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
 import MapStyleDropdown from './MapStyleDropdown.vue'
+import RouteAlternativesDialog from './RouteAlternativesDialog.vue'
 
 const props = defineProps({
   routeId: { type: [String, Number], default: null },
@@ -324,6 +325,11 @@ async function recomputeRoute() {
   // Le tracé change : les avertissements portaient sur le précédent, et un éventuel
   // « enregistrer quand même » ne vaut plus. Ils seront recalculés à la prochaine
   // tentative de sauvegarde.
+  // Exception : si une sauvegarde a déjà été tentée (saveBlocked) et que l'utilisateur est
+  // en train de corriger les points signalés, on ne se contente pas d'effacer — on
+  // ré-évalue la liste une fois le nouveau tracé calculé (cf. reevaluateWarnings plus bas),
+  // pour que les points réglés disparaissent au fil des corrections sans re-sauvegarder.
+  const wasReviewing = saveBlocked.value
   clearRouteWarnings()
 
   if (routeStore.waypoints.value.length < 2) {
@@ -812,13 +818,16 @@ const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828']
 const alternatives = ref<AlternativeView[]>([])
 const alternativesLoading = ref(false)
 const alternativesError = ref<string | null>(null)
-const activeAltId = ref<number | null>(null)
+// Géométrie du tronçon actuel, tracée en référence dans la dialogue des variantes.
+const altCurrentCoords = ref<Coord[]>([])
 // Bornes géométrie de la sélection au moment de la proposition (figées : la sélection
 // est effacée à l'application, mais on en a besoin pour le splice).
 let altBounds: { lo: number; hi: number } | null = null
 let altToken = 0
 
-const showAlternativesPanel = computed(() => alternativesLoading.value || alternativesError.value != null || alternatives.value.length > 0)
+// La dialogue s'ouvre dès qu'une proposition est en cours (chargement, erreur ou
+// variantes trouvées) et se referme via cancelAlternatives.
+const showAlternativesDialog = computed(() => alternativesLoading.value || alternativesError.value != null || alternatives.value.length > 0)
 
 async function proposeAlternatives() {
   if (routeStore.readOnly.value) return
@@ -835,12 +844,12 @@ async function proposeAlternatives() {
   alternatives.value = []
   alternativesError.value = null
   alternativesLoading.value = true
-  activeAltId.value = null
-  mapRef.value?.clearAlternatives()
 
-  // Tronçon actuel (entre les extrémités) : sert de référence pour les écarts et pour
-  // écarter les variantes identiques au tracé déjà en place.
+  // Tronçon actuel (entre les extrémités) : sert de référence pour les écarts, pour
+  // écarter les variantes identiques au tracé déjà en place, et de tracé de référence
+  // dans la dialogue.
   const currentCoords = geom.slice(loI, hiI + 1)
+  altCurrentCoords.value = currentCoords
   const currentDists = buildDistancesM(currentCoords)
   const currentDist = currentDists[currentDists.length - 1] ?? 0
   const currentGL = computeGainLoss(currentCoords)
@@ -859,7 +868,6 @@ async function proposeAlternatives() {
       deltaDistanceM: a.distanceM - currentDist,
       deltaGainM: a.gainM - currentGL.gain,
     }))
-    mapRef.value?.showAlternatives(alternatives.value)
   } catch (e: any) {
     if (token === altToken) alternativesError.value = `${t('routes.alternatives_error')}: ${e.message}`
   } finally {
@@ -867,11 +875,7 @@ async function proposeAlternatives() {
   }
 }
 
-function onHoverAlternative(altId: number | null) {
-  activeAltId.value = altId
-  mapRef.value?.highlightAlternative(altId)
-}
-
+// La dialogue émet `select` avec l'index de la variante choisie.
 function onSelectAlternative(altId: number) {
   const alt = alternatives.value[altId]
   if (alt) applyChosenAlternative(alt)
@@ -888,20 +892,11 @@ function cancelAlternatives() {
   alternatives.value = []
   alternativesError.value = null
   alternativesLoading.value = false
-  activeAltId.value = null
+  altCurrentCoords.value = []
   altBounds = null
-  mapRef.value?.clearAlternatives()
 }
 
-// Formatage de l'écart (distance/dénivelé) d'une variante vs le tronçon actuel.
-function formatDelta(m: number, unit: 'dist' | 'elev'): string {
-  const sign = m > 0 ? '+' : m < 0 ? '−' : '±'
-  const abs = Math.abs(Math.round(m))
-  if (unit === 'elev') return `${sign}${abs} m`
-  return `${sign}${formatDistanceShort(abs)}`
-}
-
-// La sélection disparaît (effacée, ou tracé recalculé) → on retire le panneau.
+// La sélection disparaît (effacée, ou tracé recalculé) → on ferme la dialogue.
 watch(() => selectionStore.selectionRange.value, (r) => {
   if (!r && (alternatives.value.length || alternativesLoading.value || alternativesError.value)) cancelAlternatives()
 })
@@ -1750,8 +1745,6 @@ onBeforeUnmount(() => {
             @select-place="onSelectPlace"
             @hover-place="onHoverPlace"
             @retry-places="fetchImportantPlaces"
-            @hover-alternative="onHoverAlternative"
-            @select-alternative="onSelectAlternative"
             @toggle-chart="state.showElevationChart = !state.showElevationChart; nextTick(() => mapRef?.resize())"
             @toggle-mobile-sheet="mobileSheetOpen = !mobileSheetOpen"
           >
@@ -1842,47 +1835,6 @@ onBeforeUnmount(() => {
             </template>
           </RouteBuilderMap>
 
-          <!-- Panneau des variantes de tronçon (proposées sur une sélection) -->
-          <Transition name="alt-panel">
-            <div v-if="showAlternativesPanel" class="alt-panel shadow-lg">
-              <div class="alt-panel-header">
-                <span class="alt-panel-title">
-                  <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>
-                  {{ t('routes.alternatives_title') }}
-                </span>
-                <button type="button" class="alt-panel-close" :aria-label="t('routes.close')" @click="cancelAlternatives">×</button>
-              </div>
-              <div v-if="alternativesLoading" class="alt-panel-status">
-                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-                {{ t('routes.alternatives_loading') }}
-              </div>
-              <div v-else-if="alternativesError" class="alt-panel-status text-danger">
-                {{ alternativesError }}
-              </div>
-              <ul v-else class="alt-panel-list">
-                <li
-                  v-for="(alt, i) in alternatives"
-                  :key="alt.idx"
-                  class="alt-panel-item"
-                  :class="{ 'alt-panel-item--active': activeAltId === i }"
-                  @mouseenter="onHoverAlternative(i)"
-                  @mouseleave="onHoverAlternative(null)"
-                  @click="applyChosenAlternative(alt)"
-                >
-                  <span class="alt-swatch" :style="{ backgroundColor: alt.color }" aria-hidden="true"></span>
-                  <span class="alt-panel-item-stats">
-                    <strong>{{ formatDistancePrecise(alt.distanceM) }}</strong>
-                    <span class="alt-panel-delta" :class="alt.deltaDistanceM <= 0 ? 'text-success' : 'text-muted'">{{ formatDelta(alt.deltaDistanceM, 'dist') }}</span>
-                    <span class="alt-panel-elev">
-                      <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i> +{{ Math.round(alt.gainM) }} m
-                      <span class="alt-panel-delta" :class="alt.deltaGainM <= 0 ? 'text-success' : 'text-muted'">{{ formatDelta(alt.deltaGainM, 'elev') }}</span>
-                    </span>
-                  </span>
-                  <span class="alt-panel-choose">{{ t('routes.apply_alternative') }}</span>
-                </li>
-              </ul>
-            </div>
-          </Transition>
         </div>
 
         <!-- Vertical resize handle (desktop only) -->
@@ -1936,6 +1888,20 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
+    </Transition>
+
+    <!-- Dialogue des variantes de tronçon (carte dédiée + infobulles) -->
+    <Transition name="modal">
+      <RouteAlternativesDialog
+        v-if="showAlternativesDialog"
+        :alternatives="alternatives"
+        :current-coords="altCurrentCoords"
+        :map-style-id="state.mapStyleId"
+        :loading="alternativesLoading"
+        :error="alternativesError"
+        @select="onSelectAlternative"
+        @close="cancelAlternatives"
+      />
     </Transition>
 
     <!-- Export image dialog -->
@@ -2057,69 +2023,6 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-/* ─── Panneau des variantes de tronçon ────────────────────────────────────── */
-.alt-panel {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  z-index: 5;
-  width: min(420px, calc(100% - 24px));
-  background: #fff;
-  border-radius: 10px;
-  overflow: hidden;
-  font-size: 0.85rem;
-}
-.alt-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
-  background: #f8f9fa;
-  border-bottom: 1px solid #e9ecef;
-}
-.alt-panel-title { font-weight: 600; }
-.alt-panel-close {
-  border: 0;
-  background: transparent;
-  font-size: 1.25rem;
-  line-height: 1;
-  cursor: pointer;
-  color: #6b7280;
-}
-.alt-panel-status { padding: 12px; display: flex; align-items: center; }
-.alt-panel-list { list-style: none; margin: 0; padding: 4px; }
-.alt-panel-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.alt-panel-item:hover,
-.alt-panel-item--active { background: #eef2ff; }
-.alt-swatch {
-  flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15);
-}
-.alt-panel-item-stats { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.alt-panel-elev { color: #6b7280; }
-.alt-panel-delta { margin-left: 6px; font-variant-numeric: tabular-nums; }
-.alt-panel-choose {
-  flex: 0 0 auto;
-  font-weight: 600;
-  color: #4f46e5;
-  white-space: nowrap;
-}
-.alt-panel-enter-active,
-.alt-panel-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
-.alt-panel-enter-from,
-.alt-panel-leave-to { opacity: 0; transform: translate(-50%, 8px); }
 .route-builder-chart-wrap {
   display: flex;
   flex-direction: column;

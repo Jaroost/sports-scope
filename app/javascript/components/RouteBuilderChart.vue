@@ -841,6 +841,36 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
           </small>
         </span>
       </div>
+      <!-- Actions sur la sélection (mobile) : apparaissent dès qu'une plage est
+           sélectionnée au doigt sur le profil d'altitude. -->
+      <div v-if="selectionStore.selectionRange.value" class="mobile-selection-actions">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          :title="t('routes.zoom_to_selection')"
+          @click="zoomToSelection"
+        >
+          <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
+        </button>
+        <button
+          v-if="!routeStore.readOnly.value"
+          type="button"
+          class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1"
+          :title="t('routes.propose_alternatives')"
+          @click="$emit('propose-alternatives')"
+        >
+          <i class="fa-solid fa-code-branch" aria-hidden="true"></i>
+          <span>{{ t('routes.alternatives_short') }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-danger ms-auto"
+          :title="t('routes.clear_selection')"
+          @click="clearSelection"
+        >
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
       <div class="card-body route-builder-chart-card-body">
         <div v-if="routeStore.isFetchingElevation.value" class="mobile-chart-loading">
           <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
@@ -1011,6 +1041,13 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
   display: inline-block;
 }
 /* ── Mobile simplified header ── */
+.mobile-selection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.1rem 0.75rem 0.5rem;
+}
 .mobile-chart-stats {
   display: flex;
   flex-wrap: wrap;

@@ -890,6 +890,9 @@ en:
     alternatives_none: "No other alternative found for this segment"
     alternatives_too_short: "Select a longer segment"
     alternatives_error: "Error while looking for alternatives"
+    alternatives_hint: "Click a variant to see its stats, then choose it."
+    alternatives_current: "Current route"
+    alternatives_variant: "Variant %{n}"
     apply_alternative: "Choose"
     # Activity-type labels, reused by several components (sport pickers). Name inherited
     # from the former Waymarked Trails selector, now generic.

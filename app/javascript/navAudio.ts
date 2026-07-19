@@ -74,30 +74,17 @@ function whenAudioReady(render: () => void): void {
   void ctx.resume().then(render).catch(() => { /* contexte bloqué — silencieux */ })
 }
 
-// Tempo des signaux de virage : multiplie les temps (position + durée des notes du
-// motif ET écart entre lectures d'un paquet, cf. MANEUVER_BURST_GAP_S). < 1 = plus
-// rapide. Ne touche ni les fréquences ni le gain. Plancher pratique : chaque note reste
-// au-dessus de ~0,06 s (l'attaque de beep dure 0,02 s), sinon le bip devient un « clic ».
-const MANEUVER_TEMPO = 0.65
-
 // Planifie le signal sonore d'un virage à l'instant `atS` (secondes) après
-// ctx.currentTime, via les temps absolus de beep(). Découplé de playManeuver pour que
-// la répétition « à la suite » (playManeuverBurst) empile plusieurs motifs en une seule
-// passe de planification Web Audio, sans timer.
+// ctx.currentTime, via le temps absolu de beep(). Découplé de playManeuver pour que la
+// répétition « à la suite » (playManeuverBurst) empile plusieurs bips en une seule passe
+// de planification Web Audio, sans timer.
 //
-// Signal UNIQUE pour tous les virages : on réutilise l'ancien motif « virage à droite »
-// (deux notes montantes 620 → 900 Hz) quels que soient le type de manœuvre et le côté.
-// `kind`/`direction` sont donc ignorés mais gardés dans la signature (appelants inchangés,
-// et pour pouvoir re-différencier les signaux plus tard sans re-toucher aux appels).
+// Signal UNIQUE pour tous les virages : un simple bip triangle à 1000 Hz (l'onde triangle
+// est celle de beep()), identique quels que soient le type de manœuvre et le côté.
+// `kind`/`direction` sont ignorés mais gardés dans la signature (appelants inchangés, et
+// pour pouvoir re-différencier les signaux plus tard sans re-toucher aux appels).
 function renderManeuver(_kind: Maneuver, _direction: 'left' | 'right', atS: number): void {
-  // Applique le tempo au motif (position `start` + durée `dur`), pas au paquet : `atS`
-  // est déjà à l'écart compressé (MANEUVER_BURST_GAP_S). Gain par défaut aligné sur beep.
-  const b = (freq: number, start: number, dur: number, gain = 0.18) =>
-    beep(freq, atS + start * MANEUVER_TEMPO, dur * MANEUVER_TEMPO, gain)
-  // Deux notes montantes très rapprochées : la 2ᵉ démarre à 0,09, avant la fin de la
-  // 1ʳᵉ (0,11) — léger chevauchement, effet glissando plutôt que deux bips distincts.
-  b(620, 0, 0.11)
-  b(900, 0.09, 0.2)
+  beep(1000, atS, 0.1)
 }
 
 // Distinct audio cue per maneuver — une lecture unique.
@@ -105,11 +92,10 @@ export function playManeuver(kind: Maneuver, direction: 'left' | 'right'): void 
   whenAudioReady(() => renderManeuver(kind, direction, 0))
 }
 
-// Écart (s) entre les débuts de deux lectures consécutives d'un même signal de virage
-// dans un « paquet » (cf. playManeuverBurst). Compressé au même tempo que le motif pour
-// rester au-dessus de sa durée (signal unique ~0,20 s au tempo courant) : les lectures
-// s'enchaînent serré sans se chevaucher.
-const MANEUVER_BURST_GAP_S = 0.7 * MANEUVER_TEMPO
+// Écart (s) entre les débuts de deux lectures consécutives d'un « paquet » (cf.
+// playManeuverBurst) : la « repeat frequency » du signal. 0,15 s → bip répété toutes les
+// 150 ms. Supérieur à la durée d'un bip (0,1 s) pour laisser un court silence entre chacun.
+const MANEUVER_BURST_GAP_S = 0.15
 
 // Joue le signal d'un virage `count` fois à la suite (1–10). Tout le paquet est PLANIFIÉ
 // EN UNE PASSE via les temps absolus de Web Audio (renderManeuver à i × gap) : pas de

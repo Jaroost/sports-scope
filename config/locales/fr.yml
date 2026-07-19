@@ -953,6 +953,7 @@ fr:
     layer_markers: "Repères"
     layer_pois: "Points d'intérêt"
     layer_grade: "Couleurs de pente"
+    layer_opacity: "Opacité des couches"
     layer_readonly: "Lecture seule"
     layer_stats_sidebar: "Panneau de statistiques"
     layer_elevation_chart: "Profil altimétrique"

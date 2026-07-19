@@ -90,6 +90,8 @@ export class RouteBuilderState extends MapPageState {
   showPois = true
   // Repères posés à la main (départ / arrivée / parking). Affichés par défaut.
   showMarkers = true
+  // Opacité (0.05–1) des couches superposées swisstopo/SuisseMobile sélectionnées.
+  overlayOpacity = 0.9
   showStatsSidebar = true
   showElevationChart = true
   overlays: string[] = []
@@ -117,6 +119,6 @@ export class RouteBuilderState extends MapPageState {
   // sinon une ancienne valeur de session écraserait silencieusement le profil. Les autres
   // réglages de vue (épingles, panneau, cols) restent locaux à la session.
   override persistedFields(): string[] {
-    return ['showClimbs', 'showWaypoints', 'showPois', 'showMarkers', 'showStatsSidebar']
+    return ['showClimbs', 'showWaypoints', 'showPois', 'showMarkers', 'showStatsSidebar', 'overlayOpacity']
   }
 }

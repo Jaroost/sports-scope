@@ -278,6 +278,8 @@ async function initMap() {
         // Mode « poser un POI » : le clic ouvre le dialogue de création d'un POI
         // sauvegardé au point cliqué, sans toucher au tracé.
         if (placePoiMode.value && !routeStore.readOnly.value) {
+          // Calque POI masqué : les POI sont invisibles, le mode est inerte.
+          if (!props.state.showPois) return
           if (savedPoiPopup) closeSavedPoiPopup()
           openPoiDialog(e.lngLat.lng, e.lngLat.lat)
           return
@@ -285,6 +287,8 @@ async function initMap() {
         // Mode « poser un repère » : le clic ouvre le dialogue de création (type +
         // libellé) au point cliqué, sans toucher au tracé.
         if (placeMarkerMode.value && !routeStore.readOnly.value) {
+          // Calque repères masqué : les repères sont invisibles, le mode est inerte.
+          if (!props.state.showMarkers) return
           if (routeMarkerPopup) closeRouteMarkerPopup()
           openMarkerDialog(e.lngLat.lng, e.lngLat.lat)
           return
@@ -319,6 +323,9 @@ async function initMap() {
           return
         }
         deselectAll()
+        // Calque « Points de passage » masqué : puisque les points ne sont pas
+        // visibles, un clic sur la carte ne doit rien faire (pas d'ajout au tracé).
+        if (!props.state.showWaypoints) return
         if (hoverInsert) {
           insertWaypointAtHover(hoverInsert)
         } else {
@@ -326,10 +333,13 @@ async function initMap() {
         }
       })
       mapInstance.on('mousemove', (e: any) => {
-        // Mode « poser un POI » : curseur viseur, pas de marqueur d'insertion de point.
+        // Mode « poser un POI/repère » : pas de marqueur d'insertion de point sur le
+        // tracé. Curseur viseur seulement si le calque correspondant est visible ;
+        // sinon le mode est inerte (rien ne se pose au clic) et rien ne le suggère.
         if ((placePoiMode.value || placeMarkerMode.value) && !routeStore.readOnly.value) {
           hideHoverMarker()
-          mapInstance.getCanvas().style.cursor = 'crosshair'
+          const layerShown = placePoiMode.value ? props.state.showPois : props.state.showMarkers
+          mapInstance.getCanvas().style.cursor = layerShown ? 'crosshair' : ''
           return
         }
         if (routeStore.readOnly.value) {
@@ -339,6 +349,9 @@ async function initMap() {
           return
         }
         if (overClimbMarker) { hideHoverMarker(); return }
+        // Calque « Points de passage » masqué : aucun ajout possible, donc pas de
+        // marqueur d'insertion au survol du tracé qui le suggérerait.
+        if (!props.state.showWaypoints) { hideHoverMarker(); return }
         if (routeStore.waypoints.value.length < 2) { hideHoverMarker(); return }
         const hit = nearestPointOnRouteAt(e.point)
         if (hit == null) { hideHoverMarker(); return }
@@ -2081,13 +2094,25 @@ function installOverlays() {
     const present = !!mapInstance.getLayer(lyrId)
     if (active.has(o.id) && !present) {
       if (!mapInstance.getSource(srcId)) mapInstance.addSource(srcId, overlaySource(o) as any)
-      mapInstance.addLayer({ id: lyrId, type: 'raster', source: srcId, paint: { 'raster-opacity': 0.9 } }, beforeId)
+      mapInstance.addLayer({ id: lyrId, type: 'raster', source: srcId, paint: { 'raster-opacity': props.state.overlayOpacity } }, beforeId)
     } else if (!active.has(o.id) && present) {
       mapInstance.removeLayer(lyrId)
       if (mapInstance.getSource(srcId)) mapInstance.removeSource(srcId)
     }
   }
 }
+
+// Répercute l'opacité réglée (slider de la section « Couches (Suisse) ») sur toutes les
+// couches overlay présentes. Appelée au changement du slider ; les nouvelles couches
+// prennent l'opacité directement à l'installation (cf. installOverlays).
+function applyOverlayOpacity() {
+  if (!mapInstance) return
+  for (const o of MAP_OVERLAYS) {
+    const lyrId = overlayLayerId(o.id)
+    if (mapInstance.getLayer(lyrId)) mapInstance.setPaintProperty(lyrId, 'raster-opacity', props.state.overlayOpacity)
+  }
+}
+watch(() => props.state.overlayOpacity, applyOverlayOpacity)
 
 function setOverlays(ids: string[]) {
   props.state.overlays = ids
@@ -2150,6 +2175,11 @@ async function toggleMapSize() {
 function toggleWaypoints() {
   props.state.showWaypoints = !props.state.showWaypoints
   refreshWaypointMarkers()
+  // Curseur « crosshair » seulement quand l'ajout de points est possible : masqué,
+  // le clic ne fait rien, donc pas de curseur qui suggérerait l'ajout.
+  if (mapInstance && !routeStore.readOnly.value) {
+    mapInstance.getCanvas().style.cursor = props.state.showWaypoints ? 'crosshair' : ''
+  }
 }
 
 function toggleClimbs() {
@@ -2162,6 +2192,11 @@ function toggleClimbs() {
 function toggleMarkers() {
   props.state.showMarkers = !props.state.showMarkers
   if (!props.state.showMarkers && routeMarkerPopup) closeRouteMarkerPopup()
+  // Masqué alors que le mode « poser un repère » est actif : le mode devient inerte,
+  // on retire le curseur viseur qui suggérerait encore un ajout possible.
+  if (!props.state.showMarkers && placeMarkerMode.value && mapInstance && !routeStore.readOnly.value) {
+    mapInstance.getCanvas().style.cursor = ''
+  }
   installRouteMarkers()
 }
 
@@ -2171,6 +2206,11 @@ function toggleMarkers() {
 function togglePois() {
   props.state.showPois = !props.state.showPois
   if (!props.state.showPois && savedPoiPopup) closeSavedPoiPopup()
+  // Masqué alors que le mode « poser un POI » est actif : le mode devient inerte,
+  // on retire le curseur viseur qui suggérerait encore un ajout possible.
+  if (!props.state.showPois && placePoiMode.value && mapInstance && !routeStore.readOnly.value) {
+    mapInstance.getCanvas().style.cursor = ''
+  }
   installPlaceMarkers()
   installSavedPoiMarkers()
 }
@@ -2422,6 +2462,17 @@ defineExpose({
               <i class="fa-solid" :class="state.overlays.includes(o.id) ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
               <i class="fa-solid fa-fw" :class="o.icon" aria-hidden="true"></i>{{ t(`strava.overlay_${o.id}`) }}
             </button>
+          </li>
+          <li>
+            <div class="dropdown-item-text px-3 py-1">
+              <label for="overlay-opacity-slider" class="d-flex align-items-center gap-2 mb-1 small text-muted">
+                <i class="fa-solid fa-droplet fa-fw" aria-hidden="true"></i>{{ t('routes.layer_opacity') }}
+                <span class="ms-auto">{{ Math.round(state.overlayOpacity * 100) }}%</span>
+              </label>
+              <input id="overlay-opacity-slider" type="range" class="form-range" min="0.05" max="1" step="0.05"
+                :value="state.overlayOpacity"
+                @input="state.overlayOpacity = ($event.target as HTMLInputElement).valueAsNumber" />
+            </div>
           </li>
           <li class="d-none d-md-block"><hr class="dropdown-divider" /></li>
           <li class="d-none d-md-block">

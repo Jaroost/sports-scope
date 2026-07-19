@@ -953,6 +953,7 @@ en:
     layer_markers: "Markers"
     layer_pois: "Points of interest"
     layer_grade: "Grade colors"
+    layer_opacity: "Layer opacity"
     layer_readonly: "Read-only"
     layer_stats_sidebar: "Statistics panel"
     layer_elevation_chart: "Elevation profile"

@@ -4,6 +4,7 @@ import { t } from '../i18n'
 import { mondayOf, isoLocal, fmtDuration, WEEK_SEGMENT_COLOR, type WeekPlan } from '../composables/useTrainingPlan'
 import { usePlannedRides, planTss, type PlannedRide } from '../composables/usePlannedRides'
 import type { AthleteState } from '../routeLoad'
+import { activityIcon } from '../activityHelpers'
 import RoutePickerModal from './RoutePickerModal.vue'
 
 // ─── Composer sa semaine ──────────────────────────────────────────────────────
@@ -20,8 +21,9 @@ import RoutePickerModal from './RoutePickerModal.vue'
 //     On prend les N premiers plans (N = nombre de sorties du jour), par ordre de
 //     création, parmi ceux posés AVANT la dernière sortie. Ainsi : 2 plans prévus + 1
 //     sortie → seul le premier passe vert ; un plan ajouté après la sortie reste orange.
-// Une sortie réelle attachée à un jour : de quoi l'afficher et lier vers sa page.
-interface DoneActivity { source: string; external_id: string; name: string; tss: number }
+// Une sortie réelle attachée à un jour : de quoi l'afficher, l'icôner (par sport) et
+// lier vers sa page.
+interface DoneActivity { source: string; external_id: string; name: string; tss: number; activity_type?: string | null }
 interface DayDone { tss: number; count: number; at: string | null; activities?: DoneActivity[] }
 // `fluid` : grille responsive « auto-fit » — au lieu des 7 colonnes fixes, les jours se
 // mettent en ligne côte à côte tant qu'ils tiennent (largeur minimale garantie par
@@ -364,9 +366,10 @@ async function moveToDay(iso: string) {
         >
           <div class="planner-day-head">
             <span class="text-capitalize d-inline-flex align-items-center gap-1">
-              <!-- ✓ vert dès qu'une activité a été enregistrée ce jour-là : repère non
-                   coloriel (icône), pour ne pas dépendre du seul fond vert. -->
-              <i v-if="isDayTrained(d.iso)" class="fa-solid fa-circle-check planner-head-check" :title="t('performance.load.week.day_tss')" aria-hidden="true"></i>
+              <!-- Aujourd'hui : repère « jour courant » (bleu), non coloriel, pour ne pas
+                   dépendre du seul fond bleu. Sinon ✓ vert dès qu'une sortie est enregistrée. -->
+              <i v-if="d.isToday" class="fa-solid fa-calendar-day planner-head-today" :title="t('performance.load.today')" aria-hidden="true"></i>
+              <i v-else-if="isDayTrained(d.iso)" class="fa-solid fa-circle-check planner-head-check" :title="t('performance.load.week.day_tss')" aria-hidden="true"></i>
               {{ d.label }}
             </span>
             <span class="text-body-tertiary">{{ d.dayNum }}</span>
@@ -437,7 +440,8 @@ async function moveToDay(iso: string) {
                 @click="openDoneDetail(d.iso)"
               >
                 <div class="planner-done-main">
-                  <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                  <!-- Icône du sport, comme sur la liste des activités récentes. -->
+                  <i :class="`fa-solid ${activityIcon(act.activity_type)} planner-done-icon`" aria-hidden="true"></i>
                   <span class="planner-done-name">{{ act.name }}</span>
                 </div>
                 <!-- TSS réalisé sur sa propre ligne, comme le TSS estimé des plans. -->
@@ -485,6 +489,24 @@ async function moveToDay(iso: string) {
             <button type="button" class="btn-close" @click="moveTarget = null" :aria-label="t('performance.load.week.cancel')"></button>
           </div>
           <div class="move-body">
+            <!-- Plan réalisé : lien(s) vers la sortie réelle enregistrée ce jour-là, pour
+                 voir l'activité correspondante. Présenté en tête, c'est ce qu'on cherche
+                 en premier sur un tour déjà fait. -->
+            <div v-if="isPlanDone(moveTarget) && activitiesFor(moveTarget.planned_on).length" class="move-section">
+              <div class="move-label">{{ t('performance.load.week.done_activity_label') }}</div>
+              <a
+                v-for="act in activitiesFor(moveTarget.planned_on)"
+                :key="`${act.source}-${act.external_id}`"
+                :href="activityHref(act)"
+                class="planner-detail-row"
+              >
+                <i :class="`fa-solid ${activityIcon(act.activity_type)} planner-detail-icon`" aria-hidden="true"></i>
+                <span class="planner-detail-name">{{ act.name }}</span>
+                <span class="planner-detail-tss">{{ Math.round(act.tss) }} TSS</span>
+                <i class="fa-solid fa-arrow-up-right-from-square planner-detail-go" aria-hidden="true"></i>
+              </a>
+            </div>
+
             <div v-if="moveContext && moveContext.count > 1" class="move-section">
               <div class="move-label">{{ t('performance.load.week.reorder_day') }}</div>
               <div class="d-flex gap-2">
@@ -563,7 +585,7 @@ async function moveToDay(iso: string) {
               :href="activityHref(act)"
               class="planner-detail-row"
             >
-              <i class="fa-solid fa-circle-check planner-detail-icon" aria-hidden="true"></i>
+              <i :class="`fa-solid ${activityIcon(act.activity_type)} planner-detail-icon`" aria-hidden="true"></i>
               <span class="planner-detail-name">{{ act.name }}</span>
               <span class="planner-detail-tss">{{ Math.round(act.tss) }} TSS</span>
               <i class="fa-solid fa-arrow-up-right-from-square planner-detail-go" aria-hidden="true"></i>
@@ -722,15 +744,20 @@ async function moveToDay(iso: string) {
   opacity: 0.55;
   background: var(--bs-tertiary-bg);
 }
-.planner-day.is-today {
-  border-color: var(--bs-primary);
-}
 /* Jour où l'on est sorti : vert franc, et il reprend son opacité même s'il est passé.
    Le fond est assez marqué pour se repérer d'un coup d'œil parmi les cases neutres. */
 .planner-day.is-done {
   opacity: 1;
   border-color: #198754;
   background: rgba(25, 135, 84, 0.16);
+}
+/* Aujourd'hui : carte bleue franche pour repérer « où on en est ». Déclarée après
+   `.is-done` pour l'emporter quand on s'est déjà entraîné aujourd'hui (le ✓ vert de
+   l'en-tête indique encore la sortie faite). */
+.planner-day.is-today {
+  opacity: 1;
+  border-color: var(--bs-primary);
+  background: rgba(13, 110, 253, 0.16);
 }
 .planner-day-head {
   display: flex;
@@ -740,6 +767,11 @@ async function moveToDay(iso: string) {
 }
 .planner-head-check {
   color: #198754;
+  font-size: 0.8rem;
+}
+/* Repère du jour courant : bleu, cohérent avec le fond bleu de la carte du jour. */
+.planner-head-today {
+  color: var(--bs-primary);
   font-size: 0.8rem;
 }
 .planner-plan {
@@ -830,12 +862,15 @@ async function moveToDay(iso: string) {
 .planner-done-mark-btn:focus-visible {
   background: rgba(25, 135, 84, 0.34);
 }
-/* Ligne principale de la pastille sortie : ✓ + nom de l'activité. */
+/* Ligne principale de la pastille sortie : icône du sport + nom de l'activité. */
 .planner-done-main {
   display: flex;
   align-items: center;
   gap: 0.25rem;
   min-width: 0;
+}
+.planner-done-icon {
+  flex: 0 0 auto;
 }
 .planner-done-name {
   flex: 1 1 auto;

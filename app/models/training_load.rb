@@ -97,6 +97,9 @@ module TrainingLoad
       daily_activities[date] << {
         source: row['source'], external_id: row['external_id'],
         name: row['name'], tss: res[:tss], source_tss: res[:source],
+        # Type Strava (Ride, Run, Hike…) : le front en dérive l'icône du sport, comme sur
+        # la liste des activités récentes (cf. activityIcon).
+        activity_type: row['activity_type'],
         # Heure de départ (ISO) : le front compare la plus tardive du jour à la date de
         # création d'un plan pour décider s'il a réellement été réalisé (cf. WeekPlanner).
         started_at: iso_time(row['started_at'])

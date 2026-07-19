@@ -13,7 +13,7 @@ import type { AthleteState } from '../routeLoad'
 // forme de Ref ; ce composable ne fait aucun fetch et ne s'occupe pas du rendu.
 
 // ── Types du payload /api/performance/training_load ──────────────────────────
-export interface DayActivity { source: string; external_id: string; name: string; tss: number; source_tss: string; started_at?: string | null }
+export interface DayActivity { source: string; external_id: string; name: string; tss: number; source_tss: string; started_at?: string | null; activity_type?: string | null }
 export interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; acwr: number | null; activities?: DayActivity[] }
 export interface Current extends Point { form_zone: string; acwr_zone: string | null }
 export interface Coverage { power: number; hr: number; estimated: number; total: number }

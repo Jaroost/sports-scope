@@ -56,6 +56,36 @@ function resetToDefaults() {
   Object.assign(prefs, JSON.parse(JSON.stringify(props.defaults)))
 }
 
+// Anti-déplacement accidentel des sliders au scroll (mobile). Le profil défile dans
+// un conteneur scrollable et contient beaucoup de <input type=range> ; sur tactile,
+// poser le doigt sur un slider en modifie déjà la valeur (« tap-to-set » natif), même
+// quand on ne veut que faire défiler. touch-action: pan-y (cf. <style>) laisse le
+// navigateur prendre la main pour le scroll vertical — il émet alors un `pointercancel`
+// sur le slider. On mémorise la valeur au contact et on la restaure à ce moment-là,
+// donc un scroll qui démarre sur un slider ne le bouge pas. Un vrai tap ou un
+// glissement horizontal ne déclenche pas de pointercancel : la valeur est conservée.
+// Délégué sur le <form> ; on ne cible que les range, pour ne pas gêner les poignées
+// de tri (qui utilisent aussi pointerdown, cf. usePointerSort).
+function onRangePointerDown(e: PointerEvent) {
+  const el = e.target as HTMLElement
+  if (el instanceof HTMLInputElement && el.type === 'range') {
+    el.dataset.valueBeforeScroll = el.value
+  }
+}
+
+function onRangePointerCancel(e: PointerEvent) {
+  const el = e.target as HTMLElement
+  if (el instanceof HTMLInputElement && el.type === 'range') {
+    const prev = el.dataset.valueBeforeScroll
+    if (prev !== undefined && el.value !== prev) {
+      el.value = prev
+      // Resynchronise le v-model : sans cet événement, la copie réactive garderait
+      // la valeur du contact alors que l'input a été remis à sa valeur d'avant.
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+  }
+}
+
 const saving = ref(false)
 const saved = ref(false)
 const error = ref<string | null>(null)
@@ -417,7 +447,7 @@ function placePreviewMarker(coords: [number, number]) {
 </script>
 
 <template>
-  <form class="user-profile" @submit.prevent="save">
+  <form class="user-profile" @submit.prevent="save" @pointerdown="onRangePointerDown" @pointercancel="onRangePointerCancel">
     <!-- Sport dont on édite les réglages : pilote toutes les sections qui en dépendent -->
     <section v-if="showSportPicker" class="card mb-3 shadow-sm sport-picker">
       <div class="card-body py-2">

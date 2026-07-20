@@ -1089,6 +1089,14 @@ function placePreviewMarker(coords: [number, number]) {
 
 }
 
+/* Sur mobile, le profil défile dans un conteneur scrollable (fenêtre ou
+   .modal-body de ProfileDialog). Sans ceci, un geste vertical démarrant sur un
+   slider en modifie la valeur au lieu de faire défiler. pan-y laisse le
+   défilement vertical au navigateur ; seul un geste horizontal ajuste le slider. */
+.form-range {
+  touch-action: pan-y;
+}
+
 /* Le formulaire est long et plusieurs sections dépendent du sport sélectionné : le
    sélecteur reste visible pendant qu'on fait défiler, sans quoi on édite les réglages
    d'un sport sans plus voir lequel.

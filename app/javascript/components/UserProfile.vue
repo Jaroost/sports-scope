@@ -225,13 +225,13 @@ async function save() {
 
 // ─── Aperçu de la navigation ────────────────────────────────────────────────
 // Petite carte MapLibre qui reflète en direct les réglages de la section
-// Navigation (style, zoom, inclinaison) et se centre sur la position GPS
-// actuelle (repli sur la Suisse si la géoloc échoue ou est refusée).
+// Navigation (style, zoom) et se centre sur la position GPS actuelle (repli
+// sur la Suisse si la géoloc échoue ou est refusée).
 const SWITZERLAND_CENTER: [number, number] = [8.23, 46.8]
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 // Même inset haut que la caméra de navigation (cf. RouteNavigation.followPadding) :
 // ancre le coureur dans le tiers inférieur pour que le cadrage — donc le ressenti du
-// zoom et de l'inclinaison — corresponde à ce que l'écran affichera réellement.
+// zoom — corresponde à ce que l'écran affichera réellement.
 const PREVIEW_TOP_PAD_RATIO = 0.45
 
 // Reporte sur l'aperçu le padding caméra de la navigation. Recalculé sur 'resize'
@@ -383,7 +383,7 @@ async function initPreview() {
     style: mapStyleFor(prefs.navigation.default_style) as any,
     center: previewCenter,
     zoom: prefs.navigation.zoom,
-    pitch: prefs.navigation.pitch,
+    pitch: 0,
     attributionControl: false,
     interactive: false,
   })
@@ -393,11 +393,10 @@ async function initPreview() {
   previewMap.on('load', () => { applyPreviewRoute(); applyPreviewTerrain(); applyPreviewPadding() })
   previewMap.on('resize', applyPreviewPadding)
 
-  // Réagit en direct aux réglages : le zoom, l'inclinaison, le relief et la largeur du
-  // tracé s'appliquent à chaud ; le changement de style recharge le fond (et replace
+  // Réagit en direct aux réglages : le zoom, le relief et la largeur du tracé
+  // s'appliquent à chaud ; le changement de style recharge le fond (et replace
   // le marqueur, le tracé et le relief).
   watch(() => prefs.navigation.zoom, (z) => previewMap?.setZoom(z))
-  watch(() => prefs.navigation.pitch, (p) => previewMap?.setPitch(p))
   watch(() => prefs.navigation.terrain, applyPreviewTerrain)
   // Ces six réglages sont propres au sport : les sources réactives passent par sport.value,
   // donc l'aperçu se met aussi à jour quand on bascule de sport dans le sélecteur.
@@ -727,12 +726,6 @@ function placePreviewMarker(coords: [number, number]) {
               {{ t('profile.navigation.zoom') }} : <strong>{{ prefs.navigation.zoom }}</strong>
             </label>
             <input id="nav-zoom" v-model.number="prefs.navigation.zoom" type="range" class="form-range" min="14" max="40" step="0.5">
-          </div>
-          <div class="col-sm-6">
-            <label for="nav-pitch" class="form-label mb-1">
-              {{ t('profile.navigation.pitch') }} : <strong>{{ prefs.navigation.pitch }}°</strong>
-            </label>
-            <input id="nav-pitch" v-model.number="prefs.navigation.pitch" type="range" class="form-range" min="0" max="90" step="5">
           </div>
           <div class="col-12">
             <div class="form-check form-switch">
@@ -1272,7 +1265,7 @@ function placePreviewMarker(coords: [number, number]) {
 .navbar-toggle-label i { width: 0.9rem; text-align: center; }
 
 /* Cadre façon téléphone en portrait : même proportions que l'écran de navigation,
-   pour que le réglage du zoom/inclinaison soit représentatif du rendu réel. */
+   pour que le réglage du zoom soit représentatif du rendu réel. */
 .nav-preview {
   position: relative;
   width: 100%;

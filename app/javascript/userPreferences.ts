@@ -70,7 +70,7 @@ export interface UserPreferences {
     alert_m: number
   }
   search: { country_codes: string[]; worldwide_fallback: boolean }
-  navigation: { default_style: MapStyleId; zoom: number; pitch: number; terrain: boolean; nav_fps: number; sound_volume: number; show_climb_card: boolean; radar_close_m: number; auto_reroute: boolean; auto_reroute_cooldown_s: number }
+  navigation: { default_style: MapStyleId; zoom: number; terrain: boolean; nav_fps: number; sound_volume: number; show_climb_card: boolean; radar_close_m: number; auto_reroute: boolean; auto_reroute_cooldown_s: number }
   display: {
     default_sport: Sport
     show_grade_colors: boolean
@@ -138,7 +138,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     country_codes: ['ch', 'fr', 'it', 'at', 'de'],
     worldwide_fallback: false,
   },
-  navigation: { default_style: 'liberty', zoom: 17, pitch: 0, terrain: false, nav_fps: 8, sound_volume: 100, show_climb_card: true, radar_close_m: 30, auto_reroute: true, auto_reroute_cooldown_s: 10 },
+  navigation: { default_style: 'liberty', zoom: 17, terrain: false, nav_fps: 8, sound_volume: 100, show_climb_card: true, radar_close_m: 30, auto_reroute: true, auto_reroute_cooldown_s: 10 },
   display: {
     default_sport: 'cycling',
     show_grade_colors: true,
@@ -228,15 +228,14 @@ export function persistNavigationStyle(styleId: MapStyleId): void {
   patchPreferencesQuietly(prefs)
 }
 
-// Reporte sur le profil le zoom, l'inclinaison et le relief 3D de la caméra réglés
-// en cours de navigation : ils deviennent les réglages par défaut du compte (même
-// contrat best-effort que persistDefaultMapStyle).
-export function persistNavCamera(zoom: number, pitch: number, terrain: boolean): void {
+// Reporte sur le profil le zoom et le relief 3D de la caméra réglés en cours de
+// navigation : ils deviennent les réglages par défaut du compte (même contrat
+// best-effort que persistDefaultMapStyle).
+export function persistNavCamera(zoom: number, terrain: boolean): void {
   if (!isLoggedIn()) return
   const prefs = userPreferences()
-  if (prefs.navigation.zoom === zoom && prefs.navigation.pitch === pitch && prefs.navigation.terrain === terrain) return
+  if (prefs.navigation.zoom === zoom && prefs.navigation.terrain === terrain) return
   prefs.navigation.zoom = zoom
-  prefs.navigation.pitch = pitch
   prefs.navigation.terrain = terrain
   patchPreferencesQuietly(prefs)
 }

@@ -13,7 +13,6 @@ class ProfilesController < ApplicationController
   TURN_ANOMALY_RANGE = (30..200)
   SNAP_WARN_RANGE = (10..200)
   NAV_ZOOM_RANGE = (14.0..40.0)
-  NAV_PITCH_RANGE = (0..90)
   NAV_FPS_RANGE = (0.5..60.0)
   NAV_LINE_WIDTH_RANGE = (2..200)
   OPACITY_RANGE = (0.0..1.0)
@@ -119,7 +118,6 @@ class ProfilesController < ApplicationController
       "navigation" => {
         "default_style" => allowed(navigation[:default_style], ALLOWED_MAP_STYLES, "swissgrau"),
         "zoom" => clamp_float(navigation[:zoom], NAV_ZOOM_RANGE, 17),
-        "pitch" => clamp_int(navigation[:pitch], NAV_PITCH_RANGE, 0),
         "terrain" => to_bool(navigation[:terrain], false),
         "nav_fps" => clamp_float(navigation[:nav_fps], NAV_FPS_RANGE, 8),
         "sound_volume" => clamp_int(navigation[:sound_volume], NAV_SOUND_VOLUME_RANGE, 100),

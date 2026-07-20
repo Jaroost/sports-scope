@@ -42,7 +42,7 @@ import { useScreenWakeLock } from '../composables/useScreenWakeLock'
 import { useNavSound } from '../composables/useNavSound'
 import { useRadarAlerts } from '../composables/useRadarAlerts'
 import {
-  useNavCamera, CAM_PITCH_MIN, CAM_PITCH_MAX, CAM_ZOOM_MIN, CAM_ZOOM_MAX,
+  useNavCamera, CAM_ZOOM_MIN, CAM_ZOOM_MAX,
 } from '../composables/useNavCamera'
 import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
@@ -159,13 +159,14 @@ const offlinePct = computed(() =>
   offlineProgress.value.total ? Math.round((offlineProgress.value.done / offlineProgress.value.total) * 100) : 0,
 )
 
-// Réglages caméra (inclinaison / zoom / relief 3D), ajustables en séance et reportés
-// sur le profil. La boucle d'animation et followOptions lisent ces refs (et non plus
-// navPrefs) pour que toute modification prenne effet à la frame suivante. onZoomInput
-// détache la caméra du suivi via onManualZoom. Voir useNavCamera.
+// Réglages caméra (zoom / relief 3D), ajustables en séance et reportés sur le profil.
+// La caméra reste toujours à plat (pitch 0) pour économiser la batterie. La boucle
+// d'animation et followOptions lisent ces refs (et non plus navPrefs) pour que toute
+// modification prenne effet à la frame suivante. onZoomInput détache la caméra du suivi
+// via onManualZoom. Voir useNavCamera.
 const {
-  camZoom, camPitch, terrain3d, zoomSaved,
-  onPitchInput, onZoomInput, applyTerrain, toggleTerrain, persistPitchTerrain, saveZoomToProfile,
+  camZoom, terrain3d, zoomSaved,
+  onZoomInput, applyTerrain, toggleTerrain, saveZoomToProfile,
 } = useNavCamera({ getMap: () => map, onManualZoom })
 // Curseur zoom pris en main : on détache la caméra du suivi (état local au composant).
 function onManualZoom() {
@@ -1309,7 +1310,7 @@ function loadRoute(route: any) {
     const coords = geom.map(([lng, lat]) => [lng, lat] as LngLat)
     const b = new maplibre.LngLatBounds(coords[0], coords[0])
     coords.forEach((c) => b.extend(c))
-    map.fitBounds(b, { padding: 60, duration: 600, pitch: camPitch.value })
+    map.fitBounds(b, { padding: 60, duration: 600, pitch: 0 })
   }
   following.value = true
   cameraUnlocked.value = false
@@ -1712,7 +1713,7 @@ function fitRouteBounds() {
   const coords = geometry.map(([lng, lat]) => [lng, lat] as LngLat)
   const b = new maplibre.LngLatBounds(coords[0], coords[0])
   coords.forEach((c) => b.extend(c))
-  map.fitBounds(b, { padding: 70, duration: 500, pitch: camPitch.value })
+  map.fitBounds(b, { padding: 70, duration: 500, pitch: 0 })
 }
 
 // Index du sommet de la géométrie le plus proche d'un point.
@@ -1997,8 +1998,10 @@ async function initMap() {
     // Mode libre : vue d'ensemble de la Suisse jusqu'au premier fix GPS.
     center: hasRoute.value ? coords[0] : DEFAULT_CENTER,
     zoom: hasRoute.value ? 14 : DEFAULT_ZOOM,
-    pitch: camPitch.value,
-    maxPitch: CAM_PITCH_MAX,
+    // Caméra toujours à plat (économie de batterie) : maxPitch 0 verrouille aussi
+    // l'inclinaison au geste tactile.
+    pitch: 0,
+    maxPitch: 0,
     attributionControl: false,
     // Tap plus tolérant : on conduit d'un pouce, en mouvement, et un appui « simple »
     // dérive souvent de quelques pixels. Au seuil par défaut (3 px), MapLibre prend ce
@@ -2096,7 +2099,7 @@ async function initMap() {
         renderTurnMarkers()
         const b = new maplibre.LngLatBounds(coords[0], coords[0])
         coords.forEach((c) => b.extend(c))
-        map.fitBounds(b, { padding: 60, duration: 0, pitch: camPitch.value })
+        map.fitBounds(b, { padding: 60, duration: 0, pitch: 0 })
       }
       resolve()
     })
@@ -2636,7 +2639,7 @@ function onPosition(pos: GeolocationPosition) {
   updatePoiProximity(here)
 
   if (!hasInitialZoom) {
-    // First fix: a smooth intro that also applies the profile zoom & pitch once,
+    // First fix: a smooth intro that also applies the profile zoom once,
     // then the rAF loop takes over the camera. On affiche directement l'ancre
     // (snappée sur le tracé si on est dessus) plutôt que le GPS brut.
     updateLocationMarker(anchorPos ?? here)
@@ -2652,7 +2655,8 @@ function onPosition(pos: GeolocationPosition) {
 
 // Camera framing used whenever we follow the rider. The rider is anchored in the
 // lower third of the screen (via padding) so the look-ahead distance stays
-// constant frame to frame; the tilt and zoom come from the profile. The render
+// constant frame to frame; the camera stays flat (pitch 0) and the zoom comes
+// from the profile. The render
 // loop re-applies camZoom every frame, and a manual pinch writes its result back
 // into camZoom, so following tracks the pinch instead of fighting it.
 function followOptions(center: LngLat): any {
@@ -2660,7 +2664,7 @@ function followOptions(center: LngLat): any {
   const opts: any = {
     center,
     bearing: currentBearing,
-    pitch: camPitch.value,
+    pitch: 0,
     duration: 500,
     padding: followPadding(h),
   }
@@ -2757,7 +2761,7 @@ function startAnimation() {
       // Dézoom de découverte du prochain virage (sortie de veille) : ajusté avant le
       // jumpTo, borné au zoom du profil. Hors de ce cas, effectiveZoom() == camZoom.
       updateRevealZoom()
-      map.jumpTo({ center: pos, bearing: displayBearing, zoom: effectiveZoom(), pitch: camPitch.value, padding: followPadding(h) })
+      map.jumpTo({ center: pos, bearing: displayBearing, zoom: effectiveZoom(), pitch: 0, padding: followPadding(h) })
     }
 
     if (idle) { rafId = null; return }   // arrêt ; le prochain fix relance la boucle
@@ -3308,12 +3312,9 @@ function onScreenOffTap() {
       :edit-mode="editMode"
       :climb-card-visible="hasRoute ? showClimbCard : undefined"
       :radar-known="radarKnown"
-      v-model:cam-pitch="camPitch"
       v-model:cam-zoom="camZoom"
       :terrain3d="terrain3d"
       :zoom-saved="zoomSaved"
-      :cam-pitch-min="CAM_PITCH_MIN"
-      :cam-pitch-max="CAM_PITCH_MAX"
       :cam-zoom-min="CAM_ZOOM_MIN"
       :cam-zoom-max="CAM_ZOOM_MAX"
       :poi-cats="POI_CATS"
@@ -3337,8 +3338,6 @@ function onScreenOffTap() {
       @update:sound-volume="setVolume"
       @toggle-climb-card="showClimbCard = !showClimbCard"
       @toggle-radar="toggleRadar"
-      @pitch-input="onPitchInput"
-      @persist-pitch-terrain="persistPitchTerrain"
       @zoom-input="onZoomInput"
       @save-zoom="saveZoomToProfile"
       @toggle-terrain="toggleTerrain"

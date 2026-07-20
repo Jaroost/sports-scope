@@ -25,12 +25,9 @@ const props = defineProps<{
   routeSport: Sport
   routeProfile: string
   radarKnown: boolean
-  camPitch: number
   camZoom: number
   terrain3d: boolean
   zoomSaved: boolean
-  camPitchMin: number
-  camPitchMax: number
   camZoomMin: number
   camZoomMax: number
   poiCats: PoiCategory[]
@@ -72,8 +69,6 @@ const emit = defineEmits<{
   (e: 'update:soundVolume', v: number): void
   (e: 'toggle-climb-card'): void
   (e: 'toggle-radar'): void
-  (e: 'pitch-input'): void
-  (e: 'persist-pitch-terrain'): void
   (e: 'zoom-input'): void
   (e: 'save-zoom'): void
   (e: 'toggle-terrain'): void
@@ -86,7 +81,6 @@ const emit = defineEmits<{
   (e: 'cycle-debug-turn'): void
   (e: 'toggle-debug-poi'): void
   (e: 'reset-storage'): void
-  (e: 'update:camPitch', v: number): void
   (e: 'update:camZoom', v: number): void
   (e: 'start-offline'): void
   (e: 'cancel-offline'): void
@@ -95,10 +89,6 @@ const emit = defineEmits<{
   (e: 'update:activePanel', v: string | null): void
 }>()
 
-function onPitch(e: Event) {
-  emit('update:camPitch', Number((e.target as HTMLInputElement).value))
-  emit('pitch-input')
-}
 function onZoom(e: Event) {
   emit('update:camZoom', Number((e.target as HTMLInputElement).value))
   emit('zoom-input')
@@ -400,18 +390,6 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
 
         <!-- Caméra -->
         <template v-else-if="activePanel === 'cam'">
-          <label class="nav-cam-row">
-            <span class="nav-cam-label">{{ t('routes.camera_pitch') }}</span>
-            <input
-              type="range"
-              class="form-range"
-              :min="camPitchMin" :max="camPitchMax" step="1"
-              :value="camPitch"
-              @input="onPitch"
-              @change="$emit('persist-pitch-terrain')"
-            />
-            <span class="nav-cam-val">{{ Math.round(camPitch) }}°</span>
-          </label>
           <label class="nav-cam-row">
             <span class="nav-cam-label">{{ t('routes.camera_zoom') }}</span>
             <input

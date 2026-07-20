@@ -146,9 +146,30 @@ function timeFactor() { return 60 } // seconds per X-axis unit (always minutes)
 // index cherchés dans `distance` absent) casse silencieusement la sélection au drag.
 const xKey = computed(() => {
   const wanted = props.xAxis
+  // Le mode « heure » (horloge murale) n'a pas de flux propre : il réutilise `time`
+  // (secondes écoulées) comme domaine numérique de l'axe — seul l'affichage des ticks
+  // change. On le rabat donc sur `time` pour toute l'indexation/sélection.
+  if (wanted === 'clock') return props.streams?.time?.data?.length > 0 ? 'time' : wanted
   if (props.streams?.[wanted]?.data?.length > 0) return wanted
   return props.streams?.time?.data?.length > 0 ? 'time' : wanted
 })
+
+// Base horodatée (ms) du départ, « Z » retiré — même convention que activityTooltip.ts
+// et ActivityMapCard.vue : Strava expose start_date_local en heure locale mais suffixé
+// d'un « Z » trompeur. Retourne null si l'activité n'a pas de départ horodaté.
+function clockBaseMs() {
+  const iso = props.activity?.start_date_local
+  if (!iso) return null
+  const ms = new Date(String(iso).replace(/Z$/, '')).getTime()
+  return Number.isNaN(ms) ? null : ms
+}
+
+// Mode « heure » effectivement rendu : souhaité, flux `time` présent, et départ horodaté.
+const isClock = computed(() =>
+  props.xAxis === 'clock'
+  && props.streams?.time?.data?.length > 0
+  && clockBaseMs() != null,
+)
 
 function chartXFromRaw(rawX) {
   if (xKey.value === 'distance') return rawX / 1000
@@ -161,8 +182,14 @@ function chartXToRaw(x) {
 }
 
 function xAxisLabel() {
+  if (isClock.value) return t('strava.time_label_clock')
   if (xKey.value === 'distance') return t('strava.distance_km')
   return t('strava.time_label_min')
+}
+
+// Formate une base ms (horloge murale) en HH:MM pour les ticks du mode « heure ».
+function formatClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
 // Binary search the x stream (raw units) for the closest index to `target`.
@@ -843,13 +870,19 @@ async function renderCharts() {
             type: 'linear',
             // Titre d'axe retiré (rappelé dans la légende du panneau, cf. axis-x-hint).
             title: { display: false },
-            ticks: xKey.value === 'time'
+            ticks: isClock.value
               ? {
                   stepSize: 10,
                   maxTicksLimit: 30,
-                  callback: ((tf) => (val: number) => formatHMS(val * tf))(timeFactor()),
+                  callback: ((base, tf) => (val: number) => formatClock(base + val * tf * 1000))(clockBaseMs() ?? 0, timeFactor()),
                 }
-              : { maxTicksLimit: 8 },
+              : xKey.value === 'time'
+                ? {
+                    stepSize: 10,
+                    maxTicksLimit: 30,
+                    callback: ((tf) => (val: number) => formatHMS(val * tf))(timeFactor()),
+                  }
+                : { maxTicksLimit: 8 },
             // Épingle l'axe sur l'étendue exacte des données (hors zoom) pour que la
             // courbe touche les deux bords. Sans min/max, Chart.js arrondit au tick
             // supérieur et laisse un vide à droite (la courbe n'atteint pas 100 %).
@@ -942,7 +975,7 @@ function externalTooltipHandler(context) {
   el.innerHTML = buildTooltipHtml({
     streams: props.streams,
     activity: props.activity,
-    xAxis: xKey.value,
+    xAxis: props.xAxis,
     idx,
     visibleStreams: visibleStreamsLocal.value,
     priorityStreams: priority,
@@ -1742,6 +1775,8 @@ onBeforeUnmount(() => {
                 <label class="btn btn-outline-secondary" for="xAxis-distance">{{ t('strava.x_distance') }}</label>
                 <input type="radio" class="btn-check" name="xAxis" id="xAxis-time" autocomplete="off" value="time" :checked="xAxis === 'time'" :disabled="!streams || !streams.time" @change="setXAxis('time')" />
                 <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
+                <input type="radio" class="btn-check" name="xAxis" id="xAxis-clock" autocomplete="off" value="clock" :checked="xAxis === 'clock'" :disabled="!streams || !streams.time || !activity?.start_date_local" @change="setXAxis('clock')" />
+                <label class="btn btn-outline-secondary" for="xAxis-clock">{{ t('strava.x_clock') }}</label>
               </div>
             </div>
           </div>

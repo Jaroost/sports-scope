@@ -379,16 +379,35 @@ export function buildGradedSegments(
   return features
 }
 
-export function computeGainLoss(coords: Coord[]): { gain: number; loss: number } {
+// D+/D- d'une géométrie d'itinéraire. L'altitude BRouter/SRTM est quantifiée au
+// mètre et la géométrie est dense (sommets espacés de ~1–2 m) : accumuler chaque
+// écart brut sommet-à-sommet gonfle le dénivelé (chaque +1 m de bruit compte).
+// On lisse donc l'altitude par moyenne mobile (fenêtre 2*halfWin+1) avant
+// d'accumuler — même approche que computeElevGain côté activités, pour que le D+
+// d'un itinéraire et celui de l'activité correspondante concordent.
+export function computeGainLoss(coords: Coord[], halfWin = 2): { gain: number; loss: number } {
+  const n = coords.length
   let gain = 0
   let loss = 0
-  for (let i = 1; i < coords.length; i++) {
-    const a = coords[i - 1][2]
-    const b = coords[i][2]
-    if (a == null || b == null) continue
-    const d = b - a
-    if (d > 0) gain += d
-    else loss += -d
+  let prev: number | null = null
+  for (let i = 0; i < n; i++) {
+    let sum = 0
+    let cnt = 0
+    for (let j = Math.max(0, i - halfWin); j <= Math.min(n - 1, i + halfWin); j++) {
+      const a = coords[j][2]
+      if (a != null) {
+        sum += a
+        cnt++
+      }
+    }
+    if (cnt === 0) continue
+    const smooth = sum / cnt
+    if (prev != null) {
+      const d = smooth - prev
+      if (d > 0) gain += d
+      else loss += -d
+    }
+    prev = smooth
   }
   return { gain, loss }
 }

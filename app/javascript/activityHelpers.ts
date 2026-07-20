@@ -613,6 +613,233 @@ export function climbCategory(lengthKm: number, avgGrade: number): string | null
   return null
 }
 
+// ─── Moyenne d'un flux sur une tranche ───────────────────────────────────────
+// Moyenne des échantillons `> gt` et finis sur [start, end]. `gt` filtre les
+// arrêts : FC/cadence à 0 = capteur au repos (gt = 0), puissance à 0 = roue libre
+// à conserver (gt = -Infinity). Renvoie null si aucun échantillon retenu.
+function meanRange(
+  data: (number | null)[] | null | undefined,
+  start: number,
+  end: number,
+  gt = -Infinity,
+): number | null {
+  if (!Array.isArray(data)) return null
+  const e = Math.min(end, data.length - 1)
+  let sum = 0
+  let cnt = 0
+  for (let i = Math.max(0, start); i <= e; i++) {
+    const v = data[i]
+    if (typeof v === 'number' && Number.isFinite(v) && v > gt) { sum += v; cnt++ }
+  }
+  return cnt > 0 ? sum / cnt : null
+}
+
+// ─── Allure ajustée à la pente (Grade Adjusted Pace) ─────────────────────────
+// Le coût métabolique de la course dépend de la pente : monter coûte plus cher, si
+// bien qu'une allure « facile » en côte équivaut à une allure plus rapide sur le plat.
+// On convertit chaque tronçon en distance « plat équivalente » via le coût
+// énergétique de Minetti et al. (2002) — C(i) en J/(kg·m), i = pente en fraction
+// (dénivelé/horizontale) — puis GAP = temps ÷ distance plat équivalente.
+const RUN_FLAT_COST = 3.6 // C(0), coût sur le plat
+
+// Facteur de coût relatif au plat pour une pente donnée (fraction). Borné à ±45 %
+// (au-delà on marche, le modèle de course ne s'applique plus).
+export function runCostFactor(gradeFraction: number): number {
+  const i = Math.max(-0.45, Math.min(0.45, gradeFraction))
+  const c = 155.4 * i ** 5 - 30.4 * i ** 4 - 43.3 * i ** 3 + 46.3 * i ** 2 + 19.5 * i + 3.6
+  return c > 0 ? c / RUN_FLAT_COST : 0.1
+}
+
+// Allure ajustée à la pente (min/km décimales) sur [startIdx, endIdx], ou null si
+// la géométrie manque. Ne dépend pas du sport — l'appelant réserve son usage à la course.
+export function gradeAdjustedPace(
+  streams: Record<string, { data?: unknown } | undefined> | null | undefined,
+  startIdx = 0,
+  endIdx?: number,
+): number | null {
+  const dist = streams?.distance?.data as number[] | undefined
+  const alt = streams?.altitude?.data as number[] | undefined
+  const time = streams?.time?.data as number[] | undefined
+  if (!Array.isArray(dist) || !Array.isArray(alt) || !Array.isArray(time)) return null
+  const s = Math.max(0, startIdx)
+  const e = Math.min(endIdx ?? dist.length - 1, dist.length - 1, alt.length - 1, time.length - 1)
+  if (e - s < 1) return null
+  let flatEquiv = 0
+  for (let i = s + 1; i <= e; i++) {
+    const dd = dist[i] - dist[i - 1]
+    if (!(dd > 0)) continue
+    const da = (typeof alt[i] === 'number' && typeof alt[i - 1] === 'number') ? alt[i] - alt[i - 1] : 0
+    flatEquiv += dd * runCostFactor(da / dd)
+  }
+  const duration = time[e] - time[s]
+  if (!(flatEquiv > 0) || !(duration > 0)) return null
+  const p = paceMinPerKm(flatEquiv / duration)
+  return Number.isFinite(p) ? p : null
+}
+
+// ─── Facteur d'efficience (Efficiency Factor) ────────────────────────────────
+// Rendement aérobie = production ÷ FC moyenne. Avec puissance : NP ÷ FC (vélo).
+// Sinon, à partir de la vitesse : m/min ÷ FC (course/marche). Monte quand la forme
+// s'améliore (plus de sortie pour la même FC). Complète le découplage (qui, lui,
+// mesure la dérive intra-séance). Renvoie null sans FC exploitable.
+export interface Efficiency { value: number; basis: 'power' | 'pace' }
+
+export function efficiencyFactor(
+  streams: Record<string, { data?: unknown } | undefined> | null | undefined,
+  startIdx = 0,
+  endIdx?: number,
+): Efficiency | null {
+  const hr = streams?.heartrate?.data as number[] | undefined
+  if (!Array.isArray(hr)) return null
+  const s = Math.max(0, startIdx)
+  const e = Math.min(endIdx ?? hr.length - 1, hr.length - 1)
+  const meanHr = meanRange(hr, s, e, 0)
+  if (meanHr == null || meanHr <= 0) return null
+
+  const watts = streams?.watts?.data as (number | null)[] | undefined
+  const hasPower = Array.isArray(watts)
+    && watts.slice(s, e + 1).some((w) => typeof w === 'number' && w > 0)
+  if (hasPower) {
+    const np = normalizedPower(watts, s, e)
+    if (np == null) return null
+    return { value: np / meanHr, basis: 'power' }
+  }
+
+  const dist = streams?.distance?.data as number[] | undefined
+  const time = streams?.time?.data as number[] | undefined
+  if (Array.isArray(dist) && Array.isArray(time)) {
+    const dd = dist[Math.min(e, dist.length - 1)] - dist[s]
+    const dt = time[Math.min(e, time.length - 1)] - time[s]
+    if (dd > 0 && dt > 0) return { value: (dd / dt * 60) / meanHr, basis: 'pace' }
+  }
+  return null
+}
+
+// ─── Stats d'une tranche [startIdx, endIdx] ──────────────────────────────────
+// Récapitulatif complet d'un segment : durée/distance, allure ou vitesse, FC,
+// puissance (+ NP), cadence, D+/D-, VAM, pente nette, GAP et EF. Sert à l'analyseur
+// de segment sélectionné ET à chaque ligne de la table des splits.
+export interface SegmentStats {
+  startIdx: number
+  endIdx: number
+  isRun: boolean
+  duration: number | null   // s (temps écoulé de la tranche)
+  distance: number | null   // m
+  avgSpeed: number | null   // m/s
+  pace: number | null       // min/km décimales (course)
+  gap: number | null        // min/km ajustée pente (course)
+  gain: number
+  loss: number
+  vam: number | null        // m/h
+  avgGrade: number | null   // % (net)
+  avgHr: number | null
+  avgPower: number | null
+  np: number | null
+  avgCadence: number | null
+  ef: number | null
+  efBasis: 'power' | 'pace' | null
+}
+
+export function segmentStats(
+  streams: Record<string, { data?: unknown } | undefined> | null | undefined,
+  activity: Record<string, unknown> | null | undefined,
+  startIdx: number,
+  endIdx: number,
+): SegmentStats {
+  const time = streams?.time?.data as number[] | undefined
+  const dist = streams?.distance?.data as number[] | undefined
+  const alt = streams?.altitude?.data as (number | null)[] | undefined
+  const refLen = time?.length || dist?.length || alt?.length || 0
+  const s = Math.max(0, Math.min(startIdx, endIdx))
+  const e = Math.min(Math.max(startIdx, endIdx), Math.max(0, refLen - 1))
+  const run = isRun(activity)
+
+  const duration = (Array.isArray(time) && Number.isFinite(time[e]) && Number.isFinite(time[s]))
+    ? Math.max(0, time[e] - time[s]) : null
+  const distance = (Array.isArray(dist) && Number.isFinite(dist[e]) && Number.isFinite(dist[s]))
+    ? Math.max(0, dist[e] - dist[s]) : null
+  const avgSpeed = (distance != null && duration != null && duration > 0) ? distance / duration : null
+  const pace = (run && avgSpeed != null && avgSpeed >= 0.5) ? paceMinPerKm(avgSpeed) : null
+
+  let gain = 0
+  let loss = 0
+  let avgGrade: number | null = null
+  let vam: number | null = null
+  if (Array.isArray(alt) && alt.length > e) {
+    const g = computeElevGain(alt.slice(s, e + 1))
+    gain = g.gain
+    loss = g.loss
+    const a0 = alt[s]
+    const a1 = alt[e]
+    if (distance != null && distance > 0 && typeof a0 === 'number' && typeof a1 === 'number') {
+      avgGrade = ((a1 - a0) / distance) * 100
+    }
+    if (duration != null && duration > 0 && gain > 0) vam = (gain / duration) * 3600
+  }
+
+  const ef = efficiencyFactor(streams, s, e)
+  return {
+    startIdx: s,
+    endIdx: e,
+    isRun: run,
+    duration,
+    distance,
+    avgSpeed,
+    pace,
+    gap: run ? gradeAdjustedPace(streams, s, e) : null,
+    gain,
+    loss,
+    vam,
+    avgGrade,
+    avgHr: meanRange(streams?.heartrate?.data as (number | null)[], s, e, 0),
+    avgPower: meanRange(streams?.watts?.data as (number | null)[], s, e),
+    np: normalizedPower(streams?.watts?.data as (number | null)[], s, e),
+    avgCadence: meanRange(streams?.cadence?.data as (number | null)[], s, e, 0),
+    ef: ef?.value ?? null,
+    efBasis: ef?.basis ?? null,
+  }
+}
+
+// ─── Splits automatiques (par km, ou par mile via splitMeters) ───────────────
+// Découpe l'activité en tranches de `splitMeters` sur le flux `distance` et
+// calcule les stats de chacune. La dernière tranche (< splitMeters) est marquée
+// `partial`. Universel : marche pour Strava comme pour les .fit importés — la
+// seule dépendance est le flux `distance`, toujours présent sur une sortie GPS.
+export interface SplitRow extends SegmentStats {
+  index: number
+  partial: boolean
+}
+
+export function computeSplits(
+  streams: Record<string, { data?: unknown } | undefined> | null | undefined,
+  activity: Record<string, unknown> | null | undefined,
+  splitMeters = 1000,
+): SplitRow[] {
+  const dist = streams?.distance?.data as number[] | undefined
+  if (!Array.isArray(dist) || dist.length < 2) return []
+  const n = dist.length
+  const total = dist[n - 1]
+  if (!(total > splitMeters)) return [] // sortie plus courte qu'un split : rien à découper
+
+  const ranges: { start: number; end: number; partial: boolean }[] = []
+  let start = 0
+  let threshold = splitMeters
+  for (let i = 1; i < n; i++) {
+    if (dist[i] >= threshold && i > start) {
+      ranges.push({ start, end: i, partial: false })
+      start = i
+      threshold += splitMeters
+    }
+  }
+  if (start < n - 1) ranges.push({ start, end: n - 1, partial: true })
+
+  return ranges.map((r, i) => ({
+    ...segmentStats(streams, activity, r.start, r.end),
+    index: i + 1,
+    partial: r.partial,
+  }))
+}
+
 export function detectClimbs(
   grades: number[] | null | undefined,
   altitudes: number[] | null | undefined,

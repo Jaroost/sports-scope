@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { Tooltip } from 'bootstrap'
 import { t } from '../i18n'
 import {
   chartIcons,
@@ -20,6 +21,7 @@ import {
   gradeForIndex,
   streamIsMeaningful,
   normalizedPower,
+  efficiencyFactor,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -273,6 +275,14 @@ function rangeNp() {
   const end = b ? b.endIdx : watts.length - 1
   return normalizedPower(watts, start, end)
 }
+
+// Efficience du segment sélectionné (ou de l'activité entière) : rendement
+// production ÷ FC. Même mesure que la carte « Efficience » des stats, mais suit la
+// sélection du graphique. Calculée une fois par changement de sélection (computed).
+const rangeEf = computed(() => {
+  const b = rangeBounds()
+  return efficiencyFactor(props.streams, b ? b.startIdx : 0, b ? b.endIdx : undefined)
+})
 
 function rangeGrade() {
   // Net rise / horizontal distance — matches the col markers on the map.
@@ -1573,6 +1583,7 @@ onMounted(async () => {
     await new Promise((r) => requestAnimationFrame(r))
     await renderCharts()
   }
+  initChipTooltips()
 })
 
 // When the parent fetches `streams` asynchronously, we may mount with
@@ -1585,13 +1596,41 @@ watch(() => props.streams, async (val, old) => {
   }
 })
 
+// ─── Tooltips Bootstrap des pastilles (VAM / NP / efficience) ─────────────────
+// Mêmes infobulles riches (HTML) que les cartes de stats. On (ré)instancie quand
+// l'ensemble des pastilles change (données chargées, carte repliée, base de l'EF).
+// La classe .stat-tooltip vient d'ActivityStats (style non scoped, injecté dès que
+// ce composant frère est importé par ActivityDetail).
+const chartsRoot = ref<HTMLElement | null>(null)
+let chipTips: Tooltip[] = []
+
+function disposeChipTooltips() {
+  chipTips.forEach((tip) => tip.dispose())
+  chipTips = []
+}
+
+function initChipTooltips() {
+  disposeChipTooltips()
+  const el = chartsRoot.value
+  if (!el) return
+  el.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
+    chipTips.push(new Tooltip(node, { container: 'body' }))
+  })
+}
+
+watch(
+  () => [props.streams, props.collapsed, chipStreams.value.length, rangeEf.value?.basis],
+  () => nextTick(initChipTooltips),
+)
+
 onBeforeUnmount(() => {
+  disposeChipTooltips()
   destroyCharts()
 })
 </script>
 
 <template>
-  <div class="card shadow-sm border-0 mt-3">
+  <div ref="chartsRoot" class="card shadow-sm border-0 mt-3">
     <div class="card-header activity-card-header charts-sticky-header">
       <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
         <h3 class="h6 mb-0 d-flex align-items-center gap-2">
@@ -1740,14 +1779,17 @@ onBeforeUnmount(() => {
           <strong>{{ rangeGrade().toFixed(1) }} %</strong>
         </span>
         <div
-          v-if="rangeVam() != null || rangeNp() != null || chipStreams.length > 0"
+          v-if="rangeVam() != null || rangeNp() != null || rangeEf != null || chipStreams.length > 0"
           class="control-group range-chip-group"
         >
           <span
             v-if="rangeVam() != null"
             class="range-chip"
             :class="rangeVam() >= 0 ? 'range-chip-success' : 'range-chip-danger'"
-            :title="t('strava.stats.vam_hint')"
+            data-bs-toggle="tooltip"
+            data-bs-html="true"
+            data-bs-custom-class="stat-tooltip"
+            :data-bs-title="t('strava.stats.vam_hint')"
           >
             <i class="fa-solid fa-mountain" aria-hidden="true"></i>
             <strong>{{ Math.round(rangeVam()) }} m/h</strong>
@@ -1757,11 +1799,27 @@ onBeforeUnmount(() => {
             v-if="rangeNp() != null"
             class="range-chip range-chip-stream"
             :style="{ background: '#fd7e141f', color: '#fd7e14' }"
-            :title="t('strava.stats.np_hint')"
+            data-bs-toggle="tooltip"
+            data-bs-html="true"
+            data-bs-custom-class="stat-tooltip"
+            :data-bs-title="t('strava.stats.np_hint')"
           >
             <i class="fa-solid fa-bolt" aria-hidden="true"></i>
             <span class="range-chip-tag">{{ t('strava.np_label') }}</span>
             <strong>{{ Math.round(rangeNp()) }} W</strong>
+          </span>
+          <span
+            v-if="rangeEf != null"
+            class="range-chip range-chip-stream"
+            :style="{ background: '#1987541f', color: '#198754' }"
+            data-bs-toggle="tooltip"
+            data-bs-html="true"
+            data-bs-custom-class="stat-tooltip"
+            :data-bs-title="t(`strava.stats.ef_hint_${rangeEf.basis}`)"
+          >
+            <i class="fa-solid fa-gauge" aria-hidden="true"></i>
+            <span class="range-chip-tag">{{ t('strava.stats.ef') }}</span>
+            <strong>{{ rangeEf.value.toFixed(2) }}</strong>
           </span>
           <span
             v-for="streamKey in chipStreams"

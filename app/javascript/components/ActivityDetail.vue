@@ -13,7 +13,10 @@
 
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds, aerobicDecoupling } from '../activityHelpers'
+import {
+  PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds, aerobicDecoupling,
+  efficiencyFactor, gradeAdjustedPace, segmentStats, computeSplits, isRun, paceMinPerKm,
+} from '../activityHelpers'
 // Même détection de cols et même pente lissée (fenêtre du profil) que le créateur
 // d'itinéraire, pour que carte, graphique et tableau de cols soient cohérents.
 import { detectClimbs, gradeForIndex } from '../routeHelpers'
@@ -170,6 +173,32 @@ const trainingMetrics = computed(() => {
 // Découplage aérobie (dérive cardiaque) : efficience 1re vs 2e moitié de la sortie.
 // Best-effort — null si l'effort est trop court ou sans FC + puissance/vitesse.
 const decoupling = computed(() => aerobicDecoupling(streams.value))
+
+// Facteur d'efficience (EF) de la sortie entière : NP÷FC (puissance) ou vitesse÷FC.
+// Complète le découplage — l'un mesure le rendement global, l'autre sa dérive.
+const efficiency = computed(() => efficiencyFactor(streams.value))
+
+// Allure ajustée à la pente (GAP) — course uniquement. On expose aussi l'allure
+// réelle moyenne pour afficher l'écart « GAP vs allure vécue ».
+const gradeAdjusted = computed(() => {
+  if (!isRun(activity.value)) return null
+  const gap = gradeAdjustedPace(streams.value)
+  if (gap == null) return null
+  const spd = activity.value?.average_speed
+  const actual = (Number.isFinite(spd) && spd >= 0.5) ? paceMinPerKm(spd) : null
+  return { gap, actual }
+})
+
+// Splits par km — universel (Strava + .fit), dépend seulement du flux `distance`.
+const splits = computed(() => computeSplits(streams.value, activity.value))
+
+// Récap du segment sélectionné (drague A/B, clic sur un col / une puissance / un split).
+// Alimente l'analyseur de segment ; null quand rien n'est sélectionné.
+const segmentSummary = computed(() => {
+  const s = selection.value
+  if (!s || !streams.value) return null
+  return segmentStats(streams.value, activity.value, s.startIdx, s.endIdx)
+})
 
 // Best average power per standard duration (peak-power curve). Uses a
 // cumulative-energy integral so non-uniform sampling and stoppages don't
@@ -486,6 +515,10 @@ onMounted(async () => {
         :global-vam="globalVam"
         :training-metrics="trainingMetrics"
         :decoupling="decoupling"
+        :efficiency="efficiency"
+        :grade-adjusted="gradeAdjusted"
+        :segment-summary="segmentSummary"
+        :splits="splits"
         :climbs-with-vam="climbsWithVam"
         :peak-powers="peakPowers"
         :peak-power-ranks="peakPowerRanks"

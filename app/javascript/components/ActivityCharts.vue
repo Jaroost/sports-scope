@@ -19,6 +19,7 @@ import {
   bucketGrade,
   gradeForIndex,
   streamIsMeaningful,
+  normalizedPower,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -259,6 +260,18 @@ function rangeVam() {
   const a1 = alt[Math.min(b.endIdx, alt.length - 1)]
   if (typeof a0 !== 'number' || typeof a1 !== 'number') return null
   return ((a1 - a0) / dur) * 3600
+}
+
+// Puissance normalisée du segment sélectionné (ou de l'activité entière sans
+// sélection). Complète la puissance MOYENNE déjà donnée par le chip watts : sur
+// un col ou un intervalle, la NP reflète mieux le coût réel de l'effort.
+function rangeNp() {
+  const watts = props.streams?.watts?.data
+  if (!Array.isArray(watts) || watts.length < 30) return null
+  const b = rangeBounds()
+  const start = b ? b.startIdx : 0
+  const end = b ? b.endIdx : watts.length - 1
+  return normalizedPower(watts, start, end)
 }
 
 function rangeGrade() {
@@ -1727,7 +1740,7 @@ onBeforeUnmount(() => {
           <strong>{{ rangeGrade().toFixed(1) }} %</strong>
         </span>
         <div
-          v-if="rangeVam() != null || chipStreams.length > 0"
+          v-if="rangeVam() != null || rangeNp() != null || chipStreams.length > 0"
           class="control-group range-chip-group"
         >
           <span
@@ -1739,6 +1752,16 @@ onBeforeUnmount(() => {
             <i class="fa-solid fa-mountain" aria-hidden="true"></i>
             <strong>{{ Math.round(rangeVam()) }} m/h</strong>
             <i class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
+          </span>
+          <span
+            v-if="rangeNp() != null"
+            class="range-chip range-chip-stream"
+            :style="{ background: '#fd7e141f', color: '#fd7e14' }"
+            :title="t('strava.stats.np_hint')"
+          >
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+            <span class="range-chip-tag">{{ t('strava.np_label') }}</span>
+            <strong>{{ Math.round(rangeNp()) }} W</strong>
           </span>
           <span
             v-for="streamKey in chipStreams"
@@ -2033,6 +2056,12 @@ onBeforeUnmount(() => {
   cursor: help;
 }
 .range-chip-stream strong { color: inherit; }
+.range-chip-tag {
+  font-size: 0.7em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+}
 .chip-info-hint {
   font-size: 0.65em;
   opacity: 0.55;

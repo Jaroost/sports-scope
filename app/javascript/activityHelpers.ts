@@ -174,6 +174,119 @@ export const STREAM_CHIP_ORDER: string[] = ['grade_smooth', 'watts', 'velocity_s
 // on the Ruby side so server-stored values align with on-screen rows).
 export const PEAK_POWER_DURATIONS: number[] = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400]
 
+// ─── Puissance normalisée (NP) sur une tranche ───────────────────────────────
+// Même formule que le serveur (TrainingLoad.normalized_power) : moyenne mobile
+// 30 échantillons de la puissance, élevée à la 4, moyennée, puis racine 4e.
+// Suppose un échantillonnage ~1 Hz (Strava/FIT). Sert à noter un segment
+// sélectionné côté client ; la NP de l'activité entière vient du serveur.
+// Renvoie null si la tranche fait moins de 30 points.
+export function normalizedPower(
+  watts: (number | null)[] | null | undefined,
+  startIdx = 0,
+  endIdx?: number,
+): number | null {
+  if (!Array.isArray(watts) || watts.length === 0) return null
+  const end = Math.min(endIdx ?? watts.length - 1, watts.length - 1)
+  const start = Math.max(0, startIdx)
+  const n = end - start + 1
+  if (n < 30) return null
+  const window = 30
+  const rolling: number[] = []
+  let sum = 0
+  const at = (i: number) => {
+    const w = watts[i]
+    return typeof w === 'number' && Number.isFinite(w) ? w : 0
+  }
+  for (let k = 0; k < n; k++) {
+    sum += at(start + k)
+    if (k >= window) sum -= at(start + k - window)
+    if (k >= window - 1) rolling.push(sum / window)
+  }
+  if (rolling.length === 0) return null
+  const mean4 = rolling.reduce((acc, r) => acc + r ** 4, 0) / rolling.length
+  const np = mean4 ** 0.25
+  return Number.isFinite(np) && np > 0 ? np : null
+}
+
+export interface Decoupling {
+  pct: number
+  basis: 'power' | 'pace'
+}
+
+// ─── Découplage aérobie (Pw:Hr / dérive cardiaque) ───────────────────────────
+// Compare l'efficience (sortie / FC) de la 1re moitié vs la 2e moitié de la sortie.
+// Sortie = NP quand la puissance est présente, sinon vitesse moyenne (m/s).
+// pct > 0 : la FC a dérivé vers le haut relativement à la sortie (fatigue) ;
+// < 5 % ≈ bonne base aérobie. On ne le calcule que pour des efforts assez longs
+// (≥ minMovingSeconds) et on ignore les échantillons en pause. Renvoie null sinon.
+export function aerobicDecoupling(
+  streams: Record<string, { data?: unknown } | undefined> | null | undefined,
+  minSeconds = 1200,
+): Decoupling | null {
+  const time = streams?.time?.data as number[] | undefined
+  const hr = streams?.heartrate?.data as number[] | undefined
+  if (!Array.isArray(time) || !Array.isArray(hr) || time.length < 4) return null
+
+  const watts = streams?.watts?.data as (number | null)[] | undefined
+  const vel = streams?.velocity_smooth?.data as (number | null)[] | undefined
+  const moving = streams?.moving?.data as (boolean | null)[] | undefined
+  const hasPower = Array.isArray(watts) && watts.some((w) => typeof w === 'number' && w > 0)
+  const output = (hasPower ? watts : vel) as (number | null)[] | undefined
+  if (!Array.isArray(output)) return null
+
+  const n = Math.min(time.length, hr.length, output.length)
+  if (n < 4) return null
+  const total = time[n - 1] - time[0]
+  if (!Number.isFinite(total) || total < minSeconds) return null
+
+  // Coupe à la moitié du temps écoulé (et non de l'index) pour deux moitiés de
+  // durée égale même quand l'échantillonnage n'est pas régulier.
+  const mid = time[0] + total / 2
+  let splitIdx = n - 1
+  for (let i = 0; i < n; i++) {
+    if (time[i] >= mid) { splitIdx = i; break }
+  }
+  if (splitIdx <= 1 || splitIdx >= n - 1) return null
+
+  const moved = (i: number) => !(moving && moving[i] === false)
+
+  // Efficience d'une moitié [a, b) : NP (ou vitesse moyenne) / FC moyenne, sur les
+  // seuls échantillons en mouvement.
+  const efHalf = (a: number, b: number): number | null => {
+    let hrSum = 0
+    let hrCnt = 0
+    for (let i = a; i < b; i++) {
+      if (!moved(i)) continue
+      const h = hr[i]
+      if (typeof h === 'number' && Number.isFinite(h) && h > 0) { hrSum += h; hrCnt++ }
+    }
+    if (hrCnt === 0) return null
+    const meanHr = hrSum / hrCnt
+    let out: number | null
+    if (hasPower) {
+      out = normalizedPower(output, a, b - 1)
+    } else {
+      let sSum = 0
+      let sCnt = 0
+      for (let i = a; i < b; i++) {
+        if (!moved(i)) continue
+        const s = output[i]
+        if (typeof s === 'number' && Number.isFinite(s) && s >= 0.5) { sSum += s; sCnt++ }
+      }
+      out = sCnt > 0 ? sSum / sCnt : null
+    }
+    if (out == null || meanHr <= 0) return null
+    return out / meanHr
+  }
+
+  const ef1 = efHalf(0, splitIdx)
+  const ef2 = efHalf(splitIdx, n)
+  if (ef1 == null || ef2 == null || ef1 <= 0) return null
+  const pct = ((ef1 - ef2) / ef1) * 100
+  if (!Number.isFinite(pct)) return null
+  return { pct: Math.round(pct * 10) / 10, basis: hasPower ? 'power' : 'pace' }
+}
+
 // ─── Elevation gain/loss ──────────────────────────────────────────────────
 // Compute D+/D- from a flat altitude array using a (2*halfWin+1)-point moving
 // average to suppress sensor/quantisation noise before accumulating. Works for

@@ -13,7 +13,7 @@
 
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds } from '../activityHelpers'
+import { PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds, aerobicDecoupling } from '../activityHelpers'
 // Même détection de cols et même pente lissée (fenêtre du profil) que le créateur
 // d'itinéraire, pour que carte, graphique et tableau de cols soient cohérents.
 import { detectClimbs, gradeForIndex } from '../routeHelpers'
@@ -149,6 +149,27 @@ const globalVam = computed(() => {
   if (!Number.isFinite(gain) || gain <= 0 || !Number.isFinite(denomS) || denomS <= 0) return null
   return (gain / denomS) * 3600
 })
+
+// ─── Métriques d'entraînement de l'activité (NP / IF / TSS / VI) ──────────
+// NP, IF et TSS viennent du serveur (dépendent de seuils : FTP/LTHR). VI = NP /
+// puissance moyenne se déduit ici. IF n'est montré que quand le TSS est basé sur
+// la puissance (le facteur d'intensité est une notion de puissance).
+const trainingMetrics = computed(() => {
+  const a = activity.value
+  if (!a) return null
+  const np = Number.isFinite(a.normalized_power) ? a.normalized_power : null
+  const avgW = Number.isFinite(a.average_watts) ? a.average_watts : null
+  const tss = Number.isFinite(a.tss) ? a.tss : null
+  const intensity = (a.tss_source === 'power' && Number.isFinite(a.intensity_factor))
+    ? a.intensity_factor : null
+  const vi = (np != null && avgW != null && avgW > 0) ? np / avgW : null
+  if (np == null && tss == null && intensity == null && vi == null) return null
+  return { np, intensity, tss, tssSource: a.tss_source, vi }
+})
+
+// Découplage aérobie (dérive cardiaque) : efficience 1re vs 2e moitié de la sortie.
+// Best-effort — null si l'effort est trop court ou sans FC + puissance/vitesse.
+const decoupling = computed(() => aerobicDecoupling(streams.value))
 
 // Best average power per standard duration (peak-power curve). Uses a
 // cumulative-energy integral so non-uniform sampling and stoppages don't
@@ -463,6 +484,8 @@ onMounted(async () => {
         class="mb-3"
         :moving-stats="movingStats"
         :global-vam="globalVam"
+        :training-metrics="trainingMetrics"
+        :decoupling="decoupling"
         :climbs-with-vam="climbsWithVam"
         :peak-powers="peakPowers"
         :peak-power-ranks="peakPowerRanks"

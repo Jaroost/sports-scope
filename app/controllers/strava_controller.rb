@@ -430,7 +430,12 @@ class StravaController < ApplicationController
     tss = TrainingLoad.tss_for(current_user, source, external_id)
     return payload unless tss
 
-    payload.merge(activity: payload[:activity].merge('tss' => tss[:tss], 'tss_source' => tss[:source]))
+    extra = { 'tss' => tss[:tss], 'tss_source' => tss[:source], 'intensity_factor' => tss[:intensity] }
+    # NP est stocké par activité (pas dans le résumé brut Strava mis en cache) : on
+    # le rattache ici pour que la page de détail affiche NP / VI sans re-fetch.
+    np = current_user.strava_activities.find_by(strava_id: external_id)&.normalized_power
+    extra['normalized_power'] = np if np
+    payload.merge(activity: payload[:activity].merge(extra))
   end
 
   def built_summary(a)

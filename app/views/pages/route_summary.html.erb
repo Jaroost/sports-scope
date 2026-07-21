@@ -1,0 +1,190 @@
+<%# Page de partage publique d'un itinéraire. Entièrement rendue côté serveur : les
+    crawlers d'aperçu des messageries (WhatsApp, Signal, Slack, iMessage) n'exécutent
+    pas de JS, et la page doit rester lisible pour un destinataire sans compte. %>
+<% content_for :title, @route.name %>
+<%
+  description = summary_description(@route)
+  preview_url = shared_route_preview_url(@route.share_token)
+  page_url = share_route_url(@route.share_token)
+%>
+<% content_for :head do %>
+  <meta name="description" content="<%= description %>">
+  <%# Les liens par jeton ne doivent pas se retrouver dans un index de recherche.
+      N'empêche pas les crawlers d'aperçu, qui ignorent robots par conception. %>
+  <meta name="robots" content="noindex, nofollow">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="<%= @route.name %>">
+  <meta property="og:description" content="<%= description %>">
+  <meta property="og:url" content="<%= page_url %>">
+  <meta property="og:site_name" content="<%= t('app.title') %>">
+  <meta property="og:image" content="<%= preview_url %>">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="<%= RoutePreviewImage::WIDTH %>">
+  <meta property="og:image:height" content="<%= RoutePreviewImage::HEIGHT %>">
+  <meta name="twitter:card" content="summary_large_image">
+<% end %>
+
+<div class="route-summary mx-auto">
+  <%# Titre et sport sur une ligne ; le sport ne rétrécit pas, c'est le nom qui est
+      tronqué s'il est trop long. %>
+  <div class="d-flex align-items-baseline gap-2 mb-3">
+    <h1 class="h3 mb-0 text-truncate flex-grow-1"><%= @route.name %></h1>
+    <span class="text-body-secondary text-nowrap flex-shrink-0">
+      <i class="fa-solid <%= { "cycling" => "fa-person-biking", "mtb" => "fa-mountain", "hiking" => "fa-person-hiking" }[@route.activity] %> me-1" aria-hidden="true"></i>
+      <%= t("routes.wt_sport_#{@route.activity}") %>
+    </span>
+  </div>
+
+  <div class="card mb-3">
+    <%# Aperçu du tracé. Le SVG (mêmes couleurs de pente que la liste) est rendu par le
+        serveur : c'est ce que voient les crawlers d'aperçu, qui n'exécutent pas de JS.
+        Dans un navigateur, l'îlot SharedRoutePreviewMap le remplace par le même tracé
+        sur un fond de carte. Le PNG équivalent, lui, ne sert qu'à og:image. %>
+    <div class="route-summary-preview">
+      <div data-vue-component="SharedRoutePreviewMap"
+           data-vue-props='<%= {
+             polyline: @route.map_polyline || [],
+             styleId: "cyclosm",
+           }.to_json %>'>
+        <% if @route.preview_segments.present? %>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="<%= @route.name %>">
+            <% @route.preview_segments.each do |segment| %>
+              <path d="<%= segment["d"] %>" fill="none"
+                    stroke="<%= { 1 => "#e0503f", 2 => "#2f8fed" }.fetch(segment["c"], "#9aa0a6") %>"
+                    stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+            <% end %>
+          </svg>
+        <% else %>
+          <p class="text-body-secondary m-0"><%= t("routes.summary.no_preview") %></p>
+        <% end %>
+      </div>
+    </div>
+
+    <%# Profil altimétrique, calculé côté serveur depuis la géométrie (cf.
+        RouteSummaryHelper#summary_profile) et coloré par paliers de pente, comme le
+        graphique du créateur d'itinéraire. %>
+    <% profile = summary_profile(@route) %>
+    <% if profile %>
+      <div class="route-summary-profile">
+        <svg viewBox="0 0 100 30" preserveAspectRatio="none" role="img"
+             aria-label="<%= t('routes.summary.profile') %>">
+          <%# Repères d'altitude sous le tracé, pour donner l'échelle du relief. %>
+          <% profile[:grid].each do |y| %>
+            <line x1="0" x2="100" y1="<%= y %>" y2="<%= y %>" class="route-summary-profile-grid"
+                  vector-effect="non-scaling-stroke" />
+          <% end %>
+          <% profile[:runs].each do |run| %>
+            <path d="<%= run[:area] %>" fill="<%= run[:color] %>" fill-opacity="0.3" stroke="none" />
+          <% end %>
+          <% profile[:runs].each do |run| %>
+            <path d="<%= run[:line] %>" fill="none" stroke="<%= run[:color] %>" stroke-width="1.5"
+                  vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round" />
+          <% end %>
+        </svg>
+      </div>
+    <% end %>
+
+    <div class="card-body">
+      <dl class="route-summary-stats mb-0">
+        <div>
+          <dt><%= t("routes.summary.distance") %></dt>
+          <dd><%= summary_km(@route.distance_m) %></dd>
+        </div>
+        <div>
+          <dt><%= t("routes.summary.elevation_gain") %></dt>
+          <dd class="text-danger-emphasis"><%= summary_elevation(@route.elevation_gain_m) %></dd>
+        </div>
+        <% speed = number_with_precision(@route.avg_speed_kmh, precision: 1, strip_insignificant_zeros: true) %>
+        <div>
+          <dt><%= t("routes.summary.duration") %></dt>
+          <dd title="<%= t('routes.summary.duration_hint', speed: speed) %>"><%= summary_duration(@route.estimated_seconds) %></dd>
+        </div>
+        <div>
+          <dt><%= t("routes.summary.speed") %></dt>
+          <dd><%= speed %> km/h</dd>
+        </div>
+      </dl>
+    </div>
+  </div>
+
+  <% markers = Array(@route.markers) %>
+  <% if markers.any? %>
+    <%# Un lien Google Maps par repère : l'API d'itinéraire Google plafonne à ~9 points
+        intermédiaires, un lien unique ne tiendrait pas la charge. %>
+    <h2 class="h6 text-body-secondary"><%= t("routes.summary.markers") %></h2>
+    <div class="list-group mb-3">
+      <% markers.each do |marker| %>
+        <% kind_label = t("routes.marker_#{marker['kind']}", default: marker["kind"].to_s.humanize) %>
+        <a class="list-group-item list-group-item-action d-flex align-items-center gap-2"
+           href="https://www.google.com/maps/search/?api=1&query=<%= u("#{marker['lat']},#{marker['lng']}") %>"
+           target="_blank" rel="noopener noreferrer">
+          <i class="fa-solid <%= { "start" => "fa-flag", "finish" => "fa-flag-checkered", "parking" => "fa-square-parking" }.fetch(marker["kind"], "fa-location-dot") %> fa-fw text-warning" aria-hidden="true"></i>
+          <%# Le type porte le nom du repère ; le libellé saisi ne s'affiche à côté que
+              s'il ajoute quelque chose (sinon on répéterait « Départ · Départ »). %>
+          <span class="badge rounded-pill route-summary-pill route-summary-pill-<%= marker["kind"] %>"><%= kind_label %></span>
+          <span class="flex-grow-1 text-truncate">
+            <%= marker["label"] if marker["label"].present? && marker["label"] != kind_label %>
+          </span>
+          <small class="text-body-secondary flex-shrink-0"><%= t("routes.summary.open_in_maps") %></small>
+        </a>
+      <% end %>
+    </div>
+  <% end %>
+
+  <h2 class="h6 text-body-secondary"><%= t("routes.summary.actions") %></h2>
+  <div class="list-group mb-3">
+    <%= link_to view_route_path(@route.share_token), class: "list-group-item list-group-item-action d-flex align-items-center gap-3" do %>
+      <i class="fa-solid fa-eye fa-fw text-warning" aria-hidden="true"></i>
+      <span>
+        <span class="d-block fw-semibold"><%= t("routes.summary.view") %></span>
+        <small class="text-body-secondary"><%= t("routes.summary.view_hint") %></small>
+      </span>
+    <% end %>
+    <%= link_to navigate_route_path(@route.share_token), class: "list-group-item list-group-item-action d-flex align-items-center gap-3" do %>
+      <i class="fa-solid fa-location-arrow fa-fw text-warning" aria-hidden="true"></i>
+      <span>
+        <span class="d-block fw-semibold"><%= t("routes.summary.navigate") %></span>
+        <small class="text-body-secondary"><%= t("routes.summary.navigate_hint") %></small>
+      </span>
+    <% end %>
+    <%= link_to "/api/routes/shared/#{@route.share_token}/gpx", class: "list-group-item list-group-item-action d-flex align-items-center gap-3" do %>
+      <i class="fa-solid fa-download fa-fw text-warning" aria-hidden="true"></i>
+      <span>
+        <span class="d-block fw-semibold"><%= t("routes.summary.gpx") %></span>
+        <small class="text-body-secondary"><%= t("routes.summary.gpx_hint") %></small>
+      </span>
+    <% end %>
+  </div>
+
+  <% localities = Array(@route.localities) %>
+  <% if localities.any? %>
+    <%# En fin de page : c'est du contexte, pas une action. Et un 120 km traverse
+        facilement cent hameaux — on en montre assez pour situer l'itinéraire, on
+        compte le reste, et la liste ne repousse pas les liens hors de l'écran. %>
+    <div class="card mb-3">
+      <div class="card-body">
+        <h2 class="h6 text-body-secondary"><%= t("routes.summary.localities") %></h2>
+        <%# Dépliage en CSS pur (case masquée + label) : la page n'a pas d'îlot Vue, et
+            ça reste fonctionnel avant même que le bundle JS soit chargé. %>
+        <input type="checkbox" id="localities-toggle" class="route-summary-toggle visually-hidden">
+        <div class="route-summary-localities">
+          <% localities.each_with_index do |locality, i| %>
+            <span class="badge rounded-pill route-summary-pill <%= "route-summary-pill-extra" if i >= RouteSummaryHelper::MAX_LOCALITIES %>"><%= locality %></span>
+          <% end %>
+          <% if localities.size > RouteSummaryHelper::MAX_LOCALITIES %>
+            <label for="localities-toggle" class="badge rounded-pill route-summary-pill route-summary-pill-muted route-summary-more">
+              <%= t("routes.summary.localities_more", count: localities.size - RouteSummaryHelper::MAX_LOCALITIES) %>
+            </label>
+            <label for="localities-toggle" class="badge rounded-pill route-summary-pill route-summary-pill-muted route-summary-less">
+              <%= t("routes.summary.localities_less") %>
+            </label>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
+  <p class="text-body-secondary small mb-0">
+    <%= link_to t("routes.summary.footer", app: t("app.title")), root_path, class: "text-reset" %>
+  </p>
+</div>

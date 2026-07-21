@@ -17,6 +17,13 @@ Rails.application.routes.draw do
     # Read-only view of a route inside the builder UI — addressed by share_token,
     # public (works for signed-out recipients).
     get "/routes/:token/view", to: "pages#route_view", as: :view_route
+    # Page de partage : résumé public d'un itinéraire (aperçu, stats, liens vers la
+    # vue en lecture seule / la navigation / le GPX). C'est l'URL qu'on partage — elle
+    # porte les balises Open Graph qui produisent l'aperçu riche dans les messageries.
+    # Déclarée APRÈS /routes/new et /routes/:id/edit pour ne pas les capturer ; la
+    # contrainte distingue en plus le jeton (24 caractères) d'un identifiant.
+    get "/routes/:token", to: "pages#route_summary", as: :share_route,
+        constraints: { token: /[A-Za-z0-9_-]{20,}/ }
     get "/profile", to: "profiles#show", as: :profile
     delete "/profile/strava", to: "profiles#unlink_strava", as: :unlink_strava
     delete "/profile/strava/activities", to: "profiles#delete_strava_activities", as: :delete_strava_activities
@@ -77,6 +84,8 @@ Rails.application.routes.draw do
   post "/api/routes", to: "routes#create"
   get "/api/routes/shared/:token", to: "routes#shared"
   get "/api/routes/shared/:token/gpx", to: "routes#export_gpx_shared"
+  # Vignette Open Graph de la page de partage (récupérée par les crawlers d'aperçu).
+  get "/api/routes/shared/:token/preview.png", to: "routes#preview_shared", as: :shared_route_preview
   get "/api/routes/:id", to: "routes#show", constraints: { id: /\d+/ }
   patch "/api/routes/:id", to: "routes#update", constraints: { id: /\d+/ }
   delete "/api/routes/:id", to: "routes#destroy", constraints: { id: /\d+/ }

@@ -92,6 +92,23 @@ class RouteStore {
     this.profile.value = routeProfileForSport(sport)
   }
 
+  // Vitesse à enregistrer avec l'itinéraire : `null` tant qu'elle vaut le réglage du
+  // profil pour ce sport. Ainsi un itinéraire ne fige sa vitesse que si on l'a
+  // délibérément ajustée pour lui ; les autres continuent de suivre le profil (et donc
+  // le curseur de vitesse de la liste des itinéraires).
+  readonly avgSpeedOverride = computed(() =>
+    this.avgSpeedKmh.value === speedForSport(this.sport.value) ? null : this.avgSpeedKmh.value,
+  )
+
+  // Applique la vitesse moyenne enregistrée avec un itinéraire. Ignore silencieusement
+  // une valeur hors bornes (même plage que speedForSport) : le défaut du sport, déjà en
+  // place, est alors conservé. À appeler APRÈS setSport, qui la réaligne sur le profil.
+  setAvgSpeedKmh(speed: unknown) {
+    const v = Number(speed)
+    if (!Number.isFinite(v) || v < 3 || v > 80) return
+    this.avgSpeedKmh.value = v
+  }
+
   // Change le profil de routage BRouter. Ignore silencieusement un profil non
   // proposé pour le sport courant (ex. valeur héritée d'un ancien itinéraire) :
   // le défaut du sport, déjà en place, est alors conservé.

@@ -258,10 +258,6 @@ function gradeColor(cat: number) {
 // Share feedback: holds the id of the route whose link was just copied, so the
 // button can flash a checkmark for a couple of seconds.
 const sharedId = ref(null)
-// Même mécanique pour le partage du lien « vue en lecture seule » (créateur).
-const sharedViewId = ref(null)
-// Share GPX file state: holds the id of the route currently being fetched/shared.
-const sharingGpxId = ref(null)
 
 // Inline rename state
 const editingId = ref(null)
@@ -454,14 +450,21 @@ async function duplicateRoute(route) {
   }
 }
 
-// Share the navigation link (works for signed-out recipients — the navigate
-// page and its API are public). Uses the native share sheet on mobile, falling
-// back to clipboard copy (then a prompt) on desktop.
+// Partage l'itinéraire : un seul lien, celui de la page de résumé publique. Elle
+// porte les balises Open Graph (vignette + stats) que les messageries affichent, et
+// mène aux trois formes de l'itinéraire (lecture seule, navigation, GPX) — inutile
+// de faire choisir un type de lien au moment du partage. Feuille de partage native
+// sur mobile, repli presse-papier puis prompt sur ordinateur.
 async function shareRoute(route) {
-  const url = `${window.location.origin}${localePrefix}/routes/${route.share_token}/navigate`
+  const url = `${window.location.origin}${localePrefix}/routes/${route.share_token}`
+  // Résumé de secours : les cibles qui n'affichent pas la carte Open Graph montrent
+  // au moins les chiffres. Beaucoup l'ignorent quand une `url` est fournie.
+  const text = [formatKm(route.distance_m), route.elevation_gain_m != null ? `${Math.round(route.elevation_gain_m)} m D+` : null]
+    .filter(Boolean)
+    .join(' · ')
   try {
     if (navigator.share) {
-      await navigator.share({ title: route.name, url })
+      await navigator.share({ title: route.name, text, url })
       return
     }
   } catch (e) {
@@ -473,49 +476,6 @@ async function shareRoute(route) {
     setTimeout(() => { if (sharedId.value === route.id) sharedId.value = null }, 2000)
   } catch {
     window.prompt(t('routes.share'), url)
-  }
-}
-
-// Partage le lien « vue en lecture seule » : ouvre l'itinéraire dans le créateur,
-// non modifiable, accessible sans compte (page + API publiques par jeton).
-async function shareViewRoute(route) {
-  const url = `${window.location.origin}${localePrefix}/routes/${route.share_token}/view`
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: route.name, url })
-      return
-    }
-  } catch (e) {
-    if (e?.name === 'AbortError') return // user dismissed the share sheet
-  }
-  try {
-    await navigator.clipboard.writeText(url)
-    sharedViewId.value = route.id
-    setTimeout(() => { if (sharedViewId.value === route.id) sharedViewId.value = null }, 2000)
-  } catch {
-    window.prompt(t('routes.share_view'), url)
-  }
-}
-
-// Share a public GPX download URL via the Web Share API (Level 1 — works on
-// all mobile browsers without file-type restrictions or user-gesture issues).
-// Falls back to clipboard copy, then a prompt on desktop.
-async function shareGpxFile(route) {
-  const url = `${window.location.origin}/api/routes/shared/${route.share_token}/gpx`
-  try {
-    if (navigator.share) {
-      await navigator.share({ title: route.name, url })
-      return
-    }
-  } catch (e) {
-    if (e?.name === 'AbortError') return
-  }
-  try {
-    await navigator.clipboard.writeText(url)
-    sharingGpxId.value = route.id
-    setTimeout(() => { if (sharingGpxId.value === route.id) sharingGpxId.value = null }, 2000)
-  } catch {
-    window.prompt(t('routes.share_gpx'), url)
   }
 }
 
@@ -647,11 +607,18 @@ function applySpeedSuggestion(sport) {
   onSpeedInput(sport)
 }
 
+// Vitesse retenue pour un itinéraire : la sienne si le créateur l'a ajustée pour ce
+// tracé, sinon celle du profil — qui reste pilotable par le curseur ci-dessus.
+function speedFor(r) {
+  const own = r?.avg_speed_kmh
+  return Number.isFinite(own) && own > 0 ? own : speeds[activityOf(r)]
+}
+
 // Estimated ride time: distance / speed. Mirrors the builder — the chosen
 // avg speed already accounts for terrain, so no climb penalty is added.
 function estimatedSecondsFor(r) {
   const d = r?.distance_m
-  const v = speeds[activityOf(r)]
+  const v = speedFor(r)
   if (!d || !Number.isFinite(v) || v <= 0) return 0
   return Math.round(((d / 1000) / v) * 3600)
 }
@@ -672,7 +639,7 @@ const routeLoads = computed(() => {
       {
         distanceM: r?.distance_m ?? 0,
         elevGainM: r?.elevation_gain_m ?? 0,
-        speedKmh: speeds[sport],
+        speedKmh: speedFor(r),
         sport,
       },
       athlete.value,
@@ -1090,7 +1057,7 @@ onMounted(() => {
                     <span
                       v-if="estimatedSecondsFor(r) > 0"
                       class="d-inline-flex align-items-center gap-1"
-                      :title="t('routes.estimated_time_hint', { speed: speeds[activityOf(r)] })"
+                      :title="t('routes.estimated_time_hint', { speed: speedFor(r) })"
                     >
                       <i class="fa-regular fa-clock" aria-hidden="true"></i>{{ formatDuration(estimatedSecondsFor(r)) }}
                     </span>
@@ -1172,21 +1139,15 @@ onMounted(() => {
                     <li><h6 class="dropdown-header">{{ t('routes.group_share') }}</h6></li>
                     <li>
                       <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="shareRoute(r)">
-                        <i class="" :class="sharedId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-location-arrow'" aria-hidden="true"></i>
+                        <i :class="sharedId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-share-nodes'" aria-hidden="true"></i>
                         <span>{{ sharedId === r.id ? t('routes.share_copied') : t('routes.share') }}</span>
                       </button>
                     </li>
                     <li>
-                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="shareViewRoute(r)">
-                        <i :class="sharedViewId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-eye'" aria-hidden="true"></i>
-                        <span>{{ sharedViewId === r.id ? t('routes.share_copied') : t('routes.share_view') }}</span>
-                      </button>
-                    </li>
-                    <li>
-                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="shareGpxFile(r)">
-                        <i :class="sharingGpxId === r.id ? 'fa-solid fa-check text-success' : 'fa-solid fa-file-export'" aria-hidden="true"></i>
-                        <span>{{ sharingGpxId === r.id ? t('routes.share_copied') : t('routes.share_gpx') }}</span>
-                      </button>
+                      <a :href="`${localePrefix}/routes/${r.share_token}`" class="dropdown-item d-flex align-items-center gap-2" target="_blank" rel="noopener">
+                        <i class="fa-solid fa-up-right-from-square" aria-hidden="true"></i>
+                        <span>{{ t('routes.share_preview') }}</span>
+                      </a>
                     </li>
                     <li><hr class="dropdown-divider"></li>
                     <li><h6 class="dropdown-header">{{ t('routes.group_export') }}</h6></li>

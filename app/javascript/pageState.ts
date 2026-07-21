@@ -39,11 +39,17 @@ export class MapPageState {
     return 'sportsScope.mapPageState'
   }
 
+  // Vrai quand load() a effectivement trouvé des réglages enregistrés : permet à
+  // l'appelant de n'imposer ses valeurs par défaut qu'à la toute première visite,
+  // sans écraser les choix déjà faits par l'utilisateur.
+  hasStoredState = false
+
   load(): void {
     try {
       const raw = localStorage.getItem(this.storageKey())
       if (!raw) return
       const saved = JSON.parse(raw) as Record<string, unknown>
+      this.hasStoredState = true
       for (const field of this.persistedFields()) {
         if (Object.prototype.hasOwnProperty.call(saved, field)) {
           ;(this as Record<string, unknown>)[field] = saved[field]
@@ -96,8 +102,15 @@ export class RouteBuilderState extends MapPageState {
   showElevationChart = true
   overlays: string[] = []
 
-  constructor() {
+  // Vue en lecture seule (lien de partage) : les calques y sont forcés à un rendu
+  // « invité » (repères + pentes seuls). Ces réglages ne doivent PAS atterrir dans la
+  // configuration du créateur — sinon ouvrir un lien partagé éteint durablement les
+  // points d'étape, les POI et les cols de sa propre session d'édition.
+  readonly shared: boolean
+
+  constructor(shared = false) {
     super(sportPreferences().map.default_style)
+    this.shared = shared
     const prefs = userPreferences()
     this.colorMode = prefs.display.show_grade_colors ? 'grade' : 'none'
     this.showElevationChart = prefs.display.show_elevation_chart
@@ -111,7 +124,7 @@ export class RouteBuilderState extends MapPageState {
   }
 
   override storageKey(): string {
-    return 'sportsScope.routeBuilderState'
+    return this.shared ? 'sportsScope.sharedRouteViewState' : 'sportsScope.routeBuilderState'
   }
 
   // mapStyleId, colorMode, showElevationChart et overlays sont gouvernés par les

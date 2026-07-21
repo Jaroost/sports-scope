@@ -14,6 +14,7 @@ import ChainWax from './components/ChainWax.vue'
 import PerformanceAnalysis from './components/PerformanceAnalysis.vue'
 import TodayPlanWidget from './components/TodayPlanWidget.vue'
 import RefreshAll from './components/RefreshAll.vue'
+import SharedRoutePreviewMap from './components/SharedRoutePreviewMap.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
@@ -31,6 +32,7 @@ const registry: Record<string, Component> = {
   PerformanceAnalysis,
   TodayPlanWidget,
   RefreshAll,
+  SharedRoutePreviewMap,
 }
 
 export function mountVueIslands(): void {

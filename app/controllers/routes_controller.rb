@@ -1,7 +1,7 @@
 class RoutesController < ApplicationController
   # `shared` is public (token-based) so a shared navigation link works without
   # an account. Every other action stays scoped to the signed-in owner.
-  before_action :require_login!, except: %i[shared export_gpx_shared]
+  before_action :require_login!, except: %i[shared export_gpx_shared preview_shared]
 
   DEFAULT_PER_PAGE = 20
   MAX_PER_PAGE = 200
@@ -78,7 +78,9 @@ class RoutesController < ApplicationController
     route = Route.find_by(share_token: params[:token])
     return head :not_found unless route
     record_open(route)
-    render json: { route: serialize_full(route) }
+    # `owned` : le propriétaire qui ouvre son propre lien doit pouvoir repasser en
+    # édition depuis la vue en lecture seule. Faux pour un visiteur non connecté.
+    render json: { route: serialize_full(route).merge(owned: current_user&.id == route.user_id) }
   end
 
   # POST /api/routes
@@ -96,7 +98,10 @@ class RoutesController < ApplicationController
     route = current_user.routes.find_by(id: params[:id])
     return head :not_found unless route
     attrs = sanitize_attrs(params)
-    route.update!(attrs.compact)
+    # `compact` sert à ignorer les champs absents d'un PATCH partiel ; mais sur
+    # avg_speed_kmh, `nil` est une valeur signifiante (« suivre le profil ») qu'il faut
+    # pouvoir réécrire — on la réinjecte quand la clé était bien dans la charge utile.
+    route.update!(attrs.compact.merge(attrs.slice(:avg_speed_kmh)))
     render json: { route: serialize_full(route) }
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
@@ -126,6 +131,25 @@ class RoutesController < ApplicationController
     send_gpx(route)
   end
 
+  # GET /api/routes/shared/:token/preview.png — public, no login required.
+  # Vignette Open Graph de la page de partage : c'est un crawler (WhatsApp, Slack…)
+  # qui la récupère, jamais un utilisateur connecté. Le rendu est mémoïsé sur
+  # `updated_at` : une modification du tracé produit une nouvelle entrée de cache,
+  # l'ancienne expire d'elle-même.
+  def preview_shared
+    route = Route.find_by(share_token: params[:token])
+    return head :not_found unless route
+
+    png = Rails.cache.fetch([ "route-og-preview", route.id, route.updated_at.to_i ]) do
+      RoutePreviewImage.render(route)
+    end
+    # Pas de géométrie exploitable : l'icône de l'app fait un aperçu acceptable.
+    return redirect_to "/icon.png", allow_other_host: false unless png
+
+    expires_in 1.week, public: true
+    send_data png, type: "image/png", disposition: "inline"
+  end
+
   # POST /api/routes/:id/duplicate
   def duplicate
     src = current_user.routes.find_by(id: params[:id])
@@ -144,6 +168,8 @@ class RoutesController < ApplicationController
       distance_m: src.distance_m,
       elevation_gain_m: src.elevation_gain_m,
       elevation_loss_m: src.elevation_loss_m,
+      # La copie hérite de la vitesse propre à l'original (nil = réglage du profil).
+      avg_speed_kmh: src[:avg_speed_kmh],
     )
     render json: { route: serialize_full(new_route) }, status: :created
   rescue ActiveRecord::RecordInvalid => e
@@ -198,6 +224,9 @@ class RoutesController < ApplicationController
     out[:distance_m] = p[:distance_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:distance_m)
     out[:elevation_gain_m] = p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_gain_m)
     out[:elevation_loss_m] = p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_loss_m)
+    # Vitesse retenue par le créateur pour CET itinéraire (peut différer de son profil).
+    # Hors bornes → nil, c'est-à-dire « retomber sur le réglage du profil ».
+    out[:avg_speed_kmh] = p[:avg_speed_kmh].to_f.then { |v| Route::SPEED_RANGE.cover?(v) ? v : nil } if p.key?(:avg_speed_kmh)
     out
   end
 
@@ -349,6 +378,10 @@ class RoutesController < ApplicationController
       elevation_loss_m: route.elevation_loss_m,
       profile: route.profile,
       activity: route.activity,
+      # Colonne brute, pas la valeur effective : `null` dit au front « cet itinéraire
+      # suit le réglage du profil », ce qui lui permet de continuer à recalculer ses
+      # estimations quand on bouge le curseur de vitesse de la liste.
+      avg_speed_kmh: route[:avg_speed_kmh],
       share_token: route.share_token,
       preview_segments: route.preview_segments,
       map_polyline: route.map_polyline,

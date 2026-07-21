@@ -57,6 +57,17 @@ class PagesController < ApplicationController
     @share_token = token
   end
 
+  # Page de partage publique : le résumé de l'itinéraire (aperçu, stats, lieux) et
+  # les liens vers ses différentes formes (lecture seule, navigation, GPX, repères
+  # dans Google Maps). Rendue côté serveur, sans îlot Vue : les crawlers d'aperçu des
+  # messageries n'exécutent pas de JS et doivent lire le contenu et les balises OG.
+  def route_summary
+    @route = Route.find_by(share_token: params[:token])
+    unless @route
+      redirect_to root_path, alert: t("routes.error_shared_not_found") and return
+    end
+  end
+
   def route_view
     # No login required: read-only builder view addressed by share_token, meant
     # to be shared with anyone (signed-out recipients included).

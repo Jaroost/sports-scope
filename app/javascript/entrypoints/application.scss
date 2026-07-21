@@ -232,3 +232,131 @@ body.fullscreen-page {
   width: 250px;
 }
 
+/* Page de partage publique d'un itinéraire (pages#route_summary). Colonne étroite :
+   elle est presque toujours ouverte depuis un lien reçu sur téléphone. */
+.route-summary {
+  max-width: 34rem;
+}
+.route-summary-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Même format que la vignette Open Graph (RoutePreviewImage : 1200 × 630), pour que
+     la page et l'aperçu reçu dans la messagerie cadrent pareil. La carte occupe toute
+     la boîte : pas de marge intérieure, qui la rendrait plus petite que l'aperçu SVG
+     qu'elle remplace. */
+  aspect-ratio: 1200 / 630;
+  overflow: hidden;
+  /* Panneau sombre, comme la vignette Open Graph : les couleurs de pente du tracé
+     ressortaient à peine sur le gris clair. Le halo décentré évite l'aplat. */
+  background:
+    radial-gradient(120% 100% at 30% 15%, #5c666f 0%, #4a545c 60%, #3d464d 100%);
+  border-radius: var(--bs-card-inner-border-radius) var(--bs-card-inner-border-radius) 0 0;
+}
+/* Le bloc qui porte l'îlot occupe toute la vignette : il contient le SVG de repli,
+   puis la carte MapLibre une fois montée. */
+.route-summary-preview > [data-vue-component],
+.route-summary-map {
+  width: 100%;
+  height: 100%;
+}
+.route-summary-preview svg {
+  width: 100%;
+  height: 100%;
+}
+/* Profil altimétrique sous l'aperçu : une bande, sans axes ni graduations — c'est la
+   forme du parcours qu'on lit ici, les chiffres sont juste en dessous. */
+.route-summary-profile {
+  position: relative;
+  height: 4.5rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+.route-summary-profile svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* Repères d'altitude : assez visibles pour donner l'échelle, assez discrets pour
+   passer sous le tracé sans le concurrencer. */
+.route-summary-profile-grid {
+  stroke: var(--bs-border-color);
+  stroke-width: 1px;
+}
+
+/* Stats en grille auto-ajustée : 2 colonnes sur téléphone, 3 dès qu'il y a la place. */
+.route-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.75rem 1rem;
+}
+.route-summary-stats dt {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--bs-secondary-color);
+}
+.route-summary-stats dd {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+/* Pastille de la page de partage — lieux traversés et type de repère. Une liste de
+   12 noms séparés par des points se lit mal en paragraphe ; la pastille donne une
+   frontière nette à chaque nom. */
+.route-summary-pill {
+  font-weight: 500;
+  font-size: 0.85rem;
+  color: var(--bs-body-color);
+  background: var(--bs-tertiary-bg, rgba(0, 0, 0, 0.05));
+  border: 1px solid var(--bs-border-color);
+}
+/* Le « et N autres » n'est pas un lieu : il reste lisible mais s'efface. */
+.route-summary-pill-muted {
+  color: var(--bs-secondary-color);
+  background: transparent;
+}
+/* Types de repère : départ et arrivée se repèrent d'un coup d'œil, le parking reste
+   neutre — c'est une information de logistique, pas un jalon du parcours. */
+.route-summary-pill-start {
+  color: var(--bs-success-text-emphasis);
+  background: var(--bs-success-bg-subtle);
+  border-color: var(--bs-success-border-subtle);
+}
+.route-summary-pill-finish {
+  color: var(--bs-danger-text-emphasis);
+  background: var(--bs-danger-bg-subtle);
+  border-color: var(--bs-danger-border-subtle);
+}
+.route-summary-localities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+/* Dépliage des lieux au-delà des premiers : la case à cocher masquée porte l'état,
+   les deux labels (« et N autres » / « réduire ») s'échangent selon celui-ci. */
+.route-summary-pill-extra,
+.route-summary-less {
+  display: none;
+}
+.route-summary-toggle:checked ~ .route-summary-localities {
+  .route-summary-pill-extra,
+  .route-summary-less {
+    display: inline-block;
+  }
+  .route-summary-more {
+    display: none;
+  }
+}
+.route-summary-more,
+.route-summary-less {
+  cursor: pointer;
+}
+/* Le focus clavier vit sur la case masquée : on le rend visible sur le label. */
+.route-summary-toggle:focus-visible ~ .route-summary-localities {
+  .route-summary-more,
+  .route-summary-less {
+    outline: 2px solid var(--bs-focus-ring-color, rgba(13, 110, 253, 0.5));
+    outline-offset: 2px;
+  }
+}
+

@@ -40,7 +40,9 @@ const readOnly = computed(() => routeStore.readOnly.value)
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
-const state = reactive(new RouteBuilderState())
+// La vue partagée persiste ses calques sous une clé à part (cf. RouteBuilderState) :
+// le rendu « invité » qu'on lui impose ne doit pas écraser la configuration d'édition.
+const state = reactive(new RouteBuilderState(!!props.shareToken))
 const saving = ref(false)
 // Indicateur transitoire affiché brièvement après un enregistrement réussi.
 const saved = ref(false)
@@ -475,6 +477,9 @@ async function fetchRoute(id: number) {
     // invalide/hérité → défaut du sport conservé).
     if (r.activity) routeStore.setSport(r.activity)
     if (r.profile) routeStore.setProfile(r.profile)
+    // Après setSport, qui a réaligné la vitesse sur le profil : on restaure celle
+    // enregistrée avec l'itinéraire.
+    routeStore.setAvgSpeedKmh(r.avg_speed_kmh)
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
@@ -516,9 +521,15 @@ async function fetchSharedRoute(token: string) {
     if (!res.ok) throw new Error(res.status === 404 ? t('routes.error_shared_not_found') : `HTTP ${res.status}`)
     const payload = await res.json()
     const r = payload.route
+    // Le propriétaire connecté peut repasser en édition depuis la vue partagée
+    // (cf. editUrl) ; pour tout autre visiteur, `owned` est faux.
+    editableRouteId.value = r.owned && r.id ? Number(r.id) : null
     routeStore.name.value = r.name || ''
     if (r.activity) routeStore.setSport(r.activity)
     if (r.profile) routeStore.setProfile(r.profile)
+    // Vitesse du créateur, pas celle du visiteur : la durée annoncée en lecture seule
+    // doit être la même que sur la page de partage.
+    routeStore.setAvgSpeedKmh(r.avg_speed_kmh)
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
@@ -712,6 +723,10 @@ async function persist() {
       elevation_loss_m: routeStore.elevLossM.value,
       profile: routeStore.profile.value,
       activity: routeStore.sport.value,
+      // Vitesse ajustée pour ce tracé précis (null si elle suit encore le profil) :
+      // l'enregistrer évite que la page de partage et la réouverture annoncent une
+      // autre durée que celle qu'on avait sous les yeux.
+      avg_speed_kmh: routeStore.avgSpeedOverride.value,
     })
     const url = isEditMode() ? `/api/routes/${routeStore.currentId.value}` : '/api/routes'
     const method = isEditMode() ? 'PATCH' : 'POST'
@@ -763,6 +778,13 @@ function exportGpx() {
 // l'itinéraire chargé/enregistré. Null tant que l'itinéraire n'a pas de jeton
 // (création non encore sauvegardée).
 const navigateToken = computed(() => props.shareToken ?? routeShareToken.value)
+
+// Vue en lecture seule ouverte par son propre auteur : identifiant de l'itinéraire,
+// pour proposer le passage en édition. null pour un visiteur (ou hors partage).
+const editableRouteId = ref<number | null>(null)
+const editUrl = computed(() =>
+  editableRouteId.value ? `${localePrefix}/routes/${editableRouteId.value}/edit` : null,
+)
 
 // La navigation n'est proposée qu'une fois l'itinéraire enregistré (jeton présent)
 // et tracé : elle s'appuie sur la géométrie publiée via le lien de partage.
@@ -1545,12 +1567,15 @@ onMounted(async () => {
     // Sur un lien partagé, on sélectionne par défaut uniquement les repères posés par
     // l'auteur (départ / arrivée / parking) et les couleurs de pente ; les autres
     // calques (points, cols, POI) partent masqués. Le menu Affichage reste complet,
-    // le destinataire peut donc tout réactiver.
-    state.showMarkers = true
-    state.colorMode = 'grade'
-    state.showWaypoints = false
-    state.showClimbs = false
-    state.showPois = false
+    // le destinataire peut donc tout réactiver — et ses choix, enregistrés sous la clé
+    // de la vue partagée, ne sont plus réimposés aux visites suivantes.
+    if (!state.hasStoredState) {
+      state.showMarkers = true
+      state.colorMode = 'grade'
+      state.showWaypoints = false
+      state.showClimbs = false
+      state.showPois = false
+    }
     await mapRef.value?.initMap()
     await fetchSharedRoute(props.shareToken as string)
     return
@@ -1644,6 +1669,12 @@ onBeforeUnmount(() => {
         :title="t('nav.profile')" :aria-label="t('nav.profile')">
         <i class="fa-solid fa-sliders" aria-hidden="true"></i>
       </button>
+      <!-- Retour à l'édition depuis son propre lien partagé — la navbar est la seule
+           barre d'actions sur téléphone, le bandeau d'en-tête étant réservé au desktop. -->
+      <a v-if="editUrl" :href="editUrl" class="btn btn-sm btn-light"
+        :title="t('routes.edit_route')" :aria-label="t('routes.edit_route')">
+        <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+      </a>
     </Teleport>
 
     <!-- Chart hors écran utilisé uniquement pour l'export image -->
@@ -1705,6 +1736,10 @@ onBeforeUnmount(() => {
             <i class="fa-solid fa-sliders" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">{{ t('nav.profile') }}</span>
           </button>
+          <a v-if="editUrl" :href="editUrl" class="btn btn-sm btn-warning d-flex align-items-center gap-1">
+            <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+            <span class="d-none d-lg-inline">{{ t('routes.edit_route') }}</span>
+          </a>
           <button v-if="!readOnly" type="button" class="btn btn-sm btn-warning d-flex align-items-center gap-1"
             @click="save" :disabled="saving || routeStore.waypoints.value.length < 2 || !routeStore.name.value.trim()">
             <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>

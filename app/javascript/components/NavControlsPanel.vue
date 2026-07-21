@@ -26,7 +26,6 @@ const props = defineProps<{
   routeProfile: string
   radarKnown: boolean
   camZoom: number
-  terrain3d: boolean
   zoomSaved: boolean
   camZoomMin: number
   camZoomMax: number
@@ -71,7 +70,6 @@ const emit = defineEmits<{
   (e: 'toggle-radar'): void
   (e: 'zoom-input'): void
   (e: 'save-zoom'): void
-  (e: 'toggle-terrain'): void
   (e: 'toggle-poi', key: string): void
   (e: 'search-pois'): void
   (e: 'search-pois-route'): void
@@ -411,18 +409,6 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
             <i class="fa-solid" :class="zoomSaved ? 'fa-check' : 'fa-floppy-disk'" aria-hidden="true"></i>
             {{ zoomSaved ? t('routes.camera_zoom_saved') : t('routes.camera_save_zoom') }}
           </button>
-          <label class="nav-cam-row nav-cam-row--switch">
-            <span class="nav-cam-label">{{ t('routes.camera_3d') }}</span>
-            <span class="form-check form-switch m-0">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                role="switch"
-                :checked="terrain3d"
-                @change="$emit('toggle-terrain')"
-              />
-            </span>
-          </label>
         </template>
 
         <!-- POI -->

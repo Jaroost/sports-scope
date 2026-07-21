@@ -228,7 +228,6 @@ async function save() {
 // Navigation (style, zoom) et se centre sur la position GPS actuelle (repli
 // sur la Suisse si la géoloc échoue ou est refusée).
 const SWITZERLAND_CENTER: [number, number] = [8.23, 46.8]
-const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 // Même inset haut que la caméra de navigation (cf. RouteNavigation.followPadding) :
 // ancre le coureur dans le tiers inférieur pour que le cadrage — donc le ressenti du
 // zoom — corresponde à ce que l'écran affichera réellement.
@@ -346,19 +345,6 @@ function previewRouteFeature(center: [number, number]) {
   }
 }
 
-// Active/désactive le relief 3D sur l'aperçu (idempotente : aussi après un setStyle).
-function applyPreviewTerrain() {
-  if (!previewMap) return
-  if (prefs.navigation.terrain) {
-    if (!previewMap.getSource('terrain-dem')) {
-      previewMap.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
-    }
-    previewMap.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
-  } else {
-    previewMap.setTerrain(null)
-  }
-}
-
 const previewEl = ref<HTMLElement | null>(null)
 const previewLocating = ref(true)
 const previewLocationError = ref(false)
@@ -390,14 +376,13 @@ async function initPreview() {
   previewMap.on('styleimagemissing', (e: any) => {
     previewMap.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
-  previewMap.on('load', () => { applyPreviewRoute(); applyPreviewTerrain(); applyPreviewPadding() })
+  previewMap.on('load', () => { applyPreviewRoute(); applyPreviewPadding() })
   previewMap.on('resize', applyPreviewPadding)
 
-  // Réagit en direct aux réglages : le zoom, le relief et la largeur du tracé
-  // s'appliquent à chaud ; le changement de style recharge le fond (et replace
-  // le marqueur, le tracé et le relief).
+  // Réagit en direct aux réglages : le zoom et la largeur du tracé s'appliquent à
+  // chaud ; le changement de style recharge le fond (et replace le marqueur et le
+  // tracé).
   watch(() => prefs.navigation.zoom, (z) => previewMap?.setZoom(z))
-  watch(() => prefs.navigation.terrain, applyPreviewTerrain)
   // Ces six réglages sont propres au sport : les sources réactives passent par sport.value,
   // donc l'aperçu se met aussi à jour quand on bascule de sport dans le sélecteur.
   watch(() => sport.value.navigation.line_width, applyPreviewRouteWidth)
@@ -413,7 +398,7 @@ async function initPreview() {
   watch(() => sport.value.navigation.turn_marker_icon_color, () => addPreviewArrowLayer())
   watch(() => prefs.navigation.default_style, (id) => {
     previewMap?.setStyle(mapStyleFor(id), { diff: false })
-    previewMap?.once('style.load', () => { applyPreviewRoute(); applyPreviewTerrain() })
+    previewMap?.once('style.load', () => { applyPreviewRoute() })
   })
 
   locatePreview()
@@ -734,12 +719,6 @@ function placePreviewMarker(coords: [number, number]) {
                   {{ t('profile.navigation.zoom') }} : <strong>{{ prefs.navigation.zoom }}</strong>
                 </label>
                 <input id="nav-zoom" v-model.number="prefs.navigation.zoom" type="range" class="form-range" min="14" max="40" step="0.5">
-              </div>
-              <div class="col-12">
-                <div class="form-check form-switch">
-                  <input id="nav-terrain" v-model="prefs.navigation.terrain" class="form-check-input" type="checkbox" role="switch">
-                  <label for="nav-terrain" class="form-check-label">{{ t('profile.navigation.terrain') }}</label>
-                </div>
               </div>
             </div>
 

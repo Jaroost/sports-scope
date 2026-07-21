@@ -163,14 +163,14 @@ const offlinePct = computed(() =>
   offlineProgress.value.total ? Math.round((offlineProgress.value.done / offlineProgress.value.total) * 100) : 0,
 )
 
-// Réglages caméra (zoom / relief 3D), ajustables en séance et reportés sur le profil.
+// Réglages caméra (zoom), ajustables en séance et reportés sur le profil.
 // La caméra reste toujours à plat (pitch 0) pour économiser la batterie. La boucle
 // d'animation et followOptions lisent ces refs (et non plus navPrefs) pour que toute
 // modification prenne effet à la frame suivante. onZoomInput détache la caméra du suivi
 // via onManualZoom. Voir useNavCamera.
 const {
-  camZoom, terrain3d, zoomSaved,
-  onZoomInput, applyTerrain, toggleTerrain, saveZoomToProfile,
+  camZoom, zoomSaved,
+  onZoomInput, saveZoomToProfile,
 } = useNavCamera({ getMap: () => map, onManualZoom })
 // Curseur zoom pris en main : on détache la caméra du suivi (état local au composant).
 function onManualZoom() {
@@ -2158,7 +2158,6 @@ async function initMap() {
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
-      applyTerrain()
       // Mode itinéraire (lien partagé chargé avant la carte) : installe le tracé et
       // cadre dessus avant le premier fix GPS. Mode libre : rien à installer.
       if (hasRoute.value && coords.length) {
@@ -2381,7 +2380,6 @@ function setMapStyle(id: string) {
 function afterStyleLoad() {
   // Pas de couches de tracé à réinstaller en mode libre.
   if (hasRoute.value) installRouteLayers()
-  applyTerrain()
   // Replace le marqueur sur la position AFFICHÉE (snappée et décalée sur sa voie si on est
   // sur le tracé), pas sur le GPS brut, pour rester cohérent avec la boucle d'animation.
   const restore = anchorPos ?? lastPos
@@ -3380,7 +3378,6 @@ function onScreenOffTap() {
       :climb-card-visible="hasRoute ? showClimbCard : undefined"
       :radar-known="radarKnown"
       v-model:cam-zoom="camZoom"
-      :terrain3d="terrain3d"
       :zoom-saved="zoomSaved"
       :cam-zoom-min="CAM_ZOOM_MIN"
       :cam-zoom-max="CAM_ZOOM_MAX"
@@ -3407,7 +3404,6 @@ function onScreenOffTap() {
       @toggle-radar="toggleRadar"
       @zoom-input="onZoomInput"
       @save-zoom="saveZoomToProfile"
-      @toggle-terrain="toggleTerrain"
       @toggle-poi="pois.togglePoi"
       @search-pois="searchPois({ center: lastPos ?? undefined })"
       @search-pois-route="searchPois()"

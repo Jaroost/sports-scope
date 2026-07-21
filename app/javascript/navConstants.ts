@@ -5,9 +5,6 @@
 // geste) vivent dans le composable correspondant ; ne restent ici que celles encore
 // lues directement par le cœur GPS / animation des composants.
 
-// Tuiles MNT (terrarium) pour le relief 3D — mêmes sources que le créateur d'itinéraire.
-export const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
-
 // ─── Suivi GPS ────────────────────────────────────────────────────────────────
 export const MIN_MOVE_M = 4       // déplacement requis pour recalculer un cap
 export const MIN_SPEED_MS = 0.8   // en dessous, on garde le cap précédent

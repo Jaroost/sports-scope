@@ -118,7 +118,6 @@ class ProfilesController < ApplicationController
       "navigation" => {
         "default_style" => allowed(navigation[:default_style], ALLOWED_MAP_STYLES, "swissgrau"),
         "zoom" => clamp_float(navigation[:zoom], NAV_ZOOM_RANGE, 17),
-        "terrain" => to_bool(navigation[:terrain], false),
         "nav_fps" => clamp_float(navigation[:nav_fps], NAV_FPS_RANGE, 8),
         "sound_volume" => clamp_int(navigation[:sound_volume], NAV_SOUND_VOLUME_RANGE, 100),
         "show_climb_card" => to_bool(navigation[:show_climb_card], true),

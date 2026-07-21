@@ -1,9 +1,11 @@
 class Poi < ApplicationRecord
   # Catégories de POI — recopiées du registre front `app/javascript/poiCategories.ts`
-  # (mêmes clés que celles utilisées par GeocodesController pour les clauses Overpass).
+  # (mêmes clés que le paramètre `types` de GeocodesController#places).
   CATEGORIES = %w[cemeteries bakeries water food viewpoints picnic toilets localities].freeze
   # Provenance : « custom » = posé à la main dans le créateur ; « overpass » = épinglé
-  # depuis un POI découvert sur Overpass.
+  # depuis un POI du catalogue OSM. Le libellé « overpass » est historique (les POI
+  # venaient de l'API du même nom) et conservé tel quel : c'est une valeur déjà en
+  # base, partagée avec le front (savedPois.ts).
   SOURCES = %w[custom overpass].freeze
   MAX_NAME_LEN = 80
 

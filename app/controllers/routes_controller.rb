@@ -264,7 +264,7 @@ class RoutesController < ApplicationController
 
   # Repères posés à la main : `kind` restreint (MARKER_KINDS), coordonnées bornées,
   # `label` libre optionnel. Distinct de clean_pois — ces repères ne sont jamais
-  # écrasés par la recherche Overpass.
+  # écrasés par la recherche de POI.
   def clean_markers(raw)
     return [] unless raw.is_a?(Array)
     raw.take(MAX_MARKERS).filter_map do |item|

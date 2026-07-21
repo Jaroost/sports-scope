@@ -73,6 +73,7 @@ services:
       DATABASE_USER: ${POSTGRES_USER:-postgres}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_NAME: sports_scope_production
+      OSM_POI_DATABASE: ${OSM_POI_DATABASE:-osm_pois_production}
       KEYCLOAK_BASE_URL: https://${KEYCLOAK_HOST}
       KEYCLOAK_REALM: sports-scope
       KEYCLOAK_CLIENT_ID: rails-app
@@ -92,6 +93,8 @@ services:
       keycloak:
         condition: service_started
       brouter:
+        condition: service_healthy
+      poi-sync:
         condition: service_healthy
     labels:
       <<: *traefik-defaults
@@ -163,10 +166,42 @@ services:
     networks:
       - default
 
+  # POI auto-hébergés : importe les points d'intérêt OpenStreetMap dans la base
+  # `osm_pois_production` (remplace les appels à overpass-api.de). Premier
+  # démarrage : ~2 Go d'extraits Geofabrik à télécharger. Rien n'est exposé —
+  # `rails` lit directement PostgreSQL, et démarre sans attendre : tant que le
+  # catalogue est vide, /api/geocode/places répond `places_unavailable`.
+  poi-sync:
+    image: jaroost-server:5000/sports-scope-poi-sync:${POI_SYNC_IMAGE_TAG:-latest}
+    restart: always
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      OSM_POI_DATABASE: ${OSM_POI_DATABASE:-osm_pois_production}
+      OSM_POI_REGIONS: ${OSM_POI_REGIONS:-}
+      OSM_POI_SYNC_INTERVAL: ${OSM_POI_SYNC_INTERVAL:-604800}
+    volumes:
+      - osm_pois_data:/data
+    networks:
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # « Sain » = il y a des POI en base. start_period couvre le premier import
+      # sans que les échecs comptent comme des retries.
+      test: ["CMD-SHELL", "test -f /data/.sync-complete"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 3600s
+
 volumes:
   db_data:
   brouter_segments:
   brouter_profiles:
+  osm_pois_data:
 
 networks:
   default:

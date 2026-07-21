@@ -1,15 +1,18 @@
 # Extrait en tâche de fond les localités traversées par une activité Strava et les
 # stocke dans `strava_activities.localities` (recherche par lieu). Enfilé par
-# StravaActivity quand le tracé du résumé change — l'appel Overpass ne doit pas
+# StravaActivity quand le tracé du résumé change — l'extraction ne doit pas
 # ralentir la synchronisation, qui enregistre des activités par lots de 200.
 class ExtractActivityLocalitiesJob < ApplicationJob
   queue_as :default
 
-  # Overpass est régulièrement saturé (429 / 504). On retente en espaçant, plutôt
-  # que de laisser l'activité sans lieux jusqu'à sa prochaine synchro — un résumé
-  # déjà stocké ne rechange plus, donc sans retry elle resterait introuvable à la
-  # recherche (le backfill, idempotent, permet de rattraper).
-  retry_on OverpassClient::Error, wait: :polynomially_longer, attempts: 5 do |job, error|
+  # Seul échec attendu : le catalogue OSM local n'est pas encore là (première
+  # synchro de `poi-sync`). On retente plutôt que de laisser l'activité sans lieux
+  # jusqu'à sa prochaine synchro — un résumé déjà stocké ne rechange plus, donc
+  # sans retry elle resterait introuvable à la recherche (le backfill, idempotent,
+  # permet de rattraper).
+  retry_on ActiveRecord::ConnectionNotEstablished, ActiveRecord::NoDatabaseError,
+           ActiveRecord::StatementInvalid,
+           wait: :polynomially_longer, attempts: 5 do |job, error|
     Rails.logger.warn(
       "ExtractActivityLocalitiesJob: abandon après #{job.executions} tentatives " \
       "(strava_activity=#{job.arguments.first}) — #{error.message}",

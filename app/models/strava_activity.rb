@@ -11,12 +11,12 @@ class StravaActivity < ApplicationRecord
   validates :strava_id, presence: true, uniqueness: { scope: :user_id }
   validates :name, presence: true, length: { maximum: 255 }
 
-  # Lieux traversés (`localities`) : extraits d'Overpass en tâche de fond quand le
+  # Lieux traversés (`localities`) : extraits du catalogue OSM en tâche de fond quand le
   # tracé du résumé change, pour la recherche par lieu dans la liste. after_commit —
   # le job doit voir l'activité enregistrée, et ne pas partir si la transaction est
   # annulée. Conditionné au tracé et non à `raw` : une resynchro réécrit `raw` en
-  # entier (kudos, description…) sans que le tracé bouge, et referait un appel
-  # Overpass par activité à chaque « Tout rafraîchir ».
+  # entier (kudos, description…) sans que le tracé bouge, et relancerait une
+  # extraction par activité à chaque « Tout rafraîchir ».
   after_commit :extract_localities_later, on: %i[create update], if: :saved_change_to_summary_polyline?
 
   # Les gear_id Strava sont préfixés par type : « b… » pour les vélos, « g… » pour

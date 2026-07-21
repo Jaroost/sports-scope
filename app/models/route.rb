@@ -22,7 +22,7 @@ class Route < ApplicationRecord
   # géométrie change (création, édition, import GPX, duplication).
   before_save :assign_geometry_derivatives, if: :will_save_change_to_geometry?
 
-  # Lieux traversés (`localities`) : extraits d'Overpass en tâche de fond à chaque
+  # Lieux traversés (`localities`) : extraits du catalogue OSM en tâche de fond à chaque
   # changement de tracé, pour la recherche par lieu dans la liste. after_commit —
   # le job doit voir la géométrie enregistrée, et ne pas partir si la transaction
   # est annulée.

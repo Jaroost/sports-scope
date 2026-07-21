@@ -13,9 +13,9 @@ class LocalitiesExtractor
   # Distance max (m) entre une localité et le tracé pour la considérer traversée.
   # Aligné sur le seuil des localités du créateur (RouteBuilder.vue, THRESHOLD_M).
   THRESHOLD_M = 2000
-  # Marge (deg) ajoutée à la bbox pour qu'Overpass renvoie aussi les localités
-  # juste au-delà des extrémités du tracé — sinon elles seraient coupées à la bbox
-  # alors qu'elles sont dans le seuil.
+  # Marge (deg) ajoutée à la bbox pour ramener aussi les localités juste au-delà
+  # des extrémités du tracé — sinon elles seraient coupées à la bbox alors
+  # qu'elles sont dans le seuil.
   BBOX_BUFFER_DEG = 0.03
   # Le test de proximité est en O(points × localités) : on sous-échantillonne le
   # tracé (jusqu'à 10 000 points en base). À ce nombre de points, l'écart entre
@@ -26,27 +26,21 @@ class LocalitiesExtractor
   # recherche, et on évite de stocker un jsonb qui gonfle sans borne.
   MAX_LOCALITIES = 200
 
-  def initialize(geometry, host: nil)
+  def initialize(geometry)
     @geometry = Array(geometry)
-    @host = host
   end
 
-  # Renvoie les noms de localités uniques, ordonnés le long du tracé. Lève
-  # OverpassClient::Error si Overpass est injoignable (le job retente).
+  # Renvoie les noms de localités uniques, ordonnés le long du tracé. Lève les
+  # erreurs de connexion à la base `osm` (catalogue pas encore importé) — le job
+  # retente.
   def call
     pts = usable_points
     return [] if pts.size < 2
 
-    elements = OverpassClient.elements(overpass_query(pts), host: @host)
-
-    named = elements.filter_map do |el|
-      tags = el["tags"] || {}
-      next unless PLACE_TYPES.include?(tags["place"])
-      name = tags["name"].presence
-      next unless name
-      lat = el["lat"] || el.dig("center", "lat")
-      lng = el["lon"] || el.dig("center", "lon")
-      next unless lat && lng
+    named = localities_in_bbox(pts).filter_map do |lat, lng, name|
+      # Les localités sans nom ne servent à rien ici : `localities` est une liste
+      # de noms cherchables.
+      next unless name.present?
       [ name, lat.to_f, lng.to_f ]
     end
 
@@ -73,20 +67,15 @@ class LocalitiesExtractor
     Route.downsample(pts, MAX_GEOMETRY_POINTS)
   end
 
-  def overpass_query(pts)
+  # `[lat, lng, name]` des localités du catalogue OSM dans la bbox du tracé.
+  def localities_in_bbox(pts)
     lats = pts.map(&:last)
     lngs = pts.map(&:first)
-    south = lats.min - BBOX_BUFFER_DEG
-    north = lats.max + BBOX_BUFFER_DEG
-    west  = lngs.min - BBOX_BUFFER_DEG
-    east  = lngs.max + BBOX_BUFFER_DEG
-    bbox = "#{south},#{west},#{north},#{east}"
 
-    <<~OVERPASS
-      [out:json][timeout:25];
-      node["place"~"^(#{PLACE_TYPES.join('|')})$"](#{bbox});
-      out center;
-    OVERPASS
+    OsmPoi.in_bbox(
+      lats.min - BBOX_BUFFER_DEG, lngs.min - BBOX_BUFFER_DEG,
+      lats.max + BBOX_BUFFER_DEG, lngs.max + BBOX_BUFFER_DEG,
+    ).where(category: PLACE_TYPES).pluck(:lat, :lng, :name)
   end
 
   # Index du point du tracé le plus proche de (lat, lng) et sa distance en mètres.

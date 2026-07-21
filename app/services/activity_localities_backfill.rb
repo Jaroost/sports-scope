@@ -1,19 +1,20 @@
 # Enfile l'extraction des lieux (`strava_activities.localities`) pour les activités
 # qui n'en ont pas encore — typiquement celles synchronisées avant l'ajout de la
-# recherche par lieu. Chaque activité = un appel Overpass : on passe par le job
-# (retries + espacement) plutôt que d'extraire en ligne.
+# recherche par lieu. Chaque activité = une requête sur le catalogue OSM local : on
+# passe par le job plutôt que d'extraire en ligne, pour ne pas bloquer la requête
+# HTTP sur des milliers d'activités.
 #
-# Un historique Strava complet se compte en milliers d'activités, soit autant
-# d'appels à une instance Overpass publique. D'où `limit:` : le backfill se fait par
-# tranches (relançable, idempotent) plutôt qu'en une rafale qui se ferait limiter.
+# `limit:` garde le backfill par tranches (relançable, idempotent) pour ne pas
+# noyer la file de jobs d'un coup. La contrainte n'est plus le quota d'une instance
+# Overpass publique, d'où une tranche bien plus large qu'avant.
 module ActivityLocalitiesBackfill
   module_function
 
-  DEFAULT_LIMIT = 200
+  DEFAULT_LIMIT = 2_000
 
   # Renvoie le nombre d'activités enfilées. Idempotent : ne reprend que celles dont
   # `localities` est NULL (jamais extrait), donc relançable jusqu'à ce qu'il renvoie
-  # 0 sans re-taper Overpass pour les activités déjà traitées — y compris celles
+  # 0 sans réextraire les activités déjà traitées — y compris celles
   # dont l'extraction n'a rendu aucune localité (`[]`).
   def run!(user: nil, limit: DEFAULT_LIMIT)
     scope = pending_scope(user)

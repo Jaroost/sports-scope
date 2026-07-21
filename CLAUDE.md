@@ -126,9 +126,43 @@ plutôt qu'un build-arg.
 La synchro écrit en `.part` puis renomme : aucun redémarrage de `brouter` n'est nécessaire
 après une mise à jour des données.
 
+## POI auto-hébergés
+
+Les points d'intérêt ne viennent plus d'`overpass-api.de` (ni SLA ni quota). Le service
+`poi-sync` (`deploy/osm-pois/`) importe périodiquement des extraits OpenStreetMap
+Geofabrik dans une **base PostgreSQL dédiée** (`osm_pois_development` / `osm_pois_production`),
+lue par `OsmPoi` via la connexion `osm` de `config/database.yml`.
+
+Pipeline (`deploy/osm-pois/sync.sh`) : téléchargement conditionnel des `.osm.pbf` →
+`osmium tags-filter` (ne garde que les tags utiles) → `osmium merge` → `osmium export`
+en GeoJSON → `extract.py` (classification + CSV) → `COPY` dans une table neuve →
+bascule atomique. L'app ne voit jamais de table partielle.
+
+- **Premier démarrage** : ~2 Go d'extraits (Suisse + voisinage). Suivre avec
+  `docker compose logs -f poi-sync`. `rails` **ne dépend pas** de `poi-sync` : tant que
+  le catalogue est vide, `/api/geocode/places` répond `places_unavailable` (le front
+  affiche son bouton réessayer) et les jobs de localités retentent.
+- **Forcer une resynchro** : `docker compose exec poi-sync /sync.sh`
+- **Changer la couverture** : `OSM_POI_REGIONS` dans `.env` (URLs `.osm.pbf` Geofabrik
+  séparées par des espaces). Les extraits retirés de la liste restent sur le volume mais
+  ne sont plus chargés.
+- **Ajouter une catégorie de POI** : le filtre dans `FILTERS` (`sync.sh`) + la
+  classification dans `classify()` (`extract.py`) + `CATEGORIES_BY_TYPE` et
+  `DEFAULT_POI_NAMES` (`app/controllers/geocodes_controller.rb`) + l'entrée dans
+  `POI_CATEGORIES` (`app/javascript/poiCategories.ts`) + le booléen de préférence
+  (`User::DEFAULT_PREFERENCES`, `ProfilesController`, `userPreferences.ts`,
+  `UserProfile.vue`) + les libellés i18n. Une resynchro est nécessaire pour peupler la
+  nouvelle catégorie.
+
+`bin/release` rebuild et pousse l'image `sports-scope-poi-sync` à chaque release (elle
+embarque `sync.sh` / `extract.py`, donc du code du repo).
+
 ## Base de données
 
 PostgreSQL. Credentials par défaut en dev : `postgres/postgres` sur `localhost:5432`, base `sports_scope_development`.
+
+`config/database.yml` déclare deux connexions par environnement : `primary` (l'app) et
+`osm` (les POI importés, `database_tasks: false` — hors migrations et hors `db/schema.rb`).
 
 ## Linting / CI
 

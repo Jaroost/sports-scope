@@ -78,6 +78,7 @@ services:
       DATABASE_PORT: 5432
       DATABASE_USER: ${POSTGRES_USER:-postgres}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      OSM_POI_DATABASE: ${OSM_POI_DATABASE:-osm_pois_development}
       VITE_RUBY_HOST: ${VITE_HOST:-vite.localtest.me}
       VITE_RUBY_PORT: 443
       VITE_RUBY_HTTPS: "true"
@@ -110,6 +111,8 @@ services:
       vite:
         condition: service_started
       brouter:
+        condition: service_healthy
+      poi-sync:
         condition: service_healthy
     labels:
       <<: *traefik-defaults
@@ -185,6 +188,39 @@ services:
     networks:
       - default
 
+  # POI auto-hébergés : importe les points d'intérêt OpenStreetMap dans la base
+  # `osm_pois_development` (remplace les appels à overpass-api.de). Premier
+  # démarrage : ~2 Go d'extraits Geofabrik à télécharger. Rien n'est exposé —
+  # `rails` lit directement PostgreSQL, et démarre sans attendre : tant que le
+  # catalogue est vide, /api/geocode/places répond `places_unavailable`.
+  poi-sync:
+    build:
+      context: ./deploy/osm-pois
+    image: sports-scope-poi-sync:1
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      OSM_POI_DATABASE: ${OSM_POI_DATABASE:-osm_pois_development}
+      OSM_POI_REGIONS: ${OSM_POI_REGIONS:-}
+      OSM_POI_SYNC_INTERVAL: ${OSM_POI_SYNC_INTERVAL:-604800}
+    volumes:
+      - osm_pois_data:/data
+    networks:
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # « Sain » = il y a des POI en base. start_period couvre le premier import
+      # sans que les échecs comptent comme des retries.
+      test: ["CMD-SHELL", "test -f /data/.sync-complete"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 3600s
+
   vite:
     image: sports-scope-app
     build:
@@ -218,6 +254,7 @@ volumes:
   node_modules_cache:
   brouter_segments:
   brouter_profiles:
+  osm_pois_data:
 
 networks:
   default:

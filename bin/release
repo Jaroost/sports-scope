@@ -12,6 +12,11 @@ GIT_SHA=$(git rev-parse --short HEAD)
 BROUTER_VERSION=${BROUTER_VERSION:-1.7.10}
 BROUTER_IMAGE=$REGISTRY/sports-scope-brouter
 
+# Image du synchroniseur de POI. Contrairement à BRouter, elle embarque du code du
+# repo (sync.sh, extract.py) : elle est donc rebuildée et taguée à chaque release,
+# pas épinglée à une version amont.
+POI_SYNC_IMAGE=$REGISTRY/sports-scope-poi-sync
+
 #docker logout $REGISTRY 2>/dev/null || true
 docker login $REGISTRY
 
@@ -34,5 +39,10 @@ if [ "${BROUTER_FORCE:-0}" = "1" ] || ! docker manifest inspect --insecure "$BRO
 else
   echo "Skip $BROUTER_IMAGE:$BROUTER_VERSION (déjà dans le registry)"
 fi
+
+echo "Building $POI_SYNC_IMAGE:$GIT_SHA ..."
+docker build -t $POI_SYNC_IMAGE:$GIT_SHA -t $POI_SYNC_IMAGE:latest deploy/osm-pois
+docker push $POI_SYNC_IMAGE:$GIT_SHA
+docker push $POI_SYNC_IMAGE:latest
 
 echo "Done: $IMAGE:$GIT_SHA"

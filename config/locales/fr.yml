@@ -660,6 +660,12 @@ fr:
       splits_title: "Splits par km"
       split_col_km: "Km"
       split_click: "Cliquer pour sélectionner ce kilomètre"
+      # Tours enregistrés par l'appareil
+      laps_title: "Tours"
+      lap_col_num: "Tour"
+      lap_col_name: "Nom"
+      lap_click: "Cliquer pour sélectionner ce tour"
+      lap_auto: "Tour automatique (déclenché par le compteur)"
     layout:
       title: "Configuration des graphiques"
       preset_label: "Préférence"

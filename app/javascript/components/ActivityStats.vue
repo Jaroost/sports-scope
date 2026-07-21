@@ -5,7 +5,7 @@ import { Tooltip } from 'bootstrap'
 import { t } from '../i18n'
 import {
   formatHMS, formatKm, formatPace, formatPowerDuration,
-  type ClimbSegment, type Efficiency, type SegmentStats, type SplitRow,
+  type ClimbSegment, type Efficiency, type SegmentStats, type SplitRow, type LapRow,
 } from '../activityHelpers'
 
 interface ClimbWithVam extends ClimbSegment {
@@ -35,6 +35,9 @@ const props = defineProps({
   segmentSummary: { type: Object as PropType<SegmentStats | null>, default: null },
   // Splits automatiques par km.
   splits: { type: Array as PropType<SplitRow[]>, default: () => [] },
+  // Tours enregistrés par l'appareil (bouton « lap » / auto-lap) — vide si l'activité
+  // n'en porte pas.
+  laps: { type: Array as PropType<LapRow[]>, default: () => [] },
   climbsWithVam: { type: Array as PropType<ClimbWithVam[]>, default: () => [] },
   peakPowers: { type: Array as PropType<PeakPower[]>, default: () => [] },
   // { current: {dur: w}, bests: {dur: { avg_watts, source, external_id, started_at }} } | null
@@ -61,6 +64,7 @@ const hasContent = computed(() =>
   || props.trainingMetrics != null || props.decoupling != null
   || props.efficiency != null || props.gradeAdjusted != null
   || props.segmentSummary != null || props.splits.length > 0
+  || props.laps.length > 0
   || props.climbsWithVam.length > 0
   || props.peakPowers.length > 0,
 )
@@ -83,6 +87,15 @@ const splitsHasPower = computed(() => props.splits.some((s) => s.avgPower != nul
 const splitsHasGap = computed(() => props.splits.some((s) => s.gap != null))
 const splitsHasGain = computed(() => props.splits.some((s) => s.gain > 0))
 
+// Mêmes colonnes conditionnelles pour les tours : un tour peut porter des données
+// que les splits n'ont pas (et inversement), donc on teste la liste des tours.
+const lapsAnyRun = computed(() => props.laps.some((l) => l.isRun))
+const lapsHasHr = computed(() => props.laps.some((l) => l.avgHr != null))
+const lapsHasPower = computed(() => props.laps.some((l) => l.avgPower != null))
+const lapsHasGap = computed(() => props.laps.some((l) => l.gap != null))
+const lapsHasGain = computed(() => props.laps.some((l) => l.gain > 0))
+const lapsHasName = computed(() => props.laps.some((l) => l.name != null))
+
 // EF : libellé de valeur (2 décimales) + clé du mode de calcul selon la base.
 function efValue(v: number): string { return v.toFixed(2) }
 
@@ -95,11 +108,12 @@ const gapDeltaSec = computed(() => {
 })
 
 // Un split est-il celui actuellement sélectionné ? (surlignage croisé carte/graphe)
-function isSplitSelected(s: SplitRow): boolean {
+// (mêmes helpers pour les lignes de tours : même forme, même sélection)
+function isSplitSelected(s: SegmentStats): boolean {
   const sel = props.selection as { startIdx: number; endIdx: number } | null
   return !!sel && sel.startIdx === s.startIdx && sel.endIdx === s.endIdx
 }
-function selectSplit(s: SplitRow) { emit('select-segment', s.startIdx, s.endIdx) }
+function selectSplit(s: SegmentStats) { emit('select-segment', s.startIdx, s.endIdx) }
 function clearSelection() { emit('select-segment', null, null) }
 
 // ─── Badges d'interprétation ────────────────────────────────────────────────
@@ -485,6 +499,87 @@ watch(
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Tours enregistrés par l'appareil (bouton « lap » ou auto-lap). Placés avant
+           les splits : ce sont les coupures voulues par l'athlète, les splits n'étant
+           qu'un découpage kilométrique recalculé. Mêmes lignes cliquables. -->
+      <div v-if="laps.length > 0" class="stats-section">
+        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-flag-checkered text-primary" aria-hidden="true"></i>
+          <span>{{ t('strava.stats.laps_title') }}</span>
+        </h4>
+        <div class="table-responsive stats-table-scroll">
+          <table class="table table-sm stats-table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>{{ t('strava.stats.lap_col_num') }}</th>
+                <th v-if="lapsHasName">{{ t('strava.stats.lap_col_name') }}</th>
+                <th :title="t('strava.stats.col_time')">
+                  <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
+                </th>
+                <th :title="t('strava.stats.seg_distance')">
+                  <i class="fa-solid fa-ruler-horizontal text-secondary" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.seg_distance') }}</span>
+                </th>
+                <th :title="lapsAnyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth')">
+                  <i :class="lapsAnyRun ? 'fa-solid fa-person-running' : 'fa-solid fa-gauge-high'" class="text-secondary" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ lapsAnyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth') }}</span>
+                </th>
+                <th v-if="lapsHasGap" :title="t('strava.stats.gap')">
+                  <i class="fa-solid fa-mountain-sun text-secondary" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.gap') }}</span>
+                </th>
+                <th v-if="lapsHasHr" :title="t('strava.stream.heartrate')">
+                  <i class="fa-solid fa-heart-pulse text-danger" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stream.heartrate') }}</span>
+                </th>
+                <th v-if="lapsHasPower" :title="t('strava.stats.col_power')">
+                  <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
+                </th>
+                <th v-if="lapsHasGain" :title="t('strava.stats.col_gain')">
+                  <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="l in laps"
+                :key="`lap-${l.index}`"
+                class="climb-row"
+                :class="{ 'climb-row-active': isSplitSelected(l) }"
+                role="button"
+                tabindex="0"
+                :title="t('strava.stats.lap_click')"
+                :aria-pressed="isSplitSelected(l)"
+                @click="selectSplit(l)"
+                @keydown.enter.prevent="selectSplit(l)"
+                @keydown.space.prevent="selectSplit(l)"
+              >
+                <td>
+                  {{ l.index }}
+                  <i
+                    v-if="l.auto"
+                    class="fa-solid fa-robot text-muted split-partial"
+                    :title="t('strava.stats.lap_auto')"
+                    aria-hidden="true"
+                  ></i>
+                </td>
+                <td v-if="lapsHasName" class="text-truncate" style="max-width: 10rem;">{{ l.name || '–' }}</td>
+                <td>{{ l.duration != null ? formatHMS(l.duration) : '–' }}</td>
+                <td>{{ l.distance != null ? formatKm(l.distance) : '–' }}</td>
+                <td>{{ speedLabel(l) }} <span class="text-muted small">{{ speedUnit(l) }}</span></td>
+                <td v-if="lapsHasGap">{{ l.gap != null ? formatPace(l.gap) : '–' }}</td>
+                <td v-if="lapsHasHr">{{ l.avgHr != null ? Math.round(l.avgHr) : '–' }}</td>
+                <td v-if="lapsHasPower">{{ l.avgPower != null ? `${Math.round(l.avgPower)} W` : '–' }}</td>
+                <td v-if="lapsHasGain">{{ l.gain > 0 ? `+${Math.round(l.gain)} m` : '–' }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 

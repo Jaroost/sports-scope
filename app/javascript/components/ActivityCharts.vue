@@ -35,6 +35,8 @@ const props = defineProps({
   // overlay + flags, and emit `select-segment` / `clear-selection` when the
   // user drags on a chart.
   selection: { type: Object, default: null },
+  // Tours de l'appareil (LapRow[]) — dessinés en traits verticaux numérotés.
+  laps: { type: Array, default: () => [] },
   // v-model:x-axis — propagated up so MapCard can pick the right unit in the
   // route-hover tooltip.
   xAxis: { type: String, default: 'distance' },
@@ -617,6 +619,57 @@ const pauseBandPlugin = {
   },
 }
 
+// Repères de tours : un trait vertical à chaque coupure enregistrée par l'appareil,
+// numéroté en pied de graphique. Purement décoratif — la sélection d'un tour passe
+// par la table de l'onglet « Analyse ». Le numéro n'est peint que s'il reste de la
+// place depuis le repère précédent, sinon une série de laps courts empile les
+// étiquettes en bouillie.
+const LAP_LABEL_MIN_GAP_PX = 26
+
+const lapMarkPlugin = {
+  id: 'activityLapMarks',
+  afterDatasetsDraw(chart) {
+    const marks = chart.$lapMarks
+    if (!marks || marks.length === 0 || !chart.scales.x) return
+    const { ctx, chartArea, scales } = chart
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+    ctx.clip()
+    ctx.font = '600 9px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    let lastLabelX = -Infinity
+    for (const mark of marks) {
+      const x = scales.x.getPixelForValue(mark.x)
+      if (!Number.isFinite(x) || x < chartArea.left || x > chartArea.right) continue
+      ctx.strokeStyle = 'rgba(13, 110, 253, 0.45)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([4, 3])
+      ctx.beginPath()
+      ctx.moveTo(x + 0.5, chartArea.top)
+      ctx.lineTo(x + 0.5, chartArea.bottom)
+      ctx.stroke()
+      ctx.setLineDash([])
+      if (x - lastLabelX < LAP_LABEL_MIN_GAP_PX) continue
+      lastLabelX = x
+      const label = String(mark.index)
+      const boxW = ctx.measureText(label).width + 8
+      const boxH = 13
+      const boxY = chartArea.bottom - boxH - 2
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+      ctx.strokeStyle = 'rgba(13, 110, 253, 0.45)'
+      ctx.beginPath()
+      ctx.roundRect(x - boxW / 2, boxY, boxW, boxH, 3)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#0d6efd'
+      ctx.fillText(label, x, boxY + boxH / 2 + 0.5)
+    }
+    ctx.restore()
+  },
+}
+
 const dragSelectPlugin = {
   id: 'dragSelect',
   beforeEvent(chart, args) {
@@ -726,7 +779,7 @@ async function renderCharts() {
   if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
-  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, pauseBandPlugin)
+  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, pauseBandPlugin, lapMarkPlugin)
 
   destroyCharts()
 
@@ -751,6 +804,11 @@ async function renderCharts() {
     }))
   // Indice d'échantillon → x du `null` de coupure à insérer juste après lui. Le repérage
   // par index (et non par valeur d'axe) est ce qui garde la coupure collée au trou réel.
+  // Coupures de tours, projetées sur l'axe tracé comme les pauses. On marque le
+  // *début* de chaque tour sauf le premier (qui est le début de l'activité).
+  const lapMarks = (props.laps as { index: number; startIdx: number }[])
+    .filter((l, i) => i > 0 && xRaw[l.startIdx] != null)
+    .map((l) => ({ index: l.index, x: chartXFromRaw(xRaw[l.startIdx]) }))
   const gapNullAfter = new Map(gapSegments.map((g) => [
     g.startIdx,
     (chartXFromRaw(xRaw[g.startIdx]) + chartXFromRaw(xRaw[g.endIdx])) / 2,
@@ -895,6 +953,7 @@ async function renderCharts() {
     })
 
     ;(chart as any).$pauseSpans = pauseSpans
+    ;(chart as any).$lapMarks = lapMarks
 
     ;(chart as any).$onSelect = (v0: number, v1: number) => {
       const r0 = chartXToRaw(Math.min(v0, v1))
@@ -1605,6 +1664,13 @@ watch(() => props.collapsed, async (collapsed) => {
 watch(() => props.zoomRange, applyZoomToCharts)
 
 watch(() => props.selection, applySelectionToCharts)
+
+// Les tours viennent du détail de l'activité, les courbes des flux : les deux fetches
+// sont indépendants, le détail peut donc arriver après un premier rendu. On repeint
+// alors les repères de tours (seulement s'il y en a — pas de rendu inutile).
+watch(() => props.laps, (val) => {
+  if (props.streams && Array.isArray(val) && val.length > 0) renderCharts()
+})
 
 // First mount: pull the saved presets, restore the user's last-used one,
 // reconcile the layout against the streams actually available, and render.

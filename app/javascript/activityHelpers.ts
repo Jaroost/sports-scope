@@ -840,6 +840,103 @@ export function computeSplits(
   }))
 }
 
+// ─── Tours (laps) enregistrés par l'appareil ─────────────────────────────────
+// Contrairement aux splits (recalculés par nous tous les km), les tours viennent
+// du fichier d'origine : bouton « lap » pressé par l'athlète ou auto-lap du
+// compteur. Source unique côté front pour les deux origines :
+//   • Strava — le détail `/activities/:id` porte `laps[]` avec `start_index` /
+//     `end_index`, déjà exprimés en indices de flux : rien à convertir.
+//   • .fit importés — `ImportFitActivity.vue` écrit la même forme au moment de
+//     l'upload (indices calculés depuis les timestamps des `records`).
+export interface LapRow extends SegmentStats {
+  index: number
+  name: string | null
+  auto: boolean // déclenché par le compteur (distance/temps) plutôt qu'à la main
+}
+
+// Nom d'un tour, sauf quand c'est le libellé générique du fournisseur (« Lap 3 »,
+// « Tour 3 ») : la colonne « Nom » ne redirait alors que le numéro déjà affiché.
+function lapName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const name = value.trim()
+  if (!name || /^(lap|tour)\s*\d+$/i.test(name)) return null
+  return name
+}
+
+// Premier indice du flux `time` (secondes écoulées, croissant) atteignant `sec`.
+function indexAtSecond(time: number[], sec: number): number {
+  let lo = 0
+  let hi = time.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (time[mid] < sec) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+// Bornes des tours en indices de flux. Deux sources, dans cet ordre :
+//   1. les dates absolues (`start_date` du tour vs de l'activité), chaque tour
+//      s'arrêtant là où commence le suivant ;
+//   2. à défaut, les `start_index` / `end_index` fournis.
+// L'ordre n'est pas un caprice : Strava livre régulièrement des index faux (un
+// premier tour `0..0`, un second qui repart de `0` et chevauche le premier), alors
+// que les dates, elles, sont cohérentes. Les .fit importés n'ont pas de dates ici
+// (`ImportFitActivity.vue` a déjà converti en indices) et passent donc par (2).
+function lapRanges(raw: unknown[], activity: Record<string, unknown> | null | undefined, time: number[] | undefined) {
+  const n = time?.length ?? 0
+  const actStart = Date.parse(String((activity as any)?.start_date ?? ''))
+  if (time && n >= 2 && Number.isFinite(actStart)) {
+    const starts = raw.map((l) => {
+      const ms = Date.parse(String((l as any)?.start_date ?? ''))
+      return Number.isFinite(ms) ? (ms - actStart) / 1000 : null
+    })
+    const usable = starts.every((s) => s != null)
+      && starts.every((s, i) => i === 0 || (s as number) > (starts[i - 1] as number))
+    if (usable) {
+      return starts.map((s, i) => ({
+        start: indexAtSecond(time, s as number),
+        end: i === starts.length - 1 ? n - 1 : indexAtSecond(time, starts[i + 1] as number),
+      }))
+    }
+  }
+  return raw.map((l) => ({ start: Number((l as any)?.start_index), end: Number((l as any)?.end_index) }))
+}
+
+// Un tour est ignoré si ses bornes ne pointent nulle part dans les flux (activité
+// dont les streams ont été tronqués, ou lap vide d'un compteur resté en pause).
+export function computeLaps(
+  streams: Record<string, { data?: unknown } | undefined> | null | undefined,
+  activity: Record<string, unknown> | null | undefined,
+  laps?: unknown,
+): LapRow[] {
+  const raw = Array.isArray(laps) ? laps : (activity as any)?.laps
+  if (!Array.isArray(raw) || raw.length === 0) return []
+  const time = streams?.time?.data as number[] | undefined
+  const dist = streams?.distance?.data as number[] | undefined
+  const n = time?.length || dist?.length || 0
+  if (n < 2) return []
+
+  const ranges = lapRanges(raw, activity, time)
+  const rows: LapRow[] = []
+  raw.forEach((l, i) => {
+    if (!l || typeof l !== 'object') return
+    const lap = l as Record<string, unknown>
+    const { start: s, end: e } = ranges[i]
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || s >= n) return
+    const trigger = String(lap.lap_trigger ?? '').toLowerCase()
+    rows.push({
+      ...segmentStats(streams, activity, s, Math.min(e, n - 1)),
+      index: rows.length + 1,
+      name: lapName(lap.name),
+      auto: trigger !== '' && trigger !== 'manual',
+    })
+  })
+  // Un seul tour = l'activité entière : la table n'apprendrait rien de plus que
+  // le bandeau de stats global.
+  return rows.length > 1 ? rows : []
+}
+
 export function detectClimbs(
   grades: number[] | null | undefined,
   altitudes: number[] | null | undefined,

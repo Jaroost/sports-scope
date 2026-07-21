@@ -2,6 +2,7 @@ class ImportedActivitiesController < ApplicationController
   before_action :require_login!
 
   MAX_STREAM_POINTS = 50_000
+  MAX_LAPS = 2_000
   ALLOWED_STREAM_KEYS = %w[time distance latlng altitude velocity_smooth heartrate cadence watts temp moving
                            grade_smooth].freeze
 
@@ -19,7 +20,9 @@ class ImportedActivitiesController < ApplicationController
     activity = current_user.imported_activities.find_by(id: params[:id])
     return head :not_found unless activity
 
-    render json: { activity: summary_json(activity, tss: TrainingLoad.tss_for(current_user, 'imported', activity.id)) }
+    render json: {
+      activity: summary_json(activity, tss: TrainingLoad.tss_for(current_user, 'imported', activity.id), with_laps: true)
+    }
   end
 
   # GET /api/imported_activities/:id/streams
@@ -82,7 +85,9 @@ class ImportedActivitiesController < ApplicationController
 
   private
 
-  def summary_json(a, tss: nil)
+  # `with_laps` seulement sur le détail : la liste ramène 100 activités, inutile d'y
+  # traîner les tours que seule la page d'analyse consomme.
+  def summary_json(a, tss: nil, with_laps: false)
     {
       id: a.id,
       source: a.source,
@@ -111,7 +116,7 @@ class ImportedActivitiesController < ApplicationController
       start_latlng: a.start_latlng,
       end_latlng: a.end_latlng,
       created_at: a.created_at.iso8601
-    }
+    }.tap { |h| h[:laps] = a.laps if with_laps }
   end
 
   def sanitize_attrs(p)
@@ -136,7 +141,8 @@ class ImportedActivitiesController < ApplicationController
       average_temp: numeric_or_nil(p[:average_temp]),
       start_latlng: latlng_or_nil(p[:start_latlng]),
       end_latlng: latlng_or_nil(p[:end_latlng]),
-      streams: clean_streams(p[:streams])
+      streams: clean_streams(p[:streams]),
+      laps: clean_laps(p[:laps])
     }
   end
 
@@ -155,6 +161,33 @@ class ImportedActivitiesController < ApplicationController
       out[key] = { 'data' => data.first(MAX_STREAM_POINTS) }
     end
     out
+  end
+
+  # Tours envoyés par l'importateur .fit, dans la forme Strava (indices de flux) :
+  # on ne garde que les champs connus et les bornes cohérentes, le front n'a alors
+  # qu'un seul format à lire quelle que soit l'origine de l'activité.
+  def clean_laps(raw)
+    return [] unless raw.is_a?(Array)
+
+    raw.filter_map do |lap|
+      h = lap.respond_to?(:to_unsafe_h) ? lap.to_unsafe_h : lap
+      next unless h.is_a?(Hash)
+
+      s = integer_or_nil(h['start_index'])
+      e = integer_or_nil(h['end_index'])
+      next if s.nil? || e.nil? || e <= s || s.negative?
+
+      {
+        'lap_index' => integer_or_nil(h['lap_index']),
+        'start_index' => s,
+        'end_index' => e,
+        'name' => h['name'].to_s.strip.first(80).presence,
+        'lap_trigger' => h['lap_trigger'].to_s.strip.first(30).presence,
+        'elapsed_time' => integer_or_nil(h['elapsed_time']),
+        'moving_time' => integer_or_nil(h['moving_time']),
+        'distance' => numeric_or_nil(h['distance'])
+      }
+    end.first(MAX_LAPS)
   end
 
   def parse_time(v)

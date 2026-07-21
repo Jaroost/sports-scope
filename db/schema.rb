@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_19_000003) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_21_000001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -72,6 +72,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_19_000003) do
     t.jsonb "end_latlng"
     t.string "filename"
     t.jsonb "hr_histogram", default: {}, null: false
+    t.jsonb "laps", default: [], null: false
     t.float "max_cadence"
     t.float "max_heartrate"
     t.float "max_speed"

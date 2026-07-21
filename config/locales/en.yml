@@ -660,6 +660,12 @@ en:
       splits_title: "Kilometre splits"
       split_col_km: "Km"
       split_click: "Click to select this kilometre"
+      # Device-recorded laps
+      laps_title: "Laps"
+      lap_col_num: "Lap"
+      lap_col_name: "Name"
+      lap_click: "Click to select this lap"
+      lap_auto: "Auto lap (triggered by the device)"
     layout:
       title: "Chart layout"
       preset_label: "Preset"

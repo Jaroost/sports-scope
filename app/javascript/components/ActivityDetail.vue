@@ -15,7 +15,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
 import {
   PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds, aerobicDecoupling,
-  efficiencyFactor, gradeAdjustedPace, segmentStats, computeSplits, isRun, paceMinPerKm,
+  efficiencyFactor, gradeAdjustedPace, segmentStats, computeSplits, computeLaps, isRun, paceMinPerKm,
 } from '../activityHelpers'
 // Même détection de cols et même pente lissée (fenêtre du profil) que le créateur
 // d'itinéraire, pour que carte, graphique et tableau de cols soient cohérents.
@@ -191,6 +191,11 @@ const gradeAdjusted = computed(() => {
 
 // Splits par km — universel (Strava + .fit), dépend seulement du flux `distance`.
 const splits = computed(() => computeSplits(streams.value, activity.value))
+
+// Tours enregistrés par l'appareil (bouton « lap » ou auto-lap). Strava les livre
+// dans le détail de l'activité, les .fit importés les stockent à l'upload — dans
+// les deux cas sous la clé `laps` du payload d'activité.
+const laps = computed(() => computeLaps(streams.value, activity.value))
 
 // Récap du segment sélectionné (drague A/B, clic sur un col / une puissance / un split).
 // Alimente l'analyseur de segment ; null quand rien n'est sélectionné.
@@ -519,6 +524,7 @@ onMounted(async () => {
         :grade-adjusted="gradeAdjusted"
         :segment-summary="segmentSummary"
         :splits="splits"
+        :laps="laps"
         :climbs-with-vam="climbsWithVam"
         :peak-powers="peakPowers"
         :peak-power-ranks="peakPowerRanks"
@@ -537,6 +543,7 @@ onMounted(async () => {
         :streams-loading="streamsLoading"
         :streams-error="streamsError"
         :selection="selection"
+        :laps="laps"
         :show-grade="showGrade"
         v-model:x-axis="xAxis"
         v-model:visible-streams="visibleStreams"

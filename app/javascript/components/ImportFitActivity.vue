@@ -164,6 +164,12 @@ function buildPayload(data, filename) {
     streams.grade_smooth = { data: grade }
   }
 
+  // Tours enregistrés par l'appareil. Le .fit les date (start_time + durée) au lieu
+  // de les indexer : on convertit en indices de flux (forme Strava `start_index` /
+  // `end_index`) pour que ActivityDetail traite les deux origines pareil. `time`
+  // contient la seconde écoulée de chaque échantillon retenu, dans l'ordre.
+  const laps = buildLaps(data.laps, time, startTs)
+
   const startLatLng = llValid.length ? llValid[0] : null
   const endLatLng = llValid.length ? llValid[llValid.length - 1] : null
 
@@ -201,7 +207,51 @@ function buildPayload(data, filename) {
     start_latlng: startLatLng,
     end_latlng: endLatLng,
     streams,
+    laps,
   }
+}
+
+// `data.laps` (fit-file-parser) → tours à la forme Strava. Un tour est daté par
+// `start_time` et dure `total_elapsed_time` : on borne donc l'intervalle en secondes
+// écoulées, puis on cherche les indices correspondants dans `time` (trié croissant).
+// Un lap dont l'intervalle ne couvre aucun échantillon (compteur en pause, tour
+// enregistré après l'arrêt) est écarté.
+function buildLaps(rawLaps, time, startTs) {
+  if (!Array.isArray(rawLaps) || rawLaps.length === 0 || time.length < 2 || startTs == null) return []
+
+  // Premier indice dont la seconde écoulée est >= `sec`.
+  const indexAt = (sec) => {
+    let lo = 0
+    let hi = time.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (time[mid] < sec) lo = mid + 1
+      else hi = mid
+    }
+    return lo
+  }
+
+  const laps = []
+  for (const lap of rawLaps) {
+    if (!lap || !lap.start_time) continue
+    const from = Math.round((new Date(lap.start_time).getTime() - startTs) / 1000)
+    const dur = numericOrNull(lap.total_elapsed_time ?? lap.total_timer_time)
+    if (!Number.isFinite(from) || dur == null || dur <= 0) continue
+    const startIndex = indexAt(from)
+    const endIndex = indexAt(from + dur)
+    if (endIndex <= startIndex) continue
+    laps.push({
+      lap_index: laps.length + 1,
+      start_index: startIndex,
+      end_index: Math.min(endIndex, time.length - 1),
+      // `lap_trigger` distingue le bouton pressé à la main (« manual ») de l'auto-lap.
+      lap_trigger: lap.lap_trigger ? String(lap.lap_trigger) : null,
+      elapsed_time: integerOrNull(lap.total_elapsed_time),
+      moving_time: integerOrNull(lap.total_timer_time),
+      distance: numericOrNull(lap.total_distance),
+    })
+  }
+  return laps
 }
 
 function numericOrNull(v) {

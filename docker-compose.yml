@@ -189,10 +189,11 @@ services:
       - default
 
   # POI auto-hébergés : importe les points d'intérêt OpenStreetMap dans la base
-  # `osm_pois_development` (remplace les appels à overpass-api.de). Premier
-  # démarrage : ~2 Go d'extraits Geofabrik à télécharger. Rien n'est exposé —
-  # `rails` lit directement PostgreSQL, et démarre sans attendre : tant que le
-  # catalogue est vide, /api/geocode/places répond `places_unavailable`.
+  # `osm_pois_development` (remplace les appels à overpass-api.de). Rien n'est
+  # exposé — `rails` lit directement PostgreSQL. Comme pour brouter, `rails`
+  # attend que le catalogue soit exploitable (marqueur `.sync-complete`) : seul le
+  # tout premier boot attend l'import (~2 Go d'extraits Geofabrik), le marqueur
+  # vivant dans le volume.
   poi-sync:
     build:
       context: ./deploy/osm-pois

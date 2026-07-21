@@ -23,11 +23,10 @@ class AddLocalitiesToRoutes < ActiveRecord::Migration[8.1]
         ON routes USING gin (name gin_trgm_ops)
     SQL
 
-    # Les itinéraires existants n'ont pas de lieux : on les extrait en tâche de
-    # fond plutôt que dans la migration (un appel Overpass par itinéraire, service
-    # externe avec rate limit — une migration ne doit pas en dépendre).
-    say "Lieux des itinéraires existants : lancer `RouteLocalitiesBackfill.run!` " \
-        "pour peupler `routes.localities` (extraction Overpass, en tâche de fond)."
+    # Les itinéraires existants n'ont pas de lieux : on les extrait hors migration
+    # (l'extraction dépend du catalogue OSM, une migration ne doit pas en dépendre).
+    say "Lieux des itinéraires existants : lancer `bin/rails localities:backfill` " \
+        "pour peupler `routes.localities`."
   end
 
   def down

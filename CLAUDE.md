@@ -139,9 +139,11 @@ en GeoJSON → `extract.py` (classification + CSV) → `COPY` dans une table neu
 bascule atomique. L'app ne voit jamais de table partielle.
 
 - **Premier démarrage** : ~2 Go d'extraits (Suisse + voisinage). Suivre avec
-  `docker compose logs -f poi-sync`. `rails` **ne dépend pas** de `poi-sync` : tant que
-  le catalogue est vide, `/api/geocode/places` répond `places_unavailable` (le front
-  affiche son bouton réessayer) et les jobs de localités retentent.
+  `docker compose logs -f poi-sync`. Comme pour BRouter, `rails` attend que `poi-sync`
+  soit *healthy* (marqueur `/data/.sync-complete`) — bloquant seulement au tout premier
+  boot, le marqueur vivant dans le volume. Si le catalogue venait à manquer malgré tout,
+  `/api/geocode/places` répond `places_unavailable` (le front affiche son bouton
+  réessayer) et les jobs de localités retentent.
 - **Forcer une resynchro** : `docker compose exec poi-sync /sync.sh`
 - **Changer la couverture** : `OSM_POI_REGIONS` dans `.env` (URLs `.osm.pbf` Geofabrik
   séparées par des espaces). Les extraits retirés de la liste restent sur le volume mais
@@ -156,6 +158,24 @@ bascule atomique. L'app ne voit jamais de table partielle.
 
 `bin/release` rebuild et pousse l'image `sports-scope-poi-sync` à chaque release (elle
 embarque `sync.sh` / `extract.py`, donc du code du repo).
+
+### Recalcul des lieux (recherche par lieu)
+
+Les lieux traversés (`routes.localities`, `strava_activities.localities`) sont extraits
+automatiquement à chaque changement de tracé. Pour les retraiter en masse —
+`LocalitiesBackfill` + `lib/tasks/localities.rake` :
+
+```bash
+bin/rails localities:pending     # combien reste-t-il à traiter
+bin/rails localities:backfill    # extrait ce qui manque (idempotent)
+bin/rails localities:recompute   # réécrit TOUT (après un changement de couverture OSM
+                                 # ou de LocalitiesExtractor::THRESHOLD_M)
+```
+
+Options : `USER_ID=<id>`, `LIMIT=<n>` (par type), `SCOPE=routes|activities`.
+
+L'extraction est faite en ligne, pas via les jobs : chaque enregistrement n'est qu'une
+requête SQL locale (~5 ms). Ordre de grandeur mesuré : 730 activités en 4 s.
 
 ## Base de données
 

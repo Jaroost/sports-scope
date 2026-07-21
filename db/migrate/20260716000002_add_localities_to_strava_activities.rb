@@ -22,9 +22,8 @@ class AddLocalitiesToStravaActivities < ActiveRecord::Migration[8.1]
         ON strava_activities USING gin (name gin_trgm_ops)
     SQL
 
-    say "Lieux des activités existantes : lancer `ActivityLocalitiesBackfill.run!` " \
-        "pour peupler `strava_activities.localities` (un appel Overpass par activité, " \
-        "en tâche de fond)."
+    say "Lieux des activités existantes : lancer `bin/rails localities:backfill` " \
+        "pour peupler `strava_activities.localities`."
   end
 
   def down

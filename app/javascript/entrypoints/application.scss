@@ -55,6 +55,30 @@ body.fullscreen-page {
   letter-spacing: 0.02em;
 }
 
+/* Rappel du type d'itinéraire à côté du logo (téléphone). Pastille discrète, alignée
+   sur la hauteur de la navbar sombre. */
+/* Rapproche la pastille du logo : annule la marge droite d'1rem que Bootstrap pose
+   sur .navbar-brand, ne gardant qu'un léger interstice. */
+#rb-brand-type { margin-left: -0.75rem; }
+.rb-brand-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.rb-brand-type-badge .fa-solid { color: var(--bs-warning); }
+/* Écrans étroits : on ne garde que l'icône pour laisser la place aux actions. */
+@media (max-width: 360px) {
+  .rb-brand-type-badge > span { display: none; }
+  .rb-brand-type-badge { padding: 0.2rem 0.45rem; }
+}
+
 /* Onglets du tableau de bord : pastilles comme sur « Mes itinéraires ». Les
    boutons sont des btn-outline-secondary ; l'onglet actif (toggle Bootstrap pill)
    passe en jaune (warning) plutôt que le gris par défaut de .active. */
@@ -326,6 +350,22 @@ body.fullscreen-page {
   color: var(--bs-danger-text-emphasis);
   background: var(--bs-danger-bg-subtle);
   border-color: var(--bs-danger-border-subtle);
+}
+/* Clic sur une pastille de repère de la vignette : la ligne correspondante de la liste
+   défile dans la vue et clignote une fois. Sans ce flash, un défilement de quelques
+   centaines de pixels laisse le lecteur chercher ce qui a bougé. */
+.route-summary-marker-flash {
+  animation: route-summary-flash 1.2s ease-out;
+}
+@keyframes route-summary-flash {
+  0%, 60% {
+    background-color: var(--bs-warning-bg-subtle);
+    box-shadow: inset 3px 0 0 0 var(--bs-warning-border-subtle);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 0 transparent;
+  }
 }
 .route-summary-localities {
   display: flex;

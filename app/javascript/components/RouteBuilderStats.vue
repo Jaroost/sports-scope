@@ -7,19 +7,9 @@ import { formatKm, formatDistanceShort, formatDuration } from '../routeHelpers'
 import type { Climb } from '../routeHelpers'
 import type { Place } from '../stores/placesStore'
 import { categoryForType } from '../poiCategories'
-import type { Sport } from '../userPreferences'
-import { profilesForSport } from '../brouter'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
 import { estimateRouteLoad } from '../routeLoad'
 import { formZone, zoneColor, FEAS_COLOR } from '../composables/useTrainingPlan'
-
-// Catégories d'activité — pilotent la vitesse moyenne (via le profil) et sont
-// enregistrées avec l'itinéraire.
-const ACTIVITIES = ['cycling', 'mtb', 'hiking'] as const
-
-function sportIcon(s: Sport) {
-  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
-}
 
 const props = defineProps<{
   sidebarWidth: number
@@ -31,11 +21,11 @@ const emit = defineEmits<{
   'select-place': [place: Place]
   'hover-place': [place: Place | null]
   'retry-places': []
-  'change-sport': [sport: Sport]
-  'change-profile': [profile: string]
 }>()
 
-const climbsExpanded = ref(true)
+// Repliée par défaut : la liste des cols peut être longue et repousser le reste des
+// stats hors de vue ; l'en-tête suffit à annoncer combien il y en a.
+const climbsExpanded = ref(false)
 
 // ── TSS estimé ───────────────────────────────────────────────────────────────
 // Recalculé à chaque changement de tracé, de sport ou de vitesse saisie. `athlete`
@@ -122,50 +112,8 @@ const routeLoad = computed(() => {
         </template>
       </template>
 
-      <!-- Type d'activité — enregistré avec l'itinéraire, pilote la vitesse moyenne -->
-      <div class="activity-toggle btn-group btn-group-sm w-100" role="group" :aria-label="t('routes.wt_sport')">
-        <button
-          v-for="s in ACTIVITIES"
-          :key="s"
-          type="button"
-          class="btn"
-          :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
-          :title="t(`routes.wt_sport_${s}`)"
-          :aria-label="t(`routes.wt_sport_${s}`)"
-          :disabled="routeStore.readOnly.value"
-          @click="emit('change-sport', s)"
-        >
-          <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
-          <span class="ms-1 d-none d-sm-inline">{{ t(`routes.wt_sport_${s}`) }}</span>
-        </button>
-      </div>
-
-      <!-- Profil de routage BRouter — filtré par sport, relance le calcul du tracé -->
-      <div class="profile-select">
-        <label class="form-label small text-muted mb-1" for="route-profile-select">
-          {{ t('routes.profile_label') }}
-        </label>
-        <select
-          id="route-profile-select"
-          class="form-select form-select-sm"
-          :value="routeStore.profile.value"
-          :disabled="routeStore.readOnly.value"
-          :title="t(`routes.brouter_profile.${routeStore.profile.value}_desc`)"
-          @change="emit('change-profile', ($event.target as HTMLSelectElement).value)"
-        >
-          <option
-            v-for="p in profilesForSport(routeStore.sport.value)"
-            :key="p"
-            :value="p"
-            :title="t(`routes.brouter_profile.${p}_desc`)"
-          >
-            {{ t(`routes.brouter_profile.${p}`) }}
-          </option>
-        </select>
-        <p class="profile-desc small text-muted mb-0 mt-1">
-          {{ t(`routes.brouter_profile.${routeStore.profile.value}_desc`) }}
-        </p>
-      </div>
+      <!-- Le type d'activité et le profil de routage sont déplacés dans le menu
+           d'actions du bandeau (cf. RouteBuilder.vue). -->
 
       <!-- Temps estimé -->
       <span class="stat-pill stat-pill-time" :title="t('routes.estimated_time_hint', { speed: routeStore.avgSpeedKmh.value })">

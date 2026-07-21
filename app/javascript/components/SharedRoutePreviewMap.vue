@@ -10,14 +10,23 @@
 import { onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { type PropType } from 'vue'
 import { mapStyleFor, ROUTE_LINE_LAYOUT } from '../mapStyles'
+import { markerMeta, markerKindLabel, type RouteMarker } from '../routeMarkers'
+import { escapeHtml } from '../activityHelpers'
 
 const props = defineProps({
   // Polyligne simplifiée `[[lng, lat], ...]` (routes.map_polyline), passée en props
   // plutôt que rechargée : elle est déjà en base, sous-échantillonnée pour être légère.
   polyline: { type: Array as PropType<[number, number][]>, default: () => [] },
+  // Repères posés dans le créateur (routes.markers) : départ / arrivée / parking. Ils
+  // situent le point de rendez-vous sans avoir à ouvrir le tracé complet.
+  markers: { type: Array as PropType<RouteMarker[]>, default: () => [] },
   // Fond de carte : les sentiers se lisent mieux sur le fond topo, les routes sur CyclOSM.
   styleId: { type: String, default: 'cyclosm' },
 })
+
+// Classe de mise en évidence de la ligne visée, définie avec la page (application.scss) :
+// la liste est rendue par le serveur, hors de ce composant.
+const FLASH_CLASS = 'route-summary-marker-flash'
 
 const mapEl = useTemplateRef('mapEl')
 // État impératif, hors réactivité Vue (maplibre n'aime pas la réactivité profonde).
@@ -26,13 +35,54 @@ let mapInstance: any = null
 function bounds(): [[number, number], [number, number]] | null {
   if (props.polyline.length < 2) return null
   let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity
-  for (const [lng, lat] of props.polyline) {
+  // Les repères entrent dans le cadrage : un parking posé un peu à l'écart du tracé
+  // sortirait sinon de la vignette.
+  const points = [...props.polyline, ...props.markers.map((m) => [m.lng, m.lat] as [number, number])]
+  for (const [lng, lat] of points) {
     if (lng < minLng) minLng = lng
     if (lat < minLat) minLat = lat
     if (lng > maxLng) maxLng = lng
     if (lat > maxLat) maxLat = lat
   }
   return [[minLng, minLat], [maxLng, maxLat]]
+}
+
+// Fait défiler la page jusqu'à la ligne du repère dans la liste rendue par le serveur
+// (route_summary.html.erb pose l'id, même index que le tableau des props) et la fait
+// clignoter une fois : après un défilement de plusieurs centaines de pixels, il faut
+// dire au lecteur ce qui a bougé.
+function revealMarkerInList(index: number) {
+  const row = document.getElementById(`route-summary-marker-${index}`)
+  if (!row) return
+  row.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' })
+  // Retirer puis remettre la classe redémarre l'animation si on reclique sur la même
+  // pastille avant la fin (sinon le navigateur la considère déjà jouée).
+  row.classList.remove(FLASH_CLASS)
+  void row.offsetWidth
+  row.classList.add(FLASH_CLASS)
+  row.addEventListener('animationend', () => row.classList.remove(FLASH_CLASS), { once: true })
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+}
+
+// Pastille d'un repère, calquée sur celle du créateur d'itinéraire. Seule interaction
+// de cette vignette : le clic renvoie à la ligne correspondante de la liste, qui porte
+// les liens Google Maps.
+function buildMarkerEl(marker: RouteMarker, index: number): HTMLElement {
+  const meta = markerMeta(marker.kind)
+  const kindLabel = markerKindLabel(marker.kind)
+  const text = marker.label && marker.label !== kindLabel ? `${kindLabel} · ${marker.label}` : kindLabel
+  const el = document.createElement('button')
+  el.type = 'button'
+  el.className = 'shared-route-marker'
+  el.style.color = meta?.color ?? '#6b7280'
+  el.title = text
+  el.innerHTML = `<i class="fa-solid ${meta?.icon ?? 'fa-location-dot'}" aria-hidden="true"></i>`
+    + `<span class="shared-route-marker-label">${escapeHtml(text)}</span>`
+  el.addEventListener('click', () => revealMarkerInList(index))
+  return el
 }
 
 async function renderMap() {
@@ -85,6 +135,11 @@ async function renderMap() {
       layout: ROUTE_LINE_LAYOUT,
       paint: { 'line-color': '#f97316', 'line-width': 3.5 },
     })
+    props.markers.forEach((marker, i) => {
+      new maplibregl.Marker({ element: buildMarkerEl(marker, i), anchor: 'bottom-left' })
+        .setLngLat([marker.lng, marker.lat])
+        .addTo(mapInstance)
+    })
   })
 }
 
@@ -98,3 +153,36 @@ onBeforeUnmount(() => {
 <template>
   <div ref="mapEl" class="route-summary-map"></div>
 </template>
+
+<!-- Non scoped : les pastilles sont créées en JS (hors template), elles ne portent donc
+     pas l'attribut data-v du composant. -->
+<style>
+.shared-route-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 0.16rem 0.45rem 0.16rem 0.38rem;
+  border-radius: 12px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1.5px solid currentColor;
+  box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.35);
+  line-height: 1.4;
+  user-select: none;
+  transform-origin: bottom left;
+  /* La carte reste non interactive : seule la pastille capte le clic, qui renvoie à la
+     ligne du repère dans la liste. Ailleurs, le doigt fait défiler la page. */
+  cursor: pointer;
+  /* Pas d'effet en `transform` : MapLibre écrit le positionnement de la pastille dans
+     le `transform` de cet élément même, il serait écrasé. */
+  transition: box-shadow 0.1s ease;
+}
+.shared-route-marker:hover,
+.shared-route-marker:focus-visible {
+  box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.45);
+}
+.shared-route-marker i { font-size: 0.7rem; }
+.shared-route-marker-label { color: #212529; }
+</style>

@@ -40,6 +40,10 @@
           <i class="fa-solid fa-mountain-sun text-warning" aria-hidden="true"></i>
           <span class="d-none d-md-inline"><%= t("app.title") %></span>
         <% end %>
+        <%# Rappel du type d'itinéraire, téléporté ici par RouteBuilder.vue sur téléphone.
+            `me-auto` colle la pastille au logo : la marge auto absorbe l'espace à sa
+            droite au lieu de laisser le justify-content: space-between l'en écarter. %>
+        <span id="rb-brand-type" class="d-md-none me-auto"></span>
         <%= yield :navbar_actions %>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
           <span class="navbar-toggler-icon"></span>

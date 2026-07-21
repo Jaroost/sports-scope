@@ -44,6 +44,7 @@
       <div data-vue-component="SharedRoutePreviewMap"
            data-vue-props='<%= {
              polyline: @route.map_polyline || [],
+             markers: Array(@route.markers),
              styleId: "cyclosm",
            }.to_json %>'>
         <% if @route.preview_segments.present? %>
@@ -109,15 +110,18 @@
 
   <% markers = Array(@route.markers) %>
   <% if markers.any? %>
-    <%# Un lien Google Maps par repère : l'API d'itinéraire Google plafonne à ~9 points
-        intermédiaires, un lien unique ne tiendrait pas la charge. %>
+    <%# Deux liens Google Maps par repère — le voir sur la carte, ou s'y faire guider en
+        voiture. Un par repère plutôt qu'un itinéraire unique : l'API d'itinéraire Google
+        plafonne à ~9 points intermédiaires, un lien unique ne tiendrait pas la charge. %>
     <h2 class="h6 text-body-secondary"><%= t("routes.summary.markers") %></h2>
     <div class="list-group mb-3">
-      <% markers.each do |marker| %>
+      <% markers.each_with_index do |marker, i| %>
         <% kind_label = t("routes.marker_#{marker['kind']}", default: marker["kind"].to_s.humanize) %>
-        <a class="list-group-item list-group-item-action d-flex align-items-center gap-2"
-           href="https://www.google.com/maps/search/?api=1&query=<%= u("#{marker['lat']},#{marker['lng']}") %>"
-           target="_blank" rel="noopener noreferrer">
+        <% coords = "#{marker['lat']},#{marker['lng']}" %>
+        <%# L'id sert d'ancre à la vignette : un clic sur la pastille du repère fait
+            défiler la page jusqu'à cette ligne (cf. SharedRoutePreviewMap). L'index
+            suit celui du tableau passé à l'îlot — même source, même ordre. %>
+        <div id="route-summary-marker-<%= i %>" class="list-group-item d-flex align-items-center flex-wrap gap-2">
           <i class="fa-solid <%= { "start" => "fa-flag", "finish" => "fa-flag-checkered", "parking" => "fa-square-parking" }.fetch(marker["kind"], "fa-location-dot") %> fa-fw text-warning" aria-hidden="true"></i>
           <%# Le type porte le nom du repère ; le libellé saisi ne s'affiche à côté que
               s'il ajoute quelque chose (sinon on répéterait « Départ · Départ »). %>
@@ -125,8 +129,23 @@
           <span class="flex-grow-1 text-truncate">
             <%= marker["label"] if marker["label"].present? && marker["label"] != kind_label %>
           </span>
-          <small class="text-body-secondary flex-shrink-0"><%= t("routes.summary.open_in_maps") %></small>
-        </a>
+          <%# `travelmode=driving` : on va en voiture au départ ou au parking, le vélo ou
+              les chaussures commencent une fois sur place. %>
+          <span class="d-flex align-items-center gap-2 flex-shrink-0 ms-auto">
+            <a class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+               href="https://www.google.com/maps/search/?api=1&query=<%= u(coords) %>"
+               target="_blank" rel="noopener noreferrer" title="<%= t("routes.summary.open_in_maps") %>">
+              <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+              <%= t("routes.summary.marker_view") %>
+            </a>
+            <a class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+               href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=<%= u(coords) %>"
+               target="_blank" rel="noopener noreferrer" title="<%= t("routes.summary.drive_there") %>">
+              <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
+              <%= t("routes.summary.marker_directions") %>
+            </a>
+          </span>
+        </div>
       <% end %>
     </div>
   <% end %>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
 import { mapStyleFor, exportTileInfoFor } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
@@ -11,7 +12,7 @@ import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration
 import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport } from '../userPreferences'
-import { BROUTER_URL } from '../brouter'
+import { BROUTER_URL, profilesForSport } from '../brouter'
 import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
 import { parseGpxWaypoints } from '../gpxImport'
@@ -795,6 +796,44 @@ function navigateRoute() {
   window.location.href = `${localePrefix}/routes/${encodeURIComponent(navigateToken.value)}/navigate`
 }
 
+// ─── Partage ──────────────────────────────────────────────────────────────────
+
+// Même lien que la liste des itinéraires : la page de résumé publique, porteuse des
+// balises Open Graph et menant aux trois formes de l'itinéraire (lecture seule,
+// navigation, GPX). Feuille de partage native si disponible, sinon presse-papier.
+const shareUrl = computed(() =>
+  navigateToken.value
+    ? `${window.location.origin}${localePrefix}/routes/${encodeURIComponent(navigateToken.value)}`
+    : null,
+)
+const shareCopied = ref(false)
+let shareCopiedTimer: ReturnType<typeof setTimeout> | null = null
+
+async function shareRoute() {
+  const url = shareUrl.value
+  if (!url) return
+  const text = [
+    formatDistancePrecise(routeStore.distanceM.value),
+    routeStore.elevGainM.value ? `${Math.round(routeStore.elevGainM.value)} m D+` : null,
+  ].filter(Boolean).join(' · ')
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: routeStore.name.value || t('routes.share'), text, url })
+      return
+    }
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return // feuille de partage refermée par l'utilisateur
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    shareCopied.value = true
+    if (shareCopiedTimer) clearTimeout(shareCopiedTimer)
+    shareCopiedTimer = setTimeout(() => { shareCopied.value = false }, 2000)
+  } catch {
+    window.prompt(t('routes.share'), url)
+  }
+}
+
 // ─── Komoot ───────────────────────────────────────────────────────────────────
 
 function openInKomoot() {
@@ -838,6 +877,111 @@ function openSelectionInKomoot() {
   const centerLng = ((Math.min(...lngs) + Math.max(...lngs)) / 2).toFixed(5)
   const points = pts.map((p, i) => `p[${i}][loc]=${p.lat},${p.lng}`).join('&')
   window.open(`https://www.komoot.com/plan/@${centerLat},${centerLng},12z?sport=touringbicycle&${points}`, '_blank', 'noopener,noreferrer')
+}
+
+// ─── Menu d'actions secondaires ───────────────────────────────────────────────
+// Une seule description des entrées, rendue de deux façons : menu déroulant dans le
+// bandeau sur ordinateur, modale plein écran sur téléphone (cibles tactiles). Les
+// deux se ferment après un clic — d'où l'appel systématique à closeActionsMenu.
+
+interface MenuAction {
+  key: string
+  icon: string
+  label: string
+  disabled?: boolean
+  // Remplace l'icône par un spinner (export d'image en cours).
+  busy?: boolean
+  // Entrée-lien (nouvel onglet) plutôt que bouton.
+  href?: string
+  run?: () => void
+  // Ouvre la modale de préférences : ProfileDialog écoute les clics sur ces attributs.
+  profileTrigger?: boolean
+}
+
+interface MenuGroup { key: string; label?: string; items: MenuAction[] }
+
+const mobileActionsOpen = ref(false)
+
+function closeActionsMenu() {
+  mobileActionsOpen.value = false
+}
+
+// Le dropdown desktop est en auto-close="outside" (pour ne pas se fermer quand on
+// règle le sport / profil) : on le referme donc à la main après une action.
+const actionsToggleEl = useTemplateRef<HTMLElement>('actionsToggleEl')
+function closeActionsDropdown() {
+  if (actionsToggleEl.value) Dropdown.getOrCreateInstance(actionsToggleEl.value).hide()
+}
+
+const menuGroups = computed<MenuGroup[]>(() => {
+  const groups: MenuGroup[] = []
+
+  if (canNavigate.value) {
+    groups.push({
+      key: 'navigate',
+      items: [{ key: 'navigate', icon: 'fa-solid fa-location-arrow', label: t('routes.navigate'), run: navigateRoute }],
+    })
+  }
+
+  const exportItems: MenuAction[] = [{
+    key: 'image',
+    icon: 'fa-solid fa-image',
+    label: t('routes.export_image'),
+    disabled: !routeStore.hasGeometry.value || exporting.value,
+    busy: exporting.value,
+    run: openExportDialog,
+  }]
+  if (canExportGpx()) {
+    exportItems.push({ key: 'gpx', icon: 'fa-solid fa-download', label: t('routes.export_gpx'), run: exportGpx })
+  }
+  if (routeStore.waypoints.value.length >= 2) {
+    exportItems.push({ key: 'komoot', icon: 'fa-solid fa-person-biking', label: t('routes.open_in_komoot'), run: openInKomoot })
+  }
+  groups.push({ key: 'export', label: t('routes.group_export'), items: exportItems })
+
+  if (shareUrl.value) {
+    groups.push({
+      key: 'share',
+      label: t('routes.group_share'),
+      items: [
+        {
+          key: 'share',
+          icon: shareCopied.value ? 'fa-solid fa-check text-success' : 'fa-solid fa-share-nodes',
+          label: shareCopied.value ? t('routes.share_copied') : t('routes.share'),
+          run: shareRoute,
+        },
+        {
+          key: 'share-preview',
+          icon: 'fa-solid fa-up-right-from-square',
+          label: t('routes.share_preview'),
+          href: shareUrl.value,
+        },
+      ],
+    })
+  }
+
+  if (!readOnly.value) {
+    groups.push({
+      key: 'profile',
+      items: [{ key: 'profile', icon: 'fa-solid fa-sliders', label: t('nav.profile'), profileTrigger: true }],
+    })
+  }
+
+  return groups
+})
+
+// Sélecteur de type d'itinéraire (sport + profil de routage) : dans le panneau latéral
+// sur ordinateur, mais celui-ci est masqué sur téléphone — on le rejoue donc dans la
+// modale d'actions. Même helpers que RouteBuilderStats.
+const ACTIVITIES = ['cycling', 'mtb', 'hiking'] as const
+function sportIcon(s: Sport) {
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
+
+// Attributs du déclencheur de préférences, posés seulement sur l'entrée concernée.
+const PROFILE_TRIGGER_ATTRS = {
+  'data-profile-trigger': '',
+  'data-profile-sections': 'display,sport,map,search,climb,poi',
 }
 
 // ─── Alternatives de tronçon ──────────────────────────────────────────────────
@@ -1634,6 +1778,7 @@ onBeforeUnmount(() => {
   navbarResizeObserver?.disconnect(); navbarResizeObserver = null
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   if (savedTimer) clearTimeout(savedTimer)
+  if (shareCopiedTimer) clearTimeout(shareCopiedTimer)
   document.body.style.removeProperty('--rb-navbar-h')
   document.body.style.removeProperty('--rb-available-h')
   window.visualViewport?.removeEventListener('resize', updateNavbarHeight)
@@ -1644,30 +1789,23 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="route-builder-page">
-    <!-- Actions mobiles téléportées dans la navbar (Image / GPX / Komoot) -->
+    <!-- Rappel du type d'itinéraire à côté du logo (téléphone) : le titre de l'app étant
+         masqué sur petit écran, on rappelle ici le sport courant. -->
+    <Teleport to="#rb-brand-type">
+      <span class="rb-brand-type-badge" :title="t(`routes.wt_sport_${routeStore.sport.value}`)">
+        <i :class="`fa-solid ${sportIcon(routeStore.sport.value)}`" aria-hidden="true"></i>
+        <span>{{ t(`routes.wt_sport_${routeStore.sport.value}`) }}</span>
+      </span>
+    </Teleport>
+
+    <!-- Actions mobiles téléportées dans la navbar. La barre n'a la place que de trois
+         boutons entre le retour et l'enregistrement (posés par la vue) : tout le reste
+         passe par ce menu, ouvert en modale plein écran (cibles tactiles). -->
     <Teleport to="#rb-navbar-actions">
-      <button type="button" class="btn btn-sm btn-outline-light"
-        @click="openExportDialog" :disabled="!routeStore.hasGeometry.value || exporting"
-        :title="t('routes.export_image')" :aria-label="t('routes.export_image')">
+      <button type="button" class="btn btn-sm btn-outline-light" @click="mobileActionsOpen = true"
+        :title="t('routes.more_actions')" :aria-label="t('routes.more_actions')">
         <span v-if="exporting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-        <i v-else class="fa-solid fa-image" aria-hidden="true"></i>
-      </button>
-      <button v-if="canExportGpx()" type="button" class="btn btn-sm btn-outline-light"
-        @click="exportGpx" :title="t('routes.export_gpx')" :aria-label="t('routes.export_gpx')">
-        <i class="fa-solid fa-download" aria-hidden="true"></i>
-      </button>
-      <button v-if="routeStore.waypoints.value.length >= 2" type="button" class="btn btn-sm btn-outline-light"
-        @click="openInKomoot" :title="t('routes.open_in_komoot')" :aria-label="t('routes.open_in_komoot')">
-        <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-      </button>
-      <button v-if="canNavigate" type="button" class="btn btn-sm btn-light"
-        @click="navigateRoute" :title="t('routes.navigate')" :aria-label="t('routes.navigate')">
-        <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
-      </button>
-      <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-light" data-profile-trigger
-        data-profile-sections="display,sport,map,search,climb,poi"
-        :title="t('nav.profile')" :aria-label="t('nav.profile')">
-        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+        <i v-else class="fa-solid fa-ellipsis" aria-hidden="true"></i>
       </button>
       <!-- Retour à l'édition depuis son propre lien partagé — la navbar est la seule
            barre d'actions sur téléphone, le bandeau d'en-tête étant réservé au desktop. -->
@@ -1676,6 +1814,75 @@ onBeforeUnmount(() => {
         <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
       </a>
     </Teleport>
+
+    <!-- Modale des actions (téléphone) : même contenu que le menu déroulant du bandeau. -->
+    <Transition name="modal">
+      <div v-if="mobileActionsOpen" class="modal-backdrop-custom" @click.self="closeActionsMenu">
+        <div class="modal-dialog-custom shadow-lg">
+          <div class="modal-header-custom">
+            <strong>{{ t('routes.more_actions') }}</strong>
+            <button type="button" class="btn-close" @click="closeActionsMenu"
+              :aria-label="t('routes.snap_warning_dismiss')"></button>
+          </div>
+          <div class="modal-body-custom actions-modal-body">
+            <!-- Type d'itinéraire — accessible seulement ici sur téléphone (panneau latéral
+                 masqué). Modifie le tracé, donc réservé à l'édition. -->
+            <template v-if="!readOnly">
+              <h6 class="actions-modal-group">{{ t('routes.wt_sport') }}</h6>
+              <div class="activity-toggle btn-group btn-group-sm w-100" role="group" :aria-label="t('routes.wt_sport')">
+                <button
+                  v-for="s in ACTIVITIES"
+                  :key="s"
+                  type="button"
+                  class="btn"
+                  :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
+                  :aria-label="t(`routes.wt_sport_${s}`)"
+                  @click="onChangeSport(s)"
+                >
+                  <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+                  <span class="ms-1">{{ t(`routes.wt_sport_${s}`) }}</span>
+                </button>
+              </div>
+              <label class="form-label small text-muted mb-1 mt-2" for="mobile-route-profile-select">
+                {{ t('routes.profile_label') }}
+              </label>
+              <select
+                id="mobile-route-profile-select"
+                class="form-select form-select-sm"
+                :value="routeStore.profile.value"
+                @change="onChangeProfile(($event.target as HTMLSelectElement).value)"
+              >
+                <option
+                  v-for="p in profilesForSport(routeStore.sport.value)"
+                  :key="p"
+                  :value="p"
+                >
+                  {{ t(`routes.brouter_profile.${p}`) }}
+                </option>
+              </select>
+              <hr class="dropdown-divider">
+            </template>
+            <template v-for="g in menuGroups" :key="g.key">
+              <h6 v-if="g.label" class="actions-modal-group">{{ g.label }}</h6>
+              <template v-for="a in g.items" :key="a.key">
+                <a v-if="a.href" :href="a.href" class="actions-modal-item" target="_blank" rel="noopener"
+                  @click="closeActionsMenu">
+                  <i :class="a.icon" aria-hidden="true"></i>
+                  <span>{{ a.label }}</span>
+                </a>
+                <button v-else type="button" class="actions-modal-item"
+                  v-bind="a.profileTrigger ? PROFILE_TRIGGER_ATTRS : {}"
+                  :disabled="a.disabled" @click="a.run?.(); closeActionsMenu()">
+                  <span v-if="a.busy" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                  <i v-else :class="a.icon" aria-hidden="true"></i>
+                  <span>{{ a.label }}</span>
+                </button>
+              </template>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Chart hors écran utilisé uniquement pour l'export image -->
     <div v-if="exportChartMounted" aria-hidden="true"
@@ -1690,6 +1897,11 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
           <span>{{ t('routes.back') }}</span>
         </a>
+        <!-- Rappel du type d'activité, collé au début du nom : le sélecteur vivant
+             désormais dans le menu, l'icône rappelle en permanence le sport courant. -->
+        <span class="route-sport-badge flex-shrink-0" :title="t(`routes.wt_sport_${routeStore.sport.value}`)">
+          <i :class="`fa-solid ${sportIcon(routeStore.sport.value)}`" aria-hidden="true"></i>
+        </span>
         <input
           v-model="routeStore.name.value"
           type="text"
@@ -1710,32 +1922,83 @@ onBeforeUnmount(() => {
             :disabled="!routeStore.hasGeometry.value" @click="clearAll" :title="t('routes.clear')">
             <i class="fa-solid fa-trash" aria-hidden="true"></i>
           </button>
-          <button type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="openExportDialog" :disabled="!routeStore.hasGeometry.value || exporting" title="Exporter en image">
-            <span v-if="exporting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-            <i v-else class="fa-solid fa-image" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">Image</span>
-          </button>
-          <button v-if="canExportGpx()" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="exportGpx" :title="t('routes.export_gpx')">
-            <i class="fa-solid fa-download" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">GPX</span>
-          </button>
-          <button v-if="routeStore.waypoints.value.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="openInKomoot" :title="t('routes.open_in_komoot')">
-            <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">Komoot</span>
-          </button>
-          <button v-if="canNavigate" type="button" class="btn btn-sm btn-primary d-flex align-items-center gap-1"
-            @click="navigateRoute" :title="t('routes.navigate')">
-            <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">{{ t('routes.navigate') }}</span>
-          </button>
-          <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            data-profile-trigger data-profile-sections="display,sport,map,search,climb,poi" :title="t('nav.profile')">
-            <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">{{ t('nav.profile') }}</span>
-          </button>
+          <!-- Actions secondaires (navigation, export, partage, préférences) : regroupées pour
+               garder le bandeau lisible, l'édition et l'enregistrement seuls restant en accès direct. -->
+          <!-- `d-flex` sur le conteneur : sans lui, le bouton ne s'étire pas comme ses
+               voisins (la rangée est en align-items: stretch) et paraît plus court. -->
+          <div class="dropdown d-flex">
+            <!-- `auto-close="outside"` : les contrôles de type d'itinéraire vivent dans le
+                 menu — un clic dessus ne doit pas le refermer, seul un clic à l'extérieur. -->
+            <button ref="actionsToggleEl" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+              :title="t('routes.more_actions')" :aria-label="t('routes.more_actions')">
+              <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end route-actions-menu">
+              <!-- Type d'itinéraire (sport + profil de routage), réservé à l'édition. -->
+              <template v-if="!readOnly">
+                <li><h6 class="dropdown-header">{{ t('routes.wt_sport') }}</h6></li>
+                <li class="px-3 pb-2">
+                  <div class="activity-toggle btn-group btn-group-sm w-100" role="group" :aria-label="t('routes.wt_sport')">
+                    <button
+                      v-for="s in ACTIVITIES"
+                      :key="s"
+                      type="button"
+                      class="btn"
+                      :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
+                      :title="t(`routes.wt_sport_${s}`)"
+                      :aria-label="t(`routes.wt_sport_${s}`)"
+                      @click="onChangeSport(s)"
+                    >
+                      <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+                      <span class="ms-1 d-none d-lg-inline">{{ t(`routes.wt_sport_${s}`) }}</span>
+                    </button>
+                  </div>
+                  <label class="form-label small text-muted mb-1 mt-2" for="route-profile-select">
+                    {{ t('routes.profile_label') }}
+                  </label>
+                  <select
+                    id="route-profile-select"
+                    class="form-select form-select-sm"
+                    :value="routeStore.profile.value"
+                    :title="t(`routes.brouter_profile.${routeStore.profile.value}_desc`)"
+                    @change="onChangeProfile(($event.target as HTMLSelectElement).value)"
+                  >
+                    <option
+                      v-for="p in profilesForSport(routeStore.sport.value)"
+                      :key="p"
+                      :value="p"
+                      :title="t(`routes.brouter_profile.${p}_desc`)"
+                    >
+                      {{ t(`routes.brouter_profile.${p}`) }}
+                    </option>
+                  </select>
+                  <p class="profile-desc small text-muted mb-0 mt-1">
+                    {{ t(`routes.brouter_profile.${routeStore.profile.value}_desc`) }}
+                  </p>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+              </template>
+              <template v-for="(g, gi) in menuGroups" :key="g.key">
+                <li v-if="gi"><hr class="dropdown-divider"></li>
+                <li v-if="g.label"><h6 class="dropdown-header">{{ g.label }}</h6></li>
+                <li v-for="a in g.items" :key="a.key">
+                  <a v-if="a.href" :href="a.href" class="dropdown-item d-flex align-items-center gap-2"
+                    target="_blank" rel="noopener" @click="closeActionsDropdown">
+                    <i :class="a.icon" aria-hidden="true"></i>
+                    <span>{{ a.label }}</span>
+                  </a>
+                  <button v-else type="button" class="dropdown-item d-flex align-items-center gap-2"
+                    v-bind="a.profileTrigger ? PROFILE_TRIGGER_ATTRS : {}"
+                    :disabled="a.disabled" @click="a.run?.(); closeActionsDropdown()">
+                    <span v-if="a.busy" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    <i v-else :class="a.icon" aria-hidden="true"></i>
+                    <span>{{ a.label }}</span>
+                  </button>
+                </li>
+              </template>
+            </ul>
+          </div>
           <a v-if="editUrl" :href="editUrl" class="btn btn-sm btn-warning d-flex align-items-center gap-1">
             <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
             <span class="d-none d-lg-inline">{{ t('routes.edit_route') }}</span>
@@ -1770,8 +2033,6 @@ onBeforeUnmount(() => {
         @select-place="onSelectPlace"
         @hover-place="onHoverPlace"
         @retry-places="fetchImportantPlaces"
-        @change-sport="onChangeSport"
-        @change-profile="onChangeProfile"
       />
 
       <!-- Horizontal resize handle -->
@@ -2124,6 +2385,23 @@ onBeforeUnmount(() => {
 /* ─── Header ──────────────────────────────────────────────────────────────── */
 .route-name-input { min-width: 0; font-weight: 600; }
 
+/* Rappel du type d'activité, collé au début du nom. */
+.route-sport-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 0.4rem;
+  background: rgba(13, 110, 253, 0.1);
+  color: var(--bs-primary);
+}
+
+/* Le menu d'actions loge les contrôles de type d'itinéraire : il lui faut de la
+   largeur, sinon les libellés de sport et de profil sont à l'étroit. */
+.route-actions-menu { min-width: 16rem; }
+.route-actions-menu .profile-desc { white-space: normal; }
+
 /* ─── Saved toast ─────────────────────────────────────────────────────────── */
 .saved-toast {
   position: fixed;
@@ -2216,6 +2494,37 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid #e5e7eb;
 }
 .modal-body-custom { padding: 1.25rem; }
+
+/* Modale des actions (téléphone) : entrées empilées en pleine largeur, cibles tactiles. */
+.actions-modal-body { display: flex; flex-direction: column; gap: 0.25rem; }
+.actions-modal-group {
+  margin: 0.5rem 0 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6b7280;
+}
+.actions-modal-group:first-child { margin-top: 0; }
+.actions-modal-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.7rem 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: #1f2937;
+  font-size: 0.95rem;
+  text-align: left;
+  text-decoration: none;
+}
+.actions-modal-item:hover:not(:disabled),
+.actions-modal-item:active:not(:disabled) { background: #f3f4f6; }
+.actions-modal-item:disabled { opacity: 0.5; }
+.actions-modal-item > i { width: 1.25rem; text-align: center; }
+
 .modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
 

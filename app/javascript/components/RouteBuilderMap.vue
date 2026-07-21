@@ -293,6 +293,7 @@ async function initMap() {
         if (routeStore.readOnly.value) {
           if (placePopup) { closePlacePopup(); return }
           if (savedPoiPopup) { closeSavedPoiPopup(); return }
+          if (routeMarkerPopup) { closeRouteMarkerPopup(); return }
           if (routePointPopup) { closeRoutePointPopup(); return }
           const idx = nearestGeomIndexAt(e.point)
           if (idx != null) {
@@ -306,6 +307,8 @@ async function initMap() {
         if (placePopup) { closePlacePopup(); return }
         // Popup d'un POI sauvegardé ouvert : le clic ne fait que le refermer.
         if (savedPoiPopup) { closeSavedPoiPopup(); return }
+        // Popup d'un repère ouvert : le clic ne fait que le refermer.
+        if (routeMarkerPopup) { closeRouteMarkerPopup(); return }
         // Un point sélectionné (tooltip ouverte) : le clic ne fait que refermer la
         // tooltip, sans ajouter de nouveau point au trajet.
         if (selectedWpIdx >= 0) { deselectAll(); return }
@@ -1198,10 +1201,10 @@ function buildRouteMarkerEl(marker: { kind: string; lng: number; lat: number; la
   el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i><span class="route-marker-label">${text}</span>`
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
-    // Zoome raisonnablement sur le repère (sans jamais dézoomer). En lecture seule on
-    // s'arrête là ; en édition on ouvre en plus le popup renommer / supprimer.
+    // Zoome raisonnablement sur le repère (sans jamais dézoomer) et ouvre le popup
+    // (Google Maps / Street View, plus renommer / supprimer hors lecture seule).
     flyTo(marker.lng, marker.lat, Math.max(mapInstance?.getZoom() ?? 15, 15))
-    if (!routeStore.readOnly.value) showRouteMarkerPopup(marker)
+    showRouteMarkerPopup(marker)
   })
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   el.addEventListener('mouseenter', () => { overClimbMarker = true; hideHoverMarker() })
@@ -1213,12 +1216,21 @@ function closeRouteMarkerPopup() {
   if (routeMarkerPopup) { routeMarkerPopup.remove(); routeMarkerPopup = null }
 }
 
-// Popup d'un repère : titre = libellé (ou type), et — hors lecture seule — actions
-// renommer / supprimer. Retrouve le repère par identité de coordonnées.
+// Popup d'un repère : titre = libellé (ou type), liens Google Maps / Street View (mêmes
+// que les POI) et — hors lecture seule — actions renommer / supprimer. Retrouve le repère
+// par identité de coordonnées.
 function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; label?: string }) {
   if (!_maplibregl || !mapInstance) return
   closeRouteMarkerPopup()
   const title = marker.label ? `${markerKindLabel(marker.kind)} — ${marker.label}` : markerKindLabel(marker.kind)
+  const OFFSET = 0.00008
+  const mapsUrl = `https://www.google.com/maps?q=${marker.lat + OFFSET},${marker.lng + OFFSET}`
+  // Navigation Google Maps en voiture depuis la position courante vers le repère
+  // (l'app mobile prend le relais du lien si elle est installée) : les repères sont
+  // des points d'accès (parking, départ), on s'y rend en voiture.
+  const dirUrl = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${marker.lat},${marker.lng}`
+  // Caméra Street View orientée depuis le tracé vers le repère (s'il y a un tracé chargé).
+  const svUrl = streetViewUrl(marker.lat, marker.lng, bearingFromRoute(routeStore.geometry.value, marker.lng, marker.lat))
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   const editActions = routeStore.readOnly.value ? '' : `
@@ -1235,7 +1247,19 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
       <span class="place-popup-name">${escapeHtml(title)}</span>
       <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
     </div>
-    ${editActions}`
+    ${editActions}
+    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-brands fa-google" aria-hidden="true"></i>
+      <span>Google Maps</span>
+    </a>
+    <a class="place-popup-link" href="${dirUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.directions'))}</span>
+    </a>
+    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+      <span>${t('routes.street_view')}</span>
+    </a>`
   routeMarkerPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([marker.lng, marker.lat])
     .setDOMContent(wrap)
@@ -1259,6 +1283,14 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
     routeStore.markers.value.splice(idx, 1)
     installRouteMarkers()
   })
+  const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
+  if (svLink) {
+    checkSV(marker.lat, marker.lng).then((ok) => {
+      svLink.classList.toggle('place-popup-link--disabled', !ok)
+      if (!ok) svLink.setAttribute('aria-disabled', 'true')
+      else svLink.removeAttribute('aria-disabled')
+    })
+  }
 }
 
 // Sélectionne le mode d'édition (dropdown). Ferme les dialogues/popups de pose en

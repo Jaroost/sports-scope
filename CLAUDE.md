@@ -89,6 +89,43 @@ Les pages Rails sont sous `scope "(:locale)", locale: /en|fr/` — le préfixe d
 | `RoutesList.vue` | Liste des itinéraires sauvegardés |
 | `ImportFitActivity.vue` | Import de fichiers .fit |
 
+## BRouter auto-hébergé
+
+Le routage n'utilise plus l'instance publique brouter.de (ni SLA ni quota). Deux services
+dans les deux docker-compose :
+
+| Service | Rôle |
+|---|---|
+| `brouter` | Le moteur (`RouteServer`), image buildée depuis les sources (`deploy/brouter/Dockerfile`, version épinglée `BROUTER_VERSION`) |
+| `brouter-sync` | Télécharge et rafraîchit les données dans les volumes `brouter_segments` (tuiles `.rd5`) et `brouter_profiles` (profils `.brf` + `lookups.dat`) |
+
+Il est servi sous le domaine de l'app via Traefik (`PathPrefix(/brouter)`, `Method(GET)`),
+donc en **même origine** : pas de CORS, pas de certificat en plus. Côté front,
+`BROUTER_URL` vaut `/brouter` par défaut (`app/javascript/brouter.ts`) — en prod les
+`import.meta.env.VITE_*` sont figés au `assets:precompile`, d'où un défaut fonctionnel
+plutôt qu'un build-arg.
+
+- **Premier démarrage** : `brouter-sync` télécharge ~3,4 Go (Europe entière, 110 tuiles).
+  Suivre l'avancement avec `docker compose logs -f brouter-sync`. `brouter` attend que
+  `brouter-sync` soit *healthy*, c'est-à-dire que le marqueur `/segments4/.sync-complete`
+  existe (au moins une tuile + `lookups.dat`) — le moteur ne démarre donc jamais sans
+  données. Le marqueur vit dans le volume : **seul le tout premier boot attend**, les
+  redémarrages suivants sont immédiats. Pour démarrer le moteur sans attendre (données
+  partielles déjà présentes) : `docker compose up -d --no-deps brouter`.
+- **Forcer une resynchro** : `docker compose run --rm brouter-sync bash /sync.sh`
+- **Changer la couverture** : `BROUTER_BBOX` dans `.env` (`lon_min,lat_min,lon_max,lat_max`,
+  grille de 5°). Les tuiles hors bbox déjà téléchargées ne sont pas supprimées.
+- **Ajouter / figer un profil** : déposer le `.brf` dans `deploy/brouter/profiles/` (voir
+  le README du dossier), puis le déclarer dans `PROFILES_BY_SPORT`
+  (`app/javascript/brouter.ts`) et `ALLOWED_PROFILES`
+  (`app/controllers/routes_controller.rb`).
+- **Monter de version** : bumper `BROUTER_VERSION` dans `bin/release` et le tag d'image
+  dans `deploy/docker-compose.prod.yml` + `docker-compose.yml`. `bin/release` ne rebuild
+  l'image BRouter que si le tag est absent du registry (`BROUTER_FORCE=1` pour forcer).
+
+La synchro écrit en `.part` puis renomme : aucun redémarrage de `brouter` n'est nécessaire
+après une mise à jour des données.
+
 ## Base de données
 
 PostgreSQL. Credentials par défaut en dev : `postgres/postgres` sur `localhost:5432`, base `sports_scope_development`.

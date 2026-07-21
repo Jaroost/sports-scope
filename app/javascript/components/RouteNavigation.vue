@@ -54,6 +54,7 @@ import {
   purgeLegacyArchive, OFFLINE_LAYERS, isOfflineLayer, type OfflineLayer,
 } from '../offline/offlineMaps'
 import { buildCoordPopupContent, buildDestPointPopupContent, attachLongPress } from '../mapCoordPopup'
+import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
 
 // Page de navigation unifiée : démarre en mode libre (carte + GPS + vitesse, sans
 // tracé) et peut charger/décharger un itinéraire à chaud. shareToken : si présent
@@ -117,6 +118,9 @@ const offlineCoords = ref<[number, number][]>([])
 // POI du tracé actif (issues de routes.pois) : passés à NavOfflineButton pour être
 // sauvegardés dans le localStorage au moment du téléchargement hors-ligne.
 const offlinePois = ref<Array<{ name: string; type: string; lat: number; lng: number }>>([])
+// Repères du tracé actif (routes.markers) tels que reçus : useNavPois les convertit en
+// NavPlace pour l'affichage, on garde ici la forme brute pour la session persistée.
+const routeMarkersRaw = ref<RouteMarker[]>([])
 // Chaque fond swisstopo (gris / couleur / satellite) a sa propre archive : le coureur
 // coche ce qu'il veut emporter, et ne paie que ça en Mo.
 type LayerFlags = Record<OfflineLayer, boolean>
@@ -921,6 +925,10 @@ onMounted(async () => {
     // directement sur le tracé. Sans token, on démarre en navigation libre.
     if (props.shareToken) {
       try { await loadSharedRouteData(props.shareToken) } catch { /* tracé introuvable : on reste en libre */ }
+    } else {
+      // Rechargement de page en pleine séance : on reprend le tracé mémorisé (itinéraire
+      // chargé ou destination ad hoc) au lieu de repartir en navigation libre.
+      restoreSession()
     }
     await initMap()
     startTracking()
@@ -1005,9 +1013,11 @@ async function loadSharedRouteData(token: string) {
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
   if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
-  pois.setRouteMarkers((route.markers || []) as RouteMarker[])
+  routeMarkersRaw.value = (route.markers || []) as RouteMarker[]
+  pois.setRouteMarkers(routeMarkersRaw.value)
   hasRoute.value = true
   syncEditable()
+  persistSession()
 }
 
 // Recompute everything derived from `geometry` + raw voicehints: altitudes, distances,
@@ -1277,6 +1287,53 @@ function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   syncEditable()
   ensureRouteInstalled()
   refreshRemaining()
+  persistSession()
+}
+
+// ─── Session persistée (reprise après rechargement) ────────────────────────────
+// Ce qu'on suit — itinéraire chargé ou destination ad hoc — survit à un rechargement de
+// page : on réécrit la session à chaque changement de tracé (chargement, reroutage,
+// insertion d'étape, édition) et on la restaure au montage en l'absence de lien partagé.
+// Voir navSession.ts pour le format et la péremption.
+function persistSession() {
+  if (!hasRoute.value) { clearNavSession(); return }
+  saveNavSession({
+    name: routeName.value,
+    token: routeToken.value,
+    routeId,
+    sport: routeSport.value,
+    profile: routeProfile.value,
+    geometry,
+    hints: rawHints,
+    waypoints: routeWaypoints,
+    vias: routeVias,
+    pois: offlinePois.value,
+    markers: routeMarkersRaw.value,
+  })
+}
+
+// Restaure le tracé mémorisé AVANT la carte (comme un lien partagé) : initMap cadre
+// alors directement dessus. On ne réinitialise PAS le suivi (resetRouteTracking effacerait
+// la progression mémorisée) : le premier fix se recale via l'indice de reprise, exactement
+// comme au chargement d'un lien partagé. Renvoie faux s'il n'y a rien à restaurer.
+function restoreSession(): boolean {
+  const s = loadNavSession()
+  if (!s) return false
+  routeToken.value = s.token
+  routeName.value = s.name
+  routeSport.value = s.sport
+  routeProfile.value = isProfileValidForSport(s.profile, s.sport) ? s.profile : catalogDefaultForSport(s.sport)
+  routeId = s.routeId
+  routeWaypoints = s.waypoints
+  routeVias = s.vias
+  rebuildRouteState(s.geometry, s.hints)
+  offlinePois.value = s.pois
+  if (s.pois.length > 0) pois.setRoutePlaces(s.pois)
+  routeMarkersRaw.value = s.markers
+  pois.setRouteMarkers(s.markers)
+  hasRoute.value = true
+  syncEditable()
+  return true
 }
 
 // ─── Chargement / déchargement d'un itinéraire (page unifiée) ──────────────────
@@ -1298,10 +1355,12 @@ function loadRoute(route: any) {
   offlinePois.value = savedPois
   void syncOfflineState()
   if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
-  pois.setRouteMarkers((route.markers || []) as RouteMarker[])
+  routeMarkersRaw.value = (route.markers || []) as RouteMarker[]
+  pois.setRouteMarkers(routeMarkersRaw.value)
   resetRouteTracking(false)
   hasRoute.value = true
   syncEditable()
+  persistSession()
   showRoutePicker.value = false
   ensureRouteInstalled()
   refreshRemaining()
@@ -1334,6 +1393,8 @@ function unloadRoute() {
   routeToken.value = null
   routeName.value = ''
   offlinePois.value = []
+  routeMarkersRaw.value = []
+  clearNavSession()
   void syncOfflineState()
   geometry = []
   displayLine = []
@@ -1615,6 +1676,9 @@ async function navigateVia(name: string, vias: LngLat[], precomputed?: { geometr
     applyReroute(geom, hints)
     // Étapes retenues comme source de recalcul : ce trajet n'a pas d'autre définition.
     routeVias = vias.slice()
+    // Réécrit la session : applyReroute l'a déjà persistée, mais sans les étapes ni le
+    // nom définitifs de cette destination.
+    persistSession()
     cancelPlaceNav()
     following.value = true
     cameraUnlocked.value = false
@@ -1689,6 +1753,7 @@ async function insertViaIntoRoute(lng: number, lat: number) {
     resetRouteTracking(false)
     ensureRouteInstalled()
     refreshRemaining()
+    persistSession()
   } catch {
     navError.value = t('routes.error_routing')
   } finally {
@@ -1749,6 +1814,7 @@ function installRecomputedRoute(geom: Coord[], hints: VoiceHint[]) {
   detourEndIdx = -1
   ensureRouteInstalled()
   refreshRemaining()
+  persistSession()
 }
 
 // Re-route l'itinéraire entier à travers les points d'ancrage courants et remplace la
@@ -1906,6 +1972,7 @@ function cancelEditMode() {
     resetRouteTracking(false)
     ensureRouteInstalled()
     refreshRemaining()
+    persistSession()
   }
   closeEditMode()
   following.value = true

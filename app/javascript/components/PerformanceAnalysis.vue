@@ -209,9 +209,30 @@ const MAIN_TABS = [
 ] as const
 type MainTab = (typeof MAIN_TABS)[number]['key']
 
+// Ancres profondes : un lien entrant désigne une vue précise, il doit primer sur
+// l'onglet mémorisé. Sans ça, « Voir l'analyse » depuis le widget d'accueil laissait
+// l'utilisateur sur « Records & volumes » (dernier onglet visité) et le défilement de
+// TrainingLoadPanel visait un panneau masqué.
+const HASH_TARGETS: Record<string, { tab: MainTab; sub?: FitnessSub }> = {
+  '#training-load': { tab: 'fitness', sub: 'load' },
+  '#ftp': { tab: 'fitness', sub: 'ftp' },
+  '#zones': { tab: 'fitness', sub: 'zones' },
+}
+const hashTarget = (typeof window !== 'undefined' && HASH_TARGETS[window.location.hash]) || null
+// Une ancre est une navigation délibérée : elle devient le nouvel onglet mémorisé.
+// Les `watch` ci-dessous ne se déclenchent pas sur la valeur initiale, d'où l'écriture
+// explicite — sinon un rechargement sans ancre renverrait à l'onglet d'avant.
+function rememberHashTarget() {
+  if (!hashTarget || typeof localStorage === 'undefined') return
+  try {
+    localStorage.setItem(TAB_STORAGE_KEY, hashTarget.tab)
+    if (hashTarget.sub) localStorage.setItem(FITNESS_SUB_STORAGE_KEY, hashTarget.sub)
+  } catch { /* ignore */ }
+}
+
 const TAB_STORAGE_KEY = 'sportsScope.performanceTab'
 const storedTab = (typeof localStorage !== 'undefined' && localStorage.getItem(TAB_STORAGE_KEY)) || 'records'
-const activeTab = ref<MainTab>(storedTab === 'fitness' ? 'fitness' : 'records')
+const activeTab = ref<MainTab>(hashTarget?.tab ?? (storedTab === 'fitness' ? 'fitness' : 'records'))
 
 watch(activeTab, (tab) => {
   try { localStorage.setItem(TAB_STORAGE_KEY, tab) } catch { /* ignore */ }
@@ -231,11 +252,12 @@ type FitnessSub = (typeof FITNESS_SUBS)[number]['key']
 const FITNESS_SUB_STORAGE_KEY = 'sportsScope.performanceFitnessSub'
 const storedSub = (typeof localStorage !== 'undefined' && localStorage.getItem(FITNESS_SUB_STORAGE_KEY)) || 'load'
 const fitnessSub = ref<FitnessSub>(
-  storedSub === 'ftp' || storedSub === 'zones' ? storedSub : 'load',
+  hashTarget?.sub ?? (storedSub === 'ftp' || storedSub === 'zones' ? storedSub : 'load'),
 )
 watch(fitnessSub, (s) => {
   try { localStorage.setItem(FITNESS_SUB_STORAGE_KEY, s) } catch { /* ignore */ }
 })
+rememberHashTarget()
 
 // Indicateurs remontés par les panneaux enfants (montés en permanence), pour afficher
 // un badge sous chaque sous-onglet : FTP courante, reco du jour, verdict des zones.

@@ -154,6 +154,7 @@ export type Reco = { action: string; tss: number; minutes: number; effort: strin
 // La CTL de référence est celle du DÉBUT de semaine, pas celle du jour : sinon la
 // cible se déplacerait chaque jour et ne serait plus une cible.
 const K_CTL = 1 - Math.exp(-1 / 42)
+const K_ATL = 1 - Math.exp(-1 / 7)
 const GOAL_RAMP: Record<Goal, number> = { improve_fast: 5, improve_slow: 3, maintain: 0, peak: -5 }
 
 // Segments de la barre de la semaine. Le vert du fait et l'orange du prévu reprennent
@@ -178,6 +179,12 @@ export type WeekPlan = {
   overPlanned: boolean
   targetPct: number // position de la cible sur la barre, en % de sa largeur (0–100)
   daysLeft: number
+  // Jours restants (aujourd'hui compris) sur lesquels rien n'est encore prévu : c'est
+  // sur eux que se répartit `remaining`.
+  daysToPlace: number
+  // Part quotidienne de la cible : `remaining / daysToPlace`. C'est ce que la reco du
+  // jour vise, pour que les deux blocs (jour / semaine) décrivent le même plan.
+  dailyNeed: number
   minutesLeft: number
   ramp: number | null // null pendant une prépa datée : c'est l'affûtage qui pilote
   rampTss: number | null // ramp converti en TSS (ramp / K_CTL) : le « + / − X TSS » affiché
@@ -246,13 +253,44 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
     return { action: 'rest', tss: 0, minutes: 0, effort: '', distanceKm: null, reason, tsb: Math.round(tsb), days }
   }
 
-  // Reco basée sur l'objectif générique (sans événement daté). `floor` = plancher de
-  // fatigue (TSB) acceptable ; plus il est bas, plus on tolère de charge.
-  function fatigueReco(c: Current, floor: number, reasons: { rest: string; easy: string; big: string }, days?: number): Reco {
-    const headroom = c.tsb - floor
-    if (c.tsb <= -30 || headroom < 0) return restReco(c.tsb <= -30 ? 'reason_overreaching' : reasons.rest, c.tsb, days)
-    if (headroom < 12) { const tss = Math.round(0.6 * c.ctl); return { action: 'easy', tss, ...planFromTss(tss, 'endurance'), reason: reasons.easy, tsb: Math.round(c.tsb), days } }
-    const tss = Math.round(1.4 * c.ctl); return { action: 'big', tss, ...planFromTss(tss, 'hard'), reason: reasons.big, tsb: Math.round(c.tsb), days }
+  // TSS maximal aujourd'hui qui laisse le TSB de DEMAIN au-dessus du plancher `floor`.
+  // TSB' = tsb + x·(K_CTL − K_ATL) − ctl·K_CTL + atl·K_ATL, et (K_CTL − K_ATL) < 0 :
+  // la contrainte TSB' ≥ floor donne donc bien une borne SUPÉRIEURE sur x.
+  // C'est ce qui rend le plancher opérant : il ne coupe plus l'entraînement par bandes
+  // arbitraires, il plafonne exactement la charge que la fatigue permet d'encaisser.
+  function fatigueCap(c: Current, floor: number): number {
+    return (floor - c.tsb + c.ctl * K_CTL - c.atl * K_ATL) / (K_CTL - K_ATL)
+  }
+
+  // Reco du jour : on vise la part quotidienne de la cible hebdo (`need`), bornée par ce
+  // que le plancher de fatigue autorise. Les deux blocs de la page décrivent alors le même
+  // plan — auparavant la reco sortait d'un jeu de bandes (0,6 × CTL / 1,4 × CTL) sans
+  // rapport avec la cible, et sous-livrait ~100 TSS par semaine en permanence.
+  // `reasons.capped` sert quand c'est la fatigue, et non la cible, qui fixe le chiffre.
+  function dayReco(
+    c: Current,
+    floor: number,
+    need: number,
+    reasons: { rest: string; normal: string; capped: string },
+    days?: number,
+  ): Reco {
+    if (c.tsb <= -30) return restReco('reason_overreaching', c.tsb, days)
+    const cap = fatigueCap(c, floor)
+    const tss = Math.round(Math.max(0, Math.min(need, cap)))
+    // Sous 20 TSS il n'y a plus de séance à proposer : c'est un jour de repos.
+    if (tss < 20) return restReco(reasons.rest, c.tsb, days)
+    const capped = cap < need - 1
+    // Au-delà de ~0,9 × CTL la séance ne passe plus en pure endurance : on la propose à
+    // intensité, ce qui la raccourcit (cf. planFromTss).
+    const kind = tss >= 0.9 * c.ctl ? 'hard' : 'endurance'
+    return {
+      action: kind === 'hard' ? 'big' : 'easy',
+      tss,
+      ...planFromTss(tss, kind),
+      reason: capped ? reasons.capped : reasons.normal,
+      tsb: Math.round(c.tsb),
+      days,
+    }
   }
 
   // ── Sortie objectif datée (persistée) ──────────────────────────────────────
@@ -354,25 +392,6 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
     return { tsb, verdict: tsb >= 5 ? 'ready' : tsb >= -5 ? 'ok' : 'tired' }
   })
 
-  // Reco datée : pilotée par la phase de préparation.
-  function eventRecommendation(c: Current, ev: NonNullable<typeof eventInfo.value>): Reco {
-    if (ev.phase === 'event_day') return { action: 'event', tss: 0, minutes: 0, effort: '', distanceKm: null, reason: 'reason_event_day', tsb: Math.round(c.tsb), days: 0 }
-    if (ev.phase === 'build') return fatigueReco(c, -25, { rest: 'reason_build_rest', easy: 'reason_build', big: 'reason_build' }, ev.days)
-    // taper / final : on suit le schéma d'affûtage
-    const tssVal = Math.round(plannedTss(ev.days, c.ctl))
-    const reason = ev.phase === 'final' ? 'reason_final' : 'reason_taper'
-    if (tssVal < 20) return restReco(reason, c.tsb, ev.days)
-    return { action: 'easy', tss: tssVal, ...planFromTss(tssVal, 'endurance'), reason, tsb: Math.round(c.tsb), days: ev.days }
-  }
-
-  const recommendation = computed<Reco | null>(() => {
-    const c = current.value
-    if (!c) return null
-    const ev = eventInfo.value
-    if (ev && ev.phase !== 'past') return eventRecommendation(c, ev)
-    return fatigueReco(c, GOAL_FLOOR[goal.value], { rest: 'reason_rest', easy: 'reason_easy', big: 'reason_big' })
-  })
-
   // ── Semaine en cours : cible de volume + avancée réelle ────────────────────
   // Volontairement fondé sur les données réelles (TSS déjà encaissé depuis lundi)
   // plutôt que sur un plan simulé : une projection jour par jour serait fausse dès
@@ -440,17 +459,18 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
     // on ne prend que ce que le plan ajoute PAR-DESSUS, sinon la sortie déjà faite
     // serait comptée deux fois (une fois en vert, une fois en orange).
     let planned = 0
-    if (plannedLoads?.value.size) {
-      const realToday = series.find((p) => p.date === todayLocalISO)?.tss ?? 0
-      for (let i = 0; i < 7; i++) {
-        const day = new Date(monday)
-        day.setDate(day.getDate() + i)
-        const iso = isoLocal(day)
-        const tss = plannedLoads.value.get(iso) ?? 0
-        if (!tss) continue
-        if (iso > todayLocalISO) planned += tss
-        else if (iso === todayLocalISO) planned += Math.max(0, tss - realToday)
-      }
+    // Jours restants encore libres : ce sont eux qui devront porter `remaining`.
+    let daysToPlace = 0
+    const realToday = series.find((p) => p.date === todayLocalISO)?.tss ?? 0
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(monday)
+      day.setDate(day.getDate() + i)
+      const iso = isoLocal(day)
+      if (iso < todayLocalISO) continue
+      const tss = plannedLoads?.value.get(iso) ?? 0
+      if (!tss) { daysToPlace += 1; continue }
+      if (iso > todayLocalISO) planned += tss
+      else planned += Math.max(0, tss - realToday)
     }
     planned = Math.round(planned)
 
@@ -489,6 +509,8 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
       overPlanned,
       targetPct,
       daysLeft,
+      daysToPlace,
+      dailyNeed: daysToPlace > 0 ? remaining / daysToPlace : 0,
       minutesLeft,
       ramp: onEvent ? null : GOAL_RAMP[goal.value],
       // Le coût en TSS de la progression visée : c'est ce que le ramp ajoute (ou retire)
@@ -502,6 +524,40 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
   // Semaine suivante : tout est « à prévoir » (aucun réel), pour piloter la planification
   // à l'avance dans le WeekPlanner.
   const nextWeekPlan = computed<WeekPlan | null>(() => buildWeekPlan(1))
+
+  // ── Recommandation du jour ────────────────────────────────────────────────
+  // Définie APRÈS la semaine : elle en dérive sa cible (`dailyNeed`). L'ordre compte,
+  // les deux blocs ne doivent plus pouvoir diverger.
+
+  // Ce que vise la journée : la sortie déjà prévue aujourd'hui si elle existe (c'est la
+  // décision de l'utilisateur, elle prime), sinon la part quotidienne de la cible hebdo.
+  function todayNeed(c: Current): number {
+    const todayISOLocal = isoLocal(new Date())
+    const plannedToday = plannedLoads?.value.get(todayISOLocal) ?? 0
+    if (plannedToday > 0) return plannedToday
+    return weekPlan.value?.dailyNeed ?? c.ctl
+  }
+
+  // Reco datée : pilotée par la phase de préparation.
+  function eventRecommendation(c: Current, ev: NonNullable<typeof eventInfo.value>): Reco {
+    if (ev.phase === 'event_day') return { action: 'event', tss: 0, minutes: 0, effort: '', distanceKm: null, reason: 'reason_event_day', tsb: Math.round(c.tsb), days: 0 }
+    // En construction, la cible de la semaine vient déjà du schéma d'affûtage : la reco
+    // du jour en prend sa part, avec un plancher de fatigue plus permissif.
+    if (ev.phase === 'build') return dayReco(c, -25, todayNeed(c), { rest: 'reason_build_rest', normal: 'reason_build', capped: 'reason_capped' }, ev.days)
+    // taper / final : on suit le schéma d'affûtage
+    const tssVal = Math.round(plannedTss(ev.days, c.ctl))
+    const reason = ev.phase === 'final' ? 'reason_final' : 'reason_taper'
+    if (tssVal < 20) return restReco(reason, c.tsb, ev.days)
+    return { action: 'easy', tss: tssVal, ...planFromTss(tssVal, 'endurance'), reason, tsb: Math.round(c.tsb), days: ev.days }
+  }
+
+  const recommendation = computed<Reco | null>(() => {
+    const c = current.value
+    if (!c) return null
+    const ev = eventInfo.value
+    if (ev && ev.phase !== 'past') return eventRecommendation(c, ev)
+    return dayReco(c, GOAL_FLOOR[goal.value], todayNeed(c), { rest: 'reason_rest', normal: 'reason_week', capped: 'reason_capped' })
+  })
 
   return {
     current,

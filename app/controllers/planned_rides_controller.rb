@@ -120,6 +120,11 @@ class PlannedRidesController < ApplicationController
         activity: plan.route.activity,
         distance_m: plan.route.distance_m,
         elevation_gain_m: plan.route.elevation_gain_m,
+        # Colonne brute, comme dans RoutesController#serialize_summary : `null` dit au
+        # front « cet itinéraire suit la vitesse du profil », une valeur dit « le
+        # créateur l'a ajustée pour ce tracé » — d'où un TSS estimé sur CETTE vitesse,
+        # et le repère affiché à côté dans le planificateur.
+        avg_speed_kmh: plan.route[:avg_speed_kmh],
       },
     }
   end

@@ -200,6 +200,7 @@ en:
         plan_done: "Activity recorded that day"
         day_done: "Ride done"
         day_tss: "TSS actually earned that day"
+        own_speed_hint: "TSS estimated at %{speed} km/h — the speed set on this route, not your profile's average speed."
         view_activity: "View activity"
         done_activity_label: "Completed activity"
         done_detail_title: "That day's activities"

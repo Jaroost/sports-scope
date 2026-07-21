@@ -32,6 +32,8 @@ interface RouteOption {
   activity: Sport
   distance_m: number | null
   elevation_gain_m: number | null
+  // Vitesse ajustée pour ce tracé, ou null s'il suit le réglage du profil.
+  avg_speed_kmh: number | null
   preview_segments?: { d: string; c: number }[]
 }
 
@@ -77,8 +79,16 @@ const dayLabel = computed(() => {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
 })
 
-// TSS estimé d'un itinéraire, avec les seuils du moment et la vitesse du sport —
-// même modèle que partout ailleurs (routeLoad.ts). null si non estimable.
+// Vitesse propre à l'itinéraire (réglée dans le créateur), ou null s'il suit celle du
+// profil. Mêmes bornes que speedForSport : hors bornes, la valeur n'est pas un réglage.
+function speedOverrideOf(r: RouteOption): number | null {
+  const v = r.avg_speed_kmh
+  return typeof v === 'number' && Number.isFinite(v) && v >= 3 && v <= 80 ? v : null
+}
+
+// TSS estimé d'un itinéraire, avec les seuils du moment et la vitesse retenue pour ce
+// tracé — même modèle et même règle de vitesse que le planificateur (routeLoad.ts,
+// planSpeedKmh) : le chiffre lu ici doit être celui qu'on verra une fois planifié.
 function tssOf(r: RouteOption): number | null {
   if (!props.athlete) return null
   const sport = activityOf(r)
@@ -86,7 +96,7 @@ function tssOf(r: RouteOption): number | null {
     {
       distanceM: r.distance_m ?? 0,
       elevGainM: r.elevation_gain_m ?? 0,
-      speedKmh: speedForSport(sport),
+      speedKmh: speedOverrideOf(r) ?? speedForSport(sport),
       sport,
     },
     props.athlete,
@@ -233,6 +243,15 @@ function choose(id: number) {
                     </span>
                     <span v-if="tssOf(r) !== null" class="d-inline-flex align-items-center gap-1">
                       <i class="fa-solid fa-bolt" style="color: #6f42c1" aria-hidden="true"></i>{{ t('routes.tss.label') }} ≈ {{ tssOf(r) }}
+                    </span>
+                    <!-- Vitesse propre au tracé : dit d'où sort le TSS ci-dessus, qui
+                         sinon semble en désaccord avec la vitesse moyenne du profil. -->
+                    <span
+                      v-if="speedOverrideOf(r) !== null"
+                      class="d-inline-flex align-items-center gap-1"
+                      :title="t('performance.load.week.own_speed_hint', { speed: speedOverrideOf(r) })"
+                    >
+                      <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>{{ speedOverrideOf(r) }} km/h
                     </span>
                   </small>
                 </span>

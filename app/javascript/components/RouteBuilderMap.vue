@@ -2325,7 +2325,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="map-wrap" :class="{ expanded: state.mapExpanded }">
+  <div class="map-wrap" :class="{ expanded: state.mapExpanded, 'map-wrap--grey-basemap': state.mapStyleId === 'swissgrau' }">
     <div ref="mapEl" class="route-builder-map"></div>
 
     <div class="map-controls">
@@ -2763,6 +2763,46 @@ defineExpose({
   display: none;
 }
 @media (max-width: 767px), (max-height: 500px) { .mobile-sheet-toggle { display: flex; } }
+
+/* Fond swisstopo gris : les contrôles blancs se fondent dans la carte. On les passe
+   en jaune (fond + bordure) pour les redétacher. Le bouton du fond de carte vit dans
+   MapStyleDropdown → :deep pour l'atteindre. */
+.map-wrap--grey-basemap :deep(.map-ctrl-btn),
+.map-wrap--grey-basemap .map-search-toggle,
+.map-wrap--grey-basemap .mobile-sheet-toggle,
+.map-wrap--grey-basemap :deep(.map-ctrl-btn:hover),
+.map-wrap--grey-basemap .map-search-toggle:hover,
+.map-wrap--grey-basemap .mobile-sheet-toggle:hover {
+  background: #ffc107;
+  border: 2px solid #ffc107;
+  color: #212529;
+}
+.map-wrap--grey-basemap :deep(.map-ctrl-btn:hover),
+.map-wrap--grey-basemap .map-search-toggle:hover,
+.map-wrap--grey-basemap .mobile-sheet-toggle:hover {
+  background: #ffcd39;
+  border-color: #ffcd39;
+}
+/* Recherche dépliée : la loupe (préfixe du champ) et le bouton de fermeture suivent
+   le même traitement ; le champ garde son fond blanc mais une bordure jaune, sinon
+   il se détacherait des deux boutons. `.bg-white` étant !important, on surcharge. */
+.map-wrap--grey-basemap .map-search .input-group-text,
+.map-wrap--grey-basemap .map-search .btn-light {
+  background: #ffc107 !important;
+  border: 2px solid #ffc107;
+  color: #212529;
+}
+.map-wrap--grey-basemap .map-search .btn-light:hover {
+  background: #ffcd39 !important;
+  border-color: #ffcd39;
+}
+.map-wrap--grey-basemap .map-search .form-control {
+  border-top: 2px solid #ffc107;
+  border-bottom: 2px solid #ffc107;
+}
+.map-wrap--grey-basemap .map-search-results {
+  border: 2px solid #ffc107;
+}
 
 /* Bannière d'échec de chargement des POI — visible uniquement sur mobile,
    la sidebar Stats (masquée sur mobile) gérant déjà le cas sur desktop. */

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mondayOf, isoLocal, fmtDuration, WEEK_SEGMENT_COLOR, type WeekPlan } from '../composables/useTrainingPlan'
-import { usePlannedRides, planTss, type PlannedRide } from '../composables/usePlannedRides'
+import { usePlannedRides, planTss, planSpeedOverride, type PlannedRide } from '../composables/usePlannedRides'
 import type { AthleteState } from '../routeLoad'
 import { activityIcon } from '../activityHelpers'
 import RoutePickerModal from './RoutePickerModal.vue'
@@ -181,6 +181,14 @@ function plansFor(iso: string): PlannedRide[] {
 
 function tssOf(plan: PlannedRide): number | null {
   return planTss(plan, props.athlete)
+}
+
+// Vitesse propre à l'itinéraire (réglée dans le créateur), ou null s'il suit la
+// vitesse moyenne du profil. Quand elle existe, c'est elle qui a servi au TSS
+// ci-dessus : on le signale, sinon un TSS qui ne colle pas à la vitesse du profil
+// ressemble à un bug.
+function speedOverrideOf(plan: PlannedRide): number | null {
+  return planSpeedOverride(plan)
 }
 
 function openPicker(iso: string) {
@@ -425,7 +433,14 @@ async function moveToDay(iso: string) {
               <span
                 v-if="!isPlanDone(plan) && tssOf(plan) !== null"
                 class="planner-plan-tss planner-plan-tss-est"
-              >≈ {{ tssOf(plan) }} TSS</span>
+              >≈ {{ tssOf(plan) }} TSS<!--
+                --><span
+                  v-if="speedOverrideOf(plan) !== null"
+                  class="planner-plan-speed"
+                  :title="t('performance.load.week.own_speed_hint', { speed: speedOverrideOf(plan) })"
+                >
+                  <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>{{ speedOverrideOf(plan) }} km/h
+                </span></span>
             </div>
 
             <!-- Jour où l'on est sorti sans itinéraire planifié : on montre les sorties
@@ -810,6 +825,16 @@ async function moveToDay(iso: string) {
   align-self: flex-end;
   color: #fd7e14;
   font-size: 0.65rem;
+}
+/* Repère « vitesse propre à l'itinéraire » : collé au TSS estimé qu'il explique,
+   mais en gris — c'est une précision, pas un second chiffre à lire. */
+.planner-plan-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin-left: 0.3rem;
+  color: var(--bs-secondary-color, #6c757d);
+  font-weight: 500;
 }
 /* Plan accompli : la carte passe d'orange (à faire) à vert (fait), bien marqué. */
 .planner-plan.is-done {

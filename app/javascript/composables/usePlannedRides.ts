@@ -24,6 +24,9 @@ export interface PlannedRouteSummary {
   activity: Sport
   distance_m: number | null
   elevation_gain_m: number | null
+  // Vitesse moyenne ajustée pour CE tracé, ou null quand l'itinéraire suit le réglage
+  // du profil pour son sport (cf. Route#avg_speed_kmh / routeStore.avgSpeedOverride).
+  avg_speed_kmh: number | null
 }
 
 export interface PlannedRide {
@@ -153,6 +156,21 @@ export function usePlannedRides() {
   return { plannedRides, loaded, addPlan, movePlan, reorderPlans, removePlan }
 }
 
+// Vitesse ajustée pour ce tracé, ou null s'il suit le réglage du profil. Bornes
+// identiques à speedForSport / Route::SPEED_RANGE : hors bornes, la valeur ne vient
+// pas d'un réglage sensé, on retombe sur le profil.
+export function planSpeedOverride(plan: PlannedRide): number | null {
+  const v = plan.route.avg_speed_kmh
+  return typeof v === 'number' && Number.isFinite(v) && v >= 3 && v <= 80 ? v : null
+}
+
+// Vitesse retenue pour estimer la durée (et donc le TSS) d'un plan : celle de
+// l'itinéraire si le créateur l'a ajustée, sinon celle du profil pour son sport —
+// même règle que la liste des itinéraires (RoutesList.speedFor).
+export function planSpeedKmh(plan: PlannedRide): number {
+  return planSpeedOverride(plan) ?? speedForSport(plan.route.activity)
+}
+
 // TSS estimé d'un plan, avec les seuils du moment. null si l'estimation est
 // impossible (pas de charge chargée, itinéraire sans distance).
 export function planTss(plan: PlannedRide, athlete: AthleteState | null): number | null {
@@ -162,7 +180,7 @@ export function planTss(plan: PlannedRide, athlete: AthleteState | null): number
     {
       distanceM: plan.route.distance_m ?? 0,
       elevGainM: plan.route.elevation_gain_m ?? 0,
-      speedKmh: speedForSport(sport),
+      speedKmh: planSpeedKmh(plan),
       sport,
     },
     athlete,

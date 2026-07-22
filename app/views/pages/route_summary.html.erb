@@ -164,18 +164,18 @@
         <small class="text-body-secondary"><%= t("routes.summary.view_hint") %></small>
       </span>
     <% end %>
-    <%= link_to navigate_route_path(@route.share_token), class: "list-group-item list-group-item-action d-flex align-items-center gap-3" do %>
-      <i class="fa-solid fa-location-arrow fa-fw text-warning" aria-hidden="true"></i>
-      <span>
-        <span class="d-block fw-semibold"><%= t("routes.summary.navigate") %></span>
-        <small class="text-body-secondary"><%= t("routes.summary.navigate_hint") %></small>
-      </span>
-    <% end %>
     <%= link_to "/api/routes/shared/#{@route.share_token}/gpx", class: "list-group-item list-group-item-action d-flex align-items-center gap-3" do %>
       <i class="fa-solid fa-download fa-fw text-warning" aria-hidden="true"></i>
       <span>
         <span class="d-block fw-semibold"><%= t("routes.summary.gpx") %></span>
         <small class="text-body-secondary"><%= t("routes.summary.gpx_hint") %></small>
+      </span>
+    <% end %>
+    <%= link_to navigate_route_path(@route.share_token), class: "list-group-item list-group-item-action d-flex align-items-center gap-3" do %>
+      <i class="fa-solid fa-location-arrow fa-fw text-warning" aria-hidden="true"></i>
+      <span>
+        <span class="d-block fw-semibold"><%= t("routes.summary.navigate") %></span>
+        <small class="text-body-secondary"><%= t("routes.summary.navigate_hint") %></small>
       </span>
     <% end %>
   </div>

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_22_065835) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_22_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -87,10 +87,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_065835) do
     t.datetime "started_at"
     t.jsonb "streams", default: {}, null: false
     t.float "total_elevation_gain"
+    t.jsonb "track_cells", default: {}, null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.index "((track_cells -> 'coarse'::text))", name: "index_imported_activities_on_track_coarse_cells", using: :gin
     t.index ["user_id", "started_at"], name: "index_imported_activities_on_user_id_and_started_at"
     t.index ["user_id"], name: "index_imported_activities_on_user_id"
+  end
+
+  create_table "named_segments", force: :cascade do |t|
+    t.jsonb "cells", default: [], null: false
+    t.jsonb "coarse", default: [], null: false
+    t.datetime "created_at", null: false
+    t.float "distance_m"
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["coarse"], name: "index_named_segments_on_coarse", using: :gin
+    t.index ["user_id"], name: "index_named_segments_on_user_id"
   end
 
   create_table "opened_routes", force: :cascade do |t|
@@ -190,9 +204,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_065835) do
     t.jsonb "streams", default: {}, null: false
     t.datetime "streams_fetched_at"
     t.float "total_elevation_gain"
+    t.jsonb "track_cells", default: {}, null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
     t.index "((localities)::text) gin_trgm_ops", name: "index_strava_activities_on_localities_trgm", using: :gin
+    t.index "((track_cells -> 'coarse'::text))", name: "index_strava_activities_on_track_coarse_cells", using: :gin
     t.index ["name"], name: "index_strava_activities_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
     t.index ["user_id", "device_name"], name: "index_strava_activities_on_user_id_and_device_name", where: "((device_name IS NOT NULL) AND ((device_name)::text <> ''::text))"
     t.index ["user_id", "gear_id"], name: "index_strava_activities_on_user_id_and_gear_id"
@@ -253,6 +269,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_065835) do
   add_foreign_key "chains", "bikes"
   add_foreign_key "chart_layouts", "users"
   add_foreign_key "imported_activities", "users"
+  add_foreign_key "named_segments", "users"
   add_foreign_key "opened_routes", "routes"
   add_foreign_key "opened_routes", "users"
   add_foreign_key "planned_rides", "routes"

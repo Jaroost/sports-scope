@@ -26,6 +26,7 @@ import ActivityMapCard from './ActivityMapCard.vue'
 import ActivityCharts from './ActivityCharts.vue'
 import ActivityConditions from './ActivityConditions.vue'
 import ActivityZones from './ActivityZones.vue'
+import ActivitySegments from './ActivitySegments.vue'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -100,7 +101,7 @@ const hoveredPeakDuration = ref(null)
 // La carte reste toujours affichée au-dessus ; photos / puissance & cols /
 // graphiques basculent dans des onglets pour libérer de la place verticale.
 // L'onglet actif est persisté comme les toggles « collapsed » ci-dessus.
-const TABS = ['photos', 'power', 'analysis', 'zones']
+const TABS = ['photos', 'power', 'analysis', 'zones', 'segments']
 const savedTab = (typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.activityTab')) || ''
 const activeTab = ref(TABS.includes(savedTab) ? savedTab : 'analysis')
 const hasPhotos = computed(() => photos.value.length > 0)
@@ -284,6 +285,23 @@ function setSelection(startIdx, endIdx) {
   selection.value = { startIdx: s, endIdx: e }
 }
 
+// Onglet Segments — deux niveaux, comme les marqueurs de cols sur la carte :
+//   survol → prévisualisation (tronçon surligné, aucune sélection committée, pas de
+//            zoom), passée à la carte via `preview-range`
+//   clic   → sélection committée : la carte zoome dessus et la GARDE surlignée
+//            jusqu'à ce qu'on reclique la ligne (ou qu'on sélectionne autre chose).
+const hoveredSegmentRange = ref(null)
+
+function hoverSegment(range) {
+  hoveredSegmentRange.value = range
+}
+
+function selectSegment(range) {
+  hoveredSegmentRange.value = null
+  if (range) setSelection(range.startIdx, range.endIdx)
+  else clearSelection()
+}
+
 function clearSelection() {
   // The map's A/B handles snap back to the route ends via ActivityMapCard's
   // own watcher; the chart's overlay clears via ActivityCharts'.
@@ -436,11 +454,16 @@ onMounted(async () => {
       <span>{{ error }}</span>
     </div>
     <div v-else-if="activity">
+      <!-- Onglet Segments : la carte se colle en haut pour rester visible pendant
+           qu'on parcourt la liste — c'est là qu'on lit le surlignage du segment
+           survolé ou épinglé. -->
       <ActivityMapCard
+        :sticky="effectiveTab === 'segments'"
         :activity="activity"
         :streams="streams"
         :photos="photos"
         :selection="selection"
+        :preview-range="hoveredSegmentRange"
         :visible-streams="visibleStreams"
         :x-axis="xAxis"
         v-model:hovered-climb-start-idx="hoveredClimbStartIdx"
@@ -466,40 +489,55 @@ onMounted(async () => {
           class="btn d-flex align-items-center gap-2"
           :class="effectiveTab === 'photos' ? 'btn-warning' : 'btn-outline-secondary'"
           :aria-pressed="effectiveTab === 'photos'"
+          :title="t('strava.tabs.photos')"
           @click="activeTab = 'photos'"
         >
           <i class="fa-solid fa-images" aria-hidden="true"></i>
-          <span>{{ t('strava.tabs.photos') }} ({{ photos.length }})</span>
+          <span class="tab-label">{{ t('strava.tabs.photos') }} ({{ photos.length }})</span>
         </button>
         <button
           type="button"
           class="btn d-flex align-items-center gap-2"
           :class="effectiveTab === 'power' ? 'btn-warning' : 'btn-outline-secondary'"
           :aria-pressed="effectiveTab === 'power'"
+          :title="t('strava.tabs.stats')"
           @click="activeTab = 'power'"
         >
           <i class="fa-solid fa-bolt" aria-hidden="true"></i>
-          <span>{{ t('strava.tabs.stats') }}</span>
+          <span class="tab-label">{{ t('strava.tabs.stats') }}</span>
         </button>
         <button
           type="button"
           class="btn d-flex align-items-center gap-2"
           :class="effectiveTab === 'analysis' ? 'btn-warning' : 'btn-outline-secondary'"
           :aria-pressed="effectiveTab === 'analysis'"
+          :title="t('strava.tabs.analysis')"
           @click="activeTab = 'analysis'"
         >
           <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
-          <span>{{ t('strava.tabs.analysis') }}</span>
+          <span class="tab-label">{{ t('strava.tabs.analysis') }}</span>
         </button>
         <button
           type="button"
           class="btn d-flex align-items-center gap-2"
           :class="effectiveTab === 'zones' ? 'btn-warning' : 'btn-outline-secondary'"
           :aria-pressed="effectiveTab === 'zones'"
+          :title="t('strava.tabs.zones')"
           @click="activeTab = 'zones'"
         >
           <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
-          <span>{{ t('strava.tabs.zones') }}</span>
+          <span class="tab-label">{{ t('strava.tabs.zones') }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn d-flex align-items-center gap-2"
+          :class="effectiveTab === 'segments' ? 'btn-warning' : 'btn-outline-secondary'"
+          :aria-pressed="effectiveTab === 'segments'"
+          :title="t('strava.tabs.segments')"
+          @click="activeTab = 'segments'"
+        >
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
+          <span class="tab-label">{{ t('strava.tabs.segments') }}</span>
         </button>
       </div>
 
@@ -562,6 +600,39 @@ onMounted(async () => {
         :source="props.source"
         :active="effectiveTab === 'zones'"
       />
+
+      <!-- Portions déjà parcourues lors d'autres sorties : découvertes côté serveur
+           (SegmentMatcher), chargées à l'affichage de l'onglet. Le survol d'une ligne
+           passe par le `selection` déjà partagé avec la carte et les graphiques. -->
+      <ActivitySegments
+        v-if="effectiveTab === 'segments'"
+        class="mb-3"
+        :activity-id="props.activityId"
+        :source="props.source"
+        :is-run="isRun(activity)"
+        :active="effectiveTab === 'segments'"
+        :selection="selection"
+        :activity-date="activity?.start_date_local || activity?.start_date || ''"
+        @hover="hoverSegment"
+        @select="selectSegment"
+      />
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Cinq onglets à libellé ne tiennent pas sur la largeur d'un téléphone : sous 576 px,
+   seul l'onglet ACTIF garde son texte (il dit où on est), les autres se réduisent à
+   leur icône — leur libellé reste dans `title`/`aria-pressed`. Rien ne déborde et on
+   évite une barre à défilement horizontal, où les onglets de droite seraient
+   invisibles. */
+@media (max-width: 575.98px) {
+  .activity-tabs .btn {
+    padding-left: 0.6rem;
+    padding-right: 0.6rem;
+  }
+  .activity-tabs .btn:not(.btn-warning) .tab-label {
+    display: none;
+  }
+}
+</style>

@@ -74,6 +74,18 @@ class ImportedActivitiesController < ApplicationController
     render json: TrainingLoad.zones_for_activity(current_user, activity)
   end
 
+  # GET /api/imported_activities/:id/segments
+  # Portions de tracé déjà parcourues lors d'autres sorties (cf. `SegmentMatcher`).
+  def segments
+    activity = current_user.imported_activities.find_by(id: params[:id])
+    return head :not_found unless activity
+
+    # Un import antérieur à l'empreinte de trace n'a pas de `track_cells` : on la
+    # calcule à la première consultation (aucun appel externe, tout est en base).
+    activity.recompute_derivations! if activity.track_cells.blank? && activity.streams.is_a?(Hash)
+    render json: { segments: SegmentMatcher.for(current_user, activity) }
+  end
+
   # DELETE /api/imported_activities/:id
   def destroy
     activity = current_user.imported_activities.find_by(id: params[:id])

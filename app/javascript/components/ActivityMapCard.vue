@@ -29,6 +29,10 @@ const props = defineProps({
   photos: { type: Array as PropType<PhotoLike[]>, default: () => [] },
   // Current cross-component selection — { startIdx, endIdx } | null.
   selection: { type: Object, default: null },
+  // Prévisualisation venue d'un panneau frère (survol d'une ligne de l'onglet
+  // Segments) : même rendu que la sélection, mais sans la committer ni zoomer —
+  // exactement ce que fait le survol d'un marqueur de col sur la carte.
+  previewRange: { type: Object, default: null },
   // v-model:hovered-climb-start-idx — synchronizes hover state with
   // ActivityStats so pointing at a row highlights the corresponding marker
   // and vice versa.
@@ -44,6 +48,10 @@ const props = defineProps({
   // For the bottom-left "Create route from activity" button — handed back
   // through an emit so the parent owns the redirect/sessionStorage handoff.
   localePrefix: { type: String, default: '' },
+  // Carte collée en haut (onglet Segments) : la classe ne peut PAS venir du parent,
+  // ce composant a deux nœuds racines (la carte + la modale) — Vue ne sait pas à qui
+  // attacher les attributs d'un fragment et les jette. D'où une prop explicite.
+  sticky: { type: Boolean, default: false },
 })
 
 const emit = defineEmits([
@@ -561,7 +569,7 @@ function syncFromMarkers() {
 // La sélection effectivement affichée est donc la prévisualisation si elle existe,
 // sinon `props.selection`. Même logique que le créateur d'itinéraire.
 const previewSelection = ref<{ startIdx: number; endIdx: number } | null>(null)
-const effectiveSelection = computed(() => previewSelection.value || props.selection)
+const effectiveSelection = computed(() => previewSelection.value || props.previewRange || props.selection)
 
 function refreshSelectedRoute() {
   if (!mapInstance || !mapInstance.getSource('selected-route')) return
@@ -896,12 +904,23 @@ watch(state, () => state.save(), { deep: true })
 // ActivityCharts colore le profil d'altitude par pente en même temps que la carte.
 watch(() => state.showGrade, (v) => emit('update:showGrade', v), { immediate: true })
 
+// La hauteur du conteneur peut changer sans que la fenêtre bouge (carte collée en
+// haut quand l'onglet Segments est actif, plein écran, redimensionnement d'un
+// panneau) : MapLibre ne le voit pas tout seul et son canvas reste à l'ancienne
+// taille. On le lui dit.
+let mapResizeObserver: ResizeObserver | null = null
+
 onMounted(() => {
   state.load()
   if (hasRoute.value) renderMap()
+  if (mapEl.value && typeof ResizeObserver !== 'undefined') {
+    mapResizeObserver = new ResizeObserver(() => mapInstance?.resize())
+    mapResizeObserver.observe(mapEl.value)
+  }
 })
 
 onBeforeUnmount(() => {
+  if (mapResizeObserver) { mapResizeObserver.disconnect(); mapResizeObserver = null }
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
   photoMarkers.forEach((m) => m.remove())
@@ -913,8 +932,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="card mb-3 shadow-sm border-0">
-    <div class="card-header activity-card-header d-flex align-items-center gap-2">
+  <div class="card mb-3 shadow-sm border-0" :class="{ 'map-card-sticky': sticky }">
+    <!-- Carte collée (onglet Segments) : pas d'en-tête. Ces chiffres (nom, durée,
+         calories, TSS) ne changent pas pendant qu'on parcourt les segments et
+         mangeraient la hauteur utile. `v-if` et non `display: none` : l'en-tête
+         porte `d-flex`, donc `display: flex !important` — impossible à masquer en
+         CSS sans surenchérir en `!important`. -->
+    <div v-if="!sticky" class="card-header activity-card-header d-flex align-items-center gap-2">
       <span class="activity-type-badge" :title="sportType(activity)">
         <i :class="`fa-solid ${activityIcon(sportType(activity))}`" aria-hidden="true"></i>
       </span>
@@ -1051,6 +1075,32 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* Carte collée sous la navbar `fixed-top` (hauteur réelle mesurée dans --navbar-h,
+   elle wrappe sur deux lignes avec beaucoup de menus). Un peu moins haute que
+   d'habitude, sinon il ne reste plus de place pour la liste des segments sur un
+   portable. `sticky` ne crée pas de bloc conteneur pour les descendants `fixed` :
+   le plein écran de la carte continue de fonctionner. */
+.map-card-sticky {
+  position: sticky;
+  /* Collée à la navbar, sans interstice : `--navbar-h` est sa hauteur réelle
+     (mesurée par trackNavbar, elle wrappe sur deux lignes avec beaucoup de menus). */
+  top: var(--navbar-h, 4rem);
+  z-index: 3;
+  /* Sans en-tête, la carte touche le haut du bloc : on la rogne aux coins arrondis.
+     Ne clippe pas le plein écran, qui est en `position: fixed` (donc cadré par la
+     fenêtre, pas par cet ancêtre). */
+  overflow: hidden;
+}
+.map-card-sticky .activity-map {
+  height: min(520px, 45vh);
+}
+/* Téléphone : écran court ET lignes de segment plus hautes (elles passent sur trois
+   étages) — on rend de la place à la liste. */
+@media (max-width: 575.98px) {
+  .map-card-sticky .activity-map {
+    height: min(300px, 35vh);
+  }
+}
 .map-wrap {
   position: relative;
 }

@@ -238,6 +238,8 @@ class User < ApplicationRecord
   has_many :strava_backfill_runs, dependent: :destroy
   has_many :strava_gears, dependent: :destroy
   has_many :bikes, dependent: :destroy
+  # Noms donnés aux segments découverts automatiquement (cf. NamedSegment).
+  has_many :named_segments, dependent: :destroy
 
   validates :keycloak_uid, presence: true, uniqueness: true
   validates :email, presence: true, uniqueness: true

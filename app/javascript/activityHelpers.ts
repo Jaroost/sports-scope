@@ -466,6 +466,19 @@ export function formatPace(minPerKm: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+// Chrono d'un effort court → « m:ss » (« h:mm:ss » au-delà de l'heure). Les temps de
+// segment se comparent à la seconde : `fmtSeconds` (arrondi à la minute) est trop
+// grossier ici.
+export function formatChrono(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return '–'
+  const total = Math.max(0, Math.round(seconds))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const mm = h ? String(m).padStart(2, '0') : String(m)
+  return `${h ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`
+}
+
 export function formatPowerDuration(sec: number): string {
   if (sec < 60) return `${sec} s`
   if (sec < 3600) return `${Math.round(sec / 60)} min`

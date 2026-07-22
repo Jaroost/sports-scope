@@ -27,7 +27,8 @@ module Activityable
     peak_powers: ->(streams) { PeakPowerCurve.compute_from(streams) },
     normalized_power: ->(streams) { TrainingLoad.normalized_power(streams) },
     hr_histogram: ->(streams) { ZoneDistribution.histogram(streams, 'heartrate', ZoneDistribution::HR_BUCKET) },
-    power_histogram: ->(streams) { ZoneDistribution.histogram(streams, 'watts', ZoneDistribution::POWER_BUCKET) }
+    power_histogram: ->(streams) { ZoneDistribution.histogram(streams, 'watts', ZoneDistribution::POWER_BUCKET) },
+    track_cells: ->(streams) { TrackFingerprint.compute_from(streams) }
   }.freeze
 
   included do

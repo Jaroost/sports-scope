@@ -59,6 +59,7 @@ Rails.application.routes.draw do
   get "/strava/activities/:id/peak_power_ranks", to: "strava#peak_power_ranks", as: :strava_activity_peak_power_ranks, constraints: { id: /\d+/ }
   get "/strava/activities/:id/zones", to: "strava#zones", as: :strava_activity_zones, constraints: { id: /\d+/ }
   get "/strava/activities/:id/photos", to: "strava#photos", as: :strava_activity_photos, constraints: { id: /\d+/ }
+  get "/strava/activities/:id/segments", to: "strava#segments", as: :strava_activity_segments, constraints: { id: /\d+/ }
 
   # Analyse de performance (records / cumuls / courbe de puissance — JSON pour Vue)
   get "/api/performance", to: "performance#show", as: :api_performance
@@ -113,6 +114,12 @@ Rails.application.routes.draw do
   get "/api/imported_activities/:id/streams", to: "imported_activities#streams", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/peak_power_ranks", to: "imported_activities#peak_power_ranks", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/zones", to: "imported_activities#zones", constraints: { id: /\d+/ }
+  get "/api/imported_activities/:id/segments", to: "imported_activities#segments", constraints: { id: /\d+/ }
+
+  # Noms donnés aux segments découverts automatiquement
+  post   "/api/named_segments", to: "named_segments#create"
+  patch  "/api/named_segments/:id", to: "named_segments#update", constraints: { id: /\d+/ }
+  delete "/api/named_segments/:id", to: "named_segments#destroy", constraints: { id: /\d+/ }
   delete "/api/imported_activities/:id", to: "imported_activities#destroy", constraints: { id: /\d+/ }
 
   # Bike chain waxing tracker (JSON consumed by Vue components)

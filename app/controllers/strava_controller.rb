@@ -162,6 +162,29 @@ class StravaController < ApplicationController
     render json: { error: e.message }, status: status
   end
 
+  # GET /strava/activities/:id/segments
+  # Portions de tracé déjà parcourues lors d'autres sorties (cf. `SegmentMatcher`).
+  # Comme #zones, on garantit d'abord que l'activité a ses streams — et donc son
+  # empreinte de trace — avant de la comparer à l'historique.
+  def segments
+    id = params[:id]
+    activity = current_user.strava_activities.find_by(strava_id: id)
+    return head :not_found unless activity
+
+    if activity.track_cells.blank?
+      if activity.streams_fetched_at.blank?
+        activity.store_streams!(load_streams_for(id))
+      else
+        activity.recompute_derivations!
+      end
+    end
+
+    render json: { segments: SegmentMatcher.for(current_user, activity) }
+  rescue StravaStreamsFetcher::ApiError => e
+    status = e.status == 404 ? :not_found : :bad_gateway
+    render json: { error: e.message }, status: status
+  end
+
   # POST /strava/backfill — récupère en masse les streams manquants. Réutilise un
   # run actif s'il y en a un (idempotent) ; ne (ré)enfile un job que si rien ne
   # tourne déjà, pour ne pas dupliquer le travail.

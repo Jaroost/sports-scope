@@ -356,7 +356,7 @@ watch(rangeDays, () => { hoverIndex.value = null })
                     <i :class="tsbTrend.icon" aria-hidden="true"></i>
                     <span v-if="tsbTrend.dir !== 'flat'" class="ms-1">{{ tsbTrend.delta }}</span>
                   </span>
-                  <span class="badge" :style="{ backgroundColor: zoneColor(currentZone) }">{{ t(`performance.load.zone_${currentZone}`) }}</span>
+                  <span class="badge load-badge" :style="{ backgroundColor: zoneColor(currentZone) }">{{ t(`performance.load.zone_${currentZone}`) }}</span>
                 </div>
                 <div class="load-help">{{ t(`performance.load.zone_${currentZone}_hint`) }}</div>
               </div>
@@ -379,7 +379,7 @@ watch(rangeDays, () => { hoverIndex.value = null })
                   <span class="fs-3 fw-bold" :style="{ color: acwrColor(current.acwr_zone) }">
                     {{ current.acwr != null ? current.acwr.toFixed(2) : '—' }}
                   </span>
-                  <span v-if="current.acwr_zone" class="badge" :style="{ backgroundColor: acwrColor(current.acwr_zone) }">{{ t(`performance.load.acwr_${current.acwr_zone}`) }}</span>
+                  <span v-if="current.acwr_zone" class="badge load-badge" :style="{ backgroundColor: acwrColor(current.acwr_zone) }">{{ t(`performance.load.acwr_${current.acwr_zone}`) }}</span>
                 </div>
                 <div class="load-help">{{ current.acwr_zone ? t(`performance.load.acwr_${current.acwr_zone}_hint`) : t('performance.load.acwr_pending') }}</div>
               </div>
@@ -732,6 +732,16 @@ watch(rangeDays, () => { hoverIndex.value = null })
   padding: 0.75rem 1rem;
   border: 1px solid var(--bs-border-color);
   border-radius: 0.5rem;
+}
+/* Les libellés de zone (« fraîcheur », « ratio ») sont longs et la case ne fait qu'une
+   demi-colonne sur mobile : le badge doit pouvoir passer à la ligne plutôt que déborder
+   sur la case voisine. */
+.load-badge {
+  white-space: normal;
+  text-align: left;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 /* Case cliquable : ouvre/ferme sa courbe. Chevron CSS (pas de dépendance police) qui
    pivote quand la courbe est ouverte ; la bordure passe à l'accent. */

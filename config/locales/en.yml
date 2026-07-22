@@ -552,8 +552,6 @@ en:
       chart_forward: "Same direction"
       chart_reverse: "Reverse direction"
       chart_y: "Time"
-      show_history: "Show efforts"
-      hide_history: "Hide efforts"
       date: "Date"
       time: "Time"
       delta: "Delta"

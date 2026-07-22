@@ -112,6 +112,8 @@ const savingName = ref(false)
 // Ref de fonction : le champ vit dans un `v-for`, un `ref` nommé y deviendrait un
 // tableau. Une seule ligne est en édition à la fois, donc une seule référence suffit.
 const nameInput = ref<HTMLInputElement | null>(null)
+// Les `li` de la liste, pour ramener à l'écran celle qu'on vient d'ouvrir.
+const rowEls: HTMLElement[] = []
 
 function csrfToken(): string {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
@@ -240,10 +242,6 @@ function effortDate(effort: Effort): string {
   })
 }
 
-function toggle(index: number) {
-  expanded.value = expanded.value === index ? null : index
-}
-
 function hover(segment: Segment | null) {
   emit('hover', segment ? { startIdx: segment.start_idx, endIdx: segment.end_idx } : null)
 }
@@ -267,13 +265,31 @@ function isSelected(segment: Segment): boolean {
   return !!sel && sel.startIdx === segment.start_idx && sel.endIdx === segment.end_idx
 }
 
-// Clic sur une ligne : on épingle le segment, ou on le désépingle s'il l'était déjà.
-function select(segment: Segment) {
+// Clic sur une ligne : on épingle le segment ET on déplie son détail. `expanded` ne
+// retient qu'un index, donc le détail précédemment ouvert se referme tout seul.
+// Reclic sur la même ligne : on referme et on désépingle.
+async function activate(index: number, segment: Segment) {
   if (isSelected(segment)) {
+    expanded.value = null
     emit('select', null)
     return
   }
+  expanded.value = index
   emit('select', { startIdx: segment.start_idx, endIdx: segment.end_idx })
+  // La ligne cliquée peut se retrouver hors écran : celle d'avant s'est repliée (tout
+  // remonte) et la carte collée mange le haut de la fenêtre. On la ramène juste sous
+  // la carte, une fois le détail rendu.
+  await nextTick()
+  scrollRowIntoView(index)
+}
+
+// `scrollIntoView` plutôt qu'un `scrollTo` calculé : la place à réserver en haut
+// (navbar + carte collée) est déclarée en CSS via `scroll-margin-top`, et c'est le
+// navigateur qui l'applique APRÈS mise en page. Un calcul JS au moment du clic, lui,
+// mesure une carte qui n'est pas encore collée et vise à côté.
+function scrollRowIntoView(index: number) {
+  const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  rowEls[index]?.scrollIntoView({ block: 'start', behavior: smooth ? 'smooth' : 'auto' })
 }
 </script>
 
@@ -306,17 +322,19 @@ function select(segment: Segment) {
       <ul class="list-group list-group-flush">
         <li
           v-for="(segment, i) in segments" :key="`${segment.start_idx}-${segment.end_idx}`"
+          :ref="(el) => { rowEls[i] = el as HTMLElement }"
           class="list-group-item segment-row"
           :class="{ 'segment-row-selected': isSelected(segment) }"
           role="button"
           tabindex="0"
           :aria-pressed="isSelected(segment)"
+          :aria-expanded="expanded === i"
           :title="isSelected(segment) ? t('strava.segments.unselect_hint') : t('strava.segments.select_hint')"
           @mouseenter="hover(segment)"
           @mouseleave="hover(null)"
-          @click="select(segment)"
-          @keydown.enter.self.prevent="select(segment)"
-          @keydown.space.self.prevent="select(segment)"
+          @click="activate(i, segment)"
+          @keydown.enter.self.prevent="activate(i, segment)"
+          @keydown.space.self.prevent="activate(i, segment)"
         >
           <div class="segment-head">
             <div class="segment-id flex-grow-1">
@@ -411,15 +429,6 @@ function select(segment: Segment) {
                 {{ t('strava.segments.reverse_count', { count: segment.reverse_count }) }}
               </span>
             </div>
-
-            <button
-              type="button" class="btn btn-sm btn-outline-secondary segment-toggle"
-              :aria-expanded="expanded === i"
-              :title="expanded === i ? t('strava.segments.hide_history') : t('strava.segments.show_history')"
-              @click.stop="toggle(i)"
-            >
-              <i :class="`fa-solid ${expanded === i ? 'fa-chevron-up' : 'fa-chevron-down'}`" aria-hidden="true"></i>
-            </button>
           </div>
 
           <!-- L'historique est dans la ligne : on stoppe le clic pour qu'ouvrir un
@@ -484,6 +493,10 @@ function select(segment: Segment) {
 
 <style scoped>
 .segment-row {
+  /* La carte reste collée en haut : une ligne amenée à l'écran doit s'arrêter SOUS
+     elle. `--sticky-map-h` est publiée par ActivityMapCard (sa hauteur réelle une
+     fois collée, 0 sinon), `--navbar-h` par trackNavbar. */
+  scroll-margin-top: calc(var(--navbar-h, 4rem) + var(--sticky-map-h, 0px) + 0.5rem);
   cursor: pointer;
   border-left: 3px solid transparent;
   transition: background-color 0.12s ease, border-color 0.12s ease;
@@ -527,17 +540,10 @@ function select(segment: Segment) {
     grid-template-areas:
       "id"
       "badges"
-      "metrics"
-      "toggle";
+      "metrics";
     gap: 0.5rem;
   }
   .segment-id { grid-area: id; }
-  /* Le bouton « voir les passages » ferme la fiche, en pleine largeur : c'est la
-     dernière chose qu'on lit, et une cible de la largeur de l'écran au pouce. */
-  .segment-toggle {
-    grid-area: toggle;
-    width: 100%;
-  }
   .segment-metrics { grid-area: metrics; }
   .segment-badges {
     grid-area: badges;

@@ -910,6 +910,21 @@ watch(() => state.showGrade, (v) => emit('update:showGrade', v), { immediate: tr
 // taille. On le lui dit.
 let mapResizeObserver: ResizeObserver | null = null
 
+// Hauteur réellement occupée par la carte quand elle est collée, publiée en
+// `--sticky-map-h` sur <html>. Les panneaux qui défilent sous elle (liste des
+// segments) s'en servent pour ne pas amener une ligne DERRIÈRE la carte. Publier la
+// mesure évite de recopier ailleurs `min(520px, 45vh)` et ses variantes, et reste
+// juste quand la fenêtre change.
+const cardEl = useTemplateRef('cardEl')
+let cardResizeObserver: ResizeObserver | null = null
+
+function publishStickyHeight() {
+  const height = props.sticky ? (cardEl.value?.offsetHeight ?? 0) : 0
+  document.documentElement.style.setProperty('--sticky-map-h', `${height}px`)
+}
+
+watch(() => props.sticky, () => nextTick().then(publishStickyHeight))
+
 onMounted(() => {
   state.load()
   if (hasRoute.value) renderMap()
@@ -917,10 +932,17 @@ onMounted(() => {
     mapResizeObserver = new ResizeObserver(() => mapInstance?.resize())
     mapResizeObserver.observe(mapEl.value)
   }
+  if (cardEl.value && typeof ResizeObserver !== 'undefined') {
+    cardResizeObserver = new ResizeObserver(publishStickyHeight)
+    cardResizeObserver.observe(cardEl.value)
+  }
+  publishStickyHeight()
 })
 
 onBeforeUnmount(() => {
   if (mapResizeObserver) { mapResizeObserver.disconnect(); mapResizeObserver = null }
+  if (cardResizeObserver) { cardResizeObserver.disconnect(); cardResizeObserver = null }
+  document.documentElement.style.removeProperty('--sticky-map-h')
   climbMarkers.forEach((m) => m.remove())
   climbMarkers.length = 0
   photoMarkers.forEach((m) => m.remove())
@@ -932,7 +954,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="card mb-3 shadow-sm border-0" :class="{ 'map-card-sticky': sticky }">
+  <div ref="cardEl" class="card mb-3 shadow-sm border-0" :class="{ 'map-card-sticky': sticky }">
     <!-- Carte collée (onglet Segments) : pas d'en-tête. Ces chiffres (nom, durée,
          calories, TSS) ne changent pas pendant qu'on parcourt les segments et
          mangeraient la hauteur utile. `v-if` et non `display: none` : l'en-tête

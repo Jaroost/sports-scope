@@ -552,8 +552,6 @@ fr:
       chart_forward: "Sens direct"
       chart_reverse: "Sens inverse"
       chart_y: "Temps"
-      show_history: "Voir les passages"
-      hide_history: "Masquer les passages"
       date: "Date"
       time: "Temps"
       delta: "Écart"

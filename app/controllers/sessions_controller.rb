@@ -14,7 +14,6 @@ class SessionsController < ApplicationController
     when "keycloak", "openid_connect"
       user = User.from_keycloak(auth)
       session[:user_id] = user.id
-      session[:kc_access_token] = auth.credentials.token
       redirect_to root_path, notice: t("auth.signed_in")
     when "strava"
       unless current_user

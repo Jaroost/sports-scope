@@ -21,6 +21,8 @@ export interface SportPreferences {
   route_profile: string
   // Diamètre (m) de détection d'amas de virages dans le créateur.
   turn_anomaly_m: number
+  // Écart (m) au-delà duquel un point d'étape accroché loin du clic est signalé.
+  snap_warn_m: number
   map: { default_style: MapStyleId; overlays: string[] }
   route: { color: string; opacity: number; width: number }
   climb_detection: {
@@ -43,7 +45,11 @@ export interface SportPreferences {
     turn_hint_m: number
     turn_urgent_m: number
     turn_now_m: number
+    turn_repeat_count: number
+    turn_repeat: boolean
     turn_repeat_ms: number
+    turn_repeat_urgent_count: number
+    turn_repeat_urgent: boolean
     turn_repeat_urgent_ms: number
     turn_green_hold_m: number
     turn_green_hold_s: number
@@ -64,12 +70,13 @@ export interface UserPreferences {
     alert_m: number
   }
   search: { country_codes: string[]; worldwide_fallback: boolean }
-  navigation: { default_style: MapStyleId; zoom: number; pitch: number; terrain: boolean; nav_fps: number; sound_volume: number; show_climb_card: boolean; radar_close_m: number; auto_reroute: boolean; auto_reroute_cooldown_s: number }
+  navigation: { default_style: MapStyleId; zoom: number; nav_fps: number; sound_volume: number; show_climb_card: boolean; radar_close_m: number; auto_reroute: boolean; auto_reroute_cooldown_s: number }
   display: {
     default_sport: Sport
     show_grade_colors: boolean
     show_elevation_chart: boolean
     show_chain_widget: boolean
+    show_performance_widget: boolean
   }
   sports: Record<Sport, SportPreferences>
 }
@@ -87,6 +94,7 @@ function sportDefaults(
     speed,
     route_profile,
     turn_anomaly_m,
+    snap_warn_m: 25,
     map: { default_style: map_style, overlays: [] },
     route: { color: '#7c3aed', opacity: 0.8, width: 5 },
     climb_detection,
@@ -101,7 +109,11 @@ function sportDefaults(
       turn_hint_m: 150,
       turn_urgent_m: 50,
       turn_now_m: 15,
+      turn_repeat_count: 3,
+      turn_repeat: false,
       turn_repeat_ms: 2000,
+      turn_repeat_urgent_count: 5,
+      turn_repeat_urgent: false,
       turn_repeat_urgent_ms: 1000,
       turn_green_hold_m: 100,
       turn_green_hold_s: 10,
@@ -126,12 +138,13 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     country_codes: ['ch', 'fr', 'it', 'at', 'de'],
     worldwide_fallback: false,
   },
-  navigation: { default_style: 'liberty', zoom: 17, pitch: 0, terrain: false, nav_fps: 8, sound_volume: 100, show_climb_card: true, radar_close_m: 30, auto_reroute: true, auto_reroute_cooldown_s: 10 },
+  navigation: { default_style: 'liberty', zoom: 17, nav_fps: 8, sound_volume: 100, show_climb_card: true, radar_close_m: 30, auto_reroute: true, auto_reroute_cooldown_s: 10 },
   display: {
     default_sport: 'cycling',
     show_grade_colors: true,
     show_elevation_chart: true,
     show_chain_widget: true,
+    show_performance_widget: true,
   },
   // Sur climb_detection, `min_grade` ouvre et ferme une montée en comparant la pente lissée
   // point par point. L'altitude étant quantifiée au mètre, une fenêtre de w mètres laisse un
@@ -203,7 +216,7 @@ export function persistDefaultMapStyle(styleId: MapStyleId, sport: Sport = curre
   const map = prefs.sports[sport].map
   if (map.default_style === styleId) return
   map.default_style = styleId
-  patchPreferences(prefs)
+  patchPreferencesQuietly(prefs)
 }
 
 // Style de carte de la navigation guidée : global, contrairement à celui du créateur.
@@ -212,20 +225,17 @@ export function persistNavigationStyle(styleId: MapStyleId): void {
   const prefs = userPreferences()
   if (prefs.navigation.default_style === styleId) return
   prefs.navigation.default_style = styleId
-  patchPreferences(prefs)
+  patchPreferencesQuietly(prefs)
 }
 
-// Reporte sur le profil le zoom, l'inclinaison et le relief 3D de la caméra réglés
-// en cours de navigation : ils deviennent les réglages par défaut du compte (même
-// contrat best-effort que persistDefaultMapStyle).
-export function persistNavCamera(zoom: number, pitch: number, terrain: boolean): void {
+// Reporte sur le profil le zoom de la caméra réglé en cours de navigation : il devient
+// le réglage par défaut du compte (même contrat best-effort que persistDefaultMapStyle).
+export function persistNavCamera(zoom: number): void {
   if (!isLoggedIn()) return
   const prefs = userPreferences()
-  if (prefs.navigation.zoom === zoom && prefs.navigation.pitch === pitch && prefs.navigation.terrain === terrain) return
+  if (prefs.navigation.zoom === zoom) return
   prefs.navigation.zoom = zoom
-  prefs.navigation.pitch = pitch
-  prefs.navigation.terrain = terrain
-  patchPreferences(prefs)
+  patchPreferencesQuietly(prefs)
 }
 
 // Miroir des overlays actifs sur le profil, pour le sport courant (même contrat que
@@ -234,14 +244,34 @@ export function persistOverlays(overlays: string[], sport: Sport = currentSport(
   if (!isLoggedIn()) return
   const prefs = userPreferences()
   prefs.sports[sport].map.overlays = [...overlays]
-  patchPreferences(prefs)
+  patchPreferencesQuietly(prefs)
 }
 
-// PATCH best-effort de l'objet complet de préférences. Silencieux pour les visiteurs
-// déconnectés (garde en amont) et tolérant aux erreurs réseau — ce n'est qu'un miroir
-// de réglages de vue.
-function patchPreferences(prefs: UserPreferences): void {
-  void fetch('/api/profile/preferences', {
+// Vitesse moyenne d'un sport, enregistrée sur le profil depuis la page des
+// itinéraires (elle pilote le temps de parcours estimé ET le TSS estimé, cf.
+// routeLoad.ts). Contrairement aux miroirs de réglages de vue ci-dessus, c'est ici
+// une saisie explicite de l'utilisateur : on renvoie la promesse pour que
+// l'appelant puisse signaler l'échec plutôt que de le perdre en silence.
+export function persistSportSpeed(sport: Sport, speed: number): Promise<void> {
+  if (!isLoggedIn()) return Promise.resolve()
+  const prefs = userPreferences()
+  const previous = prefs.sports[sport].speed
+  if (previous === speed) return Promise.resolve()
+
+  // Le cache doit porter la nouvelle valeur pour être envoyé — mais un échec doit
+  // la remettre comme avant, sinon la garde ci-dessus prendrait une nouvelle
+  // tentative pour un no-op et la vitesse ne serait jamais enregistrée.
+  prefs.sports[sport].speed = speed
+  return patchPreferences(prefs).catch((e) => {
+    prefs.sports[sport].speed = previous
+    throw e
+  })
+}
+
+// PATCH de l'objet complet de préférences — l'endpoint attend tout l'objet et
+// assainit le reste. Rejette sur échec : à l'appelant de décider quoi en faire.
+function patchPreferences(prefs: UserPreferences): Promise<void> {
+  return fetch('/api/profile/preferences', {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
@@ -250,7 +280,16 @@ function patchPreferences(prefs: UserPreferences): void {
     },
     credentials: 'same-origin',
     body: JSON.stringify({ preferences: prefs }),
-  }).catch(() => { /* ignore — miroir best-effort */ })
+  }).then((res) => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  })
+}
+
+// Variante des miroirs de réglages de vue : silencieuse pour les visiteurs
+// déconnectés (garde en amont) et tolérante aux erreurs réseau — perdre le miroir
+// d'un fond de carte ne mérite pas d'embêter l'utilisateur.
+function patchPreferencesQuietly(prefs: UserPreferences): void {
+  void patchPreferences(prefs).catch(() => { /* ignore — miroir best-effort */ })
 }
 
 function parse(): UserPreferences {
@@ -313,6 +352,15 @@ export function turnAnomalyDiameterForSport(sport: Sport): number {
   const v = sportPreferences(sport).turn_anomaly_m
   if (Number.isFinite(v) && v >= 30 && v <= 200) return v
   return DEFAULT_PREFERENCES.sports[sport]?.turn_anomaly_m ?? 100
+}
+
+// Écart (m) au-delà duquel un point d'étape accroché loin de l'endroit cliqué est signalé
+// dans le créateur, configuré pour une catégorie d'activité. Bornes alignées sur
+// ProfilesController::SNAP_WARN_RANGE.
+export function snapWarnDistanceForSport(sport: Sport): number {
+  const v = sportPreferences(sport).snap_warn_m
+  if (Number.isFinite(v) && v >= 10 && v <= 200) return v
+  return DEFAULT_PREFERENCES.sports[sport]?.snap_warn_m ?? 25
 }
 
 // Profil de routage BRouter par défaut pour un sport : préférence compte si elle

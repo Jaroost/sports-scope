@@ -53,11 +53,14 @@ export function buildTooltipTitleLines({ streams, idx, xAxis, activityStartIso }
   const timeStream = streams?.time?.data as number[] | undefined
   const dm = distStream?.[idx]
   const tSec = timeStream?.[idx]
+  // En mode « heure » (horloge murale), l'horaire absolu est la ligne principale ; sinon
+  // c'est distance ou temps écoulé selon l'axe choisi.
+  const clockMain = xAxis === 'clock' && activityStartIso != null && tSec != null
   if (xAxis === 'distance') {
     if (dm != null) lines.push({ main: true, text: `${(dm / 1000).toFixed(2)} km` })
     if (tSec != null) lines.push({ main: false, text: formatHMS(tSec) })
   } else {
-    if (tSec != null) lines.push({ main: true, text: formatHMS(tSec) })
+    if (tSec != null) lines.push({ main: !clockMain, text: formatHMS(tSec) })
     if (dm != null) lines.push({ main: false, text: `${(dm / 1000).toFixed(2)} km` })
   }
   // Absolute datetime = activity start (wall-clock, "Z" stripped) + elapsed
@@ -66,7 +69,7 @@ export function buildTooltipTitleLines({ streams, idx, xAxis, activityStartIso }
     const localBase = new Date(activityStartIso.replace(/Z$/, '')).getTime()
     const dt = new Date(localBase + tSec * 1000)
     lines.push({
-      main: false,
+      main: clockMain,
       text: dt.toLocaleString(undefined, {
         year: 'numeric', month: '2-digit', day: '2-digit',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -98,18 +101,18 @@ export function buildTooltipHtml({ streams, activity, xAxis, idx, visibleStreams
   const rendered = new Set<string>()
   const renderRow = (streamKey: string): string => {
     if (rendered.has(streamKey)) return ''
-    const def = defByKey(streamKey)
+    const def = defByKey(streamKey, activity)
     if (!def) return ''
     const rawArr = streams?.[streamKey]?.data as unknown[] | undefined
     const raw = rawArr?.[idx]
     if (raw == null) return ''
     const y = def.transform(raw as number)
     const digits = def.digits ?? 1
-    const value = Number.isNaN(y) ? '–' : y.toFixed(digits)
+    const value = Number.isNaN(y) ? '–' : (def.format ? def.format(y) : y.toFixed(digits))
     rendered.add(streamKey)
     return `<div class="chart-tooltip-row">
       <span class="chart-tooltip-swatch" style="background:${def.color}"></span>
-      <span class="chart-tooltip-name">${escapeHtml(t('strava.stream.' + streamKey))}</span>
+      <span class="chart-tooltip-name">${escapeHtml(t('strava.stream.' + (def.labelKey || streamKey)))}</span>
       <span class="chart-tooltip-value">${escapeHtml(value)} ${escapeHtml(def.unit || '')}</span>
     </div>`
   }

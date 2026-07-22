@@ -41,6 +41,10 @@ gem "i18n-js", "~> 4.2"
 # HTTP client for Keycloak broker / Strava API calls
 gem "faraday", "~> 2.9"
 
+# Génération de PNG en Ruby pur (aucune dépendance système) — vignette Open Graph
+# des itinéraires partagés, cf. RoutePreviewImage.
+gem "chunky_png", "~> 1.4"
+
 group :development, :test do
   # Load .env files in dev/test
   gem "dotenv-rails", "~> 3.1"

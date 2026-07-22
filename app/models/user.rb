@@ -17,6 +17,14 @@ class User < ApplicationRecord
       # (rando/VTT) enchaînent des virages serrés légitimes (lacets) : un diamètre plus
       # petit y limite les faux positifs.
       "turn_anomaly_m" => turn_anomaly_m,
+      # Avertissement « point accroché au loin » dans le créateur : écart (m) au-delà duquel
+      # l'écart entre le point cliqué et le tracé obtenu est signalé. BRouter projette chaque
+      # point sur la voie routable la plus proche ; un grand écart trahit l'absence de chemin
+      # à l'endroit voulu. Commun aux sports faute d'élément justifiant de les différencier :
+      # mesuré sur les itinéraires vélo existants, l'écart normal est de 1,2 m (médiane) à
+      # 7,2 m (p90), donc 25 m ne signale que les vrais trous — à ajuster si les sentiers
+      # (données OSM plus lacunaires) se révèlent trop bavards.
+      "snap_warn_m" => 25,
       "map" => {
         "default_style" => map_style,
         "overlays" => [],   # couches transparentes actives (SuisseMobile/swisstopo)
@@ -43,7 +51,11 @@ class User < ApplicationRecord
         "turn_hint_m" => 150,    # distance à laquelle l'indicateur visuel apparaît
         "turn_urgent_m" => 50,   # distance à laquelle la card passe en orange
         "turn_now_m" => 15,      # distance avant un virage à partir de laquelle la pastille bascule en confirmation verte (« maintenant »)
+        "turn_repeat_count" => 3, # nombre de lectures du son à la suite à chaque annonce d'un virage lointain (1–10)
+        "turn_repeat" => false,   # rejouer périodiquement le paquet d'annonces d'un virage lointain (sinon une seule fois)
         "turn_repeat_ms" => 2000, # intervalle entre deux répétitions du son de virage
+        "turn_repeat_urgent_count" => 5, # nombre de lectures du son à la suite à chaque annonce d'un virage proche (zone orange)
+        "turn_repeat_urgent" => false,   # rejouer périodiquement le paquet d'annonces d'un virage proche
         "turn_repeat_urgent_ms" => 1000, # intervalle entre deux répétitions quand le virage est proche (zone orange)
         "turn_green_hold_m" => 100, # distance parcourue après un virage pendant laquelle la confirmation verte reste affichée
         "turn_green_hold_s" => 10,  # durée max (s) d'affichage de la confirmation verte — elle disparaît au premier des deux : distance ou temps
@@ -93,8 +105,6 @@ class User < ApplicationRecord
     "navigation" => {
       "default_style" => "swissgrau",
       "zoom" => 17,      # zoom de la caméra de suivi
-      "pitch" => 0,        # inclinaison 3D (0 = vue du dessus, 70 = très rasante) — 0 par défaut pour économiser la batterie
-      "terrain" => false,  # relief 3D (terrain MNT) sous le tracé
       "nav_fps" => 8,      # fréquence de la boucle d'animation (0.5–60 fps)
       "sound_volume" => 100, # volume général des alertes sonores (virages + radar), en % du volume de base
       "show_climb_card" => true, # afficher le profil des cols (graphique d'altitude) pendant la navigation
@@ -117,6 +127,9 @@ class User < ApplicationRecord
       # Widget de cirage de chaîne sur la page d'accueil (n'apparaît de toute façon
       # que si Strava est lié — cf. pages/home.html.erb).
       "show_chain_widget" => true,
+      # Widget « plan du jour » (charge d'entraînement) sur l'accueil (n'apparaît que
+      # s'il y a des activités — cf. pages/home.html.erb).
+      "show_performance_widget" => true,
     },
     # Réglages dépendant de la pratique. Le sport courant est celui de l'itinéraire
     # ouvert (Route#activity), ou `display.default_sport` à défaut — cf. sportPreferences()
@@ -163,13 +176,26 @@ class User < ApplicationRecord
         }
       ),
     },
+    # Seuils physiologiques de l'athlète, pour l'analyse d'entraînement (page Performances).
+    # `ftp_manual` (watts) surcharge l'estimation automatique de la FTP quand elle est
+    # renseignée (ex. issue d'un test officiel) ; `ftp_manual_at` date cette saisie.
+    # `weight_kg` sert au calcul des W/kg. Tous nuls par défaut (aucune saisie).
+    "athlete" => {
+      "ftp_manual" => nil,
+      "ftp_manual_at" => nil,
+      "weight_kg" => nil,
+      # Seuil de fréquence cardiaque (LTHR, bpm) : ancre du hrTSS pour les sorties sans
+      # puissance. Estimé automatiquement (cf. TrainingLoad) mais surchargé si renseigné.
+      "lthr_manual" => nil,
+      "lthr_manual_at" => nil,
+    },
   }.freeze
 
   # Menus de navigation configurables, dans leur ordre par défaut. Source de vérité des
   # clés autorisées : la définition (chemin, icône, libellé) vit côté vue (NavbarHelper)
   # et côté éditeur (UserProfile.vue). Ajouter un menu : une clé ici + l'entrée
   # correspondante dans NavbarHelper::NAVBAR_ITEM_DEFS et UserProfile.vue.
-  NAVBAR_ITEM_KEYS = %w[dashboard routes new_route free_navigate chains].freeze
+  NAVBAR_ITEM_KEYS = %w[dashboard performance routes new_route free_navigate chains].freeze
 
   # Assainit/normalise un tableau d'items de navbar reçu (front ou base) : ne garde que
   # les clés connues, dédoublonnées, dans l'ordre reçu, en coercant `visible` et `home`
@@ -205,10 +231,13 @@ class User < ApplicationRecord
   # Itinéraires d'autrui ouverts via un lien partagé (cf. OpenedRoute).
   has_many :opened_routes, dependent: :destroy
   has_many :pois, dependent: :destroy
+  # Itinéraires accrochés à un jour (planification de la semaine, cf. PlannedRide).
+  has_many :planned_rides, dependent: :destroy
   has_many :imported_activities, dependent: :destroy
   has_many :strava_activities, dependent: :destroy
+  has_many :strava_backfill_runs, dependent: :destroy
+  has_many :strava_gears, dependent: :destroy
   has_many :bikes, dependent: :destroy
-  has_many :strava_activity_peak_powers, dependent: :destroy
 
   validates :keycloak_uid, presence: true, uniqueness: true
   validates :email, presence: true, uniqueness: true

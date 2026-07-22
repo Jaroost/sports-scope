@@ -6,6 +6,8 @@ import type { TurnHint, ClimbInfo } from '../navHelpers'
 
 const props = defineProps<{
   turnHint: TurnHint | null
+  followTurns?: TurnHint[]
+  arrived?: boolean
   hasFix: boolean
   offRoute: boolean
   climbInfo: ClimbInfo | null
@@ -22,8 +24,13 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
 <template>
   <!-- Battery saver: black screen — GPS and turn sounds still active -->
   <div class="nav-screen-off" @click="$emit('resume')">
+    <!-- Arrivée à destination : prioritaire sur l'indicateur de virage. -->
+    <div v-if="arrived && hasFix" class="nav-arrived-sleep shadow">
+      <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+      <span class="nav-arrived-sleep-text">{{ t('routes.arrived') }}</span>
+    </div>
     <div
-      v-if="turnHint && hasFix && !offRoute"
+      v-if="turnHint && hasFix && !offRoute && !arrived"
       class="nav-turn-sleep shadow"
       :class="{
         'nav-turn-sleep--urgent': isUrgent(),
@@ -41,6 +48,16 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
       <span v-if="turnHint.state !== 'now' && turnEta(turnHint.distM, speedKmh)" class="nav-turn-sleep-eta">
         <i class="fa-solid fa-clock me-2" aria-hidden="true"></i>{{ turnEta(turnHint.distM, speedKmh) }}
       </span>
+      <!-- Rafale : les virages qui suivent le principal de très près (gauche-droite serré). -->
+      <div v-if="followTurns && followTurns.length" class="nav-turn-sleep-follow">
+        <span class="nav-turn-sleep-follow-label">{{ t('routes.then') }}</span>
+        <span v-for="(f, i) in followTurns" :key="i" class="nav-turn-sleep-follow-item">
+          <i class="fa-solid" :class="turnIcon(f)" aria-hidden="true"></i>
+          <span v-if="f.kind === 'roundabout' && f.exitNumber" class="nav-turn-sleep-follow-exit">{{ f.exitNumber }}</span>
+          <span class="nav-turn-sleep-follow-dist">{{ formatDistancePrecise(f.distM) }}</span>
+          <span class="visually-hidden">{{ f.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
+        </span>
+      </div>
       <button
         v-if="turnHint.state === 'near'"
         class="nav-turn-sleep-mute"
@@ -100,6 +117,31 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
 /* Virage lointain (veille) : même gris-bleu discret qu'en navigation, pour distinguer
    d'un coup d'œil un virage encore loin (gris) d'un virage en approche (violet). */
 .nav-turn-sleep.nav-turn-sleep--far { background: rgba(51, 65, 85, 0.92); }
+/* Arrivée (veille) : carte verte centrée, drapeau à damier + « vous êtes arrivé ». */
+.nav-arrived-sleep {
+  display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
+  background: #16a34a; color: #fff;
+  padding: 3rem 4rem; border-radius: 1.5rem;
+  width: calc(100% - 1.5rem); box-sizing: border-box; text-align: center;
+}
+.nav-arrived-sleep i { font-size: 5.5rem; line-height: 1; }
+.nav-arrived-sleep-text { font-size: 2.8rem; font-weight: 700; line-height: 1.1; }
+/* Rafale (veille) : virages secondaires enchaînés, en petit sous le virage principal. */
+.nav-turn-sleep-follow {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  padding-top: 1rem; margin-top: 0.25rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.25);
+  width: 100%;
+}
+.nav-turn-sleep-follow-label { font-size: 1.3rem; font-weight: 600; opacity: 0.75; text-transform: uppercase; letter-spacing: 0.04em; }
+.nav-turn-sleep-follow-item { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 2.2rem; }
+.nav-turn-sleep-follow-dist { font-size: 1.9rem; font-weight: 700; }
+.nav-turn-sleep-follow-exit {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2rem; height: 2rem; border-radius: 50%;
+  background: rgba(255,255,255,0.25); font-size: 1.3rem; font-weight: 700;
+}
 /* Pendant un col en veille, la carte du col occupe le bas : on remonte l'indicateur
    de virage en haut pour qu'il ne soit pas masqué. */
 .nav-turn-sleep--climb { position: absolute; top: 1.5rem; left: 50%; transform: translateX(-50%); }

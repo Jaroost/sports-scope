@@ -4,6 +4,7 @@ module NavbarHelper
   # User::NAVBAR_ITEM_KEYS (et à la carte d'icônes de UserProfile.vue).
   NAVBAR_ITEM_DEFS = {
     "dashboard" => { icon: "fa-gauge-high", label: "nav.dashboard", path: :dashboard_path },
+    "performance" => { icon: "fa-trophy", label: "nav.performance", path: :performance_path },
     "routes" => { icon: "fa-route", label: "nav.routes", path: :routes_index_path },
     "new_route" => { icon: "fa-map-location-dot", label: "nav.new_route", path: :new_route_path },
     "free_navigate" => { icon: "fa-location-crosshairs", label: "nav.free_navigate", path: :free_navigate_path },

@@ -1,5 +1,6 @@
 import { createApp, type Component } from 'vue'
 import HelloStrava from './components/HelloStrava.vue'
+import StravaBackfill from './components/StravaBackfill.vue'
 import ActivityDetail from './components/ActivityDetail.vue'
 import RoutesList from './components/RoutesList.vue'
 import RouteBuilder from './components/RouteBuilder.vue'
@@ -10,9 +11,14 @@ import ProfileDialog from './components/ProfileDialog.vue'
 import NewRouteButton from './components/NewRouteButton.vue'
 import PwaInstall from './components/PwaInstall.vue'
 import ChainWax from './components/ChainWax.vue'
+import PerformanceAnalysis from './components/PerformanceAnalysis.vue'
+import TodayPlanWidget from './components/TodayPlanWidget.vue'
+import RefreshAll from './components/RefreshAll.vue'
+import SharedRoutePreviewMap from './components/SharedRoutePreviewMap.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
+  StravaBackfill,
   ActivityDetail,
   RoutesList,
   RouteBuilder,
@@ -23,6 +29,10 @@ const registry: Record<string, Component> = {
   NewRouteButton,
   PwaInstall,
   ChainWax,
+  PerformanceAnalysis,
+  TodayPlanWidget,
+  RefreshAll,
+  SharedRoutePreviewMap,
 }
 
 export function mountVueIslands(): void {

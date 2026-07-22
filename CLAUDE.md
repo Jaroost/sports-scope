@@ -89,9 +89,100 @@ Les pages Rails sont sous `scope "(:locale)", locale: /en|fr/` — le préfixe d
 | `RoutesList.vue` | Liste des itinéraires sauvegardés |
 | `ImportFitActivity.vue` | Import de fichiers .fit |
 
+## BRouter auto-hébergé
+
+Le routage n'utilise plus l'instance publique brouter.de (ni SLA ni quota). Deux services
+dans les deux docker-compose :
+
+| Service | Rôle |
+|---|---|
+| `brouter` | Le moteur (`RouteServer`), image buildée depuis les sources (`deploy/brouter/Dockerfile`, version épinglée `BROUTER_VERSION`) |
+| `brouter-sync` | Télécharge et rafraîchit les données dans les volumes `brouter_segments` (tuiles `.rd5`) et `brouter_profiles` (profils `.brf` + `lookups.dat`) |
+
+Il est servi sous le domaine de l'app via Traefik (`PathPrefix(/brouter)`, `Method(GET)`),
+donc en **même origine** : pas de CORS, pas de certificat en plus. Côté front,
+`BROUTER_URL` vaut `/brouter` par défaut (`app/javascript/brouter.ts`) — en prod les
+`import.meta.env.VITE_*` sont figés au `assets:precompile`, d'où un défaut fonctionnel
+plutôt qu'un build-arg.
+
+- **Premier démarrage** : `brouter-sync` télécharge ~3,4 Go (Europe entière, 110 tuiles).
+  Suivre l'avancement avec `docker compose logs -f brouter-sync`. `brouter` attend que
+  `brouter-sync` soit *healthy*, c'est-à-dire que le marqueur `/segments4/.sync-complete`
+  existe (au moins une tuile + `lookups.dat`) — le moteur ne démarre donc jamais sans
+  données. Le marqueur vit dans le volume : **seul le tout premier boot attend**, les
+  redémarrages suivants sont immédiats. Pour démarrer le moteur sans attendre (données
+  partielles déjà présentes) : `docker compose up -d --no-deps brouter`.
+- **Forcer une resynchro** : `docker compose run --rm brouter-sync bash /sync.sh`
+- **Changer la couverture** : `BROUTER_BBOX` dans `.env` (`lon_min,lat_min,lon_max,lat_max`,
+  grille de 5°). Les tuiles hors bbox déjà téléchargées ne sont pas supprimées.
+- **Ajouter / figer un profil** : déposer le `.brf` dans `deploy/brouter/profiles/` (voir
+  le README du dossier), puis le déclarer dans `PROFILES_BY_SPORT`
+  (`app/javascript/brouter.ts`) et `ALLOWED_PROFILES`
+  (`app/controllers/routes_controller.rb`).
+- **Monter de version** : bumper `BROUTER_VERSION` dans `bin/release` et le tag d'image
+  dans `deploy/docker-compose.prod.yml` + `docker-compose.yml`. `bin/release` ne rebuild
+  l'image BRouter que si le tag est absent du registry (`BROUTER_FORCE=1` pour forcer).
+
+La synchro écrit en `.part` puis renomme : aucun redémarrage de `brouter` n'est nécessaire
+après une mise à jour des données.
+
+## POI auto-hébergés
+
+Les points d'intérêt ne viennent plus d'`overpass-api.de` (ni SLA ni quota). Le service
+`poi-sync` (`deploy/osm-pois/`) importe périodiquement des extraits OpenStreetMap
+Geofabrik dans une **base PostgreSQL dédiée** (`osm_pois_development` / `osm_pois_production`),
+lue par `OsmPoi` via la connexion `osm` de `config/database.yml`.
+
+Pipeline (`deploy/osm-pois/sync.sh`) : téléchargement conditionnel des `.osm.pbf` →
+`osmium tags-filter` (ne garde que les tags utiles) → `osmium merge` → `osmium export`
+en GeoJSON → `extract.py` (classification + CSV) → `COPY` dans une table neuve →
+bascule atomique. L'app ne voit jamais de table partielle.
+
+- **Premier démarrage** : ~2 Go d'extraits (Suisse + voisinage). Suivre avec
+  `docker compose logs -f poi-sync`. Comme pour BRouter, `rails` attend que `poi-sync`
+  soit *healthy* (marqueur `/data/.sync-complete`) — bloquant seulement au tout premier
+  boot, le marqueur vivant dans le volume. Si le catalogue venait à manquer malgré tout,
+  `/api/geocode/places` répond `places_unavailable` (le front affiche son bouton
+  réessayer) et les jobs de localités retentent.
+- **Forcer une resynchro** : `docker compose exec poi-sync /sync.sh`
+- **Changer la couverture** : `OSM_POI_REGIONS` dans `.env` (URLs `.osm.pbf` Geofabrik
+  séparées par des espaces). Les extraits retirés de la liste restent sur le volume mais
+  ne sont plus chargés.
+- **Ajouter une catégorie de POI** : le filtre dans `FILTERS` (`sync.sh`) + la
+  classification dans `classify()` (`extract.py`) + `CATEGORIES_BY_TYPE` et
+  `DEFAULT_POI_NAMES` (`app/controllers/geocodes_controller.rb`) + l'entrée dans
+  `POI_CATEGORIES` (`app/javascript/poiCategories.ts`) + le booléen de préférence
+  (`User::DEFAULT_PREFERENCES`, `ProfilesController`, `userPreferences.ts`,
+  `UserProfile.vue`) + les libellés i18n. Une resynchro est nécessaire pour peupler la
+  nouvelle catégorie.
+
+`bin/release` rebuild et pousse l'image `sports-scope-poi-sync` à chaque release (elle
+embarque `sync.sh` / `extract.py`, donc du code du repo).
+
+### Recalcul des lieux (recherche par lieu)
+
+Les lieux traversés (`routes.localities`, `strava_activities.localities`) sont extraits
+automatiquement à chaque changement de tracé. Pour les retraiter en masse —
+`LocalitiesBackfill` + `lib/tasks/localities.rake` :
+
+```bash
+bin/rails localities:pending     # combien reste-t-il à traiter
+bin/rails localities:backfill    # extrait ce qui manque (idempotent)
+bin/rails localities:recompute   # réécrit TOUT (après un changement de couverture OSM
+                                 # ou de LocalitiesExtractor::THRESHOLD_M)
+```
+
+Options : `USER_ID=<id>`, `LIMIT=<n>` (par type), `SCOPE=routes|activities`.
+
+L'extraction est faite en ligne, pas via les jobs : chaque enregistrement n'est qu'une
+requête SQL locale (~5 ms). Ordre de grandeur mesuré : 730 activités en 4 s.
+
 ## Base de données
 
 PostgreSQL. Credentials par défaut en dev : `postgres/postgres` sur `localhost:5432`, base `sports_scope_development`.
+
+`config/database.yml` déclare deux connexions par environnement : `primary` (l'app) et
+`osm` (les POI importés, `database_tasks: false` — hors migrations et hors `db/schema.rb`).
 
 ## Linting / CI
 

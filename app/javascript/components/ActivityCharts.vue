@@ -1,19 +1,27 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { Tooltip } from 'bootstrap'
 import { t } from '../i18n'
 import {
   chartIcons,
   chartDefs,
   defByKey,
+  paceMinPerKm,
   STREAM_CHIP_ORDER,
   fmt,
+  formatDuration,
   formatHMS,
   formatKm,
-  downsample,
+  downsampleIndices,
+  detectPauses,
+  detectRecordingGaps,
   computeElevGain,
   GRADE_BUCKETS,
   bucketGrade,
   gradeForIndex,
+  streamIsMeaningful,
+  normalizedPower,
+  efficiencyFactor,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -27,6 +35,8 @@ const props = defineProps({
   // overlay + flags, and emit `select-segment` / `clear-selection` when the
   // user drags on a chart.
   selection: { type: Object, default: null },
+  // Tours de l'appareil (LapRow[]) — dessinés en traits verticaux numérotés.
+  laps: { type: Array, default: () => [] },
   // v-model:x-axis — propagated up so MapCard can pick the right unit in the
   // route-hover tooltip.
   xAxis: { type: String, default: 'distance' },
@@ -116,7 +126,7 @@ function syncLayoutWithStreams() {
   if (!props.streams) return
   const present = new Set(
     chartDefs
-      .filter((d) => Array.isArray(props.streams[d.key]?.data) && props.streams[d.key].data.length > 0)
+      .filter((d) => streamIsMeaningful(d.key, props.streams[d.key], props.activity))
       .map((d) => d.key),
   )
   const cleaned = chartLayout.value
@@ -132,24 +142,61 @@ function syncLayoutWithStreams() {
 // ─── X-axis unit helpers ─────────────────────────────────────────────────
 function timeFactor() { return 60 } // seconds per X-axis unit (always minutes)
 
+// Axe réellement tracé. `props.xAxis` est un souhait (les boutons radio) : sans le flux
+// correspondant — une activité sans GPS n'a pas de `distance` — on retombe sur le temps.
+// Tout ce qui convertit ou indexe DOIT passer par ici : mélanger les deux (échelle en km,
+// index cherchés dans `distance` absent) casse silencieusement la sélection au drag.
+const xKey = computed(() => {
+  const wanted = props.xAxis
+  // Le mode « heure » (horloge murale) n'a pas de flux propre : il réutilise `time`
+  // (secondes écoulées) comme domaine numérique de l'axe — seul l'affichage des ticks
+  // change. On le rabat donc sur `time` pour toute l'indexation/sélection.
+  if (wanted === 'clock') return props.streams?.time?.data?.length > 0 ? 'time' : wanted
+  if (props.streams?.[wanted]?.data?.length > 0) return wanted
+  return props.streams?.time?.data?.length > 0 ? 'time' : wanted
+})
+
+// Base horodatée (ms) du départ, « Z » retiré — même convention que activityTooltip.ts
+// et ActivityMapCard.vue : Strava expose start_date_local en heure locale mais suffixé
+// d'un « Z » trompeur. Retourne null si l'activité n'a pas de départ horodaté.
+function clockBaseMs() {
+  const iso = props.activity?.start_date_local
+  if (!iso) return null
+  const ms = new Date(String(iso).replace(/Z$/, '')).getTime()
+  return Number.isNaN(ms) ? null : ms
+}
+
+// Mode « heure » effectivement rendu : souhaité, flux `time` présent, et départ horodaté.
+const isClock = computed(() =>
+  props.xAxis === 'clock'
+  && props.streams?.time?.data?.length > 0
+  && clockBaseMs() != null,
+)
+
 function chartXFromRaw(rawX) {
-  if (props.xAxis === 'distance') return rawX / 1000
+  if (xKey.value === 'distance') return rawX / 1000
   return rawX / timeFactor()
 }
 
 function chartXToRaw(x) {
-  if (props.xAxis === 'distance') return x * 1000
+  if (xKey.value === 'distance') return x * 1000
   return x * timeFactor()
 }
 
 function xAxisLabel() {
-  if (props.xAxis === 'distance') return t('strava.distance_km')
+  if (isClock.value) return t('strava.time_label_clock')
+  if (xKey.value === 'distance') return t('strava.distance_km')
   return t('strava.time_label_min')
+}
+
+// Formate une base ms (horloge murale) en HH:MM pour les ticks du mode « heure ».
+function formatClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
 // Binary search the x stream (raw units) for the closest index to `target`.
 function xValueToIndex(target) {
-  const stream = props.streams?.[props.xAxis]?.data
+  const stream = props.streams?.[xKey.value]?.data
   if (!stream || stream.length === 0) return 0
   let lo = 0
   let hi = stream.length - 1
@@ -201,10 +248,20 @@ function rangeDistance() {
   return Math.max(0, d1 - d0)
 }
 
+// Une activité sans GPS (squash, tapis, muscu…) peut malgré tout porter un stream
+// `altitude` barométrique : il ne mesure alors que la dérive de pression, pas un
+// déplacement. D+, D- et VAM en tireraient des valeurs inventées — on les masque.
+const hasGps = computed(() => {
+  const ll = props.streams?.latlng?.data
+  if (Array.isArray(ll) && ll.length > 0) return true
+  const dist = props.streams?.distance?.data
+  return Array.isArray(dist) && dist.length > 0 && dist[dist.length - 1] > 0
+})
+
 const rangeElevation = computed(() => {
   const b = rangeBounds()
   const alt = props.streams?.altitude?.data
-  if (!b || !alt || alt.length < 2) return null
+  if (!hasGps.value || !b || !alt || alt.length < 2) return null
   const start = Math.max(b.startIdx, 0)
   const end = Math.min(b.endIdx, alt.length - 1)
 
@@ -229,12 +286,32 @@ function rangeVam() {
   const b = rangeBounds()
   const dur = rangeDuration()
   const alt = props.streams?.altitude?.data
-  if (!b || !dur || dur <= 0 || !Array.isArray(alt) || alt.length < 2) return null
+  if (!hasGps.value || !b || !dur || dur <= 0 || !Array.isArray(alt) || alt.length < 2) return null
   const a0 = alt[Math.min(b.startIdx, alt.length - 1)]
   const a1 = alt[Math.min(b.endIdx, alt.length - 1)]
   if (typeof a0 !== 'number' || typeof a1 !== 'number') return null
   return ((a1 - a0) / dur) * 3600
 }
+
+// Puissance normalisée du segment sélectionné (ou de l'activité entière sans
+// sélection). Complète la puissance MOYENNE déjà donnée par le chip watts : sur
+// un col ou un intervalle, la NP reflète mieux le coût réel de l'effort.
+function rangeNp() {
+  const watts = props.streams?.watts?.data
+  if (!Array.isArray(watts) || watts.length < 30) return null
+  const b = rangeBounds()
+  const start = b ? b.startIdx : 0
+  const end = b ? b.endIdx : watts.length - 1
+  return normalizedPower(watts, start, end)
+}
+
+// Efficience du segment sélectionné (ou de l'activité entière) : rendement
+// production ÷ FC. Même mesure que la carte « Efficience » des stats, mais suit la
+// sélection du graphique. Calculée une fois par changement de sélection (computed).
+const rangeEf = computed(() => {
+  const b = rangeBounds()
+  return efficiencyFactor(props.streams, b ? b.startIdx : 0, b ? b.endIdx : undefined)
+})
 
 function rangeGrade() {
   // Net rise / horizontal distance — matches the col markers on the map.
@@ -250,6 +327,23 @@ function rangeGrade() {
   const a0 = alt[Math.min(b.startIdx, alt.length - 1)]
   const a1 = alt[Math.min(b.endIdx, alt.length - 1)]
   return ((a1 - a0) / (d1 - d0)) * 100
+}
+
+// Résout la définition de flux pour l'activité courante (ex. vitesse → allure sur une course).
+function vdef(key) {
+  return defByKey(key, props.activity)
+}
+
+// Libellé traduit du flux, avec le nom propre au sport si la def en fournit un (allure).
+function streamLabel(key) {
+  const d = vdef(key)
+  return t('strava.stream.' + (d?.labelKey || key))
+}
+
+// Formate une stat selon la définition : « m:ss » pour l'allure, sinon N décimales + unité.
+function fmtStat(def, value) {
+  if (!def) return '–'
+  return def.format ? def.format(value) : fmt(value, def.digits)
 }
 
 function chartStats(def) {
@@ -276,6 +370,19 @@ function chartStats(def) {
   if (def.key === 'grade_smooth') {
     const rg = rangeGrade()
     if (rg != null) mean = rg
+  }
+  // Allure : la moyenne des allures instantanées (1/v) est biaisée vers le haut
+  // (Jensen) et n'est pas l'allure vécue. On la recalcule comme l'allure de la
+  // vitesse moyenne — soit distance/temps sur un flux échantillonné à pas de temps
+  // constant. min/max restent justes (transform monotone : mn = plus rapide).
+  if (def.isPace) {
+    let sSum = 0
+    let sCnt = 0
+    for (let i = s; i <= e && i < data.length; i++) {
+      const sp = data[i]
+      if (typeof sp === 'number' && Number.isFinite(sp) && sp >= 0.5) { sSum += sp; sCnt++ }
+    }
+    if (sCnt > 0) mean = paceMinPerKm(sSum / sCnt)
   }
   return { count, mean, min: mn, max: mx }
 }
@@ -364,6 +471,9 @@ const gradeFillPlugin = {
       for (let i = 1; i < data.length; i++) {
         const c = colors[i - 1]
         if (!c) continue
+        // Points de coupure des pauses (y null) : pas de quadrilatère à remplir en
+        // travers du trou — leurs pixels seraient NaN.
+        if (data[i - 1].y == null || data[i].y == null) continue
         const x0 = xScale.getPixelForValue(data[i - 1].x)
         const x1 = xScale.getPixelForValue(data[i].x)
         if (x1 < chartArea.left || x0 > chartArea.right) continue
@@ -380,6 +490,183 @@ const gradeFillPlugin = {
       }
       ctx.restore()
     })
+  },
+}
+
+// ─── Pauses ───────────────────────────────────────────────────────────────
+// Deux traitements, pour deux notions distinctes (cf. detectPauses / detectRecordingGaps) :
+//
+//   • Le TROU d'enregistrement casse la courbe. Sans ça Chart.js relie ses deux bords par
+//     une droite interpolée, et un arrêt de dix minutes ressemble à un plateau de vraies
+//     mesures. La coupure se fait en insérant un point `y: null` (spanGaps est faux par
+//     défaut), placé PAR INDEX : à l'arrêt la distance ne bouge pas, donc une dizaine
+//     d'échantillons partagent le même x et un repérage par valeur d'axe dérape.
+//   • La PAUSE peint la bande hachurée. Elle englobe le trou et déborde sur les
+//     échantillons immobiles alentour, qui eux existent — la couper serait creuser un vide
+//     là où la donnée est présente. La coupure seule dirait d'ailleurs « données
+//     manquantes » là où il faut lire « tu t'es arrêté ici ».
+const PAUSE_LABEL_MIN_PX = 46
+const PAUSE_HATCH_STEP_PX = 8
+// Sur l'axe distance, une pause n'avance par définition d'aucun mètre : sa bande serait
+// large de zéro pixel, donc invisible. On lui garantit une largeur minimale — à cette
+// taille c'est un repère plutôt qu'une étendue, mais un arrêt de trois minutes mérite mieux
+// que rien. Sur l'axe temps les bandes sont bien plus larges : ce plancher n'y joue jamais.
+const PAUSE_MIN_BAND_PX = 3
+
+function pauseSpanPixels(chart, span) {
+  const xScale = chart.scales.x
+  const area = chart.chartArea
+  const p0 = xScale.getPixelForValue(span.x0)
+  const p1 = xScale.getPixelForValue(span.x1)
+  let lo = Math.min(p0, p1)
+  let hi = Math.max(p0, p1)
+  if (hi - lo < PAUSE_MIN_BAND_PX) {
+    const mid = (lo + hi) / 2
+    lo = mid - PAUSE_MIN_BAND_PX / 2
+    hi = mid + PAUSE_MIN_BAND_PX / 2
+  }
+  return { lo: Math.max(area.left, lo), hi: Math.min(area.right, hi) }
+}
+
+const pauseBandPlugin = {
+  id: 'activityPauseBands',
+  // Sous les courbes : la bande est un décor de fond, pas un calque par-dessus la donnée.
+  beforeDatasetsDraw(chart) {
+    const spans = chart.$pauseSpans
+    if (!spans || spans.length === 0 || !chart.scales.x) return
+    const { ctx, chartArea } = chart
+    const h = chartArea.bottom - chartArea.top
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, h)
+    ctx.clip()
+    for (const span of spans) {
+      const { lo, hi } = pauseSpanPixels(chart, span)
+      if (hi <= lo) continue
+      ctx.fillStyle = 'rgba(108, 117, 125, 0.10)'
+      ctx.fillRect(lo, chartArea.top, hi - lo, h)
+      // Hachures : distinguent la pause du bandeau bleu uni de la sélection.
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(lo, chartArea.top, hi - lo, h)
+      ctx.clip()
+      ctx.strokeStyle = 'rgba(108, 117, 125, 0.22)'
+      ctx.lineWidth = 1
+      for (let x = lo - h; x < hi; x += PAUSE_HATCH_STEP_PX) {
+        ctx.beginPath()
+        ctx.moveTo(x, chartArea.bottom)
+        ctx.lineTo(x + h, chartArea.top)
+        ctx.stroke()
+      }
+      ctx.restore()
+      ctx.strokeStyle = 'rgba(108, 117, 125, 0.55)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+      ctx.beginPath()
+      ctx.moveTo(lo + 0.5, chartArea.top)
+      ctx.lineTo(lo + 0.5, chartArea.bottom)
+      ctx.moveTo(hi - 0.5, chartArea.top)
+      ctx.lineTo(hi - 0.5, chartArea.bottom)
+      ctx.stroke()
+      ctx.setLineDash([])
+    }
+    ctx.restore()
+  },
+  // Au-dessus des courbes : l'étiquette doit rester lisible quel que soit le tracé.
+  afterDatasetsDraw(chart) {
+    const spans = chart.$pauseSpans
+    if (!spans || spans.length === 0 || !chart.scales.x) return
+    const { ctx, chartArea } = chart
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+    ctx.clip()
+    ctx.font = '600 10px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    for (const span of spans) {
+      const { lo, hi } = pauseSpanPixels(chart, span)
+      const width = hi - lo
+      if (width < PAUSE_LABEL_MIN_PX) continue
+      const label = formatDuration(Math.round(span.durationSec))
+      const textW = ctx.measureText(label).width
+      const barW = 2
+      const barH = 8
+      const iconW = barW * 2 + 2
+      const padX = 5
+      const boxW = padX * 2 + iconW + 4 + textW
+      const boxH = 15
+      if (boxW > width - 4) continue
+      const boxX = (lo + hi) / 2 - boxW / 2
+      const boxY = chartArea.top + 3
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+      ctx.strokeStyle = 'rgba(108, 117, 125, 0.55)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.roundRect(boxX, boxY, boxW, boxH, 3)
+      ctx.fill()
+      ctx.stroke()
+      // Glyphe « pause » dessiné à la main : les icônes FontAwesome sont une police
+      // web, dont le chargement n'est pas garanti au moment où le canvas se peint.
+      ctx.fillStyle = '#495057'
+      const iconX = boxX + padX
+      const iconY = boxY + boxH / 2 - barH / 2
+      ctx.fillRect(iconX, iconY, barW, barH)
+      ctx.fillRect(iconX + barW + 2, iconY, barW, barH)
+      ctx.fillText(label, iconX + iconW + 4, boxY + boxH / 2 + 0.5)
+    }
+    ctx.restore()
+  },
+}
+
+// Repères de tours : un trait vertical à chaque coupure enregistrée par l'appareil,
+// numéroté en pied de graphique. Purement décoratif — la sélection d'un tour passe
+// par la table de l'onglet « Analyse ». Le numéro n'est peint que s'il reste de la
+// place depuis le repère précédent, sinon une série de laps courts empile les
+// étiquettes en bouillie.
+const LAP_LABEL_MIN_GAP_PX = 26
+
+const lapMarkPlugin = {
+  id: 'activityLapMarks',
+  afterDatasetsDraw(chart) {
+    const marks = chart.$lapMarks
+    if (!marks || marks.length === 0 || !chart.scales.x) return
+    const { ctx, chartArea, scales } = chart
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+    ctx.clip()
+    ctx.font = '600 9px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    let lastLabelX = -Infinity
+    for (const mark of marks) {
+      const x = scales.x.getPixelForValue(mark.x)
+      if (!Number.isFinite(x) || x < chartArea.left || x > chartArea.right) continue
+      ctx.strokeStyle = 'rgba(13, 110, 253, 0.45)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([4, 3])
+      ctx.beginPath()
+      ctx.moveTo(x + 0.5, chartArea.top)
+      ctx.lineTo(x + 0.5, chartArea.bottom)
+      ctx.stroke()
+      ctx.setLineDash([])
+      if (x - lastLabelX < LAP_LABEL_MIN_GAP_PX) continue
+      lastLabelX = x
+      const label = String(mark.index)
+      const boxW = ctx.measureText(label).width + 8
+      const boxH = 13
+      const boxY = chartArea.bottom - boxH - 2
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+      ctx.strokeStyle = 'rgba(13, 110, 253, 0.45)'
+      ctx.beginPath()
+      ctx.roundRect(x - boxW / 2, boxY, boxW, boxH, 3)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = '#0d6efd'
+      ctx.fillText(label, x, boxY + boxH / 2 + 0.5)
+    }
+    ctx.restore()
   },
 }
 
@@ -492,15 +779,41 @@ async function renderCharts() {
   if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
-  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin)
+  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, pauseBandPlugin, lapMarkPlugin)
 
   destroyCharts()
 
-  const xStream = props.streams[props.xAxis]?.data || props.streams.time?.data || []
+  const xStream = props.streams[xKey.value]?.data || []
   const maxPoints = 600
   const xRaw = xStream
   xMinAll = xRaw.length > 0 ? chartXFromRaw(xRaw[0]) : 0
   xMaxAll = xRaw.length > 0 ? chartXFromRaw(xRaw[xRaw.length - 1]) : 0
+
+  // Pauses et trous sont détectés sur `time`, mais projetés sur l'axe réellement tracé :
+  // les flux sont indexés par échantillon, donc `xRaw[idx]` donne la position quel que soit
+  // `xKey`. Sur l'axe distance une pause s'écrase sur un seul X (la distance n'avance pas) ;
+  // PAUSE_MIN_BAND_PX lui garde alors une largeur minimale à l'écran.
+  const gapSegments = detectRecordingGaps(props.streams.time?.data)
+    .filter((g) => xRaw[g.startIdx] != null && xRaw[g.endIdx] != null)
+  const pauseSpans = detectPauses(props.streams.time?.data, props.streams.moving?.data)
+    .filter((p) => xRaw[p.startIdx] != null && xRaw[p.endIdx] != null)
+    .map((p) => ({
+      x0: chartXFromRaw(xRaw[p.startIdx]),
+      x1: chartXFromRaw(xRaw[p.endIdx]),
+      durationSec: p.durationSec,
+    }))
+  // Indice d'échantillon → x du `null` de coupure à insérer juste après lui. Le repérage
+  // par index (et non par valeur d'axe) est ce qui garde la coupure collée au trou réel.
+  // Coupures de tours, projetées sur l'axe tracé comme les pauses. On marque le
+  // *début* de chaque tour sauf le premier (qui est le début de l'activité).
+  const lapMarks = (props.laps as { index: number; startIdx: number }[])
+    .filter((l, i) => i > 0 && xRaw[l.startIdx] != null)
+    .map((l) => ({ index: l.index, x: chartXFromRaw(xRaw[l.startIdx]) }))
+  const gapNullAfter = new Map(gapSegments.map((g) => [
+    g.startIdx,
+    (chartXFromRaw(xRaw[g.startIdx]) + chartXFromRaw(xRaw[g.endIdx])) / 2,
+  ]))
+  const gapEdges = gapSegments.flatMap((g) => [g.startIdx, g.endIdx])
 
   groups.forEach((group) => {
     if (group.collapsed) return
@@ -509,39 +822,45 @@ async function renderCharts() {
 
     const occurrences = new Map()
     const datasets = group.streams.map((streamKey, idx) => {
-      const def = defByKey(streamKey)
+      const def = vdef(streamKey)
       if (!def) return null
       const count = (occurrences.get(streamKey) || 0) + 1
       occurrences.set(streamKey, count)
       const totalForKey = group.streams.filter((s) => s === streamKey).length
       const label = totalForKey > 1
-        ? `${t('strava.stream.' + def.key)} #${count} (${def.unit})`
-        : `${t('strava.stream.' + def.key)} (${def.unit})`
+        ? `${t('strava.stream.' + (def.labelKey || def.key))} #${count} (${def.unit})`
+        : `${t('strava.stream.' + (def.labelKey || def.key))} (${def.unit})`
       const yRaw = props.streams[streamKey].data
       const len = Math.min(xRaw.length, yRaw.length)
-      const pairs = []
-      for (let i = 0; i < len; i++) {
-        pairs.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(yRaw[i]) })
-      }
-      const data = downsample(pairs, maxPoints)
 
-      // Coloration par pente du profil d'altitude (« couleur des tracés »). On calcule une
-      // couleur par échantillon puis on sous-échantillonne AVEC LE MÊME `maxPoints` que les
-      // points : les deux tableaux partent de la même longueur, donc `downsample` garde des
-      // indices alignés. `$gradeColors` est lu par gradeFillPlugin (remplissage) et par
-      // `segment.borderColor` (couleur de la ligne).
+      // Coloration par pente du profil d'altitude (« couleur des tracés »), une couleur par
+      // échantillon. Lue par gradeFillPlugin (remplissage) et par `segment.borderColor`
+      // (couleur de la ligne), toutes deux indexées sur les points du dataset.
       const gradeAltitude = props.showGrade && streamKey === 'altitude'
-      let gradeColors = null
+      let rawColors = null
       if (gradeAltitude) {
         const gradeData = props.streams.grade_smooth?.data
         const altData = props.streams.altitude?.data
         const distData = props.streams.distance?.data
-        const colors = new Array(len)
+        rawColors = new Array(len)
         for (let i = 0; i < len; i++) {
           const g = gradeForIndex(Math.min(i, len - 1), gradeData, altData, distData)
-          colors[i] = GRADE_BUCKETS[bucketGrade(g)].color
+          rawColors[i] = GRADE_BUCKETS[bucketGrade(g)].color
         }
-        gradeColors = downsample(colors, maxPoints)
+      }
+
+      // Points et couleurs sont construits dans la MÊME passe sur les indices retenus, et
+      // reçoivent le `null` de coupure au même rang : c'est ce qui les garde alignés.
+      const data = []
+      const gradeColors = rawColors ? [] : null
+      for (const i of downsampleIndices(len, maxPoints, gapEdges)) {
+        data.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(yRaw[i]) })
+        gradeColors?.push(rawColors[i])
+        const nullX = gapNullAfter.get(i)
+        if (nullX !== undefined) {
+          data.push({ x: nullX, y: null })
+          gradeColors?.push(null)
+        }
       }
 
       return {
@@ -565,7 +884,7 @@ async function renderCharts() {
 
     const yScales = {}
     group.streams.forEach((streamKey, idx) => {
-      const def = defByKey(streamKey)
+      const def = vdef(streamKey)
       if (!def) return
       yScales[`y-${idx}`] = {
         type: 'linear',
@@ -573,7 +892,12 @@ async function renderCharts() {
         // Titre d'axe retiré pour gagner de la place — l'unité est rappelée dans la
         // légende du panneau. Les graduations restent colorées pour repérer l'axe.
         title: { display: false },
-        ticks: { maxTicksLimit: 6, color: def.color },
+        ticks: {
+          maxTicksLimit: 6,
+          color: def.color,
+          // L'allure est un temps décimal (min) : on affiche les graduations en « m:ss ».
+          ...(def.format ? { callback: (v) => def.format(v) } : {}),
+        },
         grid: { drawOnChartArea: idx === 0 },
       }
     })
@@ -604,13 +928,19 @@ async function renderCharts() {
             type: 'linear',
             // Titre d'axe retiré (rappelé dans la légende du panneau, cf. axis-x-hint).
             title: { display: false },
-            ticks: props.xAxis === 'time'
+            ticks: isClock.value
               ? {
                   stepSize: 10,
                   maxTicksLimit: 30,
-                  callback: ((tf) => (val: number) => formatHMS(val * tf))(timeFactor()),
+                  callback: ((base, tf) => (val: number) => formatClock(base + val * tf * 1000))(clockBaseMs() ?? 0, timeFactor()),
                 }
-              : { maxTicksLimit: 8 },
+              : xKey.value === 'time'
+                ? {
+                    stepSize: 10,
+                    maxTicksLimit: 30,
+                    callback: ((tf) => (val: number) => formatHMS(val * tf))(timeFactor()),
+                  }
+                : { maxTicksLimit: 8 },
             // Épingle l'axe sur l'étendue exacte des données (hors zoom) pour que la
             // courbe touche les deux bords. Sans min/max, Chart.js arrondit au tick
             // supérieur et laisse un vide à droite (la courbe n'atteint pas 100 %).
@@ -622,12 +952,15 @@ async function renderCharts() {
       },
     })
 
+    ;(chart as any).$pauseSpans = pauseSpans
+    ;(chart as any).$lapMarks = lapMarks
+
     ;(chart as any).$onSelect = (v0: number, v1: number) => {
       const r0 = chartXToRaw(Math.min(v0, v1))
       const r1 = chartXToRaw(Math.max(v0, v1))
       const sIdx = xValueToIndex(r0)
       const eIdx = xValueToIndex(r1)
-      const xs = props.streams?.[props.xAxis]?.data || props.streams?.time?.data
+      const xs = props.streams?.[xKey.value]?.data
       const maxIdx = (xs?.length || 1) - 1
       if (sIdx <= 0 && eIdx >= maxIdx) emit('clear-selection')
       else emit('select-segment', sIdx, eIdx)
@@ -642,7 +975,7 @@ async function renderCharts() {
 }
 
 function applySelectionToCharts() {
-  const xs = props.streams?.[props.xAxis]?.data
+  const xs = props.streams?.[xKey.value]?.data
   if (!xs || xs.length === 0) return
   const fullStart = chartXFromRaw(xs[0])
   const fullEnd = chartXFromRaw(xs[xs.length - 1])
@@ -1115,7 +1448,7 @@ function resetZoom() { emit('update:zoomRange', null) }
 
 function zoomToSelection() {
   if (!props.selection) return
-  const xs = props.streams?.[props.xAxis]?.data || props.streams?.time?.data
+  const xs = props.streams?.[xKey.value]?.data
   if (!xs || xs.length === 0) return
   const a = xs[props.selection.startIdx]
   const b = xs[props.selection.endIdx]
@@ -1269,7 +1602,7 @@ function attachTouchInteraction(canvas: HTMLCanvasElement, chart: any) {
         if (v0 != null && v1 != null) {
           const sIdx = chartValueToIndex(v0)
           const eIdx = chartValueToIndex(v1)
-          const xs = props.streams?.[props.xAxis]?.data || props.streams?.time?.data
+          const xs = props.streams?.[xKey.value]?.data
           const maxIdx = (xs?.length || 1) - 1
           if (sIdx <= 0 && eIdx >= maxIdx) emit('clear-selection')
           else if (eIdx > sIdx) emit('select-segment', sIdx, eIdx)
@@ -1332,6 +1665,13 @@ watch(() => props.zoomRange, applyZoomToCharts)
 
 watch(() => props.selection, applySelectionToCharts)
 
+// Les tours viennent du détail de l'activité, les courbes des flux : les deux fetches
+// sont indépendants, le détail peut donc arriver après un premier rendu. On repeint
+// alors les repères de tours (seulement s'il y en a — pas de rendu inutile).
+watch(() => props.laps, (val) => {
+  if (props.streams && Array.isArray(val) && val.length > 0) renderCharts()
+})
+
 // First mount: pull the saved presets, restore the user's last-used one,
 // reconcile the layout against the streams actually available, and render.
 onMounted(async () => {
@@ -1342,6 +1682,7 @@ onMounted(async () => {
     await new Promise((r) => requestAnimationFrame(r))
     await renderCharts()
   }
+  initChipTooltips()
 })
 
 // When the parent fetches `streams` asynchronously, we may mount with
@@ -1354,13 +1695,41 @@ watch(() => props.streams, async (val, old) => {
   }
 })
 
+// ─── Tooltips Bootstrap des pastilles (VAM / NP / efficience) ─────────────────
+// Mêmes infobulles riches (HTML) que les cartes de stats. On (ré)instancie quand
+// l'ensemble des pastilles change (données chargées, carte repliée, base de l'EF).
+// La classe .stat-tooltip vient d'ActivityStats (style non scoped, injecté dès que
+// ce composant frère est importé par ActivityDetail).
+const chartsRoot = ref<HTMLElement | null>(null)
+let chipTips: Tooltip[] = []
+
+function disposeChipTooltips() {
+  chipTips.forEach((tip) => tip.dispose())
+  chipTips = []
+}
+
+function initChipTooltips() {
+  disposeChipTooltips()
+  const el = chartsRoot.value
+  if (!el) return
+  el.querySelectorAll('[data-bs-toggle="tooltip"]').forEach((node) => {
+    chipTips.push(new Tooltip(node, { container: 'body' }))
+  })
+}
+
+watch(
+  () => [props.streams, props.collapsed, chipStreams.value.length, rangeEf.value?.basis],
+  () => nextTick(initChipTooltips),
+)
+
 onBeforeUnmount(() => {
+  disposeChipTooltips()
   destroyCharts()
 })
 </script>
 
 <template>
-  <div class="card shadow-sm border-0 mt-3">
+  <div ref="chartsRoot" class="card shadow-sm border-0 mt-3">
     <div class="card-header activity-card-header charts-sticky-header">
       <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
         <h3 class="h6 mb-0 d-flex align-items-center gap-2">
@@ -1472,6 +1841,8 @@ onBeforeUnmount(() => {
                 <label class="btn btn-outline-secondary" for="xAxis-distance">{{ t('strava.x_distance') }}</label>
                 <input type="radio" class="btn-check" name="xAxis" id="xAxis-time" autocomplete="off" value="time" :checked="xAxis === 'time'" :disabled="!streams || !streams.time" @change="setXAxis('time')" />
                 <label class="btn btn-outline-secondary" for="xAxis-time">{{ t('strava.x_time') }}</label>
+                <input type="radio" class="btn-check" name="xAxis" id="xAxis-clock" autocomplete="off" value="clock" :checked="xAxis === 'clock'" :disabled="!streams || !streams.time || !activity?.start_date_local" @change="setXAxis('clock')" />
+                <label class="btn btn-outline-secondary" for="xAxis-clock">{{ t('strava.x_clock') }}</label>
               </div>
             </div>
           </div>
@@ -1509,51 +1880,80 @@ onBeforeUnmount(() => {
           <strong>{{ rangeGrade().toFixed(1) }} %</strong>
         </span>
         <div
-          v-if="rangeVam() != null || chipStreams.length > 0"
+          v-if="rangeVam() != null || rangeNp() != null || rangeEf != null || chipStreams.length > 0"
           class="control-group range-chip-group"
         >
           <span
             v-if="rangeVam() != null"
             class="range-chip"
             :class="rangeVam() >= 0 ? 'range-chip-success' : 'range-chip-danger'"
-            :title="t('strava.stats.vam_hint')"
+            data-bs-toggle="tooltip"
+            data-bs-html="true"
+            data-bs-custom-class="stat-tooltip"
+            :data-bs-title="t('strava.stats.vam_hint')"
           >
             <i class="fa-solid fa-mountain" aria-hidden="true"></i>
             <strong>{{ Math.round(rangeVam()) }} m/h</strong>
             <i class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
           </span>
           <span
+            v-if="rangeNp() != null"
+            class="range-chip range-chip-stream"
+            :style="{ background: '#fd7e141f', color: '#fd7e14' }"
+            data-bs-toggle="tooltip"
+            data-bs-html="true"
+            data-bs-custom-class="stat-tooltip"
+            :data-bs-title="t('strava.stats.np_hint')"
+          >
+            <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+            <span class="range-chip-tag">{{ t('strava.np_label') }}</span>
+            <strong>{{ Math.round(rangeNp()) }} W</strong>
+          </span>
+          <span
+            v-if="rangeEf != null"
+            class="range-chip range-chip-stream"
+            :style="{ background: '#1987541f', color: '#198754' }"
+            data-bs-toggle="tooltip"
+            data-bs-html="true"
+            data-bs-custom-class="stat-tooltip"
+            :data-bs-title="t(`strava.stats.ef_hint_${rangeEf.basis}`)"
+          >
+            <i class="fa-solid fa-gauge" aria-hidden="true"></i>
+            <span class="range-chip-tag">{{ t('strava.stats.ef') }}</span>
+            <strong>{{ rangeEf.value.toFixed(2) }}</strong>
+          </span>
+          <span
             v-for="streamKey in chipStreams"
             :key="`mean-${streamKey}`"
             class="range-chip range-chip-stream"
-            :style="{ background: defByKey(streamKey)?.color + '1f', color: defByKey(streamKey)?.color }"
+            :style="{ background: vdef(streamKey)?.color + '1f', color: vdef(streamKey)?.color }"
           >
             <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-            <strong v-if="chartStats(defByKey(streamKey))">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</strong>
+            <strong v-if="chartStats(vdef(streamKey))">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).mean) }} {{ vdef(streamKey).unit }}</strong>
             <strong v-else>–</strong>
-            <i v-if="chartStats(defByKey(streamKey))" class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
-            <span v-if="chartStats(defByKey(streamKey))" class="chip-popover">
+            <i v-if="chartStats(vdef(streamKey))" class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
+            <span v-if="chartStats(vdef(streamKey))" class="chip-popover">
               <div class="chart-tooltip-title">
                 <div class="chart-tooltip-title-main">
                   <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
-                  {{ t('strava.stream.' + streamKey) }}
+                  {{ streamLabel(streamKey) }}
                 </div>
               </div>
               <div class="chart-tooltip-section">
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-arrow-down-short-wide chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.min') }}</span>
-                  <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).min, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).min) }} {{ vdef(streamKey).unit }}</span>
                 </div>
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-equals chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.mean') }}</span>
-                  <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).mean, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).mean) }} {{ vdef(streamKey).unit }}</span>
                 </div>
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-arrow-up-wide-short chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.max') }}</span>
-                  <span class="chart-tooltip-value">{{ fmt(chartStats(defByKey(streamKey)).max, defByKey(streamKey).digits) }} {{ defByKey(streamKey).unit }}</span>
+                  <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).max) }} {{ vdef(streamKey).unit }}</span>
                 </div>
               </div>
             </span>
@@ -1623,10 +2023,10 @@ onBeforeUnmount(() => {
                     >
                       <i
                         :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'} legend-icon`"
-                        :style="{ color: defByKey(streamKey)?.color }"
+                        :style="{ color: vdef(streamKey)?.color }"
                         aria-hidden="true"
                       ></i>
-                      <span>{{ t('strava.stream.' + streamKey) }} <span class="legend-unit">[{{ defByKey(streamKey)?.unit }}]</span></span>
+                      <span>{{ streamLabel(streamKey) }} <span class="legend-unit">[{{ vdef(streamKey)?.unit }}]</span></span>
                     </button>
                   </template>
                   <template v-else>
@@ -1637,10 +2037,10 @@ onBeforeUnmount(() => {
                     >
                       <i
                         :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'} legend-icon`"
-                        :style="{ color: defByKey(streamKey)?.color }"
+                        :style="{ color: vdef(streamKey)?.color }"
                         aria-hidden="true"
                       ></i>
-                      <span>{{ t('strava.stream.' + streamKey) }} <span class="legend-unit">[{{ defByKey(streamKey)?.unit }}]</span></span>
+                      <span>{{ streamLabel(streamKey) }} <span class="legend-unit">[{{ vdef(streamKey)?.unit }}]</span></span>
                     </span>
                   </template>
                   <!-- Axe X (commun au panneau) rappelé ici, les titres d'axes ayant été
@@ -1695,7 +2095,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .charts-sticky-header {
   position: sticky;
-  top: 3.5rem;
+  /* Offset = hauteur réelle de la navbar `fixed-top` (mesurée par trackNavbar,
+     application.ts) : elle wrappe sur deux lignes avec beaucoup de menus, un offset
+     fixe passerait dessous. Fallback 3.5rem avant la première mesure. */
+  top: var(--navbar-h, 3.5rem);
   z-index: 5;
   background: #ffffff;
   backdrop-filter: saturate(140%);
@@ -1812,6 +2215,12 @@ onBeforeUnmount(() => {
   cursor: help;
 }
 .range-chip-stream strong { color: inherit; }
+.range-chip-tag {
+  font-size: 0.7em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+}
 .chip-info-hint {
   font-size: 0.65em;
   opacity: 0.55;

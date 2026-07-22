@@ -8,6 +8,7 @@ import { usePointerSort } from '../composables/usePointerSort'
 import { profilesForSport } from '../brouter'
 import { SPORTS } from '../userPreferences'
 import type { Sport, UserPreferences } from '../userPreferences'
+import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -55,6 +56,36 @@ function resetToDefaults() {
   Object.assign(prefs, JSON.parse(JSON.stringify(props.defaults)))
 }
 
+// Anti-déplacement accidentel des sliders au scroll (mobile). Le profil défile dans
+// un conteneur scrollable et contient beaucoup de <input type=range> ; sur tactile,
+// poser le doigt sur un slider en modifie déjà la valeur (« tap-to-set » natif), même
+// quand on ne veut que faire défiler. touch-action: pan-y (cf. <style>) laisse le
+// navigateur prendre la main pour le scroll vertical — il émet alors un `pointercancel`
+// sur le slider. On mémorise la valeur au contact et on la restaure à ce moment-là,
+// donc un scroll qui démarre sur un slider ne le bouge pas. Un vrai tap ou un
+// glissement horizontal ne déclenche pas de pointercancel : la valeur est conservée.
+// Délégué sur le <form> ; on ne cible que les range, pour ne pas gêner les poignées
+// de tri (qui utilisent aussi pointerdown, cf. usePointerSort).
+function onRangePointerDown(e: PointerEvent) {
+  const el = e.target as HTMLElement
+  if (el instanceof HTMLInputElement && el.type === 'range') {
+    el.dataset.valueBeforeScroll = el.value
+  }
+}
+
+function onRangePointerCancel(e: PointerEvent) {
+  const el = e.target as HTMLElement
+  if (el instanceof HTMLInputElement && el.type === 'range') {
+    const prev = el.dataset.valueBeforeScroll
+    if (prev !== undefined && el.value !== prev) {
+      el.value = prev
+      // Resynchronise le v-model : sans cet événement, la copie réactive garderait
+      // la valeur du contact alors que l'input a été remis à sa valeur d'avant.
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+  }
+}
+
 const saving = ref(false)
 const saved = ref(false)
 const error = ref<string | null>(null)
@@ -74,6 +105,25 @@ const editedSport = ref<Sport>(prefs.display.default_sport)
 // Bloc de réglages du sport en cours d'édition.
 const sport = computed(() => prefs.sports[editedSport.value])
 
+// ── Vitesse réellement tenue, proposée en un clic ───────────────────────────
+// Médiane des vitesses moyennes de tes sorties, applicable au champ « vitesse
+// moyenne » du sport édité — le nombre de sorties derrière la médiane est indiqué
+// dans l'infobulle, car une médiane sur 2 sorties ne vaut pas une médiane sur 50.
+// Comme le reste du formulaire, ça n'écrit rien tant qu'on n'enregistre pas.
+const { athlete } = useAthleteState()
+
+// SPEED_STEP doit rester le `step` du champ (cf. template) : la suggestion y est
+// alignée pour que le champ reste valide et n'empêche pas l'envoi du formulaire.
+const SPEED_STEP = 0.5
+
+const speedSuggestion = computed(() =>
+  speedSuggestionFor(athlete.value, editedSport.value, sport.value.speed, SPEED_STEP),
+)
+
+function applySpeedSuggestion() {
+  if (speedSuggestion.value) sport.value.speed = speedSuggestion.value.speed
+}
+
 // Sections dont le contenu dépend du sport : le sélecteur n'apparaît que si l'une d'elles
 // est affichée (ProfileDialog peut n'en ouvrir qu'un sous-ensemble).
 const PER_SPORT_SECTIONS = ['sport', 'map', 'climb', 'navigation']
@@ -86,6 +136,7 @@ const showSportPicker = computed(() => PER_SPORT_SECTIONS.some(showSection))
 // libellés réutilisent les clés i18n `nav.*`.
 const NAVBAR_ICONS: Record<string, string> = {
   dashboard: 'fa-gauge-high',
+  performance: 'fa-trophy',
   routes: 'fa-route',
   new_route: 'fa-map-location-dot',
   free_navigate: 'fa-location-crosshairs',
@@ -174,13 +225,12 @@ async function save() {
 
 // ─── Aperçu de la navigation ────────────────────────────────────────────────
 // Petite carte MapLibre qui reflète en direct les réglages de la section
-// Navigation (style, zoom, inclinaison) et se centre sur la position GPS
-// actuelle (repli sur la Suisse si la géoloc échoue ou est refusée).
+// Navigation (style, zoom) et se centre sur la position GPS actuelle (repli
+// sur la Suisse si la géoloc échoue ou est refusée).
 const SWITZERLAND_CENTER: [number, number] = [8.23, 46.8]
-const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 // Même inset haut que la caméra de navigation (cf. RouteNavigation.followPadding) :
 // ancre le coureur dans le tiers inférieur pour que le cadrage — donc le ressenti du
-// zoom et de l'inclinaison — corresponde à ce que l'écran affichera réellement.
+// zoom — corresponde à ce que l'écran affichera réellement.
 const PREVIEW_TOP_PAD_RATIO = 0.45
 
 // Reporte sur l'aperçu le padding caméra de la navigation. Recalculé sur 'resize'
@@ -295,19 +345,6 @@ function previewRouteFeature(center: [number, number]) {
   }
 }
 
-// Active/désactive le relief 3D sur l'aperçu (idempotente : aussi après un setStyle).
-function applyPreviewTerrain() {
-  if (!previewMap) return
-  if (prefs.navigation.terrain) {
-    if (!previewMap.getSource('terrain-dem')) {
-      previewMap.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
-    }
-    previewMap.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
-  } else {
-    previewMap.setTerrain(null)
-  }
-}
-
 const previewEl = ref<HTMLElement | null>(null)
 const previewLocating = ref(true)
 const previewLocationError = ref(false)
@@ -332,22 +369,20 @@ async function initPreview() {
     style: mapStyleFor(prefs.navigation.default_style) as any,
     center: previewCenter,
     zoom: prefs.navigation.zoom,
-    pitch: prefs.navigation.pitch,
+    pitch: 0,
     attributionControl: false,
     interactive: false,
   })
   previewMap.on('styleimagemissing', (e: any) => {
     previewMap.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
-  previewMap.on('load', () => { applyPreviewRoute(); applyPreviewTerrain(); applyPreviewPadding() })
+  previewMap.on('load', () => { applyPreviewRoute(); applyPreviewPadding() })
   previewMap.on('resize', applyPreviewPadding)
 
-  // Réagit en direct aux réglages : le zoom, l'inclinaison, le relief et la largeur du
-  // tracé s'appliquent à chaud ; le changement de style recharge le fond (et replace
-  // le marqueur, le tracé et le relief).
+  // Réagit en direct aux réglages : le zoom et la largeur du tracé s'appliquent à
+  // chaud ; le changement de style recharge le fond (et replace le marqueur et le
+  // tracé).
   watch(() => prefs.navigation.zoom, (z) => previewMap?.setZoom(z))
-  watch(() => prefs.navigation.pitch, (p) => previewMap?.setPitch(p))
-  watch(() => prefs.navigation.terrain, applyPreviewTerrain)
   // Ces six réglages sont propres au sport : les sources réactives passent par sport.value,
   // donc l'aperçu se met aussi à jour quand on bascule de sport dans le sélecteur.
   watch(() => sport.value.navigation.line_width, applyPreviewRouteWidth)
@@ -363,7 +398,7 @@ async function initPreview() {
   watch(() => sport.value.navigation.turn_marker_icon_color, () => addPreviewArrowLayer())
   watch(() => prefs.navigation.default_style, (id) => {
     previewMap?.setStyle(mapStyleFor(id), { diff: false })
-    previewMap?.once('style.load', () => { applyPreviewRoute(); applyPreviewTerrain() })
+    previewMap?.once('style.load', () => { applyPreviewRoute() })
   })
 
   locatePreview()
@@ -396,7 +431,7 @@ function placePreviewMarker(coords: [number, number]) {
 </script>
 
 <template>
-  <form class="user-profile" @submit.prevent="save">
+  <form class="user-profile" @submit.prevent="save" @pointerdown="onRangePointerDown" @pointercancel="onRangePointerCancel">
     <!-- Sport dont on édite les réglages : pilote toutes les sections qui en dépendent -->
     <section v-if="showSportPicker" class="card mb-3 shadow-sm sport-picker">
       <div class="card-body py-2">
@@ -494,6 +529,26 @@ function placePreviewMarker(coords: [number, number]) {
                 >
                   <i class="fa-solid fa-link" aria-hidden="true"></i>
                   <span>{{ t('profile.navbar.chain_widget') }}</span>
+                </label>
+              </div>
+              <!-- De même, le menu « performance » porte le widget « plan du jour » sur
+                   l'accueil, distinct du bouton d'accès à la page (interrupteur ci-dessus). -->
+              <div v-if="item.key === 'performance'" class="form-check form-switch m-0">
+                <input
+                  id="navbar-performance-widget"
+                  v-model="prefs.display.show_performance_widget"
+                  class="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  :aria-label="t('profile.display.show_performance_widget')"
+                >
+                <label
+                  class="form-check-label navbar-toggle-label"
+                  for="navbar-performance-widget"
+                  :title="t('profile.navbar.performance_widget_hint')"
+                >
+                  <i class="fa-solid fa-heart-pulse" aria-hidden="true"></i>
+                  <span>{{ t('profile.navbar.performance_widget') }}</span>
                 </label>
               </div>
             </div>
@@ -629,46 +684,102 @@ function placePreviewMarker(coords: [number, number]) {
       </div>
       <div class="card-body">
         <p class="text-muted small mb-3">{{ t('profile.navigation.help') }}</p>
-        <div class="d-flex flex-column gap-3 mb-3">
-          <div v-for="g in groupedStyles" :key="g.group" class="card map-style-group">
-            <div class="card-body p-2">
-              <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2 px-1">
-                {{ t(`profile.map.group_${g.group}`) }}
-              </h3>
-              <div class="d-flex flex-wrap gap-2">
-                <label
-                  v-for="style in g.styles"
-                  :key="style.id"
-                  class="map-style-option"
-                  :class="{ active: prefs.navigation.default_style === style.id }"
-                >
-                  <input v-model="prefs.navigation.default_style" class="visually-hidden" type="radio" name="nav-map-style" :value="style.id">
-                  <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
-                  <span>{{ t(`profile.map.style_${style.id}`) }}</span>
+
+        <!-- Apparence : tous les réglages que l'aperçu reflète (fond de carte, zoom,
+             tracé, indicateurs), gardés à côté de lui. En grand écran l'aperçu occupe
+             une colonne collante à droite pour rester visible pendant qu'on les ajuste ;
+             en dessous du seuil, il se replace sous les contrôles. -->
+        <div class="nav-appearance">
+          <div class="nav-appearance-controls">
+            <!-- Fond de carte de la navigation -->
+            <div class="d-flex flex-column gap-3 mb-3">
+              <div v-for="g in groupedStyles" :key="g.group" class="card map-style-group">
+                <div class="card-body p-2">
+                  <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2 px-1">
+                    {{ t(`profile.map.group_${g.group}`) }}
+                  </h3>
+                  <div class="d-flex flex-wrap gap-2">
+                    <label
+                      v-for="style in g.styles"
+                      :key="style.id"
+                      class="map-style-option"
+                      :class="{ active: prefs.navigation.default_style === style.id }"
+                    >
+                      <input v-model="prefs.navigation.default_style" class="visually-hidden" type="radio" name="nav-map-style" :value="style.id">
+                      <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
+                      <span>{{ t(`profile.map.style_${style.id}`) }}</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="row g-3">
+              <div class="col-sm-6">
+                <label for="nav-zoom" class="form-label mb-1">
+                  {{ t('profile.navigation.zoom') }} : <strong>{{ prefs.navigation.zoom }}</strong>
                 </label>
+                <input id="nav-zoom" v-model.number="prefs.navigation.zoom" type="range" class="form-range" min="14" max="40" step="0.5">
+              </div>
+            </div>
+
+            <hr class="my-3">
+            <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2">
+              <i class="fa-solid fa-pen-ruler me-1" aria-hidden="true"></i>{{ t('profile.navigation.line_title') }}
+            </h3>
+            <p class="text-muted small mb-3">{{ t('profile.navigation.line_help') }}</p>
+            <div class="row g-3">
+              <div class="col-sm-6">
+                <label for="nav-line-width" class="form-label mb-1">
+                  {{ t('profile.navigation.line_width') }} : <strong>{{ sport.navigation.line_width }} px</strong>
+                </label>
+                <input id="nav-line-width" v-model.number="sport.navigation.line_width" type="range" class="form-range" min="2" max="200" step="1">
+              </div>
+              <div class="col-sm-6">
+                <label for="nav-line-color" class="form-label mb-1">{{ t('profile.navigation.line_color') }}</label>
+                <input id="nav-line-color" v-model="sport.navigation.line_color" type="color" class="form-control form-control-color">
+              </div>
+              <div class="col-sm-6">
+                <label for="nav-line-opacity" class="form-label mb-1">
+                  {{ t('profile.navigation.line_opacity') }} : <strong>{{ Math.round(sport.navigation.line_opacity * 100) }} %</strong>
+                </label>
+                <input id="nav-line-opacity" v-model.number="sport.navigation.line_opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
+              </div>
+              <div class="col-sm-6">
+                <label for="nav-turn-marker-size" class="form-label mb-1">
+                  {{ t('profile.navigation.turn_marker_size') }} : <strong>{{ sport.navigation.turn_marker_size }} px</strong>
+                </label>
+                <input id="nav-turn-marker-size" v-model.number="sport.navigation.turn_marker_size" type="range" class="form-range" min="5" max="200" step="1">
+              </div>
+              <div class="col-sm-6">
+                <label for="nav-turn-marker-color" class="form-label mb-1">{{ t('profile.navigation.turn_marker_color') }}</label>
+                <input id="nav-turn-marker-color" v-model="sport.navigation.turn_marker_color" type="color" class="form-control form-control-color">
+              </div>
+              <div class="col-sm-6">
+                <label for="nav-turn-marker-icon-color" class="form-label mb-1">{{ t('profile.navigation.turn_marker_icon_color') }}</label>
+                <input id="nav-turn-marker-icon-color" v-model="sport.navigation.turn_marker_icon_color" type="color" class="form-control form-control-color">
+              </div>
+            </div>
+          </div>
+
+          <!-- Aperçu en direct : reflète tous les réglages de la colonne de gauche -->
+          <div class="nav-appearance-preview">
+            <label class="form-label mb-1">{{ t('profile.navigation.preview') }}</label>
+            <p class="text-muted small mb-2">{{ t('profile.navigation.preview_help') }}</p>
+            <div class="nav-preview">
+              <div ref="previewEl" class="nav-preview-map"></div>
+              <div v-if="previewLocating" class="nav-preview-overlay text-muted">
+                <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('profile.navigation.locating') }}
+              </div>
+              <div v-else-if="previewLocationError" class="nav-preview-badge">
+                <i class="fa-solid fa-location-crosshairs me-1" aria-hidden="true"></i>{{ t('profile.navigation.location_error') }}
               </div>
             </div>
           </div>
         </div>
+
+        <hr class="my-3">
+        <!-- Comportement pendant la navigation : réglages sans effet sur l'aperçu -->
         <div class="row g-3">
-          <div class="col-sm-6">
-            <label for="nav-zoom" class="form-label mb-1">
-              {{ t('profile.navigation.zoom') }} : <strong>{{ prefs.navigation.zoom }}</strong>
-            </label>
-            <input id="nav-zoom" v-model.number="prefs.navigation.zoom" type="range" class="form-range" min="14" max="40" step="0.5">
-          </div>
-          <div class="col-sm-6">
-            <label for="nav-pitch" class="form-label mb-1">
-              {{ t('profile.navigation.pitch') }} : <strong>{{ prefs.navigation.pitch }}°</strong>
-            </label>
-            <input id="nav-pitch" v-model.number="prefs.navigation.pitch" type="range" class="form-range" min="0" max="90" step="5">
-          </div>
-          <div class="col-12">
-            <div class="form-check form-switch">
-              <input id="nav-terrain" v-model="prefs.navigation.terrain" class="form-check-input" type="checkbox" role="switch">
-              <label for="nav-terrain" class="form-check-label">{{ t('profile.navigation.terrain') }}</label>
-            </div>
-          </div>
           <div class="col-12">
             <div class="form-check form-switch">
               <input id="nav-show-climb-card" v-model="prefs.navigation.show_climb_card" class="form-check-input" type="checkbox" role="switch">
@@ -712,59 +823,6 @@ function placePreviewMarker(coords: [number, number]) {
         </div>
 
         <hr class="my-3">
-        <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2">
-          <i class="fa-solid fa-pen-ruler me-1" aria-hidden="true"></i>{{ t('profile.navigation.line_title') }}
-        </h3>
-        <p class="text-muted small mb-3">{{ t('profile.navigation.line_help') }}</p>
-        <div class="row g-3">
-          <div class="col-sm-6">
-            <label for="nav-line-width" class="form-label mb-1">
-              {{ t('profile.navigation.line_width') }} : <strong>{{ sport.navigation.line_width }} px</strong>
-            </label>
-            <input id="nav-line-width" v-model.number="sport.navigation.line_width" type="range" class="form-range" min="2" max="200" step="1">
-          </div>
-          <div class="col-sm-6">
-            <label for="nav-line-color" class="form-label mb-1">{{ t('profile.navigation.line_color') }}</label>
-            <input id="nav-line-color" v-model="sport.navigation.line_color" type="color" class="form-control form-control-color">
-          </div>
-          <div class="col-sm-6">
-            <label for="nav-line-opacity" class="form-label mb-1">
-              {{ t('profile.navigation.line_opacity') }} : <strong>{{ Math.round(sport.navigation.line_opacity * 100) }} %</strong>
-            </label>
-            <input id="nav-line-opacity" v-model.number="sport.navigation.line_opacity" type="range" class="form-range" min="0.1" max="1" step="0.1">
-          </div>
-          <div class="col-sm-6">
-            <label for="nav-turn-marker-size" class="form-label mb-1">
-              {{ t('profile.navigation.turn_marker_size') }} : <strong>{{ sport.navigation.turn_marker_size }} px</strong>
-            </label>
-            <input id="nav-turn-marker-size" v-model.number="sport.navigation.turn_marker_size" type="range" class="form-range" min="5" max="200" step="1">
-          </div>
-          <div class="col-sm-6">
-            <label for="nav-turn-marker-color" class="form-label mb-1">{{ t('profile.navigation.turn_marker_color') }}</label>
-            <input id="nav-turn-marker-color" v-model="sport.navigation.turn_marker_color" type="color" class="form-control form-control-color">
-          </div>
-          <div class="col-sm-6">
-            <label for="nav-turn-marker-icon-color" class="form-label mb-1">{{ t('profile.navigation.turn_marker_icon_color') }}</label>
-            <input id="nav-turn-marker-icon-color" v-model="sport.navigation.turn_marker_icon_color" type="color" class="form-control form-control-color">
-          </div>
-        </div>
-
-        <!-- Aperçu en direct -->
-        <div class="mt-3">
-          <label class="form-label mb-1">{{ t('profile.navigation.preview') }}</label>
-          <p class="text-muted small mb-2">{{ t('profile.navigation.preview_help') }}</p>
-          <div class="nav-preview">
-            <div ref="previewEl" class="nav-preview-map"></div>
-            <div v-if="previewLocating" class="nav-preview-overlay text-muted">
-              <i class="fa-solid fa-spinner fa-spin me-2" aria-hidden="true"></i>{{ t('profile.navigation.locating') }}
-            </div>
-            <div v-else-if="previewLocationError" class="nav-preview-badge">
-              <i class="fa-solid fa-location-crosshairs me-1" aria-hidden="true"></i>{{ t('profile.navigation.location_error') }}
-            </div>
-          </div>
-        </div>
-
-        <hr class="my-3">
         <h3 class="h6 text-muted text-uppercase small fw-semibold mb-3">
           <i class="fa-solid fa-turn-right me-1" aria-hidden="true"></i>{{ t('profile.navigation.turns_title') }}
         </h3>
@@ -789,16 +847,38 @@ function placePreviewMarker(coords: [number, number]) {
             <input id="nav-turn-urgent" v-model.number="sport.navigation.turn_urgent_m" type="range" class="form-range" min="5" max="50" step="1">
           </div>
           <div class="col-sm-6">
-            <label for="nav-turn-repeat" class="form-label mb-1">
-              {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (sport.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
-            </label>
-            <input id="nav-turn-repeat" v-model.number="sport.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500">
+            <div class="border rounded p-2 h-100">
+              <div class="fw-semibold small mb-2">{{ t('profile.navigation.turn_repeat_far_title') }}</div>
+              <label for="nav-turn-repeat-count" class="form-label mb-1">
+                {{ t('profile.navigation.turn_repeat_count') }} : <strong>{{ sport.navigation.turn_repeat_count }}×</strong>
+              </label>
+              <input id="nav-turn-repeat-count" v-model.number="sport.navigation.turn_repeat_count" type="range" class="form-range" min="1" max="10" step="1">
+              <div class="form-check mt-2 mb-1">
+                <input id="nav-turn-repeat-enabled" v-model="sport.navigation.turn_repeat" type="checkbox" class="form-check-input">
+                <label for="nav-turn-repeat-enabled" class="form-check-label">{{ t('profile.navigation.turn_repeat_enabled') }}</label>
+              </div>
+              <label for="nav-turn-repeat" class="form-label mb-1">
+                {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (sport.navigation.turn_repeat_ms / 1000).toFixed(1) }} s</strong>
+              </label>
+              <input id="nav-turn-repeat" v-model.number="sport.navigation.turn_repeat_ms" type="range" class="form-range" min="500" max="10000" step="500" :disabled="!sport.navigation.turn_repeat">
+            </div>
           </div>
           <div class="col-sm-6">
-            <label for="nav-turn-repeat-urgent" class="form-label mb-1">
-              {{ t('profile.navigation.turn_repeat_urgent_ms') }} : <strong>{{ (sport.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
-            </label>
-            <input id="nav-turn-repeat-urgent" v-model.number="sport.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500">
+            <div class="border rounded p-2 h-100">
+              <div class="fw-semibold small mb-2">{{ t('profile.navigation.turn_repeat_near_title') }}</div>
+              <label for="nav-turn-repeat-urgent-count" class="form-label mb-1">
+                {{ t('profile.navigation.turn_repeat_count') }} : <strong>{{ sport.navigation.turn_repeat_urgent_count }}×</strong>
+              </label>
+              <input id="nav-turn-repeat-urgent-count" v-model.number="sport.navigation.turn_repeat_urgent_count" type="range" class="form-range" min="1" max="10" step="1">
+              <div class="form-check mt-2 mb-1">
+                <input id="nav-turn-repeat-urgent-enabled" v-model="sport.navigation.turn_repeat_urgent" type="checkbox" class="form-check-input">
+                <label for="nav-turn-repeat-urgent-enabled" class="form-check-label">{{ t('profile.navigation.turn_repeat_enabled') }}</label>
+              </div>
+              <label for="nav-turn-repeat-urgent" class="form-label mb-1">
+                {{ t('profile.navigation.turn_repeat_ms') }} : <strong>{{ (sport.navigation.turn_repeat_urgent_ms / 1000).toFixed(1) }} s</strong>
+              </label>
+              <input id="nav-turn-repeat-urgent" v-model.number="sport.navigation.turn_repeat_urgent_ms" type="range" class="form-range" min="500" max="10000" step="500" :disabled="!sport.navigation.turn_repeat_urgent">
+            </div>
           </div>
           <div class="col-sm-6">
             <label for="nav-turn-now" class="form-label mb-1">
@@ -908,8 +988,20 @@ function placePreviewMarker(coords: [number, number]) {
           <div class="col-sm-6">
             <label for="sport-speed" class="form-label mb-1">{{ t('profile.sport.speed') }}</label>
             <div class="input-group">
-              <input id="sport-speed" v-model.number="sport.speed" type="number" class="form-control" min="3" max="80" step="0.5">
+              <input id="sport-speed" v-model.number="sport.speed" type="number" class="form-control" min="3" max="80" :step="SPEED_STEP">
               <span class="input-group-text">km/h</span>
+              <!-- Ta vitesse réelle, en un clic. Prise en compte à l'enregistrement,
+                   comme le reste du formulaire. -->
+              <button
+                v-if="speedSuggestion"
+                type="button"
+                class="btn btn-outline-primary"
+                :title="t('routes.speed_suggestion_hint', { speed: speedSuggestion.speed, count: speedSuggestion.samples })"
+                @click="applySpeedSuggestion"
+              >
+                <i class="fa-solid fa-wand-magic-sparkles me-1" aria-hidden="true"></i>
+                {{ t('routes.speed_suggestion', { speed: speedSuggestion.speed }) }}
+              </button>
             </div>
             <p class="text-muted small mb-0 mt-1">{{ t('profile.sport.speed_help') }}</p>
           </div>
@@ -972,6 +1064,21 @@ function placePreviewMarker(coords: [number, number]) {
             </div>
           </div>
         </div>
+
+        <hr class="my-3">
+        <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2">
+          <i class="fa-solid fa-map-pin me-1" aria-hidden="true"></i>{{ t('profile.snap_warn.title') }}
+        </h3>
+        <p class="text-muted small mb-3">{{ t('profile.snap_warn.help') }}</p>
+        <div class="row g-3">
+          <div class="col-sm-4">
+            <label for="sport-snap-warn" class="form-label mb-1">{{ t('profile.snap_warn.distance') }}</label>
+            <div class="input-group">
+              <input id="sport-snap-warn" v-model.number="sport.snap_warn_m" type="number" class="form-control" min="10" max="200" step="5">
+              <span class="input-group-text">m</span>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -999,12 +1106,26 @@ function placePreviewMarker(coords: [number, number]) {
 
 }
 
+/* Sur mobile, le profil défile dans un conteneur scrollable (fenêtre ou
+   .modal-body de ProfileDialog). Sans ceci, un geste vertical démarrant sur un
+   slider en modifie la valeur au lieu de faire défiler. pan-y laisse le
+   défilement vertical au navigateur ; seul un geste horizontal ajuste le slider. */
+.form-range {
+  touch-action: pan-y;
+}
+
 /* Le formulaire est long et plusieurs sections dépendent du sport sélectionné : le
    sélecteur reste visible pendant qu'on fait défiler, sans quoi on édite les réglages
-   d'un sport sans plus voir lequel. */
+   d'un sport sans plus voir lequel.
+
+   Le point de collage dépend du conteneur de défilement, et ce composant sert dans
+   les deux cas : sur /profile c'est la fenêtre, sous la navbar fixe (hauteur réelle
+   `--navbar-h`, mesurée par trackNavbar — la navbar wrappe avec beaucoup de
+   menus ; fallback 3.5rem) ; dans ProfileDialog c'est le .modal-body, qui pose sa
+   propre origine à 0 via --sport-picker-top. */
 .sport-picker {
   position: sticky;
-  top: 0;
+  top: var(--sport-picker-top, var(--navbar-h, 3.5rem));
   z-index: 3;
 }
 
@@ -1137,8 +1258,34 @@ function placePreviewMarker(coords: [number, number]) {
 
 .navbar-toggle-label i { width: 0.9rem; text-align: center; }
 
+/* Section Navigation : les réglages reflétés par l'aperçu (fond de carte, zoom,
+   tracé, indicateurs) d'un côté, l'aperçu de l'autre. En grand écran, deux colonnes —
+   contrôles à gauche, aperçu collant à droite — pour que l'aperçu reste visible pendant
+   qu'on ajuste ces réglages, quel que soit celui qu'on regarde. Sous le seuil, tout
+   s'empile (aperçu après les contrôles). */
+.nav-appearance {
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 768px) {
+  .nav-appearance {
+    grid-template-columns: minmax(0, 1fr) 240px;
+    align-items: start;
+  }
+
+  .nav-appearance-preview {
+    position: sticky;
+    /* Se colle juste sous le sélecteur de sport (lui aussi collant, ≈ 5rem de haut) :
+       son origine dépend du conteneur de défilement — fenêtre sous la navbar sur
+       /profile, .modal-body dans ProfileDialog — d'où la même base --sport-picker-top /
+       --navbar-h que .sport-picker, augmentée de la hauteur du sélecteur. */
+    top: calc(var(--sport-picker-top, var(--navbar-h, 3.5rem)) + 5rem);
+  }
+}
+
 /* Cadre façon téléphone en portrait : même proportions que l'écran de navigation,
-   pour que le réglage du zoom/inclinaison soit représentatif du rendu réel. */
+   pour que le réglage du zoom soit représentatif du rendu réel. */
 .nav-preview {
   position: relative;
   width: 100%;

@@ -7,16 +7,38 @@ default: &default
   username: <%= ENV.fetch("DATABASE_USER", "postgres") %>
   password: <%= ENV.fetch("DATABASE_PASSWORD", "postgres") %>
 
+# La base `osm` contient les POI OpenStreetMap importés (voir deploy/osm-pois/).
+# `database_tasks: false` : son schéma est créé et rechargé par le service
+# `poi-sync`, pas par des migrations Rails — elle reste donc hors de db/schema.rb
+# et des tâches db:*. C'est de la donnée de référence rechargeable, pas de la
+# donnée applicative.
 development:
-  <<: *default
-  database: sports_scope_development
+  primary:
+    <<: *default
+    database: sports_scope_development
+  osm:
+    <<: *default
+    database: <%= ENV.fetch("OSM_POI_DATABASE", "osm_pois_development") %>
+    database_tasks: false
 
 test:
-  <<: *default
-  database: sports_scope_test
+  primary:
+    <<: *default
+    database: sports_scope_test
+  osm:
+    <<: *default
+    database: <%= ENV.fetch("OSM_POI_DATABASE", "osm_pois_development") %>
+    database_tasks: false
 
 production:
-  <<: *default
-  database: <%= ENV.fetch("DATABASE_NAME", "sports_scope_production") %>
-  username: <%= ENV.fetch("DATABASE_USER", "sports_scope") %>
-  password: <%= ENV["DATABASE_PASSWORD"] %>
+  primary:
+    <<: *default
+    database: <%= ENV.fetch("DATABASE_NAME", "sports_scope_production") %>
+    username: <%= ENV.fetch("DATABASE_USER", "sports_scope") %>
+    password: <%= ENV["DATABASE_PASSWORD"] %>
+  osm:
+    <<: *default
+    database: <%= ENV.fetch("OSM_POI_DATABASE", "osm_pois_production") %>
+    username: <%= ENV.fetch("DATABASE_USER", "sports_scope") %>
+    password: <%= ENV["DATABASE_PASSWORD"] %>
+    database_tasks: false

@@ -24,16 +24,33 @@ class StravaGearSyncService
     @user = user
   end
 
-  # Upsert les vélos de l'utilisateur. Renvoie le nombre de vélos.
+  # Upsert les vélos (table `bikes`) et les chaussures (table `strava_gears`) de
+  # l'utilisateur à partir des `gear_id` référencés par ses activités. Renvoie le
+  # nombre de vélos.
   def call
-    gear_ids = @user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
-    gear_ids.each { |gear_id| upsert_bike(gear_id) }
-
+    bike_ids = @user.strava_activities.with_bike_gear.distinct.pluck(:gear_id)
+    bike_ids.each { |gear_id| upsert_bike(gear_id) }
     ensure_a_default!
+
+    shoe_ids = @user.strava_activities.with_shoe_gear.distinct.pluck(:gear_id)
+    shoe_ids.each { |gear_id| upsert_shoe(gear_id) }
+
     @user.bikes.count
   end
 
   private
+
+  # Chaussure : simple cache de nom pour le filtre (pas de chaînes / cirage). On ne
+  # re-résout que les gear inconnus — le nom d'une chaussure ne change guère.
+  def upsert_shoe(gear_id)
+    return if @user.strava_gears.exists?(gear_id: gear_id)
+
+    gear = fetch_gear(gear_id)
+    name = gear && (gear["nickname"].presence || gear["name"].presence)
+    return if name.blank? # gear illisible : on réessaiera au prochain sync
+
+    @user.strava_gears.create!(gear_id: gear_id, gear_type: "shoe", name: name.to_s.strip.first(255))
+  end
 
   def upsert_bike(gear_id)
     gear = fetch_gear(gear_id)

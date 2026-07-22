@@ -13,11 +13,11 @@ import { fetchRouteToPlace, fetchRouteVia, fetchRouteFromWaypoints } from '../na
 import type { Waypoint } from '../navRoute'
 import { MAX_WAYPOINTS } from '../stores/routeStore'
 import {
-  textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
+  textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb, buildTurnChain,
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
-import { unlockAudio, playManeuver, playOffRoute, playPoi } from '../navAudio'
-import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi } from '../navHaptics'
+import { unlockAudio, playManeuver, playManeuverBurst, playOffRoute, playPoi, playArrival } from '../navAudio'
+import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
 import RadarOverlay from './RadarOverlay.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
@@ -37,15 +37,16 @@ import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
 import NavRoutingPicker from './NavRoutingPicker.vue'
 import { useNavPois } from '../composables/useNavPois'
 import type { NavPlace } from '../composables/useNavPois'
+import type { RouteMarker } from '../routeMarkers'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
 import { useNavSound } from '../composables/useNavSound'
 import { useRadarAlerts } from '../composables/useRadarAlerts'
 import {
-  useNavCamera, CAM_PITCH_MIN, CAM_PITCH_MAX, CAM_ZOOM_MIN, CAM_ZOOM_MAX,
+  useNavCamera, CAM_ZOOM_MIN, CAM_ZOOM_MAX,
 } from '../composables/useNavCamera'
 import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
-import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS } from '../navConstants'
+import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX, ARRIVAL_M } from '../navConstants'
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
@@ -53,6 +54,7 @@ import {
   purgeLegacyArchive, OFFLINE_LAYERS, isOfflineLayer, type OfflineLayer,
 } from '../offline/offlineMaps'
 import { buildCoordPopupContent, buildDestPointPopupContent, attachLongPress } from '../mapCoordPopup'
+import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
 
 // Page de navigation unifiée : démarre en mode libre (carte + GPS + vitesse, sans
 // tracé) et peut charger/décharger un itinéraire à chaud. shareToken : si présent
@@ -116,6 +118,9 @@ const offlineCoords = ref<[number, number][]>([])
 // POI du tracé actif (issues de routes.pois) : passés à NavOfflineButton pour être
 // sauvegardés dans le localStorage au moment du téléchargement hors-ligne.
 const offlinePois = ref<Array<{ name: string; type: string; lat: number; lng: number }>>([])
+// Repères du tracé actif (routes.markers) tels que reçus : useNavPois les convertit en
+// NavPlace pour l'affichage, on garde ici la forme brute pour la session persistée.
+const routeMarkersRaw = ref<RouteMarker[]>([])
 // Chaque fond swisstopo (gris / couleur / satellite) a sa propre archive : le coureur
 // coche ce qu'il veut emporter, et ne paie que ça en Mo.
 type LayerFlags = Record<OfflineLayer, boolean>
@@ -158,13 +163,14 @@ const offlinePct = computed(() =>
   offlineProgress.value.total ? Math.round((offlineProgress.value.done / offlineProgress.value.total) * 100) : 0,
 )
 
-// Réglages caméra (inclinaison / zoom / relief 3D), ajustables en séance et reportés
-// sur le profil. La boucle d'animation et followOptions lisent ces refs (et non plus
-// navPrefs) pour que toute modification prenne effet à la frame suivante. onZoomInput
-// détache la caméra du suivi via onManualZoom. Voir useNavCamera.
+// Réglages caméra (zoom), ajustables en séance et reportés sur le profil.
+// La caméra reste toujours à plat (pitch 0) pour économiser la batterie. La boucle
+// d'animation et followOptions lisent ces refs (et non plus navPrefs) pour que toute
+// modification prenne effet à la frame suivante. onZoomInput détache la caméra du suivi
+// via onManualZoom. Voir useNavCamera.
 const {
-  camZoom, camPitch, terrain3d, zoomSaved,
-  onPitchInput, onZoomInput, applyTerrain, toggleTerrain, persistPitchTerrain, saveZoomToProfile,
+  camZoom, zoomSaved,
+  onZoomInput, saveZoomToProfile,
 } = useNavCamera({ getMap: () => map, onManualZoom })
 // Curseur zoom pris en main : on détache la caméra du suivi (état local au composant).
 function onManualZoom() {
@@ -403,6 +409,12 @@ const remainingM = ref(0)
 const remainingGainM = ref(0)
 const doneRatio = ref(0)
 const speedKmh = ref(0)
+// Arrivée à destination : bascule à vrai (une seule fois) quand la distance restante le
+// long du tracé passe sous ARRIVAL_M. `seenEnRoute` garantit qu'on a d'abord été
+// franchement en route — évite un faux « arrivé » au tout premier fix (tracé minuscule
+// ou boucle dont le départ se projette près de la fin).
+const arrived = ref(false)
+let seenEnRoute = false
 // Vitesse lissée (EMA) dédiée à l'heure d'arrivée : la vitesse instantanée saute
 // trop pour une ETA stable, et tomber à 0 à chaque feu rouge la ferait exploser.
 // On n'alimente la moyenne qu'en roulant (> ETA_SPEED_FLOOR) pour ignorer les arrêts.
@@ -510,6 +522,9 @@ const climbInfo = ref<ClimbInfo | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
 const turnHint = ref<TurnHint | null>(null)
+// Virages secondaires enchaînés au prochain (rafale gauche-droite) : affichés en petit
+// sous le bandeau principal, éveillé comme en veille. Vide hors approche (état « near »).
+const followTurns = ref<TurnHint[]>([])
 
 // ─── Notification de proximité d'un point d'intérêt ────────────────────────────
 // Quand le coureur passe à portée (≤ points_of_interest.alert_m, 100 m par défaut)
@@ -832,11 +847,15 @@ const dbgPoi = ref(false)
 // Scénarios de virage parcourus en boucle (un clic = scénario suivant, puis « off »).
 // Couvre chaque état visuel : lointain (gris), approche (violet), urgent (orange),
 // rond-point (numéro de sortie) et virage atteint (vert).
-const DBG_TURNS: { label: string; state: 'far' | 'near' | 'now'; kind: Maneuver; direction: 'left' | 'right'; angle: number; distM: number; exitNumber?: number }[] = [
+const DBG_TURNS: { label: string; state: 'far' | 'near' | 'now'; kind: Maneuver; direction: 'left' | 'right'; angle: number; distM: number; exitNumber?: number; follow?: TurnHint[] }[] = [
   { label: 'Lointain', state: 'far', kind: 'turn', direction: 'right', angle: 60, distM: 850 },
   { label: 'Approche', state: 'near', kind: 'turn', direction: 'left', angle: -70, distM: 180 },
   { label: 'Urgent', state: 'near', kind: 'sharp', direction: 'right', angle: 110, distM: Math.min(sportNav.value.turn_urgent_m, 40) },
   { label: 'Rond-point', state: 'near', kind: 'roundabout', direction: 'right', angle: 90, distM: 120, exitNumber: 2 },
+  { label: 'Rafale', state: 'near', kind: 'turn', direction: 'left', angle: -80, distM: 90, follow: [
+    { direction: 'right', distM: 120, kind: 'turn', angle: 85, state: 'near' },
+    { direction: 'left', distM: 155, kind: 'sharp', angle: -110, state: 'near' },
+  ] },
   { label: 'Maintenant', state: 'now', kind: 'turn', direction: 'left', angle: -70, distM: 0 },
 ]
 const dbgTurnIdx = ref(0)
@@ -848,12 +867,14 @@ function cycleDebugTurn() {
   if (dbgTurnIdx.value >= DBG_TURNS.length) {
     dbgTurn.value = false
     turnHint.value = null
+    followTurns.value = []
     return
   }
   dbgTurn.value = true
   hasFix.value = true
   const p = DBG_TURNS[dbgTurnIdx.value]
   turnHint.value = { direction: p.direction, distM: p.distM, kind: p.kind, angle: p.angle, exitNumber: p.exitNumber, state: p.state }
+  followTurns.value = p.follow ?? []
   // Prévisualisation sonore : joue le bip du virage correspondant (comme en vrai).
   if (soundOn.value) playManeuver(p.kind, p.direction)
 }
@@ -904,6 +925,10 @@ onMounted(async () => {
     // directement sur le tracé. Sans token, on démarre en navigation libre.
     if (props.shareToken) {
       try { await loadSharedRouteData(props.shareToken) } catch { /* tracé introuvable : on reste en libre */ }
+    } else {
+      // Rechargement de page en pleine séance : on reprend le tracé mémorisé (itinéraire
+      // chargé ou destination ad hoc) au lieu de repartir en navigation libre.
+      restoreSession()
     }
     await initMap()
     startTracking()
@@ -988,8 +1013,11 @@ async function loadSharedRouteData(token: string) {
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
   if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
+  routeMarkersRaw.value = (route.markers || []) as RouteMarker[]
+  pois.setRouteMarkers(routeMarkersRaw.value)
   hasRoute.value = true
   syncEditable()
+  persistSession()
 }
 
 // Recompute everything derived from `geometry` + raw voicehints: altitudes, distances,
@@ -1203,12 +1231,33 @@ function resetRouteTracking(atStart: boolean) {
   reachedTurnIdx = -1
   activeTurn = null
   turnHint.value = null
+  followTurns.value = []
   turnAlertMuted.value = false
   mutedTurnPtr = -1
+  // Nouveau tracé (ou reroutage) : on réarme la détection d'arrivée.
+  arrived.value = false
+  seenEnRoute = false
   // Recalculé au prochain fix ; remis à faux pour que le bandeau hors-tracé disparaisse.
   offRoute.value = false
   // La progression mémorisée pointe un passage de l'ancien tracé : on l'efface.
   try { localStorage.removeItem(progressKey()) } catch { /* quota / private mode */ }
+}
+
+// Réinitialisation manuelle depuis Réglages : efface TOUTES les progressions mémorisées
+// (`sportsScope.navProgress.*`, une par tracé), pas seulement celle du tracé actif. Une
+// entrée corrompue ou obsolète peut faire repartir la navigation sur le mauvais passage
+// d'un tracé auto-recoupant et donc dérailler les alertes de virage/arrivée ; on repart
+// d'une ardoise propre. Le suivi en cours est relancé (recherche globale au prochain fix).
+function resetNavigationState() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('sportsScope.navProgress.')) localStorage.removeItem(k)
+    }
+  } catch { /* stockage indisponible */ }
+  if (hasRoute.value) resetRouteTracking(false)
+  activePanel.value = null
+  showPoiToast(true, t('routes.nav_reset_done'))
 }
 
 // Installe (ou met à jour) les couches du tracé sur la carte. En mode libre, aucune
@@ -1238,6 +1287,53 @@ function applyReroute(newGeometry: Coord[], hints: VoiceHint[]) {
   syncEditable()
   ensureRouteInstalled()
   refreshRemaining()
+  persistSession()
+}
+
+// ─── Session persistée (reprise après rechargement) ────────────────────────────
+// Ce qu'on suit — itinéraire chargé ou destination ad hoc — survit à un rechargement de
+// page : on réécrit la session à chaque changement de tracé (chargement, reroutage,
+// insertion d'étape, édition) et on la restaure au montage en l'absence de lien partagé.
+// Voir navSession.ts pour le format et la péremption.
+function persistSession() {
+  if (!hasRoute.value) { clearNavSession(); return }
+  saveNavSession({
+    name: routeName.value,
+    token: routeToken.value,
+    routeId,
+    sport: routeSport.value,
+    profile: routeProfile.value,
+    geometry,
+    hints: rawHints,
+    waypoints: routeWaypoints,
+    vias: routeVias,
+    pois: offlinePois.value,
+    markers: routeMarkersRaw.value,
+  })
+}
+
+// Restaure le tracé mémorisé AVANT la carte (comme un lien partagé) : initMap cadre
+// alors directement dessus. On ne réinitialise PAS le suivi (resetRouteTracking effacerait
+// la progression mémorisée) : le premier fix se recale via l'indice de reprise, exactement
+// comme au chargement d'un lien partagé. Renvoie faux s'il n'y a rien à restaurer.
+function restoreSession(): boolean {
+  const s = loadNavSession()
+  if (!s) return false
+  routeToken.value = s.token
+  routeName.value = s.name
+  routeSport.value = s.sport
+  routeProfile.value = isProfileValidForSport(s.profile, s.sport) ? s.profile : catalogDefaultForSport(s.sport)
+  routeId = s.routeId
+  routeWaypoints = s.waypoints
+  routeVias = s.vias
+  rebuildRouteState(s.geometry, s.hints)
+  offlinePois.value = s.pois
+  if (s.pois.length > 0) pois.setRoutePlaces(s.pois)
+  routeMarkersRaw.value = s.markers
+  pois.setRouteMarkers(s.markers)
+  hasRoute.value = true
+  syncEditable()
+  return true
 }
 
 // ─── Chargement / déchargement d'un itinéraire (page unifiée) ──────────────────
@@ -1259,9 +1355,12 @@ function loadRoute(route: any) {
   offlinePois.value = savedPois
   void syncOfflineState()
   if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
+  routeMarkersRaw.value = (route.markers || []) as RouteMarker[]
+  pois.setRouteMarkers(routeMarkersRaw.value)
   resetRouteTracking(false)
   hasRoute.value = true
   syncEditable()
+  persistSession()
   showRoutePicker.value = false
   ensureRouteInstalled()
   refreshRemaining()
@@ -1270,7 +1369,7 @@ function loadRoute(route: any) {
     const coords = geom.map(([lng, lat]) => [lng, lat] as LngLat)
     const b = new maplibre.LngLatBounds(coords[0], coords[0])
     coords.forEach((c) => b.extend(c))
-    map.fitBounds(b, { padding: 60, duration: 600, pitch: camPitch.value })
+    map.fitBounds(b, { padding: 60, duration: 600, pitch: 0 })
   }
   following.value = true
   cameraUnlocked.value = false
@@ -1294,6 +1393,8 @@ function unloadRoute() {
   routeToken.value = null
   routeName.value = ''
   offlinePois.value = []
+  routeMarkersRaw.value = []
+  clearNavSession()
   void syncOfflineState()
   geometry = []
   displayLine = []
@@ -1304,6 +1405,7 @@ function unloadRoute() {
   turns = []
   rawHints = []
   turnHint.value = null
+  followTurns.value = []
   // État de suivi des virages : sans ça, `activeTurn` reste pointé sur le dernier
   // virage et le timer de répétition (tickTurnRepeat) continue de jouer l'alerte sonore
   // indéfiniment après l'effacement du tracé (typiquement quand on efface à un carrefour,
@@ -1319,6 +1421,8 @@ function unloadRoute() {
   mutedTurnPtr = -1
   climbInfo.value = null
   offRoute.value = false
+  arrived.value = false
+  seenEnRoute = false
   remainingM.value = 0
   remainingGainM.value = 0
   doneRatio.value = 0
@@ -1572,6 +1676,9 @@ async function navigateVia(name: string, vias: LngLat[], precomputed?: { geometr
     applyReroute(geom, hints)
     // Étapes retenues comme source de recalcul : ce trajet n'a pas d'autre définition.
     routeVias = vias.slice()
+    // Réécrit la session : applyReroute l'a déjà persistée, mais sans les étapes ni le
+    // nom définitifs de cette destination.
+    persistSession()
     cancelPlaceNav()
     following.value = true
     cameraUnlocked.value = false
@@ -1646,6 +1753,7 @@ async function insertViaIntoRoute(lng: number, lat: number) {
     resetRouteTracking(false)
     ensureRouteInstalled()
     refreshRemaining()
+    persistSession()
   } catch {
     navError.value = t('routes.error_routing')
   } finally {
@@ -1670,7 +1778,7 @@ function fitRouteBounds() {
   const coords = geometry.map(([lng, lat]) => [lng, lat] as LngLat)
   const b = new maplibre.LngLatBounds(coords[0], coords[0])
   coords.forEach((c) => b.extend(c))
-  map.fitBounds(b, { padding: 70, duration: 500, pitch: camPitch.value })
+  map.fitBounds(b, { padding: 70, duration: 500, pitch: 0 })
 }
 
 // Index du sommet de la géométrie le plus proche d'un point.
@@ -1706,6 +1814,7 @@ function installRecomputedRoute(geom: Coord[], hints: VoiceHint[]) {
   detourEndIdx = -1
   ensureRouteInstalled()
   refreshRemaining()
+  persistSession()
 }
 
 // Re-route l'itinéraire entier à travers les points d'ancrage courants et remplace la
@@ -1863,6 +1972,7 @@ function cancelEditMode() {
     resetRouteTracking(false)
     ensureRouteInstalled()
     refreshRemaining()
+    persistSession()
   }
   closeEditMode()
   following.value = true
@@ -1955,8 +2065,10 @@ async function initMap() {
     // Mode libre : vue d'ensemble de la Suisse jusqu'au premier fix GPS.
     center: hasRoute.value ? coords[0] : DEFAULT_CENTER,
     zoom: hasRoute.value ? 14 : DEFAULT_ZOOM,
-    pitch: camPitch.value,
-    maxPitch: CAM_PITCH_MAX,
+    // Caméra toujours à plat (économie de batterie) : maxPitch 0 verrouille aussi
+    // l'inclinaison au geste tactile.
+    pitch: 0,
+    maxPitch: 0,
     attributionControl: false,
     // Tap plus tolérant : on conduit d'un pouce, en mouvement, et un appui « simple »
     // dérive souvent de quelques pixels. Au seuil par défaut (3 px), MapLibre prend ce
@@ -2046,7 +2158,6 @@ async function initMap() {
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
-      applyTerrain()
       // Mode itinéraire (lien partagé chargé avant la carte) : installe le tracé et
       // cadre dessus avant le premier fix GPS. Mode libre : rien à installer.
       if (hasRoute.value && coords.length) {
@@ -2054,7 +2165,7 @@ async function initMap() {
         renderTurnMarkers()
         const b = new maplibre.LngLatBounds(coords[0], coords[0])
         coords.forEach((c) => b.extend(c))
-        map.fitBounds(b, { padding: 60, duration: 0, pitch: camPitch.value })
+        map.fitBounds(b, { padding: 60, duration: 0, pitch: 0 })
       }
       resolve()
     })
@@ -2269,7 +2380,6 @@ function setMapStyle(id: string) {
 function afterStyleLoad() {
   // Pas de couches de tracé à réinstaller en mode libre.
   if (hasRoute.value) installRouteLayers()
-  applyTerrain()
   // Replace le marqueur sur la position AFFICHÉE (snappée et décalée sur sa voie si on est
   // sur le tracé), pas sur le GPS brut, pour rester cohérent avec la boucle d'animation.
   const restore = anchorPos ?? lastPos
@@ -2594,7 +2704,7 @@ function onPosition(pos: GeolocationPosition) {
   updatePoiProximity(here)
 
   if (!hasInitialZoom) {
-    // First fix: a smooth intro that also applies the profile zoom & pitch once,
+    // First fix: a smooth intro that also applies the profile zoom once,
     // then the rAF loop takes over the camera. On affiche directement l'ancre
     // (snappée sur le tracé si on est dessus) plutôt que le GPS brut.
     updateLocationMarker(anchorPos ?? here)
@@ -2610,7 +2720,8 @@ function onPosition(pos: GeolocationPosition) {
 
 // Camera framing used whenever we follow the rider. The rider is anchored in the
 // lower third of the screen (via padding) so the look-ahead distance stays
-// constant frame to frame; the tilt and zoom come from the profile. The render
+// constant frame to frame; the camera stays flat (pitch 0) and the zoom comes
+// from the profile. The render
 // loop re-applies camZoom every frame, and a manual pinch writes its result back
 // into camZoom, so following tracks the pinch instead of fighting it.
 function followOptions(center: LngLat): any {
@@ -2618,7 +2729,7 @@ function followOptions(center: LngLat): any {
   const opts: any = {
     center,
     bearing: currentBearing,
-    pitch: camPitch.value,
+    pitch: 0,
     duration: 500,
     padding: followPadding(h),
   }
@@ -2715,7 +2826,7 @@ function startAnimation() {
       // Dézoom de découverte du prochain virage (sortie de veille) : ajusté avant le
       // jumpTo, borné au zoom du profil. Hors de ce cas, effectiveZoom() == camZoom.
       updateRevealZoom()
-      map.jumpTo({ center: pos, bearing: displayBearing, zoom: effectiveZoom(), pitch: camPitch.value, padding: followPadding(h) })
+      map.jumpTo({ center: pos, bearing: displayBearing, zoom: effectiveZoom(), pitch: 0, padding: followPadding(h) })
     }
 
     if (idle) { rafId = null; return }   // arrêt ; le prochain fix relance la boucle
@@ -2741,12 +2852,13 @@ function updateTurns(): boolean {
   // hors-tracé prend le relais. autoWakeForTurns gère déjà la mise en veille hors-tracé.
   if (offRoute.value) {
     turnHint.value = null
+    followTurns.value = []
     activeTurn = null
     activeTurnUrgent = false
     autoWakeForTurns(null)
     return false
   }
-  if (!turns.length) { turnHint.value = null; activeTurn = null; reachedTurn = null; return false }
+  if (!turns.length) { turnHint.value = null; followTurns.value = []; activeTurn = null; reachedTurn = null; return false }
   const here = snapDistAlongM
   // Avance le pointeur sur les virages dépassés (>5 m derrière), en mémorisant chacun
   // pour le maintien vert. Le décompte ne démarre donc qu'une fois le virage vraiment
@@ -2772,16 +2884,27 @@ function updateTurns(): boolean {
     activeTurn = { kind: turn.kind, direction: turn.direction }
     activeTurnUrgent = dist <= sportNav.value.turn_urgent_m
     // Entrée dans la zone orange : double buzz distinct, une seule fois par virage.
-    if (activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr) {
+    const enteringUrgent = activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr
+    if (enteringUrgent) {
       urgentBuzzedTurn = nextTurnPtr
       if (!alertsMuted.value && !turnAlertMuted.value) vibrateApproach()
     }
-    if (announcedTurn !== nextTurnPtr) {
+    // Deux déclencheurs d'annonce sonore par virage, chacun rejoué UNE fois à l'entrée
+    // de sa zone : la première détection (zone lointaine) et le passage en zone proche
+    // (orange). Chaque zone joue son propre paquet (turn_repeat[_urgent]_count lectures),
+    // indépendamment de la répétition périodique — sans quoi, répétition coupée, la zone
+    // proche resterait muette puisque seule tickTurnRepeat y sonnait. Si le virage
+    // apparaît déjà dans la zone proche, les deux déclencheurs coïncident : une seule
+    // annonce (compteur de la zone proche), pas de doublon.
+    const firstAnnounce = announcedTurn !== nextTurnPtr
+    if (firstAnnounce || enteringUrgent) {
       announcedTurn = nextTurnPtr
       lastTurnReminderMs = Date.now()
-      if (soundOn.value && !audioMuted.value && !turnAlertMuted.value) playManeuver(turn.kind, turn.direction)
-      // Vibration indépendante du son (perceptible téléphone en poche, vent fort).
-      if (!alertsMuted.value && !turnAlertMuted.value) vibrateManeuver(turn.kind)
+      const burst = activeTurnUrgent ? sportNav.value.turn_repeat_urgent_count : sportNav.value.turn_repeat_count
+      if (soundOn.value && !audioMuted.value && !turnAlertMuted.value) playManeuverBurst(turn.kind, turn.direction, burst)
+      // Vibration de manœuvre à la première détection seulement (l'entrée en zone orange
+      // a sa propre vibration, vibrateApproach ci-dessus).
+      if (firstAnnounce && !alertsMuted.value && !turnAlertMuted.value) vibrateManeuver(turn.kind)
       fired = true
     }
   } else {
@@ -2802,14 +2925,32 @@ function updateTurns(): boolean {
   const greenActive = reachedTurn != null
     && here - reachedTurn.distM < greenHoldM.value
     && Date.now() - reachedAtMs < greenHoldMs.value
+  // Rafale des virages qui suivent le prochain de près (≤ TURN_CHAIN_GAP_M entre chacun).
+  const chain = buildTurnChain(turns, nextTurnPtr, here, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX)
   if (turn && dist > sportNav.value.turn_now_m && dist <= sportNav.value.turn_hint_m) {
+    // Approche classique : prochain virage en grand + sa rafale en dessous.
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
+    followTurns.value = chain
+  } else if (turn && dist <= sportNav.value.turn_now_m && chain.length) {
+    // On est SUR le virage (zone verte), mais un autre le suit de près : on affiche déjà
+    // le suivant (plus utile qu'un maintien vert du virage qu'on est en train de prendre).
+    // On couvre aussi la fenêtre `dist` ∈ [−5, 0] (virage tout juste passé, pointeur pas
+    // encore avancé) — sinon le vert flasherait le premier virage à cet instant précis.
+    turnHint.value = chain[0]
+    followTurns.value = chain.slice(1)
+  } else if (turn && dist <= sportNav.value.turn_now_m) {
+    // Virage sur nous, sans virage rapproché derrière : confirmation verte.
+    turnHint.value = { direction: turn.direction, distM: 0, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'now' }
+    followTurns.value = []
   } else if (greenActive && reachedTurn) {
     turnHint.value = { direction: reachedTurn.direction, distM: 0, kind: reachedTurn.kind, angle: reachedTurn.angle, exitNumber: reachedTurn.exitNumber, state: 'now' }
+    followTurns.value = []
   } else if (turn && dist > 0) {
     turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'far' }
+    followTurns.value = []
   } else {
     turnHint.value = null
+    followTurns.value = []
   }
 
   // Confirmation verte (« now ») : on colore en vert SA pastille sur la carte, en
@@ -2874,14 +3015,21 @@ function muteTurnAlert() {
 
 // Répétition du son de virage, cadencée à turn_repeat_ms et non aux fixes GPS.
 // Un poll court (250 ms) suffit : la préférence est plafonnée à 500 ms mini.
+// Le paquet d'annonces (turn_repeat_count lectures à la suite) n'est rejoué que si la
+// répétition périodique est activée pour la zone courante (turn_repeat / turn_repeat_urgent) ;
+// sinon le virage n'est annoncé qu'une fois (au passage dans la zone d'alerte).
 function tickTurnRepeat() {
   updateAutoRerouteCountdown()
   if (!activeTurn || !soundOn.value || audioMuted.value || turnAlertMuted.value) return
+  const nav = sportNav.value
+  const enabled = activeTurnUrgent ? nav.turn_repeat_urgent : nav.turn_repeat
+  if (!enabled) return
   const now = Date.now()
-  const interval = activeTurnUrgent ? sportNav.value.turn_repeat_urgent_ms : sportNav.value.turn_repeat_ms
+  const interval = activeTurnUrgent ? nav.turn_repeat_urgent_ms : nav.turn_repeat_ms
   if (now - lastTurnReminderMs >= interval) {
     lastTurnReminderMs = now
-    playManeuver(activeTurn.kind, activeTurn.direction)
+    const burst = activeTurnUrgent ? nav.turn_repeat_urgent_count : nav.turn_repeat_count
+    playManeuverBurst(activeTurn.kind, activeTurn.direction, burst)
   }
 }
 
@@ -3022,6 +3170,14 @@ function updateProgress(idx: number) {
   remainingM.value = p.remainingM
   remainingGainM.value = p.remainingGainM
   doneRatio.value = p.doneRatio
+  // Détection d'arrivée : on a été clairement en route (au-delà de la zone d'arrivée),
+  // puis la distance restante retombe sous ARRIVAL_M, en étant toujours sur le tracé.
+  if (hasRoute.value && p.remainingM > ARRIVAL_M + 50) seenEnRoute = true
+  if (!arrived.value && seenEnRoute && !offRoute.value && p.remainingM <= ARRIVAL_M) {
+    arrived.value = true
+    if (soundOn.value && !audioMuted.value) playArrival()
+    if (!alertsMuted.value) vibrateArrival()
+  }
   // Débug : une carte de col factice est épinglée, on ne la réécrit pas depuis le GPS.
   if (dbgClimb.value) { refreshRemaining(); return }
   const ac = activeClimb(idx, climbs, cumDistM, snapDistAlongM)
@@ -3155,6 +3311,8 @@ function onScreenOffTap() {
     <NavScreenOff
       v-if="screenOff"
       :turn-hint="turnHint"
+      :follow-turns="followTurns"
+      :arrived="arrived"
       :has-fix="hasFix"
       :off-route="offRoute"
       :climb-info="isClimbing ? climbInfo : null"
@@ -3219,12 +3377,8 @@ function onScreenOffTap() {
       :edit-mode="editMode"
       :climb-card-visible="hasRoute ? showClimbCard : undefined"
       :radar-known="radarKnown"
-      v-model:cam-pitch="camPitch"
       v-model:cam-zoom="camZoom"
-      :terrain3d="terrain3d"
       :zoom-saved="zoomSaved"
-      :cam-pitch-min="CAM_PITCH_MIN"
-      :cam-pitch-max="CAM_PITCH_MAX"
       :cam-zoom-min="CAM_ZOOM_MIN"
       :cam-zoom-max="CAM_ZOOM_MAX"
       :poi-cats="POI_CATS"
@@ -3248,11 +3402,8 @@ function onScreenOffTap() {
       @update:sound-volume="setVolume"
       @toggle-climb-card="showClimbCard = !showClimbCard"
       @toggle-radar="toggleRadar"
-      @pitch-input="onPitchInput"
-      @persist-pitch-terrain="persistPitchTerrain"
       @zoom-input="onZoomInput"
       @save-zoom="saveZoomToProfile"
-      @toggle-terrain="toggleTerrain"
       @toggle-poi="pois.togglePoi"
       @search-pois="searchPois({ center: lastPos ?? undefined })"
       @search-pois-route="searchPois()"
@@ -3265,6 +3416,7 @@ function onScreenOffTap() {
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
       @toggle-debug-poi="toggleDebugPoi"
+      @reset-storage="resetNavigationState"
     />
 
     <!-- Toast transitoire : résultat d'une recherche POI (« autour de moi » / trajet). -->
@@ -3392,14 +3544,26 @@ function onScreenOffTap() {
     <!-- Upcoming turn indicator. Masqué en mode recherche : l'utilisateur a la tête
          dans la carte pour choisir une nouvelle destination, pas sur le tracé courant. -->
     <NavTurnBanner
-      v-if="turnHint && hasFix && !offRoute && !placeNavActive && !editMode && !poiBrowseActive"
+      v-if="turnHint && hasFix && !offRoute && !arrived && !placeNavActive && !editMode && !poiBrowseActive"
       :turn-hint="turnHint"
+      :follow-turns="followTurns"
       :urgent-m="sportNav.turn_urgent_m"
       :radar-banner-visible="radarBannerVisible"
       :speed-kmh="speedKmh"
       :muted="turnAlertMuted"
       @mute="muteTurnAlert"
     />
+
+    <!-- Arrivée à destination : carte centrée « vous êtes arrivé » (éveillé ; la version
+         veille est rendue par NavScreenOff). Masquée en édition / recherche / navigation
+         libre vers un POI, où la notion d'arrivée au tracé ne s'applique pas. -->
+    <div
+      v-if="arrived && hasFix && !placeNavActive && !editMode && !poiBrowseActive"
+      class="nav-arrived shadow"
+    >
+      <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+      <span class="nav-arrived-text">{{ t('routes.arrived') }}</span>
+    </div>
 
     <!-- GPS / off-route banners -->
     <div v-if="gpsError" class="nav-banner nav-banner--warn">
@@ -3621,6 +3785,20 @@ function onScreenOffTap() {
 .nav-offroute-bigarrow--sleep { z-index: 21; opacity: 1; }
 .nav-banner--warn { background: #fff3cd; color: #664d03; }
 .nav-banner--info { background: #cfe2ff; color: #084298; }
+
+/* Arrivée à destination : carte centrée, verte (cohérente avec le vert « virage atteint »),
+   drapeau à damier + « vous êtes arrivé ». z-index 8 : au-dessus des overlays de virage/POI
+   mais sous le tiroir de commandes (9). pointer-events: none — purement informatif. */
+.nav-arrived {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 8; pointer-events: none;
+  display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
+  background: #16a34a; color: #fff;
+  padding: 2.5rem 3.5rem; border-radius: 1.5rem;
+  text-align: center;
+}
+.nav-arrived i { font-size: 5rem; line-height: 1; }
+.nav-arrived-text { font-size: 2.4rem; font-weight: 700; line-height: 1.1; }
 
 /* Toast transitoire de résultat de recherche POI : centré en haut, au-dessus des
    panneaux (z 10), non interactif. Vert si abouti, rouge si échec. */

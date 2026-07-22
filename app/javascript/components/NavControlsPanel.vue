@@ -25,12 +25,8 @@ const props = defineProps<{
   routeSport: Sport
   routeProfile: string
   radarKnown: boolean
-  camPitch: number
   camZoom: number
-  terrain3d: boolean
   zoomSaved: boolean
-  camPitchMin: number
-  camPitchMax: number
   camZoomMin: number
   camZoomMax: number
   poiCats: PoiCategory[]
@@ -72,11 +68,8 @@ const emit = defineEmits<{
   (e: 'update:soundVolume', v: number): void
   (e: 'toggle-climb-card'): void
   (e: 'toggle-radar'): void
-  (e: 'pitch-input'): void
-  (e: 'persist-pitch-terrain'): void
   (e: 'zoom-input'): void
   (e: 'save-zoom'): void
-  (e: 'toggle-terrain'): void
   (e: 'toggle-poi', key: string): void
   (e: 'search-pois'): void
   (e: 'search-pois-route'): void
@@ -85,7 +78,7 @@ const emit = defineEmits<{
   (e: 'toggle-debug-climb'): void
   (e: 'cycle-debug-turn'): void
   (e: 'toggle-debug-poi'): void
-  (e: 'update:camPitch', v: number): void
+  (e: 'reset-storage'): void
   (e: 'update:camZoom', v: number): void
   (e: 'start-offline'): void
   (e: 'cancel-offline'): void
@@ -94,10 +87,6 @@ const emit = defineEmits<{
   (e: 'update:activePanel', v: string | null): void
 }>()
 
-function onPitch(e: Event) {
-  emit('update:camPitch', Number((e.target as HTMLInputElement).value))
-  emit('pitch-input')
-}
 function onZoom(e: Event) {
   emit('update:camZoom', Number((e.target as HTMLInputElement).value))
   emit('zoom-input')
@@ -123,6 +112,13 @@ function goBack() {
   const target = prevPanel.value
   prevPanel.value = null
   emit('update:activePanel', target)
+}
+
+// Réinitialise l'état de navigation persisté (progressions de reprise mémorisées). Utile
+// quand les alertes de virage/arrivée déraillent sur un tracé auto-recoupant. Confirmation
+// car l'action efface la reprise en cours.
+function onResetStorage() {
+  if (window.confirm(t('routes.nav_reset_confirm'))) emit('reset-storage')
 }
 
 const panelTitle = computed(() => {
@@ -280,6 +276,12 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
               @change="$emit('change-routing', $event)"
             />
           </div>
+          <!-- Dépannage : réinitialise l'état de navigation persisté (progressions de reprise)
+               quand les alertes de virage/arrivée déraillent sur un tracé auto-recoupant. -->
+          <button type="button" class="nav-route-action nav-route-action--danger" @click="onResetStorage()">
+            <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
+            <span>{{ t('routes.nav_reset') }}</span>
+          </button>
         </template>
 
         <!-- Hors-ligne -->
@@ -387,18 +389,6 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
         <!-- Caméra -->
         <template v-else-if="activePanel === 'cam'">
           <label class="nav-cam-row">
-            <span class="nav-cam-label">{{ t('routes.camera_pitch') }}</span>
-            <input
-              type="range"
-              class="form-range"
-              :min="camPitchMin" :max="camPitchMax" step="1"
-              :value="camPitch"
-              @input="onPitch"
-              @change="$emit('persist-pitch-terrain')"
-            />
-            <span class="nav-cam-val">{{ Math.round(camPitch) }}°</span>
-          </label>
-          <label class="nav-cam-row">
             <span class="nav-cam-label">{{ t('routes.camera_zoom') }}</span>
             <input
               type="range"
@@ -419,18 +409,6 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
             <i class="fa-solid" :class="zoomSaved ? 'fa-check' : 'fa-floppy-disk'" aria-hidden="true"></i>
             {{ zoomSaved ? t('routes.camera_zoom_saved') : t('routes.camera_save_zoom') }}
           </button>
-          <label class="nav-cam-row nav-cam-row--switch">
-            <span class="nav-cam-label">{{ t('routes.camera_3d') }}</span>
-            <span class="form-check form-switch m-0">
-              <input
-                class="form-check-input"
-                type="checkbox"
-                role="switch"
-                :checked="terrain3d"
-                @change="$emit('toggle-terrain')"
-              />
-            </span>
-          </label>
         </template>
 
         <!-- POI -->

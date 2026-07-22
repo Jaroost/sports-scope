@@ -2,6 +2,7 @@ Rails.application.routes.draw do
   scope "(:locale)", locale: /en|fr/ do
     root "pages#home"
     get "/dashboard", to: "pages#dashboard", as: :dashboard
+    get "/performance", to: "pages#performance", as: :performance
     get "/activities/:id", to: "activities#show", as: :activity, constraints: { id: /\d+/ }
     get "/imported_activities/:id", to: "activities#show_imported", as: :imported_activity, constraints: { id: /\d+/ }
     get "/routes", to: "pages#routes_index", as: :routes_index
@@ -16,8 +17,16 @@ Rails.application.routes.draw do
     # Read-only view of a route inside the builder UI — addressed by share_token,
     # public (works for signed-out recipients).
     get "/routes/:token/view", to: "pages#route_view", as: :view_route
+    # Page de partage : résumé public d'un itinéraire (aperçu, stats, liens vers la
+    # vue en lecture seule / la navigation / le GPX). C'est l'URL qu'on partage — elle
+    # porte les balises Open Graph qui produisent l'aperçu riche dans les messageries.
+    # Déclarée APRÈS /routes/new et /routes/:id/edit pour ne pas les capturer ; la
+    # contrainte distingue en plus le jeton (24 caractères) d'un identifiant.
+    get "/routes/:token", to: "pages#route_summary", as: :share_route,
+        constraints: { token: /[A-Za-z0-9_-]{20,}/ }
     get "/profile", to: "profiles#show", as: :profile
     delete "/profile/strava", to: "profiles#unlink_strava", as: :unlink_strava
+    delete "/profile/strava/activities", to: "profiles#delete_strava_activities", as: :delete_strava_activities
     # Suivi du cirage de chaîne (par vélo)
     get "/chains", to: "pages#chains", as: :chains
   end
@@ -42,10 +51,27 @@ Rails.application.routes.draw do
   # Strava activities (JSON consumed by Vue components)
   get "/strava/activities", to: "strava#activities", as: :strava_activities
   post "/strava/sync", to: "strava#sync", as: :strava_sync
+  post "/strava/refresh", to: "strava#refresh", as: :strava_refresh
+  get "/strava/backfill", to: "strava#backfill_status", as: :strava_backfill
+  post "/strava/backfill", to: "strava#backfill"
   get "/strava/activities/:id", to: "strava#show", as: :strava_activity, constraints: { id: /\d+/ }
   get "/strava/activities/:id/streams", to: "strava#streams", as: :strava_activity_streams, constraints: { id: /\d+/ }
   get "/strava/activities/:id/peak_power_ranks", to: "strava#peak_power_ranks", as: :strava_activity_peak_power_ranks, constraints: { id: /\d+/ }
+  get "/strava/activities/:id/zones", to: "strava#zones", as: :strava_activity_zones, constraints: { id: /\d+/ }
   get "/strava/activities/:id/photos", to: "strava#photos", as: :strava_activity_photos, constraints: { id: /\d+/ }
+
+  # Analyse de performance (records / cumuls / courbe de puissance — JSON pour Vue)
+  get "/api/performance", to: "performance#show", as: :api_performance
+  get "/api/performance/ftp", to: "performance#ftp", as: :api_performance_ftp
+  get "/api/performance/training_load", to: "performance#training_load", as: :api_performance_training_load
+
+  # Seuils physiologiques de l'athlète (FTP manuelle, poids — JSON pour Vue)
+  patch "/api/athlete", to: "profiles#update_athlete"
+
+  # Maintenance réservée aux administrateurs (déclenchée depuis l'UI)
+  namespace :admin do
+    post "/maintenance/backfill_derivations", to: "maintenance#backfill_derivations"
+  end
 
   # Geocoding proxy (avoids CORS when calling Nominatim from the browser)
   get "/api/geocode/places", to: "geocodes#places"
@@ -58,6 +84,8 @@ Rails.application.routes.draw do
   post "/api/routes", to: "routes#create"
   get "/api/routes/shared/:token", to: "routes#shared"
   get "/api/routes/shared/:token/gpx", to: "routes#export_gpx_shared"
+  # Vignette Open Graph de la page de partage (récupérée par les crawlers d'aperçu).
+  get "/api/routes/shared/:token/preview.png", to: "routes#preview_shared", as: :shared_route_preview
   get "/api/routes/:id", to: "routes#show", constraints: { id: /\d+/ }
   patch "/api/routes/:id", to: "routes#update", constraints: { id: /\d+/ }
   delete "/api/routes/:id", to: "routes#destroy", constraints: { id: /\d+/ }
@@ -71,17 +99,26 @@ Rails.application.routes.draw do
   patch "/api/pois/:id", to: "pois#update", constraints: { id: /\d+/ }
   delete "/api/pois/:id", to: "pois#destroy", constraints: { id: /\d+/ }
 
+  # Itinéraires prévus sur un jour (planification de la semaine — JSON pour Vue)
+  get "/api/planned_rides", to: "planned_rides#index"
+  post "/api/planned_rides", to: "planned_rides#create"
+  post "/api/planned_rides/reorder", to: "planned_rides#reorder"
+  patch "/api/planned_rides/:id", to: "planned_rides#update", constraints: { id: /\d+/ }
+  delete "/api/planned_rides/:id", to: "planned_rides#destroy", constraints: { id: /\d+/ }
+
   # Imported (FIT) activities (JSON consumed by Vue components)
   get "/api/imported_activities", to: "imported_activities#index"
   post "/api/imported_activities", to: "imported_activities#create"
   get "/api/imported_activities/:id", to: "imported_activities#show", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/streams", to: "imported_activities#streams", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/peak_power_ranks", to: "imported_activities#peak_power_ranks", constraints: { id: /\d+/ }
+  get "/api/imported_activities/:id/zones", to: "imported_activities#zones", constraints: { id: /\d+/ }
   delete "/api/imported_activities/:id", to: "imported_activities#destroy", constraints: { id: /\d+/ }
 
   # Bike chain waxing tracker (JSON consumed by Vue components)
   get    "/api/bikes", to: "bikes#index"
   patch  "/api/bikes/:id", to: "bikes#update", constraints: { id: /\d+/ }
+  delete "/api/bikes/:id", to: "bikes#destroy", constraints: { id: /\d+/ }
   post   "/api/bikes/:id/chains", to: "bikes#add_chain", constraints: { id: /\d+/ }
   post   "/api/bikes/:id/mount", to: "bikes#mount", constraints: { id: /\d+/ }
   patch  "/api/chains/:id", to: "chains#update", constraints: { id: /\d+/ }

@@ -4,6 +4,8 @@ import { haversine, streetViewUrl, bearingFromRoute } from '../routeHelpers'
 import type { Coord, LngLat } from '../routeHelpers'
 import { userPreferences } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
+import { markerMeta, markerKindLabel } from '../routeMarkers'
+import type { RouteMarker } from '../routeMarkers'
 import { savedPoisStore } from '../stores/savedPoisStore'
 
 // ─── Points d'intérêt de la navigation (POI ponctuels du profil) ───────────────
@@ -72,6 +74,10 @@ export function useNavPois(deps: {
   // POI sauvegardés (table `pois`) projetés en NavPlace : rendus en permanence, en plus
   // des POI Overpass. Alimentés depuis savedPoisStore (cf. bas du composable).
   const savedPlaces = ref<NavPlace[]>([])
+  // Repères posés à la main avec l'itinéraire (routes.markers : départ / arrivée /
+  // parking). Rendus en permanence, jamais filtrés par le panneau POI ni remplacés par
+  // une recherche Overpass. Le `type` porte le `kind` → icône/couleur via markerMeta.
+  const routeMarkers = ref<NavPlace[]>([])
   const placeEls = new Map<string, HTMLElement>()
   const placeKey = (p: NavPlace) => `${p.type}:${p.lng}:${p.lat}`
   let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
@@ -179,6 +185,19 @@ export function useNavPois(deps: {
     renderMarkers()
   }
 
+  // Installe les repères posés à la main avec l'itinéraire (routes.markers). Le `type`
+  // reprend le `kind` (start/finish/parking), résolu par markerMeta au rendu ; le nom
+  // affiché est le libellé saisi, sinon le libellé du type.
+  function setRouteMarkers(markers: RouteMarker[]) {
+    routeMarkers.value = markers.map((m) => ({
+      name: m.label || markerKindLabel(m.kind),
+      type: m.kind,
+      lng: m.lng,
+      lat: m.lat,
+    }))
+    renderMarkers()
+  }
+
   // Marqueur HTML persistant par POI (même look que le créateur), pour l'union des POI
   // Overpass (`places`) et sauvegardés (`savedPlaces`). Les marqueurs MapLibre sont des
   // overlays DOM, ils survivent à un setStyle — pas besoin de les réinstaller au
@@ -192,14 +211,18 @@ export function useNavPois(deps: {
     placeMarkers = []
     placeEls.clear()
     const overpassOrRoute = places.value.length > 0 ? places.value : routePlaces.value
-    for (const place of [...overpassOrRoute, ...savedPlaces.value]) {
+    for (const place of [...overpassOrRoute, ...savedPlaces.value, ...routeMarkers.value]) {
       const el = document.createElement('div')
       const cat = categoryForType(place.type)
-      const icon = cat?.icon ?? 'fa-location-dot'
+      // Repère d'itinéraire (départ/arrivée/parking) : pas une catégorie POI, on résout
+      // alors icône/couleur via le registre des repères (markerMeta).
+      const mk = cat ? undefined : markerMeta(place.type)
+      const icon = cat?.icon ?? mk?.icon ?? 'fa-location-dot'
       el.className = place.saved ? 'place-marker place-marker--saved' : 'place-marker'
-      // Couleur pilotée par le registre POI (currentColor → bordure / remplissage).
-      el.style.color = cat?.color ?? '#6b7280'
-      // Clé de catégorie : sert au filtrage d'affichage par le panneau de séance.
+      // Couleur pilotée par le registre POI/repère (currentColor → bordure / remplissage).
+      el.style.color = cat?.color ?? mk?.color ?? '#6b7280'
+      // Clé de catégorie : sert au filtrage d'affichage par le panneau de séance. Les
+      // repères d'itinéraire n'en ont pas → toujours visibles.
       if (cat) el.dataset.poiKey = cat.key
       el.title = place.name
       el.innerHTML = `<i class="fa-solid ${icon}" aria-hidden="true"></i>`
@@ -416,6 +439,7 @@ export function useNavPois(deps: {
   return {
     loadSavedPois,
     setRoutePlaces,
+    setRouteMarkers,
     POI_CATS,
     poiVisible,
     poiCounts,

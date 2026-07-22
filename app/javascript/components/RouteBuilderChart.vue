@@ -8,17 +8,28 @@ import {
   haversine, colorForGrade, geomIdxForKm,
   computeSegmentGrades, formatDuration,
 } from '../routeHelpers'
-import type { Sport } from '../userPreferences'
+import { useAthleteState } from '../composables/useAthleteState'
+import { estimateRouteLoad } from '../routeLoad'
+import { FEAS_COLOR } from '../composables/useTrainingPlan'
 
 const props = defineProps<{ simplified?: boolean }>()
 
-// Catégories d'activité — enregistrées avec l'itinéraire, pilotent la vitesse
-// moyenne. Réexposées ici car la barre de stats mobile remplace le panneau latéral.
-const ACTIVITIES = ['cycling', 'mtb', 'hiking'] as const
-
-function sportIcon(s: Sport) {
-  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
-}
+// TSS estimé de l'itinéraire ENTIER (comme le temps estimé voisin, et non la
+// sélection) : la barre mobile remplace le panneau latéral. Null = non estimable
+// (visiteur non connecté, compte sans activité) → pastille masquée.
+const { athlete } = useAthleteState()
+const routeLoad = computed(() => {
+  if (!athlete.value) return null
+  return estimateRouteLoad(
+    {
+      distanceM: routeStore.distanceM.value,
+      elevGainM: routeStore.elevGainM.value,
+      speedKmh: routeStore.avgSpeedKmh.value,
+      sport: routeStore.sport.value,
+    },
+    athlete.value,
+  )
+})
 
 const chartEl = useTemplateRef('chartEl')
 let chartInstance: any = null
@@ -772,21 +783,8 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
 
     <!-- ── Mode simplifié (mobile) ── -->
     <template v-if="props.simplified">
-      <!-- Type d'activité — seul accès sur mobile (le panneau latéral est masqué) -->
-      <div class="activity-toggle btn-group btn-group-sm w-100 mb-2" role="group" :aria-label="t('routes.wt_sport')">
-        <button
-          v-for="s in ACTIVITIES"
-          :key="s"
-          type="button"
-          class="btn"
-          :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
-          :aria-label="t(`routes.wt_sport_${s}`)"
-          @click="routeStore.setSport(s)"
-        >
-          <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
-          <span class="ms-1">{{ t(`routes.wt_sport_${s}`) }}</span>
-        </button>
-      </div>
+      <!-- Le type d'itinéraire (sport + profil de routage) est déplacé dans la modale
+           d'actions de la navbar sur téléphone (cf. RouteBuilder.vue). -->
       <div v-if="routeStore.hasGeometry.value" class="mobile-chart-stats">
         <span class="stat-pill stat-pill-distance">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
@@ -809,6 +807,47 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
             <small>km/h</small>
           </span>
         </span>
+        <span
+          v-if="routeLoad"
+          class="stat-pill stat-pill-tss"
+          :title="t('routes.tss.hint_short')"
+        >
+          <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+          <strong>{{ t('routes.tss.label') }} ≈ {{ routeLoad.tss }}</strong>
+          <small v-if="routeLoad.level" :style="{ color: FEAS_COLOR[routeLoad.level] }">
+            {{ t(`routes.tss.level_${routeLoad.level}`) }}
+          </small>
+        </span>
+      </div>
+      <!-- Actions sur la sélection (mobile) : apparaissent dès qu'une plage est
+           sélectionnée au doigt sur le profil d'altitude. -->
+      <div v-if="selectionStore.selectionRange.value" class="mobile-selection-actions">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary"
+          :title="t('routes.zoom_to_selection')"
+          @click="zoomToSelection"
+        >
+          <i class="fa-solid fa-magnifying-glass-plus" aria-hidden="true"></i>
+        </button>
+        <button
+          v-if="!routeStore.readOnly.value"
+          type="button"
+          class="btn btn-sm btn-primary d-inline-flex align-items-center gap-1"
+          :title="t('routes.propose_alternatives')"
+          @click="$emit('propose-alternatives')"
+        >
+          <i class="fa-solid fa-code-branch" aria-hidden="true"></i>
+          <span>{{ t('routes.alternatives_short') }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-danger ms-auto"
+          :title="t('routes.clear_selection')"
+          @click="clearSelection"
+        >
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
       </div>
       <div class="card-body route-builder-chart-card-body">
         <div v-if="routeStore.isFetchingElevation.value" class="mobile-chart-loading">
@@ -970,6 +1009,8 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
 .stat-pill-up       { background: rgba(25, 135, 84, 0.12); color: #15803d; }
 .stat-pill-down     { background: rgba(220, 53, 69, 0.12); color: #b02a37; }
 .stat-pill-grade    { background: rgba(108, 117, 125, 0.12); color: #495057; }
+.stat-pill-tss      { background: rgba(111, 66, 193, 0.12); color: #6f42c1; gap: 0.4rem; }
+.stat-pill-tss small { font-weight: 600; font-size: 0.72rem; }
 .grade-icon {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-weight: 700;
@@ -978,6 +1019,13 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
   display: inline-block;
 }
 /* ── Mobile simplified header ── */
+.mobile-selection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.1rem 0.75rem 0.5rem;
+}
 .mobile-chart-stats {
   display: flex;
   flex-wrap: wrap;

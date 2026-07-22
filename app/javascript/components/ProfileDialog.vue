@@ -14,6 +14,8 @@ const props = defineProps<{
   stravaLinked: boolean
   canLinkStrava: boolean
   unlinkPath: string
+  deleteActivitiesPath: string
+  hasStravaActivities: boolean
 }>()
 
 const modalEl = ref<HTMLElement | null>(null)
@@ -63,6 +65,10 @@ function confirmUnlink(e: Event) {
   if (!window.confirm(t('profile.strava.unlink_confirm'))) e.preventDefault()
 }
 
+function confirmDeleteActivities(e: Event) {
+  if (!window.confirm(t('profile.strava.delete_activities_confirm'))) e.preventDefault()
+}
+
 onMounted(() => {
   if (!modalEl.value) return
   modal = new Modal(modalEl.value)
@@ -89,7 +95,10 @@ onBeforeUnmount(() => {
           </h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" :aria-label="t('strava.close')"></button>
         </div>
-        <div class="modal-body">
+        <!-- Ici le conteneur de défilement est le .modal-body lui-même, pas la fenêtre :
+             le sélecteur de sport de UserProfile se colle à son bord haut, sans l'offset
+             de navbar qu'il applique sur la page /profile. -->
+        <div class="modal-body" style="--sport-picker-top: 0">
           <!-- Compte Strava — mêmes actions que la page /profile (navigation pleine page). -->
           <section v-if="showSection('strava')" class="card mb-3 shadow-sm">
             <div class="card-header d-flex align-items-center gap-2">
@@ -97,17 +106,32 @@ onBeforeUnmount(() => {
               <h2 class="h6 mb-0">{{ t('profile.strava.title') }}</h2>
             </div>
             <div class="card-body">
-              <div v-if="stravaLinked" class="d-flex align-items-center gap-3 flex-wrap">
-                <span class="badge bg-success-subtle text-success d-inline-flex align-items-center gap-1 fs-6">
-                  <i class="fa-solid fa-circle-check" aria-hidden="true"></i>{{ t('profile.strava.connected') }}
-                </span>
-                <form :action="unlinkPath" method="post" class="ms-sm-auto" @submit="confirmUnlink">
-                  <input type="hidden" name="_method" value="delete" />
-                  <input type="hidden" name="authenticity_token" :value="csrfToken()" />
-                  <button type="submit" class="btn btn-outline-danger btn-sm">
-                    <i class="fa-solid fa-link-slash me-1" aria-hidden="true"></i>{{ t('profile.strava.unlink') }}
-                  </button>
-                </form>
+              <div v-if="stravaLinked">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                  <span class="badge bg-success-subtle text-success d-inline-flex align-items-center gap-1 fs-6">
+                    <i class="fa-solid fa-circle-check" aria-hidden="true"></i>{{ t('profile.strava.connected') }}
+                  </span>
+                  <form :action="unlinkPath" method="post" class="ms-sm-auto" @submit="confirmUnlink">
+                    <input type="hidden" name="_method" value="delete" />
+                    <input type="hidden" name="authenticity_token" :value="csrfToken()" />
+                    <button type="submit" class="btn btn-outline-danger btn-sm">
+                      <i class="fa-solid fa-link-slash me-1" aria-hidden="true"></i>{{ t('profile.strava.unlink') }}
+                    </button>
+                  </form>
+                </div>
+                <template v-if="hasStravaActivities">
+                  <hr class="my-3" />
+                  <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <p class="text-muted small mb-0">{{ t('profile.strava.delete_activities_help') }}</p>
+                    <form :action="deleteActivitiesPath" method="post" class="ms-sm-auto" @submit="confirmDeleteActivities">
+                      <input type="hidden" name="_method" value="delete" />
+                      <input type="hidden" name="authenticity_token" :value="csrfToken()" />
+                      <button type="submit" class="btn btn-outline-danger btn-sm">
+                        <i class="fa-solid fa-trash me-1" aria-hidden="true"></i>{{ t('profile.strava.delete_activities') }}
+                      </button>
+                    </form>
+                  </div>
+                </template>
               </div>
               <template v-else-if="canLinkStrava">
                 <p class="text-muted small mb-3">{{ t('profile.strava.help') }}</p>

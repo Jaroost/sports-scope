@@ -40,6 +40,10 @@
           <i class="fa-solid fa-mountain-sun text-warning" aria-hidden="true"></i>
           <span class="d-none d-md-inline"><%= t("app.title") %></span>
         <% end %>
+        <%# Rappel du type d'itinéraire, téléporté ici par RouteBuilder.vue sur téléphone.
+            `me-auto` colle la pastille au logo : la marge auto absorbe l'espace à sa
+            droite au lieu de laisser le justify-content: space-between l'en écarter. %>
+        <span id="rb-brand-type" class="d-md-none me-auto"></span>
         <%= yield :navbar_actions %>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
           <span class="navbar-toggler-icon"></span>
@@ -55,7 +59,7 @@
                     <span data-vue-component="NewRouteButton" data-vue-props='<%= { variant: "nav" }.to_json %>'></span>
                   <% else %>
                     <%= link_to item[:path], class: "nav-link" do %>
-                      <i class="fa-solid <%= item[:icon] %> me-1" aria-hidden="true"></i><%= item[:label] %>
+                      <i class="fa-solid <%= item[:icon] %> me-1" aria-hidden="true"></i><span class="nav-label"><%= item[:label] %></span>
                     <% end %>
                   <% end %>
                 </li>
@@ -67,7 +71,7 @@
               <li class="nav-item dropdown">
                 <a class="nav-link dropdown-toggle d-flex align-items-center gap-2" href="#" id="userMenu" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                   <i class="fa-solid fa-circle-user fa-lg" aria-hidden="true"></i>
-                  <span><%= current_user.display_name %></span>
+                  <span class="nav-label"><%= current_user.display_name %></span>
                 </a>
                 <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userMenu">
                   <li><h6 class="dropdown-header"><%= t("nav.language") %></h6></li>
@@ -85,9 +89,9 @@
                   </li>
                   <li><hr class="dropdown-divider"></li>
                   <li>
-                    <button type="button" class="dropdown-item" data-profile-trigger>
+                    <%= link_to profile_path, class: "dropdown-item" do %>
                       <i class="fa-solid fa-sliders me-2" aria-hidden="true"></i><%= t("nav.profile") %>
-                    </button>
+                    <% end %>
                   </li>
                   <li>
                     <%= button_to logout_path, method: :delete, class: "dropdown-item", data: { turbo: false } do %>
@@ -115,14 +119,14 @@
     </nav>
     <% end %>
 
-    <main class="<%= content_for?(:container_class) ? yield(:container_class) : 'container' %>">
+    <main class="<%= content_for?(:container_class) ? yield(:container_class) : 'container my-3' %>">
       <% if notice %>
-        <div class="alert alert-success d-flex align-items-center gap-2">
+        <div class="alert alert-success d-flex align-items-center gap-2 mt-3">
           <i class="fa-solid fa-circle-check" aria-hidden="true"></i><span><%= notice %></span>
         </div>
       <% end %>
       <% if alert %>
-        <div class="alert alert-warning d-flex align-items-center gap-2">
+        <div class="alert alert-warning d-flex align-items-center gap-2 mt-3">
           <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><span><%= alert %></span>
         </div>
       <% end %>
@@ -136,7 +140,9 @@
             defaults: User::DEFAULT_PREFERENCES,
             stravaLinked: current_user.strava_linked?,
             canLinkStrava: can?(:link, :strava),
-            unlinkPath: unlink_strava_path
+            unlinkPath: unlink_strava_path,
+            deleteActivitiesPath: delete_strava_activities_path,
+            hasStravaActivities: current_user.strava_activities.exists?
           }.to_json %>'></div>
     <% end %>
 

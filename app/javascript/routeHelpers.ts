@@ -379,16 +379,35 @@ export function buildGradedSegments(
   return features
 }
 
-export function computeGainLoss(coords: Coord[]): { gain: number; loss: number } {
+// D+/D- d'une géométrie d'itinéraire. L'altitude BRouter/SRTM est quantifiée au
+// mètre et la géométrie est dense (sommets espacés de ~1–2 m) : accumuler chaque
+// écart brut sommet-à-sommet gonfle le dénivelé (chaque +1 m de bruit compte).
+// On lisse donc l'altitude par moyenne mobile (fenêtre 2*halfWin+1) avant
+// d'accumuler — même approche que computeElevGain côté activités, pour que le D+
+// d'un itinéraire et celui de l'activité correspondante concordent.
+export function computeGainLoss(coords: Coord[], halfWin = 2): { gain: number; loss: number } {
+  const n = coords.length
   let gain = 0
   let loss = 0
-  for (let i = 1; i < coords.length; i++) {
-    const a = coords[i - 1][2]
-    const b = coords[i][2]
-    if (a == null || b == null) continue
-    const d = b - a
-    if (d > 0) gain += d
-    else loss += -d
+  let prev: number | null = null
+  for (let i = 0; i < n; i++) {
+    let sum = 0
+    let cnt = 0
+    for (let j = Math.max(0, i - halfWin); j <= Math.min(n - 1, i + halfWin); j++) {
+      const a = coords[j][2]
+      if (a != null) {
+        sum += a
+        cnt++
+      }
+    }
+    if (cnt === 0) continue
+    const smooth = sum / cnt
+    if (prev != null) {
+      const d = smooth - prev
+      if (d > 0) gain += d
+      else loss += -d
+    }
+    prev = smooth
   }
   return { gain, loss }
 }
@@ -912,12 +931,13 @@ export function detectTurns(
 // un crochet pour aller le chercher puis revenir, ce qui empile 2–3 virages au même
 // endroit et fausse la navigation (instructions contradictoires en quelques mètres).
 export interface TurnAnomaly {
+  kind: 'cluster' | 'uturn' // amas de virages, ou demi-tour isolé
   idx: number         // sommet géométrique du virage le plus marqué de l'amas
   lng: number
   lat: number
   distM: number       // distance cumulée jusqu'à l'amas
-  count: number       // nombre de virages dans l'amas
-  waypointIdx: number // point d'étape en cause (-1 si les waypoints n'ont pas été fournis)
+  count: number       // nombre de virages dans l'amas (1 pour un demi-tour isolé)
+  waypointIdx: number // point d'étape en cause (-1 si aucun à portée / non fournis)
 }
 
 // Emprise d'un rond-point : rayon autour du hint RNDB dans lequel les virages voisins
@@ -1034,11 +1054,59 @@ export function detectTurnAnomalies(
         if (waypointIdx < 0) { i = j + 1; continue }
       }
       const [lng, lat] = pos(sharp)
-      out.push({ idx: sharp.idx, lng, lat, distM: sharp.distM, count, waypointIdx })
+      out.push({ kind: 'cluster', idx: sharp.idx, lng, lat, distM: sharp.distM, count, waypointIdx })
       i = j + 1
     } else {
       i++
     }
+  }
+  return out
+}
+
+// Rayon dans lequel un demi-tour est imputé à un point d'étape. Mesuré sur la base :
+// les demi-tours réels sont à 0–7 m de leur point (BRouter accroche le waypoint sur la
+// voie), 20 m pour le cas extrême ; 25 m couvre donc tout sans mordre sur le point suivant.
+const UTURN_WP_RADIUS_M = 25
+
+// Repère les demi-tours, seconde signature d'un point d'étape mal posé — et la seule que
+// `detectTurnAnomalies` ne peut pas voir. Un point posé sur une impasse fait sortir BRouter
+// de la route, aller au point, faire demi-tour et revenir : les virages d'entrée/sortie du
+// crochet sont alors à la LONGUEUR DE L'IMPASSE du demi-tour (220 m sur un cas réel), donc
+// bien au-delà du diamètre d'un amas. On ne cherche donc pas une densité de virages mais le
+// demi-tour lui-même, qui suffit : le `turncost` de BRouter le rend si coûteux qu'il n'en
+// fait jamais spontanément — seul un point d'étape à atteindre puis à quitter l'y force.
+//
+// Trois exceptions, toutes vérifiées sur la base :
+//   • le demi-tour ancré sur le PREMIER point : sans cap connu, BRouter peut partir à
+//     l'envers puis se retourner (cf. headingParam dans navRoute.ts) — artefact, pas erreur.
+//   • le demi-tour ancré sur le DERNIER point : on y arrive et on s'arrête, le demi-tour
+//     n'est jamais exécuté. Surtout, sur une boucle (le cas le plus courant) l'arrivée est
+//     posée sur le départ : l'artefact du départ est alors à égale distance des deux, et
+//     nearestWaypoint tranche les ex æquo en faveur du dernier index. Sans cette exception
+//     l'artefact ressortirait donc en fin de tracé, là où l'exclusion du premier point ne
+//     le rattrape pas.
+//   • un point marqué `uturn_ok` : l'aller-retour est délibéré (sommet, point de vue), et
+//     la géométrie seule ne distingue pas ce cas d'un point mal posé — l'utilisateur tranche.
+export function detectUturnAnomalies(
+  turns: TurnPoint[],
+  geometry: Coord[],
+  opts: { waypoints?: LngLat[]; uturnOk?: boolean[]; radiusM?: number } = {},
+): TurnAnomaly[] {
+  const radiusM = opts.radiusM ?? UTURN_WP_RADIUS_M
+  const waypoints = opts.waypoints ?? []
+  const out: TurnAnomaly[] = []
+  if (!geometry.length) return out
+  for (const t of turns) {
+    if (t.kind !== 'uturn') continue
+    const g = geometry[t.idx]
+    if (!g) continue
+    const p: LngLat = [g[0], g[1]]
+    const waypointIdx = nearestWaypoint([p], waypoints, radiusM)
+    // `waypointIdx >= 0` protège le cas sans waypoints : nearestWaypoint renvoie alors -1,
+    // qui vaut aussi `waypoints.length - 1` sur une liste vide.
+    if (waypointIdx >= 0 && (waypointIdx === 0 || waypointIdx === waypoints.length - 1)) continue
+    if (waypointIdx >= 0 && opts.uturnOk?.[waypointIdx]) continue
+    out.push({ kind: 'uturn', idx: t.idx, lng: p[0], lat: p[1], distM: t.distM, count: 1, waypointIdx })
   }
   return out
 }

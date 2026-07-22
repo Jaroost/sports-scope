@@ -78,6 +78,7 @@ services:
       DATABASE_PORT: 5432
       DATABASE_USER: ${POSTGRES_USER:-postgres}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      OSM_POI_DATABASE: ${OSM_POI_DATABASE:-osm_pois_development}
       VITE_RUBY_HOST: ${VITE_HOST:-vite.localtest.me}
       VITE_RUBY_PORT: 443
       VITE_RUBY_HTTPS: "true"
@@ -109,12 +110,117 @@ services:
         condition: service_started
       vite:
         condition: service_started
+      brouter:
+        condition: service_healthy
+      poi-sync:
+        condition: service_healthy
     labels:
       <<: *traefik-defaults
       traefik.http.routers.rails.rule: "Host(`${APP_HOST:-app.localtest.me}`)"
       traefik.http.routers.rails.entrypoints: websecure
       traefik.http.routers.rails.tls: "true"
       traefik.http.services.rails.loadbalancer.server.port: "3000"
+
+  brouter:
+    build:
+      context: ./deploy/brouter
+    image: sports-scope-brouter:1.7.10
+    restart: unless-stopped
+    environment:
+      BROUTER_XMX: ${BROUTER_XMX:-1500m}
+      BROUTER_THREADS: ${BROUTER_THREADS:-4}
+    volumes:
+      - brouter_segments:/segments4
+      - brouter_profiles:/profiles2
+    networks:
+      - default
+      - proxy
+    depends_on:
+      # Le moteur n'est démarré qu'une fois les données exploitables (au moins une
+      # tuile + lookups.dat). Bloquant uniquement au tout premier boot : le marqueur
+      # vit dans le volume.
+      brouter-sync:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:17777/robots.txt"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      <<: *traefik-defaults
+      # Servi sous le domaine de l'app : même origine, donc pas de CORS ni de
+      # certificat supplémentaire. La priorité explicite passe devant le router
+      # `rails` (Host seul). Method(GET) neutralise l'endpoint d'upload de profil
+      # (POST /brouter/profile) exposé par RouteServer — l'app ne fait que des GET.
+      traefik.http.routers.brouter.rule: "Host(`${APP_HOST:-app.localtest.me}`) && PathPrefix(`/brouter`) && Method(`GET`)"
+      traefik.http.routers.brouter.priority: "100"
+      traefik.http.routers.brouter.entrypoints: websecure
+      traefik.http.routers.brouter.tls: "true"
+      traefik.http.services.brouter.loadbalancer.server.port: "17777"
+
+  # Bootstrap + rafraîchissement des données de routage (tuiles .rd5, profils,
+  # lookups.dat). Premier démarrage : ~3,4 Go pour l'Europe.
+  brouter-sync:
+    image: alpine:3.20
+    restart: unless-stopped
+    environment:
+      BROUTER_BBOX: ${BROUTER_BBOX:--30,30,45,70}
+      BROUTER_SYNC_INTERVAL: ${BROUTER_SYNC_INTERVAL:-604800}
+    volumes:
+      - brouter_segments:/segments4
+      - brouter_profiles:/profiles2
+      - ./deploy/brouter/sync.sh:/sync.sh:ro
+      - ./deploy/brouter/profiles:/profiles-overlay:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        apk add --no-cache bash curl coreutils >/dev/null &&
+        while true; do bash /sync.sh; sleep "$$BROUTER_SYNC_INTERVAL"; done
+    healthcheck:
+      # « Sain » = il y a des données à servir. start_period couvre le premier
+      # téléchargement (~3,4 Go) sans que les échecs comptent comme des retries.
+      test: ["CMD-SHELL", "test -f /segments4/.sync-complete"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 7200s
+    networks:
+      - default
+
+  # POI auto-hébergés : importe les points d'intérêt OpenStreetMap dans la base
+  # `osm_pois_development` (remplace les appels à overpass-api.de). Rien n'est
+  # exposé — `rails` lit directement PostgreSQL. Comme pour brouter, `rails`
+  # attend que le catalogue soit exploitable (marqueur `.sync-complete`) : seul le
+  # tout premier boot attend l'import (~2 Go d'extraits Geofabrik), le marqueur
+  # vivant dans le volume.
+  poi-sync:
+    build:
+      context: ./deploy/osm-pois
+    image: sports-scope-poi-sync:1
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      OSM_POI_DATABASE: ${OSM_POI_DATABASE:-osm_pois_development}
+      OSM_POI_REGIONS: ${OSM_POI_REGIONS:-}
+      OSM_POI_SYNC_INTERVAL: ${OSM_POI_SYNC_INTERVAL:-604800}
+    volumes:
+      - osm_pois_data:/data
+    networks:
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      # « Sain » = il y a des POI en base. start_period couvre le premier import
+      # sans que les échecs comptent comme des retries.
+      test: ["CMD-SHELL", "test -f /data/.sync-complete"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 3600s
 
   vite:
     image: sports-scope-app
@@ -147,6 +253,9 @@ volumes:
   db_data:
   bundle_cache:
   node_modules_cache:
+  brouter_segments:
+  brouter_profiles:
+  osm_pois_data:
 
 networks:
   default:

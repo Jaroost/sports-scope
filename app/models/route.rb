@@ -7,6 +7,9 @@ class Route < ApplicationRecord
   belongs_to :user
   # Traces d'ouverture par d'autres utilisateurs (via lien partagé) — purgées avec l'itinéraire.
   has_many :opened_routes, dependent: :destroy
+  # Jours où cet itinéraire est prévu : un itinéraire supprimé ne doit pas laisser
+  # de plan orphelin dans la semaine.
+  has_many :planned_rides, dependent: :destroy
   # Unguessable token for public, shareable navigation links.
   has_secure_token :share_token
   validates :name, presence: true, length: { maximum: 80 }
@@ -18,6 +21,12 @@ class Route < ApplicationRecord
   # d'envoyer les milliers de points au listing. Recalculé seulement quand la
   # géométrie change (création, édition, import GPX, duplication).
   before_save :assign_geometry_derivatives, if: :will_save_change_to_geometry?
+
+  # Lieux traversés (`localities`) : extraits du catalogue OSM en tâche de fond à chaque
+  # changement de tracé, pour la recherche par lieu dans la liste. after_commit —
+  # le job doit voir la géométrie enregistrée, et ne pas partir si la transaction
+  # est annulée.
+  after_commit :extract_localities_later, on: %i[create update], if: :saved_change_to_geometry?
 
   # Côté SVG rendu : viewBox carré `0 0 100 100`. Le tracé est projeté, mis à
   # l'échelle pour tenir dans la boîte (avec marge), et centré.
@@ -52,6 +61,21 @@ class Route < ApplicationRecord
   # 0 0 100 100). Retourne nil si moins de 2 points exploitables. Catégories :
   # 0 = plat, 1 = montée, 2 = descente.
   def self.build_preview_segments(geometry)
+    runs = preview_runs(geometry)
+    return nil unless runs
+
+    runs.map do |run|
+      coords = run[:points].map { |x, y| "#{format('%.1f', x)},#{format('%.1f', y)}" }
+      { "c" => run[:cat], "d" => "M#{coords.first} L#{coords.drop(1).join(' ')}" }
+    end
+  end
+
+  # Runs de pente homogène en coordonnées écran numériques `[[x, y], ...]`, dans une
+  # boîte `width` × `height`. Base commune de l'aperçu SVG (liste, page de partage,
+  # boîte carrée) et de la vignette PNG Open Graph (cf. RoutePreviewImage, boîte
+  # paysage), qui n'a que faire des chaînes de path. Retourne nil si moins de 2
+  # points exploitables.
+  def self.preview_runs(geometry, width: PREVIEW_SIZE, height: width, padding: PREVIEW_PADDING)
     pts = Array(geometry).filter_map do |pt|
       lng, lat, ele = pt[0], pt[1], pt[2]
       next unless lng.is_a?(Numeric) && lat.is_a?(Numeric)
@@ -60,7 +84,7 @@ class Route < ApplicationRecord
     return nil if pts.size < 2
 
     pts = downsample(pts, PREVIEW_MAX_POINTS)
-    screen = project_to_screen(pts)
+    screen = project_to_screen(pts, width: width, height: height, padding: padding)
 
     # Catégorie de pente pour chaque segment [i, i+1].
     cats = pts.each_cons(2).map { |a, b| segment_category(a, b) }
@@ -76,32 +100,33 @@ class Route < ApplicationRecord
       end
     end
 
-    runs.map do |run|
-      coords = screen[run[:first]..run[:last]]
-      d = "M#{coords.first} L#{coords.drop(1).join(' ')}"
-      { "c" => run[:cat], "d" => d }
-    end
+    runs.map { |run| { cat: run[:cat], points: screen[run[:first]..run[:last]] } }
   end
 
-  # Projette les points en coordonnées écran (chaînes "x,y") dans la boîte carrée,
-  # ratio préservé (compression cos(lat)), centré, nord en haut.
-  def self.project_to_screen(pts)
+  # Projette les points en coordonnées écran `[x, y]` dans la boîte `width` × `height`,
+  # ratio préservé (compression cos(lat)), centré dans les deux axes, nord en haut.
+  def self.project_to_screen(pts, width: PREVIEW_SIZE, height: width, padding: PREVIEW_PADDING)
     mean_lat = pts.sum { |_, lat, _| lat } / pts.size
     cos_lat = Math.cos(mean_lat * Math::PI / 180)
     proj = pts.map { |lng, lat, _| [lng * cos_lat, lat] }
 
     min_x, max_x = proj.map(&:first).minmax
     min_y, max_y = proj.map(&:last).minmax
-    inner = PREVIEW_SIZE - 2 * PREVIEW_PADDING
-    scale = inner / [max_x - min_x, max_y - min_y, 1e-9].max
-    off_x = PREVIEW_PADDING + (inner - (max_x - min_x) * scale) / 2
-    off_y = PREVIEW_PADDING + (inner - (max_y - min_y) * scale) / 2
+    span_x = [max_x - min_x, 1e-9].max
+    span_y = [max_y - min_y, 1e-9].max
+    inner_w = width - 2 * padding
+    inner_h = height - 2 * padding
+    # L'échelle est commune aux deux axes (sinon le tracé est déformé) : c'est la
+    # dimension la plus contrainte qui la fixe.
+    scale = [inner_w / span_x, inner_h / span_y].min
+    off_x = padding + (inner_w - span_x * scale) / 2
+    off_y = padding + (inner_h - span_y * scale) / 2
 
     proj.map do |x, y|
       px = off_x + (x - min_x) * scale
       # SVG : l'axe y descend, donc on inverse (nord en haut).
-      py = PREVIEW_SIZE - (off_y + (y - min_y) * scale)
-      "#{format('%.1f', px)},#{format('%.1f', py)}"
+      py = height - (off_y + (y - min_y) * scale)
+      [px, py]
     end
   end
 
@@ -128,6 +153,30 @@ class Route < ApplicationRecord
     2 * r * Math.asin(Math.sqrt(h))
   end
 
+  # Bornes de la vitesse enregistrée — mêmes que le front (speedForSport,
+  # userPreferences.ts) : au-delà, la valeur ne vient pas d'un réglage sensé.
+  SPEED_RANGE = (3.0..80.0)
+
+  # Vitesse moyenne (km/h) servant à l'estimation de durée. La valeur enregistrée avec
+  # l'itinéraire prime — le créateur a pu l'ajuster pour ce tracé précis, et la page de
+  # partage doit annoncer ce qu'il voyait. À défaut (itinéraires d'avant la colonne),
+  # on retombe sur le réglage du profil pour ce sport, miroir serveur de speedForSport().
+  def avg_speed_kmh
+    return self[:avg_speed_kmh].to_f if SPEED_RANGE.cover?(self[:avg_speed_kmh].to_f)
+    speed = user&.preferences_with_defaults&.dig("sports", activity, "speed")
+    return speed.to_f if speed.is_a?(Numeric) && SPEED_RANGE.cover?(speed.to_f)
+    User::DEFAULT_PREFERENCES.dig("sports", activity, "speed").to_f
+  end
+
+  # Durée estimée (s) — miroir serveur de routeStore.estimatedSeconds (routeStore.ts).
+  # Les deux formules doivent rester alignées : la page de partage et le créateur
+  # affichent la même estimation pour un même itinéraire.
+  def estimated_seconds
+    v = avg_speed_kmh
+    return 0 unless distance_m.to_f.positive? && v.positive?
+    ((distance_m.to_f / 1000) / v * 3600).round
+  end
+
   # Sous-échantillonnage régulier à au plus `max` points, dernier point conservé.
   def self.downsample(pts, max)
     return pts if pts.size <= max
@@ -142,5 +191,9 @@ class Route < ApplicationRecord
   def assign_geometry_derivatives
     self.preview_segments = self.class.build_preview_segments(geometry)
     self.map_polyline = self.class.build_map_polyline(geometry)
+  end
+
+  def extract_localities_later
+    ExtractRouteLocalitiesJob.perform_later(id)
   end
 end

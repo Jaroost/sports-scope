@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Modal } from 'bootstrap'
 import { t } from '../i18n'
+import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
 
 // compact : sur le tableau de bord on n'affiche que la chaîne montée de chaque vélo
 // + un lien vers la page dédiée. En mode complet (/chains) on gère tout.
@@ -223,6 +224,19 @@ function confirmMountNext() {
 function setDefault(bike: any) {
   run(() => api(`/api/bikes/${bike.id}`, 'PATCH', { is_default: true }))
 }
+async function removeBike(bike: any) {
+  if (!window.confirm(t('chains.delete_bike_confirm'))) return
+  error.value = null
+  try {
+    await api(`/api/bikes/${bike.id}`, 'DELETE')
+    bikes.value = bikes.value.filter((b) => b.id !== bike.id)
+    // Le vélo par défaut supprimé est promu côté serveur : on relit pour refléter
+    // le nouveau vélo par défaut (badge + rattachement des km).
+    if (bike.is_default && bikes.value.length) fetchBikes()
+  } catch (e: any) {
+    error.value = e.message
+  }
+}
 function toggleWax(bike: any) {
   run(() => api(`/api/bikes/${bike.id}`, 'PATCH', { uses_wax: bike.uses_wax === false }))
 }
@@ -259,8 +273,18 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString()
 }
 
-onMounted(() => fetchBikes())
-onBeforeUnmount(() => mountModal?.dispose())
+// Recharge les vélos (km à jour) quand le bouton unique « Tout rafraîchir » de la
+// page a terminé sa synchronisation Strava (îlots séparés → coordination par événement).
+function onStravaRefreshed() { fetchBikes() }
+
+onMounted(() => {
+  fetchBikes()
+  window.addEventListener(STRAVA_REFRESHED_EVENT, onStravaRefreshed)
+})
+onBeforeUnmount(() => {
+  mountModal?.dispose()
+  window.removeEventListener(STRAVA_REFRESHED_EVENT, onStravaRefreshed)
+})
 </script>
 
 <template>
@@ -283,20 +307,7 @@ onBeforeUnmount(() => mountModal?.dispose())
           <i class="fa-solid fa-link text-warning" aria-hidden="true"></i>
           <span>{{ t('chains.title') }}</span>
         </h2>
-        <button
-          type="button"
-          class="btn btn-sm btn-outline-secondary ms-auto"
-          :disabled="refreshing"
-          :title="t('chains.refresh_hint')"
-          @click="fetchBikes('activities')"
-        >
-          <i
-            class="fa-solid fa-arrows-rotate me-1"
-            :class="{ 'fa-spin': refreshing }"
-            aria-hidden="true"
-          ></i>{{ t('chains.refresh') }}
-        </button>
-        <a :href="`${localePrefix}/chains`" class="btn btn-sm btn-outline-secondary">
+        <a :href="`${localePrefix}/chains`" class="btn btn-sm btn-outline-secondary ms-auto">
           {{ t('chains.manage') }}
         </a>
       </div>
@@ -386,6 +397,15 @@ onBeforeUnmount(() => mountModal?.dispose())
               />
               <label :for="`wax-${bike.id}`" class="form-check-label small">{{ t('chains.uses_wax') }}</label>
             </div>
+            <button
+              type="button"
+              class="btn btn-sm btn-outline-danger"
+              :title="t('chains.delete_bike')"
+              :aria-label="t('chains.delete_bike')"
+              @click="removeBike(bike)"
+            >
+              <i class="fa-solid fa-trash" aria-hidden="true"></i>
+            </button>
           </div>
         </div>
 

@@ -6,9 +6,26 @@
 @import "@fortawesome/fontawesome-free/css/all.min.css";
 
 body {
-  padding-top: 4rem;
+  // Hauteur réelle de la navbar `fixed-top`, mesurée par trackNavbar() (application.ts).
+  // Fallback 4rem avant le premier calcul / sur page sans navbar.
+  padding-top: var(--navbar-h, 4rem);
   background: linear-gradient(180deg, rgba(252, 76, 2, 0.04), transparent 360px), #f8f9fb;
   min-height: 100vh;
+}
+
+// Navbar « icônes seules » : ajoutée par trackNavbar() quand les libellés feraient
+// wrapper la barre sur deux lignes. Ne s'applique qu'en mode horizontal étendu (≥ md) —
+// sous md la navbar se replie dans le tiroir hamburger, où les libellés ont la place.
+@include media-breakpoint-up(md) {
+  .navbar-compact .nav-label {
+    display: none;
+  }
+  // Libellé masqué : l'écart après l'icône (`me-1`, utilitaire `!important`) n'a plus
+  // lieu d'être — on le neutralise pour centrer l'icône.
+  .navbar-compact .navbar-nav .nav-link .fa-solid,
+  .navbar-compact .navbar-nav .dropdown-toggle .fa-solid {
+    margin-right: 0 !important;
+  }
 }
 
 // Full-screen pages (e.g. route navigation) render without the fixed navbar,
@@ -36,6 +53,39 @@ body.fullscreen-page {
 .sports-scope-brand {
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+/* Rappel du type d'itinéraire à côté du logo (téléphone). Pastille discrète, alignée
+   sur la hauteur de la navbar sombre. */
+/* Rapproche la pastille du logo : annule la marge droite d'1rem que Bootstrap pose
+   sur .navbar-brand, ne gardant qu'un léger interstice. */
+#rb-brand-type { margin-left: -0.75rem; }
+.rb-brand-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.rb-brand-type-badge .fa-solid { color: var(--bs-warning); }
+/* Écrans étroits : on ne garde que l'icône pour laisser la place aux actions. */
+@media (max-width: 360px) {
+  .rb-brand-type-badge > span { display: none; }
+  .rb-brand-type-badge { padding: 0.2rem 0.45rem; }
+}
+
+/* Onglets du tableau de bord : pastilles comme sur « Mes itinéraires ». Les
+   boutons sont des btn-outline-secondary ; l'onglet actif (toggle Bootstrap pill)
+   passe en jaune (warning) plutôt que le gris par défaut de .active. */
+.dashboard-tabs .dashboard-tab.active {
+  background-color: var(--bs-warning);
+  border-color: var(--bs-warning);
+  color: #000;
 }
 
 .dashboard-badge {
@@ -164,7 +214,189 @@ body.fullscreen-page {
   line-height: 1.5;
 }
 
+// Charge d'entraînement (TSS) d'une sortie, affichée en pastille dans la liste
+// d'activités du tableau de bord. Couleur selon la source de calcul : puissance
+// (fiable, vert), FC (rouge), ou estimation (gris, moins précis).
+.tss-badge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.2rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  line-height: 1.2;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  background: rgba(108, 117, 125, 0.12);
+  color: #6c757d;
+
+  .tss-value {
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+
+  .tss-unit {
+    font-size: 0.6rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.85;
+  }
+}
+
+.tss-badge--power {
+  background: rgba(25, 135, 84, 0.12);
+  color: #198754;
+}
+
+.tss-badge--hr {
+  background: rgba(220, 53, 69, 0.12);
+  color: #dc3545;
+}
+
 .home-button{
   width: 250px;
+}
+
+/* Page de partage publique d'un itinéraire (pages#route_summary). Colonne étroite :
+   elle est presque toujours ouverte depuis un lien reçu sur téléphone. */
+.route-summary {
+  max-width: 34rem;
+}
+.route-summary-preview {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Même format que la vignette Open Graph (RoutePreviewImage : 1200 × 630), pour que
+     la page et l'aperçu reçu dans la messagerie cadrent pareil. La carte occupe toute
+     la boîte : pas de marge intérieure, qui la rendrait plus petite que l'aperçu SVG
+     qu'elle remplace. */
+  aspect-ratio: 1200 / 630;
+  overflow: hidden;
+  /* Panneau sombre, comme la vignette Open Graph : les couleurs de pente du tracé
+     ressortaient à peine sur le gris clair. Le halo décentré évite l'aplat. */
+  background:
+    radial-gradient(120% 100% at 30% 15%, #5c666f 0%, #4a545c 60%, #3d464d 100%);
+  border-radius: var(--bs-card-inner-border-radius) var(--bs-card-inner-border-radius) 0 0;
+}
+/* Le bloc qui porte l'îlot occupe toute la vignette : il contient le SVG de repli,
+   puis la carte MapLibre une fois montée. */
+.route-summary-preview > [data-vue-component],
+.route-summary-map {
+  width: 100%;
+  height: 100%;
+}
+.route-summary-preview svg {
+  width: 100%;
+  height: 100%;
+}
+/* Profil altimétrique sous l'aperçu : une bande, sans axes ni graduations — c'est la
+   forme du parcours qu'on lit ici, les chiffres sont juste en dessous. */
+.route-summary-profile {
+  position: relative;
+  height: 4.5rem;
+  border-top: 1px solid var(--bs-border-color);
+}
+.route-summary-profile svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* Repères d'altitude : assez visibles pour donner l'échelle, assez discrets pour
+   passer sous le tracé sans le concurrencer. */
+.route-summary-profile-grid {
+  stroke: var(--bs-border-color);
+  stroke-width: 1px;
+}
+
+/* Stats en grille auto-ajustée : 2 colonnes sur téléphone, 3 dès qu'il y a la place. */
+.route-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.75rem 1rem;
+}
+.route-summary-stats dt {
+  font-size: 0.8rem;
+  font-weight: 400;
+  color: var(--bs-secondary-color);
+}
+.route-summary-stats dd {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+/* Pastille de la page de partage — lieux traversés et type de repère. Une liste de
+   12 noms séparés par des points se lit mal en paragraphe ; la pastille donne une
+   frontière nette à chaque nom. */
+.route-summary-pill {
+  font-weight: 500;
+  font-size: 0.85rem;
+  color: var(--bs-body-color);
+  background: var(--bs-tertiary-bg, rgba(0, 0, 0, 0.05));
+  border: 1px solid var(--bs-border-color);
+}
+/* Le « et N autres » n'est pas un lieu : il reste lisible mais s'efface. */
+.route-summary-pill-muted {
+  color: var(--bs-secondary-color);
+  background: transparent;
+}
+/* Types de repère : départ et arrivée se repèrent d'un coup d'œil, le parking reste
+   neutre — c'est une information de logistique, pas un jalon du parcours. */
+.route-summary-pill-start {
+  color: var(--bs-success-text-emphasis);
+  background: var(--bs-success-bg-subtle);
+  border-color: var(--bs-success-border-subtle);
+}
+.route-summary-pill-finish {
+  color: var(--bs-danger-text-emphasis);
+  background: var(--bs-danger-bg-subtle);
+  border-color: var(--bs-danger-border-subtle);
+}
+/* Clic sur une pastille de repère de la vignette : la ligne correspondante de la liste
+   défile dans la vue et clignote une fois. Sans ce flash, un défilement de quelques
+   centaines de pixels laisse le lecteur chercher ce qui a bougé. */
+.route-summary-marker-flash {
+  animation: route-summary-flash 1.2s ease-out;
+}
+@keyframes route-summary-flash {
+  0%, 60% {
+    background-color: var(--bs-warning-bg-subtle);
+    box-shadow: inset 3px 0 0 0 var(--bs-warning-border-subtle);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 0 transparent;
+  }
+}
+.route-summary-localities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+/* Dépliage des lieux au-delà des premiers : la case à cocher masquée porte l'état,
+   les deux labels (« et N autres » / « réduire ») s'échangent selon celui-ci. */
+.route-summary-pill-extra,
+.route-summary-less {
+  display: none;
+}
+.route-summary-toggle:checked ~ .route-summary-localities {
+  .route-summary-pill-extra,
+  .route-summary-less {
+    display: inline-block;
+  }
+  .route-summary-more {
+    display: none;
+  }
+}
+.route-summary-more,
+.route-summary-less {
+  cursor: pointer;
+}
+/* Le focus clavier vit sur la case masquée : on le rend visible sur le label. */
+.route-summary-toggle:focus-visible ~ .route-summary-localities {
+  .route-summary-more,
+  .route-summary-less {
+    outline: 2px solid var(--bs-focus-ring-color, rgba(13, 110, 253, 0.5));
+    outline-offset: 2px;
+  }
 }
 

@@ -1,9 +1,12 @@
 import type { Sport } from './userPreferences'
 
-// Endpoint du moteur de routage BRouter. Surchargé via VITE_BROUTER_URL pour
-// pointer vers une instance auto-hébergée (le serveur public brouter.de n'a ni
-// SLA ni quota garanti). Voir .env.example.
-export const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || 'https://brouter.de/brouter'
+// Endpoint du moteur de routage BRouter. Par défaut l'instance auto-hébergée,
+// servie sous le domaine de l'app (même origine, cf. service `brouter` des
+// docker-compose). Surcharger via VITE_BROUTER_URL pour repointer ailleurs, par
+// ex. le serveur public 'https://brouter.de/brouter' (sans SLA ni quota garanti).
+// Le défaut doit rester une valeur qui marche sans configuration : en prod les
+// import.meta.env sont figés au build (assets:precompile). Voir .env.example.
+export const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || '/brouter'
 
 // Catalogue des profils de routage BRouter proposés, par catégorie d'activité
 // (Route#activity). Le 1er de chaque liste est le défaut catalogue du sport ; il
@@ -11,9 +14,11 @@ export const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || 'https://brouter.
 // cf. routeProfileForSport dans userPreferences). Le profil retenu est envoyé tel quel
 // à BRouter dans le paramètre `&profile=` (voir RouteBuilder.recomputeRoute).
 //
-// Tous ces profils existent sur l'instance publique brouter.de. Les profils alpins
-// SAC (Hiking-Alpine-SAC6) n'y sont PAS installés (HTTP 500) ; si on passe à une
-// instance auto-hébergée qui les fournit, on pourra les ajouter ici.
+// Ces profils sont fournis par l'instance auto-hébergée, qui miroite les .brf de
+// brouter.de (`fastbike-lowtraffic` n'est pas livré dans le jar BRouter, il vient
+// de ce miroir). Pour ajouter un profil maison, déposer son .brf dans
+// deploy/brouter/profiles/ (voir le README) puis l'ajouter ici ET dans
+// ALLOWED_PROFILES (app/controllers/routes_controller.rb).
 export const PROFILES_BY_SPORT: Record<Sport, string[]> = {
   cycling: ['trekking', 'fastbike', 'fastbike-lowtraffic', 'shortest'],
   mtb: ['gravel', 'trekking', 'shortest'],

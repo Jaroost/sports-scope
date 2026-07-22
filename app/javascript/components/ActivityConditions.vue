@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // Bandeau « conditions » sous la carte d'une activité : matériel Strava utilisé
-// (nom + km au compteur) et météo du jour (température, ciel, vent + rafales).
-// Le matériel ne vient que du détail Strava (`activity.gear`) ; la météo est
-// récupérée par le parent via /api/weather (cf. ActivityDetail).
+// (nom + km au compteur), appareil d'enregistrement et météo du jour (température,
+// ciel, vent + rafales). Le matériel ne vient que du détail Strava (`activity.gear`) ;
+// la météo est récupérée par le parent via /api/weather (cf. ActivityDetail).
 import { computed, type PropType } from 'vue'
 import { t } from '../i18n'
 import { weatherBucket, weatherLabel, windCardinal, windArrowDeg, type Weather } from '../weatherHelpers'
@@ -29,6 +29,14 @@ const gearDistanceKm = computed(() => {
   return Number.isFinite(d) && d > 0 ? Math.round(d / 1000).toLocaleString() : null
 })
 
+// L'appareil d'enregistrement (montre, compteur, appli) est distinct du « gear » Strava,
+// qui ne couvre que les vélos et les chaussures : une séance de squash n'a pas de gear
+// mais a bien un `device_name`.
+const deviceName = computed(() => {
+  const d = props.activity?.device_name
+  return typeof d === 'string' && d.trim() ? d.trim() : null
+})
+
 const w = computed(() => props.weather)
 const bucketIcon = computed(() => weatherBucket(w.value?.weather_code).icon)
 const label = computed(() => (w.value ? weatherLabel(w.value.weather_code) : ''))
@@ -38,7 +46,9 @@ const arrowDeg = computed(() => windArrowDeg(w.value?.wind_direction))
 const hasWeather = computed(() =>
   !!w.value && (w.value.temperature != null || w.value.wind_speed != null || w.value.weather_code != null),
 )
-const hasContent = computed(() => !!gearName.value || hasWeather.value || props.weatherLoading)
+const hasContent = computed(
+  () => !!gearName.value || !!deviceName.value || hasWeather.value || props.weatherLoading,
+)
 
 function fmt1(v: number | null | undefined): string {
   return v == null ? '–' : (Math.round(v * 10) / 10).toString()
@@ -55,7 +65,17 @@ function fmt1(v: number | null | undefined): string {
         <span v-if="gearDistanceKm" class="cond-sub">{{ gearDistanceKm }} km</span>
       </span>
 
-      <span v-if="gearName && (hasWeather || weatherLoading)" class="cond-sep" aria-hidden="true"></span>
+      <!-- Appareil d'enregistrement -->
+      <span v-if="deviceName" class="cond-pill cond-device" :title="t('strava.conditions.device')">
+        <i class="fa-solid fa-microchip" aria-hidden="true"></i>
+        <span class="cond-val">{{ deviceName }}</span>
+      </span>
+
+      <span
+        v-if="(gearName || deviceName) && (hasWeather || weatherLoading)"
+        class="cond-sep"
+        aria-hidden="true"
+      ></span>
 
       <!-- Météo -->
       <span
@@ -117,6 +137,7 @@ function fmt1(v: number | null | undefined): string {
 }
 .cond-pill > i { color: #fc4c02; }
 .cond-gear > i { color: #6c757d; }
+.cond-device > i { color: #6c757d; }
 .cond-val { font-weight: 600; font-variant-numeric: tabular-nums; }
 .cond-sub { color: #6c757d; font-size: 0.78rem; }
 .cond-sep {

@@ -42,7 +42,19 @@ class ApplicationController < ActionController::Base
   def require_login!
     return if user_signed_in?
 
-    redirect_to root_path, alert: t("auth.login_required")
+    # Requêtes JSON (fetch des îlots Vue, y compris sur les pages publiques comme la
+    # vue partagée en lecture seule) : 401 JSON propre. Sinon la redirection HTML vers
+    # `home` était suivie par le fetch avec `Accept: application/json` et faisait
+    # planter `PagesController#home` (UnknownFormat), en plus d'un flash de login
+    # trompeur. Les vraies navigations de page gardent la redirection + alerte.
+    # NB : on teste `request.format.json?` explicitement plutôt qu'un `respond_to` —
+    # avec `Accept: */*` (navigateur), `respond_to` matcherait le premier format
+    # déclaré (json) et casserait la redirection des pages HTML.
+    if request.format.json?
+      render json: { error: t("auth.login_required") }, status: :unauthorized
+    else
+      redirect_to root_path, alert: t("auth.login_required")
+    end
   end
 
   def default_url_options

@@ -15,6 +15,8 @@ export function daysSince(iso: string | null | undefined): number | null {
 }
 
 // Human-readable "X days ago" badge label. Uses i18n keys under `common.*`.
+// Shows the largest relevant unit: days under a month, then months, then
+// years (≈30 days/month, ≈365 days/year — good enough for a badge).
 // Negative days (date in the future) fall back to the plain count to avoid
 // nonsensical strings — shouldn't happen in practice for activity lists.
 export function formatDaysAgo(iso: string | null | undefined): string {
@@ -23,5 +25,9 @@ export function formatDaysAgo(iso: string | null | undefined): string {
   if (n === 0) return t('common.days_ago_today')
   if (n === 1) return t('common.days_ago_yesterday')
   if (n < 0) return t('common.days_in_future', { count: -n })
-  return t('common.days_ago_other', { count: n })
+  if (n < 30) return t('common.days_ago_other', { count: n })
+  const months = Math.round(n / 30)
+  if (months < 12) return t('common.months_ago', { count: months })
+  const years = Math.round(n / 365)
+  return t(years === 1 ? 'common.years_ago_one' : 'common.years_ago_other', { count: years })
 }

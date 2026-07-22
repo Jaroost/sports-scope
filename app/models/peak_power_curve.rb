@@ -1,7 +1,7 @@
 # Shared peak-power curve utilities. The algorithm is purely numeric so it
-# lives outside any AR model; both `ImportedActivity` (FIT imports, full
-# `streams` JSON in DB) and `StravaActivityPeakPower` (cache table fed from
-# the Strava API streams response) call into here.
+# lives outside any AR model; both `ImportedActivity` and `StravaActivity`
+# store the full `streams` JSON in DB and call into here (via `Activityable`)
+# to compute and persist their `peak_powers` curve.
 module PeakPowerCurve
   # Standard cycling peak-power durations (seconds). Mirrors the frontend list
   # in `ActivityDetail.vue` so the values shown match the values persisted.
@@ -74,33 +74,24 @@ module PeakPowerCurve
   end
 
   # Pull the single best row across both source tables for a given duration.
-  # Returns nil when no row has that duration. SQL is hand-written so we can
-  # `UNION ALL` two heterogeneous tables.
+  # Returns nil when no row has that duration. The `UNION ALL` over the two
+  # heterogeneous tables is built by `UserActivities`.
   def best_row(user_id:, duration_key:, exclude_source:, exclude_external_id:)
+    key = UserActivities.quote(duration_key)
+    union = UserActivities.union_sql(
+      user_id: user_id,
+      columns: ['started_at', "(peak_powers->>#{key})::float AS avg_watts"]
+    )
     sql = <<~SQL.squish
-      WITH rows AS (
-        SELECT 'imported' AS source,
-               id::text   AS external_id,
-               started_at,
-               (peak_powers->>$2)::float AS avg_watts
-          FROM imported_activities
-         WHERE user_id = $1 AND peak_powers ? $2
-        UNION ALL
-        SELECT 'strava'              AS source,
-               strava_id::text       AS external_id,
-               started_at,
-               (peak_powers->>$2)::float AS avg_watts
-          FROM strava_activities
-         WHERE user_id = $1 AND peak_powers ? $2
-      )
       SELECT source, external_id, started_at, avg_watts
-        FROM rows
-       WHERE NOT (source = $3 AND external_id = $4)
-       ORDER BY avg_watts DESC NULLS LAST
+        FROM (#{union}) rows
+       WHERE avg_watts IS NOT NULL
+         AND NOT (source = #{UserActivities.quote(exclude_source.to_s)}
+                  AND external_id = #{UserActivities.quote(exclude_external_id.to_s)})
+       ORDER BY avg_watts DESC
        LIMIT 1
     SQL
-    binds = [user_id, duration_key, exclude_source.to_s, exclude_external_id.to_s]
-    row = ActiveRecord::Base.connection.exec_query(sql, 'PeakPowerCurve#best_row', binds).first
+    row = UserActivities.select_all(sql, 'PeakPowerCurve#best_row').first
     return nil unless row
 
     {

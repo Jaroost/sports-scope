@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
 import { mapStyleFor, exportTileInfoFor } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
@@ -7,11 +8,11 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, formatDistanceShort, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex } from '../routeHelpers'
 import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
-import { turnAnomalyDiameterForSport } from '../userPreferences'
-import { BROUTER_URL } from '../brouter'
+import { turnAnomalyDiameterForSport, snapWarnDistanceForSport } from '../userPreferences'
+import { BROUTER_URL, profilesForSport } from '../brouter'
 import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
 import { parseGpxWaypoints } from '../gpxImport'
@@ -19,6 +20,7 @@ import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
 import MapStyleDropdown from './MapStyleDropdown.vue'
+import RouteAlternativesDialog from './RouteAlternativesDialog.vue'
 
 const props = defineProps({
   routeId: { type: [String, Number], default: null },
@@ -39,7 +41,9 @@ const readOnly = computed(() => routeStore.readOnly.value)
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
-const state = reactive(new RouteBuilderState())
+// La vue partagée persiste ses calques sous une clé à part (cf. RouteBuilderState) :
+// le rendu « invité » qu'on lui impose ne doit pas écraser la configuration d'édition.
+const state = reactive(new RouteBuilderState(!!props.shareToken))
 const saving = ref(false)
 // Indicateur transitoire affiché brièvement après un enregistrement réussi.
 const saved = ref(false)
@@ -58,11 +62,75 @@ const exporting = ref(false)
 // pas sauvegardé, donc pas de navigation possible avant l'enregistrement).
 const routeShareToken = ref<string | null>(null)
 const showExportDialog = ref(false)
-// Avertissement « amas de virages » détecté à l'enregistrement : un point d'étape mal
-// posé (à côté de la route) fait crocheter BRouter et empile plusieurs virages serrés
-// au même endroit, ce qui fausse la navigation. On le signale sans bloquer la sauvegarde.
+// ─── Avertissements sur le tracé ───────────────────────────────────────────────
+// Les deux ne sont calculés qu'à la tentative de sauvegarde (cf. save), et non au fil de
+// l'édition : un tracé en cours de construction passe par des états intermédiaires bancals
+// dont il n'y a rien à dire tant qu'on n'a pas fini. Toute modification du tracé les périme
+// donc (cf. clearRouteWarnings). L'erreur de routage, elle, reste immédiate : elle décrit
+// l'échec du calcul qu'on vient de lancer, pas la qualité du tracé.
+//
+// « Amas de virages » / « demi-tour » : un point d'étape mal posé (à côté de la route, ou
+// sur une impasse) fait crocheter BRouter, ce qui fausse la navigation.
 const turnWarnings = ref<TurnAnomaly[]>([])
 const showTurnWarning = ref(false)
+// « Point accroché au loin » : BRouter projette chaque waypoint sur la voie routable la plus
+// proche. Quand aucun chemin n'existe à l'endroit cliqué (trou de données OSM, plein champ…),
+// il l'accroche silencieusement des dizaines de mètres plus loin — au pire, plusieurs points
+// atterrissent sur la même voie et le tracé s'écrase en ligne droite. Seuil réglable par
+// sport (cf. snapWarnDistanceForSport), comme le diamètre de détection des amas.
+const snapWarnings = ref<Array<{ idx: number; distM: number }>>([])
+// Vrai une fois la sauvegarde tentée malgré des avertissements : fait apparaître
+// « enregistrer quand même ». Retombe à faux dès que le tracé change.
+const saveBlocked = ref(false)
+// « Aucun repère » : à l'enregistrement, si l'itinéraire n'a aucun repère posé, on
+// prévient qu'un lien partagé n'affiche par défaut que le parcours et les repères.
+// Purement informatif — la sauvegarde reste possible via « enregistrer quand même ».
+const noMarkersWarn = ref(false)
+
+// Fermer une alerte ne fait que la replier : la cause (erreur, points accrochés, amas de
+// virages) est toujours là et l'utilisateur doit pouvoir la relire. On masque donc
+// l'affichage sans jeter les données, et une pastille propose de tout rouvrir. Chaque
+// drapeau se relève de lui-même dès que l'alerte a un nouveau contenu à montrer.
+const errorDismissed = ref(false)
+const snapDismissed = ref(false)
+const noMarkersDismissed = ref(false)
+watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
+watch(snapWarnings, () => { snapDismissed.value = false })
+
+// Les points accrochés au loin portent un marqueur : c'est lui qui les situe sur la carte
+// (les puces de l'alerte ne font que cadrer dessus). Ce watch en est le seul propriétaire,
+// snapWarnings étant leur seule source. Replier l'alerte les LAISSE en place, comme le fait
+// closeTurnWarning pour les amas : ils guident la correction, et la pastille rappelle d'où
+// ils viennent. Ils disparaissent quand le tracé change (cf. clearRouteWarnings).
+watch(snapWarnings, (list) => {
+  const wps = routeStore.waypoints.value
+  mapRef.value?.showSnapMarkers(
+    list.map((s) => wps[s.idx]).filter((w): w is { lng: number; lat: number } => !!w),
+  )
+})
+
+// Ce qui est réellement à l'écran, source unique pour l'affichage comme pour la pastille.
+const snapVisible = computed(() => snapWarnings.value.length > 0 && !snapDismissed.value)
+const turnVisible = computed(() => turnWarnings.value.length > 0 && showTurnWarning.value)
+const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismissed.value)
+
+// Alertes repliées mais toujours d'actualité : elles gardent leurs données, seule leur
+// vue est masquée, et la pastille les rappelle.
+const hiddenNoticeCount = computed(() => {
+  let n = 0
+  if (routeStore.error.value && errorDismissed.value) n++
+  if (snapWarnings.value.length && snapDismissed.value) n++
+  if (turnWarnings.value.length && !showTurnWarning.value) n++
+  if (noMarkersWarn.value && noMarkersDismissed.value) n++
+  return n
+})
+
+function reopenNotices() {
+  errorDismissed.value = false
+  snapDismissed.value = false
+  noMarkersDismissed.value = false
+  if (turnWarnings.value.length) showTurnWarning.value = true
+}
 const exportStyleId = ref('')
 const exportShowGrade = ref(false)
 const exportShowClimbs = ref(false)
@@ -257,8 +325,15 @@ function onChangeProfile(profile: string) {
 async function recomputeRoute() {
   const token = ++recomputeToken
   selectionStore.clear()
-  // Toute modification du tracé invalide un éventuel avertissement d'amas de virages.
-  if (showTurnWarning.value || turnWarnings.value.length) dismissTurnWarning()
+  // Le tracé change : les avertissements portaient sur le précédent, et un éventuel
+  // « enregistrer quand même » ne vaut plus. Ils seront recalculés à la prochaine
+  // tentative de sauvegarde.
+  // Exception : si une sauvegarde a déjà été tentée (saveBlocked) et que l'utilisateur est
+  // en train de corriger les points signalés, on ne se contente pas d'effacer — on
+  // ré-évalue la liste une fois le nouveau tracé calculé (cf. reevaluateWarnings plus bas),
+  // pour que les points réglés disparaissent au fil des corrections sans re-sauvegarder.
+  const wasReviewing = saveBlocked.value
+  clearRouteWarnings()
 
   if (routeStore.waypoints.value.length < 2) {
     routeStore.geometry.value = []
@@ -315,6 +390,7 @@ async function recomputeRoute() {
     if (straight.size) geom = densifyGeometry(geom)
     routeStore.geometry.value = geom
 
+
     // Recalcule d'abord les index géométriques des waypoints : le rendu du tracé
     // (updateRouteLayer → applyColorMode) s'en sert pour repérer les tronçons droits
     // (points libres) à dessiner en traitillé.
@@ -325,6 +401,10 @@ async function recomputeRoute() {
     // après un déplacement, leurs liens (Street View, Google Maps, Komoot, coordonnées
     // copiables) doivent refléter la nouvelle position, pas celle d'avant le drag.
     mapRef.value?.refreshWaypointMarkers()
+
+    // Correction en cours après une sauvegarde bloquée : le tracé vient d'être recalculé,
+    // on ré-évalue les avertissements (qui ne dépendent que de la géométrie et des points).
+    if (wasReviewing) reevaluateWarnings()
 
     // BRouter ne renvoie pas d'altitude pour les tronçons « straight » (points libres).
     // On ne se fie aux altitudes inline que si TOUS les points en ont ; sinon on
@@ -338,7 +418,12 @@ async function recomputeRoute() {
       await fetchElevation(token)
     }
   } catch (e: any) {
-    if (token === recomputeToken) routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
+    if (token === recomputeToken) {
+      routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
+      // Le tracé garde l'ancienne géométrie alors que les waypoints, eux, ont déjà changé :
+      // on réaligne les index dessus, sinon l'insertion de point resterait bloquée.
+      mapRef.value?.recomputeWaypointGeomIndices()
+    }
   } finally {
     if (token === recomputeToken) routeStore.isFetchingRoute.value = false
   }
@@ -393,9 +478,13 @@ async function fetchRoute(id: number) {
     // invalide/hérité → défaut du sport conservé).
     if (r.activity) routeStore.setSport(r.activity)
     if (r.profile) routeStore.setProfile(r.profile)
+    // Après setSport, qui a réaligné la vitesse sur le profil : on restaure celle
+    // enregistrée avec l'itinéraire.
+    routeStore.setAvgSpeedKmh(r.avg_speed_kmh)
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
+    routeStore.markers.value = Array.isArray(r.markers) ? r.markers : []
     routeStore.distanceM.value = r.distance_m || 0
     routeStore.elevGainM.value = r.elevation_gain_m || 0
     routeStore.elevLossM.value = r.elevation_loss_m || 0
@@ -405,6 +494,7 @@ async function fetchRoute(id: number) {
       mapRef.value?.fitBounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)], { padding: 40, duration: 0 })
     }
     mapRef.value?.refreshWaypointMarkers()
+    mapRef.value?.refreshRouteMarkers()
     mapRef.value?.recomputeWaypointGeomIndices()
     mapRef.value?.updateRouteLayer()
     await nextTick()
@@ -432,12 +522,19 @@ async function fetchSharedRoute(token: string) {
     if (!res.ok) throw new Error(res.status === 404 ? t('routes.error_shared_not_found') : `HTTP ${res.status}`)
     const payload = await res.json()
     const r = payload.route
+    // Le propriétaire connecté peut repasser en édition depuis la vue partagée
+    // (cf. editUrl) ; pour tout autre visiteur, `owned` est faux.
+    editableRouteId.value = r.owned && r.id ? Number(r.id) : null
     routeStore.name.value = r.name || ''
     if (r.activity) routeStore.setSport(r.activity)
     if (r.profile) routeStore.setProfile(r.profile)
+    // Vitesse du créateur, pas celle du visiteur : la durée annoncée en lecture seule
+    // doit être la même que sur la page de partage.
+    routeStore.setAvgSpeedKmh(r.avg_speed_kmh)
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
+    routeStore.markers.value = Array.isArray(r.markers) ? r.markers : []
     routeStore.distanceM.value = r.distance_m || 0
     routeStore.elevGainM.value = r.elevation_gain_m || 0
     routeStore.elevLossM.value = r.elevation_loss_m || 0
@@ -449,6 +546,7 @@ async function fetchSharedRoute(token: string) {
     mapRef.value?.applyColorMode()
     mapRef.value?.installClimbMarkers()
     mapRef.value?.refreshWaypointMarkers()
+    mapRef.value?.refreshRouteMarkers()
     mapRef.value?.updateRouteLayer()
     await nextTick()
     chartRef.value?.render()
@@ -461,14 +559,85 @@ async function fetchSharedRoute(token: string) {
 
 // Recherche les amas de virages (point mal placé) sur le tracé courant à partir des
 // voicehints BRouter déjà calculés. Vide tant que la géométrie est trop courte.
+// Les deux signatures d'un point d'étape mal posé, réunies en une liste : l'amas de virages
+// (crochet compact) et le demi-tour (crochet étalé sur une impasse, que l'amas ne voit pas).
+// Un même crochet peut déclencher les deux ; on ne garde alors que l'amas, plus informatif
+// (il compte les virages), pour ne pas signaler deux fois le même point.
 function computeTurnAnomalies(): TurnAnomaly[] {
   const geom = routeStore.geometry.value
   if (geom.length < 3) return []
   const cumDistM = buildDistancesM(geom)
   const turns = turnsFromVoiceHints(routeStore.voiceHints.value, geom, cumDistM)
   const diameterM = turnAnomalyDiameterForSport(routeStore.sport.value)
-  const waypoints = routeStore.waypoints.value.map((w) => [w.lng, w.lat] as LngLat)
-  return detectTurnAnomalies(turns, geom, { diameterM, waypoints })
+  const wps = routeStore.waypoints.value
+  const waypoints = wps.map((w) => [w.lng, w.lat] as LngLat)
+  const uturnOk = wps.map((w) => w.uturn_ok === true)
+  const clusters = detectTurnAnomalies(turns, geom, { diameterM, waypoints })
+  const claimed = new Set(clusters.map((a) => a.waypointIdx).filter((i) => i >= 0))
+  const uturns = detectUturnAnomalies(turns, geom, { waypoints, uturnOk })
+    .filter((a) => a.waypointIdx < 0 || !claimed.has(a.waypointIdx))
+  return [...clusters, ...uturns].sort((a, b) => a.distM - b.distM)
+}
+
+// Un demi-tour sans point d'étape à portée n'accuse personne : on le situe à la distance
+// parcourue plutôt que d'annoncer un numéro de point qui n'existe pas.
+function turnWarningLabel(a: TurnAnomaly): string {
+  const distance = formatDistancePrecise(a.distM)
+  if (a.kind === 'uturn') {
+    return a.waypointIdx >= 0
+      ? t('routes.uturn_warning_item', { point: a.waypointIdx + 1, distance })
+      : t('routes.uturn_warning_item_orphan', { distance })
+  }
+  return t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count, distance })
+}
+
+// Publie la liste des crochets : alerte + marqueurs, ou table rase. Comme pour les points
+// accrochés au loin, une liste non vide rouvre l'alerte même si elle avait été repliée —
+// le tracé a changé depuis, le repli ne vaut plus.
+function setTurnWarnings(anomalies: TurnAnomaly[]) {
+  turnWarnings.value = anomalies
+  showTurnWarning.value = anomalies.length > 0
+  if (anomalies.length) mapRef.value?.showTurnAnomalyMarkers(anomalies)
+  else mapRef.value?.clearTurnAnomalyMarkers()
+}
+
+// Écart entre chaque point d'étape et le tracé réellement obtenu. Un point « libre » est
+// traversé par sa ligne droite, donc son écart est nul : il ne se signale jamais de
+// lui-même. Un point posé là où aucun chemin n'est cartographié, lui, ressort.
+function computeSnapWarnings(): Array<{ idx: number; distM: number }> {
+  const geom = routeStore.geometry.value
+  if (geom.length < 2) return []
+  const threshold = snapWarnDistanceForSport(routeStore.sport.value)
+  return routeStore.waypoints.value
+    .map((w, idx) => ({ idx, distM: nearestGeomIndex([w.lng, w.lat], geom).distM }))
+    .filter((s) => s.distM >= threshold)
+}
+
+// Périme les avertissements : ils ne décrivaient que le tracé qui les a produits.
+function clearRouteWarnings() {
+  snapWarnings.value = []   // le watch ci-dessus retire les marqueurs correspondants
+  setTurnWarnings([])
+  noMarkersWarn.value = false
+  saveBlocked.value = false
+}
+
+// Recalcule la liste après un changement qui ne retouche pas le tracé (marquer un demi-tour
+// comme normal) : sans ça l'alerte continuerait de lister un point déjà réglé. Ne réveille
+// rien si aucun avertissement n'est affiché — ils n'apparaissent qu'à la sauvegarde.
+function refreshTurnWarnings() {
+  if (!turnWarnings.value.length) return
+  setTurnWarnings(computeTurnAnomalies())
+}
+
+// Ré-évalue tous les avertissements après un recalcul du tracé, pendant que l'utilisateur
+// corrige les points signalés par une sauvegarde bloquée (cf. recomputeRoute). Chaque point
+// réglé sort de la liste et le barrage (saveBlocked) tombe de lui-même quand il ne reste
+// rien — l'utilisateur n'a plus à re-sauvegarder juste pour voir ce qu'il reste à corriger.
+function reevaluateWarnings() {
+  snapWarnings.value = computeSnapWarnings()
+  setTurnWarnings(computeTurnAnomalies())
+  noMarkersWarn.value = routeStore.markers.value.length === 0
+  saveBlocked.value = snapWarnings.value.length > 0 || turnWarnings.value.length > 0 || noMarkersWarn.value
 }
 
 async function save() {
@@ -483,13 +652,18 @@ async function save() {
     routeStore.name.value = name
   }
   if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
-  // Avant d'enregistrer, on prévient si le tracé contient des amas de virages (signe
-  // d'un point posé à côté de la route). L'utilisateur peut corriger ou passer outre.
-  const anomalies = computeTurnAnomalies()
-  if (anomalies.length) {
-    turnWarnings.value = anomalies
-    showTurnWarning.value = true
-    mapRef.value?.showTurnAnomalyMarkers(anomalies)
+  // Seul endroit où les avertissements sont calculés : le tracé est terminé, il y a enfin
+  // quelque chose à en dire. S'il y a matière, on fait barrage une fois — l'utilisateur
+  // corrige, ou passe outre.
+  snapWarnings.value = computeSnapWarnings()
+  setTurnWarnings(computeTurnAnomalies())
+  // Rappel informatif : un itinéraire sans repère perd de sa lisibilité une fois
+  // partagé (le lecteur ne voit par défaut que le parcours et les repères).
+  noMarkersWarn.value = routeStore.markers.value.length === 0
+  if (snapWarnings.value.length || turnWarnings.value.length || noMarkersWarn.value) {
+    saveBlocked.value = true
+    snapDismissed.value = false
+    noMarkersDismissed.value = false
     return
   }
   await persistAndIndexPlaces()
@@ -502,34 +676,35 @@ async function persistAndIndexPlaces() {
   fetchImportantPlaces()
 }
 
-// Enregistre malgré l'avertissement d'amas de virages : l'utilisateur assume le tracé,
-// on retire donc les marqueurs d'alerte.
+// Enregistre malgré les avertissements : l'utilisateur assume le tracé, on retire donc
+// alertes et marqueurs.
 async function saveAnyway() {
-  dismissTurnWarning()
+  clearRouteWarnings()
   await persistAndIndexPlaces()
 }
 
-// Ferme la modale mais LAISSE les marqueurs d'alerte sur la carte : ils guident
-// l'utilisateur vers les points à corriger et disparaissent au prochain recalcul du
-// tracé (cf. recomputeRoute).
+// Ferme l'alerte mais LAISSE les marqueurs sur la carte : ils guident l'utilisateur vers
+// les points à corriger et disparaissent au prochain recalcul du tracé (cf. recomputeRoute).
 function closeTurnWarning() {
   showTurnWarning.value = false
 }
 
-// Recentre la carte sur un amas pour le corriger (marqueurs conservés) et ouvre le point
-// d'étape en cause : sa bulle porte les actions de correction (déplacer, supprimer), ce
-// qui évite à l'utilisateur de deviner lequel des points voisins a produit le crochet.
+// Recentre la carte sur un amas. On se contente de cadrer : le marqueur d'alerte déjà posé
+// désigne l'endroit, et ouvrir la bulle du point la ferait recouvrir l'alerte dont elle
+// vient (elle s'affiche au-dessus du marqueur, donc en plein milieu de la pile). À
+// l'utilisateur de cliquer le point s'il veut ses actions de correction.
+// L'alerte reste ouverte : contrairement à une modale, elle ne masque pas la carte et
+// sert de liste de tâches tant que les amas ne sont pas corrigés.
 function focusTurnAnomaly(a: TurnAnomaly) {
-  closeTurnWarning()
   mapRef.value?.flyTo(a.lng, a.lat, 17)
-  if (a.waypointIdx >= 0) mapRef.value?.focusWaypoint(a.waypointIdx)
 }
 
-// Réinitialise complètement l'avertissement : modale, liste et marqueurs d'alerte.
-function dismissTurnWarning() {
-  showTurnWarning.value = false
-  turnWarnings.value = []
-  mapRef.value?.clearTurnAnomalyMarkers()
+// Recentre sur un point accroché au loin — repéré sur la carte par son propre marqueur
+// (cf. le watch ci-dessous), même logique que pour les amas.
+function focusSnapWarning(idx: number) {
+  const w = routeStore.waypoints.value[idx]
+  if (!w) return
+  mapRef.value?.flyTo(w.lng, w.lat, 17)
 }
 
 async function persist() {
@@ -543,11 +718,16 @@ async function persist() {
       geometry: routeStore.geometry.value,
       voice_hints: routeStore.voiceHints.value,
       pois: placesStore.importantPlaces.value.map(({ name, type, lat, lng }) => ({ name, type, lat, lng })),
+      markers: routeStore.markers.value,
       distance_m: routeStore.distanceM.value,
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,
       profile: routeStore.profile.value,
       activity: routeStore.sport.value,
+      // Vitesse ajustée pour ce tracé précis (null si elle suit encore le profil) :
+      // l'enregistrer évite que la page de partage et la réouverture annoncent une
+      // autre durée que celle qu'on avait sous les yeux.
+      avg_speed_kmh: routeStore.avgSpeedOverride.value,
     })
     const url = isEditMode() ? `/api/routes/${routeStore.currentId.value}` : '/api/routes'
     const method = isEditMode() ? 'PATCH' : 'POST'
@@ -600,6 +780,13 @@ function exportGpx() {
 // (création non encore sauvegardée).
 const navigateToken = computed(() => props.shareToken ?? routeShareToken.value)
 
+// Vue en lecture seule ouverte par son propre auteur : identifiant de l'itinéraire,
+// pour proposer le passage en édition. null pour un visiteur (ou hors partage).
+const editableRouteId = ref<number | null>(null)
+const editUrl = computed(() =>
+  editableRouteId.value ? `${localePrefix}/routes/${editableRouteId.value}/edit` : null,
+)
+
 // La navigation n'est proposée qu'une fois l'itinéraire enregistré (jeton présent)
 // et tracé : elle s'appuie sur la géométrie publiée via le lien de partage.
 const canNavigate = computed(() => !!navigateToken.value && routeStore.hasGeometry.value)
@@ -607,6 +794,44 @@ const canNavigate = computed(() => !!navigateToken.value && routeStore.hasGeomet
 function navigateRoute() {
   if (!navigateToken.value) return
   window.location.href = `${localePrefix}/routes/${encodeURIComponent(navigateToken.value)}/navigate`
+}
+
+// ─── Partage ──────────────────────────────────────────────────────────────────
+
+// Même lien que la liste des itinéraires : la page de résumé publique, porteuse des
+// balises Open Graph et menant aux trois formes de l'itinéraire (lecture seule,
+// navigation, GPX). Feuille de partage native si disponible, sinon presse-papier.
+const shareUrl = computed(() =>
+  navigateToken.value
+    ? `${window.location.origin}${localePrefix}/routes/${encodeURIComponent(navigateToken.value)}`
+    : null,
+)
+const shareCopied = ref(false)
+let shareCopiedTimer: ReturnType<typeof setTimeout> | null = null
+
+async function shareRoute() {
+  const url = shareUrl.value
+  if (!url) return
+  const text = [
+    formatDistancePrecise(routeStore.distanceM.value),
+    routeStore.elevGainM.value ? `${Math.round(routeStore.elevGainM.value)} m D+` : null,
+  ].filter(Boolean).join(' · ')
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: routeStore.name.value || t('routes.share'), text, url })
+      return
+    }
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return // feuille de partage refermée par l'utilisateur
+  }
+  try {
+    await navigator.clipboard.writeText(url)
+    shareCopied.value = true
+    if (shareCopiedTimer) clearTimeout(shareCopiedTimer)
+    shareCopiedTimer = setTimeout(() => { shareCopied.value = false }, 2000)
+  } catch {
+    window.prompt(t('routes.share'), url)
+  }
 }
 
 // ─── Komoot ───────────────────────────────────────────────────────────────────
@@ -654,6 +879,111 @@ function openSelectionInKomoot() {
   window.open(`https://www.komoot.com/plan/@${centerLat},${centerLng},12z?sport=touringbicycle&${points}`, '_blank', 'noopener,noreferrer')
 }
 
+// ─── Menu d'actions secondaires ───────────────────────────────────────────────
+// Une seule description des entrées, rendue de deux façons : menu déroulant dans le
+// bandeau sur ordinateur, modale plein écran sur téléphone (cibles tactiles). Les
+// deux se ferment après un clic — d'où l'appel systématique à closeActionsMenu.
+
+interface MenuAction {
+  key: string
+  icon: string
+  label: string
+  disabled?: boolean
+  // Remplace l'icône par un spinner (export d'image en cours).
+  busy?: boolean
+  // Entrée-lien (nouvel onglet) plutôt que bouton.
+  href?: string
+  run?: () => void
+  // Ouvre la modale de préférences : ProfileDialog écoute les clics sur ces attributs.
+  profileTrigger?: boolean
+}
+
+interface MenuGroup { key: string; label?: string; items: MenuAction[] }
+
+const mobileActionsOpen = ref(false)
+
+function closeActionsMenu() {
+  mobileActionsOpen.value = false
+}
+
+// Le dropdown desktop est en auto-close="outside" (pour ne pas se fermer quand on
+// règle le sport / profil) : on le referme donc à la main après une action.
+const actionsToggleEl = useTemplateRef<HTMLElement>('actionsToggleEl')
+function closeActionsDropdown() {
+  if (actionsToggleEl.value) Dropdown.getOrCreateInstance(actionsToggleEl.value).hide()
+}
+
+const menuGroups = computed<MenuGroup[]>(() => {
+  const groups: MenuGroup[] = []
+
+  if (canNavigate.value) {
+    groups.push({
+      key: 'navigate',
+      items: [{ key: 'navigate', icon: 'fa-solid fa-location-arrow', label: t('routes.navigate'), run: navigateRoute }],
+    })
+  }
+
+  const exportItems: MenuAction[] = [{
+    key: 'image',
+    icon: 'fa-solid fa-image',
+    label: t('routes.export_image'),
+    disabled: !routeStore.hasGeometry.value || exporting.value,
+    busy: exporting.value,
+    run: openExportDialog,
+  }]
+  if (canExportGpx()) {
+    exportItems.push({ key: 'gpx', icon: 'fa-solid fa-download', label: t('routes.export_gpx'), run: exportGpx })
+  }
+  if (routeStore.waypoints.value.length >= 2) {
+    exportItems.push({ key: 'komoot', icon: 'fa-solid fa-person-biking', label: t('routes.open_in_komoot'), run: openInKomoot })
+  }
+  groups.push({ key: 'export', label: t('routes.group_export'), items: exportItems })
+
+  if (shareUrl.value) {
+    groups.push({
+      key: 'share',
+      label: t('routes.group_share'),
+      items: [
+        {
+          key: 'share',
+          icon: shareCopied.value ? 'fa-solid fa-check text-success' : 'fa-solid fa-share-nodes',
+          label: shareCopied.value ? t('routes.share_copied') : t('routes.share'),
+          run: shareRoute,
+        },
+        {
+          key: 'share-preview',
+          icon: 'fa-solid fa-up-right-from-square',
+          label: t('routes.share_preview'),
+          href: shareUrl.value,
+        },
+      ],
+    })
+  }
+
+  if (!readOnly.value) {
+    groups.push({
+      key: 'profile',
+      items: [{ key: 'profile', icon: 'fa-solid fa-sliders', label: t('nav.profile'), profileTrigger: true }],
+    })
+  }
+
+  return groups
+})
+
+// Sélecteur de type d'itinéraire (sport + profil de routage) : dans le panneau latéral
+// sur ordinateur, mais celui-ci est masqué sur téléphone — on le rejoue donc dans la
+// modale d'actions. Même helpers que RouteBuilderStats.
+const ACTIVITIES = ['cycling', 'mtb', 'hiking'] as const
+function sportIcon(s: Sport) {
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
+
+// Attributs du déclencheur de préférences, posés seulement sur l'entrée concernée.
+const PROFILE_TRIGGER_ATTRS = {
+  'data-profile-trigger': '',
+  'data-profile-sections': 'display,sport,map,search,climb,poi',
+}
+
 // ─── Alternatives de tronçon ──────────────────────────────────────────────────
 // Sur une sélection, on rejoue le routage BRouter entre ses deux extrémités
 // (alternativeidx 0..3) pour proposer d'autres tracés du tronçon. Le choix d'une
@@ -669,13 +999,16 @@ const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828']
 const alternatives = ref<AlternativeView[]>([])
 const alternativesLoading = ref(false)
 const alternativesError = ref<string | null>(null)
-const activeAltId = ref<number | null>(null)
+// Géométrie du tronçon actuel, tracée en référence dans la dialogue des variantes.
+const altCurrentCoords = ref<Coord[]>([])
 // Bornes géométrie de la sélection au moment de la proposition (figées : la sélection
 // est effacée à l'application, mais on en a besoin pour le splice).
 let altBounds: { lo: number; hi: number } | null = null
 let altToken = 0
 
-const showAlternativesPanel = computed(() => alternativesLoading.value || alternativesError.value != null || alternatives.value.length > 0)
+// La dialogue s'ouvre dès qu'une proposition est en cours (chargement, erreur ou
+// variantes trouvées) et se referme via cancelAlternatives.
+const showAlternativesDialog = computed(() => alternativesLoading.value || alternativesError.value != null || alternatives.value.length > 0)
 
 async function proposeAlternatives() {
   if (routeStore.readOnly.value) return
@@ -692,12 +1025,12 @@ async function proposeAlternatives() {
   alternatives.value = []
   alternativesError.value = null
   alternativesLoading.value = true
-  activeAltId.value = null
-  mapRef.value?.clearAlternatives()
 
-  // Tronçon actuel (entre les extrémités) : sert de référence pour les écarts et pour
-  // écarter les variantes identiques au tracé déjà en place.
+  // Tronçon actuel (entre les extrémités) : sert de référence pour les écarts, pour
+  // écarter les variantes identiques au tracé déjà en place, et de tracé de référence
+  // dans la dialogue.
   const currentCoords = geom.slice(loI, hiI + 1)
+  altCurrentCoords.value = currentCoords
   const currentDists = buildDistancesM(currentCoords)
   const currentDist = currentDists[currentDists.length - 1] ?? 0
   const currentGL = computeGainLoss(currentCoords)
@@ -716,7 +1049,6 @@ async function proposeAlternatives() {
       deltaDistanceM: a.distanceM - currentDist,
       deltaGainM: a.gainM - currentGL.gain,
     }))
-    mapRef.value?.showAlternatives(alternatives.value)
   } catch (e: any) {
     if (token === altToken) alternativesError.value = `${t('routes.alternatives_error')}: ${e.message}`
   } finally {
@@ -724,11 +1056,7 @@ async function proposeAlternatives() {
   }
 }
 
-function onHoverAlternative(altId: number | null) {
-  activeAltId.value = altId
-  mapRef.value?.highlightAlternative(altId)
-}
-
+// La dialogue émet `select` avec l'index de la variante choisie.
 function onSelectAlternative(altId: number) {
   const alt = alternatives.value[altId]
   if (alt) applyChosenAlternative(alt)
@@ -745,20 +1073,11 @@ function cancelAlternatives() {
   alternatives.value = []
   alternativesError.value = null
   alternativesLoading.value = false
-  activeAltId.value = null
+  altCurrentCoords.value = []
   altBounds = null
-  mapRef.value?.clearAlternatives()
 }
 
-// Formatage de l'écart (distance/dénivelé) d'une variante vs le tronçon actuel.
-function formatDelta(m: number, unit: 'dist' | 'elev'): string {
-  const sign = m > 0 ? '+' : m < 0 ? '−' : '±'
-  const abs = Math.abs(Math.round(m))
-  if (unit === 'elev') return `${sign}${abs} m`
-  return `${sign}${formatDistanceShort(abs)}`
-}
-
-// La sélection disparaît (effacée, ou tracé recalculé) → on retire le panneau.
+// La sélection disparaît (effacée, ou tracé recalculé) → on ferme la dialogue.
 watch(() => selectionStore.selectionRange.value, (r) => {
   if (!r && (alternatives.value.length || alternativesLoading.value || alternativesError.value)) cancelAlternatives()
 })
@@ -1389,9 +1708,18 @@ onMounted(async () => {
   // Mode lecture seule (lien de partage) : on charge l'itinéraire via le jeton
   // public, sans brancher la sauvegarde ni lire les paramètres de pré-remplissage.
   if (props.shareToken) {
-    // En lecture seule, les points sont affichés par défaut (le bouton reste là
-    // pour les masquer), sans tenir compte d'un éventuel réglage de session.
-    state.showWaypoints = true
+    // Sur un lien partagé, on sélectionne par défaut uniquement les repères posés par
+    // l'auteur (départ / arrivée / parking) et les couleurs de pente ; les autres
+    // calques (points, cols, POI) partent masqués. Le menu Affichage reste complet,
+    // le destinataire peut donc tout réactiver — et ses choix, enregistrés sous la clé
+    // de la vue partagée, ne sont plus réimposés aux visites suivantes.
+    if (!state.hasStoredState) {
+      state.showMarkers = true
+      state.colorMode = 'grade'
+      state.showWaypoints = false
+      state.showClimbs = false
+      state.showPois = false
+    }
     await mapRef.value?.initMap()
     await fetchSharedRoute(props.shareToken as string)
     return
@@ -1450,6 +1778,7 @@ onBeforeUnmount(() => {
   navbarResizeObserver?.disconnect(); navbarResizeObserver = null
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
   if (savedTimer) clearTimeout(savedTimer)
+  if (shareCopiedTimer) clearTimeout(shareCopiedTimer)
   document.body.style.removeProperty('--rb-navbar-h')
   document.body.style.removeProperty('--rb-available-h')
   window.visualViewport?.removeEventListener('resize', updateNavbarHeight)
@@ -1460,32 +1789,100 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="route-builder-page">
-    <!-- Actions mobiles téléportées dans la navbar (Image / GPX / Komoot) -->
-    <Teleport to="#rb-navbar-actions">
-      <button type="button" class="btn btn-sm btn-outline-light"
-        @click="openExportDialog" :disabled="!routeStore.hasGeometry.value || exporting"
-        :title="t('routes.export_image')" :aria-label="t('routes.export_image')">
-        <span v-if="exporting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-        <i v-else class="fa-solid fa-image" aria-hidden="true"></i>
-      </button>
-      <button v-if="canExportGpx()" type="button" class="btn btn-sm btn-outline-light"
-        @click="exportGpx" :title="t('routes.export_gpx')" :aria-label="t('routes.export_gpx')">
-        <i class="fa-solid fa-download" aria-hidden="true"></i>
-      </button>
-      <button v-if="routeStore.waypoints.value.length >= 2" type="button" class="btn btn-sm btn-outline-light"
-        @click="openInKomoot" :title="t('routes.open_in_komoot')" :aria-label="t('routes.open_in_komoot')">
-        <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-      </button>
-      <button v-if="canNavigate" type="button" class="btn btn-sm btn-light"
-        @click="navigateRoute" :title="t('routes.navigate')" :aria-label="t('routes.navigate')">
-        <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
-      </button>
-      <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-light" data-profile-trigger
-        data-profile-sections="display,sport,map,search,climb,poi"
-        :title="t('nav.profile')" :aria-label="t('nav.profile')">
-        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-      </button>
+    <!-- Rappel du type d'itinéraire à côté du logo (téléphone) : le titre de l'app étant
+         masqué sur petit écran, on rappelle ici le sport courant. -->
+    <Teleport to="#rb-brand-type">
+      <span class="rb-brand-type-badge" :title="t(`routes.wt_sport_${routeStore.sport.value}`)">
+        <i :class="`fa-solid ${sportIcon(routeStore.sport.value)}`" aria-hidden="true"></i>
+        <span>{{ t(`routes.wt_sport_${routeStore.sport.value}`) }}</span>
+      </span>
     </Teleport>
+
+    <!-- Actions mobiles téléportées dans la navbar. La barre n'a la place que de trois
+         boutons entre le retour et l'enregistrement (posés par la vue) : tout le reste
+         passe par ce menu, ouvert en modale plein écran (cibles tactiles). -->
+    <Teleport to="#rb-navbar-actions">
+      <button type="button" class="btn btn-sm btn-outline-light" @click="mobileActionsOpen = true"
+        :title="t('routes.more_actions')" :aria-label="t('routes.more_actions')">
+        <span v-if="exporting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <i v-else class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+      </button>
+      <!-- Retour à l'édition depuis son propre lien partagé — la navbar est la seule
+           barre d'actions sur téléphone, le bandeau d'en-tête étant réservé au desktop. -->
+      <a v-if="editUrl" :href="editUrl" class="btn btn-sm btn-light"
+        :title="t('routes.edit_route')" :aria-label="t('routes.edit_route')">
+        <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+      </a>
+    </Teleport>
+
+    <!-- Modale des actions (téléphone) : même contenu que le menu déroulant du bandeau. -->
+    <Transition name="modal">
+      <div v-if="mobileActionsOpen" class="modal-backdrop-custom" @click.self="closeActionsMenu">
+        <div class="modal-dialog-custom shadow-lg">
+          <div class="modal-header-custom">
+            <strong>{{ t('routes.more_actions') }}</strong>
+            <button type="button" class="btn-close" @click="closeActionsMenu"
+              :aria-label="t('routes.snap_warning_dismiss')"></button>
+          </div>
+          <div class="modal-body-custom actions-modal-body">
+            <!-- Type d'itinéraire — accessible seulement ici sur téléphone (panneau latéral
+                 masqué). Modifie le tracé, donc réservé à l'édition. -->
+            <template v-if="!readOnly">
+              <h6 class="actions-modal-group">{{ t('routes.wt_sport') }}</h6>
+              <div class="activity-toggle btn-group btn-group-sm w-100" role="group" :aria-label="t('routes.wt_sport')">
+                <button
+                  v-for="s in ACTIVITIES"
+                  :key="s"
+                  type="button"
+                  class="btn"
+                  :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
+                  :aria-label="t(`routes.wt_sport_${s}`)"
+                  @click="onChangeSport(s)"
+                >
+                  <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+                  <span class="ms-1">{{ t(`routes.wt_sport_${s}`) }}</span>
+                </button>
+              </div>
+              <label class="form-label small text-muted mb-1 mt-2" for="mobile-route-profile-select">
+                {{ t('routes.profile_label') }}
+              </label>
+              <select
+                id="mobile-route-profile-select"
+                class="form-select form-select-sm"
+                :value="routeStore.profile.value"
+                @change="onChangeProfile(($event.target as HTMLSelectElement).value)"
+              >
+                <option
+                  v-for="p in profilesForSport(routeStore.sport.value)"
+                  :key="p"
+                  :value="p"
+                >
+                  {{ t(`routes.brouter_profile.${p}`) }}
+                </option>
+              </select>
+              <hr class="dropdown-divider">
+            </template>
+            <template v-for="g in menuGroups" :key="g.key">
+              <h6 v-if="g.label" class="actions-modal-group">{{ g.label }}</h6>
+              <template v-for="a in g.items" :key="a.key">
+                <a v-if="a.href" :href="a.href" class="actions-modal-item" target="_blank" rel="noopener"
+                  @click="closeActionsMenu">
+                  <i :class="a.icon" aria-hidden="true"></i>
+                  <span>{{ a.label }}</span>
+                </a>
+                <button v-else type="button" class="actions-modal-item"
+                  v-bind="a.profileTrigger ? PROFILE_TRIGGER_ATTRS : {}"
+                  :disabled="a.disabled" @click="a.run?.(); closeActionsMenu()">
+                  <span v-if="a.busy" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                  <i v-else :class="a.icon" aria-hidden="true"></i>
+                  <span>{{ a.label }}</span>
+                </button>
+              </template>
+            </template>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Chart hors écran utilisé uniquement pour l'export image -->
     <div v-if="exportChartMounted" aria-hidden="true"
@@ -1500,6 +1897,11 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
           <span>{{ t('routes.back') }}</span>
         </a>
+        <!-- Rappel du type d'activité, collé au début du nom : le sélecteur vivant
+             désormais dans le menu, l'icône rappelle en permanence le sport courant. -->
+        <span class="route-sport-badge flex-shrink-0" :title="t(`routes.wt_sport_${routeStore.sport.value}`)">
+          <i :class="`fa-solid ${sportIcon(routeStore.sport.value)}`" aria-hidden="true"></i>
+        </span>
         <input
           v-model="routeStore.name.value"
           type="text"
@@ -1520,32 +1922,87 @@ onBeforeUnmount(() => {
             :disabled="!routeStore.hasGeometry.value" @click="clearAll" :title="t('routes.clear')">
             <i class="fa-solid fa-trash" aria-hidden="true"></i>
           </button>
-          <button type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="openExportDialog" :disabled="!routeStore.hasGeometry.value || exporting" title="Exporter en image">
-            <span v-if="exporting" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-            <i v-else class="fa-solid fa-image" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">Image</span>
-          </button>
-          <button v-if="canExportGpx()" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="exportGpx" :title="t('routes.export_gpx')">
-            <i class="fa-solid fa-download" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">GPX</span>
-          </button>
-          <button v-if="routeStore.waypoints.value.length >= 2" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            @click="openInKomoot" :title="t('routes.open_in_komoot')">
-            <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">Komoot</span>
-          </button>
-          <button v-if="canNavigate" type="button" class="btn btn-sm btn-primary d-flex align-items-center gap-1"
-            @click="navigateRoute" :title="t('routes.navigate')">
-            <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">{{ t('routes.navigate') }}</span>
-          </button>
-          <button v-if="!readOnly" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
-            data-profile-trigger data-profile-sections="display,sport,map,search,climb,poi" :title="t('nav.profile')">
-            <i class="fa-solid fa-sliders" aria-hidden="true"></i>
-            <span class="d-none d-lg-inline">{{ t('nav.profile') }}</span>
-          </button>
+          <!-- Actions secondaires (navigation, export, partage, préférences) : regroupées pour
+               garder le bandeau lisible, l'édition et l'enregistrement seuls restant en accès direct. -->
+          <!-- `d-flex` sur le conteneur : sans lui, le bouton ne s'étire pas comme ses
+               voisins (la rangée est en align-items: stretch) et paraît plus court. -->
+          <div class="dropdown d-flex">
+            <!-- `auto-close="outside"` : les contrôles de type d'itinéraire vivent dans le
+                 menu — un clic dessus ne doit pas le refermer, seul un clic à l'extérieur. -->
+            <button ref="actionsToggleEl" type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+              data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+              :title="t('routes.more_actions')" :aria-label="t('routes.more_actions')">
+              <i class="fa-solid fa-ellipsis" aria-hidden="true"></i>
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end route-actions-menu">
+              <!-- Type d'itinéraire (sport + profil de routage), réservé à l'édition. -->
+              <template v-if="!readOnly">
+                <li><h6 class="dropdown-header">{{ t('routes.wt_sport') }}</h6></li>
+                <li class="px-3 pb-2">
+                  <div class="activity-toggle btn-group btn-group-sm w-100" role="group" :aria-label="t('routes.wt_sport')">
+                    <button
+                      v-for="s in ACTIVITIES"
+                      :key="s"
+                      type="button"
+                      class="btn"
+                      :class="routeStore.sport.value === s ? 'btn-primary' : 'btn-outline-secondary'"
+                      :title="t(`routes.wt_sport_${s}`)"
+                      :aria-label="t(`routes.wt_sport_${s}`)"
+                      @click="onChangeSport(s)"
+                    >
+                      <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+                      <span class="ms-1 d-none d-lg-inline">{{ t(`routes.wt_sport_${s}`) }}</span>
+                    </button>
+                  </div>
+                  <label class="form-label small text-muted mb-1 mt-2" for="route-profile-select">
+                    {{ t('routes.profile_label') }}
+                  </label>
+                  <select
+                    id="route-profile-select"
+                    class="form-select form-select-sm"
+                    :value="routeStore.profile.value"
+                    :title="t(`routes.brouter_profile.${routeStore.profile.value}_desc`)"
+                    @change="onChangeProfile(($event.target as HTMLSelectElement).value)"
+                  >
+                    <option
+                      v-for="p in profilesForSport(routeStore.sport.value)"
+                      :key="p"
+                      :value="p"
+                      :title="t(`routes.brouter_profile.${p}_desc`)"
+                    >
+                      {{ t(`routes.brouter_profile.${p}`) }}
+                    </option>
+                  </select>
+                  <p class="profile-desc small text-muted mb-0 mt-1">
+                    {{ t(`routes.brouter_profile.${routeStore.profile.value}_desc`) }}
+                  </p>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+              </template>
+              <template v-for="(g, gi) in menuGroups" :key="g.key">
+                <li v-if="gi"><hr class="dropdown-divider"></li>
+                <li v-if="g.label"><h6 class="dropdown-header">{{ g.label }}</h6></li>
+                <li v-for="a in g.items" :key="a.key">
+                  <a v-if="a.href" :href="a.href" class="dropdown-item d-flex align-items-center gap-2"
+                    target="_blank" rel="noopener" @click="closeActionsDropdown">
+                    <i :class="a.icon" aria-hidden="true"></i>
+                    <span>{{ a.label }}</span>
+                  </a>
+                  <button v-else type="button" class="dropdown-item d-flex align-items-center gap-2"
+                    v-bind="a.profileTrigger ? PROFILE_TRIGGER_ATTRS : {}"
+                    :disabled="a.disabled" @click="a.run?.(); closeActionsDropdown()">
+                    <span v-if="a.busy" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                    <i v-else :class="a.icon" aria-hidden="true"></i>
+                    <span>{{ a.label }}</span>
+                  </button>
+                </li>
+              </template>
+            </ul>
+          </div>
+          <a v-if="editUrl" :href="editUrl" class="btn btn-sm btn-warning d-flex align-items-center gap-1">
+            <i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+            <span class="d-none d-lg-inline">{{ t('routes.edit_route') }}</span>
+          </a>
           <button v-if="!readOnly" type="button" class="btn btn-sm btn-warning d-flex align-items-center gap-1"
             @click="save" :disabled="saving || routeStore.waypoints.value.length < 2 || !routeStore.name.value.trim()">
             <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
@@ -1554,13 +2011,6 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-    </div>
-
-    <!-- Error -->
-    <div v-if="routeStore.error.value" class="alert alert-warning d-flex align-items-center gap-2">
-      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-      <span class="flex-grow-1">{{ routeStore.error.value }}</span>
-      <button type="button" class="btn-close" @click="routeStore.error.value = null" aria-label="dismiss"></button>
     </div>
 
     <!-- Indicateur transitoire d'enregistrement réussi -->
@@ -1583,8 +2033,6 @@ onBeforeUnmount(() => {
         @select-place="onSelectPlace"
         @hover-place="onHoverPlace"
         @retry-places="fetchImportantPlaces"
-        @change-sport="onChangeSport"
-        @change-profile="onChangeProfile"
       />
 
       <!-- Horizontal resize handle -->
@@ -1604,56 +2052,100 @@ onBeforeUnmount(() => {
             ref="mapRef"
             :state="state"
             @waypoints-changed="recomputeRoute()"
+            @uturn-ok-changed="refreshTurnWarnings"
             @select-place="onSelectPlace"
             @hover-place="onHoverPlace"
             @retry-places="fetchImportantPlaces"
-            @hover-alternative="onHoverAlternative"
-            @select-alternative="onSelectAlternative"
             @toggle-chart="state.showElevationChart = !state.showElevationChart; nextTick(() => mapRef?.resize())"
             @toggle-mobile-sheet="mobileSheetOpen = !mobileSheetOpen"
-          />
+          >
+            <template #overlays>
+              <!-- Alertes du tracé, empilées en surimpression de la carte plutôt qu'en flux :
+                   elles décaleraient sinon la carte sous le curseur. Calées à droite, sous la
+                   rangée de contrôles du haut, pour ne rien couvrir. -->
+              <div class="map-notices">
+                <TransitionGroup name="map-notice">
 
-          <!-- Panneau des variantes de tronçon (proposées sur une sélection) -->
-          <Transition name="alt-panel">
-            <div v-if="showAlternativesPanel" class="alt-panel shadow-lg">
-              <div class="alt-panel-header">
-                <span class="alt-panel-title">
-                  <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>
-                  {{ t('routes.alternatives_title') }}
-                </span>
-                <button type="button" class="alt-panel-close" :aria-label="t('routes.close')" @click="cancelAlternatives">×</button>
+                  <!-- Erreur (routage, altitude, enregistrement…) -->
+                  <div v-if="routeStore.error.value && !errorDismissed" key="error" class="map-notice map-notice--danger" role="alert">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ routeStore.error.value }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="errorDismissed = true"
+                        :aria-label="t('routes.snap_warning_dismiss')"></button>
+                    </div>
+                  </div>
+
+                  <!-- Points accrochés loin du clic (aucun chemin cartographié à proximité) -->
+                  <div v-if="snapVisible" key="snap" class="map-notice map-notice--warning" role="status">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ t('routes.snap_warning_title', { count: snapWarnings.length }) }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="snapDismissed = true"
+                        :aria-label="t('routes.snap_warning_dismiss')"></button>
+                    </div>
+                    <p class="map-notice-body">{{ t('routes.snap_warning_body') }}</p>
+                    <div class="map-notice-chips">
+                      <button v-for="s in snapWarnings" :key="s.idx" type="button" class="map-notice-chip"
+                        @click="focusSnapWarning(s.idx)">
+                        <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
+                        {{ t('routes.snap_warning_item', { point: s.idx + 1, distance: formatDistancePrecise(s.distM) }) }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Crochets : amas de virages / demi-tour (point mal placé) -->
+                  <div v-if="turnVisible" key="turns" class="map-notice map-notice--danger" role="alert">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ t('routes.turn_warning_title') }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="closeTurnWarning"
+                        :aria-label="t('routes.turn_warning_dismiss')"></button>
+                    </div>
+                    <p class="map-notice-body">{{ t('routes.turn_warning_body') }}</p>
+                    <div class="map-notice-chips">
+                      <button v-for="(a, i) in turnWarnings" :key="i" type="button" class="map-notice-chip"
+                        @click="focusTurnAnomaly(a)">
+                        <i :class="a.kind === 'uturn' ? 'fa-solid fa-arrows-turn-to-dots' : 'fa-solid fa-location-crosshairs'"
+                          aria-hidden="true"></i>
+                        {{ turnWarningLabel(a) }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Aucun repère posé : rappel informatif sur le rendu d'un lien partagé -->
+                  <div v-if="noMarkersVisible" key="no-markers" class="map-notice map-notice--warning" role="status">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-flag" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ t('routes.no_markers_warning_title') }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="noMarkersDismissed = true"
+                        :aria-label="t('routes.snap_warning_dismiss')"></button>
+                    </div>
+                    <p class="map-notice-body">{{ t('routes.no_markers_warning_body') }}</p>
+                  </div>
+
+                  <!-- « Enregistrer quand même » : hors des alertes, car il vaut pour toutes
+                       celles qui font barrage, pas seulement la dernière de la pile. -->
+                  <div v-if="saveBlocked && (snapVisible || turnVisible || noMarkersVisible)" key="save-anyway" class="map-notice-actions">
+                    <button type="button" class="btn btn-sm btn-warning shadow" :disabled="saving" @click="saveAnyway">
+                      <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                      {{ t('routes.turn_warning_save_anyway') }}
+                    </button>
+                  </div>
+
+                  <!-- Rappel des alertes repliées : seul vestige visible tant qu'elles ne sont
+                       pas corrigées, sinon l'utilisateur perdrait l'info sans recours. -->
+                  <button v-if="hiddenNoticeCount" key="reopen" type="button" class="map-notice-pill"
+                    @click="reopenNotices" :title="t('routes.notices_reopen')">
+                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <span>{{ t('routes.notices_reopen_count', { count: hiddenNoticeCount }) }}</span>
+                  </button>
+
+                </TransitionGroup>
               </div>
-              <div v-if="alternativesLoading" class="alt-panel-status">
-                <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
-                {{ t('routes.alternatives_loading') }}
-              </div>
-              <div v-else-if="alternativesError" class="alt-panel-status text-danger">
-                {{ alternativesError }}
-              </div>
-              <ul v-else class="alt-panel-list">
-                <li
-                  v-for="(alt, i) in alternatives"
-                  :key="alt.idx"
-                  class="alt-panel-item"
-                  :class="{ 'alt-panel-item--active': activeAltId === i }"
-                  @mouseenter="onHoverAlternative(i)"
-                  @mouseleave="onHoverAlternative(null)"
-                  @click="applyChosenAlternative(alt)"
-                >
-                  <span class="alt-swatch" :style="{ backgroundColor: alt.color }" aria-hidden="true"></span>
-                  <span class="alt-panel-item-stats">
-                    <strong>{{ formatDistancePrecise(alt.distanceM) }}</strong>
-                    <span class="alt-panel-delta" :class="alt.deltaDistanceM <= 0 ? 'text-success' : 'text-muted'">{{ formatDelta(alt.deltaDistanceM, 'dist') }}</span>
-                    <span class="alt-panel-elev">
-                      <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i> +{{ Math.round(alt.gainM) }} m
-                      <span class="alt-panel-delta" :class="alt.deltaGainM <= 0 ? 'text-success' : 'text-muted'">{{ formatDelta(alt.deltaGainM, 'elev') }}</span>
-                    </span>
-                  </span>
-                  <span class="alt-panel-choose">{{ t('routes.apply_alternative') }}</span>
-                </li>
-              </ul>
-            </div>
-          </Transition>
+            </template>
+          </RouteBuilderMap>
+
         </div>
 
         <!-- Vertical resize handle (desktop only) -->
@@ -1709,42 +2201,18 @@ onBeforeUnmount(() => {
       </div>
     </Transition>
 
-    <!-- Avertissement amas de virages (point mal placé) -->
+    <!-- Dialogue des variantes de tronçon (carte dédiée + infobulles) -->
     <Transition name="modal">
-      <div v-if="showTurnWarning" class="modal-backdrop-custom" @click.self="closeTurnWarning">
-        <div class="modal-dialog-custom shadow-lg">
-          <div class="modal-header-custom">
-            <strong class="d-flex align-items-center gap-2">
-              <i class="fa-solid fa-triangle-exclamation text-danger" aria-hidden="true"></i>
-              {{ t('routes.turn_warning_title') }}
-            </strong>
-            <button type="button" class="btn-close" @click="closeTurnWarning" :aria-label="t('routes.turn_warning_dismiss')"></button>
-          </div>
-          <div class="modal-body-custom d-flex flex-column gap-3">
-            <p class="small text-muted mb-0">{{ t('routes.turn_warning_body') }}</p>
-            <ul class="turn-warning-list">
-              <li v-for="(a, i) in turnWarnings" :key="i">
-                <button type="button" class="turn-warning-item" @click="focusTurnAnomaly(a)">
-                  <span class="turn-warning-item-label">
-                    <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
-                    {{ t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count, distance: formatDistancePrecise(a.distM) }) }}
-                  </span>
-                  <i class="fa-solid fa-chevron-right text-muted" aria-hidden="true"></i>
-                </button>
-              </li>
-            </ul>
-            <div class="d-flex gap-2">
-              <button type="button" class="btn btn-outline-secondary flex-fill" @click="closeTurnWarning">
-                {{ t('routes.turn_warning_fix') }}
-              </button>
-              <button type="button" class="btn btn-warning flex-fill" :disabled="saving" @click="saveAnyway">
-                <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-                {{ t('routes.turn_warning_save_anyway') }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <RouteAlternativesDialog
+        v-if="showAlternativesDialog"
+        :alternatives="alternatives"
+        :current-coords="altCurrentCoords"
+        :map-style-id="state.mapStyleId"
+        :loading="alternativesLoading"
+        :error="alternativesError"
+        @select="onSelectAlternative"
+        @close="cancelAlternatives"
+      />
     </Transition>
 
     <!-- Export image dialog -->
@@ -1806,8 +2274,11 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  height: calc(100vh - 4rem);
-  height: calc(100dvh - 4rem);
+  /* Hauteur = viewport moins la navbar réelle (--rb-navbar-h, mesurée en JS) : un
+     4rem figé faisait déborder la page de 3rem quand la navbar wrappe sur deux lignes
+     (contrôles du bas coupés). Fallback 4rem avant la première mesure. */
+  height: calc(100vh - var(--rb-navbar-h, 4rem));
+  height: calc(100dvh - var(--rb-navbar-h, 4rem));
   padding: 0.5rem 0.75rem 0;
   gap: 0.5rem;
   overflow: hidden;
@@ -1863,69 +2334,6 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-/* ─── Panneau des variantes de tronçon ────────────────────────────────────── */
-.alt-panel {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  transform: translateX(-50%);
-  z-index: 5;
-  width: min(420px, calc(100% - 24px));
-  background: #fff;
-  border-radius: 10px;
-  overflow: hidden;
-  font-size: 0.85rem;
-}
-.alt-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 12px;
-  background: #f8f9fa;
-  border-bottom: 1px solid #e9ecef;
-}
-.alt-panel-title { font-weight: 600; }
-.alt-panel-close {
-  border: 0;
-  background: transparent;
-  font-size: 1.25rem;
-  line-height: 1;
-  cursor: pointer;
-  color: #6b7280;
-}
-.alt-panel-status { padding: 12px; display: flex; align-items: center; }
-.alt-panel-list { list-style: none; margin: 0; padding: 4px; }
-.alt-panel-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.alt-panel-item:hover,
-.alt-panel-item--active { background: #eef2ff; }
-.alt-swatch {
-  flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.15);
-}
-.alt-panel-item-stats { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.alt-panel-elev { color: #6b7280; }
-.alt-panel-delta { margin-left: 6px; font-variant-numeric: tabular-nums; }
-.alt-panel-choose {
-  flex: 0 0 auto;
-  font-weight: 600;
-  color: #4f46e5;
-  white-space: nowrap;
-}
-.alt-panel-enter-active,
-.alt-panel-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
-.alt-panel-enter-from,
-.alt-panel-leave-to { opacity: 0; transform: translate(-50%, 8px); }
 .route-builder-chart-wrap {
   display: flex;
   flex-direction: column;
@@ -1977,10 +2385,29 @@ onBeforeUnmount(() => {
 /* ─── Header ──────────────────────────────────────────────────────────────── */
 .route-name-input { min-width: 0; font-weight: 600; }
 
+/* Rappel du type d'activité, collé au début du nom. */
+.route-sport-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 0.4rem;
+  background: rgba(13, 110, 253, 0.1);
+  color: var(--bs-primary);
+}
+
+/* Le menu d'actions loge les contrôles de type d'itinéraire : il lui faut de la
+   largeur, sinon les libellés de sport et de profil sont à l'étroit. */
+.route-actions-menu { min-width: 16rem; }
+.route-actions-menu .profile-desc { white-space: normal; }
+
 /* ─── Saved toast ─────────────────────────────────────────────────────────── */
 .saved-toast {
   position: fixed;
-  top: 4.5rem;
+  /* Sous la navbar réelle (--rb-navbar-h, mesurée en JS) : un offset fixe passerait
+     dessous quand la navbar wrappe sur deux lignes avec beaucoup de menus. */
+  top: calc(var(--rb-navbar-h, 4rem) + 0.5rem);
   left: 50%;
   transform: translateX(-50%);
   z-index: 1060;
@@ -2067,36 +2494,154 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid #e5e7eb;
 }
 .modal-body-custom { padding: 1.25rem; }
+
+/* Modale des actions (téléphone) : entrées empilées en pleine largeur, cibles tactiles. */
+.actions-modal-body { display: flex; flex-direction: column; gap: 0.25rem; }
+.actions-modal-group {
+  margin: 0.5rem 0 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6b7280;
+}
+.actions-modal-group:first-child { margin-top: 0; }
+.actions-modal-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.7rem 0.75rem;
+  border: none;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: #1f2937;
+  font-size: 0.95rem;
+  text-align: left;
+  text-decoration: none;
+}
+.actions-modal-item:hover:not(:disabled),
+.actions-modal-item:active:not(:disabled) { background: #f3f4f6; }
+.actions-modal-item:disabled { opacity: 0.5; }
+.actions-modal-item > i { width: 1.25rem; text-align: center; }
+
 .modal-enter-active, .modal-leave-active { transition: opacity 0.15s; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
 
-/* ─── Avertissement amas de virages ───────────────────────────────────────── */
-.turn-warning-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ─── Alertes en surimpression de la carte ────────────────────────────────── */
+/* Colonne calée sous la rangée de contrôles du haut (contrôles droite : top 56px) et
+   entre les deux colonnes de boutons (34px de large + 10px de marge de chaque côté). */
+/* Colonne calée à DROITE, sous la rangée de contrôles du haut. Le décalage de 54px la
+   laisse passer à gauche de la colonne de boutons de droite (34px de large + 10px de
+   marge), qui commence elle aussi à 56px. */
+.map-notices {
+  position: absolute;
+  top: 56px;
+  right: 54px;
+  width: min(400px, calc(100% - 64px));
+  /* Au-dessus de TOUT ce que porte la carte, `.wp-tooltip` (z-index 20) compris : une bulle
+     ouverte près du bord recouvrirait sinon l'alerte. */
+  z-index: 25;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  max-height: 240px;
+  gap: 0.5rem;
+  align-items: stretch;
+  max-height: calc(100% - 76px);
   overflow-y: auto;
+  pointer-events: none;
 }
-.turn-warning-item {
-  width: 100%;
+.map-notice {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+.map-notice--warning {
+  background: #fff8e6;
+  border-color: #ffe08a;
+  color: #664d03;
+}
+.map-notice--danger {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #7f1d1d;
+}
+.map-notice-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #fde0e0;
-  border-radius: 0.5rem;
+}
+.map-notice-body {
+  margin: 0;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+.map-notice-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.map-notice-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.7);
+  color: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.map-notice-chip:hover { background: #fff; }
+.map-notice-actions {
+  pointer-events: auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.btn-close-sm { --bs-btn-close-focus-shadow: none; padding: 0.25rem; background-size: 0.65em; }
+
+/* Pastille de réouverture : discrète (elle vit en permanence sur la carte tant que
+   l'alerte n'est pas corrigée) mais assez colorée pour rester repérable. */
+.map-notice-pill {
+  pointer-events: auto;
+  align-self: flex-end;   /* la pastille reste compacte dans une pile désormais étirée */
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #fca5a5;
+  border-radius: 999px;
   background: #fef2f2;
   color: #7f1d1d;
-  font-size: 0.875rem;
-  text-align: left;
+  font-size: 0.8rem;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  transition: background 0.12s;
 }
-.turn-warning-item:hover { background: #fee2e2; border-color: #fca5a5; }
-.turn-warning-item-label { display: flex; align-items: center; gap: 0.5rem; }
+.map-notice-pill:hover { background: #fee2e2; }
+
+.map-notice-enter-active,
+.map-notice-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.map-notice-enter-from,
+.map-notice-leave-to { opacity: 0; transform: translateY(-6px); }
+.map-notice-leave-active { position: absolute; }
+
+/* Sur mobile la carte est trop étroite pour une colonne de 400px calée à droite : les
+   alertes reprennent toute la largeur, aux bords près. */
+@media (max-width: 767px), (max-height: 500px) {
+  .map-notices {
+    left: 8px;
+    right: 8px;
+    top: 52px;
+    width: auto;
+  }
+}
 </style>

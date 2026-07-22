@@ -8,6 +8,7 @@ import MapStyleDropdown from './MapStyleDropdown.vue'
 import RouteFromActivityModal from './RouteFromActivityModal.vue'
 import {
   activityIcon,
+  sportType,
   decodePolyline,
   pickPhotoUrl,
   type PhotoLike,
@@ -156,6 +157,12 @@ function formatDuration(seconds) {
   const m = Math.floor((seconds % 3600) / 60)
   const s = seconds % 60
   return h > 0 ? `${h}h ${m}min` : (m > 0 ? `${m}min ${s}s` : `${s}s`)
+}
+
+// Aide de la pilule TSS selon la source du calcul (puissance / FC / estimation).
+function tssHint(source) {
+  const key = source === 'power' ? 'tss_hint_power' : source === 'hr' ? 'tss_hint_hr' : 'tss_hint_estimated'
+  return t(`strava.${key}`)
 }
 
 // Valeur par défaut proposée dans la modale « créer un itinéraire depuis l'activité » :
@@ -878,23 +885,32 @@ onBeforeUnmount(() => {
 <template>
   <div class="card mb-3 shadow-sm border-0">
     <div class="card-header activity-card-header d-flex align-items-center gap-2">
-      <span class="activity-type-badge">
-        <i :class="`fa-solid ${activityIcon(activity.type)}`" aria-hidden="true"></i>
+      <span class="activity-type-badge" :title="sportType(activity)">
+        <i :class="`fa-solid ${activityIcon(sportType(activity))}`" aria-hidden="true"></i>
       </span>
       <div class="flex-grow-1 min-width-0">
         <h2 class="h5 mb-0 text-truncate">{{ activity.name }}</h2>
-        <div v-if="startEndDisplay" class="activity-times d-flex flex-wrap align-items-center gap-2 mt-1">
-          <span class="d-inline-flex align-items-center gap-1">
-            <i class="fa-solid fa-flag text-success" aria-hidden="true"></i>
-            <span>{{ startEndDisplay.start }}</span>
+        <div
+          v-if="startEndDisplay || sportType(activity)"
+          class="activity-times d-flex flex-wrap align-items-center gap-2 mt-1"
+        >
+          <span v-if="sportType(activity)" class="activity-sport-pill d-inline-flex align-items-center gap-1">
+            <i class="fa-solid fa-tag" aria-hidden="true"></i>
+            <span>{{ sportType(activity) }}</span>
           </span>
-          <i v-if="startEndDisplay.end" class="fa-solid fa-arrow-right text-muted" aria-hidden="true"></i>
-          <span v-if="startEndDisplay.end" class="d-inline-flex align-items-center gap-1">
-            <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
-            <span>{{ startEndDisplay.end }}</span>
-          </span>
+          <template v-if="startEndDisplay">
+            <span class="d-inline-flex align-items-center gap-1">
+              <i class="fa-solid fa-flag text-success" aria-hidden="true"></i>
+              <span>{{ startEndDisplay.start }}</span>
+            </span>
+            <i v-if="startEndDisplay.end" class="fa-solid fa-arrow-right text-muted" aria-hidden="true"></i>
+            <span v-if="startEndDisplay.end" class="d-inline-flex align-items-center gap-1">
+              <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+              <span>{{ startEndDisplay.end }}</span>
+            </span>
+          </template>
           <span
-            v-if="startEndDisplay.duration"
+            v-if="startEndDisplay?.duration"
             class="activity-duration-pill d-inline-flex align-items-center gap-1"
           >
             <i class="fa-solid fa-stopwatch" aria-hidden="true"></i>
@@ -906,6 +922,15 @@ onBeforeUnmount(() => {
           >
             <i class="fa-solid fa-fire" aria-hidden="true"></i>
             <span>{{ Math.round(activity.calories) }} kcal</span>
+          </span>
+          <span
+            v-if="activity.tss != null"
+            class="activity-tss-pill d-inline-flex align-items-center gap-1"
+            :class="`activity-tss-pill--${activity.tss_source || 'estimated'}`"
+            :title="tssHint(activity.tss_source)"
+          >
+            <i class="fa-solid fa-gauge-high" aria-hidden="true"></i>
+            <span>{{ Math.round(activity.tss) }} {{ t('strava.tss_label') }}</span>
           </span>
         </div>
       </div>
@@ -920,8 +945,8 @@ onBeforeUnmount(() => {
         <span class="d-none d-md-inline">{{ t('routes.create_from_activity') }}</span>
       </button>
     </div>
-    <div class="card-body p-0">
-      <div v-if="hasRoute" class="map-wrap" :class="{ expanded: state.mapExpanded }">
+    <div v-if="hasRoute" class="card-body p-0">
+      <div class="map-wrap" :class="{ expanded: state.mapExpanded }">
         <div ref="mapEl" class="activity-map"></div>
         <div class="map-controls">
           <!-- Groupe 1 : style de fond -->
@@ -983,10 +1008,6 @@ onBeforeUnmount(() => {
           </div>
         </div>
       </div>
-      <div v-else class="alert alert-info m-3 mb-0 d-flex align-items-center gap-2">
-        <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
-        <span>{{ t('strava.no_route_data') }}</span>
-      </div>
     </div>
   </div>
   <RouteFromActivityModal
@@ -1005,8 +1026,10 @@ onBeforeUnmount(() => {
 .map-wrap.expanded {
   position: fixed;
   /* Sits below the fixed-top navbar (z-index 1030) and above anything else.
-     left=0/right=0 spans the full viewport width. */
-  top: 4rem;
+     left=0/right=0 spans the full viewport width. Offset = real navbar height
+     (--navbar-h, mesurée par trackNavbar) : elle wrappe sur deux lignes avec
+     beaucoup de menus, un offset fixe passerait dessous. Fallback 4rem. */
+  top: var(--navbar-h, 4rem);
   left: 0;
   right: 0;
   bottom: 0;
@@ -1019,6 +1042,15 @@ onBeforeUnmount(() => {
   font-size: 0.82rem;
   color: #495057;
   font-variant-numeric: tabular-nums;
+}
+/* Sport (sport_type Strava) — neutre, pour ne pas concurrencer les pastilles
+   chiffrées (durée, calories, TSS) qui portent l'information de performance. */
+.activity-sport-pill {
+  background: rgba(108, 117, 125, 0.12);
+  color: #495057;
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-weight: 600;
 }
 .activity-duration-pill {
   background: rgba(252, 76, 2, 0.12);
@@ -1033,6 +1065,23 @@ onBeforeUnmount(() => {
   padding: 0.1rem 0.55rem;
   border-radius: 999px;
   font-weight: 600;
+}
+/* Charge d'entraînement (TSS) — couleur selon la source : puissance (vert,
+   fiable), FC (rouge), estimation (gris, moins précis). */
+.activity-tss-pill {
+  padding: 0.1rem 0.55rem;
+  border-radius: 999px;
+  font-weight: 600;
+  background: rgba(108, 117, 125, 0.15);
+  color: #6c757d;
+}
+.activity-tss-pill--power {
+  background: rgba(25, 135, 84, 0.14);
+  color: #198754;
+}
+.activity-tss-pill--hr {
+  background: rgba(220, 53, 69, 0.12);
+  color: #b02a37;
 }
 .activity-map {
   height: 520px;

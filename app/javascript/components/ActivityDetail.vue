@@ -13,7 +13,10 @@
 
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { PEAK_POWER_DURATIONS } from '../activityHelpers'
+import {
+  PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds, aerobicDecoupling,
+  efficiencyFactor, gradeAdjustedPace, segmentStats, computeSplits, computeLaps, isRun, paceMinPerKm,
+} from '../activityHelpers'
 // Même détection de cols et même pente lissée (fenêtre du profil) que le créateur
 // d'itinéraire, pour que carte, graphique et tableau de cols soient cohérents.
 import { detectClimbs, gradeForIndex } from '../routeHelpers'
@@ -22,6 +25,7 @@ import ActivityStats from './ActivityStats.vue'
 import ActivityMapCard from './ActivityMapCard.vue'
 import ActivityCharts from './ActivityCharts.vue'
 import ActivityConditions from './ActivityConditions.vue'
+import ActivityZones from './ActivityZones.vue'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -96,7 +100,7 @@ const hoveredPeakDuration = ref(null)
 // La carte reste toujours affichée au-dessus ; photos / puissance & cols /
 // graphiques basculent dans des onglets pour libérer de la place verticale.
 // L'onglet actif est persisté comme les toggles « collapsed » ci-dessus.
-const TABS = ['photos', 'power', 'analysis']
+const TABS = ['photos', 'power', 'analysis', 'zones']
 const savedTab = (typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.activityTab')) || ''
 const activeTab = ref(TABS.includes(savedTab) ? savedTab : 'analysis')
 const hasPhotos = computed(() => photos.value.length > 0)
@@ -115,17 +119,90 @@ const movingStats = computed(() => {
   const elapsed = activity.value?.elapsed_time
   const moving = activity.value?.moving_time
   if (!Number.isFinite(elapsed) || !Number.isFinite(moving)) return null
-  const stopped = Math.max(0, elapsed - moving)
+  let stopped = Math.max(0, elapsed - moving)
+  // Quand le capteur coupe l'enregistrement au lieu de marquer `moving: false`, le
+  // résumé Strava renvoie moving_time == elapsed_time et `stopped` vaut 0 à tort. Les
+  // streams sont alors la seule mesure des arrêts (cf. detectPauses). On recale `moving`
+  // sur ce qui reste, pour que moving + stopped == elapsed reste vrai.
+  if (stopped <= 0) {
+    const detected = totalPausedSeconds(
+      detectPauses(streams.value?.time?.data, streams.value?.moving?.data),
+    )
+    if (detected > 0) stopped = Math.min(detected, elapsed)
+  }
   const stopPct = elapsed > 0 ? (stopped / elapsed) * 100 : 0
-  return { elapsed, moving, stopped, stopPct }
+  return { elapsed, moving: Math.max(0, elapsed - stopped), stopped, stopPct }
+})
+
+// Une activité sans GPS (squash, tapis, muscu…) n'a pas de déplacement à mesurer :
+// son éventuel stream `altitude` n'est que la dérive du baromètre. La VAM globale
+// n'a alors aucun sens — même garde que les pastilles D+/D-/VAM d'ActivityCharts.
+const hasGps = computed(() => {
+  const ll = streams.value?.latlng?.data
+  if (Array.isArray(ll) && ll.length > 0) return true
+  const dist = streams.value?.distance?.data
+  return Array.isArray(dist) && dist.length > 0 && dist[dist.length - 1] > 0
 })
 
 // Global VAM (m/h). Falls back to elapsed_time when moving_time is missing.
 const globalVam = computed(() => {
   const gain = activity.value?.total_elevation_gain
   const denomS = movingStats.value?.moving ?? activity.value?.elapsed_time
+  if (!hasGps.value) return null
   if (!Number.isFinite(gain) || gain <= 0 || !Number.isFinite(denomS) || denomS <= 0) return null
   return (gain / denomS) * 3600
+})
+
+// ─── Métriques d'entraînement de l'activité (NP / IF / TSS / VI) ──────────
+// NP, IF et TSS viennent du serveur (dépendent de seuils : FTP/LTHR). VI = NP /
+// puissance moyenne se déduit ici. IF n'est montré que quand le TSS est basé sur
+// la puissance (le facteur d'intensité est une notion de puissance).
+const trainingMetrics = computed(() => {
+  const a = activity.value
+  if (!a) return null
+  const np = Number.isFinite(a.normalized_power) ? a.normalized_power : null
+  const avgW = Number.isFinite(a.average_watts) ? a.average_watts : null
+  const tss = Number.isFinite(a.tss) ? a.tss : null
+  const intensity = (a.tss_source === 'power' && Number.isFinite(a.intensity_factor))
+    ? a.intensity_factor : null
+  const vi = (np != null && avgW != null && avgW > 0) ? np / avgW : null
+  if (np == null && tss == null && intensity == null && vi == null) return null
+  return { np, intensity, tss, tssSource: a.tss_source, vi }
+})
+
+// Découplage aérobie (dérive cardiaque) : efficience 1re vs 2e moitié de la sortie.
+// Best-effort — null si l'effort est trop court ou sans FC + puissance/vitesse.
+const decoupling = computed(() => aerobicDecoupling(streams.value))
+
+// Facteur d'efficience (EF) de la sortie entière : NP÷FC (puissance) ou vitesse÷FC.
+// Complète le découplage — l'un mesure le rendement global, l'autre sa dérive.
+const efficiency = computed(() => efficiencyFactor(streams.value))
+
+// Allure ajustée à la pente (GAP) — course uniquement. On expose aussi l'allure
+// réelle moyenne pour afficher l'écart « GAP vs allure vécue ».
+const gradeAdjusted = computed(() => {
+  if (!isRun(activity.value)) return null
+  const gap = gradeAdjustedPace(streams.value)
+  if (gap == null) return null
+  const spd = activity.value?.average_speed
+  const actual = (Number.isFinite(spd) && spd >= 0.5) ? paceMinPerKm(spd) : null
+  return { gap, actual }
+})
+
+// Splits par km — universel (Strava + .fit), dépend seulement du flux `distance`.
+const splits = computed(() => computeSplits(streams.value, activity.value))
+
+// Tours enregistrés par l'appareil (bouton « lap » ou auto-lap). Strava les livre
+// dans le détail de l'activité, les .fit importés les stockent à l'upload — dans
+// les deux cas sous la clé `laps` du payload d'activité.
+const laps = computed(() => computeLaps(streams.value, activity.value))
+
+// Récap du segment sélectionné (drague A/B, clic sur un col / une puissance / un split).
+// Alimente l'analyseur de segment ; null quand rien n'est sélectionné.
+const segmentSummary = computed(() => {
+  const s = selection.value
+  if (!s || !streams.value) return null
+  return segmentStats(streams.value, activity.value, s.startIdx, s.endIdx)
 })
 
 // Best average power per standard duration (peak-power curve). Uses a
@@ -259,6 +336,9 @@ async function fetchStreams() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     streams.value = withSmoothedGrade(payload.streams || {})
+    // Une activité sans GPS (squash, tapis, muscu…) n'a pas de flux `distance` :
+    // l'axe des abscisses par défaut n'a alors rien à mesurer, on bascule sur le temps.
+    if (!streams.value.distance?.data?.length) xAxis.value = 'time'
   } catch (e) {
     streamsError.value = e.message
   } finally {
@@ -399,7 +479,7 @@ onMounted(async () => {
           @click="activeTab = 'power'"
         >
           <i class="fa-solid fa-bolt" aria-hidden="true"></i>
-          <span>{{ t('strava.tabs.power_climbs') }}</span>
+          <span>{{ t('strava.tabs.stats') }}</span>
         </button>
         <button
           type="button"
@@ -410,6 +490,16 @@ onMounted(async () => {
         >
           <i class="fa-solid fa-chart-line" aria-hidden="true"></i>
           <span>{{ t('strava.tabs.analysis') }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn d-flex align-items-center gap-2"
+          :class="effectiveTab === 'zones' ? 'btn-warning' : 'btn-outline-secondary'"
+          :aria-pressed="effectiveTab === 'zones'"
+          @click="activeTab = 'zones'"
+        >
+          <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
+          <span>{{ t('strava.tabs.zones') }}</span>
         </button>
       </div>
 
@@ -428,6 +518,13 @@ onMounted(async () => {
         class="mb-3"
         :moving-stats="movingStats"
         :global-vam="globalVam"
+        :training-metrics="trainingMetrics"
+        :decoupling="decoupling"
+        :efficiency="efficiency"
+        :grade-adjusted="gradeAdjusted"
+        :segment-summary="segmentSummary"
+        :splits="splits"
+        :laps="laps"
         :climbs-with-vam="climbsWithVam"
         :peak-powers="peakPowers"
         :peak-power-ranks="peakPowerRanks"
@@ -446,6 +543,7 @@ onMounted(async () => {
         :streams-loading="streamsLoading"
         :streams-error="streamsError"
         :selection="selection"
+        :laps="laps"
         :show-grade="showGrade"
         v-model:x-axis="xAxis"
         v-model:visible-streams="visibleStreams"
@@ -453,6 +551,16 @@ onMounted(async () => {
         v-model:collapsed="chartsCollapsed"
         @select-segment="(s, e) => setSelection(s, e)"
         @clear-selection="clearSelection"
+      />
+
+      <!-- Zones d'intensité de la sortie : chargé paresseusement à l'affichage de
+           l'onglet (la logique de zonage + les seuils viennent du serveur). -->
+      <ActivityZones
+        v-if="effectiveTab === 'zones'"
+        class="mb-3"
+        :activity-id="props.activityId"
+        :source="props.source"
+        :active="effectiveTab === 'zones'"
       />
     </div>
   </div>

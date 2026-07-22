@@ -4,6 +4,7 @@ import type { Coord, Climb, VoiceHint } from '../routeHelpers'
 import { userPreferences, speedForSport, routeProfileForSport, setActiveSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { isProfileValidForSport } from '../brouter'
+import type { RouteMarker } from '../routeMarkers'
 
 // Plafond du nombre de waypoints — doit rester ≤ MAX_WAYPOINTS côté serveur
 // (RoutesController = 500), qui tronque silencieusement au-delà à la sauvegarde.
@@ -12,8 +13,15 @@ export const MAX_WAYPOINTS = 200
 class RouteStore {
   // ─── Core route data ────────────────────────────────────────────────────────
   readonly geometry = ref<Coord[]>([])
-  readonly waypoints = ref<Array<{ lng: number; lat: number; free?: boolean }>>([])
+  // `free` : le tronçon ENTRANT du point est tracé en ligne droite (cf. reverseWaypoints).
+  // `uturn_ok` : l'utilisateur assume le demi-tour que ce point provoque (aller-retour
+  // délibéré) — purement informatif, n'affecte pas le routage (cf. detectUturnAnomalies).
+  readonly waypoints = ref<Array<{ lng: number; lat: number; free?: boolean; uturn_ok?: boolean }>>([])
   readonly voiceHints = ref<VoiceHint[]>([])
+  // Repères posés à la main (départ / arrivée / parking + libellé optionnel),
+  // enregistrés avec l'itinéraire (colonne `routes.markers`). Distincts des POI
+  // Overpass, cf. routeMarkers.ts.
+  readonly markers = ref<RouteMarker[]>([])
   readonly distanceM = ref(0)
   readonly elevGainM = ref(0)
   readonly elevLossM = ref(0)
@@ -84,6 +92,23 @@ class RouteStore {
     this.profile.value = routeProfileForSport(sport)
   }
 
+  // Vitesse à enregistrer avec l'itinéraire : `null` tant qu'elle vaut le réglage du
+  // profil pour ce sport. Ainsi un itinéraire ne fige sa vitesse que si on l'a
+  // délibérément ajustée pour lui ; les autres continuent de suivre le profil (et donc
+  // le curseur de vitesse de la liste des itinéraires).
+  readonly avgSpeedOverride = computed(() =>
+    this.avgSpeedKmh.value === speedForSport(this.sport.value) ? null : this.avgSpeedKmh.value,
+  )
+
+  // Applique la vitesse moyenne enregistrée avec un itinéraire. Ignore silencieusement
+  // une valeur hors bornes (même plage que speedForSport) : le défaut du sport, déjà en
+  // place, est alors conservé. À appeler APRÈS setSport, qui la réaligne sur le profil.
+  setAvgSpeedKmh(speed: unknown) {
+    const v = Number(speed)
+    if (!Number.isFinite(v) || v < 3 || v > 80) return
+    this.avgSpeedKmh.value = v
+  }
+
   // Change le profil de routage BRouter. Ignore silencieusement un profil non
   // proposé pour le sport courant (ex. valeur héritée d'un ancien itinéraire) :
   // le défaut du sport, déjà en place, est alors conservé.
@@ -96,6 +121,7 @@ class RouteStore {
     this.geometry.value = []
     this.waypoints.value = []
     this.voiceHints.value = []
+    this.markers.value = []
     this.distanceM.value = 0
     this.elevGainM.value = 0
     this.elevLossM.value = 0

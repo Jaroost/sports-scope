@@ -1,0 +1,18 @@
+<% content_for :title, t("performance.title") %>
+
+<div class="d-flex align-items-center gap-3 mb-2">
+  <span class="dashboard-badge bg-primary-subtle text-primary">
+    <i class="fa-solid fa-trophy" aria-hidden="true"></i>
+  </span>
+  <h1 class="mb-0"><%= t("performance.title") %></h1>
+</div>
+<p class="text-muted"><%= t("performance.intro") %></p>
+
+<% if current_user.strava_linked? || current_user.imported_activities.exists? %>
+  <div data-vue-component="PerformanceAnalysis" data-vue-props='<%= { admin: can?(:manage, :all) }.to_json %>'></div>
+<% else %>
+  <div class="alert alert-info d-flex align-items-center gap-2">
+    <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
+    <span><%= t("performance.no_data") %></span>
+  </div>
+<% end %>

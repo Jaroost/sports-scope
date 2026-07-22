@@ -41,3 +41,8 @@ export function vibrateOffRoute(): void {
 export function vibratePoi(): void {
   vibrate([120, 80, 120])
 }
+
+// Triple buzz montant : destination atteinte. Motif festif et distinct des alertes.
+export function vibrateArrival(): void {
+  vibrate([150, 100, 150, 100, 350])
+}

@@ -7,6 +7,16 @@ REGISTRY=${REGISTRY:-jaroost-server:5000}
 IMAGE=$REGISTRY/sports-scope
 GIT_SHA=$(git rev-parse --short HEAD)
 
+# Image BRouter (build depuis les sources, aucune image officielle publiée).
+# Doit rester aligné avec le tag utilisé dans deploy/docker-compose.prod.yml.
+BROUTER_VERSION=${BROUTER_VERSION:-1.7.10}
+BROUTER_IMAGE=$REGISTRY/sports-scope-brouter
+
+# Image du synchroniseur de POI. Contrairement à BRouter, elle embarque du code du
+# repo (sync.sh, extract.py) : elle est donc rebuildée et taguée à chaque release,
+# pas épinglée à une version amont.
+POI_SYNC_IMAGE=$REGISTRY/sports-scope-poi-sync
+
 #docker logout $REGISTRY 2>/dev/null || true
 docker login $REGISTRY
 
@@ -16,5 +26,23 @@ docker build -f deploy/Dockerfile.prod -t $IMAGE:$GIT_SHA -t $IMAGE:latest .
 echo "Pushing to $REGISTRY ..."
 docker push $IMAGE:$GIT_SHA
 docker push $IMAGE:latest
+
+# L'image BRouter ne change qu'à un bump de version : on ne rebuild que si le tag
+# est absent du registry (BROUTER_FORCE=1 pour forcer).
+# (--insecure : le registry local est en HTTP, sans quoi l'inspection échouerait
+# toujours et on rebuilderait à chaque release.)
+if [ "${BROUTER_FORCE:-0}" = "1" ] || ! docker manifest inspect --insecure "$BROUTER_IMAGE:$BROUTER_VERSION" >/dev/null 2>&1; then
+  echo "Building $BROUTER_IMAGE:$BROUTER_VERSION ..."
+  docker build --build-arg BROUTER_VERSION=$BROUTER_VERSION \
+    -t $BROUTER_IMAGE:$BROUTER_VERSION deploy/brouter
+  docker push $BROUTER_IMAGE:$BROUTER_VERSION
+else
+  echo "Skip $BROUTER_IMAGE:$BROUTER_VERSION (déjà dans le registry)"
+fi
+
+echo "Building $POI_SYNC_IMAGE:$GIT_SHA ..."
+docker build -t $POI_SYNC_IMAGE:$GIT_SHA -t $POI_SYNC_IMAGE:latest deploy/osm-pois
+docker push $POI_SYNC_IMAGE:$GIT_SHA
+docker push $POI_SYNC_IMAGE:latest
 
 echo "Done: $IMAGE:$GIT_SHA"

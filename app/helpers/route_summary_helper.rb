@@ -9,6 +9,16 @@ module RouteSummaryHelper
   # tronquent l'aperçu autour de 150 caractères.
   DESCRIPTION_LOCALITIES = 4
 
+  # Jeton de version du lien de partage. Les messageries (WhatsApp, Signal, Slack,
+  # iMessage) mettent l'aperçu en cache sur l'URL seule et ne la recrawlent jamais :
+  # sans ce paramètre, un itinéraire renommé garderait son ancien titre dans tous les
+  # aperçus déjà générés. Le suffixer d'`updated_at` donne une URL neuve à chaque
+  # modification, donc un aperçu regénéré, sans invalider les anciens liens (le
+  # paramètre est ignoré par le routeur).
+  def summary_version(route)
+    route.updated_at.to_i
+  end
+
   def summary_km(meters)
     return "–" unless meters.to_f.positive?
     "#{number_with_precision(meters.to_f / 1000, precision: 1, delimiter: ' ')} km"

@@ -19,6 +19,16 @@ export function buildNewRouteUrl({ name, sport, profile }: { name: string; sport
   return url.toString()
 }
 
+// Suffixe `?v=<horodatage>` d'un lien de partage. Les messageries (WhatsApp, Signal,
+// Slack, iMessage) mettent l'aperçu Open Graph en cache sur l'URL seule et ne la
+// recrawlent pas : sans ce paramètre, un itinéraire renommé puis repartagé
+// ressortirait avec son ancien titre. Le routeur ignore le paramètre, les liens déjà
+// diffusés restent donc valides.
+export function shareVersionParam(updatedAt?: string | null): string {
+  const ts = updatedAt ? Date.parse(updatedAt) : NaN
+  return Number.isNaN(ts) ? '' : `?v=${Math.floor(ts / 1000)}`
+}
+
 export function haversine(a: Coord | LngLat, b: Coord | LngLat): number {
   const R = 6371000
   const toRad = (d: number) => (d * Math.PI) / 180

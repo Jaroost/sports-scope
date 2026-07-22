@@ -8,7 +8,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, shareVersionParam } from '../routeHelpers'
 import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport } from '../userPreferences'
@@ -61,6 +61,9 @@ const exporting = ref(false)
 // en édition il vient de l'itinéraire chargé/enregistré (null tant qu'il n'est
 // pas sauvegardé, donc pas de navigation possible avant l'enregistrement).
 const routeShareToken = ref<string | null>(null)
+// Horodatage de dernière modification, tenu à jour au chargement et à chaque
+// enregistrement : il version le lien de partage (cf. shareVersionParam).
+const routeUpdatedAt = ref<string | null>(null)
 const showExportDialog = ref(false)
 // ─── Avertissements sur le tracé ───────────────────────────────────────────────
 // Les deux ne sont calculés qu'à la tentative de sauvegarde (cf. save), et non au fil de
@@ -471,6 +474,7 @@ async function fetchRoute(id: number) {
     const payload = await res.json()
     const r = payload.route
     routeShareToken.value = r.share_token || null
+    routeUpdatedAt.value = r.updated_at || null
     routeStore.name.value = r.name || ''
     // Réaligne la catégorie d'activité (et donc la vitesse moyenne) sur celle
     // enregistrée avec l'itinéraire. setSport réinitialise le profil au défaut du
@@ -525,6 +529,7 @@ async function fetchSharedRoute(token: string) {
     // Le propriétaire connecté peut repasser en édition depuis la vue partagée
     // (cf. editUrl) ; pour tout autre visiteur, `owned` est faux.
     editableRouteId.value = r.owned && r.id ? Number(r.id) : null
+    routeUpdatedAt.value = r.updated_at || null
     routeStore.name.value = r.name || ''
     if (r.activity) routeStore.setSport(r.activity)
     if (r.profile) routeStore.setProfile(r.profile)
@@ -743,6 +748,7 @@ async function persist() {
     // Mémorise le jeton de partage renvoyé pour activer le bouton de navigation
     // dès le premier enregistrement (un itinéraire neuf n'en avait pas encore).
     if (r?.share_token) routeShareToken.value = r.share_token
+    routeUpdatedAt.value = r?.updated_at || null
     if (!isEditMode() && r?.id) {
       routeStore.currentId.value = r.id
       window.history.replaceState({}, '', `${localePrefix}/routes/${r.id}/edit`)
@@ -803,7 +809,7 @@ function navigateRoute() {
 // navigation, GPX). Feuille de partage native si disponible, sinon presse-papier.
 const shareUrl = computed(() =>
   navigateToken.value
-    ? `${window.location.origin}${localePrefix}/routes/${encodeURIComponent(navigateToken.value)}`
+    ? `${window.location.origin}${localePrefix}/routes/${encodeURIComponent(navigateToken.value)}${shareVersionParam(routeUpdatedAt.value)}`
     : null,
 )
 const shareCopied = ref(false)

@@ -4,8 +4,14 @@
 <% content_for :title, @route.name %>
 <%
   description = summary_description(@route)
-  preview_url = shared_route_preview_url(@route.share_token)
-  page_url = share_route_url(@route.share_token)
+  # `v` : cf. RouteSummaryHelper#summary_version — sans lui, les messageries
+  # continueraient d'afficher le titre et la vignette d'avant le renommage.
+  version = summary_version(@route)
+  preview_url = shared_route_preview_url(token: @route.share_token, v: version)
+  # `token:` nommé, pas positionnel : le segment de locale est optionnel dans la route,
+  # et un argument positionnel irait le remplir dès que la locale n'est pas déjà dans
+  # les default_url_options.
+  page_url = share_route_url(token: @route.share_token, v: version)
 %>
 <% content_for :head do %>
   <meta name="description" content="<%= description %>">

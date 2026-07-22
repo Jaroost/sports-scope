@@ -3,7 +3,7 @@ import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { t } from '../i18n'
 import { speedForSport, persistSportSpeed, isLoggedIn, SPORTS } from '../userPreferences'
 import type { Sport } from '../userPreferences'
-import { buildNewRouteUrl } from '../routeHelpers'
+import { buildNewRouteUrl, shareVersionParam } from '../routeHelpers'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
 import { usePlannedRides } from '../composables/usePlannedRides'
 import { estimateRouteLoad } from '../routeLoad'
@@ -400,7 +400,10 @@ async function saveName(route) {
     const updated = payload.route
     const idx = routes.value.findIndex((r) => r.id === route.id)
     if (idx >= 0 && updated) {
-      routes.value[idx] = { ...routes.value[idx], name: updated.name }
+      // `updated_at` suit le nom : c'est lui qui version le lien de partage (cf.
+      // shareVersionParam), sans quoi un partage juste après le renommage
+      // ressortirait l'aperçu en cache de l'ancien nom.
+      routes.value[idx] = { ...routes.value[idx], name: updated.name, updated_at: updated.updated_at }
     }
     cancelEdit()
   } catch (e) {
@@ -456,7 +459,10 @@ async function duplicateRoute(route) {
 // de faire choisir un type de lien au moment du partage. Feuille de partage native
 // sur mobile, repli presse-papier puis prompt sur ordinateur.
 async function shareRoute(route) {
-  const url = `${window.location.origin}${localePrefix}/routes/${route.share_token}`
+  // `v` = horodatage de dernière modification : les messageries mettent l'aperçu en
+  // cache sur l'URL seule et ne la recrawlent pas. Sans ce paramètre, un itinéraire
+  // renommé repartagé garderait l'ancien titre et l'ancienne vignette.
+  const url = `${window.location.origin}${localePrefix}/routes/${route.share_token}${shareVersionParam(route.updated_at)}`
   // Résumé de secours : les cibles qui n'affichent pas la carte Open Graph montrent
   // au moins les chiffres. Beaucoup l'ignorent quand une `url` est fournie.
   const text = [formatKm(route.distance_m), route.elevation_gain_m != null ? `${Math.round(route.elevation_gain_m)} m D+` : null]

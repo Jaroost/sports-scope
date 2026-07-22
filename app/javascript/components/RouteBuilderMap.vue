@@ -20,7 +20,7 @@ import { MARKER_KINDS, markerMeta, markerKindLabel } from '../routeMarkers'
 import type { MarkerKind } from '../routeMarkers'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
-  streetViewUrl, bearingFromRoute, bearingAlongRoute, simplifyTrack,
+  streetViewUrl, bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
 } from '../routeHelpers'
 import type { Climb, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
@@ -96,12 +96,13 @@ const savedPoiMarkerObservers: MutationObserver[] = []
 let savedPoiPopup: any = null
 // Mode d'édition courant, piloté par le dropdown « Mode d'édition » (hors lecture
 // seule) : 'route' modifie le tracé au clic, 'poi' pose un POI, 'marker' pose un
-// repère. Par défaut on édite l'itinéraire.
-type EditMode = 'route' | 'poi' | 'marker'
+// repère, 'measure' mesure à vol d'oiseau. Par défaut on édite l'itinéraire.
+type EditMode = 'route' | 'poi' | 'marker' | 'measure'
 const editMode = ref<EditMode>('route')
 // Dérivés conservés pour les gardes de clic/survol de la carte.
 const placePoiMode = computed(() => editMode.value === 'poi')
 const placeMarkerMode = computed(() => editMode.value === 'marker')
+const measureMode = computed(() => editMode.value === 'measure')
 // Dialogue de création d'un POI (nom + catégorie) ouvert au clic en mode « poser ».
 const poiDialog = ref<{ lng: number; lat: number; name: string; category: string } | null>(null)
 const POI_CATS = POI_CATEGORIES
@@ -116,14 +117,36 @@ let routeMarkerPopup: any = null
 // Dialogue de création d'un repère (type + libellé optionnel).
 const markerDialog = ref<{ lng: number; lat: number; kind: MarkerKind; label: string } | null>(null)
 
+// ── Mesure à vol d'oiseau ────────────────────────────────────────────────────
+// Mode « règle » : chaque clic pose un point, et l'on affiche la distance directe
+// (orthodromie) cumulée le long des segments posés. Purement éphémère — rien n'est
+// enregistré avec l'itinéraire, et le tracé n'est jamais modifié.
+const measurePoints = ref<LngLat[]>([])
+const measureMarkers: any[] = []
+// Poignées « + » au milieu de chaque segment (insertion d'un point intermédiaire).
+const measureMidMarkers: any[] = []
+// Point de mesure dont la tooltip (suppression) est ouverte, ou -1. Piloté en DOM comme
+// les waypoints : une classe sur le marqueur, pas de re-rendu.
+let measureSelectedIdx = -1
+// Distances cumulées, index par index (measureCumM[0] === 0).
+const measureCumM = computed(() => {
+  const out = [0]
+  for (let i = 1; i < measurePoints.value.length; i++) {
+    out.push(out[i - 1] + haversine(measurePoints.value[i - 1], measurePoints.value[i]))
+  }
+  return out
+})
+const measureTotalM = computed(() => measureCumM.value[measureCumM.value.length - 1] ?? 0)
+
 // Dropdown ouvert dans la toolbar de la carte, ou null. Un seul à la fois : ouvrir
 // un dropdown (style de carte / « Affichage » / « Mode d'édition ») ferme l'autre.
 // 'style' est piloté par MapStyleDropdown via v-model:open.
 const openMenu = ref<'style' | 'display' | 'edit' | null>(null)
 const EDIT_MODES: Array<{ mode: EditMode; icon: string; labelKey: string }> = [
-  { mode: 'route',  icon: 'fa-route',            labelKey: 'routes.edit_mode_route' },
-  { mode: 'poi',    icon: 'fa-map-location-dot', labelKey: 'routes.edit_mode_poi' },
-  { mode: 'marker', icon: 'fa-signs-post',       labelKey: 'routes.edit_mode_marker' },
+  { mode: 'route',   icon: 'fa-route',            labelKey: 'routes.edit_mode_route' },
+  { mode: 'poi',     icon: 'fa-map-location-dot', labelKey: 'routes.edit_mode_poi' },
+  { mode: 'marker',  icon: 'fa-signs-post',       labelKey: 'routes.edit_mode_marker' },
+  { mode: 'measure', icon: 'fa-ruler',            labelKey: 'routes.edit_mode_measure' },
 ]
 const currentEditMode = computed(() => EDIT_MODES.find((m) => m.mode === editMode.value) ?? EDIT_MODES[0])
 let hoveredPlaceEl: HTMLElement | null = null
@@ -269,6 +292,15 @@ async function initMap() {
         // Tooltip « point quelconque » (clic droit / appui long) ouverte : un clic ne
         // fait que la refermer, sans ajouter de point au tracé.
         if (coordPopup) { closeCoordPopup(); return }
+        // Mode « mesurer » : le clic pose un point de mesure, sans jamais toucher au
+        // tracé. Testé avant la garde de lecture seule : mesurer reste possible sur un
+        // itinéraire verrouillé.
+        if (measureMode.value) {
+          // Tooltip de suppression ouverte : le clic ne fait que la refermer.
+          if (measureSelectedIdx >= 0) { selectMeasurePoint(-1); return }
+          addMeasurePoint(e.lngLat.lng, e.lngLat.lat)
+          return
+        }
         // Mode « poser un POI » : le clic ouvre le dialogue de création d'un POI
         // sauvegardé au point cliqué, sans toucher au tracé.
         if (placePoiMode.value && !routeStore.readOnly.value) {
@@ -330,6 +362,12 @@ async function initMap() {
         }
       })
       mapInstance.on('mousemove', (e: any) => {
+        // Mode « mesurer » : viseur, et pas de marqueur d'insertion sur le tracé.
+        if (measureMode.value) {
+          hideHoverMarker()
+          mapInstance.getCanvas().style.cursor = 'crosshair'
+          return
+        }
         // Mode « poser un POI/repère » : pas de marqueur d'insertion de point sur le
         // tracé. Curseur viseur seulement si le calque correspondant est visible ;
         // sinon le mode est inerte (rien ne se pose au clic) et rien ne le suggère.
@@ -420,6 +458,12 @@ function installRouteLayer() {
   if (!mapInstance.getSource('builder-route-selected')) {
     mapInstance.addSource('builder-route-selected', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
     mapInstance.addLayer({ id: 'builder-route-selected-line', type: 'line', source: 'builder-route-selected', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#00b4d8', 'line-width': 7 } })
+  }
+  // Mesure à vol d'oiseau : segments droits en traitillé, au-dessus du tracé, dans une
+  // couleur qui ne se confond ni avec l'itinéraire ni avec les tronçons libres.
+  if (!mapInstance.getSource('builder-measure')) {
+    mapInstance.addSource('builder-measure', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
+    mapInstance.addLayer({ id: 'builder-measure-line', type: 'line', source: 'builder-measure', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0f766e', 'line-width': 3, 'line-dasharray': [2, 1.6] } })
   }
   // Flèches de sens de parcours : espacées en pixels écran (constantes au zoom) et
   // posées au-dessus du tracé, sur la géométrie continue de `builder-route`.
@@ -1300,6 +1344,222 @@ function setEditMode(mode: EditMode) {
   openMenu.value = null
   if (mode !== 'poi') poiDialog.value = null
   if (mode !== 'marker') markerDialog.value = null
+  // Quitter le mode mesure efface la mesure en cours : elle n'est ni enregistrée ni
+  // visible ailleurs, la garder afficherait une ligne orpheline sur la carte.
+  if (mode !== 'measure') clearMeasure()
+}
+
+// ─── Mesure à vol d'oiseau ────────────────────────────────────────────────────
+
+function addMeasurePoint(lng: number, lat: number) {
+  measurePoints.value.push([lng, lat])
+  renderMeasure()
+}
+
+function undoMeasurePoint() {
+  measurePoints.value.pop()
+  measureSelectedIdx = -1
+  renderMeasure()
+}
+
+function clearMeasure() {
+  if (!measurePoints.value.length) return
+  measurePoints.value = []
+  measureSelectedIdx = -1
+  renderMeasure()
+}
+
+function removeMeasurePoint(idx: number) {
+  measurePoints.value.splice(idx, 1)
+  measureSelectedIdx = -1
+  renderMeasure()
+}
+
+// Ouvre la tooltip du point `idx` (-1 = aucune). Les index changent à chaque
+// insertion/suppression : on referme plutôt que de tenter de suivre le point.
+function selectMeasurePoint(idx: number) {
+  measureSelectedIdx = idx
+  measureMarkers.forEach((m, i) => m.getElement().classList.toggle('measure-marker--selected', i === idx))
+}
+
+// Insère un point au milieu du segment `idx` (entre les points idx et idx+1) et renvoie
+// son index. Sert au clic comme au glisser d'une poignée « + ».
+function insertMeasurePoint(idx: number): number {
+  const [a, b] = [measurePoints.value[idx], measurePoints.value[idx + 1]]
+  measurePoints.value.splice(idx + 1, 0, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2])
+  measureSelectedIdx = -1
+  renderMeasure()
+  return idx + 1
+}
+
+// Redessine ligne + poignées de la mesure. Tout est recréé (poignées peu nombreuses) :
+// les libellés dépendent de la distance cumulée, donc de tous les points qui précèdent,
+// et les index capturés dans les gestionnaires doivent suivre les insertions/suppressions.
+function renderMeasure() {
+  updateMeasureLayer()
+  while (measureMarkers.length) measureMarkers.pop().remove()
+  while (measureMidMarkers.length) measureMidMarkers.pop().remove()
+  if (!mapInstance || !_maplibregl) return
+  measurePoints.value.forEach((p, idx) => {
+    const el = document.createElement('div')
+    el.className = idx === measureSelectedIdx ? 'measure-marker measure-marker--selected' : 'measure-marker'
+    el.innerHTML = `
+      <span class="measure-marker-dot"></span>
+      <span class="measure-marker-label"></span>
+      <div class="measure-tooltip">
+        <button type="button" class="measure-tooltip-delete">
+          <i class="fa-solid fa-trash" aria-hidden="true"></i>
+          <span>${t('routes.measure_remove_point')}</span>
+        </button>
+        <div class="measure-tooltip-arrow"></div>
+      </div>`
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(p).addTo(mapInstance)
+    // Un clic sur la poignée ne doit pas traverser jusqu'à la carte (qui poserait un
+    // point de plus) : il ouvre/ferme la tooltip de suppression. Le clic droit supprime
+    // directement.
+    el.addEventListener('click', (ev: Event) => {
+      ev.stopPropagation()
+      if ((ev.target as Element).closest('.measure-tooltip')) return
+      selectMeasurePoint(idx === measureSelectedIdx ? -1 : idx)
+    })
+    el.querySelector('.measure-tooltip-delete')!.addEventListener('click', (ev: Event) => {
+      ev.stopPropagation(); ev.preventDefault()
+      removeMeasurePoint(idx)
+    })
+    el.addEventListener('contextmenu', (ev: Event) => {
+      ev.preventDefault(); ev.stopPropagation()
+      removeMeasurePoint(idx)
+    })
+    attachMeasureDrag(el, marker, {
+      start: () => { selectMeasurePoint(-1); return marker },
+      move: (lng, lat) => { measurePoints.value[idx] = [lng, lat]; updateMeasureLayer(); refreshMeasureLabels() },
+      end: renderMeasure,
+      // Tactile seulement (cf. attachMeasureDrag) : l'appui n'y produit pas de `click`.
+      tap: () => selectMeasurePoint(idx === measureSelectedIdx ? -1 : idx),
+    })
+    measureMarkers.push(marker)
+  })
+  // Poignées « + » au milieu de chaque segment : clic = insérer un point là, glisser =
+  // insérer et emmener le nouveau point sous le curseur.
+  for (let i = 0; i < measurePoints.value.length - 1; i++) {
+    const el = document.createElement('div')
+    el.className = 'measure-mid-marker'
+    el.innerHTML = '<i class="fa-solid fa-plus"></i>'
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(midOfMeasureSegment(i)).addTo(mapInstance)
+    el.addEventListener('click', (ev: Event) => { ev.stopPropagation(); insertMeasurePoint(i) })
+    let dragIdx = -1
+    attachMeasureDrag(el, marker, {
+      // Le glissement promeut la poignée en vrai point : renderMeasure recrée les
+      // marqueurs, on rend le nouveau pour que le glissement continue sur lui.
+      start: () => { dragIdx = insertMeasurePoint(i); return measureMarkers[dragIdx] },
+      move: (lng, lat) => { measurePoints.value[dragIdx] = [lng, lat]; updateMeasureLayer(); refreshMeasureLabels() },
+      end: renderMeasure,
+      tap: () => insertMeasurePoint(i),
+    })
+    measureMidMarkers.push(marker)
+  }
+}
+
+function midOfMeasureSegment(i: number): LngLat {
+  const [a, b] = [measurePoints.value[i], measurePoints.value[i + 1]]
+  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+}
+
+// Mise à jour légère pendant un glissement : les marqueurs restent en place (les
+// recréer casserait le geste), seuls leur libellé et la position des « + » changent.
+function refreshMeasureLabels() {
+  measureMarkers.forEach((m, idx) => {
+    const lbl = m.getElement().querySelector('.measure-marker-label')
+    if (lbl) lbl.textContent = idx === 0 ? t('routes.measure_start') : formatDistancePrecise(measureCumM.value[idx])
+  })
+  measureMidMarkers.forEach((m, i) => {
+    if (i < measurePoints.value.length - 1) m.setLngLat(midOfMeasureSegment(i))
+  })
+}
+
+// Glisser-déposer d'une poignée de mesure (souris + tactile), calqué sur
+// attachWaypointDrag : pan de la carte désactivé le temps du geste, suivi du curseur en
+// direct, et neutralisation du clic de relâchement (il poserait un point de plus).
+// `start` peut renvoyer un autre marqueur à déplacer que celui saisi (poignée « + »).
+function attachMeasureDrag(
+  el: HTMLElement,
+  marker: any,
+  hooks: { start?: () => any; move: (lng: number, lat: number) => void; end: () => void; tap?: () => void },
+) {
+  const unproject = (clientX: number, clientY: number) => {
+    const rect = mapInstance.getContainer().getBoundingClientRect()
+    return mapInstance.unproject([clientX - rect.left, clientY - rect.top])
+  }
+  // `isTouch` : sur un appui tactile, `touchstart` est annulé (preventDefault) donc
+  // aucun `click` n'est émis — c'est `tap` qui rend l'appui. À la souris, le `click`
+  // arrive normalement et c'est lui qui agit : déclencher `tap` en plus ferait double.
+  const endDrag = (moved: boolean, isTouch: boolean) => {
+    mapInstance.dragPan.enable()
+    el.style.cursor = ''
+    if (!moved) { if (isTouch) hooks.tap?.(); return }
+    // Le relâchement produit un clic sur la carte si le curseur a quitté la poignée.
+    suppressNextMapClick = true
+    setTimeout(() => { suppressNextMapClick = false }, 50)
+    hooks.end()
+  }
+
+  el.addEventListener('mousedown', (ev: MouseEvent) => {
+    if (ev.button !== 0) return
+    ev.preventDefault(); ev.stopPropagation()
+    let moved = false
+    let target = marker
+    mapInstance.dragPan.disable()
+    el.style.cursor = 'grabbing'
+    const onMove = (e: MouseEvent) => {
+      if (!moved) { moved = true; target = hooks.start?.() ?? marker }
+      const ll = unproject(e.clientX, e.clientY)
+      target.setLngLat([ll.lng, ll.lat])
+      hooks.move(ll.lng, ll.lat)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      endDrag(moved, false)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  })
+
+  el.addEventListener('touchstart', (ev: TouchEvent) => {
+    if (ev.touches.length !== 1) return
+    ev.preventDefault(); ev.stopPropagation()
+    const start = ev.touches[0]
+    let moved = false
+    let target = marker
+    mapInstance.dragPan.disable()
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return
+      e.preventDefault()
+      const touch = e.touches[0]
+      const dx = touch.clientX - start.clientX, dy = touch.clientY - start.clientY
+      // Seuil anti-tremblement : sous 5 px on considère que c'est un appui, pas un glissé.
+      if (!moved && dx * dx + dy * dy < 25) return
+      if (!moved) { moved = true; target = hooks.start?.() ?? marker }
+      const ll = unproject(touch.clientX, touch.clientY)
+      target.setLngLat([ll.lng, ll.lat])
+      hooks.move(ll.lng, ll.lat)
+    }
+    const onTouchEnd = () => {
+      el.removeEventListener('touchmove', onTouchMove)
+      el.removeEventListener('touchend', onTouchEnd)
+      el.removeEventListener('touchcancel', onTouchEnd)
+      endDrag(moved, true)
+    }
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    el.addEventListener('touchend', onTouchEnd)
+    el.addEventListener('touchcancel', onTouchEnd)
+  }, { passive: false })
+}
+
+function updateMeasureLayer() {
+  const src = mapInstance?.getSource('builder-measure')
+  if (!src) return
+  src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: measurePoints.value } })
 }
 
 // Ouvre le dialogue de création (type + libellé) au point cliqué en mode « poser ».
@@ -2015,7 +2275,7 @@ function applyMapStyle(id: string) {
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
     installRouteLayer(); installOverlays()
-    updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); installClimbMarkers(); installPlaceMarkers(); installSavedPoiMarkers()
+    updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); updateMeasureLayer(); installClimbMarkers(); installPlaceMarkers(); installSavedPoiMarkers()
     if (locationVisible.value && lastLocationCoords) installLocationLayers(lastLocationCoords, lastLocationAccuracy)
     if (props.state.is3D) {
       if (!mapInstance.getSource('terrain-dem')) {
@@ -2280,6 +2540,8 @@ onBeforeUnmount(() => {
   climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
   climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
   clearTurnAnomalyMarkers()
+  measureMarkers.forEach((m) => m.remove()); measureMarkers.length = 0
+  measureMidMarkers.forEach((m) => m.remove()); measureMidMarkers.length = 0
   clearPlaceMarkers()
   clearSavedPoiMarkers()
   closeSavedPoiPopup()
@@ -2521,8 +2783,28 @@ defineExpose({
       </template>
     </div>
 
+    <!-- Panneau du mode « mesurer » : total à vol d'oiseau + annulation/effacement.
+         Affiché tant que le mode est actif, même sans point posé (il porte la consigne). -->
+    <div v-if="measureMode" class="measure-panel shadow" :title="t('routes.measure_tip')">
+      <div class="measure-panel-main">
+        <i class="fa-solid fa-ruler" aria-hidden="true"></i>
+        <span class="measure-panel-total">{{ formatDistancePrecise(measureTotalM) }}</span>
+        <span class="measure-panel-hint">{{ measurePoints.length ? t('routes.measure_straight') : t('routes.measure_hint') }}</span>
+      </div>
+      <button type="button" class="btn btn-sm btn-light" :disabled="!measurePoints.length"
+        :title="t('routes.measure_undo')" :aria-label="t('routes.measure_undo')" @click="undoMeasurePoint">
+        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+      </button>
+      <button type="button" class="btn btn-sm btn-light" :disabled="!measurePoints.length"
+        :title="t('routes.measure_clear')" :aria-label="t('routes.measure_clear')" @click="clearMeasure">
+        <i class="fa-solid fa-trash" aria-hidden="true"></i>
+      </button>
+    </div>
+
     <!-- Overlays -->
-    <div v-if="routeStore.waypoints.value.length === 0" class="map-overlay-hint">
+    <!-- Consigne « cliquez pour tracer » : masquée en mode mesure (le clic n'ajoute
+         alors rien au tracé, et elle occuperait la place du bandeau de mesure). -->
+    <div v-if="routeStore.waypoints.value.length === 0 && !measureMode" class="map-overlay-hint">
       <i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>
       <span>{{ t('routes.click_hint') }}</span>
     </div>
@@ -2714,6 +2996,53 @@ defineExpose({
 }
 .map-search-result:last-child { border-bottom: 0; }
 .map-search-result:hover { background: rgba(252,76,2,0.08); }
+/* Panneau de mesure : centré en bas de la carte. */
+.measure-panel {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: calc(100% - 1.5rem);
+  padding: 0.3rem 0.4rem 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(15,118,110,0.95);
+  color: #fff;
+  font-size: 0.85rem;
+}
+.measure-panel-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.measure-panel-total {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.measure-panel-hint {
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Sur téléphone, le bandeau se cale juste au-dessus du bouton de stats (distance /
+   dénivelé), aligné sur lui plutôt que centré. Même seuil que ce bouton. */
+@media (max-width: 767px), (max-height: 500px) {
+  .measure-panel {
+    left: 5px;
+    right: auto;
+    bottom: 44px;
+    transform: none;
+    max-width: calc(100% - 10px);
+  }
+}
+@media (max-width: 575.98px) {
+  .measure-panel-hint { display: none; }
+}
 .map-overlay-hint {
   position: absolute;
   bottom: 18px;
@@ -2840,6 +3169,102 @@ defineExpose({
 
 <style>
 /* JS-created DOM elements — must be global (not scoped) */
+/* Points de mesure à vol d'oiseau : pastille + étiquette de distance cumulée.
+   La pastille FAIT la taille du marqueur (ancré au centre) et l'étiquette est en
+   position absolue au-dessus : sinon elle entre dans le calcul de l'ancrage et décale
+   le point par rapport à l'endroit cliqué. */
+.measure-marker {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  cursor: grab;
+  touch-action: none;
+}
+.measure-marker-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #0f766e;
+  border: 3px solid #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+}
+.measure-marker-label {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15,118,110,0.95);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 1px 6px;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  pointer-events: none;
+}
+/* Tooltip de suppression d'un point de mesure. Sous la pastille : l'étiquette de
+   distance occupe déjà le dessus. */
+.measure-tooltip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
+  padding: 3px;
+  z-index: 20;
+  white-space: nowrap;
+}
+.measure-marker--selected .measure-tooltip { display: block; }
+.measure-marker--selected .measure-marker-dot {
+  box-shadow: 0 0 0 3px rgba(15,118,110,0.32), 0 1px 4px rgba(0,0,0,0.35);
+}
+.measure-tooltip-delete {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 7px;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  color: #b02a37;
+  cursor: pointer;
+}
+.measure-tooltip-delete:hover { background: rgba(176,42,55,0.1); }
+.measure-tooltip-arrow {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: #fff;
+}
+/* Poignée « + » au milieu d'un segment de mesure. */
+.measure-mid-marker {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #0f766e;
+  color: #0f766e;
+  font-size: 0.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  opacity: 0.85;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+/* Pas de `transform` au survol : MapLibre pose le sien en style inline sur l'élément
+   du marqueur (positionnement), le remplacer déplacerait la poignée. */
+.measure-mid-marker:hover { opacity: 1; background: #0f766e; color: #fff; }
 .wp-marker {
   position: relative;
   width: 28px;

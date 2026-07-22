@@ -310,7 +310,7 @@ onBeforeUnmount(() => {
                 <div class="text-muted">
                   <span v-if="data.auto.best_20min">20&nbsp;min : {{ data.auto.best_20min }} W</span>
                   <span v-if="data.auto.best_60min"> · 60&nbsp;min : {{ data.auto.best_60min }} W</span>
-                  <span v-if="data.auto.cp"> · CP : {{ data.auto.cp }} W</span>
+                  <span v-if="data.auto.cp"> · {{ t('performance.ftp.cp_short') }} : {{ data.auto.cp }} W</span>
                 </div>
                 <div class="text-muted">{{ t('performance.ftp.samples', { count: data.auto.samples }) }}</div>
               </div>

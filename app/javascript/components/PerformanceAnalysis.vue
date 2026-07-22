@@ -2,6 +2,7 @@
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { ACTION_STYLE, ZONE_VERDICT_COLOR } from '../composables/useTrainingPlan'
+import FitnessGlossary from './FitnessGlossary.vue'
 import FtpPanel from './FtpPanel.vue'
 import TrainingLoadPanel from './TrainingLoadPanel.vue'
 
@@ -964,6 +965,10 @@ onBeforeUnmount(() => {
           :section="fitnessSub === 'zones' ? 'zones' : 'load'"
           @summary="onFitnessSummary"
         />
+
+        <!-- Lexique commun aux trois sous-onglets : les sigles des graphiques (TSS, CTL,
+             IF…) expliqués une seule fois, au lieu d'un rappel dans chaque panneau. -->
+        <FitnessGlossary />
       </div>
     </template>
   </div>

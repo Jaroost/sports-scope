@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_21_000002) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_22_065835) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -180,6 +180,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_21_000002) do
     t.string "name", null: false
     t.float "normalized_power"
     t.jsonb "peak_powers", default: {}, null: false
+    t.jsonb "photo_thumbs"
     t.jsonb "power_histogram", default: {}, null: false
     t.jsonb "preview_segments"
     t.jsonb "raw", default: {}, null: false

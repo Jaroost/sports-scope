@@ -35,6 +35,56 @@ class StravaActivity < ApplicationRecord
   # NULL (par opposition à "" = vérifié, aucun appareil). Cible du backfill device.
   scope :device_unchecked, -> { where(device_name: nil) }
 
+  # Activités qui annoncent des photos (`total_photo_count` du résumé) sans qu'on en
+  # ait encore les URLs : `photo_thumbs` NULL (par opposition à `[]` = récupéré,
+  # rien d'exploitable). Cible du backfill photos.
+  scope :photos_pending, lambda {
+    where(photo_thumbs: nil).where("COALESCE((raw->>'total_photo_count')::int, 0) > 0")
+  }
+
+  # Nombre de photos annoncé par le résumé Strava. Sert à la fois au scope de
+  # backfill et à l'invalidation (photos ajoutées après coup sur Strava).
+  def self.total_photo_count_from(raw)
+    return 0 unless raw.is_a?(Hash)
+
+    (raw["total_photo_count"] || raw[:total_photo_count]).to_i
+  end
+
+  # Vignettes retenues pour le carousel de la liste, dans l'ordre renvoyé par
+  # Strava. On ne garde que ce que la vignette affiche (une URL + la légende) et on
+  # plafonne le nombre : le carousel n'a pas vocation à dérouler 30 photos, et la
+  # colonne reste petite sur des milliers d'activités.
+  MAX_PHOTO_THUMBS = 6
+
+  # Enregistre les vignettes lues sur `/activities/:id/photos`. Écrit `[]` quand il
+  # n'y a rien d'exploitable, pour marquer l'activité vérifiée et ne pas boucler
+  # dessus au backfill suivant. `update_column` : backfill léger, sans callbacks.
+  def store_photo_thumbs!(photos)
+    thumbs = self.class.photo_thumbs_from(photos)
+    update_column(:photo_thumbs, thumbs)
+    thumbs
+  end
+
+  def self.photo_thumbs_from(photos)
+    Array(photos).filter_map { |photo|
+      next unless photo.is_a?(Hash)
+
+      url = thumb_url_from(photo["urls"] || photo[:urls])
+      next if url.blank?
+
+      { "id" => (photo["unique_id"] || photo[:unique_id]).to_s, "url" => url,
+        "caption" => (photo["caption"] || photo[:caption]).to_s }
+    }.first(MAX_PHOTO_THUMBS)
+  end
+
+  # Strava renvoie un dictionnaire `{ "256" => url }` dont les clés dépendent du
+  # `size` demandé : on prend la plus petite disponible, la vignette fait 36 px.
+  def self.thumb_url_from(urls)
+    return nil unless urls.is_a?(Hash)
+
+    urls.min_by { |size, _| size.to_i }&.last.presence
+  end
+
   # Enregistre le matériel d'enregistrement lu dans l'activité détaillée. On stocke
   # "" quand l'activité n'en déclare pas (saisie manuelle) pour la marquer vérifiée
   # et ne pas la re-télécharger à chaque backfill. Écrit directement (update_column)
@@ -115,6 +165,11 @@ class StravaActivity < ApplicationRecord
     return nil if strava_id.blank?
 
     record = find_or_initialize_by(user: user, strava_id: strava_id)
+    # Photos ajoutées (ou retirées) sur Strava depuis la dernière synchro : on
+    # redonne l'activité au backfill plutôt que de garder des vignettes périmées.
+    if total_photo_count_from(record.raw) != total_photo_count_from(summary)
+      record.photo_thumbs = nil
+    end
     record.assign_attributes(attrs_from_summary(summary))
     record.raw = summary
     # Aperçu du tracé depuis la polyligne résumé (sans altitude → tracé neutre).

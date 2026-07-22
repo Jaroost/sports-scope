@@ -5,6 +5,7 @@ import { formatDaysAgo } from '../timeAgo'
 import { activityIcon, sportType } from '../activityHelpers'
 import { useStickyListHeader } from '../composables/useStickyListHeader'
 import ActivitiesOverviewMap from './ActivitiesOverviewMap.vue'
+import ActivityThumb from './ActivityThumb.vue'
 
 const props = defineProps({
   endpoint: { type: String, default: '/strava/activities' },
@@ -415,13 +416,10 @@ function tssHint(source) {
   return t(`strava.${key}`)
 }
 
-// Couleur d'un segment de l'aperçu selon la catégorie de pente calculée côté
-// serveur : 1 = montée (rouge), 2 = descente (bleu), 0 = plat (gris neutre).
-// Mêmes teintes que la liste des itinéraires (RoutesList).
-function gradeColor(cat) {
-  if (cat === 1) return '#e0503f'
-  if (cat === 2) return '#2f8fed'
-  return '#9aa0a6'
+// Vignette (tracé et/ou photos) plutôt que la simple pastille de sport : il faut
+// au moins une vue à montrer. Sans tracé ni photo, on retombe sur la pastille.
+function hasThumb(activity) {
+  return activity.preview_segments?.length > 0 || activity.photo_thumbs?.length > 0
 }
 
 </script>
@@ -647,7 +645,7 @@ function gradeColor(cat) {
       </div>
       <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1" :class="{ 'opacity-50': loading }">
         <li
-          v-for="activity in activities"
+          v-for="(activity, rowIndex) in activities"
           :key="activity.id"
         >
           <a
@@ -655,27 +653,14 @@ function gradeColor(cat) {
             class="activity-row d-flex justify-content-between align-items-center text-decoration-none text-reset"
           >
             <div class="activity-row__main d-flex align-items-center gap-3">
-              <span
-                v-if="activity.preview_segments && activity.preview_segments.length"
-                class="activity-track-preview"
-                :title="sportType(activity)"
-              >
-                <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-                  <path
-                    v-for="(s, i) in activity.preview_segments"
-                    :key="i"
-                    :d="s.d"
-                    fill="none"
-                    :stroke="gradeColor(s.c)"
-                    stroke-width="6"
-                    stroke-linejoin="round"
-                    stroke-linecap="round"
-                  />
-                </svg>
-                <span class="activity-track-preview__badge">
-                  <i :class="`fa-solid ${activityIcon(sportType(activity))}`" aria-hidden="true"></i>
-                </span>
-              </span>
+              <ActivityThumb
+                v-if="hasThumb(activity)"
+                :preview-segments="activity.preview_segments"
+                :photos="activity.photo_thumbs"
+                :icon-class="activityIcon(sportType(activity))"
+                :label="sportType(activity)"
+                :index="rowIndex"
+              />
               <span v-else class="activity-type-badge">
                 <i :class="`fa-solid ${activityIcon(sportType(activity))}`" aria-hidden="true"></i>
               </span>
@@ -786,46 +771,6 @@ function gradeColor(cat) {
   justify-content: center;
   align-items: flex-start;
   flex-shrink: 0;
-}
-
-/* Vignette du tracé : même encombrement que le badge d'activité (2.25rem), coin
-   arrondi. Les teintes des segments (montée/descente/plat) portent le dénivelé,
-   comme la liste des itinéraires. */
-.activity-track-preview {
-  position: relative;
-  flex-shrink: 0;
-  width: 2.25rem;
-  height: 2.25rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.5rem;
-  /* Fond sombre, comme l'aperçu de la page de partage : les couleurs de pente du
-     tracé ressortaient à peine sur le gris clair. */
-  background:
-    radial-gradient(120% 100% at 30% 15%, #5c666f 0%, #4a545c 60%, #3d464d 100%);
-}
-.activity-track-preview svg {
-  width: 100%;
-  height: 100%;
-}
-
-/* Pastille d'icône du type d'activité, superposée en bas à droite de la
-   vignette : conserve l'identification du sport en plus du tracé. */
-.activity-track-preview__badge {
-  position: absolute;
-  right: -0.25rem;
-  bottom: -0.25rem;
-  width: 1.15rem;
-  height: 1.15rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: #3d464d;
-  color: var(--bs-warning, #ffc107);
-  font-size: 0.65rem;
-  border: 1.5px solid var(--bs-body-bg, #fff);
 }
 
 .min-width-0 {

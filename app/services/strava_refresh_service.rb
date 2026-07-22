@@ -21,6 +21,7 @@ class StravaRefreshService
     synced = sync_summaries
     sync_gear
     device_run = enqueue_device_backfill
+    enqueue_photos_backfill
     { synced: synced, run: enqueue_streams_backfill, device_run: device_run }
   end
 
@@ -78,6 +79,28 @@ class StravaRefreshService
       StravaDeviceBackfillJob.perform_later(run.id)
     elsif run.resumable?
       StravaDeviceBackfillJob.perform_later(run.id)
+    end
+
+    run
+  end
+
+  # (Ré)enfile la récupération des vignettes photo des activités qui en annoncent
+  # (`total_photo_count`) sans qu'on ait leurs URLs. Idempotent : réutilise un run
+  # photos actif, n'enfile un job que si rien ne tourne déjà. Renvoie le run, ou nil
+  # si rien à récupérer / Strava non lié.
+  def enqueue_photos_backfill
+    return nil unless @user.strava_linked?
+
+    pending = @user.strava_activities.photos_pending.count
+
+    run = @user.strava_backfill_runs.photos.active.order(created_at: :desc).first
+    if run.nil?
+      return nil if pending.zero?
+
+      run = @user.strava_backfill_runs.create!(kind: "photos", status: "pending", total: pending)
+      StravaPhotosBackfillJob.perform_later(run.id)
+    elsif run.resumable?
+      StravaPhotosBackfillJob.perform_later(run.id)
     end
 
     run

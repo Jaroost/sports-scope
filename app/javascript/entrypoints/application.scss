@@ -143,14 +143,16 @@ body.fullscreen-page {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.25rem;
-  height: 2.25rem;
+  /* Aligné sur la vignette de tracé (.activity-thumb) : dans la liste, les deux
+     alternent d'une ligne à l'autre et doivent occuper la même largeur. */
+  width: 3.25rem;
+  height: 3.25rem;
   border-radius: 50%;
   /* Même fond sombre que la vignette de tracé (.activity-track-preview), avec
      l'icône du sport en jaune : les deux pastilles se lisent pareil dans la liste. */
   background: #3d464d;
   color: var(--bs-warning, #ffc107);
-  font-size: 1rem;
+  font-size: 1.15rem;
   flex-shrink: 0;
 }
 

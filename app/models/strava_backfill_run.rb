@@ -6,7 +6,7 @@ class StravaBackfillRun < ApplicationRecord
 
   STATUSES = %w[pending running rate_limited completed failed].freeze
   ACTIVE_STATUSES = %w[pending running rate_limited].freeze
-  KINDS = %w[streams device].freeze
+  KINDS = %w[streams device photos].freeze
 
   validates :status, inclusion: { in: STATUSES }
   validates :kind, inclusion: { in: KINDS }
@@ -14,6 +14,7 @@ class StravaBackfillRun < ApplicationRecord
   scope :active, -> { where(status: ACTIVE_STATUSES) }
   scope :streams, -> { where(kind: "streams") }
   scope :device, -> { where(kind: "device") }
+  scope :photos, -> { where(kind: "photos") }
 
   # Un run « en cours » qui n'a pas avancé depuis un moment : son job a très
   # probablement été perdu (adapter async + reload/redémarrage qui vide le pool de

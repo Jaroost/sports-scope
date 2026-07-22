@@ -419,6 +419,10 @@ class StravaController < ApplicationController
     # Aperçu SVG du tracé (segments pré-calculés, colorés par le dénivelé) pour
     # la vignette de la liste — mêmes données que la liste des itinéraires.
     base = base.merge('preview_segments' => a.preview_segments)
+    # Vignettes des photos (URLs Strava en 256 px) : la liste les fait défiler avec
+    # le tracé. `nil` tant que le backfill n'est pas passé — la vignette montre
+    # alors le seul tracé, sans trou d'affichage.
+    base = base.merge('photo_thumbs' => a.photo_thumbs)
     # TSS ajouté au vol (non persisté) : dépend de seuils modifiables, se recalcule
     # à chaque lecture. Absent si l'activité n'a pas pu être notée.
     tss ? base.merge('tss' => tss[:tss], 'tss_source' => tss[:source]) : base

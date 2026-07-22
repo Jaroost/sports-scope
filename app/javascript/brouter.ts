@@ -20,7 +20,7 @@ export const BROUTER_URL = import.meta.env.VITE_BROUTER_URL || '/brouter'
 // deploy/brouter/profiles/ (voir le README) puis l'ajouter ici ET dans
 // ALLOWED_PROFILES (app/controllers/routes_controller.rb).
 export const PROFILES_BY_SPORT: Record<Sport, string[]> = {
-  cycling: ['trekking', 'fastbike', 'fastbike-lowtraffic', 'shortest'],
+  cycling: ['trekking-paved', 'trekking', 'fastbike', 'fastbike-lowtraffic', 'shortest'],
   mtb: ['gravel', 'trekking', 'shortest'],
   hiking: ['hiking-mountain', 'trekking', 'shortest'],
 }

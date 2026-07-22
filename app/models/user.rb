@@ -144,7 +144,7 @@ class User < ApplicationRecord
       # Sur route, tout ce qui dépasse le faux plat (3 %) monte. Les cols enchaînent des
       # rampes séparées de replats parfois longs : on fusionne large (500 m).
       "cycling" => sport_defaults(
-        speed: 18, route_profile: "trekking", turn_anomaly_m: 100, map_style: "cyclosm",
+        speed: 18, route_profile: "trekking-paved", turn_anomaly_m: 100, map_style: "cyclosm",
         climb_detection: {
           "min_grade" => 3,        # pente lissée au-delà de laquelle « ça monte » (%)
           "min_gain_m" => 50,      # dénivelé positif minimal (m)

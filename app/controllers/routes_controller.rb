@@ -13,7 +13,7 @@ class RoutesController < ApplicationController
   MAX_NAME_LEN = 80
   # Profils de routage BRouter acceptés — union du catalogue front (brouter.ts /
   # PROFILES_BY_SPORT). Le profil enregistré pilote le tracé BRouter au rechargement.
-  ALLOWED_PROFILES = %w[trekking fastbike fastbike-lowtraffic shortest gravel hiking-mountain].freeze
+  ALLOWED_PROFILES = %w[trekking trekking-paved fastbike fastbike-lowtraffic shortest gravel hiking-mountain].freeze
   ALLOWED_ACTIVITIES = Route::ACTIVITIES
   # Repères posés à la main (cf. routeMarkers.ts côté front) — types acceptés et
   # libellé GPX associé (repli quand l'utilisateur n'a pas saisi de libellé).

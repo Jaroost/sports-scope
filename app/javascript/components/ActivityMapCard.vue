@@ -9,6 +9,7 @@ import RouteFromActivityModal from './RouteFromActivityModal.vue'
 import {
   activityIcon,
   sportType,
+  routeSportFor,
   decodePolyline,
   pickPhotoUrl,
   type PhotoLike,
@@ -17,8 +18,9 @@ import {
 // helpers que le créateur d'itinéraire — donc les seuils de col et la fenêtre de
 // lissage de pente du profil utilisateur — pour que l'analyse et la création
 // d'itinéraire restent cohérentes.
-import { simplifyTrack, simplifyIndices, buildGradedSegments, detectClimbs, GRADE_BUCKETS } from '../routeHelpers'
-import { sportPreferences } from '../userPreferences'
+import { simplifyIndices, nudgeIndicesOffTurns, buildGradedSegments, detectClimbs, GRADE_BUCKETS } from '../routeHelpers'
+import { sportPreferences, routeProfileForSport, turnAnomalyDiameterForSport } from '../userPreferences'
+import { repairAgainstTrack } from '../routeRepair'
 import { buildTooltipHtml } from '../activityTooltip'
 
 const props = defineProps({
@@ -794,18 +796,46 @@ function openCreateRouteModal() {
   if (routeCoords.value.length) showCreateRouteModal.value = true
 }
 
-function confirmCreateRoute({ name, maxPoints }: { name: string; maxPoints: number }) {
-  showCreateRouteModal.value = false
+// La réparation interroge BRouter deux ou trois fois : on tient la modale ouverte pendant
+// ce temps plutôt que de laisser l'utilisateur devant une page qui ne bouge pas.
+const creatingRoute = ref(false)
+
+async function confirmCreateRoute({ name, maxPoints }: { name: string; maxPoints: number }) {
   const coords = routeCoords.value
-  if (!coords.length) return
+  if (!coords.length || creatingRoute.value) return
   // Simplification Ramer-Douglas-Peucker : on garde les points où la trace tourne
   // vraiment et on jette les points alignés inutiles. Résultat : peu de waypoints sur
   // les lignes droites, du détail dans les virages → re-routage BRouter fidèle. Le
   // plafond (saisi par l'utilisateur) borne le nombre de waypoints.
-  const sampled = simplifyTrack(coords.slice() as [number, number][], 8, maxPoints)
+  // Puis nudgeIndicesOffTurns écarte les waypoints de l'apex des virages, sans quoi ils
+  // atterriraient sur les carrefours et BRouter y produirait des crochets parasites.
+  const track = coords.map((c) => [c[0], c[1]] as [number, number])
+  let idx = nudgeIndicesOffTurns(track, simplifyIndices(track, 8, maxPoints))
+
+  // Le sport est déduit de l'activité (et non du dernier sport utilisé) pour que le profil
+  // de routage de la réparation soit exactement celui que le créateur appliquera ensuite.
+  const sport = routeSportFor(props.activity as Record<string, unknown> | null)
+  const profile = routeProfileForSport(sport)
+
+  // Diagnostic + correction : purge des crochets, ré-ancrage des détours. Jamais bloquant —
+  // si BRouter ne répond pas, on part avec les waypoints bruts (cf. routeRepair).
+  creatingRoute.value = true
+  try {
+    const { indices } = await repairAgainstTrack(track, idx, profile, {
+      maxPoints,
+      turnDiameterM: turnAnomalyDiameterForSport(sport),
+    })
+    idx = indices
+  } finally {
+    creatingRoute.value = false
+  }
+
+  showCreateRouteModal.value = false
   sessionStorage.setItem('sportsScope.gpxImport', JSON.stringify({
     name,
-    waypoints: sampled.map((p) => ({ lng: p[0], lat: p[1] })),
+    activity: sport,
+    profile,
+    waypoints: idx.map((i) => ({ lng: track[i][0], lat: track[i][1] })),
   }))
   window.location.href = `${props.localePrefix}/routes/new?fromGpx=1`
 }
@@ -1014,6 +1044,7 @@ onBeforeUnmount(() => {
     :show="showCreateRouteModal"
     :initial-name="defaultRouteName"
     :default-max-points="ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS"
+    :busy="creatingRoute"
     @confirm="confirmCreateRoute"
     @close="showCreateRouteModal = false"
   />

@@ -141,9 +141,22 @@ function perpDistanceM(p: Coord | LngLat, a: Coord | LngLat, b: Coord | LngLat):
 // `maxPoints` (optionnel) : si la simplification dépasse ce plafond, la tolérance est
 // augmentée progressivement jusqu'à passer dessous (utile pour rester sous la limite BRouter).
 export function simplifyTrack<T extends Coord | LngLat>(coords: T[], toleranceM = 8, maxPoints?: number): T[] {
-  const rdp = (tol: number): T[] => {
-    const n = coords.length
-    if (n <= 2) return coords.slice()
+  const idx = simplifyIndices(coords, toleranceM, maxPoints)
+  const out = idx.map((i) => coords[i])
+  // Garde-fou ultime sur trace pathologique : coupe net par distance.
+  return maxPoints && maxPoints >= 2 && out.length > maxPoints ? downsampleByDistance(out, maxPoints) : out
+}
+
+// Variante de simplifyTrack qui renvoie les INDICES conservés (triés croissant) plutôt que
+// les points eux-mêmes. Utile pour sous-échantillonner en parallèle plusieurs tableaux
+// alignés par index (coords + altitude + distance) sans casser leur correspondance — ce
+// qu'exige buildGradedSegments. C'est ici que vit l'algorithme Ramer-Douglas-Peucker ;
+// simplifyTrack n'en est que l'habillage « points ».
+export function simplifyIndices(coords: (Coord | LngLat)[], toleranceM = 8, maxPoints?: number): number[] {
+  const n = coords.length
+  if (n <= 2) return coords.map((_, i) => i)
+
+  const rdp = (tol: number): number[] => {
     const keep = new Uint8Array(n)
     keep[0] = 1; keep[n - 1] = 1
     const stack: Array<[number, number]> = [[0, n - 1]]
@@ -159,8 +172,8 @@ export function simplifyTrack<T extends Coord | LngLat>(coords: T[], toleranceM 
         stack.push([first, idx], [idx, last])
       }
     }
-    const out: T[] = []
-    for (let i = 0; i < n; i++) if (keep[i]) out.push(coords[i])
+    const out: number[] = []
+    for (let i = 0; i < n; i++) if (keep[i]) out.push(i)
     return out
   }
 
@@ -169,36 +182,55 @@ export function simplifyTrack<T extends Coord | LngLat>(coords: T[], toleranceM 
   if (maxPoints && maxPoints >= 2) {
     let guard = 0
     while (out.length > maxPoints && guard++ < 24) { tol *= 1.6; out = rdp(tol) }
-    // Garde-fou ultime sur trace pathologique : coupe net par distance.
-    if (out.length > maxPoints) out = downsampleByDistance(out, maxPoints)
   }
   return out
 }
 
-// Variante de simplifyTrack qui renvoie les INDICES conservés (triés croissant) plutôt que
-// les points eux-mêmes. Utile pour sous-échantillonner en parallèle plusieurs tableaux
-// alignés par index (coords + altitude + distance) sans casser leur correspondance — ce
-// qu'exige buildGradedSegments. Même algorithme Ramer-Douglas-Peucker que simplifyTrack.
-export function simplifyIndices(coords: (Coord | LngLat)[], toleranceM = 8): number[] {
-  const n = coords.length
-  if (n <= 2) return coords.map((_, i) => i)
-  const keep = new Uint8Array(n)
-  keep[0] = 1; keep[n - 1] = 1
-  const stack: Array<[number, number]> = [[0, n - 1]]
-  while (stack.length) {
-    const [first, last] = stack.pop()!
-    let maxDist = -1, idx = -1
-    for (let i = first + 1; i < last; i++) {
-      const d = perpDistanceM(coords[i], coords[first], coords[last])
-      if (d > maxDist) { maxDist = d; idx = i }
+// Décalage par défaut (m) appliqué aux waypoints issus de simplifyIndices, cf.
+// nudgeIndicesOffTurns. ~20 m : au-delà du rayon d'un carrefour ordinaire et de
+// l'erreur GPS typique, en deçà de la longueur d'un tronçon inter-virages courant.
+export const TURN_OFFSET_M = 20
+
+// Éloigne des intersections les indices retenus par simplifyIndices.
+//
+// Ramer-Douglas-Peucker garde par construction l'apex des virages — et un virage, dans
+// la vraie vie, c'est une intersection. Un waypoint posé là est ambigu pour BRouter :
+// plusieurs ways sont à quelques mètres, l'erreur GPS fait le reste, et le moteur peut
+// coller le point sur la mauvaise branche. Comme il doit *passer par* ce point, on
+// récolte un crochet ou un demi-tour parasite.
+//
+// On garde donc RDP pour DÉTECTER les virages, mais on avance chaque waypoint le long de
+// la trace jusqu'à ~offsetM après l'apex : il tombe alors sur un tronçon unique, en
+// sortie de carrefour — ce qui fixe justement la branche empruntée. Les extrémités ne
+// bougent pas (départ / arrivée sont voulus tels quels), et le décalage est plafonné à
+// la moitié du chemin vers le virage suivant pour ne pas télescoper les épingles.
+export function nudgeIndicesOffTurns(
+  coords: Array<Coord | LngLat>,
+  indices: number[],
+  offsetM = TURN_OFFSET_M,
+): number[] {
+  if (indices.length <= 2) return indices.slice()
+  const out = [indices[0]]
+  for (let k = 1; k < indices.length - 1; k++) {
+    const apex = indices[k]
+    const next = indices[k + 1]
+    let toNext = 0
+    for (let i = apex; i < next; i++) toNext += haversine(coords[i], coords[i + 1])
+    const budget = Math.min(offsetM, toNext / 2)
+
+    let moved = apex
+    let walked = 0
+    for (let i = apex; i < next - 1 && walked < budget; i++) {
+      walked += haversine(coords[i], coords[i + 1])
+      moved = i + 1
     }
-    if (idx !== -1 && maxDist > toleranceM) {
-      keep[idx] = 1
-      stack.push([first, idx], [idx, last])
-    }
+    // Indices strictement croissants : sur une trace repliée sur elle-même, un
+    // décalage qui repasserait derrière le waypoint précédent est abandonné.
+    const prev = out[out.length - 1]
+    if (moved > prev) out.push(moved)
+    else if (apex > prev) out.push(apex)
   }
-  const out: number[] = []
-  for (let i = 0; i < n; i++) if (keep[i]) out.push(i)
+  out.push(indices[indices.length - 1])
   return out
 }
 

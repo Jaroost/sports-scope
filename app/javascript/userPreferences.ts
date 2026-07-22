@@ -152,7 +152,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   // min_grade ≈ 2 × 100/grade_smoothing_m, sinon le bruit hache la montée. Miroir de
   // User::DEFAULT_PREFERENCES.
   sports: {
-    cycling: sportDefaults(18, 'trekking', 100, 'cyclosm',
+    cycling: sportDefaults(18, 'trekking-paved', 100, 'cyclosm',
       { min_grade: 3, min_gain_m: 50, min_length_m: 500, grade_smoothing_m: 60, merge_gap_m: 500 }),
     mtb: sportDefaults(14, 'gravel', 80, 'topo',
       { min_grade: 4, min_gain_m: 50, min_length_m: 300, grade_smoothing_m: 40, merge_gap_m: 300 }),

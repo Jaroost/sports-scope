@@ -140,6 +140,17 @@ export function isRun(activity: Record<string, unknown> | null | undefined): boo
   return sportType(activity).toLowerCase().includes('run')
 }
 
+// Catégorie d'itinéraire (Route#activity) correspondant à une activité Strava — sert à
+// créer un itinéraire depuis une sortie avec le bon profil de routage dès le départ,
+// plutôt que de retomber sur le dernier sport utilisé. Le VTT et le gravel partagent la
+// catégorie `mtb` : ce sont les deux qui empruntent des chemins non revêtus.
+export function routeSportFor(activity: Record<string, unknown> | null | undefined): 'cycling' | 'mtb' | 'hiking' {
+  const t = sportType(activity).toLowerCase()
+  if (t.includes('mountainbike') || t.includes('gravel') || t.includes('emountainbike')) return 'mtb'
+  if (t.includes('hike') || t.includes('walk') || t.includes('run')) return 'hiking'
+  return 'cycling'
+}
+
 // Sports de raquette : la cadence remontée par une montre au poignet n'y mesure rien de
 // physiologique. Le jeu est fait de pas chassés, de fentes et d'arrêts, pas d'une foulée
 // régulière — la montre ne détecte un rythme que par intermittence et remplit le reste

@@ -141,10 +141,35 @@ apply_overlay() {
   return 0
 }
 
+# Réglages amont que l'on force sur TOUS les profils, maison compris. On patche plutôt
+# que de figer une copie : les profils continuent de recevoir les corrections amont.
+#
+# `correctMisplacedViaPoints` : BRouter sait supprimer lui-même les allers-retours
+# parasites causés par un point d'étape mal accroché (le « crochet » d'un waypoint tombé
+# sur un carrefour ou à côté de la route). L'option est livrée à false. Mesuré sur deux
+# sorties réelles : 6 virages douteux -> 1, et 9 -> 0, sans un appel de plus ni une ligne
+# de code. Le seuil amont `correctMisplacedViaPointsDistance` (400 m) est conservé : il
+# borne la correction aux détours courts, donc un aller-retour délibéré vers un sommet ou
+# un point de vue n'est jamais rogné.
+apply_patches() {
+  local n=0 f
+  for f in "$PROFILES_DIR"/*.brf; do
+    [ -e "$f" ] || continue
+    if grep -q '^assign correctMisplacedViaPoints[[:space:]]*=[[:space:]]*false' "$f"; then
+      sed -i 's/^assign correctMisplacedViaPoints\([[:space:]]*\)=\([[:space:]]*\)false/assign correctMisplacedViaPoints\1=\2true/' "$f"
+      n=$(( n + 1 ))
+    fi
+  done
+  [ "$n" -gt 0 ] && log "patch : correctMisplacedViaPoints activé sur $n profil(s)"
+  return 0
+}
+
 log "démarrage (source $BASE_URL)"
 sync_segments
 sync_profiles
 apply_overlay
+# Après l'overlay : le patch couvre aussi les profils maison.
+apply_patches
 log "terminé — $n_ok fichier(s) à jour, $n_updated mis à jour ($(( bytes / 1024 / 1024 )) Mo), $n_failed échec(s)"
 
 # Marqueur « données exploitables » : lu par le healthcheck du service brouter-sync,

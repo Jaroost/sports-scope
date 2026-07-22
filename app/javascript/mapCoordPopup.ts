@@ -35,6 +35,11 @@ export function checkStreetView(lat: number, lng: number): Promise<boolean> {
   })
 }
 
+// Zoom d'ouverture d'OpenStreetMap : assez près pour voir les attributs d'un chemin
+// (nom, surface, accès), sans dépendre du zoom de notre propre carte — on vient
+// regarder un point précis, pas retrouver le cadrage qu'on avait.
+const OSM_ZOOM = 17
+
 function escapeHtml(s: string) {
   const div = document.createElement('div')
   div.textContent = s
@@ -81,6 +86,11 @@ export function buildCoordPopupContent(
 ): HTMLElement {
   const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`
   const svUrl = streetViewUrl(lat, lng, heading)
+  // OpenStreetMap au point cliqué : c'est la source des données de routage, on y va pour
+  // vérifier le terrain (un chemin manquant, un sens interdit) ou pour le corriger.
+  // `mlat/mlon` pose le marqueur, le fragment cadre la vue — sans lui, OSM ouvrirait
+  // sur la dernière position mémorisée du visiteur.
+  const osmUrl = `https://www.openstreetmap.org/?mlat=${lat.toFixed(6)}&mlon=${lng.toFixed(6)}#map=${OSM_ZOOM}/${lat.toFixed(5)}/${lng.toFixed(5)}`
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   const addAction = onAddToRoute
@@ -112,6 +122,10 @@ export function buildCoordPopupContent(
     <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
       <i class="fa-solid fa-street-view" aria-hidden="true"></i>
       <span>${escapeHtml(t('routes.street_view'))}</span>
+    </a>
+    <a class="place-popup-link" href="${osmUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-map" aria-hidden="true"></i>
+      <span>OpenStreetMap</span>
     </a>`
   wrap.querySelector('.place-popup-close')?.addEventListener('click', onClose)
   wrap.querySelector('.place-popup-link--add-route')?.addEventListener('click', (ev) => {

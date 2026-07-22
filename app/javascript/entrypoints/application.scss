@@ -146,8 +146,10 @@ body.fullscreen-page {
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 50%;
-  background: rgba(13, 110, 253, 0.1);
-  color: #0d6efd;
+  /* Même fond sombre que la vignette de tracé (.activity-track-preview), avec
+     l'icône du sport en jaune : les deux pastilles se lisent pareil dans la liste. */
+  background: #3d464d;
+  color: var(--bs-warning, #ffc107);
   font-size: 1rem;
   flex-shrink: 0;
 }

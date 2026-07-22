@@ -1278,7 +1278,10 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   border-radius: 0.5rem;
-  background: var(--bs-tertiary-bg, rgba(0, 0, 0, 0.04));
+  /* Fond sombre, comme l'aperçu de la page de partage : les couleurs de pente du
+     tracé ressortaient à peine sur le gris clair. */
+  background:
+    radial-gradient(120% 100% at 30% 15%, #5c666f 0%, #4a545c 60%, #3d464d 100%);
   color: var(--bs-warning, #ffc107);
 }
 .route-preview svg {

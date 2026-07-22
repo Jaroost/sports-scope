@@ -654,7 +654,7 @@ function gradeColor(cat) {
             :href="`${localePrefix}/activities/${activity.id}`"
             class="activity-row d-flex justify-content-between align-items-center text-decoration-none text-reset"
           >
-            <div class="d-flex align-items-center gap-3">
+            <div class="activity-row__main d-flex align-items-center gap-3">
               <span
                 v-if="activity.preview_segments && activity.preview_segments.length"
                 class="activity-track-preview"
@@ -679,7 +679,7 @@ function gradeColor(cat) {
               <span v-else class="activity-type-badge">
                 <i :class="`fa-solid ${activityIcon(sportType(activity))}`" aria-hidden="true"></i>
               </span>
-              <div>
+              <div class="min-width-0">
                 <div class="fw-semibold">{{ activity.name }}</div>
                 <small class="text-muted">
                   <i class="fa-solid fa-tag me-1" aria-hidden="true"></i>{{ sportType(activity) }}
@@ -689,7 +689,7 @@ function gradeColor(cat) {
                 </small>
               </div>
             </div>
-            <div class="d-flex align-items-center gap-3">
+            <div class="activity-row__stats d-flex align-items-center gap-3">
               <span
                 v-if="activity.tss != null"
                 class="tss-badge"
@@ -800,7 +800,10 @@ function gradeColor(cat) {
   align-items: center;
   justify-content: center;
   border-radius: 0.5rem;
-  background: var(--bs-tertiary-bg, rgba(0, 0, 0, 0.04));
+  /* Fond sombre, comme l'aperçu de la page de partage : les couleurs de pente du
+     tracé ressortaient à peine sur le gris clair. */
+  background:
+    radial-gradient(120% 100% at 30% 15%, #5c666f 0%, #4a545c 60%, #3d464d 100%);
 }
 .activity-track-preview svg {
   width: 100%;
@@ -819,9 +822,40 @@ function gradeColor(cat) {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: rgba(13, 110, 253, 0.1);
-  color: #0d6efd;
+  background: #3d464d;
+  color: var(--bs-warning, #ffc107);
   font-size: 0.65rem;
   border: 1.5px solid var(--bs-body-bg, #fff);
+}
+
+.min-width-0 {
+  min-width: 0;
+}
+
+/* Sur téléphone, la ligne d'activité tient mal sur une seule rangée : le nom, le
+   sport, la date, le TSS, la distance et la durée se serrent tous côte à côte. On
+   passe en trois rangées — nom / sport + date / mesures — en laissant le bloc de
+   droite passer à la ligne sous la vignette et le texte. */
+@media (max-width: 575.98px) {
+  .activity-row {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  .activity-row__main {
+    width: 100%;
+  }
+  .activity-row__stats {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  /* Distance et durée côte à côte : elles partagent la rangée avec le TSS, plus
+     besoin de les empiler. */
+  .activity-row__stats .activity-metrics {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    min-height: 0;
+  }
 }
 </style>

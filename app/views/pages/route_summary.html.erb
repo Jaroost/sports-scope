@@ -81,6 +81,11 @@
             <path d="<%= run[:line] %>" fill="none" stroke="<%= run[:color] %>" stroke-width="1.5"
                   vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round" />
           <% end %>
+          <%# Curseur déplacé par l'îlot SharedRoutePreviewMap au fil de l'animation du
+              tracé. Comme l'abscisse du profil, il est gradué en distance parcourue :
+              la position de la tête sur la carte s'y lit directement. %>
+          <line id="route-summary-profile-cursor" class="route-summary-profile-cursor"
+                x1="0" x2="0" y1="0" y2="30" vector-effect="non-scaling-stroke" />
         </svg>
       </div>
     <% end %>

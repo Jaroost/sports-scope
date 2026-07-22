@@ -28,9 +28,20 @@ const props = defineProps({
 // la liste est rendue par le serveur, hors de ce composant.
 const FLASH_CLASS = 'route-summary-marker-flash'
 
+// Animation du tracé : durée d'un passage, puis temps d'arrêt sur le tracé complet
+// avant de recommencer. Assez lent pour qu'on suive le sens du trajet, assez court pour
+// qu'un lecteur qui arrive sur la page voie un cycle entier sans attendre.
+const DRAW_MS = 4500
+const HOLD_MS = 1400
+
 const mapEl = useTemplateRef('mapEl')
 // État impératif, hors réactivité Vue (maplibre n'aime pas la réactivité profonde).
 let mapInstance: any = null
+let animationFrame: number | null = null
+let visibilityObserver: IntersectionObserver | null = null
+// La vignette peut très bien être déjà hors de l'écran quand la carte finit de charger
+// (page ouverte puis défilée) : l'observateur fait foi, pas l'ordre des événements.
+let isVisible = true
 
 function bounds(): [[number, number], [number, number]] | null {
   if (props.polyline.length < 2) return null
@@ -118,6 +129,9 @@ async function renderMap() {
     mapInstance.fitBounds(box as any, { padding: 24, duration: 0 })
     mapInstance.addSource('route', {
       type: 'geojson',
+      // `lineMetrics` : indispensable à `line-gradient`, qui a besoin de la distance
+      // parcourue le long de la ligne (`line-progress`) pour animer le tracé.
+      lineMetrics: true,
       data: { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: props.polyline } },
     })
     // Liseré sombre sous le tracé : le rend lisible quel que soit le fond.
@@ -127,6 +141,16 @@ async function renderMap() {
       source: 'route',
       layout: ROUTE_LINE_LAYOUT,
       paint: { 'line-color': 'rgba(0,0,0,0.45)', 'line-width': 6 },
+    })
+    // Tracé complet en sourdine : l'animation dessine par-dessus, mais l'itinéraire
+    // reste lisible d'un bout à l'autre à tout instant du cycle — c'est un aperçu avant
+    // d'être une animation, et la première image ne doit pas être une carte vide.
+    mapInstance.addLayer({
+      id: 'route-line-base',
+      type: 'line',
+      source: 'route',
+      layout: ROUTE_LINE_LAYOUT,
+      paint: { 'line-color': '#f97316', 'line-width': 3.5, 'line-opacity': 0.35 },
     })
     mapInstance.addLayer({
       id: 'route-line',
@@ -140,12 +164,93 @@ async function renderMap() {
         .setLngLat([marker.lng, marker.lat])
         .addTo(mapInstance)
     })
+    startDrawLoop()
   })
 }
 
-onMounted(() => renderMap())
+// Curseur du profil altimétrique, rendu par le serveur hors de ce composant
+// (route_summary.html.erb) : son abscisse est la distance parcourue, comme celle de la
+// tête du tracé, les deux se déplacent donc du même pas.
+function setProfileCursor(progress: number | null) {
+  const cursor = document.getElementById('route-summary-profile-cursor')
+  if (!cursor) return
+  if (progress === null) return cursor.classList.remove('is-active')
+  const x = String(progress * 100)
+  cursor.setAttribute('x1', x)
+  cursor.setAttribute('x2', x)
+  cursor.classList.add('is-active')
+}
+
+// Position de la « tête » du tracé, de 0 (départ) à 1 (arrivée). Au-delà de 1 le tracé
+// est entièrement peint : c'est le temps d'arrêt avant le passage suivant.
+function setProgress(progress: number) {
+  // Le curseur s'efface pendant le temps d'arrêt : arrivé au bout, il n'indique plus
+  // rien, et une barre plantée à droite se lirait comme un élément du graphique.
+  setProfileCursor(progress >= 1 ? null : progress)
+  if (!mapInstance?.getLayer('route-line')) return
+  if (progress >= 1) {
+    // Un dégradé à un seul palier reviendrait à une ligne pleine, mais coûte une
+    // recompilation d'expression à chaque image : on repasse en couleur simple.
+    mapInstance.setPaintProperty('route-line', 'line-gradient', null)
+    return
+  }
+  // Le dernier segment peint est éclairci : ça donne une tête au tracé, et c'est elle
+  // qui rend le sens de parcours lisible. Les paliers doivent rester strictement
+  // croissants, d'où les bornes.
+  const head = Math.max(progress - 0.05, 0.0001)
+  mapInstance.setPaintProperty('route-line', 'line-gradient', [
+    'interpolate', ['linear'], ['line-progress'],
+    0, '#f97316',
+    head, '#f97316',
+    progress, '#fff7ed',
+    Math.min(progress + 0.0005, 1), 'rgba(249,115,22,0)',
+    1, 'rgba(249,115,22,0)',
+  ])
+}
+
+function startDrawLoop() {
+  // Mouvement réduit demandé : le tracé reste peint en entier, sans boucle.
+  if (prefersReducedMotion() || !isVisible) { setProgress(1); return }
+  if (animationFrame !== null) return
+
+  const start = performance.now()
+  const step = (now: number) => {
+    const elapsed = (now - start) % (DRAW_MS + HOLD_MS)
+    setProgress(Math.min(elapsed / DRAW_MS, 1))
+    animationFrame = requestAnimationFrame(step)
+  }
+  animationFrame = requestAnimationFrame(step)
+}
+
+function stopDrawLoop() {
+  if (animationFrame !== null) { cancelAnimationFrame(animationFrame); animationFrame = null }
+}
+
+// Une vignette hors de l'écran ne doit pas continuer à redessiner : la page de partage
+// s'ouvre souvent sur un téléphone, et la boucle tournerait pendant tout le défilement.
+function watchVisibility() {
+  if (!mapEl.value || !window.IntersectionObserver) return
+  visibilityObserver = new IntersectionObserver(([entry]) => {
+    isVisible = entry.isIntersecting
+    if (isVisible) {
+      if (mapInstance?.getLayer('route-line')) startDrawLoop()
+    } else {
+      stopDrawLoop()
+      setProgress(1)
+    }
+  })
+  visibilityObserver.observe(mapEl.value)
+}
+
+onMounted(() => {
+  renderMap()
+  watchVisibility()
+})
 
 onBeforeUnmount(() => {
+  stopDrawLoop()
+  visibilityObserver?.disconnect()
+  visibilityObserver = null
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
 </script>

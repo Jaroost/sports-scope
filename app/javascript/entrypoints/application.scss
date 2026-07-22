@@ -311,6 +311,17 @@ body.fullscreen-page {
   stroke: var(--bs-border-color);
   stroke-width: 1px;
 }
+/* Curseur suivant l'animation du tracé sur la carte : il dit où en est le trait qui se
+   dessine. Masqué tant que l'îlot Vue ne l'a pas pris en main — sans JS, l'animation
+   n'existe pas et une barre figée à gauche ne voudrait rien dire. */
+.route-summary-profile-cursor {
+  stroke: var(--bs-body-color);
+  stroke-width: 1.5px;
+  opacity: 0;
+}
+.route-summary-profile-cursor.is-active {
+  opacity: 0.65;
+}
 
 /* Stats en grille auto-ajustée : 2 colonnes sur téléphone, 3 dès qu'il y a la place. */
 .route-summary-stats {

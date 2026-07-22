@@ -2581,6 +2581,7 @@ defineExpose({
   hidePlaceHoverMarker,
   showPlacePopup,
   setMapStyle,
+  setEditMode,
   resize: () => mapInstance?.resize(),
   getMapInstance: () => mapInstance,
 })

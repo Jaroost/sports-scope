@@ -624,6 +624,11 @@ function clearRouteWarnings() {
   setTurnWarnings([])
   noMarkersWarn.value = false
   saveBlocked.value = false
+  // Les replis (croix de fermeture, ou cadrage d'un point à problème) ne valaient que pour
+  // ce tracé-là : le suivant repart avec des alertes ouvertes s'il a matière à en montrer.
+  errorDismissed.value = false
+  snapDismissed.value = false
+  noMarkersDismissed.value = false
 }
 
 // Recalcule la liste après un changement qui ne retouche pas le tracé (marquer un demi-tour
@@ -642,8 +647,25 @@ function reevaluateWarnings() {
   snapWarnings.value = computeSnapWarnings()
   setTurnWarnings(computeTurnAnomalies())
   noMarkersWarn.value = routeStore.markers.value.length === 0
+  refreshSaveBlock()
+}
+
+// Le barrage ne vaut que tant qu'il reste quelque chose à passer outre : dès que la
+// dernière alerte tombe, « enregistrer quand même » n'a plus lieu d'être.
+function refreshSaveBlock() {
   saveBlocked.value = snapWarnings.value.length > 0 || turnWarnings.value.length > 0 || noMarkersWarn.value
 }
+
+// Poser (ou retirer) un repère ne touche pas au tracé : rien ne repasserait par
+// reevaluateWarnings. On règle donc l'alerte « aucun repère » à la source, sinon le
+// repère posé depuis l'alerte la laisserait affichée et « enregistrer quand même »
+// avec. Ne réveille rien tant qu'aucune sauvegarde n'a été tentée.
+watch(() => routeStore.markers.value.length, (n) => {
+  if (!saveBlocked.value && !noMarkersWarn.value) return
+  noMarkersWarn.value = n === 0
+  if (noMarkersWarn.value) noMarkersDismissed.value = false  // retour à zéro repère : à revoir
+  refreshSaveBlock()
+})
 
 async function save() {
   if (routeStore.readOnly.value) return
@@ -694,14 +716,32 @@ function closeTurnWarning() {
   showTurnWarning.value = false
 }
 
+// Cadrer un point à problème, c'est vouloir le corriger : la pile d'alertes n'a plus rien
+// à apprendre et ne ferait que gêner la manipulation du point. On la replie donc en entier
+// (la pastille la rappelle), jusqu'à la prochaine modification du tracé qui, elle, relève
+// les drapeaux d'elle-même via clearRouteWarnings / setTurnWarnings.
+function collapseNotices() {
+  errorDismissed.value = true
+  snapDismissed.value = true
+  noMarkersDismissed.value = true
+  showTurnWarning.value = false
+}
+
+// Bascule la carte en pose de repère depuis l'alerte « aucun repère » : c'est le geste
+// qu'elle réclame, autant l'offrir sur place. On replie la pile, sinon elle recouvrirait
+// la carte que l'utilisateur doit maintenant cliquer.
+function startMarkerMode() {
+  mapRef.value?.setEditMode('marker')
+  collapseNotices()
+}
+
 // Recentre la carte sur un amas. On se contente de cadrer : le marqueur d'alerte déjà posé
 // désigne l'endroit, et ouvrir la bulle du point la ferait recouvrir l'alerte dont elle
 // vient (elle s'affiche au-dessus du marqueur, donc en plein milieu de la pile). À
 // l'utilisateur de cliquer le point s'il veut ses actions de correction.
-// L'alerte reste ouverte : contrairement à une modale, elle ne masque pas la carte et
-// sert de liste de tâches tant que les amas ne sont pas corrigés.
 function focusTurnAnomaly(a: TurnAnomaly) {
   mapRef.value?.flyTo(a.lng, a.lat, 17)
+  collapseNotices()
 }
 
 // Recentre sur un point accroché au loin — repéré sur la carte par son propre marqueur
@@ -710,6 +750,7 @@ function focusSnapWarning(idx: number) {
   const w = routeStore.waypoints.value[idx]
   if (!w) return
   mapRef.value?.flyTo(w.lng, w.lat, 17)
+  collapseNotices()
 }
 
 async function persist() {
@@ -2072,6 +2113,16 @@ onBeforeUnmount(() => {
               <div class="map-notices">
                 <TransitionGroup name="map-notice">
 
+                  <!-- « Enregistrer quand même » : en tête de pile et hors des alertes, car il
+                       vaut pour toutes celles qui font barrage. Reste offert même quand elles
+                       sont repliées — le barrage, lui, tient tant que le tracé n'a pas changé. -->
+                  <div v-if="saveBlocked" key="save-anyway" class="map-notice-actions">
+                    <button type="button" class="btn btn-sm btn-warning shadow" :disabled="saving" @click="saveAnyway">
+                      <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                      {{ t('routes.turn_warning_save_anyway') }}
+                    </button>
+                  </div>
+
                   <!-- Erreur (routage, altitude, enregistrement…) -->
                   <div v-if="routeStore.error.value && !errorDismissed" key="error" class="map-notice map-notice--danger" role="alert">
                     <div class="map-notice-header">
@@ -2128,15 +2179,12 @@ onBeforeUnmount(() => {
                         :aria-label="t('routes.snap_warning_dismiss')"></button>
                     </div>
                     <p class="map-notice-body">{{ t('routes.no_markers_warning_body') }}</p>
-                  </div>
-
-                  <!-- « Enregistrer quand même » : hors des alertes, car il vaut pour toutes
-                       celles qui font barrage, pas seulement la dernière de la pile. -->
-                  <div v-if="saveBlocked && (snapVisible || turnVisible || noMarkersVisible)" key="save-anyway" class="map-notice-actions">
-                    <button type="button" class="btn btn-sm btn-warning shadow" :disabled="saving" @click="saveAnyway">
-                      <span v-if="saving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-                      {{ t('routes.turn_warning_save_anyway') }}
-                    </button>
+                    <div class="map-notice-chips">
+                      <button type="button" class="map-notice-chip" @click="startMarkerMode">
+                        <i class="fa-solid fa-signs-post" aria-hidden="true"></i>
+                        {{ t('routes.no_markers_warning_add') }}
+                      </button>
+                    </div>
                   </div>
 
                   <!-- Rappel des alertes repliées : seul vestige visible tant qu'elles ne sont

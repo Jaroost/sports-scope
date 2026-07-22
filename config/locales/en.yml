@@ -1025,6 +1025,7 @@ en:
     snap_warning_item: "Point %{point} · %{distance}"
     snap_warning_dismiss: "Close"
     no_markers_warning_title: "No markers on this route"
+    no_markers_warning_add: "Add a marker"
     no_markers_warning_body: "When you share this route, only the course and its markers (start, finish, parking) are shown by default. Add markers to help recipients get their bearings."
     no_cycling_here: "No-cycling section (one-way against bikes)"
     selection: "Selection"

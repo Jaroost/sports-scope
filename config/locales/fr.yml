@@ -1025,6 +1025,7 @@ fr:
     snap_warning_item: "Point %{point} · %{distance}"
     snap_warning_dismiss: "Fermer"
     no_markers_warning_title: "Aucun repère sur cet itinéraire"
+    no_markers_warning_add: "Ajouter un repère"
     no_markers_warning_body: "Quand vous partagez cet itinéraire, seuls le parcours et les repères (départ, arrivée, parking) sont affichés par défaut. Ajoutez des repères pour aider vos destinataires à s'orienter."
     no_cycling_here: "Sens interdit à vélo (détour cyclable)"
     selection: "Sélection"

@@ -20,9 +20,12 @@ class ImportedActivitiesController < ApplicationController
     activity = current_user.imported_activities.find_by(id: params[:id])
     return head :not_found unless activity
 
-    render json: {
-      activity: summary_json(activity, tss: TrainingLoad.tss_for(current_user, 'imported', activity.id), with_laps: true)
-    }
+    json = summary_json(activity, tss: TrainingLoad.tss_for(current_user, 'imported', activity.id), with_laps: true)
+    # Forme (fraîcheur) à l'entrée de la séance — contexte « étais-je frais ? » sur la
+    # page de détail (absente de la liste, inutile d'y traîner une passe de charge).
+    form = TrainingLoad.form_on(current_user, activity.started_at)
+    json[:form] = form if form
+    render json: { activity: json }
   end
 
   # GET /api/imported_activities/:id/streams
@@ -58,7 +61,8 @@ class ImportedActivitiesController < ApplicationController
     activity.recompute_derivations! if activity.peak_powers.blank? && activity.streams.is_a?(Hash)
     render json: {
       current: activity.peak_powers,
-      bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['imported', activity.id])
+      bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['imported', activity.id]),
+      podium: PeakPowerCurve.podium_for(current_user, activity.peak_powers, exclude: ['imported', activity.id])
     }
   end
 

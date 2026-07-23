@@ -136,7 +136,8 @@ class StravaController < ApplicationController
 
     render json: {
       current: current,
-      bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['strava', id])
+      bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['strava', id]),
+      podium: PeakPowerCurve.podium_for(current_user, current, exclude: ['strava', id])
     }
   rescue StravaStreamsFetcher::ApiError => e
     status = e.status == 404 ? :not_found : :bad_gateway
@@ -459,17 +460,30 @@ class StravaController < ApplicationController
     tss ? base.merge('tss' => tss[:tss], 'tss_source' => tss[:source]) : base
   end
 
-  # Ajoute `tss`/`tss_source` à l'activité d'un payload `{ activity: {...} }` sans
-  # muter le hash mis en cache (merge = nouveaux hashes). No-op si non notable.
+  # Ajoute `tss`/`tss_source` + la forme du jour à l'activité d'un payload
+  # `{ activity: {...} }` sans muter le hash mis en cache (merge = nouveaux hashes).
+  # No-op si rien à ajouter.
   def with_activity_tss(payload, source, external_id)
-    tss = TrainingLoad.tss_for(current_user, source, external_id)
-    return payload unless tss
+    record = current_user.strava_activities.find_by(strava_id: external_id)
+    extra = {}
 
-    extra = { 'tss' => tss[:tss], 'tss_source' => tss[:source], 'intensity_factor' => tss[:intensity] }
-    # NP est stocké par activité (pas dans le résumé brut Strava mis en cache) : on
-    # le rattache ici pour que la page de détail affiche NP / VI sans re-fetch.
-    np = current_user.strava_activities.find_by(strava_id: external_id)&.normalized_power
-    extra['normalized_power'] = np if np
+    tss = TrainingLoad.tss_for(current_user, source, external_id)
+    if tss
+      extra['tss'] = tss[:tss]
+      extra['tss_source'] = tss[:source]
+      extra['intensity_factor'] = tss[:intensity]
+      # NP est stocké par activité (pas dans le résumé brut Strava mis en cache) : on
+      # le rattache ici pour que la page de détail affiche NP / VI sans re-fetch.
+      extra['normalized_power'] = record.normalized_power if record&.normalized_power
+    end
+
+    # Forme (fraîcheur) à l'entrée de la séance — contexte « étais-je frais ? ». Datée
+    # sur le `started_at` en base (même passe que la série de charge), indépendante du TSS.
+    form = TrainingLoad.form_on(current_user, record&.started_at)
+    extra['form'] = form if form
+
+    return payload if extra.empty?
+
     payload.merge(activity: payload[:activity].merge(extra))
   end
 

@@ -961,6 +961,162 @@ export function computeLaps(
   return rows.length > 1 ? rows : []
 }
 
+// ─── Détection automatique d'intervalles (efforts soutenus) ──────────────────
+// Repère les blocs d'effort dur d'une sortie — ce que la courbe de puissance ne
+// donne pas (elle ne rend qu'UN meilleur effort par durée, pas la structure « 5×4
+// min »). Auto-adaptatif : aucun seuil FTP requis, on se réfère au signal DE LA
+// SORTIE.
+//
+// Signal retenu (par ordre de fiabilité) : puissance → fréquence cardiaque →
+// vitesse (course seulement — sur un vélo sans capteur, les descentes gonfleraient
+// la vitesse et créeraient de faux intervalles). Dans les trois cas « plus haut =
+// plus dur ».
+//
+// Méthode : on lisse le signal (~10 s) pour ignorer le bruit, puis on borne les
+// efforts par HYSTÉRÉSIS entre deux seuils calés sur la plage dynamique de la
+// sortie (moyenne → 95e centile) : on entre dans un intervalle au-dessus du seuil
+// haut, on n'en sort qu'en repassant sous le seuil bas — ça évite de hacher un
+// même effort en dizaines de fragments à chaque micro-oscillation. Ne sont retenus
+// que les blocs assez longs ET dont la moyenne dépasse vraiment le seuil haut (un
+// simple pic transitoire ne suffit pas).
+export interface IntervalSegment extends SegmentStats {
+  index: number
+  basis: 'power' | 'heartrate' | 'pace'
+}
+
+// Lissage temporel (fenêtre en secondes) : moyenne mobile centrée, robuste à un
+// échantillonnage non uniforme (deux pointeurs, O(n)). Les trous (valeurs non
+// finies) comptent pour 0 comme ailleurs (NP, histogrammes).
+function rollingMeanTime(values: number[], time: number[], windowS: number): number[] {
+  const n = values.length
+  const out = new Array<number>(n)
+  const half = windowS / 2
+  let lo = 0
+  let hi = 0
+  let sum = 0
+  let count = 0
+  for (let i = 0; i < n; i++) {
+    const tMin = time[i] - half
+    const tMax = time[i] + half
+    while (hi < n && time[hi] <= tMax) { sum += values[hi]; count++; hi++ }
+    while (lo < i && time[lo] < tMin) { sum -= values[lo]; count--; lo++ }
+    out[i] = count > 0 ? sum / count : values[i]
+  }
+  return out
+}
+
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)))
+  return sorted[idx]
+}
+
+export function detectIntervals(
+  streams: Record<string, { data?: unknown } | undefined> | null | undefined,
+  activity: Record<string, unknown> | null | undefined,
+): IntervalSegment[] {
+  const time = streams?.time?.data as number[] | undefined
+  if (!Array.isArray(time) || time.length < 30) return []
+
+  // Choix du signal : puissance > FC > vitesse (course seulement).
+  const watts = streams?.watts as { data?: unknown } | undefined
+  const hr = streams?.heartrate as { data?: unknown } | undefined
+  const vel = streams?.velocity_smooth as { data?: unknown } | undefined
+  let raw: (number | null)[] | undefined
+  let basis: IntervalSegment['basis']
+  if (streamIsMeaningful('watts', watts, activity)) {
+    raw = watts!.data as (number | null)[]; basis = 'power'
+  } else if (streamIsMeaningful('heartrate', hr, activity)) {
+    raw = hr!.data as (number | null)[]; basis = 'heartrate'
+  } else if (isRun(activity) && streamIsMeaningful('velocity_smooth', vel, activity)) {
+    raw = vel!.data as (number | null)[]; basis = 'pace'
+  } else {
+    return []
+  }
+
+  const n = Math.min(time.length, raw.length)
+  if (n < 30) return []
+  const clean = new Array<number>(n)
+  for (let i = 0; i < n; i++) {
+    const v = raw[i]
+    clean[i] = typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0
+  }
+
+  const SMOOTH_S = 10
+  const smooth = rollingMeanTime(clean, time as number[], SMOOTH_S)
+
+  // Plage dynamique de la sortie : moyenne (baseline) → 95e centile (haut robuste).
+  const positives = smooth.filter((v) => v > 0)
+  if (positives.length < 30) return []
+  const mean = positives.reduce((a, b) => a + b, 0) / positives.length
+  const p95 = percentile([...positives].sort((a, b) => a - b), 0.95)
+  const range = p95 - mean
+  if (range <= 0) return [] // sortie plate/régulière : aucun intervalle à isoler
+
+  const HIGH_FRAC = 0.45
+  const LOW_FRAC = 0.22
+  const hi = mean + HIGH_FRAC * range
+  const lo = mean + LOW_FRAC * range
+
+  // Balayage par hystérésis → bornes brutes des efforts.
+  const rawRanges: { s: number; e: number }[] = []
+  let start = -1
+  for (let i = 0; i < n; i++) {
+    if (start < 0) {
+      if (smooth[i] >= hi) {
+        // On remonte jusqu'au début de la rampe (dernier point encore au-dessus du bas).
+        let s = i
+        while (s > 0 && smooth[s - 1] >= lo) s--
+        start = s
+      }
+    } else if (smooth[i] < lo) {
+      rawRanges.push({ s: start, e: i - 1 })
+      start = -1
+    }
+  }
+  if (start >= 0) rawRanges.push({ s: start, e: n - 1 })
+
+  const MERGE_GAP_S = 10
+  const MIN_DURATION_S = 20
+  const MAX_INTERVALS = 40
+
+  // Fusion des efforts séparés par un très court répit (bruit de seuil, pas une vraie
+  // récupération).
+  const merged: { s: number; e: number }[] = []
+  for (const r of rawRanges) {
+    const prev = merged[merged.length - 1]
+    if (prev && time[r.s] - time[prev.e] < MERGE_GAP_S) prev.e = r.e
+    else merged.push({ ...r })
+  }
+
+  const intervals: IntervalSegment[] = []
+  for (const r of merged) {
+    if (time[r.e] - time[r.s] < MIN_DURATION_S) continue
+    // Le bloc ENTIER doit être franchement au-dessus du seuil haut, pas seulement
+    // l'avoir effleuré : moyenne du signal lissé sur la plage ≥ seuil haut.
+    let sum = 0
+    for (let i = r.s; i <= r.e; i++) sum += smooth[i]
+    if (sum / (r.e - r.s + 1) < hi) continue
+    intervals.push({
+      ...segmentStats(streams, activity, r.s, r.e),
+      index: intervals.length + 1,
+      basis,
+    })
+    if (intervals.length >= MAX_INTERVALS) break
+  }
+
+  // Un seul intervalle qui couvre presque toute la sortie n'apprend rien de plus que
+  // le bandeau global : on exige soit ≥ 2 efforts, soit un effort nettement plus court
+  // que la sortie (une vraie « pointe » dans une sortie par ailleurs facile).
+  if (intervals.length === 0) return []
+  if (intervals.length === 1) {
+    const only = intervals[0]
+    const totalS = time[n - 1] - time[0]
+    if (only.duration != null && totalS > 0 && only.duration > 0.8 * totalS) return []
+  }
+  return intervals
+}
+
 export function detectClimbs(
   grades: number[] | null | undefined,
   altitudes: number[] | null | undefined,

@@ -6,6 +6,7 @@ import { t } from '../i18n'
 import {
   formatHMS, formatKm, formatPace, formatPowerDuration,
   type ClimbSegment, type Efficiency, type SegmentStats, type SplitRow, type LapRow,
+  type IntervalSegment,
 } from '../activityHelpers'
 
 interface ClimbWithVam extends ClimbSegment {
@@ -39,6 +40,8 @@ const props = defineProps({
   // n'en porte pas.
   laps: { type: Array as PropType<LapRow[]>, default: () => [] },
   climbsWithVam: { type: Array as PropType<ClimbWithVam[]>, default: () => [] },
+  // Intervalles détectés automatiquement (efforts durs soutenus).
+  intervals: { type: Array as PropType<IntervalSegment[]>, default: () => [] },
   peakPowers: { type: Array as PropType<PeakPower[]>, default: () => [] },
   // { current: {dur: w}, bests: {dur: { avg_watts, source, external_id, started_at }} } | null
   peakPowerRanks: { type: Object as PropType<Record<string, any> | null>, default: null },
@@ -102,6 +105,7 @@ const hasContent = computed(() =>
   || props.segmentSummary != null || props.splits.length > 0
   || props.laps.length > 0
   || props.climbsWithVam.length > 0
+  || props.intervals.length > 0
   || props.peakPowers.length > 0
   || hasEfforts.value,
 )
@@ -206,19 +210,15 @@ function isPeakPowerSelected(pp) {
   return !!s && s.startIdx === pp.startIdx && s.endIdx === pp.endIdx
 }
 
-// For a row in the peak-power table, label its rank vs. the user's history.
-// Same semantics as before extraction: 'pr' = strictly better than the best
-// known prior effort, 'tied' = within ±0.5 W, otherwise null (we surface the
-// historical best instead).
-function peakPowerRankLabel(pp) {
-  const bests = props.peakPowerRanks?.bests
-  if (!bests) return null
-  const best = bests[String(pp.duration)]
-  if (!best || !Number.isFinite(best.avg_watts)) return 'pr'
-  const delta = pp.avgPower - best.avg_watts
-  if (delta > 0.5) return 'pr'
-  if (Math.abs(delta) <= 0.5) return 'tied'
-  return null
+// Rang de podium (1 = or, 2 = argent, 3 = bronze) de la sortie sur cette durée
+// parmi tout l'historique, calculé côté serveur (`podium`). null hors du podium.
+// Décerne les mêmes médailles que le tableau « meilleurs efforts ».
+function peakPowerMedal(pp): number | null {
+  const rank = props.peakPowerRanks?.podium?.[String(pp.duration)]
+  return typeof rank === 'number' && rank >= 1 && rank <= 3 ? rank : null
+}
+const PEAK_MEDAL_CLASS: Record<number, string> = {
+  1: 'peak-power-badge-gold', 2: 'peak-power-badge-silver', 3: 'peak-power-badge-bronze',
 }
 
 function peakPowerBestFor(pp) {
@@ -227,6 +227,25 @@ function peakPowerBestFor(pp) {
 
 function selectClimb(c) { emit('select-segment', c.startIdx, c.endIdx) }
 function selectPeak(pp) { emit('select-segment', pp.startIdx, pp.endIdx) }
+
+// ─── Intervalles détectés ────────────────────────────────────────────────────
+function isIntervalSelected(iv: IntervalSegment): boolean {
+  const s = props.selection as { startIdx: number; endIdx: number } | null
+  return !!s && s.startIdx === iv.startIdx && s.endIdx === iv.endIdx
+}
+function selectInterval(iv: IntervalSegment) { emit('select-segment', iv.startIdx, iv.endIdx) }
+
+// La sortie porte-t-elle au moins un intervalle avec du dénivelé net à afficher ?
+const intervalsHaveGrade = computed(() => props.intervals.some((iv) => iv.avgGrade != null))
+
+// Métrique d'effort principale d'un intervalle, selon le signal qui l'a détecté
+// (puissance → FC → allure). Chaîne prête à afficher, « – » si absente.
+function intervalEffort(iv: IntervalSegment): string {
+  if (iv.basis === 'power' && iv.avgPower != null) return `${Math.round(iv.avgPower)} W`
+  if (iv.basis === 'heartrate' && iv.avgHr != null) return `${Math.round(iv.avgHr)} bpm`
+  if (iv.basis === 'pace' && iv.pace != null) return formatPace(iv.pace)
+  return '–'
+}
 
 function setHoveredClimb(idx) { emit('update:hoveredClimbStartIdx', idx) }
 function setHoveredPeak(dur)  { emit('update:hoveredPeakDuration', dur) }
@@ -261,6 +280,7 @@ watch(
   () => [
     props.trainingMetrics, props.decoupling, props.efficiency, props.gradeAdjusted,
     props.globalVam, props.segmentSummary, props.collapsed, hasEfforts.value,
+    props.intervals.length,
   ],
   () => nextTick(initTooltips),
 )
@@ -754,6 +774,67 @@ watch(
       </div>
 
       <!-- Climbs (per-climb VAM) -->
+      <!-- Intervalles détectés automatiquement (efforts durs soutenus). Cliquer une
+           ligne la surligne sur la carte et le graphique via la sélection partagée. -->
+      <div v-if="intervals.length > 0" class="stats-section">
+        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-stopwatch-20 text-warning" aria-hidden="true"></i>
+          <span>{{ t('strava.stats.intervals_title') }}</span>
+          <i
+            class="fa-regular fa-circle-question text-muted"
+            data-bs-toggle="tooltip"
+            :data-bs-title="t('strava.stats.intervals_hint')"
+            aria-hidden="true"
+          ></i>
+        </h4>
+        <div class="table-responsive stats-table-scroll">
+          <table class="table table-sm stats-table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th :title="t('strava.stats.col_time')">
+                  <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
+                </th>
+                <th :title="t('strava.stats.col_length')">
+                  <i class="fa-solid fa-route text-secondary" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.col_length') }}</span>
+                </th>
+                <th :title="t('strava.stats.intervals_effort')">
+                  <i class="fa-solid fa-fire text-danger" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.intervals_effort') }}</span>
+                </th>
+                <th v-if="intervalsHaveGrade" :title="t('strava.stats.col_grade')">
+                  <i class="fa-solid fa-slash text-secondary" aria-hidden="true"></i>
+                  <span class="visually-hidden">{{ t('strava.stats.col_grade') }}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="iv in intervals"
+                :key="`interval-${iv.index}`"
+                class="climb-row"
+                :class="{ 'climb-row-active': isIntervalSelected(iv) }"
+                role="button"
+                tabindex="0"
+                :title="t('strava.stats.intervals_click')"
+                :aria-pressed="isIntervalSelected(iv)"
+                @click="selectInterval(iv)"
+                @keydown.enter.prevent="selectInterval(iv)"
+                @keydown.space.prevent="selectInterval(iv)"
+              >
+                <td>{{ iv.index }}</td>
+                <td>{{ iv.duration != null ? formatHMS(iv.duration) : '–' }}</td>
+                <td>{{ iv.distance != null ? formatKm(iv.distance) : '–' }}</td>
+                <td>{{ intervalEffort(iv) }}</td>
+                <td v-if="intervalsHaveGrade">{{ iv.avgGrade != null ? `${iv.avgGrade.toFixed(1)} %` : '–' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div v-if="climbsWithVam.length > 0" class="stats-section">
         <h4 class="h6 mb-2 d-flex align-items-center gap-2">
           <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
@@ -867,24 +948,21 @@ watch(
                 <td>{{ formatPowerDuration(pp.duration) }}</td>
                 <td class="d-flex align-items-center gap-2 flex-wrap">
                   <span>{{ Math.round(pp.avgPower) }} W</span>
+                  <!-- Podium historique sur cette durée : or / argent / bronze. Le rang 1
+                       porte le libellé « Record », l'argent et le bronze leur médaille. -->
                   <span
-                    v-if="peakPowerRankLabel(pp) === 'pr'"
-                    class="peak-power-badge peak-power-badge-pr"
-                    :title="t('strava.stats.peak_power_pr_hint')"
+                    v-if="peakPowerMedal(pp)"
+                    class="peak-power-badge"
+                    :class="PEAK_MEDAL_CLASS[peakPowerMedal(pp)]"
+                    :title="peakPowerMedal(pp) === 1 ? t('strava.stats.peak_power_pr_hint') : medalTitle(peakPowerMedal(pp))"
                   >
-                    <i class="fa-solid fa-trophy" aria-hidden="true"></i>
-                    <span>{{ t('strava.stats.peak_power_pr') }}</span>
+                    <i class="fa-solid fa-medal" aria-hidden="true"></i>
+                    <span>{{ peakPowerMedal(pp) === 1 ? t('strava.stats.peak_power_pr') : medalTitle(peakPowerMedal(pp)) }}</span>
                   </span>
+                  <!-- Meilleur historique à battre : montré tant que la sortie n'est pas le
+                       record (argent/bronze ou hors podium). -->
                   <span
-                    v-else-if="peakPowerRankLabel(pp) === 'tied'"
-                    class="peak-power-badge peak-power-badge-tied"
-                    :title="t('strava.stats.peak_power_tied_hint')"
-                  >
-                    <i class="fa-solid fa-equals" aria-hidden="true"></i>
-                    <span>{{ t('strava.stats.peak_power_tied') }}</span>
-                  </span>
-                  <span
-                    v-else-if="peakPowerBestFor(pp)"
+                    v-if="peakPowerMedal(pp) !== 1 && peakPowerBestFor(pp)"
                     class="peak-power-best text-muted small"
                     :title="t('strava.stats.peak_power_best_hint')"
                   >
@@ -1091,8 +1169,8 @@ watch(
   font-weight: 600;
 }
 
-/* Personal-best badges on the peak-power table. `-pr` is the highlight, `-tied`
-   is a soft variant when values match within rounding tolerance. */
+/* Podium badges on the peak-power table — gold / silver / bronze, matching the
+   medals used by the « meilleurs efforts » table. */
 .peak-power-badge {
   display: inline-flex;
   align-items: center;
@@ -1104,15 +1182,20 @@ watch(
   letter-spacing: 0.02em;
   white-space: nowrap;
 }
-.peak-power-badge-pr {
-  background: rgba(255, 193, 7, 0.18);
+.peak-power-badge-gold {
+  background: rgba(245, 179, 1, 0.18);
   color: #b45309;
   border: 1px solid rgba(180, 83, 9, 0.35);
 }
-.peak-power-badge-tied {
-  background: rgba(108, 117, 125, 0.14);
-  color: #495057;
-  border: 1px solid rgba(108, 117, 125, 0.3);
+.peak-power-badge-silver {
+  background: rgba(154, 164, 176, 0.20);
+  color: #4b5563;
+  border: 1px solid rgba(107, 114, 128, 0.35);
+}
+.peak-power-badge-bronze {
+  background: rgba(205, 127, 50, 0.18);
+  color: #92400e;
+  border: 1px solid rgba(146, 64, 14, 0.35);
 }
 .peak-power-best {
   display: inline-flex;

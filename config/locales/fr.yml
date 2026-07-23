@@ -590,6 +590,7 @@ fr:
       gusts: "rafales"
       humidity: "Humidité"
       precipitation: "Précipitations"
+      form: "Fraîcheur à l'entrée de la séance"
     weather:
       codes:
         clear: "Ciel dégagé"
@@ -684,6 +685,10 @@ fr:
       decoupling_level_good: "Bonne endurance"
       decoupling_level_moderate: "Dérive modérée"
       decoupling_level_high: "Dérive marquée"
+      intervals_title: "Intervalles détectés"
+      intervals_hint: "Efforts durs et soutenus, repérés automatiquement à partir de la puissance — sinon de la fréquence cardiaque, ou de l'allure en course. Complète les meilleures puissances : celles-ci ne donnent qu'un pic par durée, ici c'est la structure de la séance (les répétitions)."
+      intervals_effort: "Effort moyen"
+      intervals_click: "Cliquer pour sélectionner l'intervalle"
       climbs_title: "Montées détectées"
       climbs_empty: "Aucune montée significative détectée."
       col_time: "Temps"
@@ -693,8 +698,6 @@ fr:
       peak_power_title: "Meilleures puissances moyennes"
       peak_power_pr: "Record"
       peak_power_pr_hint: "Meilleure performance de votre historique sur cette durée"
-      peak_power_tied: "Égalité"
-      peak_power_tied_hint: "Identique à votre meilleur enregistrement sur cette durée"
       peak_power_best_hint: "Votre meilleur historique sur cette durée"
       efforts_title: "Meilleurs efforts"
       efforts_hint: "Classement de cette sortie parmi vos %{sport} — or, argent et bronze pour les trois meilleures."

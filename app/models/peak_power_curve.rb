@@ -73,6 +73,56 @@ module PeakPowerCurve
     out
   end
 
+  # Nombre de places de podium (or / argent / bronze).
+  PODIUM_PLACES = 3
+
+  # Rang (1 = or, 2 = argent, 3 = bronze) de la sortie courante pour chaque durée,
+  # parmi TOUTES les activités de l'utilisateur — pour décorer le tableau des
+  # meilleures puissances moyennes des mêmes médailles que les « meilleurs efforts ».
+  # `current` = les `peak_powers` de la sortie ({ "300" => watts, … }). Une durée
+  # n'apparaît que si la sortie y est sur le podium. Ex æquo partagés (deux sorties
+  # à la même puissance max sont toutes deux « or »), même sémantique que
+  # `PerformanceRecords.rank_in`. `exclude` = [source, external_id] de la sortie
+  # courante, retirée du décompte pour ne pas se comparer à elle-même.
+  def podium_for(user, current, exclude:)
+    return {} unless current.is_a?(Hash)
+
+    exclude_source, exclude_external_id = exclude
+    out = {}
+    DURATIONS.each do |d|
+      key = d.to_s
+      value = current[key] || current[key.to_sym]
+      value = value.to_f if value.is_a?(Numeric) || (value.is_a?(String) && value.present?)
+      next unless value.is_a?(Float) && value.positive?
+
+      rank = better_count(
+        user_id: user.id, duration_key: key, value: value,
+        exclude_source: exclude_source, exclude_external_id: exclude_external_id&.to_s
+      ) + 1
+      out[key] = rank if rank <= PODIUM_PLACES
+    end
+    out
+  end
+
+  # Combien d'AUTRES activités battent strictement `value` sur cette durée (sert au
+  # rang du podium). Exclut la sortie courante par (source, external_id).
+  def better_count(user_id:, duration_key:, value:, exclude_source:, exclude_external_id:)
+    key = UserActivities.quote(duration_key)
+    union = UserActivities.union_sql(
+      user_id: user_id,
+      columns: ["(peak_powers->>#{key})::float AS avg_watts"]
+    )
+    sql = <<~SQL.squish
+      SELECT COUNT(*) AS n
+        FROM (#{union}) rows
+       WHERE avg_watts IS NOT NULL
+         AND avg_watts > #{value.to_f}
+         AND NOT (source = #{UserActivities.quote(exclude_source.to_s)}
+                  AND external_id = #{UserActivities.quote(exclude_external_id.to_s)})
+    SQL
+    UserActivities.select_all(sql, 'PeakPowerCurve#better_count').first['n'].to_i
+  end
+
   # Pull the single best row across both source tables for a given duration.
   # Returns nil when no row has that duration. The `UNION ALL` over the two
   # heterogeneous tables is built by `UserActivities`.

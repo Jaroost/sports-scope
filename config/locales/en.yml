@@ -590,6 +590,7 @@ en:
       gusts: "gusts"
       humidity: "Humidity"
       precipitation: "Precipitation"
+      form: "Freshness entering the session"
     weather:
       codes:
         clear: "Clear sky"
@@ -684,6 +685,10 @@ en:
       decoupling_level_good: "Good endurance"
       decoupling_level_moderate: "Moderate drift"
       decoupling_level_high: "Marked drift"
+      intervals_title: "Detected intervals"
+      intervals_hint: "Sustained hard efforts, spotted automatically from power — or heart rate, or pace when running. Complements the peak powers: those give only one best per duration, this shows the session's structure (the repetitions)."
+      intervals_effort: "Average effort"
+      intervals_click: "Click to select the interval"
       climbs_title: "Detected climbs"
       climbs_empty: "No significant climbs detected."
       col_time: "Time"
@@ -693,8 +698,6 @@ en:
       peak_power_title: "Best average powers"
       peak_power_pr: "PR"
       peak_power_pr_hint: "Your best ever effort at this duration"
-      peak_power_tied: "Tied"
-      peak_power_tied_hint: "Matches your previous best at this duration"
       peak_power_best_hint: "Your all-time best at this duration"
       efforts_title: "Best efforts"
       efforts_hint: "Where this activity ranks among your %{sport} — gold, silver and bronze for the top three."

@@ -170,6 +170,29 @@ module TrainingLoad
     tss_by_activity(user)[[source, external_id.to_s]]
   end
 
+  # Forme (fraîcheur) de l'athlète À L'ENTRÉE d'une séance datée — le contexte
+  # « étais-je frais ou cramé ce jour-là ? » sur la page d'activité. On prend le
+  # point de série de la VEILLE : ce jour-là n'inclut pas encore le TSS de la séance,
+  # donc son TSB décrit bien l'état AVANT l'effort. Réutilise la série déjà mise en
+  # cache (`summary`). Renvoie { ctl:, atl:, tsb:, form_zone: } ou nil si la date
+  # tombe hors de l'historique de forme.
+  def form_on(user, date)
+    day = parse_date(date)
+    return nil unless day
+
+    series = summary(user)[:series]
+    return nil if series.blank?
+
+    entering = (day - 1).iso8601
+    point = series.find { |p| p[:date] == entering }
+    # Séance au tout premier jour d'historique : pas de veille, on prend le jour même
+    # (la forme de fond part de zéro, valeur indicative).
+    point ||= series.find { |p| p[:date] == day.iso8601 }
+    return nil unless point
+
+    { ctl: point[:ctl], atl: point[:atl], tsb: point[:tsb], form_zone: form_zone(point[:tsb]) }
+  end
+
   # ── TSS d'une activité (cascade puissance → FC → estimation) ─────────────────
   def activity_tss(row, ftp:, lthr:)
     secs = row['moving_time_s'].to_i

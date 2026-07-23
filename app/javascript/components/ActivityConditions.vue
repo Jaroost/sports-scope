@@ -6,12 +6,30 @@
 import { computed, type PropType } from 'vue'
 import { t } from '../i18n'
 import { weatherBucket, weatherLabel, windCardinal, windArrowDeg, type Weather } from '../weatherHelpers'
+import { zoneColor } from '../composables/useTrainingPlan'
 
 const props = defineProps({
   activity: { type: Object as PropType<Record<string, any>>, required: true },
   weather: { type: Object as PropType<Weather | null>, default: null },
   weatherLoading: { type: Boolean, default: false },
 })
+
+// Forme (fraîcheur) à l'entrée de la séance : { ctl, atl, tsb, form_zone } servi par
+// le back (TrainingLoad.form_on) sur l'activité. Le TSB dit si on abordait la sortie
+// reposé (positif) ou fatigué (négatif) ; la zone donne couleur + libellé partagés
+// avec la page performance.
+const form = computed(() => {
+  const f = props.activity?.form
+  return f && Number.isFinite(f.tsb) ? f : null
+})
+const formZoneKey = computed(() => form.value?.form_zone || 'neutral')
+const formColor = computed(() => zoneColor(formZoneKey.value))
+const formTsb = computed(() => {
+  const v = Math.round(form.value?.tsb ?? 0)
+  return v > 0 ? `+${v}` : `${v}`
+})
+const formLabel = computed(() => t(`performance.load.zone_${formZoneKey.value}`))
+const formHint = computed(() => t(`performance.load.zone_${formZoneKey.value}_hint`))
 
 // Le matériel Strava (vélo ou chaussures) n'est présent que dans le détail Strava.
 const gear = computed(() => {
@@ -47,7 +65,7 @@ const hasWeather = computed(() =>
   !!w.value && (w.value.temperature != null || w.value.wind_speed != null || w.value.weather_code != null),
 )
 const hasContent = computed(
-  () => !!gearName.value || !!deviceName.value || hasWeather.value || props.weatherLoading,
+  () => !!form.value || !!gearName.value || !!deviceName.value || hasWeather.value || props.weatherLoading,
 )
 
 function fmt1(v: number | null | undefined): string {
@@ -58,6 +76,19 @@ function fmt1(v: number | null | undefined): string {
 <template>
   <div v-if="hasContent" class="card shadow-sm border-0 mb-3 activity-conditions">
     <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+      <!-- Forme (fraîcheur) à l'entrée de la séance : TSB + zone colorée. -->
+      <span v-if="form" class="cond-pill cond-form" :title="`${t('strava.conditions.form')} — ${formHint}`">
+        <i class="fa-solid fa-heart-pulse" :style="{ color: formColor }" aria-hidden="true"></i>
+        <span class="cond-val" :style="{ color: formColor }">{{ formTsb }}</span>
+        <span class="cond-sub">{{ formLabel }}</span>
+      </span>
+
+      <span
+        v-if="form && (gearName || deviceName || hasWeather || weatherLoading)"
+        class="cond-sep"
+        aria-hidden="true"
+      ></span>
+
       <!-- Matériel Strava -->
       <span v-if="gearName" class="cond-pill cond-gear" :title="t('strava.conditions.gear')">
         <i class="fa-solid" :class="gearIcon" aria-hidden="true"></i>

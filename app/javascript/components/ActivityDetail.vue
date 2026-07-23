@@ -16,6 +16,7 @@ import { t } from '../i18n'
 import {
   PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds, aerobicDecoupling,
   efficiencyFactor, gradeAdjustedPace, segmentStats, computeSplits, computeLaps, isRun, paceMinPerKm,
+  detectIntervals,
 } from '../activityHelpers'
 // Même détection de cols et même pente lissée (fenêtre du profil) que le créateur
 // d'itinéraire, pour que carte, graphique et tableau de cols soient cohérents.
@@ -253,6 +254,11 @@ const peakPowers = computed(() => {
   }
   return out
 })
+
+// Intervalles détectés automatiquement (efforts durs soutenus) — auto-adaptatif à
+// partir du signal de la sortie (puissance → FC → vitesse). Complète la courbe de
+// pics, qui ne donne qu'un meilleur effort par durée sans en révéler la structure.
+const intervals = computed(() => detectIntervals(streams.value, activity.value))
 
 // Per-climb stats enriched with duration + VAM. detectClimbs already gives
 // gain/lengthM/avgGrade/category; we add the per-climb time and VAM.
@@ -588,6 +594,7 @@ onMounted(async () => {
         :splits="splits"
         :laps="laps"
         :climbs-with-vam="climbsWithVam"
+        :intervals="intervals"
         :peak-powers="peakPowers"
         :peak-power-ranks="peakPowerRanks"
         :best-efforts="bestEfforts"

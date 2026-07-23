@@ -2581,6 +2581,10 @@ defineExpose({
   hidePlaceHoverMarker,
   showPlacePopup,
   setMapStyle,
+  // Applique un fond SANS l'enregistrer comme défaut du compte : sert au fond imposé
+  // par l'auteur d'un lien partagé, qui ne doit pas écraser la préférence du visiteur
+  // (et qui, non connecté, n'a de toute façon rien à enregistrer).
+  applyMapStyle,
   setEditMode,
   resize: () => mapInstance?.resize(),
   getMapInstance: () => mapInstance,

@@ -922,6 +922,12 @@ en:
     share: "Share route"
     share_copied: "Link copied!"
     share_preview: "Open the share page"
+    # Map style forced on the recipients of the link (routes.share_map_style).
+    share_map_style: "Shared link map"
+    share_map_style_hint: "Map style shown to people who open your link: read-only view and share page preview."
+    share_map_style_force: "Force a map style"
+    share_map_style_free: "Each visitor sees their own map style."
+    share_map_style_save: "Save"
     # Public share page (pages#route_summary) — readable without an account, and the
     # source of the Open Graph tags messaging apps render as a preview card.
     summary:

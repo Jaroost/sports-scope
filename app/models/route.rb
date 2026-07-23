@@ -4,6 +4,11 @@ class Route < ApplicationRecord
   # lié mais réglable indépendamment (cf. brouter.ts / PROFILES_BY_SPORT).
   ACTIVITIES = %w[cycling mtb hiking].freeze
 
+  # Fonds de carte proposés à l'auteur pour son lien de partage — doit rester aligné
+  # sur MAP_STYLES (app/javascript/mapStyles.ts). `nil` (aucune consigne) reste la
+  # valeur par défaut : le destinataire voit alors son propre fond.
+  SHARE_MAP_STYLES = %w[cyclosm topo liberty swissgrau swisstopo swissimage].freeze
+
   belongs_to :user
   # Traces d'ouverture par d'autres utilisateurs (via lien partagé) — purgées avec l'itinéraire.
   has_many :opened_routes, dependent: :destroy
@@ -15,6 +20,7 @@ class Route < ApplicationRecord
   validates :name, presence: true, length: { maximum: 80 }
   validates :waypoints, presence: true
   validates :activity, inclusion: { in: ACTIVITIES }
+  validates :share_map_style, inclusion: { in: SHARE_MAP_STYLES }, allow_nil: true
 
   # Aperçu du tracé : polyligne SVG pré-calculée depuis la géométrie et découpée
   # en segments colorés par pente (montée / descente / plat), stockée pour éviter

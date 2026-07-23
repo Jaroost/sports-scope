@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { t } from '../i18n'
-import { speedForSport, persistSportSpeed, isLoggedIn, SPORTS } from '../userPreferences'
+import { speedForSport, persistSportSpeed, isLoggedIn, sportPreferences, SPORTS } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { buildNewRouteUrl, shareVersionParam } from '../routeHelpers'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
@@ -10,7 +10,9 @@ import { estimateRouteLoad } from '../routeLoad'
 import { FEAS_COLOR, mondayOf, isoLocal } from '../composables/useTrainingPlan'
 import { parseGpxWaypoints, GpxImportError } from '../gpxImport'
 import { useStickyListHeader } from '../composables/useStickyListHeader'
+import { MAP_STYLES } from '../mapStyles'
 import NewRouteModal from './NewRouteModal.vue'
+import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
 import RoutesOverviewMap from './RoutesOverviewMap.vue'
 
 // canDense : réservé aux admins (can :manage, :all). Débloque l'export d'un GPX
@@ -258,6 +260,27 @@ function gradeColor(cat: number) {
 // Share feedback: holds the id of the route whose link was just copied, so the
 // button can flash a checkmark for a couple of seconds.
 const sharedId = ref(null)
+
+// ─── Fond de carte du lien partagé ────────────────────────────────────────────
+// Même réglage que dans le créateur (cf. ShareMapStyleDialog) : se régler d'ici évite
+// d'ouvrir l'itinéraire juste pour choisir ce que verra le destinataire, alors qu'on
+// partage justement depuis cette liste.
+const shareStyleRoute = ref(null) // itinéraire dont la modale est ouverte, null sinon
+
+function styleMeta(styleId) {
+  return MAP_STYLES.find((s) => s.id === styleId) ?? null
+}
+
+function onShareMapStyleSaved({ styleId, updatedAt }) {
+  const idx = routes.value.findIndex((r) => r.id === shareStyleRoute.value?.id)
+  if (idx >= 0) {
+    routes.value[idx] = {
+      ...routes.value[idx],
+      share_map_style: styleId,
+      updated_at: updatedAt || routes.value[idx].updated_at,
+    }
+  }
+}
 
 // Inline rename state
 const editingId = ref(null)
@@ -1155,6 +1178,18 @@ onMounted(() => {
                         <span>{{ t('routes.share_preview') }}</span>
                       </a>
                     </li>
+                    <li>
+                      <!-- Fond imposé : l'entrée en porte l'icône et le nom, pour qu'on
+                           sache ce que verra le destinataire sans ouvrir la modale. -->
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+                        @click="shareStyleRoute = r">
+                        <i :class="`fa-solid ${styleMeta(r.share_map_style)?.icon ?? 'fa-layer-group'}`" aria-hidden="true"></i>
+                        <span>{{ t('routes.share_map_style') }}</span>
+                        <span v-if="r.share_map_style" class="ms-auto ps-2 small text-muted">
+                          {{ t(`strava.map_style_${r.share_map_style}`) }}
+                        </span>
+                      </button>
+                    </li>
                     <li><hr class="dropdown-divider"></li>
                     <li><h6 class="dropdown-header">{{ t('routes.group_export') }}</h6></li>
                     <li>
@@ -1231,6 +1266,16 @@ onMounted(() => {
       :initial-name="newRouteName"
       @confirm="onNewRouteConfirm"
       @close="onNewRouteClose"
+    />
+
+    <ShareMapStyleDialog
+      :show="!!shareStyleRoute"
+      :route-id="shareStyleRoute?.id ?? null"
+      :style-id="shareStyleRoute?.share_map_style ?? null"
+      :default-style-id="sportPreferences(shareStyleRoute?.activity).map.default_style"
+      @close="shareStyleRoute = null"
+      @saved="onShareMapStyleSaved"
+      @error="error = $event"
     />
   </div>
 </template>

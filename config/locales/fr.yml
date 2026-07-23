@@ -922,6 +922,12 @@ fr:
     share: "Partager l'itinéraire"
     share_copied: "Lien copié !"
     share_preview: "Voir la page de partage"
+    # Fond de carte imposé aux destinataires du lien (routes.share_map_style).
+    share_map_style: "Carte du lien partagé"
+    share_map_style_hint: "Fond de carte affiché aux personnes qui ouvrent votre lien : vue en lecture seule et aperçu de la page de partage."
+    share_map_style_force: "Imposer un fond de carte"
+    share_map_style_free: "Chaque visiteur voit son propre fond de carte."
+    share_map_style_save: "Enregistrer"
     # Page de partage publique (pages#route_summary) — résumé lisible sans compte,
     # et source des balises Open Graph affichées par les messageries.
     summary:

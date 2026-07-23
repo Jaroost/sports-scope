@@ -99,9 +99,10 @@ class RoutesController < ApplicationController
     return head :not_found unless route
     attrs = sanitize_attrs(params)
     # `compact` sert à ignorer les champs absents d'un PATCH partiel ; mais sur
-    # avg_speed_kmh, `nil` est une valeur signifiante (« suivre le profil ») qu'il faut
-    # pouvoir réécrire — on la réinjecte quand la clé était bien dans la charge utile.
-    route.update!(attrs.compact.merge(attrs.slice(:avg_speed_kmh)))
+    # avg_speed_kmh (« suivre le profil ») et share_map_style (« pas de consigne au
+    # destinataire »), `nil` est une valeur signifiante qu'il faut pouvoir réécrire —
+    # on la réinjecte quand la clé était bien dans la charge utile.
+    route.update!(attrs.compact.merge(attrs.slice(:avg_speed_kmh, :share_map_style)))
     render json: { route: serialize_full(route) }
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
@@ -227,6 +228,11 @@ class RoutesController < ApplicationController
     # Vitesse retenue par le créateur pour CET itinéraire (peut différer de son profil).
     # Hors bornes → nil, c'est-à-dire « retomber sur le réglage du profil ».
     out[:avg_speed_kmh] = p[:avg_speed_kmh].to_f.then { |v| Route::SPEED_RANGE.cover?(v) ? v : nil } if p.key?(:avg_speed_kmh)
+    # Fond de carte imposé aux destinataires du lien. Valeur inconnue → nil, c'est-à-dire
+    # « pas de consigne », le visiteur garde son propre fond.
+    if p.key?(:share_map_style)
+      out[:share_map_style] = Route::SHARE_MAP_STYLES.include?(p[:share_map_style].to_s) ? p[:share_map_style] : nil
+    end
     out
   end
 
@@ -383,6 +389,9 @@ class RoutesController < ApplicationController
       # estimations quand on bouge le curseur de vitesse de la liste.
       avg_speed_kmh: route[:avg_speed_kmh],
       share_token: route.share_token,
+      # Fond imposé par l'auteur aux destinataires du lien (nil = choix du visiteur).
+      # Dans le résumé : la liste des itinéraires règle aussi ce réglage.
+      share_map_style: route.share_map_style,
       preview_segments: route.preview_segments,
       map_polyline: route.map_polyline,
       updated_at: route.updated_at.iso8601,

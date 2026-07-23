@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
-import { mapStyleFor, exportTileInfoFor } from '../mapStyles'
+import { mapStyleFor, exportTileInfoFor, MAP_STYLES } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
@@ -21,6 +21,7 @@ import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import RouteAlternativesDialog from './RouteAlternativesDialog.vue'
+import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
 
 const props = defineProps({
   routeId: { type: [String, Number], default: null },
@@ -65,6 +66,10 @@ const routeShareToken = ref<string | null>(null)
 // enregistrement : il version le lien de partage (cf. shareVersionParam).
 const routeUpdatedAt = ref<string | null>(null)
 const showExportDialog = ref(false)
+// Fond de carte imposé aux destinataires du lien de partage (null = pas de consigne,
+// chaque visiteur garde le sien). Chargé avec l'itinéraire, réglé depuis la modale
+// « Carte du lien partagé » — cf. saveShareMapStyle.
+const shareMapStyle = ref<string | null>(null)
 // ─── Avertissements sur le tracé ───────────────────────────────────────────────
 // Les deux ne sont calculés qu'à la tentative de sauvegarde (cf. save), et non au fil de
 // l'édition : un tracé en cours de construction passe par des états intermédiaires bancals
@@ -475,6 +480,7 @@ async function fetchRoute(id: number) {
     const r = payload.route
     routeShareToken.value = r.share_token || null
     routeUpdatedAt.value = r.updated_at || null
+    shareMapStyle.value = r.share_map_style || null
     routeStore.name.value = r.name || ''
     // Réaligne la catégorie d'activité (et donc la vitesse moyenne) sur celle
     // enregistrée avec l'itinéraire. setSport réinitialise le profil au défaut du
@@ -554,6 +560,13 @@ async function fetchSharedRoute(token: string) {
     mapRef.value?.refreshRouteMarkers()
     mapRef.value?.updateRouteLayer()
     await nextTick()
+    // Fond imposé par l'auteur, appliqué après le nextTick : setSport ci-dessus déclenche
+    // un watch qui réaligne la carte sur le fond par défaut du sport, et il doit avoir
+    // joué avant qu'on impose le nôtre. applyMapStyle (et non setMapStyle) : la consigne
+    // de l'auteur ne doit pas devenir la préférence du visiteur.
+    if (r.share_map_style && r.share_map_style !== state.mapStyleId) {
+      mapRef.value?.applyMapStyle(r.share_map_style)
+    }
     chartRef.value?.render()
     // Pas de recherche de POI dans le visionneur partagé : le proxy Overpass
     // exige une session (visiteur déconnecté), donc on n'interroge pas les lieux.
@@ -774,6 +787,8 @@ async function persist() {
       // l'enregistrer évite que la page de partage et la réouverture annoncent une
       // autre durée que celle qu'on avait sous les yeux.
       avg_speed_kmh: routeStore.avgSpeedOverride.value,
+      // Fond imposé aux destinataires du lien (null = pas de consigne).
+      share_map_style: shareMapStyle.value,
     })
     const url = isEditMode() ? `/api/routes/${routeStore.currentId.value}` : '/api/routes'
     const method = isEditMode() ? 'PATCH' : 'POST'
@@ -881,6 +896,20 @@ async function shareRoute() {
   }
 }
 
+// ─── Fond de carte du lien partagé ────────────────────────────────────────────
+// Réglé dans ShareMapStyleDialog (partagé avec la liste des itinéraires), qui
+// enregistre lui-même. Ici on ne garde que l'ouverture et l'état affiché.
+const showShareMapDialog = ref(false)
+
+// Fond actuellement imposé (null tant qu'il n'y a pas de consigne) : alimente
+// l'indication portée par l'entrée de menu.
+const shareMapStyleMeta = computed(() => MAP_STYLES.find((s) => s.id === shareMapStyle.value) ?? null)
+
+function onShareMapStyleSaved({ styleId, updatedAt }: { styleId: string | null; updatedAt: string | null }) {
+  shareMapStyle.value = styleId
+  if (updatedAt) routeUpdatedAt.value = updatedAt
+}
+
 // ─── Komoot ───────────────────────────────────────────────────────────────────
 
 function openInKomoot() {
@@ -938,6 +967,8 @@ interface MenuAction {
   disabled?: boolean
   // Remplace l'icône par un spinner (export d'image en cours).
   busy?: boolean
+  // Précision affichée en gris à droite du libellé (valeur courante du réglage).
+  hint?: string
   // Entrée-lien (nouvel onglet) plutôt que bouton.
   href?: string
   run?: () => void
@@ -987,24 +1018,34 @@ const menuGroups = computed<MenuGroup[]>(() => {
   groups.push({ key: 'export', label: t('routes.group_export'), items: exportItems })
 
   if (shareUrl.value) {
-    groups.push({
-      key: 'share',
-      label: t('routes.group_share'),
-      items: [
-        {
-          key: 'share',
-          icon: shareCopied.value ? 'fa-solid fa-check text-success' : 'fa-solid fa-share-nodes',
-          label: shareCopied.value ? t('routes.share_copied') : t('routes.share'),
-          run: shareRoute,
-        },
-        {
-          key: 'share-preview',
-          icon: 'fa-solid fa-up-right-from-square',
-          label: t('routes.share_preview'),
-          href: shareUrl.value,
-        },
-      ],
-    })
+    const shareItems: MenuAction[] = [
+      {
+        key: 'share',
+        icon: shareCopied.value ? 'fa-solid fa-check text-success' : 'fa-solid fa-share-nodes',
+        label: shareCopied.value ? t('routes.share_copied') : t('routes.share'),
+        run: shareRoute,
+      },
+      {
+        key: 'share-preview',
+        icon: 'fa-solid fa-up-right-from-square',
+        label: t('routes.share_preview'),
+        href: shareUrl.value,
+      },
+    ]
+    // Réglage du lien, réservé à l'auteur : un destinataire en lecture seule ne
+    // redéfinit pas ce que voient les autres.
+    if (!readOnly.value) {
+      shareItems.push({
+        key: 'share-map-style',
+        // Fond imposé : l'entrée en porte l'icône et le nom, pour qu'on sache ce que
+        // verra le destinataire sans avoir à rouvrir la modale.
+        icon: `fa-solid ${shareMapStyleMeta.value?.icon ?? 'fa-layer-group'}`,
+        label: t('routes.share_map_style'),
+        hint: shareMapStyleMeta.value ? t(`strava.map_style_${shareMapStyleMeta.value.id}`) : undefined,
+        run: () => { showShareMapDialog.value = true },
+      })
+    }
+    groups.push({ key: 'share', label: t('routes.group_share'), items: shareItems })
   }
 
   if (!readOnly.value) {
@@ -1923,6 +1964,7 @@ onBeforeUnmount(() => {
                   <span v-if="a.busy" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
                   <i v-else :class="a.icon" aria-hidden="true"></i>
                   <span>{{ a.label }}</span>
+                  <span v-if="a.hint" class="ms-auto ps-2 small text-muted text-truncate">{{ a.hint }}</span>
                 </button>
               </template>
             </template>
@@ -2041,6 +2083,7 @@ onBeforeUnmount(() => {
                     <span v-if="a.busy" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
                     <i v-else :class="a.icon" aria-hidden="true"></i>
                     <span>{{ a.label }}</span>
+                    <span v-if="a.hint" class="ms-auto ps-2 small text-muted">{{ a.hint }}</span>
                   </button>
                 </li>
               </template>
@@ -2268,6 +2311,17 @@ onBeforeUnmount(() => {
         @close="cancelAlternatives"
       />
     </Transition>
+
+    <!-- Fond de carte imposé aux destinataires du lien de partage -->
+    <ShareMapStyleDialog
+      :show="showShareMapDialog"
+      :route-id="routeStore.currentId.value"
+      :style-id="shareMapStyle"
+      :default-style-id="state.mapStyleId"
+      @close="showShareMapDialog = false"
+      @saved="onShareMapStyleSaved"
+      @error="routeStore.error.value = $event"
+    />
 
     <!-- Export image dialog -->
     <Transition name="modal">

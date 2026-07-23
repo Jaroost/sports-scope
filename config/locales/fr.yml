@@ -767,6 +767,30 @@ fr:
     empty: "Aucune activité importée pour l'instant."
     delete: "Supprimer l'activité importée"
     delete_confirm: "Supprimer cette activité importée ?"
+  # Noms de pays affichés côté serveur (page de partage : pays traversés). Couvre
+  # les pays de la couverture OSM par défaut et leurs voisins ; un code absent
+  # s'affiche tel quel, en majuscules (cf. RouteSummaryHelper#summary_country_name).
+  countries:
+    ad: "Andorre"
+    at: "Autriche"
+    be: "Belgique"
+    ch: "Suisse"
+    cz: "Tchéquie"
+    de: "Allemagne"
+    es: "Espagne"
+    fr: "France"
+    gb: "Royaume-Uni"
+    hr: "Croatie"
+    hu: "Hongrie"
+    it: "Italie"
+    li: "Liechtenstein"
+    lu: "Luxembourg"
+    mc: "Monaco"
+    nl: "Pays-Bas"
+    pl: "Pologne"
+    pt: "Portugal"
+    si: "Slovénie"
+    sk: "Slovaquie"
   routes:
     list_title: "Mes itinéraires"
     view_list: "Liste"
@@ -937,6 +961,7 @@ fr:
       speed: "Vitesse moyenne"
       duration_hint: "Estimation à %{speed} km/h"
       profile: "Profil altimétrique"
+      countries: "Pays traversés"
       localities: "Lieux traversés"
       localities_more:
         one: "et 1 autre"

@@ -34,29 +34,50 @@ class LocalitiesExtractor
   # erreurs de connexion à la base `osm` (catalogue pas encore importé) — le job
   # retente.
   def call
-    pts = usable_points
-    return [] if pts.size < 2
+    matches.map { |name, _country, _idx| name }.uniq.first(MAX_LOCALITIES)
+  end
 
-    named = localities_in_bbox(pts).filter_map do |lat, lng, name|
-      # Les localités sans nom ne servent à rien ici : `localities` est une liste
-      # de noms cherchables.
-      next unless name.present?
-      [ name, lat.to_f, lng.to_f ]
-    end
-
-    # Position le long du tracé (index du point le plus proche) → ordre de
-    # traversée. Un même nom peut apparaître plusieurs fois dans OSM : on garde
-    # sa première occurrence.
-    nearest = named.filter_map do |name, lat, lng|
-      idx, dist = nearest_point(pts, lat, lng)
-      next if dist > THRESHOLD_M
-      [ name, idx ]
-    end
-
-    nearest.sort_by(&:last).map(&:first).uniq.first(MAX_LOCALITIES)
+  # Pays traversés (ISO 3166-1 alpha-2), dans l'ordre de traversée. Déduits des
+  # localités retenues : le pays vient de l'extrait Geofabrik dont la localité est
+  # issue (cf. deploy/osm-pois/sync.sh), OSM ne le portant pas sur les objets.
+  #
+  # Conséquence assumée du seuil commun : un pays n'est listé que si le tracé passe
+  # à moins de THRESHOLD_M d'une de ses localités. Une incursion par un col désert,
+  # sans village à 2 km, n'est donc pas comptée — préférable à l'inverse, où un
+  # tracé longeant une frontière listerait le pays d'en face.
+  def countries
+    matches.filter_map { |_name, country, _idx| country.presence }.uniq
   end
 
   private
+
+  # `[nom, pays, index du point le plus proche]` des localités traversées, ordonnées
+  # le long du tracé. Une seule passe : `call` et `countries` sont appelés d'affilée
+  # sur la même instance (job, backfill).
+  def matches
+    @matches ||= begin
+      pts = usable_points
+      if pts.size < 2
+        []
+      else
+        named = localities_in_bbox(pts).filter_map do |lat, lng, name, country|
+          # Les localités sans nom ne servent à rien ici : `localities` est une liste
+          # de noms cherchables.
+          next unless name.present?
+          [ name, country, lat.to_f, lng.to_f ]
+        end
+
+        # Position le long du tracé (index du point le plus proche) → ordre de
+        # traversée. Un même nom peut apparaître plusieurs fois dans OSM : les
+        # doublons sont retirés par les appelants, qui gardent la première occurrence.
+        named.filter_map do |name, country, lat, lng|
+          idx, dist = nearest_point(pts, lat, lng)
+          next if dist > THRESHOLD_M
+          [ name, country, idx ]
+        end.sort_by(&:last)
+      end
+    end
+  end
 
   # Points `[lng, lat]` exploitables, sous-échantillonnés pour le test de proximité.
   def usable_points
@@ -67,15 +88,28 @@ class LocalitiesExtractor
     Route.downsample(pts, MAX_GEOMETRY_POINTS)
   end
 
-  # `[lat, lng, name]` des localités du catalogue OSM dans la bbox du tracé.
+  # `[lat, lng, name, country]` des localités du catalogue OSM dans la bbox du tracé.
+  # `country` est nul pour les catalogues importés avant l'ajout de la colonne (une
+  # resynchro de `poi-sync` la remplit) ou pour un extrait hors table des pays.
   def localities_in_bbox(pts)
     lats = pts.map(&:last)
     lngs = pts.map(&:first)
 
-    OsmPoi.in_bbox(
+    scope = OsmPoi.in_bbox(
       lats.min - BBOX_BUFFER_DEG, lngs.min - BBOX_BUFFER_DEG,
       lats.max + BBOX_BUFFER_DEG, lngs.max + BBOX_BUFFER_DEG,
-    ).where(category: PLACE_TYPES).pluck(:lat, :lng, :name)
+    ).where(category: PLACE_TYPES)
+
+    # Catalogue importé avant l'ajout de la colonne : on continue d'extraire les
+    # localités (le pays reste vide) plutôt que de faire échouer toute l'extraction
+    # sur un `PG::UndefinedColumn`.
+    return scope.pluck(:lat, :lng, :name).map { |lat, lng, name| [ lat, lng, name, nil ] } unless country_column?
+
+    scope.pluck(:lat, :lng, :name, :country)
+  end
+
+  def country_column?
+    OsmPoi.column_names.include?("country")
   end
 
   # Index du point du tracé le plus proche de (lat, lng) et sa distance en mètres.

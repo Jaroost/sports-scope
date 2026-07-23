@@ -767,6 +767,30 @@ en:
     empty: "No imported activities yet."
     delete: "Delete imported activity"
     delete_confirm: "Delete this imported activity?"
+  # Country names rendered server-side (share page: countries crossed). Covers the
+  # default OSM coverage and its neighbours; an unlisted code shows as-is, uppercased
+  # (see RouteSummaryHelper#summary_country_name).
+  countries:
+    ad: "Andorra"
+    at: "Austria"
+    be: "Belgium"
+    ch: "Switzerland"
+    cz: "Czechia"
+    de: "Germany"
+    es: "Spain"
+    fr: "France"
+    gb: "United Kingdom"
+    hr: "Croatia"
+    hu: "Hungary"
+    it: "Italy"
+    li: "Liechtenstein"
+    lu: "Luxembourg"
+    mc: "Monaco"
+    nl: "Netherlands"
+    pl: "Poland"
+    pt: "Portugal"
+    si: "Slovenia"
+    sk: "Slovakia"
   routes:
     list_title: "My routes"
     view_list: "List"
@@ -937,6 +961,7 @@ en:
       speed: "Average speed"
       duration_hint: "Estimated at %{speed} km/h"
       profile: "Elevation profile"
+      countries: "Countries crossed"
       localities: "Places along the way"
       localities_more:
         one: "and 1 more"

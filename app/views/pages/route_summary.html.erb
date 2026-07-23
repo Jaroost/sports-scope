@@ -187,12 +187,29 @@
   </div>
 
   <% localities = Array(@route.localities) %>
-  <% if localities.any? %>
+  <% countries = Array(@route.countries) %>
+  <% if localities.any? || countries.any? %>
     <%# En fin de page : c'est du contexte, pas une action. Et un 120 km traverse
         facilement cent hameaux — on en montre assez pour situer l'itinéraire, on
         compte le reste, et la liste ne repousse pas les liens hors de l'écran. %>
     <div class="card mb-3">
       <div class="card-body">
+        <%# Pays d'abord : c'est la maille la plus large, elle situe le reste. Une
+            seule entrée le plus souvent — les tracés transfrontaliers sont l'exception
+            qui justifie la section. %>
+        <% if countries.any? %>
+          <h2 class="h6 text-body-secondary"><%= t("routes.summary.countries") %></h2>
+          <div class="route-summary-localities mb-3">
+            <% countries.each do |code| %>
+              <span class="badge rounded-pill route-summary-pill">
+                <span aria-hidden="true"><%= summary_country_flag(code) %></span>
+                <%= summary_country_name(code) %>
+              </span>
+            <% end %>
+          </div>
+        <% end %>
+
+        <% if localities.any? %>
         <h2 class="h6 text-body-secondary"><%= t("routes.summary.localities") %></h2>
         <%# Dépliage en CSS pur (case masquée + label) : la page n'a pas d'îlot Vue, et
             ça reste fonctionnel avant même que le bundle JS soit chargé. %>
@@ -210,6 +227,7 @@
             </label>
           <% end %>
         </div>
+        <% end %>
       </div>
     </div>
   <% end %>

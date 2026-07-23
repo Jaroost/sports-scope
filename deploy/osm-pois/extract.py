@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Transforme la sortie `osmium export -f geojsonseq` en CSV chargeable par COPY.
 
-Lit un flux GeoJSON Text Sequences sur stdin, écrit `category,name,lat,lng` sur
-stdout (une ligne par POI retenu), et un résumé par catégorie sur stderr.
+Lit un flux GeoJSON Text Sequences sur stdin, écrit `category,name,lat,lng,country`
+sur stdout (une ligne par POI retenu), et un résumé par catégorie sur stderr.
+
+`--country XX` : code ISO 3166-1 alpha-2 de l'extrait traité (sync.sh appelle ce
+script une fois par extrait, cf. COUNTRY_CODES). OSM ne porte pas le pays sur les
+objets ; l'extrait dont ils viennent est la seule source disponible ici. Vide (ou
+option absente) => colonne NULL.
 
 C'est ici que vit la classification des éléments OSM, déplacée de
 GeocodesController#classify_poi : la catégorie est calculée une fois à l'import
@@ -14,6 +19,7 @@ restaurant en polygone) est le centre de sa bounding box — même sémantique q
 `out center` d'Overpass qu'on remplace.
 """
 
+import argparse
 import json
 import sys
 from collections import Counter
@@ -90,6 +96,11 @@ def csv_field(value):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--country", default="", help="code ISO 3166-1 alpha-2 de l'extrait")
+    args = parser.parse_args()
+    country = args.country.strip().upper()
+
     counts = Counter()
     skipped = 0
     out = sys.stdout
@@ -121,7 +132,7 @@ def main():
         # (GeocodesController::DEFAULT_POI_NAMES), qui connaît la locale.
         name = (tags.get("name") or "").strip()
 
-        out.write(f"{category},{csv_field(name)},{lat:.7f},{lng:.7f}\n")
+        out.write(f"{category},{csv_field(name)},{lat:.7f},{lng:.7f},{country}\n")
         counts[category] += 1
 
     total = sum(counts.values())

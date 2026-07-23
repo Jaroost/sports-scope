@@ -19,6 +19,22 @@ module RouteSummaryHelper
     route.updated_at.to_i
   end
 
+  # Drapeau emoji d'un code ISO 3166-1 alpha-2 : deux indicateurs régionaux (U+1F1E6
+  # + rang de la lettre). Même dérivation que countryFlag() côté front (countries.ts),
+  # donc aucune image à servir. Chaîne vide si le code n'a pas la bonne forme.
+  def summary_country_flag(code)
+    normalized = code.to_s.upcase
+    return "" unless normalized.match?(/\A[A-Z]{2}\z/)
+
+    normalized.chars.map { |c| (c.ord - "A".ord + 0x1F1E6) }.pack("U*")
+  end
+
+  # Nom localisé du pays. Repli sur le code en majuscules : la table de pays de
+  # l'import (deploy/osm-pois/sync.sh) couvre plus large que les traductions.
+  def summary_country_name(code)
+    t("countries.#{code.to_s.downcase}", default: code.to_s.upcase)
+  end
+
   def summary_km(meters)
     return "–" unless meters.to_f.positive?
     "#{number_with_precision(meters.to_f / 1000, precision: 1, delimiter: ' ')} km"

@@ -134,9 +134,19 @@ Geofabrik dans une **base PostgreSQL dédiée** (`osm_pois_development` / `osm_p
 lue par `OsmPoi` via la connexion `osm` de `config/database.yml`.
 
 Pipeline (`deploy/osm-pois/sync.sh`) : téléchargement conditionnel des `.osm.pbf` →
-`osmium tags-filter` (ne garde que les tags utiles) → `osmium merge` → `osmium export`
-en GeoJSON → `extract.py` (classification + CSV) → `COPY` dans une table neuve →
-bascule atomique. L'app ne voit jamais de table partielle.
+`osmium tags-filter` (ne garde que les tags utiles) → `osmium export` en GeoJSON,
+**extrait par extrait** → `extract.py --country XX` (classification + CSV) → `COPY`
+dans une table de transit → dédoublonnage → bascule atomique. L'app ne voit jamais de
+table partielle.
+
+L'export est fait extrait par extrait (et non sur une fusion `osmium merge`) pour que
+chaque POI porte le pays de l'extrait dont il vient (`osm_pois.country`) : OSM ne
+porte pas le pays sur les objets, et c'est cette colonne qui alimente les « pays
+traversés » (`routes.countries`). Le pays d'un extrait est déduit de son URL
+Geofabrik (`COUNTRY_CODES` dans `sync.sh`) ; un extrait absent de la table donne un
+pays vide. Le dédoublonnage que faisait la fusion (objet présent dans deux extraits
+frontaliers) est repris en SQL sur `(category, name, lat, lng)`, premier extrait
+gagnant.
 
 - **Premier démarrage** : ~2 Go d'extraits (Suisse + voisinage). Suivre avec
   `docker compose logs -f poi-sync`. Comme pour BRouter, `rails` attend que `poi-sync`
@@ -159,17 +169,24 @@ bascule atomique. L'app ne voit jamais de table partielle.
 `bin/release` rebuild et pousse l'image `sports-scope-poi-sync` à chaque release (elle
 embarque `sync.sh` / `extract.py`, donc du code du repo).
 
-### Recalcul des lieux (recherche par lieu)
+### Recalcul des lieux (recherche par lieu) et des pays
 
 Les lieux traversés (`routes.localities`, `strava_activities.localities`) sont extraits
-automatiquement à chaque changement de tracé. Pour les retraiter en masse —
-`LocalitiesBackfill` + `lib/tasks/localities.rake` :
+automatiquement à chaque changement de tracé. Les **pays traversés**
+(`routes.countries`, affichés sur la page de partage) sortent de la même passe : ce
+sont les pays des localités retenues (`osm_pois.country`), donc un pays n'est listé que
+si le tracé passe à moins de `LocalitiesExtractor::THRESHOLD_M` d'une de ses localités.
+Un catalogue importé avant la colonne `country` donne simplement des pays vides — il
+faut une resynchro (`docker compose exec poi-sync /sync.sh`) puis un recalcul.
+
+Pour les retraiter en masse — `LocalitiesBackfill` + `lib/tasks/localities.rake` :
 
 ```bash
 bin/rails localities:pending     # combien reste-t-il à traiter
 bin/rails localities:backfill    # extrait ce qui manque (idempotent)
-bin/rails localities:recompute   # réécrit TOUT (après un changement de couverture OSM
-                                 # ou de LocalitiesExtractor::THRESHOLD_M)
+bin/rails localities:recompute   # réécrit TOUT (après un changement de couverture OSM,
+                                 # de LocalitiesExtractor::THRESHOLD_M, ou une resynchro
+                                 # qui vient de remplir les pays)
 ```
 
 Options : `USER_ID=<id>`, `LIMIT=<n>` (par type), `SCOPE=routes|activities`.

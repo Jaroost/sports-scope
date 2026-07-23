@@ -10,10 +10,17 @@
 #   PGHOST / PGUSER / PGPASSWORD  connexion PostgreSQL (utilisateur pouvant créer la base)
 #
 # Pipeline : téléchargement -> osmium tags-filter (ne garde que les tags utiles)
-# -> osmium merge -> osmium export en GeoJSON -> extract.py (classification + CSV)
-# -> COPY dans une table neuve -> bascule atomique. L'app ne voit jamais de table
-# partielle : elle lit `osm_pois`, qui n'est remplacée qu'à la toute fin, en une
-# transaction.
+# -> osmium export en GeoJSON, extrait par extrait -> extract.py (classification +
+# CSV) -> COPY dans une table de transit -> dédoublonnage -> bascule atomique.
+# L'app ne voit jamais de table partielle : elle lit `osm_pois`, qui n'est remplacée
+# qu'à la toute fin, en une transaction.
+#
+# L'export est fait extrait par extrait (et non sur une fusion `osmium merge` comme
+# avant) pour que chaque POI porte le pays de l'extrait dont il vient : c'est la
+# seule source de pays disponible ici, et elle alimente les « pays traversés »
+# (LocalitiesExtractor). Le dédoublonnage que faisait la fusion — un objet présent
+# dans deux extraits frontaliers — est repris en SQL, sur (catégorie, nom, lat, lng) :
+# un même objet OSM a exactement les mêmes coordonnées dans les deux extraits.
 #
 set -uo pipefail
 
@@ -50,6 +57,39 @@ FILTERS=(
   "n/tourism=viewpoint,picnic_site"
   "n/leisure=picnic_table"
 )
+
+# Pays (ISO 3166-1 alpha-2) des extraits Geofabrik, d'après leur chemin : les
+# extraits nationaux (`europe/switzerland-latest.osm.pbf`) portent le pays dans le
+# nom du fichier, les sous-régions (`europe/france/alsace-latest.osm.pbf`) dans le
+# dossier parent. Un extrait absent de cette table donne un pays vide (NULL) : ses
+# POI restent servis, ils ne comptent simplement pas pour les pays traversés.
+declare -A COUNTRY_CODES=(
+  [albania]=AL [andorra]=AD [austria]=AT [belarus]=BY [belgium]=BE
+  [bosnia-herzegovina]=BA [bulgaria]=BG [croatia]=HR [cyprus]=CY
+  [czech-republic]=CZ [denmark]=DK [estonia]=EE [finland]=FI [france]=FR
+  [germany]=DE [great-britain]=GB [greece]=GR [hungary]=HU [iceland]=IS
+  [ireland]=IE [italy]=IT [kosovo]=XK [latvia]=LV [liechtenstein]=LI
+  [lithuania]=LT [luxembourg]=LU [macedonia]=MK [malta]=MT [moldova]=MD
+  [monaco]=MC [montenegro]=ME [netherlands]=NL [norway]=NO [poland]=PL
+  [portugal]=PT [romania]=RO [serbia]=RS [slovakia]=SK [slovenia]=SI
+  [spain]=ES [sweden]=SE [switzerland]=CH [turkey]=TR [ukraine]=UA
+)
+
+# Code pays d'une URL d'extrait, ou chaîne vide s'il n'est pas dans la table.
+country_for_url() {
+  local path=${1#*://}     # download.geofabrik.de/europe/france/alsace-latest.osm.pbf
+  path=${path#*/}          # europe/france/alsace-latest.osm.pbf
+  local name
+  if [[ "$path" == */*/* ]]; then
+    # Sous-région : le pays est le dossier parent (europe/france/alsace-…).
+    name=${path%/*}
+    name=${name##*/}
+  else
+    # Extrait national : europe/switzerland-latest.osm.pbf.
+    name=$(basename "$path" -latest.osm.pbf)
+  fi
+  printf '%s' "${COUNTRY_CODES[$name]:-}"
+}
 
 log() { printf '[osm-pois] %s\n' "$*"; }
 
@@ -95,12 +135,15 @@ download_regions() {
   done
 }
 
-# Filtre chaque extrait séparément (un extrait inchangé n'est pas refiltré), puis
-# fusionne. La fusion dédoublonne les objets présents dans plusieurs extraits
-# (régions frontalières qui se recouvrent) : même ID OSM = un seul objet.
-filter_and_merge() {
-  local url src name filtered inputs=()
+# Filtre chaque extrait séparément (un extrait inchangé n'est pas refiltré) et
+# renseigne FILTERED avec des entrées `chemin|pays` : l'export qui suit se fait
+# extrait par extrait, pour garder l'origine — donc le pays — de chaque POI.
+FILTERED=()
+
+filter_regions() {
+  local url src name filtered country
   mkdir -p "$WORK_DIR"
+  FILTERED=()
 
   # On itère sur OSM_POI_REGIONS et non sur le contenu de $PBF_DIR : un extrait
   # retiré de la liste reste sur le volume mais sort du catalogue.
@@ -119,16 +162,53 @@ filter_and_merge() {
         continue
       fi
     fi
-    inputs+=("$filtered")
+    country=$(country_for_url "$url")
+    [ -n "$country" ] || log "  $name : pays inconnu (POI sans pays)"
+    FILTERED+=("$filtered|$country")
   done
 
-  if [ ${#inputs[@]} -eq 0 ]; then
+  if [ ${#FILTERED[@]} -eq 0 ]; then
     log "ECHEC aucun extrait exploitable"
     return 1
   fi
+}
 
-  log "fusion de ${#inputs[@]} extrait(s)"
-  osmium merge --overwrite -o "$WORK_DIR/merged.pbf" "${inputs[@]}"
+# Exporte chaque extrait filtré et le classe (extract.py), en concaténant les CSV.
+# Un extrait qui échoue est signalé mais n'invalide pas les autres : c'est le CSV
+# global vide qui fait échouer la synchro, table existante conservée.
+export_and_extract() {
+  local csv=$1 entry filtered country seq name ok=0
+
+  : > "$csv"
+  for entry in "${FILTERED[@]}"; do
+    filtered=${entry%|*}
+    country=${entry##*|}
+    name=$(basename "$filtered" .filtered.pbf)
+    seq="$WORK_DIR/$name.geojsonseq"
+
+    log "  export + classification $name${country:+ ($country)}"
+    if ! osmium export --overwrite -f geojsonseq \
+           --geometry-types=point,linestring,polygon \
+           -o "$seq" "$filtered"; then
+      log "  ECHEC export $name"
+      n_failed=$(( n_failed + 1 ))
+      rm -f "$seq"
+      continue
+    fi
+
+    if python3 /extract.py --country "$country" < "$seq" >> "$csv"; then
+      ok=$(( ok + 1 ))
+    else
+      log "  ECHEC classification $name"
+      n_failed=$(( n_failed + 1 ))
+    fi
+    rm -f "$seq"
+  done
+
+  if [ "$ok" -eq 0 ] || [ ! -s "$csv" ]; then
+    log "ECHEC extraction (aucun POI produit) — table existante conservée"
+    return 1
+  fi
 }
 
 # Crée la base si elle n'existe pas. L'init-script du container postgres ne peut
@@ -148,29 +228,38 @@ ensure_database() {
 load() {
   local csv="$WORK_DIR/pois.csv"
 
-  log "export GeoJSON + classification"
-  if ! osmium export --overwrite -f geojsonseq \
-         --geometry-types=point,linestring,polygon \
-         -o "$WORK_DIR/pois.geojsonseq" "$WORK_DIR/merged.pbf"; then
-    log "ECHEC export osmium"
-    return 1
-  fi
+  export_and_extract "$csv" || return 1
 
-  if ! python3 /extract.py < "$WORK_DIR/pois.geojsonseq" > "$csv"; then
-    log "ECHEC extraction (aucun POI produit) — table existante conservée"
-    return 1
-  fi
-
+  # `osm_pois_stage` : table de transit, chargée dans l'ordre des extraits. Le
+  # dédoublonnage (objet présent dans deux extraits frontaliers) se fait ensuite
+  # sur (catégorie, nom, lat, lng), en gardant la première occurrence — donc le
+  # pays du premier extrait de OSM_POI_REGIONS qui le contient.
   log "chargement dans $DB"
   psql -v ON_ERROR_STOP=1 -d "$DB" <<-SQL || return 1
+	DROP TABLE IF EXISTS osm_pois_stage;
 	DROP TABLE IF EXISTS osm_pois_new;
-	CREATE TABLE osm_pois_new (
+	CREATE TABLE osm_pois_stage (
 	  category text NOT NULL,
 	  name     text,
 	  lat      double precision NOT NULL,
-	  lng      double precision NOT NULL
+	  lng      double precision NOT NULL,
+	  country  text,
+	  ord      bigserial
 	);
-	\\copy osm_pois_new (category, name, lat, lng) FROM '$csv' WITH (FORMAT csv, NULL '')
+	\\copy osm_pois_stage (category, name, lat, lng, country) FROM '$csv' WITH (FORMAT csv, NULL '')
+
+	CREATE TABLE osm_pois_new AS
+	SELECT category, name, lat, lng, country
+	FROM (
+	  SELECT DISTINCT ON (category, name, lat, lng) *
+	  FROM osm_pois_stage
+	  ORDER BY category, name, lat, lng, ord
+	) deduped;
+	ALTER TABLE osm_pois_new ALTER COLUMN category SET NOT NULL;
+	ALTER TABLE osm_pois_new ALTER COLUMN lat SET NOT NULL;
+	ALTER TABLE osm_pois_new ALTER COLUMN lng SET NOT NULL;
+	DROP TABLE osm_pois_stage;
+
 	CREATE INDEX osm_pois_new_lat_lng_idx ON osm_pois_new (lat, lng);
 	CREATE INDEX osm_pois_new_category_idx ON osm_pois_new (category);
 	ANALYZE osm_pois_new;
@@ -183,7 +272,7 @@ load() {
 	COMMIT;
 	SQL
 
-  rm -f "$csv" "$WORK_DIR/pois.geojsonseq"
+  rm -f "$csv"
 }
 
 log "démarrage (base $DB)"
@@ -191,7 +280,7 @@ mkdir -p "$DATA_DIR"
 
 download_regions
 
-if ensure_database && filter_and_merge && load; then
+if ensure_database && filter_regions && load; then
   # Marqueur « il y a des POI à servir », lu par le healthcheck. Il vit dans le
   # volume : seule la toute première synchro fait attendre.
   touch "$DATA_DIR/.sync-complete"

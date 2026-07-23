@@ -1,6 +1,8 @@
 # Extrait en tâche de fond les localités traversées par un itinéraire et les stocke
-# dans `routes.localities` (recherche par lieu). Enfilé par Route quand la géométrie
-# change — l'extraction ne doit pas ralentir la sauvegarde.
+# dans `routes.localities` (recherche par lieu) — ainsi que les pays traversés
+# (`routes.countries`, affichés sur la page de partage), déduits des mêmes localités.
+# Enfilé par Route quand la géométrie change — l'extraction ne doit pas ralentir la
+# sauvegarde.
 class ExtractRouteLocalitiesJob < ApplicationJob
   queue_as :default
 
@@ -22,11 +24,12 @@ class ExtractRouteLocalitiesJob < ApplicationJob
     route = Route.find_by(id: route_id)
     return if route.nil?
 
-    localities = LocalitiesExtractor.new(route.geometry).call
+    extractor = LocalitiesExtractor.new(route.geometry)
 
-    # update_column : pas de callbacks (sinon on ré-enfilerait ce job), pas de
+    # update_columns : pas de callbacks (sinon on ré-enfilerait ce job), pas de
     # bump d'`updated_at` — la liste des itinéraires est triée dessus et une
     # extraction de fond ne doit pas faire remonter un itinéraire non modifié.
-    route.update_column(:localities, localities)
+    # Les pays sortent de la même passe (page de partage) que les localités.
+    route.update_columns(localities: extractor.call, countries: extractor.countries)
   end
 end

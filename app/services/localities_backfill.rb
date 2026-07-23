@@ -32,12 +32,19 @@ module LocalitiesBackfill
   # pour lesquels au moins un lieu a été trouvé.
   def routes(user: nil, only_missing: true, limit: nil, &progress)
     scope = user ? user.routes : Route.all
-    # `localities` est un jsonb non nul par défaut : « jamais traité » s'y lit `[]`.
-    scope = scope.where("routes.localities = '[]'::jsonb") if only_missing
+    scope = missing_routes(scope) if only_missing
 
     process(scope, "routes", limit, progress) do |route|
-      LocalitiesExtractor.new(route.geometry).call
+      extractor = LocalitiesExtractor.new(route.geometry)
+      { localities: extractor.call, countries: extractor.countries }
     end
+  end
+
+  # « Jamais traité » : `localities` et `countries` sont des jsonb non nuls par
+  # défaut, ça s'y lit `[]`. Les pays comptent aussi, sans quoi les itinéraires déjà
+  # localisés resteraient sans pays après l'ajout de la colonne.
+  def missing_routes(scope)
+    scope.where("routes.localities = '[]'::jsonb OR routes.countries = '[]'::jsonb")
   end
 
   # Activités Strava. Les activités sans tracé (indoor, GPS absent) sont écartées :
@@ -50,7 +57,9 @@ module LocalitiesBackfill
 
     process(scope, "activities", limit, progress) do |activity|
       geometry = activity.map_polyline
-      geometry ? LocalitiesExtractor.new(geometry).call : []
+      # Pas de `countries` côté activités : la colonne n'existe que sur les
+      # itinéraires, seuls à avoir une page de partage.
+      { localities: geometry ? LocalitiesExtractor.new(geometry).call : [] }
     end
   end
 
@@ -58,16 +67,18 @@ module LocalitiesBackfill
   # l'avancement sans rien modifier.
   def pending_counts(user: nil)
     {
-      routes: (user ? user.routes : Route.all).where("routes.localities = '[]'::jsonb").count,
+      routes: missing_routes(user ? user.routes : Route.all).count,
       activities: (user ? user.strava_activities : StravaActivity.all)
         .where("strava_activities.raw #>> '{map,summary_polyline}' <> ''")
         .where(localities: nil).count,
     }
   end
 
-  # Parcourt le scope par lots et écrit le résultat de `extract`.
+  # Parcourt le scope par lots et écrit les attributs renvoyés par le bloc
+  # (`{ localities:, countries: }` pour les itinéraires, `{ localities: }` pour les
+  # activités).
   #
-  # update_column : pas de callbacks (sinon on ré-enfilerait le job d'extraction) et
+  # update_columns : pas de callbacks (sinon on ré-enfilerait le job d'extraction) et
   # pas de bump d'`updated_at` — la liste des itinéraires est triée dessus et
   # `cached_at` des activités s'y appuie ; un recalcul de fond ne doit pas faire
   # remonter un enregistrement non modifié.
@@ -82,9 +93,9 @@ module LocalitiesBackfill
     ids.each_slice(BATCH_SIZE) do |slice|
       scope.klass.where(id: slice).each do |record|
         begin
-          localities = yield(record)
-          record.update_column(:localities, localities)
-          located += 1 if localities.any?
+          attrs = yield(record)
+          record.update_columns(attrs)
+          located += 1 if attrs[:localities].any?
         rescue ActiveRecord::ConnectionNotEstablished, ActiveRecord::NoDatabaseError,
                ActiveRecord::StatementInvalid => e
           # Catalogue OSM absent ou injoignable : l'échec est systémique, pas propre

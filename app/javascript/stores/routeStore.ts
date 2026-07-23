@@ -109,6 +109,16 @@ class RouteStore {
     this.avgSpeedKmh.value = v
   }
 
+  // Applique la vitesse moyenne du créateur (médiane de ses sorties réelles) comme
+  // défaut du créateur d'itinéraire, mais UNIQUEMENT tant qu'aucune vitesse n'a été
+  // décidée pour l'itinéraire — c.-à-d. qu'elle vaut encore le défaut du profil
+  // (avgSpeedOverride === null). Ne recouvre donc jamais une valeur saisie à la main
+  // ni celle chargée avec un itinéraire enregistré. Mêmes bornes que setAvgSpeedKmh.
+  setCreatorDefaultSpeed(speed: unknown) {
+    if (this.avgSpeedOverride.value !== null) return
+    this.setAvgSpeedKmh(speed)
+  }
+
   // Change le profil de routage BRouter. Ignore silencieusement un profil non
   // proposé pour le sport courant (ex. valeur héritée d'un ancien itinéraire) :
   // le défaut du sport, déjà en place, est alors conservé.

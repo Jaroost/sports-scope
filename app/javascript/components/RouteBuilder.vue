@@ -16,6 +16,7 @@ import { BROUTER_URL, profilesForSport } from '../brouter'
 import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
 import { parseGpxWaypoints } from '../gpxImport'
+import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
 import RouteBuilderStats from './RouteBuilderStats.vue'
 import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
@@ -104,6 +105,24 @@ const snapDismissed = ref(false)
 const noMarkersDismissed = ref(false)
 watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
 watch(snapWarnings, () => { snapDismissed.value = false })
+
+// Vitesse par défaut du créateur : pour un NOUVEL itinéraire dont la vitesse n'a pas
+// encore été décidée, on préremplit avec la vitesse moyenne réelle du créateur (médiane
+// de ses sorties, cf. useAthleteState) au lieu du défaut générique du profil. On réutilise
+// speedSuggestionFor pour l'arrondi au pas du champ et la règle « vélo de route seulement » ;
+// setCreatorDefaultSpeed refuse d'écraser une valeur saisie ou chargée. Réagit à l'arrivée
+// (asynchrone) de la charge d'athlète et aux changements de sport. En lecture seule (lien
+// partagé) ou en édition d'un itinéraire enregistré, on ne touche à rien.
+const { athlete: builderAthlete } = useAthleteState()
+watch(
+  [builderAthlete, () => routeStore.sport.value],
+  ([a]) => {
+    if (routeStore.isEditMode.value || routeStore.readOnly.value) return
+    const suggestion = speedSuggestionFor(a, routeStore.sport.value, routeStore.avgSpeedKmh.value, 1)
+    if (suggestion) routeStore.setCreatorDefaultSpeed(suggestion.speed)
+  },
+  { immediate: true },
+)
 
 // Les points accrochés au loin portent un marqueur : c'est lui qui les situe sur la carte
 // (les puces de l'alerte ne font que cadrer dessus). Ce watch en est le seul propriétaire,

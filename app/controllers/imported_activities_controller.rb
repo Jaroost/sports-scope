@@ -62,6 +62,16 @@ class ImportedActivitiesController < ApplicationController
     }
   end
 
+  # GET /api/imported_activities/:id/best_efforts
+  # Classement de cette sortie (distance / dénivelé / durée) parmi les activités du
+  # même sport — rang absolu + rang de l'année — pour décerner or/argent/bronze.
+  def best_efforts
+    activity = current_user.imported_activities.find_by(id: params[:id])
+    return head :not_found unless activity
+
+    render json: PerformanceRecords.efforts_for(current_user, source: 'imported', external_id: activity.id) || {}
+  end
+
   # GET /api/imported_activities/:id/zones
   # Répartition du temps par zone d'intensité (FC + puissance) pour cette sortie,
   # avec les seuils courants — même modèle que la page performance.

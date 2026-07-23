@@ -65,6 +65,9 @@ interface Segment {
   // quelle sortie qui le traverse) — cf. NamedSegment côté serveur.
   named_segment_id: number | null
   name: string | null
+  // Repli d'affichage quand `name` est absent : la localité la plus proche du milieu
+  // du segment (côté serveur). Nul si aucune localité n'est assez proche.
+  place_name?: string | null
 }
 
 const loading = ref(false)
@@ -124,7 +127,9 @@ function csrfToken(): string {
 // plus souvent le remplacer.
 async function startRename(index: number, segment: Segment) {
   renaming.value = index
-  draftName.value = segment.name ?? ''
+  // Segment encore anonyme : on part de la localité proposée en repli — le plus
+  // souvent on la garde, sinon on la remplace (le champ est présélectionné).
+  draftName.value = segment.name || segment.place_name || ''
   await nextTick()
   nameInput.value?.focus()
   nameInput.value?.select()
@@ -370,7 +375,7 @@ function scrollRowIntoView(index: number) {
                   :class="isSelected(segment) ? 'text-warning' : 'text-body-tertiary'"
                   aria-hidden="true"
                 ></i>
-                <span class="segment-name">{{ segment.name || t('strava.segments.segment_n', { n: i + 1 }) }}</span>
+                <span class="segment-name">{{ segment.name || segment.place_name || t('strava.segments.segment_n', { n: i + 1 }) }}</span>
                 <button
                   type="button" class="btn btn-sm btn-link p-0 segment-rename-btn"
                   :title="segment.name ? t('strava.segments.rename') : t('strava.segments.name_it')"

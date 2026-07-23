@@ -42,6 +42,9 @@ const props = defineProps({
   peakPowers: { type: Array as PropType<PeakPower[]>, default: () => [] },
   // { current: {dur: w}, bests: {dur: { avg_watts, source, external_id, started_at }} } | null
   peakPowerRanks: { type: Object as PropType<Record<string, any> | null>, default: null },
+  // Classement de la sortie (or/argent/bronze) sur distance/dénivelé/durée :
+  // { sport, year, metrics: { key: { unit, value, overall:{rank,count}, year:{rank,count,year} } } } | null
+  bestEfforts: { type: Object as PropType<Record<string, any> | null>, default: null },
   // The whole-activity selection (drives row highlight on map AND in here).
   selection: { type: Object, default: null },
   // v-model:hovered-climb-start-idx — synced with the map markers in the parent.
@@ -59,6 +62,39 @@ const emit = defineEmits([
   'update:collapsed',
 ])
 
+// ─── Meilleurs efforts (or / argent / bronze) ────────────────────────────────
+// Classement de la sortie sur distance / dénivelé / durée, en absolu et sur son
+// année. Le tableau s'affiche dès qu'on a le classement ; les médailles (or /
+// argent / bronze) ne décorent que le top 3, les autres rangs restent en gris.
+const EFFORT_ORDER = ['distance', 'elevation', 'duration'] as const
+const MEDAL_COLORS: Record<number, string> = { 1: '#f5b301', 2: '#9aa4b0', 3: '#cd7f32' }
+
+function medalColor(rank: number | null | undefined): string | null {
+  return rank != null ? (MEDAL_COLORS[rank] ?? null) : null
+}
+function medalTitle(rank: number | null | undefined): string {
+  if (rank === 1) return t('strava.stats.effort_gold')
+  if (rank === 2) return t('strava.stats.effort_silver')
+  if (rank === 3) return t('strava.stats.effort_bronze')
+  return ''
+}
+
+const effortRows = computed(() => {
+  const m = props.bestEfforts?.metrics
+  if (!m) return []
+  return EFFORT_ORDER.filter((k) => m[k]).map((k) => ({ key: k, ...m[k] }))
+})
+// Le classement est-il disponible pour au moins une métrique ?
+const hasEfforts = computed(() => effortRows.value.length > 0)
+// La colonne « année » n'a de sens que si la sortie porte une date.
+const effortYear = computed<number | null>(() => props.bestEfforts?.year ?? null)
+
+function effortValue(key: string, value: number): string {
+  if (key === 'distance') return formatKm(value)
+  if (key === 'duration') return formatHMS(value)
+  return `+${Math.round(value)} m`
+}
+
 const hasContent = computed(() =>
   props.movingStats || props.globalVam != null
   || props.trainingMetrics != null || props.decoupling != null
@@ -66,7 +102,8 @@ const hasContent = computed(() =>
   || props.segmentSummary != null || props.splits.length > 0
   || props.laps.length > 0
   || props.climbsWithVam.length > 0
-  || props.peakPowers.length > 0,
+  || props.peakPowers.length > 0
+  || hasEfforts.value,
 )
 
 // ─── Analyseur de segment + splits : formatage adaptatif ─────────────────────
@@ -223,7 +260,7 @@ onBeforeUnmount(disposeTooltips)
 watch(
   () => [
     props.trainingMetrics, props.decoupling, props.efficiency, props.gradeAdjusted,
-    props.globalVam, props.segmentSummary, props.collapsed,
+    props.globalVam, props.segmentSummary, props.collapsed, hasEfforts.value,
   ],
   () => nextTick(initTooltips),
 )
@@ -245,6 +282,71 @@ watch(
       </button>
     </div>
     <div v-if="!collapsed" class="card-body">
+      <!-- Meilleurs efforts : classement de la sortie (distance / dénivelé / durée)
+           parmi les activités du même sport, en absolu et sur son année. Or / argent /
+           bronze pour le top 3 ; affiché seulement si la sortie décroche une médaille. -->
+      <div v-if="hasEfforts" class="stats-section mb-3">
+        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-medal text-warning" aria-hidden="true"></i>
+          <span>{{ t('strava.stats.efforts_title') }}</span>
+          <i
+            class="fa-regular fa-circle-question text-muted"
+            data-bs-toggle="tooltip"
+            :data-bs-title="t('strava.stats.efforts_hint', { sport: t(`performance.sports.${bestEfforts.sport}`) })"
+            aria-hidden="true"
+          ></i>
+        </h4>
+        <div class="table-responsive">
+          <table class="table table-sm stats-table align-middle mb-0">
+            <thead>
+              <tr>
+                <th></th>
+                <th></th>
+                <th>{{ t('strava.stats.effort_overall') }}</th>
+                <th v-if="effortYear != null">{{ t('strava.stats.effort_year', { year: effortYear }) }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in effortRows" :key="`effort-${row.key}`">
+                <td class="effort-label">{{ t(`strava.stats.effort_${row.key}`) }}</td>
+                <td class="text-muted">{{ effortValue(row.key, row.value) }}</td>
+                <td>
+                  <span class="effort-rank">
+                    <i
+                      v-if="medalColor(row.overall.rank)"
+                      class="fa-solid fa-medal effort-medal"
+                      :style="{ color: medalColor(row.overall.rank) }"
+                      :title="medalTitle(row.overall.rank)"
+                      aria-hidden="true"
+                    ></i>
+                    <span :class="{ 'text-muted': !medalColor(row.overall.rank) }">
+                      {{ t('strava.stats.effort_rank', { rank: row.overall.rank }) }}
+                    </span>
+                    <span class="effort-pool text-muted">{{ t('strava.stats.effort_pool', { count: row.overall.count }) }}</span>
+                  </span>
+                </td>
+                <td v-if="effortYear != null">
+                  <span v-if="row.year" class="effort-rank">
+                    <i
+                      v-if="medalColor(row.year.rank)"
+                      class="fa-solid fa-medal effort-medal"
+                      :style="{ color: medalColor(row.year.rank) }"
+                      :title="medalTitle(row.year.rank)"
+                      aria-hidden="true"
+                    ></i>
+                    <span :class="{ 'text-muted': !medalColor(row.year.rank) }">
+                      {{ t('strava.stats.effort_rank', { rank: row.year.rank }) }}
+                    </span>
+                    <span class="effort-pool text-muted">{{ t('strava.stats.effort_pool', { count: row.year.count }) }}</span>
+                  </span>
+                  <span v-else class="text-muted">–</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- Analyseur du segment sélectionné (drague A/B, clic sur un col / un pic de
            puissance / un split). Récap complet de la tranche ; se referme au clic sur ×. -->
       <div v-if="segmentSummary" class="segment-panel mb-3">
@@ -823,6 +925,18 @@ watch(
 .climb-cat-badge > span { color: #fff; }
 
 .stats-section + .stats-section { border-top: 1px dashed rgba(0, 0, 0, 0.08); padding-top: 0.75rem; }
+
+/* Meilleurs efforts : médaille + rang + taille du groupe sur une ligne. */
+.effort-label { font-weight: 600; }
+.effort-rank {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.effort-medal { font-size: 0.95rem; align-self: center; }
+.effort-pool { font-weight: 400; font-size: 0.78rem; }
 
 /* Analyseur de segment : encadré teinté à la couleur de sélection (orange Strava). */
 .segment-panel {

@@ -37,6 +37,11 @@ class SegmentMatcher
   # Recouvrement (part de la portion la plus courte) à partir duquel deux passages
   # sont considérés comme étant sur le MÊME segment.
   OVERLAP_RATIO = 0.6
+  # Recouvrement (part de la portion la plus courte) au-delà duquel deux SEGMENTS
+  # découverts sont jugés être la même route aux bornes floues, et dédupliqués
+  # (`consolidate`). Plus haut qu'OVERLAP_RATIO : on ne fusionne que des quasi-doublons,
+  # pas deux portions qui se recouvrent à moitié.
+  DEDUP_OVERLAP_RATIO = 0.7
   # Bornes de coût : la comparaison fine est en O(appariements) par candidat.
   MAX_CANDIDATES = 300
   MAX_SEGMENTS = 30
@@ -46,10 +51,17 @@ class SegmentMatcher
   PODIUM_PLACES = 3
   # Bruit barométrique ignoré dans le cumul de dénivelé du segment.
   ELEVATION_NOISE_M = 1.0
+  # Localité la plus proche donnée en nom de repli aux segments encore anonymes
+  # (aucun `NamedSegment`). Au-delà de ce seuil, on ne baptise pas : mieux vaut
+  # « Segment N » qu'un village à l'autre bout de la sortie.
+  PLACE_NAME_MAX_M = 5_000
+  # Marge (deg) autour de la bbox des milieux de segments pour la requête OSM des
+  # localités — ~5,5 km en latitude, cohérent avec PLACE_NAME_MAX_M.
+  PLACE_BBOX_BUFFER_DEG = 0.05
 
   # Bumper invalide les résultats déjà en cache (`ActivitiesController` / contrôleurs
   # d'activité), en plus de `UserActivities.data_version`.
-  CACHE_VERSION = 4
+  CACHE_VERSION = 7
 
   # `fp` = l'empreinte du candidat, déjà chargée : le chronométrage sur la portion
   # commune la relit sans requête supplémentaire.
@@ -88,13 +100,17 @@ class SegmentMatcher
     efforts = candidates.flat_map { |row| efforts_against(row) }
     return [] if efforts.empty?
 
-    segments = cluster(efforts).filter_map { |cluster| build_segment(cluster) }
+    segments = consolidate(cluster(efforts)).filter_map { |cluster| build_segment(cluster) }
     # Le podium d'abord (or, argent, bronze) : c'est l'information qu'on cherche en
     # ouvrant l'onglet. Ensuite les chemins les plus refaits, puis les plus longs. Le
     # tri précède le plafonnement, donc une médaille n'est jamais coupée au profit
     # d'un chemin banal.
-    segments.sort_by { |s| [s[:current][:podium] || PODIUM_PLACES + 1, -s[:count], -s[:distance_m]] }
-            .first(MAX_SEGMENTS)
+    result = segments.sort_by { |s| [s[:current][:podium] || PODIUM_PLACES + 1, -s[:count], -s[:distance_m]] }
+                     .first(MAX_SEGMENTS)
+    # Repli d'affichage : les segments encore anonymes prennent le nom de la localité
+    # la plus proche. Fait après le plafonnement pour ne géolocaliser que ce qu'on rend.
+    assign_place_names(result)
+    result
   end
 
   private
@@ -280,6 +296,13 @@ class SegmentMatcher
     )
   end
 
+  # Un passage par (sortie, sens), le plus rapide. Deux sens d'une même sortie (un
+  # aller-retour) restent deux passages : ils ne sont pas comparables.
+  def dedupe_efforts(efforts)
+    efforts.group_by { |e| [e[:source], e[:external_id], e[:reverse]] }
+           .map { |_, group| group.min_by { |e| e[:duration_s] } }
+  end
+
   def span_metres(dists, from, to)
     a = dists[[from, to].min].to_f
     b = dists[[from, to].max].to_f
@@ -314,6 +337,35 @@ class SegmentMatcher
                 [cluster[:a_end], effort.a_end].min) >= MIN_SEGMENT_M
   end
 
+  # Déduplication des groupes qui décrivent la même route. Le regroupement glouton
+  # ci-dessus rétrécit chaque groupe à l'intersection de ses passages : deux passages
+  # du même chemin aux bornes un peu différentes atterrissent alors dans DEUX groupes
+  # voisins, qui se recouvrent largement (bornes floues). Fusionner à l'intersection ne
+  # marche pas ici — un chemin d'à peine MIN_SEGMENT_M a une partie commune qui tombe
+  # juste sous le seuil et disparaîtrait. On garde donc le groupe le MIEUX ÉTAYÉ (le
+  # plus de passages, à égalité le plus long) et on y verse les passages des groupes
+  # qu'il recouvre. `dedupe_efforts` retire ensuite les sorties comptées deux fois (une
+  # même sortie est dans les deux groupes puisque c'est la même route), et projette les
+  # passages rescapés sur la plage retenue.
+  #
+  # Le recouvrement se mesure sur la portion la plus COURTE (`overlap_ratio`) : deux
+  # routes distinctes qui ne font que se croiser près d'un même lieu restent séparées
+  # (c'est la numérotation qui les distingue), seuls les quasi-doublons fusionnent.
+  def consolidate(clusters)
+    kept = []
+    clusters.sort_by { |c| [-c[:efforts].size, c[:a_start] - c[:a_end]] }.each do |c|
+      host = kept.find do |k|
+        overlap_ratio(k[:a_start], k[:a_end], c[:a_start], c[:a_end]) >= DEDUP_OVERLAP_RATIO
+      end
+      if host
+        host[:efforts] += c[:efforts]
+      else
+        kept << c
+      end
+    end
+    kept
+  end
+
   # Part de la portion la plus courte couverte par les deux plages (en mètres).
   def overlap_ratio(s1, e1, s2, e2)
     lo = [s1, s2].max
@@ -346,6 +398,11 @@ class SegmentMatcher
     # qui zigzague, arrêt, lacet de montée.
     window = [a_times[start_cell].to_f, a_times[end_cell].to_f]
     efforts = cluster[:efforts].filter_map { |e| effort_json(e, start_cell, end_cell, current_reverse, window) }
+    # Une même sortie peut s'apparier au chemin par plusieurs diagonales (lacets,
+    # zigzags GPS) — a fortiori après la refusion des groupes. On n'en garde qu'un
+    # passage par (sortie, sens), le plus rapide, pour que `count` soit un vrai nombre
+    # de passages et non de fragments.
+    efforts = dedupe_efforts(efforts)
 
     # Les passages en sens opposé ne sont pas comparables : on ne les montre QUE si
     # cette sortie fait elle-même l'aller-retour sur le segment (elle l'emprunte dans
@@ -363,7 +420,7 @@ class SegmentMatcher
     ranked = ([current_duration] + same_way.map { |e| e[:duration_s] }).sort
     best = same_way.min_by { |e| e[:duration_s] }
 
-    {
+    segment = {
       start_idx: start_idx,
       end_idx: end_idx,
       distance_m: distance.round,
@@ -378,6 +435,13 @@ class SegmentMatcher
       best: best,
       efforts: recent_efforts(efforts, best)
     }.merge(naming.except(:current_reverse))
+
+    # Sans nom d'utilisateur, on garde le milieu du segment pour lui donner ensuite
+    # celui de la localité la plus proche (`assign_place_names`). Clé interne, retirée
+    # avant le rendu — elle ne doit jamais atteindre le front.
+    center = mid_cell_center(start_cell, end_cell) unless segment[:name]
+    segment[:place_point] = center if center
+    segment
   end
 
   # Place de la sortie affichée parmi les passages COMPARABLES (même sens).
@@ -474,5 +538,89 @@ class SegmentMatcher
       end
     end
     gain.round
+  end
+
+  # ── Noms de repli (localité la plus proche) ─────────────────────────────────
+  # Baptise chaque segment resté anonyme du nom de la localité OSM la plus proche de
+  # son milieu, en UNE requête pour toute la fournée. Non essentiel : une base `osm`
+  # absente ou en erreur ne doit jamais casser l'onglet segments, d'où le repli à
+  # vide. La clé interne `:place_point` est toujours retirée au passage.
+  def assign_place_names(segments)
+    pending = segments.select { |s| s.key?(:place_point) }
+    return if pending.empty?
+
+    places = nearby_places(pending.map { |s| s[:place_point] })
+    pending.each do |s|
+      lat, lng = s.delete(:place_point)
+      s[:place_name] = places.empty? ? nil : nearest_place_name(places, lat, lng)
+    end
+    disambiguate_place_names(pending)
+  end
+
+  # Deux segments distincts ne doivent pas afficher le même nom : quand plusieurs
+  # tombent sur la même localité, on les numérote dans l'ordre d'affichage
+  # (« Gruyères 1 », « Gruyères 2 »…). Un nom resté unique n'est pas suffixé.
+  def disambiguate_place_names(segments)
+    counts = Hash.new(0)
+    segments.each { |s| counts[s[:place_name]] += 1 if s[:place_name] }
+
+    seen = Hash.new(0)
+    segments.each do |s|
+      name = s[:place_name]
+      next unless name && counts[name] > 1
+
+      seen[name] += 1
+      s[:place_name] = "#{name} #{seen[name]}"
+    end
+  end
+
+  # `[lat, lng, name]` des localités OSM autour des milieux de segments fournis.
+  def nearby_places(points)
+    lats = points.map(&:first)
+    lngs = points.map(&:last)
+    OsmPoi.in_bbox(
+      lats.min - PLACE_BBOX_BUFFER_DEG, lngs.min - PLACE_BBOX_BUFFER_DEG,
+      lats.max + PLACE_BBOX_BUFFER_DEG, lngs.max + PLACE_BBOX_BUFFER_DEG
+    ).where(category: LocalitiesExtractor::PLACE_TYPES)
+     .pluck(:lat, :lng, :name)
+     .filter_map { |lat, lng, name| [lat.to_f, lng.to_f, name] if name.present? }
+  rescue StandardError => e
+    Rails.logger.warn("SegmentMatcher: localités indisponibles (#{e.class}: #{e.message})")
+    []
+  end
+
+  # Nom de la localité la plus proche de (lat, lng), ou nil si la plus proche est
+  # au-delà du seuil. Présélection sur les carrés en degrés (compression cos(lat)),
+  # comme `LocalitiesExtractor` ; seule la retenue est mesurée en mètres.
+  def nearest_place_name(places, lat, lng)
+    cos_lat = Math.cos(lat * Math::PI / 180)
+    best_name = nil
+    best_pt = nil
+    best_d2 = Float::INFINITY
+    places.each do |p_lat, p_lng, name|
+      d_lng = (p_lng - lng) * cos_lat
+      d_lat = p_lat - lat
+      d2 = d_lng * d_lng + d_lat * d_lat
+      if d2 < best_d2
+        best_d2 = d2
+        best_name = name
+        best_pt = [p_lat, p_lng]
+      end
+    end
+    return nil unless best_pt
+    return nil if Route.haversine_m(best_pt[1], best_pt[0], lng, lat) > PLACE_NAME_MAX_M
+
+    best_name
+  end
+
+  # Centre (lat, lng) de la cellule médiane du segment. Les cellules viennent de
+  # points GPS valides (jamais nuls), d'où un repère sûr là où le stream latlng
+  # pourrait avoir un trou.
+  def mid_cell_center(start_cell, end_cell)
+    key = a_cells[(start_cell + end_cell) / 2]
+    return nil unless key
+
+    lat_i, lng_i = key.to_s.split(':').map(&:to_i)
+    [(lat_i + 0.5) * TrackFingerprint::LAT_STEP, (lng_i + 0.5) * TrackFingerprint::LNG_STEP]
   end
 end

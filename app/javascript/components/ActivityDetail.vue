@@ -49,6 +49,9 @@ const photosUrl = computed(() => props.source === 'imported'
 const peakPowerRanksUrl = computed(() => props.source === 'imported'
   ? `/api/imported_activities/${props.activityId}/peak_power_ranks`
   : `/strava/activities/${props.activityId}/peak_power_ranks`)
+const bestEffortsUrl = computed(() => props.source === 'imported'
+  ? `/api/imported_activities/${props.activityId}/best_efforts`
+  : `/strava/activities/${props.activityId}/best_efforts`)
 
 // ─── Data state ──────────────────────────────────────────────────────────
 const loading = ref(true)
@@ -59,6 +62,8 @@ const streamsLoading = ref(false)
 const streamsError = ref(null)
 const photos = ref([])
 const peakPowerRanks = ref(null) // { current: {dur: w}, bests: {dur: {avg_watts, …}} } | null
+// { sport, year, metrics: { distance|elevation|duration: { unit, value, overall:{rank,count}, year:{rank,count,year} } } } | null
+const bestEfforts = ref(null)
 // Conditions météo du jour (matériel Strava + vent) — reconstituées via /api/weather
 // à partir de la position de départ et de l'heure de l'activité.
 const weather = ref(null)
@@ -420,6 +425,23 @@ async function fetchPeakPowerRanks() {
   }
 }
 
+// All-time / per-year ranks of this activity (distance, elevation, duration).
+// Best-effort — the medals section simply stays hidden without it.
+async function fetchBestEfforts() {
+  bestEfforts.value = null
+  try {
+    const res = await fetch(bestEffortsUrl.value, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) return
+    const payload = await res.json()
+    bestEfforts.value = payload && payload.metrics ? payload : null
+  } catch {
+    // Best-effort — the rest of the stats render fine without it.
+  }
+}
+
 // ─── Persistence watchers (children mutate via v-model) ──────────────────
 watch(galleryCollapsed, (v) => {
   try { localStorage.setItem('sportsScope.galleryCollapsed', v ? '1' : '0') } catch { /* ignore */ }
@@ -440,6 +462,8 @@ onMounted(async () => {
   await fetchStreams()
   // Fire-and-forget — the table renders fine without ranks.
   fetchPeakPowerRanks()
+  // Fire-and-forget — the medals section stays hidden until it arrives.
+  fetchBestEfforts()
 })
 </script>
 
@@ -566,6 +590,7 @@ onMounted(async () => {
         :climbs-with-vam="climbsWithVam"
         :peak-powers="peakPowers"
         :peak-power-ranks="peakPowerRanks"
+        :best-efforts="bestEfforts"
         :selection="selection"
         v-model:hovered-climb-start-idx="hoveredClimbStartIdx"
         v-model:hovered-peak-duration="hoveredPeakDuration"

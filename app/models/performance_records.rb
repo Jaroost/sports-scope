@@ -44,6 +44,14 @@ module PerformanceRecords
     { key: 'max_cadence',       column: 'max_cadence',          unit: 'rpm' }
   ].freeze
 
+  # Métriques classées pour les « meilleurs efforts » d'une sortie (or/argent/
+  # bronze) : distance, dénivelé, durée. Toutes des maxima (« higher is better »).
+  EFFORT_METRICS = [
+    { key: 'distance',  column: 'distance_m',           unit: 'distance' },
+    { key: 'elevation', column: 'total_elevation_gain', unit: 'elevation' },
+    { key: 'duration',  column: 'moving_time_s',        unit: 'duration' }
+  ].freeze
+
   CACHE_TTL = 12.hours
 
   # Payload complet consommé par la page d'analyse : un onglet « all » agrégé +
@@ -83,6 +91,70 @@ module PerformanceRecords
       total_count: all_rows.length,
       sport_types: sport_types
     }
+  end
+
+  # Mots-clés qui subdivisent la catégorie « cycling » pour les efforts : Strava
+  # envoie « MountainBikeRide » (→ « mountain ») et « GravelRide » (→ « gravel »),
+  # les imports FIT parfois « vtt » / « mtb ». Un gros dénivelé à VTT ou une longue
+  # sortie gravel ne se comparent pas à la route, d'où une segmentation plus fine
+  # que `sport_category` pour les efforts (elle seule) — le reste (records, filtres)
+  # garde la catégorie large. L'ordre compte : premier groupe qui matche gagne.
+  CYCLING_SUBGROUPS = [
+    ['mtb',    %w[vtt mtb mountain]],
+    ['gravel', %w[gravel]]
+  ].freeze
+
+  # Catégorie de sport pour les efforts : comme `sport_category`, mais le vélo se
+  # scinde en « mtb » (VTT), « gravel » et « cycling » (route / autre vélo). Les
+  # autres sports sont inchangés.
+  def effort_sport_category(activity_type)
+    base = sport_category(activity_type)
+    return base unless base == 'cycling'
+
+    t = activity_type.to_s.downcase
+    CYCLING_SUBGROUPS.each do |group, keywords|
+      return group if keywords.any? { |kw| t.include?(kw) }
+    end
+    'cycling'
+  end
+
+  # Classement d'UNE sortie (source + external_id) parmi les autres du même sport
+  # pour la distance, le dénivelé et la durée : rang absolu (tout l'historique) et
+  # rang de son année civile. Sert à décerner or/argent/bronze sur la page
+  # d'activité. Segmenté par sport (VTT et gravel distincts du vélo de route) — un
+  # gros dénivelé à ski ou à VTT ne concourt pas avec la route. nil si l'activité
+  # est introuvable dans l'historique.
+  def efforts_for(user, source:, external_id:)
+    rows = summary_rows(user.id)
+    current = rows.find do |r|
+      r['source'] == source.to_s && r['external_id'].to_s == external_id.to_s
+    end
+    return nil unless current
+
+    sport = effort_sport_category(current['activity_type'])
+    peers = rows.select { |r| effort_sport_category(r['activity_type']) == sport }
+    year = year_of(current)
+    year_peers = year ? peers.select { |r| year_of(r) == year } : []
+
+    metrics = EFFORT_METRICS.filter_map do |metric|
+      value = numeric(current[metric[:column]])
+      next if value.nil? || value <= 0
+
+      entry = { unit: metric[:unit], value: value, overall: rank_in(peers, metric[:column], value) }
+      entry[:year] = rank_in(year_peers, metric[:column], value).merge(year: year) if year
+      [metric[:key], entry]
+    end.to_h
+
+    { sport: sport, year: year, metrics: metrics }
+  end
+
+  # Rang (1 = meilleur) de `value` dans `rows` sur `column`, + taille du groupe.
+  # Les sorties strictement supérieures comptent, les ex æquo partagent le rang
+  # (deux sorties à la valeur max sont toutes deux « or »). `value` est celle de la
+  # sortie courante, elle-même présente dans `rows` (donc comptée dans `count`).
+  def rank_in(rows, column, value)
+    pool = rows.filter_map { |r| numeric(r[column]) }.select { |v| v.positive? }
+    { rank: pool.count { |v| v > value } + 1, count: pool.length }
   end
 
   # Normalise les filtres bruts (query params) : conversions d'unités (km → m,

@@ -143,6 +143,14 @@ class StravaController < ApplicationController
     render json: { error: e.message }, status: status
   end
 
+  # GET /strava/activities/:id/best_efforts
+  # Classement de cette sortie (distance / dénivelé / durée) parmi les activités du
+  # même sport — rang absolu + rang de l'année — pour décerner or/argent/bronze.
+  # Lit uniquement les résumés déjà en base (pas de streams, pas d'appel API).
+  def best_efforts
+    render json: PerformanceRecords.efforts_for(current_user, source: 'strava', external_id: params[:id]) || {}
+  end
+
   # GET /strava/activities/:id/zones
   # Répartition du temps par zone d'intensité (FC + puissance) pour CETTE sortie,
   # avec les seuils courants — même modèle que la page performance. On garantit au

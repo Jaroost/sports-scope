@@ -756,6 +756,73 @@ export function nearestGeomIndex(
   return { idx: bestIdx, distM }
 }
 
+// Projection globale désambiguïsée sur un tracé qui repasse par le même endroit —
+// typiquement une BOUCLE, dont l'arrivée frôle le départ, mais aussi un tracé qui se
+// recoupe. Le sommet géométriquement le plus proche y est ambigu : au départ d'une
+// boucle, le bruit GPS suffit à désigner un sommet de LA FIN, et toute la suite
+// (progression, distance restante, arrivée, point de raccord d'un reroutage) part
+// alors du mauvais passage.
+// On collecte donc tous les passages plausibles — les groupes de sommets contigus dont
+// la distance latérale reste à moins de `tolM` du meilleur — et on retient celui dont
+// la distance le long du tracé est la plus proche de `preferDistAlongM` : la
+// progression connue du coureur (0 au démarrage). Un passage isolé (cas courant) reste
+// seul candidat : la préférence ne joue qu'en cas d'ambiguïté réelle.
+export function nearestGeomIndexPreferring(
+  pos: LngLat,
+  geometry: Coord[],
+  cumDistM: number[],
+  preferDistAlongM: number,
+  tolM = 30,
+): { idx: number; distM: number } {
+  const n = geometry.length
+  if (n === 0) return { idx: 0, distM: Infinity }
+  if (n === 1) return { idx: 0, distM: haversine(pos, geometry[0]) }
+  // Distance latérale sommet par sommet : le min des deux tronçons adjacents (un seul
+  // pointToSegmentM par tronçon). Mesurer au tronçon et non au sommet évite de rater un
+  // passage dont les sommets sont espacés alors que la ligne, elle, passe juste à côté.
+  const seg = new Array<number>(n - 1)
+  for (let i = 0; i < n - 1; i++) seg[i] = pointToSegmentM(pos, geometry[i], geometry[i + 1])
+  const distAt = (i: number) => Math.min(i > 0 ? seg[i - 1] : Infinity, i < n - 1 ? seg[i] : Infinity)
+  let bestDist = Infinity
+  for (let i = 0; i < n; i++) {
+    const d = distAt(i)
+    if (d < bestDist) bestDist = d
+  }
+  // Tolérance élargie quand on est loin de tout (hors-trajet) : à 5 m du tracé, deux
+  // passages distants de 30 m sont bien distincts ; à 200 m, ils sont tous les deux « le
+  // tracé, là-bas » et l'écart brut ne dit plus lequel est le bon — c'est alors la
+  // progression qui doit trancher, pas 60 m d'écart à vol d'oiseau.
+  const limit = bestDist + Math.max(tolM, bestDist * 0.5)
+  let chosenIdx = 0
+  let chosenDist = Infinity
+  let chosenGap = Infinity
+  // Un groupe de sommets contigus sous `limit` = un passage ; on n'en garde que le
+  // meilleur sommet, puis on arbitre entre passages sur l'écart de progression.
+  let runIdx = -1
+  let runDist = Infinity
+  const closeRun = () => {
+    if (runIdx < 0) return
+    const gap = Math.abs((cumDistM[runIdx] ?? 0) - preferDistAlongM)
+    if (gap < chosenGap || (gap === chosenGap && runDist < chosenDist)) {
+      chosenIdx = runIdx
+      chosenDist = runDist
+      chosenGap = gap
+    }
+    runIdx = -1
+    runDist = Infinity
+  }
+  for (let i = 0; i < n; i++) {
+    const d = distAt(i)
+    if (d <= limit) {
+      if (d < runDist) { runDist = d; runIdx = i }
+    } else {
+      closeRun()
+    }
+  }
+  closeRun()
+  return { idx: chosenIdx, distM: chosenDist }
+}
+
 // Remaining distance / elevation / progress ratio from a projected index.
 // Pass `doneM` (the distance covered along the route, e.g. from projectOnRoute)
 // to advance distance and ratio continuously within a segment; it defaults to

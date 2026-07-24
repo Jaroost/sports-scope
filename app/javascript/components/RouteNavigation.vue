@@ -4,7 +4,7 @@ import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
-  haversine, bearingBetween, nearestGeomIndex, projectOnRoute,
+  haversine, bearingBetween, nearestGeomIndex, nearestGeomIndexPreferring, projectOnRoute,
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
   buildOffsetDisplayLine, formatDistancePrecise,
 } from '../routeHelpers'
@@ -46,7 +46,7 @@ import {
 } from '../composables/useNavCamera'
 import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
-import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX, ARRIVAL_M } from '../navConstants'
+import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX, ARRIVAL_M, ARRIVAL_APPROACH_M } from '../navConstants'
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
@@ -88,6 +88,14 @@ const navPrefs = userPreferences().navigation
 const OFF_ROUTE_M = 30          // lateral distance beyond which we warn
 const OFF_ROUTE_ACCURACY_CAP = 45  // most we widen the threshold by for a fuzzy GPS fix (élargi pour le drift GPS sous couvert boisé)
 const OFF_ROUTE_REALERT_MS = 12000  // re-buzz this often while still off route
+// Tolérance de désambiguïsation des passages lors d'une recherche globale (voir
+// nearestGeomIndexPreferring) : deux passages du tracé distants de moins de ça sont
+// jugés également plausibles, et c'est le plus proche de la progression connue qui
+// l'emporte. Volontairement large : sur une boucle, se garer quelques dizaines de
+// mètres en amont sur la branche de retour ne doit pas démarrer la séance à 99 % du
+// parcours. Le pire cas — un coureur qui rejoint vraiment le tracé là où deux passages
+// se frôlent — se corrige seul dès qu'il avance.
+const LOOP_AMBIGUITY_TOL_M = 60
 // Recalcul automatique hors-course (profil navigation.auto_reroute) : délai entre deux
 // recalculs auto tant qu'on reste hors-course (profil navigation.auto_reroute_cooldown_s,
 // 10 s par défaut). Évite qu'un flottement GPS hors-tracé/sur-tracé déclenche une rafale
@@ -460,9 +468,11 @@ const speedKmh = ref(0)
 // Arrivée à destination : bascule à vrai (une seule fois) quand la distance restante le
 // long du tracé passe sous ARRIVAL_M. `seenEnRoute` garantit qu'on a d'abord été
 // franchement en route — évite un faux « arrivé » au tout premier fix (tracé minuscule
-// ou boucle dont le départ se projette près de la fin).
+// ou boucle dont le départ se projette près de la fin). `lastRemainingM` ajoute la
+// plausibilité du rapprochement : l'arrivée doit être approchée progressivement.
 const arrived = ref(false)
 let seenEnRoute = false
+let lastRemainingM: number | null = null
 // Vitesse lissée (EMA) dédiée à l'heure d'arrivée : la vitesse instantanée saute
 // trop pour une ETA stable, et tomber à 0 à chaque feu rouge la ferait exploser.
 // On n'alimente la moyenne qu'en roulant (> ETA_SPEED_FLOOR) pour ignorer les arrêts.
@@ -1111,6 +1121,13 @@ const REJOIN_LOOKAHEAD_M = 30
 const REJOIN_FORWARD_ARC = 85
 // Distance minimale (m) au point de raccord : on ne raccorde pas juste à côté de soi.
 const REJOIN_MIN_AHEAD_M = 40
+// Saut maximal (m) LE LONG du tracé pour un raccord. Au-delà, on ne « rejoint » plus le
+// tracé : on en escamote une portion entière. Décisif sur une boucle, dont l'arrivée
+// passe à quelques mètres du départ — sans ce plafond, un écart en début de parcours
+// raccorde les derniers sommets (les plus proches à vol d'oiseau) et le trajet est
+// aussitôt fini. Le plafond est large : un détour normal raccroche à quelques centaines
+// de mètres au plus.
+const REJOIN_MAX_SKIP_M = 2000
 let rerouteToken = 0
 
 // Sommet du tracé restant où raccorder. On privilégie le sommet le plus proche situé
@@ -1121,9 +1138,13 @@ let rerouteToken = 0
 // depuis la progression : BRouter, guidé par le cap, en tracera quand même un accès qui
 // repart vers l'avant, sans demi-tour collé au départ.
 function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number {
+  // Fenêtre de raccord : les sommets à moins de REJOIN_MAX_SKIP_M devant la progression
+  // (cumDistM est croissant, on peut donc s'arrêter net). Voir REJOIN_MAX_SKIP_M.
+  const maxDist = (cumDistM[fromIdx] ?? 0) + REJOIN_MAX_SKIP_M
   let best = -1
   let bestD = Infinity
   for (let i = fromIdx; i < geometry.length; i++) {
+    if (cumDistM[i] > maxDist) break
     const d = haversine(pos, [geometry[i][0], geometry[i][1]])
     if (d < REJOIN_MIN_AHEAD_M) continue
     let rel = bearingBetween(pos, [geometry[i][0], geometry[i][1]]) - heading
@@ -1136,6 +1157,7 @@ function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number
     best = fromIdx
     bestD = Infinity
     for (let i = fromIdx; i < geometry.length; i++) {
+      if (cumDistM[i] > maxDist) break
       const d = haversine(pos, [geometry[i][0], geometry[i][1]])
       if (d < bestD) { bestD = d; best = i }
     }
@@ -1291,6 +1313,7 @@ function resetRouteTracking(atStart: boolean) {
   // Nouveau tracé (ou reroutage) : on réarme la détection d'arrivée.
   arrived.value = false
   seenEnRoute = false
+  lastRemainingM = null
   // Recalculé au prochain fix ; remis à faux pour que le bandeau hors-tracé disparaisse.
   offRoute.value = false
   // La progression mémorisée pointe un passage de l'ancien tracé : on l'efface.
@@ -1489,6 +1512,7 @@ function unloadRoute() {
   offRoute.value = false
   arrived.value = false
   seenEnRoute = false
+  lastRemainingM = null
   remainingM.value = 0
   remainingGainM.value = 0
   doneRatio.value = 0
@@ -2671,8 +2695,14 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   // (rechargement en pleine course) lève l'ambiguïté du passage — on repart de cet
   // indice. On ne s'y fie que si le rider est effectivement proche de ce passage ;
   // sinon (entrée périmée ou rider ailleurs) on retombe sur la recherche globale.
+  // Cette recherche globale est ambiguë sur une boucle (l'arrivée passe à quelques
+  // mètres du départ) : on privilégie donc le passage le plus proche du DÉPART, sinon
+  // un simple fix bruité au point de départ nous place sur les derniers mètres du tracé
+  // — parcours affiché comme terminé, arrivée annoncée aussitôt.
   const hint = located ? lastIdx : resumeHintIdx()
-  let { idx, distM } = nearestGeomIndex(here, geometry, hint)
+  let { idx, distM } = hint >= 0
+    ? nearestGeomIndex(here, geometry, hint)
+    : nearestGeomIndexPreferring(here, geometry, cumDistM, 0, LOOP_AMBIGUITY_TOL_M)
   // Recherche globale de secours quand la projection fenêtrée nous place hors-tracé :
   //  • au premier fix d'un tracé chargé (!located), le coureur peut être n'importe où ;
   //  • en séance (located), s'il a quitté la ligne suivie — typiquement un reroutage auto
@@ -2680,10 +2710,23 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   //    loin, la fenêtre ±60 autour du dernier indice ne le retrouve pas. On rebalaie tout et
   //    on adopte le point vraiment le plus proche. `relocated` : vrai quand cela fait sauter
   //    la position sur un tout autre passage, ce qui invalide les pointeurs de virage.
+  // La progression connue (snapDistAlongM en séance, l'indice repris sinon) sert
+  // d'arbitre entre passages également proches : on ne saute pas sur la fin du tracé
+  // alors qu'on est au début d'une boucle.
+  // EN SÉANCE, on n'adopte un autre passage que si le coureur est franchement DESSUS
+  // (au sens du seuil hors-trajet). Sinon, s'écarter du tracé près du départ d'une
+  // boucle — où la dernière branche passe à quelques dizaines de mètres — ferait
+  // basculer la progression à ~100 % : parcours affiché comme fini, reroutage vers
+  // l'arrivée. Hors séance (reprise via localStorage), on garde le repli large :
+  // l'indice mémorisé peut être périmé et le coureur être n'importe où.
+  // Widen the threshold by the reported GPS accuracy (capped) so an imprecise fix
+  // doesn't get flagged off-route while the rider is actually on the line.
+  const accuracyM = Math.min(pos.coords.accuracy ?? 0, OFF_ROUTE_ACCURACY_CAP)
   let relocated = false
   if (hint >= 0 && distM > OFF_ROUTE_M + OFF_ROUTE_ACCURACY_CAP) {
-    const global = nearestGeomIndex(here, geometry, -1)
-    if (global.distM < distM) {
+    const prefer = located ? snapDistAlongM : (cumDistM[hint] ?? 0)
+    const global = nearestGeomIndexPreferring(here, geometry, cumDistM, prefer, LOOP_AMBIGUITY_TOL_M)
+    if (global.distM < distM && (!located || global.distM <= OFF_ROUTE_M + accuracyM)) {
       relocated = located && Math.abs(global.idx - idx) > 1
       ;({ idx, distM } = global)
     }
@@ -2714,9 +2757,6 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   // partage `cumDistM`, donc l'interpolation par distance le long donne le point décalé.
   displaySnapPoint = lngLatAtDistanceM(displayLine, cumDistM, snapDistAlongM)
   const wasOffRoute = offRoute.value
-  // Widen the threshold by the reported GPS accuracy (capped) so an imprecise fix
-  // doesn't get flagged off-route while the rider is actually on the line.
-  const accuracyM = Math.min(pos.coords.accuracy ?? 0, OFF_ROUTE_ACCURACY_CAP)
   offRoute.value = distM > OFF_ROUTE_M + accuracyM
   updateProgress(idx)
   // Mémorise la progression pour reprendre sur le bon passage après un éventuel
@@ -3252,13 +3292,21 @@ function updateProgress(idx: number) {
   remainingGainM.value = p.remainingGainM
   doneRatio.value = p.doneRatio
   // Détection d'arrivée : on a été clairement en route (au-delà de la zone d'arrivée),
-  // puis la distance restante retombe sous ARRIVAL_M, en étant toujours sur le tracé.
+  // puis la distance restante retombe sous ARRIVAL_M, en étant toujours sur le tracé —
+  // et en s'en étant approché progressivement (le fix précédent était déjà dans les
+  // ARRIVAL_APPROACH_M derniers mètres). Sans cette dernière condition, un changement de
+  // passage de la projection (boucle, tracé qui se recoupe) suffirait à déclarer arrivé
+  // un coureur qui vient de partir. Un trou GPS retarde l'annonce d'un fix, pas plus.
   if (hasRoute.value && p.remainingM > ARRIVAL_M + 50) seenEnRoute = true
-  if (!arrived.value && seenEnRoute && !offRoute.value && p.remainingM <= ARRIVAL_M) {
+  const approaching = lastRemainingM != null && lastRemainingM <= ARRIVAL_M + ARRIVAL_APPROACH_M
+  if (!arrived.value && seenEnRoute && approaching && !offRoute.value && p.remainingM <= ARRIVAL_M) {
     arrived.value = true
     if (soundOn.value && !audioMuted.value) playArrival()
     if (!alertsMuted.value) vibrateArrival()
   }
+  // Référence du prochain fix : seulement sur le tracé, une projection hors-trajet
+  // n'ayant pas de progression fiable.
+  if (!offRoute.value) lastRemainingM = p.remainingM
   // Débug : une carte de col factice est épinglée, on ne la réécrit pas depuis le GPS.
   if (dbgClimb.value) { refreshRemaining(); return }
   const ac = activeClimb(idx, climbs, cumDistM, snapDistAlongM)

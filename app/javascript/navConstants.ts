@@ -25,3 +25,8 @@ export const TURN_CHAIN_MAX = 4    // nombre total de virages affichés dans la 
 // Distance restante (le long du tracé) sous laquelle on considère le coureur arrivé
 // à destination. Une notification « vous êtes arrivé » s'affiche alors (éveillé + veille).
 export const ARRIVAL_M = 25
+// Garde-fou : l'arrivée n'est retenue que si la distance restante était DÉJÀ proche au
+// fix précédent. On ne franchit pas 30 km en une seconde — un saut brutal du restant
+// vers zéro trahit donc une projection qui a changé de passage (boucle dont l'arrivée
+// frôle le départ, tracé qui se recoupe), pas un coureur arrivé.
+export const ARRIVAL_APPROACH_M = 300

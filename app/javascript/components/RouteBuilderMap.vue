@@ -444,14 +444,14 @@ function installRouteLayer() {
   if (!mapInstance.getSource('builder-route-graded')) {
     mapInstance.addSource('builder-route-graded', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     mapInstance.addLayer({ id: 'builder-route-border', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
-    mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5, 'line-opacity': routePrefs().opacity } })
+    mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5, 'line-opacity': props.state.routeOpacity } })
   }
   // Tronçons « libres » : tracés en ligne droite (beeline) entre points, rendus en
   // traitillé pour les distinguer du tracé routé. La géométrie droite est exclue de
   // la source graduée (applyColorMode) pour que le pointillé reste lisible.
   if (!mapInstance.getSource('builder-route-straight')) {
     mapInstance.addSource('builder-route-straight', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-    mapInstance.addLayer({ id: 'builder-route-straight-line', type: 'line', source: 'builder-route-straight', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': routePrefs().color, 'line-width': 4, 'line-dasharray': [1.6, 1.4], 'line-opacity': routePrefs().opacity } })
+    mapInstance.addLayer({ id: 'builder-route-straight-line', type: 'line', source: 'builder-route-straight', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': routePrefs().color, 'line-width': 4, 'line-dasharray': [1.6, 1.4], 'line-opacity': props.state.routeOpacity } })
   }
   if (!mapInstance.getSource('builder-divergent')) {
     mapInstance.addSource('builder-divergent', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
@@ -2346,6 +2346,18 @@ function applyOverlayOpacity() {
 }
 watch(() => props.state.overlayOpacity, applyOverlayOpacity)
 
+// Opacité du tracé (slider du menu « Affichage »). La bordure sombre garde la sienne :
+// c'est elle qui détache le tracé du fond, l'estomper aussi le rendrait illisible avant
+// même d'être transparent. Les nouvelles couches la prennent à la création
+// (installRouteLayer), d'où un simple repeint ici.
+function applyRouteOpacity() {
+  if (!mapInstance) return
+  for (const id of ['builder-route-line', 'builder-route-straight-line']) {
+    if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-opacity', props.state.routeOpacity)
+  }
+}
+watch(() => props.state.routeOpacity, applyRouteOpacity)
+
 function setOverlays(ids: string[]) {
   props.state.overlays = ids
   persistOverlays(ids, routeStore.sport.value)
@@ -2368,15 +2380,16 @@ watch(routeStore.sport, (sport) => {
   const { map, route } = sportPreferences(sport)
   const styleChanged = map.default_style !== props.state.mapStyleId
   props.state.overlays = [...map.overlays]
+  // Le réglage d'opacité du menu « Affichage » repart de la préférence du nouveau sport :
+  // c'est un ajustement de séance, pas une valeur qui suit l'utilisateur d'un sport à l'autre.
+  props.state.routeOpacity = route.opacity
   if (styleChanged) {
     applyMapStyle(map.default_style)
     return
   }
   installOverlays()
   if (!mapInstance) return
-  for (const id of ['builder-route-line', 'builder-route-straight-line']) {
-    if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-opacity', route.opacity)
-  }
+  applyRouteOpacity()
   applyColorMode()      // couleur du mode uni
   setRouteLineScale(1)  // épaisseurs dérivées de route.width
 })
@@ -2675,6 +2688,17 @@ defineExpose({
               <i class="fa-solid" :class="state.showGrade ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
               <i class="fa-solid fa-palette fa-fw" aria-hidden="true"></i>{{ t('routes.layer_grade') }}
             </button>
+          </li>
+          <li>
+            <div class="dropdown-item-text px-3 py-1">
+              <label for="route-opacity-slider" class="d-flex align-items-center gap-2 mb-1 small text-muted">
+                <i class="fa-solid fa-route fa-fw" aria-hidden="true"></i>{{ t('routes.layer_route_opacity') }}
+                <span class="ms-auto">{{ Math.round(state.routeOpacity * 100) }}%</span>
+              </label>
+              <input id="route-opacity-slider" type="range" class="form-range" min="0.1" max="1" step="0.05"
+                :value="state.routeOpacity"
+                @input="state.routeOpacity = ($event.target as HTMLInputElement).valueAsNumber" />
+            </div>
           </li>
           <li>
             <button type="button" class="dropdown-item d-flex align-items-center gap-2"

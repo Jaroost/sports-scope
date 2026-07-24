@@ -197,7 +197,9 @@ function computeIsMobile() {
   return typeof window !== 'undefined' && (window.innerWidth < 768 || window.innerHeight <= 500)
 }
 const isMobile = ref(computeIsMobile())
-const SHEET_HEIGHT_DEFAULT = Math.round(window.innerHeight * 0.45)
+// Le profil s'ouvre au quart de la hauteur de l'écran : sur téléphone, la carte prime et
+// le graphe reste consultable d'un coup d'œil. La poignée permet de l'agrandir ensuite.
+const SHEET_HEIGHT_DEFAULT = Math.round(window.innerHeight * 0.25)
 const SHEET_HEIGHT_MIN = 140
 const SHEET_HEIGHT_MAX = Math.round(window.innerHeight * 0.85)
 const mobileSheetHeight = ref(SHEET_HEIGHT_DEFAULT)
@@ -1595,18 +1597,33 @@ function stopResizeH() {
 
 // ─── Mobile sheet ─────────────────────────────────────────────────────────────
 
+// La bande de pastilles sous la poignée sert aussi à redimensionner : c'est la première
+// chose que le pouce rencontre, et la poignée seule est étroite. Les éléments interactifs
+// qu'elle contient (saisie de la vitesse) gardent la main, sinon ils deviendraient
+// inutilisables. Le reste du panneau — le graphe — garde ses propres gestes.
+function onSheetBodyTouchStart(ev: TouchEvent) {
+  const el = ev.target as HTMLElement | null
+  if (!el?.closest('.mobile-chart-stats')) return
+  if (el.closest('input, button, select, textarea, a')) return
+  onSheetHandleTouchStart(ev)
+}
+
 function onSheetHandleTouchStart(ev: TouchEvent) {
   if (ev.touches.length !== 1) return
   const startY = ev.touches[0].clientY; const startH = mobileSheetHeight.value
+  // Hauteur voulue par le doigt, avant écrêtage : c'est le dépassement sous le minimum
+  // qui referme le panneau. Comparer la hauteur écrêtée fermerait sur simple appui dès
+  // que la hauteur par défaut frôle le minimum (écrans courts).
+  let rawH = startH
   const onMove = (e: TouchEvent) => {
     if (e.touches.length !== 1) return
-    const dy = startY - e.touches[0].clientY
-    mobileSheetHeight.value = Math.min(SHEET_HEIGHT_MAX, Math.max(SHEET_HEIGHT_MIN, startH + dy))
+    rawH = startH + (startY - e.touches[0].clientY)
+    mobileSheetHeight.value = Math.min(SHEET_HEIGHT_MAX, Math.max(SHEET_HEIGHT_MIN, rawH))
     chartRef.value?.resize()
   }
   const onEnd = () => {
     window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', onEnd)
-    if (mobileSheetHeight.value < SHEET_HEIGHT_MIN + 40) mobileSheetOpen.value = false
+    if (rawH < SHEET_HEIGHT_MIN - 40) mobileSheetOpen.value = false
     chartRef.value?.resize()
   }
   window.addEventListener('touchmove', onMove, { passive: true }); window.addEventListener('touchend', onEnd)
@@ -2300,7 +2317,7 @@ onBeforeUnmount(() => {
           <div class="mobile-sheet-handle" @touchstart.prevent="onSheetHandleTouchStart">
             <span class="mobile-sheet-grip"></span>
           </div>
-          <div class="mobile-sheet-body">
+          <div class="mobile-sheet-body" @touchstart="onSheetBodyTouchStart">
           <RouteBuilderChart
             ref="chartRef"
             :simplified="true"
@@ -2585,6 +2602,11 @@ onBeforeUnmount(() => {
   border-radius: 2px;
   background: #d1d5db;
   display: block;
+}
+/* La bande de pastilles prolonge la poignée : on lui prend le geste vertical, en lui
+   laissant le geste horizontal — elle défile quand les pastilles débordent. */
+.mobile-sheet-body :deep(.mobile-chart-stats) {
+  touch-action: pan-x;
 }
 .mobile-sheet-body {
   display: flex;

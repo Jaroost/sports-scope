@@ -98,6 +98,9 @@ export class RouteBuilderState extends MapPageState {
   showMarkers = true
   // Opacité (0.05–1) des couches superposées swisstopo/SuisseMobile sélectionnées.
   overlayOpacity = 0.9
+  // Opacité (0.1–1) du tracé lui-même. Part de la préférence du sport courant et suit
+  // les changements de sport ; l'ajuster ne vaut que pour la session en cours.
+  routeOpacity = 1
   showStatsSidebar = true
   showElevationChart = true
   overlays: string[] = []
@@ -115,6 +118,7 @@ export class RouteBuilderState extends MapPageState {
     this.colorMode = prefs.display.show_grade_colors ? 'grade' : 'none'
     this.showElevationChart = prefs.display.show_elevation_chart
     this.overlays = [...sportPreferences().map.overlays]
+    this.routeOpacity = sportPreferences().route.opacity
   }
 
   // Derived from colorMode — reactive because `this` is the reactive proxy
@@ -127,8 +131,8 @@ export class RouteBuilderState extends MapPageState {
     return this.shared ? 'sportsScope.sharedRouteViewState' : 'sportsScope.routeBuilderState'
   }
 
-  // mapStyleId, colorMode, showElevationChart et overlays sont gouvernés par les
-  // préférences du profil (cf. constructeur) : on ne les persiste pas en localStorage,
+  // mapStyleId, colorMode, showElevationChart, overlays et routeOpacity sont gouvernés
+  // par les préférences du profil (cf. constructeur) : on ne les persiste pas en localStorage,
   // sinon une ancienne valeur de session écraserait silencieusement le profil. Les autres
   // réglages de vue (épingles, panneau, cols) restent locaux à la session.
   override persistedFields(): string[] {

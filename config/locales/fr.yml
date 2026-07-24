@@ -1214,6 +1214,7 @@ fr:
     layer_pois: "Points d'intérêt"
     layer_grade: "Couleurs de pente"
     layer_opacity: "Opacité des couches"
+    layer_route_opacity: "Opacité du tracé"
     layer_readonly: "Lecture seule"
     layer_stats_sidebar: "Panneau de statistiques"
     layer_elevation_chart: "Profil altimétrique"

@@ -6,12 +6,15 @@
 //
 // Carte volontairement non interactive : c'est une vignette dans une page qui défile,
 // pas un outil. Le tracé complet est visible d'emblée, et sur téléphone le doigt fait
-// défiler la page au lieu de déplacer la carte.
+// défiler la page au lieu de déplacer la carte. Un clic ailleurs que sur un repère
+// ouvre la vue en lecture seule — l'aperçu se comporte comme le lien « Voir le tracé »
+// qu'il illustre.
 import { onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { type PropType } from 'vue'
 import { mapStyleFor, ROUTE_LINE_LAYOUT } from '../mapStyles'
 import { markerMeta, markerKindLabel, type RouteMarker } from '../routeMarkers'
 import { escapeHtml } from '../activityHelpers'
+import { t } from '../i18n'
 
 const props = defineProps({
   // Polyligne simplifiée `[[lng, lat], ...]` (routes.map_polyline), passée en props
@@ -22,7 +25,12 @@ const props = defineProps({
   markers: { type: Array as PropType<RouteMarker[]>, default: () => [] },
   // Fond de carte : les sentiers se lisent mieux sur le fond topo, les routes sur CyclOSM.
   styleId: { type: String, default: 'cyclosm' },
+  // Vue en lecture seule (/routes/:token/view) ouverte au clic sur la carte. Vide = la
+  // vignette reste inerte.
+  viewUrl: { type: String, default: '' },
 })
+
+const viewLabel = t('routes.summary.view')
 
 // Classe de mise en évidence de la ligne visée, définie avec la page (application.scss) :
 // la liste est rendue par le serveur, hors de ce composant.
@@ -92,8 +100,22 @@ function buildMarkerEl(marker: RouteMarker, index: number): HTMLElement {
   el.title = text
   el.innerHTML = `<i class="fa-solid ${meta?.icon ?? 'fa-location-dot'}" aria-hidden="true"></i>`
     + `<span class="shared-route-marker-label">${escapeHtml(text)}</span>`
-  el.addEventListener('click', () => revealMarkerInList(index))
+  // `stopPropagation` : sans lui le clic remonterait au conteneur, qui ouvre la vue en
+  // lecture seule — un clic sur un repère doit rester un clic sur le repère.
+  el.addEventListener('click', (event) => {
+    event.stopPropagation()
+    revealMarkerInList(index)
+  })
   return el
+}
+
+// Clic sur la carte : on ouvre le tracé en lecture seule. Les repères ont déjà arrêté
+// leur clic ; restent les contrôles MapLibre (attribution et ses liens), qu'on laisse
+// se comporter normalement.
+function openView(event: MouseEvent) {
+  if (!props.viewUrl) return
+  if ((event.target as HTMLElement | null)?.closest('.maplibregl-ctrl')) return
+  window.location.href = props.viewUrl
 }
 
 async function renderMap() {
@@ -256,12 +278,51 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="mapEl" class="route-summary-map"></div>
+  <!-- Le conteneur MapLibre reste vide : la pastille d'invite est posée à côté, dans un
+       parent positionné. MapLibre s'attend à un conteneur qu'il est seul à peupler. -->
+  <div class="route-summary-map-wrap" :class="{ 'is-clickable': viewUrl }"
+       :title="viewUrl ? viewLabel : undefined" @click="openView">
+    <div ref="mapEl" class="route-summary-map"></div>
+    <!-- Raccourci à la souris/au doigt : au clavier, c'est le lien « Voir le tracé » de la
+         liste d'actions, juste en dessous, qui mène au même endroit. -->
+    <span v-if="viewUrl" class="route-summary-map-hint">
+      <i class="fa-solid fa-eye" aria-hidden="true"></i>
+      {{ viewLabel }}
+    </span>
+  </div>
 </template>
 
 <!-- Non scoped : les pastilles sont créées en JS (hors template), elles ne portent donc
      pas l'attribut data-v du composant. -->
 <style>
+.route-summary-map-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+.route-summary-map-wrap.is-clickable { cursor: pointer; }
+
+/* Invite discrète : la carte n'a pas l'air d'un lien, il faut le dire. Transparente aux
+   clics pour ne pas voler celui du conteneur ni celui d'un repère qui passerait dessous. */
+.route-summary-map-hint {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.16rem 0.5rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #212529;
+  font-size: 0.7rem;
+  font-weight: 600;
+  box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.35);
+}
+.route-summary-map-hint i { font-size: 0.7rem; color: #f97316; }
+
 .shared-route-marker {
   display: inline-flex;
   align-items: center;
@@ -277,8 +338,9 @@ onBeforeUnmount(() => {
   line-height: 1.4;
   user-select: none;
   transform-origin: bottom left;
-  /* La carte reste non interactive : seule la pastille capte le clic, qui renvoie à la
-     ligne du repère dans la liste. Ailleurs, le doigt fait défiler la page. */
+  /* La carte reste non déplaçable : le clic sur la pastille renvoie à la ligne du repère
+     dans la liste, ailleurs il ouvre la vue en lecture seule. Le doigt, lui, continue de
+     faire défiler la page. */
   cursor: pointer;
   /* Pas d'effet en `transform` : MapLibre écrit le positionnement de la pastille dans
      le `transform` de cet élément même, il serait écrasé. */

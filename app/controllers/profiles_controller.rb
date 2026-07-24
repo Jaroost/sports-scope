@@ -40,7 +40,7 @@ class ProfilesController < ApplicationController
   LTHR_MANUAL_RANGE = (100..220)   # bpm plausibles pour un seuil FC saisi à la main
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
-  ALLOWED_OVERLAYS = %w[veloland mountainbikeland wanderland wanderwege].freeze
+  ALLOWED_OVERLAYS = %w[paths veloland mountainbikeland wanderland wanderwege].freeze
   ALLOWED_SPORTS = User::SPORTS
 
   # Profils BRouter proposés par sport (miroir du catalogue front brouter.ts /

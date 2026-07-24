@@ -3,7 +3,9 @@ import { ref, computed, watch, onBeforeUnmount, useTemplateRef, nextTick } from 
 import { t } from '../i18n'
 import {
   mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT,
-  MAP_OVERLAYS, overlaySource, overlaySourceId, overlayLayerId,
+  MAP_OVERLAYS, MAP_OVERLAY_GROUPS, overlaysInGroup,
+  overlaySource, overlaySourceId, overlayLayers,
+  mapStyleComboFor, combosOverlaysForStyle,
 } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
@@ -2263,10 +2265,24 @@ async function toggleLocation() {
 // Choix manuel de l'utilisateur : ce fond devient le style par défaut du compte pour le
 // sport courant. Le changement de sport, lui, applique un style déjà enregistré et ne
 // doit donc rien réécrire — cf. applyMapStyle.
+// `id` peut être une entrée composée (« Satellite + chemins ») : elle n'est pas un fond,
+// on la décompose en fond + overlay, seuls états réellement persistés. Choisir le fond nu
+// retire en retour l'overlay de la composée, faute de quoi les deux entrées se
+// confondraient.
 function setMapStyle(id: string) {
-  if (!mapInstance || id === props.state.mapStyleId) return
-  persistDefaultMapStyle(id as MapStyleId, routeStore.sport.value)
-  applyMapStyle(id)
+  if (!mapInstance) return
+  const combo = mapStyleComboFor(id)
+  const styleId = combo ? combo.style : id
+  // Re-cliquer l'entrée déjà active laisse `next` à null : pas d'écriture de préférence.
+  const current = props.state.overlays
+  const governed = combosOverlaysForStyle(styleId)
+  let next: string[] | null = null
+  if (combo && !current.includes(combo.overlay)) next = [...current, combo.overlay]
+  if (!combo && current.some((o) => governed.includes(o))) next = current.filter((o) => !governed.includes(o))
+  if (next) setOverlays(next)
+  if (styleId === props.state.mapStyleId) return
+  persistDefaultMapStyle(styleId as MapStyleId, routeStore.sport.value)
+  applyMapStyle(styleId)
 }
 
 function applyMapStyle(id: string) {
@@ -2286,8 +2302,10 @@ function applyMapStyle(id: string) {
   })
 }
 
-// Réconcilie les couches overlay (SuisseMobile/swisstopo) avec props.state.overlays :
-// ajoute les actives manquantes, retire les inactives présentes. Insérées sous le tracé
+// Réconcilie les couches overlay (chemins mondiaux, SuisseMobile/swisstopo) avec
+// props.state.overlays : ajoute les actives manquantes, retire les inactives présentes.
+// Un overlay peut peser plusieurs couches MapLibre (cf. overlayLayers) mais une seule
+// source ; la première couche sert de témoin de présence. Insérées sous le tracé
 // (beforeId = builder-route-border) pour rester au-dessus du fond mais sous l'itinéraire.
 // Idempotente : appelée au toggle comme après un setStyle (qui efface tout).
 function installOverlays() {
@@ -2296,26 +2314,34 @@ function installOverlays() {
   const beforeId = mapInstance.getLayer('builder-route-border') ? 'builder-route-border' : undefined
   for (const o of MAP_OVERLAYS) {
     const srcId = overlaySourceId(o.id)
-    const lyrId = overlayLayerId(o.id)
-    const present = !!mapInstance.getLayer(lyrId)
+    const layers = overlayLayers(o)
+    const present = !!mapInstance.getLayer(layers[0].id)
     if (active.has(o.id) && !present) {
       if (!mapInstance.getSource(srcId)) mapInstance.addSource(srcId, overlaySource(o) as any)
-      mapInstance.addLayer({ id: lyrId, type: 'raster', source: srcId, paint: { 'raster-opacity': props.state.overlayOpacity } }, beforeId)
+      for (const l of layers) {
+        mapInstance.addLayer({
+          ...l.spec,
+          id: l.id,
+          source: srcId,
+          paint: { ...(l.spec.paint ?? {}), [l.opacityProp]: props.state.overlayOpacity },
+        } as any, beforeId)
+      }
     } else if (!active.has(o.id) && present) {
-      mapInstance.removeLayer(lyrId)
+      for (const l of layers) if (mapInstance.getLayer(l.id)) mapInstance.removeLayer(l.id)
       if (mapInstance.getSource(srcId)) mapInstance.removeSource(srcId)
     }
   }
 }
 
-// Répercute l'opacité réglée (slider de la section « Couches (Suisse) ») sur toutes les
-// couches overlay présentes. Appelée au changement du slider ; les nouvelles couches
-// prennent l'opacité directement à l'installation (cf. installOverlays).
+// Répercute l'opacité réglée (slider de la section « Couches ») sur toutes les couches
+// overlay présentes. Appelée au changement du slider ; les nouvelles couches prennent
+// l'opacité directement à l'installation (cf. installOverlays).
 function applyOverlayOpacity() {
   if (!mapInstance) return
   for (const o of MAP_OVERLAYS) {
-    const lyrId = overlayLayerId(o.id)
-    if (mapInstance.getLayer(lyrId)) mapInstance.setPaintProperty(lyrId, 'raster-opacity', props.state.overlayOpacity)
+    for (const l of overlayLayers(o)) {
+      if (mapInstance.getLayer(l.id)) mapInstance.setPaintProperty(l.id, l.opacityProp, props.state.overlayOpacity)
+    }
   }
 }
 watch(() => props.state.overlayOpacity, applyOverlayOpacity)
@@ -2596,7 +2622,8 @@ defineExpose({
     <div ref="mapEl" class="route-builder-map"></div>
 
     <div class="map-controls">
-      <MapStyleDropdown :model-value="state.mapStyleId" :mobile-label="t('strava.map_style_short')" @update:model-value="setMapStyle"
+      <MapStyleDropdown :model-value="state.mapStyleId" :active-overlays="state.overlays"
+        :mobile-label="t('strava.map_style_short')" @update:model-value="setMapStyle"
         :open="openMenu === 'style'" @update:open="(v) => openMenu = v ? 'style' : null" />
       <!-- Menu « Affichage » : bascules de calques regroupées (façon menu des couches).
            Les actions de pose (POI / repère) restent des boutons dédiés, hors de ce menu. -->
@@ -2610,7 +2637,9 @@ defineExpose({
           <span>{{ t('routes.display_label') }}</span>
           <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
         </button>
-        <ul v-if="openMenu === 'display'" class="dropdown-menu show mt-1" style="min-width: 14rem; z-index: 10;">
+        <!-- Le menu « Affichage » dépasse la hauteur de la carte sur petit écran (couches
+             monde + Suisse) : on le borne à la fenêtre et on le laisse défiler. -->
+        <ul v-if="openMenu === 'display'" class="dropdown-menu show mt-1 dropdown-scrollable" style="min-width: 14rem; z-index: 10;">
           <li><h6 class="dropdown-header">{{ t('routes.display_label') }}</h6></li>
           <li>
             <button type="button" class="dropdown-item d-flex align-items-center gap-2"
@@ -2665,14 +2694,16 @@ defineExpose({
             </li>
           </template>
           <li><hr class="dropdown-divider" /></li>
-          <li><h6 class="dropdown-header">{{ t('strava.overlay_label') }}</h6></li>
-          <li v-for="o in MAP_OVERLAYS" :key="o.id">
-            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
-              :class="{ active: state.overlays.includes(o.id) }" @click="toggleOverlay(o.id)">
-              <i class="fa-solid" :class="state.overlays.includes(o.id) ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
-              <i class="fa-solid fa-fw" :class="o.icon" aria-hidden="true"></i>{{ t(`strava.overlay_${o.id}`) }}
-            </button>
-          </li>
+          <template v-for="g in MAP_OVERLAY_GROUPS" :key="g">
+            <li><h6 class="dropdown-header">{{ t(`strava.overlay_group_${g}`) }}</h6></li>
+            <li v-for="o in overlaysInGroup(g)" :key="o.id">
+              <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+                :class="{ active: state.overlays.includes(o.id) }" @click="toggleOverlay(o.id)">
+                <i class="fa-solid" :class="state.overlays.includes(o.id) ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+                <i class="fa-solid fa-fw" :class="o.icon" aria-hidden="true"></i>{{ t(`strava.overlay_${o.id}`) }}
+              </button>
+            </li>
+          </template>
           <li>
             <div class="dropdown-item-text px-3 py-1">
               <label for="overlay-opacity-slider" class="d-flex align-items-center gap-2 mb-1 small text-muted">
@@ -2888,6 +2919,13 @@ defineExpose({
 </template>
 
 <style scoped>
+/* Menu déroulant plus haut que la fenêtre : on plafonne et on fait défiler le contenu,
+   plutôt que de laisser les dernières entrées hors écran. */
+.dropdown-scrollable {
+  max-height: min(70vh, 26rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .map-wrap {
   position: relative;
   flex: 1;
@@ -2910,6 +2948,10 @@ defineExpose({
   min-height: 0;
   width: 100%;
 }
+/* La barre capte les clics sur toute son emprise, gouttières comprises : viser à côté
+   d'un menu ne doit pas traverser jusqu'à la carte et y poser un point. Son emprise reste
+   celle de son contenu (largeur du plus large bouton), les menus ouverts étant en
+   position absolue ils ne l'élargissent pas. */
 .map-controls {
   position: absolute;
   top: 10px;
@@ -2919,9 +2961,8 @@ defineExpose({
   flex-direction: column;
   gap: 0.5rem;
   align-items: flex-start;
-  pointer-events: none;
+  pointer-events: auto;
 }
-.map-controls > * { pointer-events: auto; }
 .map-controls-right {
   position: absolute;
   top: 56px;

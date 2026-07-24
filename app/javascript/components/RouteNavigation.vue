@@ -367,6 +367,19 @@ const { controlsVisible, armControlsHide, showControls, hideControls } = useCont
   closePanels: () => { activePanel.value = null },
 })
 
+// Ouverture du tiroir par un geste sur la zone de révélation. Sur mobile, le tap y
+// produit un `click` de compatibilité juste après le pointerup : à cet instant le tiroir
+// vient d'être démasqué mais glisse encore depuis le bas (transition 0,28 s), il n'est
+// donc pas sous le doigt — le clic atterrissait sur la carte, dont le gestionnaire
+// « clic hors du menu » le refermait aussitôt. D'où l'impression qu'il fallait presser
+// deux fois. On horodate l'ouverture et la carte ignore le clic qui la suit de près.
+const REVEAL_CLICK_GUARD_MS = 500
+let controlsShownAt = 0
+function revealControls() {
+  controlsShownAt = performance.now()
+  showControls()
+}
+
 // ─── Zone de veille (bandeau haut) ────────────────────────────────────────────
 // Le tiroir de commandes vit maintenant en bas : la bande haute n'est plus qu'une zone
 // de tap, dédiée à la veille (endort hors veille, réveille en veille, comme un tap
@@ -387,8 +400,8 @@ const {
   onRevealUp: onMenuUp,
   cancel: cancelMenuReveal,
 } = useRevealGesture({
-  onReveal: showControls,
-  onTap: () => { if (screenOff.value) toggleScreenOffManual(); else showControls() },
+  onReveal: revealControls,
+  onTap: () => { if (screenOff.value) toggleScreenOffManual(); else revealControls() },
   canTap: () => true,
   direction: 'up',
 })
@@ -2170,6 +2183,10 @@ async function initMap() {
   mapEl.value?.addEventListener('click', (e: MouseEvent) => {
     if (!controlsVisible.value) return
     e.stopPropagation()
+    // …sauf le clic de compatibilité du tap qui vient d'ouvrir le tiroir (cf.
+    // revealControls) : il refermerait aussitôt ce qu'on vient d'ouvrir. On avale quand
+    // même l'événement (stopPropagation ci-dessus) pour qu'il n'aille pas endormir l'écran.
+    if (performance.now() - controlsShownAt < REVEAL_CLICK_GUARD_MS) return
     hideControls()
   }, true)
 

@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
+import { useNavLineWidth, widthRunsCollection } from '../navLineWidth'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
   haversine, bearingBetween, nearestGeomIndex, nearestGeomIndexPreferring, projectOnRoute,
@@ -165,6 +166,17 @@ function onManualZoom() {
   cameraUnlocked.value = true
 }
 
+// ─── Largeur du tracé selon le zoom ────────────────────────────────────────────
+// Loi base 2 ancrée sur le zoom de référence du profil, clampée (cf. navLineWidth). Défini
+// AVANT useNavPois, qui reçoit zoomWidthScale pour caler la taille des POI sur celle des virages.
+const { zoomWidthScale, zoomWidthExpr } = useNavLineWidth({
+  refZoom: navPrefs.zoom ?? 16.5,
+  minScale: 0.4,
+  maxScale: 2.4,
+  zoomMin: CAM_ZOOM_MIN,
+  zoomMax: CAM_ZOOM_MAX,
+})
+
 // ─── Filtres POI (panneau de séance) ──────────────────────────────────────────
 // Le sous-système POI (recherche Overpass, marqueurs, popup, Street View, mise à
 // l'échelle) vit dans useNavPois — il n'a aucun lien avec l'état de navigation. Le
@@ -294,34 +306,6 @@ const {
   direction: 'left',
 })
 
-// ─── Échelle largeur tracé / pastilles selon le zoom ───────────────────────────
-// Tracé et indicateurs de virage doivent se comporter comme un ruban posé au sol :
-// épais quand on zoome, fin quand on dézoome (et non l'inverse, ce que donnait une
-// largeur fixe en pixels). On suit donc une loi base 2 (chaque niveau de zoom
-// double l'échelle, soit une largeur au sol constante), ancrée sur le zoom par
-// défaut du profil pour que l'aspect à ce zoom soit identique à l'ancien réglage.
-// Les extrêmes sont clampés pour éviter un trait ridicule en zoom max / invisible
-// en dézoom total.
-const WIDTH_REF_ZOOM = navPrefs.zoom ?? 16.5
-const WIDTH_MIN_SCALE = 0.4
-const WIDTH_MAX_SCALE = 2.4
-function zoomWidthScale(z: number): number {
-  return Math.min(WIDTH_MAX_SCALE, Math.max(WIDTH_MIN_SCALE, 2 ** (z - WIDTH_REF_ZOOM)))
-}
-// Expression MapLibre `line-width` : stops à chaque niveau de zoom entier (clampés
-// aux bornes du suivi), interpolés linéairement. MapLibre clampe hors plage sur le
-// premier/dernier stop, ce qui borne naturellement la largeur.
-// `perFeature` : si vrai, chaque palier est multiplié par la propriété `wscale` de la feature
-// (largeur réduite sur les recouvrements). On garde `zoom` en entrée de l'interpolation de plus
-// haut niveau — seule forme acceptée par MapLibre pour une expression zoom + data-driven.
-function zoomWidthExpr(base: number, perFeature = false): any {
-  const stops: any[] = []
-  for (let z = CAM_ZOOM_MIN; z <= CAM_ZOOM_MAX; z++) {
-    const w = Math.round(base * zoomWidthScale(z) * 100) / 100
-    stops.push(z, perFeature ? ['*', w, ['get', 'wscale']] : w)
-  }
-  return ['interpolate', ['linear'], ['zoom'], ...stops]
-}
 
 // Live navigation state (reactive, drives the UI overlays)
 const remainingM = ref(0)
@@ -2307,30 +2291,6 @@ function maybeApplyMarkerScale() {
   lastScaleZoom = z
   applyMarkerScale()
   pois.applyPoiScale(z)
-}
-
-// Une LineString a une largeur uniforme : pour faire varier `wscale` le long du tracé, on le
-// découpe en tronçons de wscale ~constant (quantifié par paliers) et on porte la valeur en
-// propriété de feature, lue par line-width. Les tronçons partagent leur sommet frontière pour
-// rester jointifs. `scales` est aligné index-pour-index sur `coords`.
-function widthRunsCollection(coords: number[][], scales: number[]) {
-  const q = (w: number) => Math.round(w / 0.05) * 0.05   // paliers de 0.05 → peu de features
-  const seg = (c: number[][], wscale: number) =>
-    ({ type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: c }, properties: { wscale } })
-  const features: ReturnType<typeof seg>[] = []
-  if (coords.length < 2) return { type: 'FeatureCollection' as const, features }
-  let start = 0
-  let cur = q(scales[0] ?? 1)
-  for (let i = 1; i < coords.length; i++) {
-    const w = q(scales[i] ?? 1)
-    if (w !== cur) {
-      features.push(seg(coords.slice(start, i + 1), cur))   // inclut le sommet frontière i
-      start = i
-      cur = w
-    }
-  }
-  features.push(seg(coords.slice(start), cur))
-  return { type: 'FeatureCollection' as const, features }
 }
 
 function setMapStyle(id: string) {

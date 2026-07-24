@@ -182,9 +182,12 @@ onMounted(fetchRoutes)
 </template>
 
 <style scoped>
-/* Au-dessus du tiroir de commandes (z 8) et des notifications. */
+/* Au-dessus de TOUT ce que porte la page de navigation : le dialogue s'ouvre depuis le
+   tiroir de commandes, qui passe lui-même à 23 en mode panneau (et laisse son panneau
+   ouvert derrière), et doit aussi couvrir le toast POI (24) et le bandeau radar en
+   veille (25). */
 .nav-picker-backdrop {
-  position: absolute; inset: 0; z-index: 12;
+  position: absolute; inset: 0; z-index: 26;
   display: flex; align-items: flex-start; justify-content: center;
   padding: 1rem;
   background: rgba(0, 0, 0, 0.45);

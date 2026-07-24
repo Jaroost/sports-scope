@@ -1074,6 +1074,7 @@ fr:
     turn_now: "Maintenant"
     then: "puis"
     arrived: "Vous êtes arrivé"
+    leave_nav_confirm: "Un itinéraire est en cours. Quitter la navigation ?"
     nav_reset: "Réinitialiser la navigation"
     nav_reset_confirm: "Réinitialiser la navigation ? La progression mémorisée sera effacée."
     nav_reset_done: "Navigation réinitialisée"

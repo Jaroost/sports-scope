@@ -114,6 +114,15 @@ function goBack() {
   emit('update:activePanel', target)
 }
 
+// Sortie de la navigation : un tracé en cours (itinéraire chargé comme trajet vers un lieu,
+// les deux posent `routeLoaded`) se perd en quittant la page — le guidage s'arrête, et un
+// trajet calculé vers un lieu n'est nulle part sauvegardé. On demande donc confirmation
+// avant de suivre le lien. Sans tracé, rien à perdre : on sort directement.
+function onLeave(e: MouseEvent) {
+  if (!props.routeLoaded) return
+  if (!window.confirm(t('routes.leave_nav_confirm'))) e.preventDefault()
+}
+
 // Réinitialise l'état de navigation persisté (progressions de reprise mémorisées). Utile
 // quand les alertes de virage/arrivée déraillent sur un tracé auto-recoupant. Confirmation
 // car l'action efface la reprise en cours.
@@ -502,7 +511,13 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
     <!-- ── Mode barre : 4 boutons ──────────────────────────────────────────── -->
     <template v-else>
       <div class="nav-panel-group">
-        <a :href="`/routes`" class="btn btn-sm btn-light shadow-sm" :title="t('routes.back')" :aria-label="t('routes.back')">
+        <a
+          :href="`/routes`"
+          class="btn btn-sm btn-light shadow-sm"
+          :title="t('routes.back')"
+          :aria-label="t('routes.back')"
+          @click="onLeave"
+        >
           <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
         </a>
         <button
@@ -589,7 +604,12 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
 
 /* Mode panneau : le tiroir passe en colonne pour afficher le contenu du panneau actif.
    Il grandit vers le haut ; on borne sa hauteur et on laisse défiler le corps pour que
-   les longues listes (réglages, POI, fonds de carte) ne débordent pas de l'écran. */
+   les longues listes (réglages, POI, fonds de carte) ne débordent pas de l'écran.
+   z-index 23 (déclaré après --sleep pour l'emporter à égalité de spécificité) : la
+   feuille est haute et se ferait traverser par les boutons flottants de la page, tous
+   plus hauts que le tiroir replié — « recentrer » (22), le voile de veille (20/21), la
+   barre d'édition et la confirmation de destination (9). Le temps qu'on règle quelque
+   chose, la feuille prend toute la main. */
 .nav-controls-panel--panel {
   flex-direction: column;
   flex-wrap: nowrap;
@@ -597,6 +617,7 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
   align-items: stretch;
   gap: 0;
   max-height: 85svh;
+  z-index: 23;
 }
 
 /* En-tête du panneau actif : flèche retour + titre. */

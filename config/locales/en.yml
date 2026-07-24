@@ -1074,6 +1074,7 @@ en:
     turn_now: "Now"
     then: "then"
     arrived: "You have arrived"
+    leave_nav_confirm: "A route is in progress. Leave navigation?"
     nav_reset: "Reset navigation"
     nav_reset_confirm: "Reset navigation? Saved progress will be cleared."
     nav_reset_done: "Navigation reset"

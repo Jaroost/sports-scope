@@ -275,13 +275,16 @@ const poiBrowseHint = computed(() => {
 })
 
 function startPoiBrowse() {
-  activePanel.value = null
   const list = [...pois.visiblePlaces.value]
   if (lastPos) {
     const here = lastPos
     list.sort((a, b) => haversine(here, [a.lng, a.lat]) - haversine(here, [b.lng, b.lat]))
   }
   if (list.length === 0) return
+  // Le parcours prend la carte et le bas de l'écran : on referme le tiroir tout de suite
+  // (sans attendre l'auto-masquage) pour dégager la vue et laisser la place au bandeau de
+  // parcours. Rien à masquer si la liste est vide : on n'arrive pas ici.
+  hideControls()
   poiBrowseAll.value = list
   poiBrowseFilter.value = null   // on parcourt toutes les catégories par défaut
   poiBrowseIndex.value = 0
@@ -305,7 +308,19 @@ function focusBrowsePlace() {
   // `if (following.value)`), seul le marqueur de position continue de bouger.
   following.value = false
   cameraUnlocked.value = true
-  map.flyTo({ center: [place.lng, place.lat], zoom: 16, pitch: 0, bearing: 0, duration: 700 })
+  // La moitié basse de l'écran est occupée (bandeau de parcours, barre du bas, tiroir de
+  // commandes déployé depuis le bas) : on cadre le POI au centre de la moitié HAUTE, via
+  // un padding bas d'une demi-hauteur, pour le voir avec sa bulle. Le padding reste posé
+  // sur la caméra, mais toute reprise du suivi le réécrit (cf. followPadding).
+  const h = containerH || map.getContainer()?.clientHeight || 0
+  map.flyTo({
+    center: [place.lng, place.lat],
+    zoom: 16,
+    pitch: 0,
+    bearing: 0,
+    duration: 700,
+    padding: { top: 0, bottom: Math.round(h / 2), left: 0, right: 0 },
+  })
   pois.openPlacePopup(place)
 }
 
@@ -2124,6 +2139,18 @@ async function initMap() {
   // Sur 'render' (et non 'zoom') avec garde sur le delta : fiable pour toute origine
   // de zoom, sans coût notable à zoom constant.
   map.on('render', maybeApplyMarkerScale)
+  // Tiroir de commandes ouvert : le premier clic sur la carte ne fait que le refermer,
+  // comme un clic hors d'un menu déroulant — sans poser de point d'étape, ouvrir un POI
+  // ni mettre en veille. Posé en CAPTURE sur le conteneur : il passe avant les
+  // gestionnaires de MapLibre ET avant ceux des marqueurs / popups (marqueur POI, point
+  // d'ancrage…), qui vivent dans le conteneur mais ne déclenchent pas map.on('click').
+  // Un simple déplacement de carte ne produit pas de clic : le tiroir y survit.
+  mapEl.value?.addEventListener('click', (e: MouseEvent) => {
+    if (!controlsVisible.value) return
+    e.stopPropagation()
+    hideControls()
+  }, true)
+
   // Tap simple sur la carte → mode veille (la boucle rAF s'arrête, le wake lock est libéré).
   // L'overlay noir capte le tap de réveil ; pas de conflit car il est au z-index 20.
   map.on('click', (e: any) => {
@@ -2131,9 +2158,8 @@ async function initMap() {
     if (suppressNextMapClick) { suppressNextMapClick = false; return }
     // Tooltip « point quelconque » ouverte : un tap ne fait que la refermer.
     if (coordPopup) { closeCoordPopup(); return }
-    // Tiroir de commandes ouvert : un tap carte le referme d'abord (sans poser de point
-    // ni mettre en veille), y compris en mode édition / cible. Priorité sur tout le reste.
-    if (controlsVisible.value) { hideControls(); return }
+    // Le tiroir de commandes ouvert absorbe le tap en amont (cf. le gestionnaire en
+    // capture sur le conteneur de carte, plus bas) : on n'arrive jamais ici tiroir ouvert.
     // Mode édition : un tap pose un nouveau point d'ancrage (ou referme la tooltip d'un
     // point ouverte) au lieu de mettre en veille.
     if (editMode.value) {
@@ -3324,7 +3350,13 @@ function onScreenOffTap() {
        occupe le bas de l'écran — les overlays du bas remontent d'autant pour rester
        lisibles (cf. --nav-bottom-inset). En mode panneau, la feuille est haute et les
        recouvre volontairement : on règle quelque chose, la carte passe au second plan. -->
-  <div class="nav-page" :class="{ 'nav-page--drawer': controlsVisible && activePanel === null }">
+  <div
+    class="nav-page"
+    :class="{
+      'nav-page--drawer': controlsVisible && activePanel === null,
+      'nav-page--nobar': hasRoute && !bottomOverlaysVisible,
+    }"
+  >
     <div ref="mapEl" class="nav-map" :class="{ 'nav-map--climbing': isClimbing }"></div>
 
     <!-- Battery saver: black screen — GPS and turn sounds still active -->
@@ -3620,9 +3652,12 @@ function onScreenOffTap() {
     </div>
 
     <!-- Recenter button. Masqué en mode recherche : recentrer sur l'utilisateur
-         annulerait la vue sur le lieu cherché et chevaucherait « Naviguer ici ». -->
+         annulerait la vue sur le lieu cherché et chevaucherait « Naviguer ici ». Masqué
+         de même pendant le parcours des POI, où la caméra vole volontairement de POI en
+         POI : le bouton apparaîtrait à chaque vol (la caméra n'est plus asservie) et
+         recentrer ferait perdre le POI qu'on est en train de regarder. -->
     <button
-      v-if="!following && hasFix && !placeNavActive && !editMode"
+      v-if="!following && hasFix && !placeNavActive && !editMode && !poiBrowseActive"
       type="button"
       class="btn btn-warning shadow nav-recenter"
       @click="recenter"
@@ -3665,17 +3700,18 @@ function onScreenOffTap() {
     />
 
     <!-- Bottom stats : barre complète (distance / D+ / ETA / progression) en navigation
-         sur itinéraire (masquable par le geste du bas) ; en navigation libre, carte
-         réduite à la vitesse. -->
+         sur itinéraire (masquable par le geste latéral) ; en navigation libre, carte
+         réduite à la vitesse. Escamotée pendant le parcours des POI, où le bandeau de
+         parcours prend sa place tout en bas. -->
     <NavStatsBar
-      v-if="hasRoute && bottomOverlaysVisible"
+      v-if="hasRoute && bottomOverlaysVisible && !poiBrowseActive"
       :remaining-m="remainingM"
       :remaining-gain-m="remainingGainM"
       :done-percent="donePercent"
       :speed-kmh="speedKmh"
       :eta-speed-kmh="avgSpeedKmh"
     />
-    <div v-else-if="!hasRoute" class="nav-stats nav-stats--free shadow">
+    <div v-else-if="!hasRoute && !poiBrowseActive" class="nav-stats nav-stats--free shadow">
       <div class="nav-stat-value">{{ Math.round(speedKmh) }}<span class="nav-stat-unit"> km/h</span></div>
       <div class="nav-stat-label">{{ t('routes.speed') }}</div>
     </div>
@@ -3687,7 +3723,10 @@ function onScreenOffTap() {
     <div
       v-if="!controlsVisible"
       class="nav-menu-reveal-zone"
-      :class="{ 'nav-menu-reveal-zone--sleep': screenOff }"
+      :class="{
+        'nav-menu-reveal-zone--sleep': screenOff,
+        'nav-menu-reveal-zone--browse': poiBrowseActive,
+      }"
       @pointerdown="onMenuDown"
       @pointermove="onMenuMove"
       @pointerup="onMenuUp"
@@ -3730,6 +3769,10 @@ function onScreenOffTap() {
      composants enfants : les variables CSS traversent les styles scopés. Hauteur de la
      barre = 0.75rem de padding × 2 + 3.25rem de bouton. */
   --nav-bottom-inset: 0rem;
+  /* Hauteur réservée au-dessus de la barre du bas (avancement ou vitesse) pour le bouton
+     « recentrer », qui se pose sur son bord supérieur. Tombe à ras du bord quand la barre
+     est escamotée (cf. nav-page--nobar). */
+  --nav-bar-clearance: 5.75rem;
   /* Fond visible sous la carte rétrécie pendant un col (autour des panneaux). */
   background: #e9ecef;
   /* svh = smallest visible viewport (browser chrome expanded). The page never
@@ -3741,6 +3784,9 @@ function onScreenOffTap() {
   overflow: hidden;
 }
 .nav-page--drawer { --nav-bottom-inset: 4.75rem; }
+/* Overlays du bas escamotés (geste de droite à gauche) : plus de barre d'avancement à
+   surplomber, le bouton « recentrer » descend au ras du coin bas-gauche. */
+.nav-page--nobar { --nav-bar-clearance: 0.9rem; }
 .nav-map { position: absolute; inset: 0; }
 /* Pendant un col, la carte se rétrécit pour laisser le bas de l'écran à la carte du
    col (bottom: 6.25rem, hauteur ≈ 16rem) : la flèche reste dans la carte visible. */
@@ -3786,6 +3832,10 @@ function onScreenOffTap() {
    qu'un swipe vers le haut ouvre le tiroir écran éteint (le tiroir lui-même passe aussi
    au-dessus du voile, cf. nav-controls-panel--sleep). */
 .nav-menu-reveal-zone--sleep { z-index: 21; }
+/* Parcours des POI : le bandeau de parcours occupe le bas et passe devant (z 9). La zone
+   de geste se replie juste au-dessus de lui pour rester utilisable — et sa poignée
+   visible — sans lui voler ses taps. */
+.nav-menu-reveal-zone--browse { bottom: 5rem; height: 2.4rem; }
 /* Chevron discret indiquant qu'on peut faire glisser vers le haut pour déployer le
    tiroir de commandes. */
 .nav-menu-grabber {
@@ -3863,7 +3913,9 @@ function onScreenOffTap() {
    panneaux (z 10), non interactif. Vert si abouti, rouge si échec. */
 .nav-toast {
   position: absolute; top: 4.5rem; left: 50%; transform: translateX(-50%);
-  z-index: 10; display: flex; align-items: center; gap: 0.5rem;
+  /* z-index 24 : au-dessus de la feuille de réglages (23), d'où partent justement les
+     recherches de POI dont ce toast rend compte. */
+  z-index: 24; display: flex; align-items: center; gap: 0.5rem;
   padding: 0.5rem 1rem; border-radius: 999px;
   font-weight: 600; font-size: 0.9rem; white-space: nowrap;
   color: #fff; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
@@ -3877,11 +3929,12 @@ function onScreenOffTap() {
 /* Bouton recentrer : calé à gauche, JUSTE AU-DESSUS de la barre du bas (avancement ou
    vitesse) — le bas de l'écran appartient désormais au geste d'ouverture du tiroir, qui
    couvre toute cette barre. Aligné sur sa marge latérale (0.75rem) et posé sur son bord
-   supérieur (0.75rem d'écart + ~4.7rem de barre). Au-dessus de TOUS les autres éléments
-   (z-index 22 > voile de veille 20/21 et marqueurs POI 1) pour rester toujours
-   accessible. */
+   supérieur (--nav-bar-clearance : 0.75rem d'écart + ~4.7rem de barre, ramené au ras du
+   bord quand la barre est escamotée). Remonte encore du tiroir déployé
+   (--nav-bottom-inset). Au-dessus de TOUS les autres éléments (z-index 22 > voile de
+   veille 20/21 et marqueurs POI 1) pour rester toujours accessible. */
 .nav-recenter {
-  position: absolute; bottom: calc(5.75rem + var(--nav-bottom-inset)); left: 0.75rem; z-index: 22;
+  position: absolute; bottom: calc(var(--nav-bar-clearance) + var(--nav-bottom-inset)); left: 0.75rem; z-index: 22;
   transition: bottom 0.28s ease;
   border-radius: 999px; font-weight: 700;
   font-size: 1.35rem; padding: 0.85rem 1.8rem;

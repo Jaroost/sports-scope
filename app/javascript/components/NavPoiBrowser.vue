@@ -148,15 +148,17 @@ function pick(key: string | null) {
 </template>
 
 <style scoped>
-/* Bandeau de parcours : pleine largeur en bas, à la même hauteur que la notification de
-   proximité (NavPoiBanner, bottom: 6rem) qu'il remplace pendant le parcours. z-index 7 :
-   au-dessus de la barre de stats (6) et de TOUTE la couche de marqueurs de la carte. */
+/* Bandeau de parcours : pleine largeur, collé TOUT EN BAS — pendant le parcours il est le
+   seul habitant du bas de l'écran (la barre d'avancement / vitesse est escamotée, cf.
+   RouteNavigation) et c'est lui qu'on pilote au pouce. z-index 9 : au-dessus de la zone de
+   geste d'ouverture du tiroir (8), qui couvre justement cette bande — sans quoi ses
+   boutons et son menu de catégories ne recevraient plus les taps. */
 .nav-poi-browser {
   /* --nav-bottom-inset (posé par RouteNavigation, hérité au travers des styles scopés)
      remonte le bandeau au-dessus du tiroir de commandes quand il est déployé en bas. */
-  position: absolute; left: 0.75rem; right: 0.75rem; bottom: calc(6rem + var(--nav-bottom-inset, 0rem));
+  position: absolute; left: 0.75rem; right: 0.75rem; bottom: calc(0.75rem + var(--nav-bottom-inset, 0rem));
   transition: bottom 0.28s ease;
-  z-index: 7;
+  z-index: 9;
   display: flex; align-items: center; gap: 0.5rem;
   background: #fff; padding: 0.55rem 0.6rem; border-radius: 1rem;
 }

@@ -947,6 +947,7 @@ en:
     back: "Back to list"
     navigate: "Navigate"
     navigate_title: "Navigation"
+    resume_navigation: "Resume navigation"
     route_panel: "Route"
     load_route: "Load a route"
     unload_route: "Stop following the route"

@@ -11,13 +11,17 @@
   </div>
 
   <% if user_signed_in? %>
-    <%# Bouton unique « Tout rafraîchir » : synchronise résumés + vélos + streams et
-        notifie les widgets ci-dessous (via un événement window) de se recharger. %>
-    <% if current_user.strava_linked? %>
-      <div class="mb-4">
+    <%# Rangée d'actions. « Tout rafraîchir » : synchronise résumés + vélos + streams et
+        notifie les widgets ci-dessous (via un événement window) de se recharger — sans
+        Strava lié, il n'y a rien à synchroniser. « Reprendre la navigation » : l'îlot ne
+        s'affiche que s'il trouve une séance en cours dans le localStorage (invisible
+        côté serveur), d'où un montage inconditionnel. %>
+    <div class="mb-4 d-flex flex-wrap justify-content-center align-items-center gap-2">
+      <% if current_user.strava_linked? %>
         <div data-vue-component="RefreshAll"></div>
-      </div>
-    <% end %>
+      <% end %>
+      <div data-vue-component="ResumeNavigation" data-vue-props='<%= { href: free_navigate_path }.to_json %>'></div>
+    </div>
     <%# Plan du jour : sortie objectif + « que faire aujourd'hui » (charge d'entraînement).
         Nécessite des activités (Strava ou .fit) ET l'interrupteur du profil (masquable). %>
     <% if (current_user.strava_linked? || current_user.imported_activities.exists?) &&
@@ -55,11 +59,15 @@
   <% else %>
 
     <p class="lead text-muted"><%= t("pages.home_lead") %></p>
-    <p>
+    <%# La navigation ne demande pas de compte : une séance interrompue doit pouvoir être
+        reprise sans se reconnecter. L'îlot ne s'affiche que s'il trouve une séance en
+        cours dans le localStorage (cf. ResumeNavigation). %>
+    <div class="mb-3 d-flex flex-wrap justify-content-center align-items-center gap-2">
       <%= button_to "/auth/keycloak", method: :post, class: "btn btn-primary btn-lg home-button", data: { turbo: false } do %>
         <i class="fa-solid fa-right-to-bracket me-2" aria-hidden="true"></i><%= t("nav.login") %>
       <% end %>
-    </p>
+      <div data-vue-component="ResumeNavigation" data-vue-props='<%= { href: free_navigate_path }.to_json %>'></div>
+    </div>
 
     <div class="row g-3 mt-5 home-features text-start">
       <div class="col-md-6 col-lg-3">

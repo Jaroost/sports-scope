@@ -947,6 +947,7 @@ fr:
     back: "Retour à la liste"
     navigate: "Naviguer"
     navigate_title: "Navigation"
+    resume_navigation: "Reprendre la navigation"
     route_panel: "Itinéraire"
     load_route: "Charger un itinéraire"
     unload_route: "Ne plus suivre l'itinéraire"

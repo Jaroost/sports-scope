@@ -14,6 +14,7 @@ import ChainWax from './components/ChainWax.vue'
 import PerformanceAnalysis from './components/PerformanceAnalysis.vue'
 import TodayPlanWidget from './components/TodayPlanWidget.vue'
 import RefreshAll from './components/RefreshAll.vue'
+import ResumeNavigation from './components/ResumeNavigation.vue'
 import SharedRoutePreviewMap from './components/SharedRoutePreviewMap.vue'
 
 const registry: Record<string, Component> = {
@@ -32,6 +33,7 @@ const registry: Record<string, Component> = {
   PerformanceAnalysis,
   TodayPlanWidget,
   RefreshAll,
+  ResumeNavigation,
   SharedRoutePreviewMap,
 }
 

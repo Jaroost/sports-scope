@@ -559,31 +559,44 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
 </template>
 
 <style scoped>
+/* Tiroir de commandes : feuille ancrée en BAS de l'écran (le pouce y accède sans lâcher
+   le guidon), déployée par un swipe vers le haut. Le haut de l'écran reste libre pour
+   les notifications pleine largeur (virage / radar). */
 .nav-controls-panel {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 8;
-  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 0.6rem;
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 8;
+  display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 0.6rem;
   padding: 0.75rem;
   background: rgba(255, 255, 255, 0.94);
-  border-bottom-left-radius: 1rem; border-bottom-right-radius: 1rem;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  border-top-left-radius: 1rem; border-top-right-radius: 1rem;
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.18);
   transition: transform 0.28s ease, opacity 0.28s ease;
 }
-.nav-panel-group { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.6rem; }
+.nav-panel-group { display: flex; flex-wrap: nowrap; align-items: center; gap: 0.6rem; }
 .nav-panel-group--right { flex: 1 1 auto; justify-content: flex-end; }
+/* Écrans très étroits (< 352 px) : les 5 boutons de la barre tiennent tout juste sur une
+   ligne. On resserre plutôt que de repasser en deux lignes — la hauteur de la barre est
+   supposée constante par --nav-bottom-inset (cf. RouteNavigation). */
+@media (max-width: 22rem) {
+  .nav-controls-panel { padding: 0.5rem; gap: 0.4rem; }
+  .nav-panel-group { gap: 0.4rem; }
+}
 .nav-controls-panel--hidden {
-  transform: translateY(-110%);
+  transform: translateY(110%);
   opacity: 0;
   pointer-events: none;
 }
 .nav-controls-panel--sleep { z-index: 21; }
 
-/* Mode panneau : le tiroir passe en colonne pour afficher le contenu du panneau actif. */
+/* Mode panneau : le tiroir passe en colonne pour afficher le contenu du panneau actif.
+   Il grandit vers le haut ; on borne sa hauteur et on laisse défiler le corps pour que
+   les longues listes (réglages, POI, fonds de carte) ne débordent pas de l'écran. */
 .nav-controls-panel--panel {
   flex-direction: column;
   flex-wrap: nowrap;
   justify-content: flex-start;
   align-items: stretch;
   gap: 0;
+  max-height: 85svh;
 }
 
 /* En-tête du panneau actif : flèche retour + titre. */
@@ -592,6 +605,7 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
   align-items: center;
   gap: 0.75rem;
   margin-bottom: 0.75rem;
+  flex-shrink: 0;
 }
 .nav-panel-title {
   font-size: 1rem;
@@ -599,11 +613,21 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
   color: #343a40;
 }
 
-/* Corps du panneau : contenu pleine largeur, colonnes verticales. */
+/* Corps du panneau : contenu pleine largeur, colonnes verticales. Défilant (la feuille
+   est bornée en hauteur) ; overscroll-behavior empêche le geste de propager un scroll
+   à la page une fois la liste au bout. */
 .nav-panel-body {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  /* min-height: 0 — sans ça un enfant flex refuse de descendre sous la hauteur de son
+     contenu et le défilement ne s'amorce jamais. overflow-x: hidden rogne le surlignage
+     débordant des lignes de réglages au survol plutôt que d'ouvrir une barre horizontale. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .nav-controls-panel :deep(.btn) {

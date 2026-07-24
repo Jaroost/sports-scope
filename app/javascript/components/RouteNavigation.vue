@@ -340,28 +340,44 @@ const screenOff = ref(false)
 // ─── Auto-masquage des boutons (interface épurée en séance) ────────────────────
 // Les commandes (retour, style de carte, son, radar, caméra, POI) encombrent la
 // vue une fois la séance lancée. On les affiche au démarrage (découvrabilité) puis
-// on les estompe après quelques secondes d'inactivité ; un swipe vers le bas depuis
-// le haut de l'écran les rappelle (le tap simple reste dédié à la mise en veille).
-// On ne masque pas tant qu'un sous-panneau (caméra / POI / débug) est ouvert. Voir
-// useControlsHide.
+// on les estompe après quelques secondes d'inactivité ; un swipe vers le haut depuis
+// le bas de l'écran les rappelle. On ne masque pas tant qu'un sous-panneau (caméra /
+// POI / débug) est ouvert. Voir useControlsHide.
 const { controlsVisible, armControlsHide, showControls, hideControls } = useControlsHide({
   isPanelOpen: () => activePanel.value !== null,
   closePanels: () => { activePanel.value = null },
 })
 
-// ─── Geste de révélation (swipe vers le bas depuis le bandeau haut) ────────────
-// Swipe → rappelle les boutons (y compris en veille, par-dessus le voile noir) ; tap
-// quasi immobile → bascule la veille dans les deux sens (endort hors veille, réveille
-// en veille, comme un tap n'importe où sur le voile). Voir useRevealGesture.
+// ─── Zone de veille (bandeau haut) ────────────────────────────────────────────
+// Le tiroir de commandes vit maintenant en bas : la bande haute n'est plus qu'une zone
+// de tap, dédiée à la veille (endort hors veille, réveille en veille, comme un tap
+// n'importe où sur le voile). Aucun swipe à y écouter. Voir useRevealGesture.
 const { onRevealDown, onRevealMove, onRevealUp, cancel: cancelReveal } = useRevealGesture({
-  onReveal: showControls,
   onTap: () => toggleScreenOffManual(),
   canTap: () => true,
 })
 
+// ─── Geste de révélation du tiroir (swipe vers le haut depuis le bord bas) ─────
+// Swipe vers le haut → rappelle le tiroir de commandes, y compris en veille, par-dessus
+// le voile noir. La zone couvre toute la barre du bas ; en veille, elle recouvre donc
+// l'indice « tap pour reprendre » du voile : le tap y garde la sémantique du voile
+// (réveil) et seul le swipe ouvre le tiroir. Voir useRevealGesture.
+const {
+  onRevealDown: onMenuDown,
+  onRevealMove: onMenuMove,
+  onRevealUp: onMenuUp,
+  cancel: cancelMenuReveal,
+} = useRevealGesture({
+  onReveal: showControls,
+  onTap: () => { if (screenOff.value) toggleScreenOffManual(); else showControls() },
+  canTap: () => true,
+  direction: 'up',
+})
+
 // ─── Masquage groupé des overlays du bas (cols / POI / avancement) ─────────────
-// Un swipe vers le haut depuis le bord inférieur (ou un tap sur la poignée) bascule la
-// visibilité de TOUS les overlays du bas d'un coup, pour dégager la carte.
+// Un swipe de droite à gauche depuis le bord droit (ou un tap sur la poignée) bascule la
+// visibilité de TOUS les overlays du bas d'un coup, pour dégager la carte. Geste
+// horizontal : le vertical est pris par le tiroir de commandes, juste en dessous.
 const bottomOverlaysVisible = ref(true)
 const {
   onRevealDown: onBottomDown,
@@ -372,7 +388,7 @@ const {
   onReveal: () => { bottomOverlaysVisible.value = !bottomOverlaysVisible.value },
   onTap: () => { bottomOverlaysVisible.value = !bottomOverlaysVisible.value },
   canTap: () => true,
-  direction: 'up',
+  direction: 'left',
 })
 
 // ─── Échelle largeur tracé / pastilles selon le zoom ───────────────────────────
@@ -3294,7 +3310,7 @@ function toggleScreenOffManual() {
   toggleScreenOff()
 }
 
-// Tap sur le voile de veille (en dehors du tiroir du haut, qui passe au-dessus). Si le
+// Tap sur le voile de veille (en dehors du tiroir du bas, qui passe au-dessus). Si le
 // tiroir est ouvert, ce premier tap se contente de le refermer — sans quitter la veille,
 // comme un clic hors d'un menu déroulant. Sinon (tiroir fermé), on réveille l'écran.
 function onScreenOffTap() {
@@ -3304,7 +3320,11 @@ function onScreenOffTap() {
 </script>
 
 <template>
-  <div class="nav-page">
+  <!-- nav-page--drawer : le tiroir de commandes est déployé en barre (pas en panneau) et
+       occupe le bas de l'écran — les overlays du bas remontent d'autant pour rester
+       lisibles (cf. --nav-bottom-inset). En mode panneau, la feuille est haute et les
+       recouvre volontairement : on règle quelque chose, la carte passe au second plan. -->
+  <div class="nav-page" :class="{ 'nav-page--drawer': controlsVisible && activePanel === null }">
     <div ref="mapEl" class="nav-map" :class="{ 'nav-map--climbing': isClimbing }"></div>
 
     <!-- Battery saver: black screen — GPS and turn sounds still active -->
@@ -3330,9 +3350,10 @@ function onScreenOffTap() {
       <i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>{{ error }}
     </div>
 
-    <!-- Zone de swipe (révèle les boutons masqués) : fine bande transparente en haut,
-         active dès que les boutons sont masqués (y compris en veille, où elle passe
-         au-dessus du voile noir pour permettre d'ouvrir le tiroir du haut écran éteint). -->
+    <!-- Zone de veille : fine bande transparente en haut, où un tap bascule la veille
+         dans les deux sens. Active dès que le tiroir est replié (quand il est ouvert,
+         l'utilisateur règle quelque chose : un tap au bord haut ne doit pas endormir
+         l'écran) ; en veille elle passe au-dessus du voile noir pour réveiller. -->
     <div
       v-if="!controlsVisible"
       class="nav-reveal-zone"
@@ -3341,16 +3362,12 @@ function onScreenOffTap() {
       @pointermove="onRevealMove"
       @pointerup="onRevealUp"
       @pointercancel="cancelReveal"
-    >
-      <span class="nav-reveal-grabber" aria-hidden="true">
-        <i class="fa-solid fa-chevron-down"></i>
-      </span>
-    </div>
+    ></div>
 
-    <!-- Panneau de commandes : glisse depuis le haut au swipe vers le bas. Regroupe
-         TOUS les boutons (retour, profil, style de carte, son, radar, caméra, POI)
-         pour libérer le haut de l'écran aux notifications pleine largeur (virage /
-         radar). Masqué hors séance, rappelé par la zone de swipe. -->
+    <!-- Panneau de commandes : feuille qui glisse depuis le BAS au swipe vers le haut.
+         Regroupe TOUS les boutons (retour, profil, style de carte, son, radar, caméra,
+         POI) — à portée de pouce, et le haut de l'écran reste aux notifications pleine
+         largeur (virage / radar). Masqué hors séance, rappelé par la zone de swipe. -->
     <NavControlsPanel
       :controls-visible="controlsVisible"
       :screen-off="screenOff"
@@ -3663,12 +3680,31 @@ function onScreenOffTap() {
       <div class="nav-stat-label">{{ t('routes.speed') }}</div>
     </div>
 
-    <!-- Masquage groupé des overlays du bas : une fine zone au bord inférieur capte le
-         swipe vers le haut (ou un tap) et bascule la visibilité de tous les overlays du
-         bas. Disponible aussi en veille (pour masquer la carte de col écran éteint, comme
-         hors veille) ; masquée seulement en recherche / édition. Le chevron pointe vers le
-         bas quand tout est visible (geste → masquer) et vers le haut quand c'est masqué
-         (geste → réafficher). -->
+    <!-- Révélation du tiroir de commandes : zone alignée sur la barre du bas (avancement /
+         vitesse) qui capte le swipe vers le haut (ou un tap), poignée centrée au bord
+         inférieur. Active tant que le tiroir est replié, y compris en veille (elle passe
+         alors au-dessus du voile noir, comme le tiroir lui-même). -->
+    <div
+      v-if="!controlsVisible"
+      class="nav-menu-reveal-zone"
+      :class="{ 'nav-menu-reveal-zone--sleep': screenOff }"
+      @pointerdown="onMenuDown"
+      @pointermove="onMenuMove"
+      @pointerup="onMenuUp"
+      @pointercancel="cancelMenuReveal"
+    >
+      <span class="nav-menu-grabber" aria-hidden="true">
+        <i class="fa-solid fa-chevron-up"></i>
+      </span>
+    </div>
+
+    <!-- Masquage groupé des overlays du bas : une fine zone au bord DROIT capte le swipe
+         de droite à gauche (ou un tap) et bascule la visibilité de tous les overlays du
+         bas. Geste horizontal — le vertical est pris par le tiroir de commandes, juste en
+         dessous. Disponible aussi en veille (pour masquer la carte de col écran éteint,
+         comme hors veille) ; masquée seulement en recherche / édition. Le chevron pointe
+         vers la droite quand tout est visible (geste → masquer) et vers la gauche quand
+         c'est masqué (geste → réafficher). -->
     <div
       v-if="hasRoute && !placeNavActive && !editMode"
       class="nav-bottom-reveal-zone"
@@ -3679,7 +3715,7 @@ function onScreenOffTap() {
       @pointercancel="cancelBottomReveal"
     >
       <span class="nav-bottom-grabber" aria-hidden="true">
-        <i class="fa-solid" :class="bottomOverlaysVisible ? 'fa-chevron-down' : 'fa-chevron-up'"></i>
+        <i class="fa-solid" :class="bottomOverlaysVisible ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
       </span>
     </div>
   </div>
@@ -3689,6 +3725,11 @@ function onScreenOffTap() {
 .nav-page {
   position: relative;
   width: 100%;
+  /* Décalage vers le haut des overlays ancrés en bas (stats, carte de col, bandeau POI,
+     recentrer) quand le tiroir de commandes occupe le bas en mode barre. Hérité par les
+     composants enfants : les variables CSS traversent les styles scopés. Hauteur de la
+     barre = 0.75rem de padding × 2 + 3.25rem de bouton. */
+  --nav-bottom-inset: 0rem;
   /* Fond visible sous la carte rétrécie pendant un col (autour des panneaux). */
   background: #e9ecef;
   /* svh = smallest visible viewport (browser chrome expanded). The page never
@@ -3699,10 +3740,11 @@ function onScreenOffTap() {
   height: 100svh;
   overflow: hidden;
 }
+.nav-page--drawer { --nav-bottom-inset: 4.75rem; }
 .nav-map { position: absolute; inset: 0; }
 /* Pendant un col, la carte se rétrécit pour laisser le bas de l'écran à la carte du
    col (bottom: 6.25rem, hauteur ≈ 16rem) : la flèche reste dans la carte visible. */
-.nav-map--climbing { bottom: 22.75rem; }
+.nav-map--climbing { bottom: calc(22.75rem + var(--nav-bottom-inset)); }
 
 .nav-overlay-center {
   position: absolute; inset: 0;
@@ -3711,54 +3753,71 @@ function onScreenOffTap() {
   z-index: 5; font-weight: 500;
 }
 
-/* Zone de geste « swipe vers le bas » : bande transparente en haut de l'écran.
-   touch-action:none pour que le glissement vertical déclenche bien pointermove au
-   lieu d'un scroll. Au-dessus de la carte mais sous le voile de veille (z-index 20). */
+/* Zone de veille : bande transparente en haut de l'écran, sensible au seul tap (le
+   tiroir de commandes est en bas). touch-action:none pour que le geste ne parte pas en
+   scroll. Au-dessus de la carte mais sous le voile de veille (z-index 20). */
 .nav-reveal-zone {
   position: absolute; top: 0; left: 0; right: 0; height: 6rem;
   z-index: 6; touch-action: none;
-  display: flex; justify-content: center; align-items: flex-start;
 }
-/* En veille, le voile noir (z 20) recouvre tout : on remonte la zone de geste au-dessus
-   pour qu'un swipe vers le bas ouvre le tiroir du haut écran éteint (le tiroir lui-même
-   passe aussi au-dessus du voile, cf. nav-controls-panel--sleep). */
+/* En veille, le voile noir (z 20) recouvre tout : on remonte la zone au-dessus pour
+   qu'un tap au bord haut réveille l'écran. */
 .nav-reveal-zone--sleep { z-index: 21; }
-/* Fond sombre du grabber confondu avec le voile : on l'éclaircit en veille. */
-.nav-reveal-zone--sleep .nav-reveal-grabber { background: rgba(255, 255, 255, 0.25); }
-/* Petit chevron discret indiquant qu'on peut faire glisser vers le bas pour déployer
-   le tiroir de commandes. Centré sur le bord supérieur. */
-.nav-reveal-grabber {
-  margin-top: 0.35rem;
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 2.4rem; height: 1.3rem; border-radius: 999px;
-  background: rgba(0, 0, 0, 0.28); color: #fff; font-size: 0.7rem;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
-  animation: nav-reveal-pulse 2.4s ease-in-out infinite;
-}
+
 @keyframes nav-reveal-pulse {
   0%, 100% { opacity: 0.35; }
   50% { opacity: 0.7; }
 }
 
-/* Zone de geste « swipe vers le haut » du tiroir du bas : petit grabber centré au bord
-   inférieur (étroit pour ne pas capter les taps sur la barre de stats au-dessus).
+/* Zone de geste « swipe vers le haut » du tiroir de commandes : couvre toute la barre du
+   bas (avancement en navigation sur itinéraire, vitesse en navigation libre) — on part du
+   pouce posé sur les chiffres, sans viser une poignée de la taille d'un timbre. Alignée
+   sur cette barre (mêmes marges latérales, hauteur = 0.75rem d'écart + ~4.7rem de barre).
    touch-action:none pour que le glissement vertical déclenche pointermove. z-index 8 :
-   au-dessus des overlays du bas (stats z6, POI z7), sous le tiroir lui-même (z9). */
-.nav-bottom-reveal-zone {
-  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: 6rem; height: 2.2rem; z-index: 8; touch-action: none;
+   au-dessus des overlays du bas (stats z6, POI z7 — qui commence à 6rem, juste au-dessus
+   de la zone), au niveau du tiroir lui-même — qu'elle ne côtoie jamais, l'un n'existant
+   que quand l'autre est replié. */
+.nav-menu-reveal-zone {
+  position: absolute; bottom: 0; left: 0.75rem; right: 0.75rem;
+  height: 5.5rem; z-index: 8; touch-action: none;
   display: flex; justify-content: center; align-items: flex-end;
 }
-/* En veille, le voile noir (z 20) recouvre tout : on remonte la zone de geste au-dessus
-   (comme la carte de col à z 21) pour qu'un swipe vers le haut puisse masquer la carte
-   de col écran éteint. */
-.nav-bottom-reveal-zone--sleep { z-index: 21; }
+/* En veille, le voile noir (z 20) recouvre tout : on remonte la zone au-dessus pour
+   qu'un swipe vers le haut ouvre le tiroir écran éteint (le tiroir lui-même passe aussi
+   au-dessus du voile, cf. nav-controls-panel--sleep). */
+.nav-menu-reveal-zone--sleep { z-index: 21; }
 /* Chevron discret indiquant qu'on peut faire glisser vers le haut pour déployer le
-   tiroir d'affichage. */
-.nav-bottom-grabber {
+   tiroir de commandes. */
+.nav-menu-grabber {
   margin-bottom: 0.2rem;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 2.4rem; height: 1.3rem; border-radius: 999px;
+  width: 2.8rem; height: 1.3rem; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28); color: #fff; font-size: 0.7rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  animation: nav-reveal-pulse 2.4s ease-in-out infinite;
+}
+/* Fond sombre du grabber confondu avec le voile : on l'éclaircit en veille. */
+.nav-menu-reveal-zone--sleep .nav-menu-grabber { background: rgba(255, 255, 255, 0.25); }
+
+/* Zone de geste « swipe de droite à gauche » du masquage des overlays du bas : poignée
+   collée au bord DROIT, à mi-hauteur. Horizontale parce que le vertical est pris par le
+   tiroir de commandes, en bas. touch-action:none pour que le glissement déclenche
+   pointermove plutôt qu'un pan de carte. z-index 8 : au-dessus des overlays du bas
+   (stats z6, POI z7). */
+.nav-bottom-reveal-zone {
+  position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: 2.4rem; height: 8rem; z-index: 8; touch-action: none;
+  display: flex; justify-content: flex-end; align-items: center;
+}
+/* En veille, le voile noir (z 20) recouvre tout : on remonte la zone de geste au-dessus
+   (comme la carte de col à z 21) pour pouvoir masquer la carte de col écran éteint. */
+.nav-bottom-reveal-zone--sleep { z-index: 21; }
+/* Chevron discret indiquant qu'on peut balayer vers la gauche pour escamoter les
+   overlays du bas (et les rappeler). */
+.nav-bottom-grabber {
+  margin-right: 0.2rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.3rem; height: 2.4rem; border-radius: 999px;
   background: rgba(0, 0, 0, 0.28); color: #fff; font-size: 0.7rem;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
   animation: nav-reveal-pulse 2.4s ease-in-out infinite;
@@ -3815,11 +3874,15 @@ function onScreenOffTap() {
 .nav-toast-enter-active, .nav-toast-leave-active { transition: opacity 0.25s, transform 0.25s; }
 .nav-toast-enter-from, .nav-toast-leave-to { opacity: 0; transform: translate(-50%, -0.5rem); }
 
-/* Bouton recentrer : centré horizontalement, tout en bas (par-dessus la barre
-   d'avancement) et au-dessus de TOUS les autres éléments (z-index 22 > voile de
-   veille 20/21 et marqueurs POI 1) pour rester toujours accessible. */
+/* Bouton recentrer : calé à gauche, JUSTE AU-DESSUS de la barre du bas (avancement ou
+   vitesse) — le bas de l'écran appartient désormais au geste d'ouverture du tiroir, qui
+   couvre toute cette barre. Aligné sur sa marge latérale (0.75rem) et posé sur son bord
+   supérieur (0.75rem d'écart + ~4.7rem de barre). Au-dessus de TOUS les autres éléments
+   (z-index 22 > voile de veille 20/21 et marqueurs POI 1) pour rester toujours
+   accessible. */
 .nav-recenter {
-  position: absolute; bottom: 0.9rem; left: 50%; transform: translateX(-50%); z-index: 22;
+  position: absolute; bottom: calc(5.75rem + var(--nav-bottom-inset)); left: 0.75rem; z-index: 22;
+  transition: bottom 0.28s ease;
   border-radius: 999px; font-weight: 700;
   font-size: 1.35rem; padding: 0.85rem 1.8rem;
 }
@@ -3902,14 +3965,13 @@ function onScreenOffTap() {
 /* Mode édition : bandeau de consigne en haut (au-dessus de la carte, sous le tiroir
    replié z 8) + barre d'actions ancrée en bas, au-dessus du bandeau de stats. */
 .nav-edit-banner {
-  position: absolute; top: 2.5rem; left: 50%; transform: translateX(-50%);
+  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
   z-index: 7; width: min(440px, calc(100% - 1.5rem));
   background: rgba(124, 58, 237, 0.96); color: #fff;
   padding: 0.5rem 0.9rem; border-radius: 0.6rem;
   font-size: 0.85rem; font-weight: 500; text-align: center;
-  /* Descendu sous la poignée de déploiement du tiroir (.nav-reveal-grabber, en haut
-     au centre) pour ne pas la recouvrir. Un tap masque l'aide (cf. editHintVisible),
-     ce qui libère complètement l'accès au tiroir de commandes. */
+  /* Un tap masque l'aide (cf. editHintVisible) et rend la bande haute — devenue une
+     zone de tap pour la veille — de nouveau accessible. */
   cursor: pointer;
 }
 .nav-edit-bar {
@@ -3937,9 +3999,11 @@ function onScreenOffTap() {
 }
 
 /* Barre du bas en navigation libre : réduite à la vitesse (reprend l'allure de
-   NavStatsBar), centrée. Affichée tant qu'aucun itinéraire n'est chargé. */
+   NavStatsBar), centrée. Affichée tant qu'aucun itinéraire n'est chargé. Remonte
+   au-dessus du tiroir de commandes quand il est déployé (cf. --nav-bottom-inset). */
 .nav-stats {
-  position: absolute; left: 0.75rem; right: 0.75rem; bottom: 0.75rem;
+  position: absolute; left: 0.75rem; right: 0.75rem; bottom: calc(0.75rem + var(--nav-bottom-inset));
+  transition: bottom 0.28s ease;
   /* z-index 6 : au-dessus de TOUTE la couche de marqueurs de la carte (POI z1,
      pastilles de virage z2-4, destination z4, flèche du coureur z5), qui sont des
      overlays DOM MapLibre remontant dans le contexte d'empilement racine. Cf. le

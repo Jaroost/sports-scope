@@ -152,7 +152,10 @@ function pick(key: string | null) {
    proximité (NavPoiBanner, bottom: 6rem) qu'il remplace pendant le parcours. z-index 7 :
    au-dessus de la barre de stats (6) et de TOUTE la couche de marqueurs de la carte. */
 .nav-poi-browser {
-  position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6rem;
+  /* --nav-bottom-inset (posé par RouteNavigation, hérité au travers des styles scopés)
+     remonte le bandeau au-dessus du tiroir de commandes quand il est déployé en bas. */
+  position: absolute; left: 0.75rem; right: 0.75rem; bottom: calc(6rem + var(--nav-bottom-inset, 0rem));
+  transition: bottom 0.28s ease;
   z-index: 7;
   display: flex; align-items: center; gap: 0.5rem;
   background: #fff; padding: 0.55rem 0.6rem; border-radius: 1rem;

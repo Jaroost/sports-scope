@@ -62,7 +62,10 @@ defineEmits<{ (e: 'resume'): void }>()
 
 <style scoped>
 .nav-climb {
-  position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6.25rem;
+  /* --nav-bottom-inset (posé par RouteNavigation, hérité au travers des styles scopés)
+     remonte la carte au-dessus du tiroir de commandes quand il est déployé en bas. */
+  position: absolute; left: 0.75rem; right: 0.75rem; bottom: calc(6.25rem + var(--nav-bottom-inset, 0rem));
+  transition: bottom 0.28s ease;
   /* z-index 6 : au-dessus de TOUTE la couche de marqueurs de la carte (POI z1,
      pastilles de virage z2-4, destination z4, flèche du coureur z5), qui sont des
      overlays DOM MapLibre remontant dans le contexte d'empilement racine. Sans ça,

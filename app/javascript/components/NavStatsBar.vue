@@ -51,7 +51,10 @@ const eta = computed(() => {
 
 <style scoped>
 .nav-stats {
-  position: absolute; left: 0.75rem; right: 0.75rem; bottom: 0.75rem;
+  /* --nav-bottom-inset (posé par RouteNavigation, hérité au travers des styles scopés)
+     remonte la barre au-dessus du tiroir de commandes quand il est déployé en bas. */
+  position: absolute; left: 0.75rem; right: 0.75rem; bottom: calc(0.75rem + var(--nav-bottom-inset, 0rem));
+  transition: bottom 0.28s ease;
   /* z-index 6 : au-dessus de TOUTE la couche de marqueurs de la carte. Les marqueurs
      MapLibre (POI z1, pastilles de virage z2-4, destination z4, flèche du coureur z5)
      sont des overlays DOM qui remontent dans le contexte d'empilement racine ; à z3,

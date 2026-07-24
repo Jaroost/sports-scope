@@ -35,7 +35,10 @@ defineEmits<{ (e: 'toggle'): void }>()
    overlays DOM MapLibre remontés à la racine. Cliquable (cursor: pointer) : un tap
    bascule la veille. */
 .nav-poi {
-  position: absolute; left: 0.75rem; right: 0.75rem; bottom: 6rem;
+  /* --nav-bottom-inset (posé par RouteNavigation, hérité au travers des styles scopés)
+     remonte le bandeau au-dessus du tiroir de commandes quand il est déployé en bas. */
+  position: absolute; left: 0.75rem; right: 0.75rem; bottom: calc(6rem + var(--nav-bottom-inset, 0rem));
+  transition: bottom 0.28s ease;
   z-index: 7;
   display: flex; align-items: center; gap: 1rem;
   color: #fff; padding: 0.7rem 1.1rem; border-radius: 1rem;

@@ -5,8 +5,8 @@ import { ref, onBeforeUnmount } from 'vue'
 //
 // Les commandes (retour, style de carte, son, radar, caméra, POI…) encombrent la vue
 // une fois la séance lancée. On les affiche au démarrage (découvrabilité) puis on les
-// estompe après quelques secondes d'inactivité ; un swipe vers le bas les rappelle
-// (cf. useRevealGesture).
+// estompe après quelques secondes d'inactivité ; un swipe vers le haut depuis le bord
+// bas les rappelle (cf. useRevealGesture).
 //
 // L'appelant fournit isPanelOpen() — vrai tant qu'un sous-panneau (caméra / POI /
 // débug) est ouvert, auquel cas on ne masque pas (l'utilisateur règle quelque chose)

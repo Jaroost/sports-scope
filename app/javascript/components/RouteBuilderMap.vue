@@ -2360,7 +2360,10 @@ watch(() => props.state.routeOpacity, applyRouteOpacity)
 
 function setOverlays(ids: string[]) {
   props.state.overlays = ids
-  persistOverlays(ids, routeStore.sport.value)
+  // Pas de miroir sur le profil depuis la vue partagée : ce qu'un destinataire
+  // affiche sur l'itinéraire d'un autre ne doit pas redéfinir les couches de son
+  // propre créateur (et y réintroduirait, ou en retirerait, « Routes et chemins »).
+  if (!props.state.shared) persistOverlays(ids, routeStore.sport.value)
   installOverlays()
 }
 
@@ -2379,7 +2382,7 @@ function toggleOverlay(id: string) {
 watch(routeStore.sport, (sport) => {
   const { map, route } = sportPreferences(sport)
   const styleChanged = map.default_style !== props.state.mapStyleId
-  props.state.overlays = [...map.overlays]
+  props.state.overlays = props.state.defaultOverlays(sport)
   // Le réglage d'opacité du menu « Affichage » repart de la préférence du nouveau sport :
   // c'est un ajustement de séance, pas une valeur qui suit l'utilisateur d'un sport à l'autre.
   props.state.routeOpacity = route.opacity

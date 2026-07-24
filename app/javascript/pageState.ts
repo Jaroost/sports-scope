@@ -10,8 +10,14 @@
 // dependency on any reactive property the getter reads.
 
 import { sportPreferences, userPreferences } from './userPreferences'
+import type { Sport } from './userPreferences'
 
 export type ColorMode = 'grade' | 'none'
+
+// Couches que la vue partagée n'hérite pas des préférences du visiteur : « Routes et
+// chemins » recouvre la carte de sa propre trame, au détriment du tracé — or c'est
+// tout ce qu'un destinataire vient voir. Elle reste proposée dans le menu Affichage.
+const SHARED_EXCLUDED_OVERLAYS = ['paths']
 
 // ─── Base ─────────────────────────────────────────────────────────────────
 
@@ -117,8 +123,16 @@ export class RouteBuilderState extends MapPageState {
     const prefs = userPreferences()
     this.colorMode = prefs.display.show_grade_colors ? 'grade' : 'none'
     this.showElevationChart = prefs.display.show_elevation_chart
-    this.overlays = [...sportPreferences().map.overlays]
+    this.overlays = this.defaultOverlays()
     this.routeOpacity = sportPreferences().route.opacity
+  }
+
+  // Couches actives par défaut pour un sport : celles du profil, moins ce que la vue
+  // partagée écarte. Appelée à la construction et à chaque changement de sport (qui
+  // réaligne la carte sur les préférences de la pratique, cf. RouteBuilderMap).
+  defaultOverlays(sport?: Sport): string[] {
+    const ids = [...sportPreferences(sport).map.overlays]
+    return this.shared ? ids.filter((id) => !SHARED_EXCLUDED_OVERLAYS.includes(id)) : ids
   }
 
   // Derived from colorMode — reactive because `this` is the reactive proxy

@@ -591,6 +591,15 @@ en:
       humidity: "Humidity"
       precipitation: "Precipitation"
       form: "Freshness entering the session"
+    quality:
+      title: "Data quality"
+      hint: "Recording glitches can distort some metrics (training load, normalized power, averages, power curve). Nothing is corrected automatically — just keep it in mind when reading the analysis."
+      gaps: "Recording gaps: %{count} (%{duration} total)"
+      gaps_hint: "The device recorded nothing during these stretches. Averages and training load, computed over moving time, can be thrown off."
+      power_spikes: "Spurious power spikes: %{count}"
+      power_spikes_hint: "Isolated, implausible power values — typical of a sensor glitch. They inflate max power, normalized power and the power curve."
+      hr_dropouts: "Heart-rate sensor dropouts: %{count} (%{duration})"
+      hr_dropouts_hint: "Heart rate dropped to zero mid-activity (lost contact). Aerobic decoupling and efficiency may be affected."
     weather:
       codes:
         clear: "Clear sky"

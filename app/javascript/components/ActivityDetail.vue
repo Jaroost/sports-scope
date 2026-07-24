@@ -16,7 +16,7 @@ import { t } from '../i18n'
 import {
   PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds, aerobicDecoupling,
   efficiencyFactor, gradeAdjustedPace, segmentStats, computeSplits, computeLaps, isRun, paceMinPerKm,
-  detectIntervals,
+  detectIntervals, dataQualityFlags,
 } from '../activityHelpers'
 // Même détection de cols et même pente lissée (fenêtre du profil) que le créateur
 // d'itinéraire, pour que carte, graphique et tableau de cols soient cohérents.
@@ -26,6 +26,7 @@ import ActivityStats from './ActivityStats.vue'
 import ActivityMapCard from './ActivityMapCard.vue'
 import ActivityCharts from './ActivityCharts.vue'
 import ActivityConditions from './ActivityConditions.vue'
+import ActivityDataQuality from './ActivityDataQuality.vue'
 import ActivityZones from './ActivityZones.vue'
 import ActivitySegments from './ActivitySegments.vue'
 
@@ -254,6 +255,11 @@ const peakPowers = computed(() => {
   }
   return out
 })
+
+// Anomalies d'enregistrement (trous de capteur, pics de puissance, pertes du cardio)
+// qui peuvent fausser l'analyse. Signalées discrètement sous la carte ; n'altèrent
+// aucun calcul.
+const qualityFlags = computed(() => dataQualityFlags(streams.value, activity.value))
 
 // Intervalles détectés automatiquement (efforts durs soutenus) — auto-adaptatif à
 // partir du signal de la sortie (puissance → FC → vitesse). Complète la courbe de
@@ -510,6 +516,9 @@ onMounted(async () => {
         :weather="weather"
         :weather-loading="weatherLoading"
       />
+
+      <!-- Signalement discret des anomalies d'enregistrement (n'altère aucun calcul). -->
+      <ActivityDataQuality :flags="qualityFlags" />
 
       <!-- Onglets d'analyse — la carte ci-dessus reste toujours visible. -->
       <div class="btn-group btn-group-sm activity-tabs mt-3" role="group" :aria-label="t('strava.tabs.analysis')">

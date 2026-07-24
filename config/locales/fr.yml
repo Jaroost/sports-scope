@@ -591,6 +591,15 @@ fr:
       humidity: "Humidité"
       precipitation: "Précipitations"
       form: "Fraîcheur à l'entrée de la séance"
+    quality:
+      title: "Qualité des données"
+      hint: "Des anomalies d'enregistrement peuvent fausser certaines mesures (charge, puissance normalisée, moyennes, courbe de puissance). Rien n'est corrigé automatiquement — c'est juste à garder en tête en lisant l'analyse."
+      gaps: "Trous d'enregistrement : %{count} (%{duration} au total)"
+      gaps_hint: "Le capteur n'a rien enregistré pendant ces intervalles. Les moyennes et la charge, calculées sur le temps actif, peuvent en être faussées."
+      power_spikes: "Pics de puissance aberrants : %{count}"
+      power_spikes_hint: "Des valeurs de puissance isolées et invraisemblables, typiques d'un défaut de capteur. Elles gonflent la puissance max, la puissance normalisée et la courbe de puissance."
+      hr_dropouts: "Pertes du capteur cardiaque : %{count} (%{duration})"
+      hr_dropouts_hint: "La fréquence cardiaque a chuté à zéro en pleine activité (contact perdu). Le découplage et l'efficience cardiaque peuvent en être affectés."
     weather:
       codes:
         clear: "Ciel dégagé"

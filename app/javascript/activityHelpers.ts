@@ -420,6 +420,94 @@ export function totalPausedSeconds(pauses: PauseSegment[]): number {
   return pauses.reduce((sum, p) => sum + p.durationSec, 0)
 }
 
+// ─── Signalement qualité des données ─────────────────────────────────────────
+// Repère les anomalies d'enregistrement qui faussent l'analyse — trous de capteur,
+// pics de puissance aberrants, pertes du cardio — pour que l'utilisateur ne
+// surinterprète pas des chiffres pollués (NP, TSS, moyennes, courbe de puissance).
+// Volontairement CONSERVATEUR : on préfère ne rien signaler qu'un faux positif.
+export interface QualityFlag {
+  key: 'gaps' | 'power_spikes' | 'hr_dropouts'
+  severity: 'warning' | 'info'
+  count: number
+  seconds?: number
+}
+
+const POWER_SPIKE_MIN_W = 1500 // plancher absolu d'un pic « impossible »
+const POWER_SPIKE_RATIO = 3 // … ET ce multiple des voisins (glitch isolé, pas un vrai sprint qui monte sur plusieurs secondes)
+const HR_DROPOUT_FLOOR = 30 // bpm sous lesquels le cardio est « perdu »
+const HR_NORMAL = 80 // bpm au-dessus desquels le signal est sain (avant un décrochage)
+const GAP_MIN_TOTAL_S = 120 // en deçà, un trou isolé est du bruit
+const GAP_WARN_TOTAL_S = 600 // au-delà, ça mérite un avertissement franc
+const HR_DROPOUT_MIN_TOTAL_S = 20
+
+export function dataQualityFlags(
+  streams: Record<string, { data?: unknown } | undefined> | null | undefined,
+  activity: Record<string, unknown> | null | undefined,
+): QualityFlag[] {
+  const flags: QualityFlag[] = []
+  const time = streams?.time?.data as (number | null)[] | undefined
+
+  // 1. Trous d'enregistrement (capteur muet). Réutilise le détecteur des graphiques.
+  const gaps = detectRecordingGaps(time)
+  if (gaps.length) {
+    const seconds = totalPausedSeconds(gaps)
+    if (gaps.length >= 2 || seconds >= GAP_MIN_TOTAL_S) {
+      flags.push({
+        key: 'gaps',
+        severity: seconds >= GAP_WARN_TOTAL_S ? 'warning' : 'info',
+        count: gaps.length,
+        seconds,
+      })
+    }
+  }
+
+  // 2. Pics de puissance aberrants : un échantillon très haut ET non corroboré par ses
+  //    voisins — un vrai sprint monte sur plusieurs secondes, un glitch capteur surgit seul.
+  const watts = streams?.watts?.data as (number | null)[] | undefined
+  if (streamIsMeaningful('watts', streams?.watts, activity) && Array.isArray(watts)) {
+    let spikes = 0
+    for (let i = 1; i < watts.length - 1; i++) {
+      const w = watts[i]
+      if (typeof w !== 'number' || w <= POWER_SPIKE_MIN_W) continue
+      const prev = typeof watts[i - 1] === 'number' ? (watts[i - 1] as number) : 0
+      const next = typeof watts[i + 1] === 'number' ? (watts[i + 1] as number) : 0
+      if (w > POWER_SPIKE_RATIO * Math.max(prev, next, 1)) spikes++
+    }
+    if (spikes > 0) flags.push({ key: 'power_spikes', severity: 'warning', count: spikes })
+  }
+
+  // 3. Pertes du capteur cardiaque : le cardio chute à ~0 en pleine activité (contact
+  //    perdu). Seuls les décrochages DEPUIS un signal sain comptent (pas le tout début,
+  //    montre pas encore accrochée).
+  const hr = streams?.heartrate?.data as (number | null)[] | undefined
+  if (Array.isArray(hr) && Array.isArray(time) && hr.length === time.length) {
+    let dropouts = 0
+    let seconds = 0
+    let runStart = -1
+    for (let i = 0; i < hr.length; i++) {
+      const v = hr[i]
+      const low = typeof v === 'number' && v < HR_DROPOUT_FLOOR
+      if (low && runStart < 0) {
+        const before = i > 0 ? hr[i - 1] : null
+        if (typeof before === 'number' && before >= HR_NORMAL) runStart = i
+      } else if (!low && runStart >= 0) {
+        dropouts++
+        seconds += (time[i - 1] as number) - (time[runStart] as number)
+        runStart = -1
+      }
+    }
+    if (runStart >= 0) { // décrochage courant jusqu'à la fin de la sortie
+      dropouts++
+      seconds += (time[hr.length - 1] as number) - (time[runStart] as number)
+    }
+    if (dropouts > 0 && seconds >= HR_DROPOUT_MIN_TOTAL_S) {
+      flags.push({ key: 'hr_dropouts', severity: 'info', count: dropouts, seconds })
+    }
+  }
+
+  return flags
+}
+
 // ─── Formatting ───────────────────────────────────────────────────────────
 export function fmt(v: number | null | undefined, digits: number): string {
   if (v == null || Number.isNaN(v)) return '–'

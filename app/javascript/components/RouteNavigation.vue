@@ -49,6 +49,7 @@ import { useRevealGesture } from '../composables/useRevealGesture'
 import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX, ARRIVAL_M, ARRIVAL_APPROACH_M } from '../navConstants'
 import { useOfflineMaps } from '../composables/useOfflineMaps'
 import { usePoiBrowse } from '../composables/usePoiBrowse'
+import { useNavToast } from '../composables/useNavToast'
 import { buildCoordPopupContent, buildDestPointPopupContent, attachLongPress } from '../mapCoordPopup'
 import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
 
@@ -183,15 +184,9 @@ const pois = useNavPois({
   hasRoute: () => hasRoute.value,
 })
 const { POI_CATS, poiVisible, poiCounts, loading: poiLoading } = pois
-// Toast transitoire du résultat d'une recherche POI manuelle (boutons « autour de moi »
-// / « sur le trajet ») : nombre de lieux trouvés, ou échec de la recherche. Auto-effacé.
-const poiToast = ref<{ ok: boolean; text: string } | null>(null)
-let poiToastTimer: number | null = null
-function showPoiToast(ok: boolean, text: string) {
-  poiToast.value = { ok, text }
-  if (poiToastTimer != null) clearTimeout(poiToastTimer)
-  poiToastTimer = window.setTimeout(() => { poiToast.value = null; poiToastTimer = null }, 3000)
-}
+// Toast transitoire (résultat de recherche POI, reroutage, reset, sauvegarde d'édition…),
+// auto-effacé au bout de 3 s. Cf. useNavToast (gère aussi son nettoyage au démontage).
+const { poiToast, showPoiToast } = useNavToast()
 
 // Lance une recherche POI depuis le panneau de séance et affiche un toast de résultat.
 // Les recherches automatiques (montage, chargement de tracé) restent silencieuses.
@@ -902,7 +897,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   if (turnRepeatId != null) { clearInterval(turnRepeatId); turnRepeatId = null }
-  if (poiToastTimer != null) { clearTimeout(poiToastTimer); poiToastTimer = null }
   stopAnimation()
   window.removeEventListener('pointerdown', onFirstGesture, true)
   window.removeEventListener('touchstart', onFirstGesture, true)

@@ -66,6 +66,7 @@ export interface UserPreferences {
     show_viewpoints: boolean
     show_toilets: boolean
     show_picnic: boolean
+    show_parking: boolean
     radius_m: number
     alert_m: number
   }
@@ -131,6 +132,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     show_viewpoints: false,
     show_toilets: false,
     show_picnic: false,
+    show_parking: false,
     radius_m: 1500,
     alert_m: 100,
   },

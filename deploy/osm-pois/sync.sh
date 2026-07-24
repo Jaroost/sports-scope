@@ -49,7 +49,7 @@ REGIONS=${REGIONS//,/ }
 # leur centre de bbox), comme les clauses `node[...]` / `way[...]` d'origine.
 FILTERS=(
   "n/place=city,town,village,hamlet"
-  "nw/amenity=grave_yard,drinking_water,toilets,cafe,restaurant"
+  "nw/amenity=grave_yard,drinking_water,toilets,cafe,restaurant,parking"
   "nw/landuse=cemetery"
   "nw/shop=bakery"
   "n/natural=spring,peak,saddle"
@@ -141,9 +141,14 @@ download_regions() {
 FILTERED=()
 
 filter_regions() {
-  local url src name filtered country
+  local url src name filtered country sig sig_file
   mkdir -p "$WORK_DIR"
   FILTERED=()
+
+  # Empreinte de FILTERS : sans elle, ajouter une catégorie ne referait pas le
+  # filtrage (le .pbf source n'a pas changé) et la nouvelle catégorie resterait
+  # absente du catalogue jusqu'au prochain rafraîchissement Geofabrik.
+  sig=$(printf '%s\n' "${FILTERS[@]}" | md5sum | cut -d' ' -f1)
 
   # On itère sur OSM_POI_REGIONS et non sur le contenu de $PBF_DIR : un extrait
   # retiré de la liste reste sur le volume mais sort du catalogue.
@@ -152,15 +157,19 @@ filter_regions() {
     src="$PBF_DIR/$name.osm.pbf"
     [ -f "$src" ] || continue
     filtered="$WORK_DIR/$name.filtered.pbf"
+    sig_file="$WORK_DIR/$name.filters"
 
-    if [ ! -f "$filtered" ] || [ "$src" -nt "$filtered" ]; then
+    if [ ! -f "$filtered" ] || [ "$src" -nt "$filtered" ] || \
+       [ "$(cat "$sig_file" 2>/dev/null)" != "$sig" ]; then
       log "  filtrage $name"
+      rm -f "$sig_file"
       if ! osmium tags-filter --overwrite -o "$filtered" "$src" "${FILTERS[@]}"; then
         log "  ECHEC filtrage $name"
         n_failed=$(( n_failed + 1 ))
         rm -f "$filtered"
         continue
       fi
+      printf '%s\n' "$sig" > "$sig_file"
     fi
     country=$(country_for_url "$url")
     [ -n "$country" ] || log "  $name : pays inconnu (POI sans pays)"

@@ -59,6 +59,15 @@ def classify(tags):
         return "toilets"
     if tags.get("tourism") == "picnic_site" or tags.get("leisure") == "picnic_table":
         return "picnic"
+    # On ne garde que les parkings utilisables comme point de départ : ni privés
+    # (entreprise, résidence, clients d'un commerce), ni stationnement de rue
+    # (`street_side` / `lane`), qui sature l'affichage en ville sans rien apporter.
+    if (
+        amenity == "parking"
+        and tags.get("access") not in ("private", "no", "customers")
+        and tags.get("parking") not in ("street_side", "lane")
+    ):
+        return "parking"
     if tags.get("place") in PLACE_TYPES:
         return tags["place"]
 

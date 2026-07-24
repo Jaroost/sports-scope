@@ -112,6 +112,7 @@ class ProfilesController < ApplicationController
         "show_viewpoints" => to_bool(poi[:show_viewpoints], false),
         "show_toilets" => to_bool(poi[:show_toilets], false),
         "show_picnic" => to_bool(poi[:show_picnic], false),
+        "show_parking" => to_bool(poi[:show_parking], false),
         "radius_m" => clamp_int(poi[:radius_m], RADIUS_RANGE, 1500),
         "alert_m" => clamp_int(poi[:alert_m], POI_ALERT_RANGE, 100),
       },

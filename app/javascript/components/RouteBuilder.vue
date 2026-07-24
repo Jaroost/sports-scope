@@ -979,7 +979,7 @@ function openSelectionInKomoot() {
 // ─── Menu d'actions secondaires ───────────────────────────────────────────────
 // Une seule description des entrées, rendue de deux façons : menu déroulant dans le
 // bandeau sur ordinateur, modale plein écran sur téléphone (cibles tactiles). Les
-// deux se ferment après un clic — d'où l'appel systématique à closeActionsMenu.
+// deux se ferment après un clic — sauf entrée keepOpen (cf. les bascules de POI).
 
 interface MenuAction {
   key: string
@@ -995,6 +995,11 @@ interface MenuAction {
   run?: () => void
   // Ouvre la modale de préférences : ProfileDialog écoute les clics sur ces attributs.
   profileTrigger?: boolean
+  // Bascule : coche à droite, et icône colorée quand l'entrée est active.
+  checked?: boolean
+  iconColor?: string
+  // Laisse le menu ouvert après le clic — pour les entrées qu'on enchaîne.
+  keepOpen?: boolean
 }
 
 interface MenuGroup { key: string; label?: string; items: MenuAction[] }
@@ -1071,6 +1076,35 @@ const menuGroups = computed<MenuGroup[]>(() => {
 
   if (!readOnly.value) {
     groups.push({
+      key: 'pois',
+      label: t('routes.group_pois'),
+      items: [
+        // Toutes les catégories du registre, pas seulement celles présentes dans les
+        // résultats (contrairement à la barre de filtre du panneau latéral) : c'est
+        // ici qu'on en rallume une que le profil n'avait pas demandée.
+        ...POI_CATEGORIES.map((cat) => ({
+          key: `poi-${cat.key}`,
+          icon: `fa-solid ${cat.icon}`,
+          iconColor: placesStore.show[cat.key] ? cat.color : undefined,
+          label: t(`profile.poi.${cat.labelKey}`),
+          checked: placesStore.show[cat.key],
+          keepOpen: true,
+          run: () => togglePoiCategory(cat.key),
+        })),
+        // Même recherche qu'à l'enregistrement (cf. persistAndIndexPlaces), sans
+        // enregistrer : de quoi remettre les lieux à jour après un changement de
+        // catégories ou de rayon dans les préférences, ou sur un tracé retouché.
+        {
+          key: 'refresh-pois',
+          icon: 'fa-solid fa-arrows-rotate',
+          label: t('routes.refresh_pois'),
+          disabled: !routeStore.hasGeometry.value || placesStore.isFetchingPlaces.value,
+          busy: placesStore.isFetchingPlaces.value,
+          run: fetchImportantPlaces,
+        },
+      ],
+    })
+    groups.push({
       key: 'profile',
       items: [{ key: 'profile', icon: 'fa-solid fa-sliders', label: t('nav.profile'), profileTrigger: true }],
     })
@@ -1078,6 +1112,21 @@ const menuGroups = computed<MenuGroup[]>(() => {
 
   return groups
 })
+
+// Bascule une catégorie de POI pour la page courante — sans toucher aux préférences
+// du profil, qui restent l'état par défaut au chargement.
+//
+// `show` (affichage) et `search` (catégories interrogées) sont menés ensemble : une
+// catégorie éteinte ici ne sera plus recherchée, et une catégorie rallumée doit être
+// cherchée pour avoir quelque chose à afficher — d'où le fetch immédiat quand elle
+// ne l'était pas encore.
+function togglePoiCategory(key: string) {
+  const on = !placesStore.show[key]
+  placesStore.show[key] = on
+  const wasSearched = placesStore.search[key]
+  placesStore.search[key] = on
+  if (on && !wasSearched && routeStore.hasGeometry.value) fetchImportantPlaces()
+}
 
 // Sélecteur de type d'itinéraire (sport + profil de routage) : dans le panneau latéral
 // sur ordinateur, mais celui-ci est masqué sur téléphone — on le rejoue donc dans la
@@ -1996,11 +2045,13 @@ onBeforeUnmount(() => {
                 </a>
                 <button v-else type="button" class="actions-modal-item"
                   v-bind="a.profileTrigger ? PROFILE_TRIGGER_ATTRS : {}"
-                  :disabled="a.disabled" @click="a.run?.(); closeActionsMenu()">
+                  :disabled="a.disabled" @click="a.run?.(); a.keepOpen || closeActionsMenu()">
                   <span v-if="a.busy" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                  <i v-else :class="a.icon" aria-hidden="true"></i>
+                  <i v-else :class="a.icon" :style="a.iconColor ? { color: a.iconColor } : undefined" aria-hidden="true"></i>
                   <span>{{ a.label }}</span>
                   <span v-if="a.hint" class="ms-auto ps-2 small text-muted text-truncate">{{ a.hint }}</span>
+                  <i v-if="a.checked !== undefined" class="fa-solid fa-check ms-auto ps-2"
+                    :class="{ invisible: !a.checked }" aria-hidden="true"></i>
                 </button>
               </template>
             </template>
@@ -2115,11 +2166,13 @@ onBeforeUnmount(() => {
                   </a>
                   <button v-else type="button" class="dropdown-item d-flex align-items-center gap-2"
                     v-bind="a.profileTrigger ? PROFILE_TRIGGER_ATTRS : {}"
-                    :disabled="a.disabled" @click="a.run?.(); closeActionsDropdown()">
+                    :disabled="a.disabled" @click="a.run?.(); a.keepOpen || closeActionsDropdown()">
                     <span v-if="a.busy" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                    <i v-else :class="a.icon" aria-hidden="true"></i>
+                    <i v-else :class="a.icon" :style="a.iconColor ? { color: a.iconColor } : undefined" aria-hidden="true"></i>
                     <span>{{ a.label }}</span>
                     <span v-if="a.hint" class="ms-auto ps-2 small text-muted">{{ a.hint }}</span>
+                    <i v-if="a.checked !== undefined" class="fa-solid fa-check ms-auto ps-2"
+                      :class="{ invisible: !a.checked }" aria-hidden="true"></i>
                   </button>
                 </li>
               </template>
@@ -2542,8 +2595,15 @@ onBeforeUnmount(() => {
 }
 
 /* Le menu d'actions loge les contrôles de type d'itinéraire : il lui faut de la
-   largeur, sinon les libellés de sport et de profil sont à l'étroit. */
-.route-actions-menu { min-width: 16rem; }
+   largeur, sinon les libellés de sport et de profil sont à l'étroit. Il loge aussi
+   les bascules de POI (une entrée par catégorie) : sur un écran bas, il dépasserait
+   la fenêtre — d'où la hauteur plafonnée et le défilement interne. */
+.route-actions-menu {
+  min-width: 16rem;
+  max-height: calc(100dvh - var(--rb-navbar-h, 4rem) - 1rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .route-actions-menu .profile-desc { white-space: normal; }
 
 /* ─── Saved toast ─────────────────────────────────────────────────────────── */
@@ -2644,8 +2704,17 @@ onBeforeUnmount(() => {
 }
 .modal-body-custom { padding: 1.25rem; }
 
-/* Modale des actions (téléphone) : entrées empilées en pleine largeur, cibles tactiles. */
-.actions-modal-body { display: flex; flex-direction: column; gap: 0.25rem; }
+/* Modale des actions (téléphone) : entrées empilées en pleine largeur, cibles tactiles.
+   Avec les bascules de POI la liste dépasse l'écran ; le dialogue étant en
+   overflow:hidden, c'est au corps de défiler (sinon le bas serait simplement coupé). */
+.actions-modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-height: calc(100dvh - 9rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .actions-modal-group {
   margin: 0.5rem 0 0.15rem;
   font-size: 0.75rem;

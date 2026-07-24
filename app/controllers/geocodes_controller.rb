@@ -14,6 +14,7 @@ class GeocodesController < ApplicationController
     "viewpoints" => %w[viewpoint],
     "toilets" => %w[toilets],
     "picnic" => %w[picnic],
+    "parking" => %w[parking],
   }.freeze
 
   DEFAULT_TYPES = %w[localities cemeteries bakeries].freeze
@@ -29,6 +30,7 @@ class GeocodesController < ApplicationController
     "viewpoint" => "Point de vue",
     "toilets" => "Toilettes",
     "picnic" => "Aire de pique-nique",
+    "parking" => "Parking",
   }.freeze
 
   def places

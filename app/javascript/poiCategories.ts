@@ -46,6 +46,7 @@ export const POI_CATEGORIES: PoiCategory[] = [
   { key: 'viewpoints',  prefField: 'show_viewpoints', serverTypes: ['viewpoint'], icon: 'fa-binoculars',  color: '#7c3aed', point: true,  labelKey: 'viewpoints' },
   { key: 'picnic',      prefField: 'show_picnic',     serverTypes: ['picnic'],    icon: 'fa-tree',        color: '#15803d', point: true,  labelKey: 'picnic' },
   { key: 'toilets',     prefField: 'show_toilets',    serverTypes: ['toilets'],   icon: 'fa-restroom',    color: '#0891b2', point: true,  labelKey: 'toilets' },
+  { key: 'parking',     prefField: 'show_parking',    serverTypes: ['parking'],   icon: 'fa-square-parking', color: '#1d4ed8', point: true, labelKey: 'parking' },
   { key: 'localities',  prefField: 'show_localities', serverTypes: ['city', 'town', 'village', 'hamlet'], icon: 'fa-location-dot', color: '#475569', point: false, labelKey: 'localities' },
 ]
 

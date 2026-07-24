@@ -45,6 +45,11 @@ class PagesController < ApplicationController
   def free_navigation
     # Page de navigation unifiée : démarre en navigation libre (carte + vitesse + radar
     # + veille) et peut charger un itinéraire à la volée. Public, aucun login requis.
+    #
+    # `fresh=1` (posé par les menus, cf. NavbarHelper) : on veut vraiment repartir en
+    # libre, donc sans reprendre l'itinéraire mémorisé. Sans le paramètre — typiquement
+    # un rechargement de page en pleine séance — la session est restaurée.
+    @fresh = params[:fresh].present?
   end
 
   def route_navigation

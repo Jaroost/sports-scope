@@ -60,7 +60,11 @@ import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
 // tracé) et peut charger/décharger un itinéraire à chaud. shareToken : si présent
 // (lien partageable /routes/:token/navigate), l'itinéraire est chargé automatiquement
 // au montage. Absent → on démarre en navigation libre.
-const props = defineProps<{ shareToken?: string; canDebug?: boolean }>()
+//
+// fresh : navigation libre demandée explicitement depuis un menu (`/navigate?fresh=1`).
+// On repart alors vraiment de zéro — la session mémorisée est effacée au lieu d'être
+// restaurée, sinon l'itinéraire de la séance précédente réapparaissait.
+const props = defineProps<{ shareToken?: string; canDebug?: boolean; fresh?: boolean }>()
 
 // Vrai dès qu'un itinéraire est chargé (≥ 2 points) : bascule entre la navigation
 // libre (suivi GPS brut, vitesse seule) et la navigation sur itinéraire (tracé,
@@ -956,6 +960,12 @@ onMounted(async () => {
     // directement sur le tracé. Sans token, on démarre en navigation libre.
     if (props.shareToken) {
       try { await loadSharedRouteData(props.shareToken) } catch { /* tracé introuvable : on reste en libre */ }
+    } else if (props.fresh) {
+      // « Navigation libre » choisie dans un menu : on veut la carte nue, pas l'itinéraire
+      // de tout à l'heure. On efface la session et on retire `fresh` de l'URL pour qu'un
+      // rechargement ultérieur (séance en cours) reprenne bien ce qu'on suit alors.
+      clearNavSession()
+      stripFreshParam()
     } else {
       // Rechargement de page en pleine séance : on reprend le tracé mémorisé (itinéraire
       // chargé ou destination ad hoc) au lieu de repartir en navigation libre.
@@ -1365,6 +1375,18 @@ function restoreSession(): boolean {
   hasRoute.value = true
   syncEditable()
   return true
+}
+
+// Retire `?fresh=1` de l'URL sans recharger : le paramètre n'est qu'une intention de
+// départ. S'il restait, charger un itinéraire puis recharger la page (batterie, crash)
+// effacerait la session au lieu de la reprendre.
+function stripFreshParam(): void {
+  try {
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('fresh')) return
+    url.searchParams.delete('fresh')
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash)
+  } catch { /* URL exotique : sans importance */ }
 }
 
 // ─── Chargement / déchargement d'un itinéraire (page unifiée) ──────────────────

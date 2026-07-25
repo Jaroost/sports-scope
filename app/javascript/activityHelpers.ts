@@ -575,12 +575,6 @@ export function formatPowerDuration(sec: number): string {
   return m === 0 ? `${h} h` : `${h} h ${m}`
 }
 
-export function escapeHtml(s: unknown): string {
-  return String(s).replace(/[&<>"']/g, (c) => (
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]
-  ))
-}
-
 // Strava photos come with multiple sized URLs keyed by their max edge length
 // (e.g. `{ "100": "...", "256": "...", "2048": "..." }`). Pick the entry that
 // matches `preferred`, else the smallest one bigger, else the biggest.

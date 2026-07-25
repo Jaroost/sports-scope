@@ -3,7 +3,8 @@
 // plain arguments so the file stays free of Vue / DOM closures.
 
 import { t } from './i18n'
-import { defByKey, formatHMS, escapeHtml } from './activityHelpers'
+import { defByKey, formatHMS } from './activityHelpers'
+import { escapeHtml } from './html'
 
 export type StreamEntry = { data: unknown[] }
 export type StreamsMap = Record<string, StreamEntry | undefined> | null | undefined

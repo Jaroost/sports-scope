@@ -2,6 +2,7 @@ import { reactive, ref, computed, watch } from 'vue'
 import { t } from '../i18n'
 import { haversine, bearingFromRoute } from '../routeHelpers'
 import { streetViewUrl, probeStreetViewLink } from '../streetView'
+import { popupHeaderHtml, popupActionHtml, popupMapLinksHtml, googleMapsUrl } from '../placePopup'
 import type { Coord, LngLat } from '../routeHelpers'
 import { userPreferences } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
@@ -314,7 +315,7 @@ export function useNavPois(deps: {
     // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
     // le POI. On vise juste à côté pour le laisser visible/cliquable.
     const OFFSET = 0.00008
-    const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
+    const mapsUrl = googleMapsUrl(place.lat + OFFSET, place.lng + OFFSET)
     // Caméra Street View orientée depuis le tracé vers le POI (cap tracé → POI).
     const svUrl = streetViewUrl(place.lat, place.lng, bearingFromRoute(getGeometry(), place.lng, place.lat))
     const wrap = document.createElement('div')
@@ -322,34 +323,18 @@ export function useNavPois(deps: {
     // « Naviguer ici » en tête (action principale) : lance la navigation guidée vers le
     // POI. Présent seulement quand l'appelant fournit onNavigateTo (mode libre).
     const navAction = onNavigateTo
-      ? `<button type="button" class="place-popup-link place-popup-link--navigate">
-        <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
-        <span>${escapeHtml(t('routes.navigate_here'))}</span>
-      </button>`
+      ? popupActionHtml({ className: 'place-popup-link--navigate', icon: 'fa-solid fa-location-arrow', label: t('routes.navigate_here') })
       : ''
     // « Ajouter à l'itinéraire » : insère le POI dans le tracé courant (au plus proche),
     // sans le remplacer. Présent seulement quand un itinéraire est chargé.
     const insertAction = onInsertVia && hasRoute?.()
-      ? `<button type="button" class="place-popup-link place-popup-link--add-route">
-        <i class="fa-solid fa-circle-plus" aria-hidden="true"></i>
-        <span>${escapeHtml(t('routes.add_to_route'))}</span>
-      </button>`
+      ? popupActionHtml({ className: 'place-popup-link--add-route', icon: 'fa-solid fa-circle-plus', label: t('routes.add_to_route') })
       : ''
     wrap.innerHTML = `
-      <div class="place-popup-header">
-        <span class="place-popup-name">${escapeHtml(place.name)}</span>
-        <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
-      </div>
+      ${popupHeaderHtml(place.name)}
       ${navAction}
       ${insertAction}
-      <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-        <i class="fa-brands fa-google" aria-hidden="true"></i>
-        <span>Google Maps</span>
-      </a>
-      <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-        <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-        <span>${escapeHtml(t('routes.street_view'))}</span>
-      </a>`
+      ${popupMapLinksHtml(mapsUrl, svUrl)}`
     // closeOnClick désactivé : un tap carte met l'écran en veille ; la fermeture du
     // popup sur tap carte est gérée explicitement dans le handler de clic de la carte.
     placePopup = new maplibre.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
@@ -375,12 +360,6 @@ export function useNavPois(deps: {
   function closePlacePopup() {
     if (placePopup) { placePopup.remove(); placePopup = null }
     if (activePlaceEl) { activePlaceEl.classList.remove('place-marker--active'); activePlaceEl = null }
-  }
-
-  function escapeHtml(s: string) {
-    const div = document.createElement('div')
-    div.textContent = s
-    return div.innerHTML
   }
 
   // ─── POI sauvegardés ──────────────────────────────────────────────────────────

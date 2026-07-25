@@ -31,6 +31,9 @@ import {
 import type { Climb, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 import { createScaledMarkerGroup, MARKER_SCALE_VAR } from '../mapMarkerGroup'
+import {
+  escapeHtml, googleMapsUrl, popupHeaderHtml, popupLinkHtml, popupMapLinksHtml,
+} from '../placePopup'
 import { useMapLocation } from '../composables/useMapLocation'
 import { usePlaceSearch, placeShortName, flyToPlace } from '../composables/usePlaceSearch'
 import { useMapMeasure, MEASURE_SOURCE, MEASURE_LINE_LAYER } from '../composables/useMapMeasure'
@@ -758,7 +761,7 @@ function showPlacePopup(place: Place) {
   // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
   // le POI. On vise juste à côté pour le laisser visible/cliquable.
   const OFFSET = 0.00008
-  const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
+  const mapsUrl = googleMapsUrl(place.lat + OFFSET, place.lng + OFFSET)
   // Caméra Street View orientée depuis le tracé vers le POI (s'il y a un tracé chargé).
   const svUrl = streetViewUrl(place.lat, place.lng, bearingFromRoute(routeStore.geometry.value, place.lng, place.lat))
   const wrap = document.createElement('div')
@@ -780,20 +783,10 @@ function showPlacePopup(place: Place) {
         <span>${escapeHtml(t('routes.save_poi'))}</span>
       </button>`
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${escapeHtml(place.name)}</span>
-      <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
-    </div>
+    ${popupHeaderHtml(place.name)}
     ${addAction}
     ${saveAction}
-    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-brands fa-google" aria-hidden="true"></i>
-      <span>Google Maps</span>
-    </a>
-    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-      <span>${t('routes.street_view')}</span>
-    </a>`
+    ${popupMapLinksHtml(mapsUrl, svUrl)}`
   // closeOnClick désactivé : la fermeture sur clic carte est gérée dans le handler
   // de clic de la carte, pour que ce clic ne fasse que fermer sans ajouter de point.
   placePopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
@@ -816,12 +809,6 @@ function showPlacePopup(place: Place) {
   if (svLink) {
     probeStreetViewLink(svLink, place.lat, place.lng)
   }
-}
-
-function escapeHtml(s: string) {
-  const div = document.createElement('div')
-  div.textContent = s
-  return div.innerHTML
 }
 
 function closeRoutePointPopup() {
@@ -864,10 +851,7 @@ function showRoutePointPopup(lng: number, lat: number) {
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${t('routes.route_point')}</span>
-      <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
-    </div>
+    ${popupHeaderHtml(t('routes.route_point'))}
     <div class="wp-tooltip-coords-row">
       <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${lat.toFixed(6)}" title="${t('routes.copy_latitude')}">
         <i class="fa-regular fa-copy" aria-hidden="true"></i>
@@ -878,7 +862,7 @@ function showRoutePointPopup(lng: number, lat: number) {
         <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lng</span>${lng.toFixed(6)}</span>
       </button>
     </div>
-    <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer">
+    <a class="wp-tooltip-action" href="${googleMapsUrl(lat, lng)}" target="_blank" rel="noopener noreferrer">
       <i class="fa-brands fa-google" aria-hidden="true"></i>
       <span>Google Maps</span>
     </a>
@@ -1091,7 +1075,7 @@ function showSavedPoiPopup(poi: SavedPoi) {
   if (!_maplibregl || !mapInstance) return
   closeSavedPoiPopup()
   const OFFSET = 0.00008
-  const mapsUrl = `https://www.google.com/maps?q=${poi.lat + OFFSET},${poi.lng + OFFSET}`
+  const mapsUrl = googleMapsUrl(poi.lat + OFFSET, poi.lng + OFFSET)
   // Caméra Street View orientée depuis le tracé vers le POI (s'il y a un tracé chargé).
   const svUrl = streetViewUrl(poi.lat, poi.lng, bearingFromRoute(routeStore.geometry.value, poi.lng, poi.lat))
   const wrap = document.createElement('div')
@@ -1106,19 +1090,9 @@ function showSavedPoiPopup(poi: SavedPoi) {
       <span>${escapeHtml(t('routes.delete_poi'))}</span>
     </button>`
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${escapeHtml(poi.name)}</span>
-      <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
-    </div>
+    ${popupHeaderHtml(poi.name)}
     ${editActions}
-    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-brands fa-google" aria-hidden="true"></i>
-      <span>Google Maps</span>
-    </a>
-    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-      <span>${t('routes.street_view')}</span>
-    </a>`
+    ${popupMapLinksHtml(mapsUrl, svUrl)}`
   savedPoiPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([poi.lng, poi.lat])
     .setDOMContent(wrap)
@@ -1231,7 +1205,7 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
   closeRouteMarkerPopup()
   const title = marker.label ? `${markerKindLabel(marker.kind)} — ${marker.label}` : markerKindLabel(marker.kind)
   const OFFSET = 0.00008
-  const mapsUrl = `https://www.google.com/maps?q=${marker.lat + OFFSET},${marker.lng + OFFSET}`
+  const mapsUrl = googleMapsUrl(marker.lat + OFFSET, marker.lng + OFFSET)
   // Navigation Google Maps en voiture depuis la position courante vers le repère
   // (l'app mobile prend le relais du lien si elle est installée) : les repères sont
   // des points d'accès (parking, départ), on s'y rend en voiture.
@@ -1250,23 +1224,11 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
       <span>${escapeHtml(t('routes.marker_delete'))}</span>
     </button>`
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${escapeHtml(title)}</span>
-      <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
-    </div>
+    ${popupHeaderHtml(title)}
     ${editActions}
-    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-brands fa-google" aria-hidden="true"></i>
-      <span>Google Maps</span>
-    </a>
-    <a class="place-popup-link" href="${dirUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
-      <span>${escapeHtml(t('routes.directions'))}</span>
-    </a>
-    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-      <span>${t('routes.street_view')}</span>
-    </a>`
+    ${popupLinkHtml({ href: mapsUrl, icon: 'fa-brands fa-google', label: 'Google Maps' })}
+    ${popupLinkHtml({ href: dirUrl, icon: 'fa-solid fa-diamond-turn-right', label: t('routes.directions') })}
+    ${popupLinkHtml({ href: svUrl, icon: 'fa-solid fa-street-view', label: t('routes.street_view'), className: 'place-popup-link--streetview' })}`
   routeMarkerPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([marker.lng, marker.lat])
     .setDOMContent(wrap)
@@ -1788,7 +1750,7 @@ function refreshWaypointMarkers() {
             <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lng</span>${w.lng.toFixed(6)}</span>
           </button>
         </div>
-        <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
+        <a class="wp-tooltip-action" href="${googleMapsUrl(w.lat, w.lng)}" target="_blank" rel="noopener noreferrer">
           <i class="fa-brands fa-google" aria-hidden="true"></i>
           <span>Google Maps</span>
         </a>

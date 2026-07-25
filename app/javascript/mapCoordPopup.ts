@@ -6,17 +6,15 @@
 // feuille de style propre à un composant.
 import { t } from './i18n'
 import { streetViewUrl, probeStreetViewLink } from './streetView'
+import {
+  popupHeaderHtml, popupLinkHtml, popupActionHtml, popupMapLinksHtml, popupCoordsRowHtml,
+  googleMapsUrl,
+} from './placePopup'
 
 // Zoom d'ouverture d'OpenStreetMap : assez près pour voir les attributs d'un chemin
 // (nom, surface, accès), sans dépendre du zoom de notre propre carte — on vient
 // regarder un point précis, pas retrouver le cadrage qu'on avait.
 const OSM_ZOOM = 17
-
-function escapeHtml(s: string) {
-  const div = document.createElement('div')
-  div.textContent = s
-  return div.innerHTML
-}
 
 // Copie un texte dans le presse-papier (avec repli execCommand sur les contextes non
 // sécurisés) et bascule brièvement l'icône du bouton en « coché » comme accusé.
@@ -56,7 +54,6 @@ export function buildCoordPopupContent(
   // caméra Street View dans le sens de parcours. Absent (point hors tracé) → vue par défaut.
   heading?: number,
 ): HTMLElement {
-  const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`
   const svUrl = streetViewUrl(lat, lng, heading)
   // OpenStreetMap au point cliqué : c'est la source des données de routage, on y va pour
   // vérifier le terrain (un chemin manquant, un sens interdit) ou pour le corriger.
@@ -66,39 +63,14 @@ export function buildCoordPopupContent(
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   const addAction = onAddToRoute
-    ? `<button type="button" class="place-popup-link place-popup-link--add-route">
-        <i class="fa-solid fa-circle-plus" aria-hidden="true"></i>
-        <span>${escapeHtml(t('routes.add_to_route'))}</span>
-      </button>`
+    ? popupActionHtml({ className: 'place-popup-link--add-route', icon: 'fa-solid fa-circle-plus', label: t('routes.add_to_route') })
     : ''
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${escapeHtml(t('routes.map_point'))}</span>
-      <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
-    </div>
+    ${popupHeaderHtml(t('routes.map_point'))}
     ${addAction}
-    <div class="place-popup-coords-row">
-      <button type="button" class="place-popup-link place-popup-link--copy" data-coord="${lat.toFixed(6)}" title="${escapeHtml(t('routes.copy_latitude'))}">
-        <i class="fa-regular fa-copy" aria-hidden="true"></i>
-        <span>Lat&nbsp;${lat.toFixed(6)}</span>
-      </button>
-      <button type="button" class="place-popup-link place-popup-link--copy" data-coord="${lng.toFixed(6)}" title="${escapeHtml(t('routes.copy_longitude'))}">
-        <i class="fa-regular fa-copy" aria-hidden="true"></i>
-        <span>Lng&nbsp;${lng.toFixed(6)}</span>
-      </button>
-    </div>
-    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-brands fa-google" aria-hidden="true"></i>
-      <span>Google Maps</span>
-    </a>
-    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-      <span>${escapeHtml(t('routes.street_view'))}</span>
-    </a>
-    <a class="place-popup-link" href="${osmUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-map" aria-hidden="true"></i>
-      <span>OpenStreetMap</span>
-    </a>`
+    ${popupCoordsRowHtml(lat, lng)}
+    ${popupMapLinksHtml(googleMapsUrl(lat, lng), svUrl)}
+    ${popupLinkHtml({ href: osmUrl, icon: 'fa-solid fa-map', label: 'OpenStreetMap' })}`
   wrap.querySelector('.place-popup-close')?.addEventListener('click', onClose)
   wrap.querySelector('.place-popup-link--add-route')?.addEventListener('click', (ev) => {
     ev.stopPropagation(); ev.preventDefault()
@@ -124,37 +96,16 @@ export function buildDestPointPopupContent(
   onClose: () => void,
   onDelete: () => void,
 ): HTMLElement {
-  const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`
+  // Ce point-ci ouvre Street View par l'ancien format `cbll` (panorama le plus proche,
+  // sans orientation) : on ne connaît pas de cap pertinent pour une étape posée à la main.
   const svUrl = `https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${escapeHtml(t('routes.waypoint'))}</span>
-      <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
-    </div>
-    <button type="button" class="place-popup-link place-popup-link--delete">
-      <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
-      <span>${escapeHtml(t('routes.delete_point'))}</span>
-    </button>
-    <div class="place-popup-coords-row">
-      <button type="button" class="place-popup-link place-popup-link--copy" data-coord="${lat.toFixed(6)}" title="${escapeHtml(t('routes.copy_latitude'))}">
-        <i class="fa-regular fa-copy" aria-hidden="true"></i>
-        <span>Lat&nbsp;${lat.toFixed(6)}</span>
-      </button>
-      <button type="button" class="place-popup-link place-popup-link--copy" data-coord="${lng.toFixed(6)}" title="${escapeHtml(t('routes.copy_longitude'))}">
-        <i class="fa-regular fa-copy" aria-hidden="true"></i>
-        <span>Lng&nbsp;${lng.toFixed(6)}</span>
-      </button>
-    </div>
-    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-brands fa-google" aria-hidden="true"></i>
-      <span>Google Maps</span>
-    </a>
-    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-      <span>${escapeHtml(t('routes.street_view'))}</span>
-    </a>`
+    ${popupHeaderHtml(t('routes.waypoint'))}
+    ${popupActionHtml({ className: 'place-popup-link--delete', icon: 'fa-solid fa-trash-can', label: t('routes.delete_point') })}
+    ${popupCoordsRowHtml(lat, lng)}
+    ${popupMapLinksHtml(googleMapsUrl(lat, lng), svUrl)}`
   wrap.querySelector('.place-popup-close')?.addEventListener('click', onClose)
   wrap.querySelector('.place-popup-link--delete')?.addEventListener('click', (ev) => {
     ev.stopPropagation(); ev.preventDefault()

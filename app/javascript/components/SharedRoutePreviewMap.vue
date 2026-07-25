@@ -13,7 +13,7 @@ import { onMounted, onBeforeUnmount, useTemplateRef } from 'vue'
 import { type PropType } from 'vue'
 import { mapStyleFor, ROUTE_LINE_LAYOUT } from '../mapStyles'
 import { markerMeta, markerKindLabel, type RouteMarker } from '../routeMarkers'
-import { escapeHtml } from '../activityHelpers'
+import { escapeHtml } from '../html'
 import { t } from '../i18n'
 
 const props = defineProps({

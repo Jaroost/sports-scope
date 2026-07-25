@@ -96,6 +96,139 @@ export function buildTurnChain(
   return out
 }
 
+// Fenêtre de tolérance derrière le coureur (m) : un virage compte comme « encore devant »
+// jusqu'à 5 m derrière la position projetée. Elle absorbe le bruit du snapping (la
+// projection avance et recule de quelques mètres) — sans elle, le pointeur de virage
+// avancerait puis l'alerte s'éteindrait pile au moment du virage.
+export const TURN_PASSED_M = 5
+
+// État des annonces sonores / vibratoires du virage courant, porté d'un fix au suivant.
+export interface TurnAlertState {
+  /** Rang du dernier virage annoncé (première détection) ; -1 si aucun. */
+  announced: number
+  /** Rang du dernier virage dont l'entrée en zone proche a été buzzée ; -1 si aucun. */
+  urgentBuzzed: number
+}
+
+export const INITIAL_TURN_ALERT_STATE: TurnAlertState = { announced: -1, urgentBuzzed: -1 }
+
+export interface TurnAlertDecision {
+  state: TurnAlertState
+  /** Virage armé pour la répétition cadencée (tickTurnRepeat), ou null hors zone d'alerte. */
+  active: { urgent: boolean } | null
+  /** Jouer un paquet d'annonce maintenant. */
+  announce: boolean
+  /** Ce paquet est celui de la zone proche (compte de lectures différent). */
+  urgentBurst: boolean
+  /** Double buzz d'entrée en zone proche — une seule fois par virage. */
+  buzzApproach: boolean
+  /** Vibration de manœuvre : à la première détection seulement. */
+  buzzManeuver: boolean
+}
+
+// Décide ce qu'il faut annoncer pour le prochain virage, à un fix donné. Deux déclencheurs
+// par virage, chacun rejoué UNE fois à l'entrée de sa zone : la première détection (zone
+// lointaine) et le passage en zone proche. Chaque zone joue son propre paquet,
+// indépendamment de la répétition périodique — sans quoi, répétition coupée, la zone proche
+// resterait muette. Si le virage apparaît déjà dans la zone proche, les deux déclencheurs
+// coïncident : une seule annonce (celle de la zone proche), pas de doublon.
+//
+// Rien n'est joué ici : l'appelant filtre par ses sourdines (son coupé, sourdine manuelle,
+// tiroir ouvert…) puis émet. `ptr` identifie le virage — c'est son changement, et non la
+// distance, qui réarme les annonces.
+export function turnAlertStep(
+  state: TurnAlertState,
+  opts: { ptr: number; distM: number; alertM: number; urgentM: number },
+): TurnAlertDecision {
+  const { ptr, distM, alertM, urgentM } = opts
+  const inRange = distM <= alertM && distM > -TURN_PASSED_M
+  if (!inRange) {
+    // Pas encore assez proche, ou virage franchi : on coupe la répétition jusqu'au suivant.
+    return { state, active: null, announce: false, urgentBurst: false, buzzApproach: false, buzzManeuver: false }
+  }
+  const urgent = distM <= urgentM
+  const enteringUrgent = urgent && state.urgentBuzzed !== ptr
+  const firstAnnounce = state.announced !== ptr
+  const announce = firstAnnounce || enteringUrgent
+  return {
+    state: {
+      announced: announce ? ptr : state.announced,
+      urgentBuzzed: enteringUrgent ? ptr : state.urgentBuzzed,
+    },
+    active: { urgent },
+    announce,
+    urgentBurst: urgent,
+    buzzApproach: enteringUrgent,
+    buzzManeuver: announce && firstAnnounce,
+  }
+}
+
+// Virage tout juste franchi, retenu pour le maintien vert (confirmation « c'est fait »).
+export interface ReachedTurn {
+  direction: 'left' | 'right'
+  kind: Maneuver
+  angle: number
+  exitNumber?: number
+  /** Distance le long du tracé du virage franchi, pour mesurer la longueur du maintien. */
+  distM: number
+}
+
+export interface TurnBannerInput {
+  /** Prochain virage non franchi, ou undefined en fin de tracé. */
+  turn?: TurnPoint
+  /** Distance jusqu'à lui (négative juste après l'avoir passé, tant que le pointeur n'a pas avancé). */
+  distM: number
+  /** Virages qui le suivent de près (cf. buildTurnChain). */
+  chain: TurnHint[]
+  /** Dernier virage franchi et son maintien vert encore actif ? */
+  reached: ReachedTurn | null
+  greenActive: boolean
+  /** Seuils du sport : « on est dessus » et « on l'affiche en grand » (profil). */
+  nowM: number
+  hintM: number
+}
+
+// Que montrer dans le bandeau de virage : l'instruction principale (`hint`) et la rafale
+// affichée en petit dessous (`follow`). Priorité au prochain virage s'il est proche
+// (« sauf s'il y a une autre instruction plus proche »), sinon au maintien vert du virage
+// tout juste franchi, sinon au prochain virage en mode lointain.
+export function turnBanner(input: TurnBannerInput): { hint: TurnHint | null; follow: TurnHint[] } {
+  const { turn, distM, chain, reached, greenActive, nowM, hintM } = input
+  const hintOf = (t: TurnPoint, d: number, state: TurnHint['state']): TurnHint => ({
+    direction: t.direction, distM: d, kind: t.kind, angle: t.angle, exitNumber: t.exitNumber, state,
+  })
+
+  if (turn && distM > nowM && distM <= hintM) {
+    // Approche classique : prochain virage en grand + sa rafale en dessous.
+    return { hint: hintOf(turn, distM, 'near'), follow: chain }
+  }
+  if (turn && distM <= nowM && chain.length) {
+    // On est SUR le virage (zone verte), mais un autre le suit de près : on affiche déjà le
+    // suivant (plus utile qu'un maintien vert du virage qu'on est en train de prendre). Cela
+    // couvre aussi la fenêtre distM ∈ [−5, 0] (virage tout juste passé, pointeur pas encore
+    // avancé) — sinon le vert flasherait le premier virage à cet instant précis.
+    return { hint: chain[0], follow: chain.slice(1) }
+  }
+  if (turn && distM <= nowM) {
+    // Virage sur nous, sans virage rapproché derrière : confirmation verte.
+    return { hint: hintOf(turn, 0, 'now'), follow: [] }
+  }
+  if (greenActive && reached) {
+    return {
+      hint: {
+        direction: reached.direction, distM: 0, kind: reached.kind,
+        angle: reached.angle, exitNumber: reached.exitNumber, state: 'now',
+      },
+      follow: [],
+    }
+  }
+  if (turn && distM > 0) {
+    // Encore loin : bandeau discret, sans rafale.
+    return { hint: hintOf(turn, distM, 'far'), follow: [] }
+  }
+  return { hint: null, follow: [] }
+}
+
 // Temps estimé jusqu'au prochain virage, à la vitesse actuelle. Renvoie null tant
 // qu'on est quasi à l'arrêt (vitesse < 1 km/h) : l'estimation exploserait et n'aurait
 // aucun sens. Format horloge m:ss au-delà d'une minute, « N s » en deçà.
@@ -139,6 +272,31 @@ export function formatDuration(sec: number): string {
 export function arrivalClock(sec: number, now: Date = new Date()): string {
   const d = new Date(now.getTime() + sec * 1000)
   return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// ─── Zoom de découverte du prochain virage ─────────────────────────────────────
+
+// Fractions de la hauteur de l'écran délimitant la bande où l'on veut voir le virage :
+// au-dessus de `TOP_SAFE`, il est trop haut (voire hors champ) → dézoomer ; en dessous de
+// `COMFY_MAX`, il reste trop d'espace vide devant → resserrer. La bande morte entre les
+// deux est large exprès : sans elle, la vue oscillerait d'une frame à l'autre.
+const REVEAL_TOP_SAFE = 0.18
+const REVEAL_COMFY_MAX = 0.30
+// Pas de zoom par frame : petit, pour que le cumul donne un dézoom progressif et fluide.
+const REVEAL_ZOOM_STEP = 0.2
+
+// Prochain zoom de découverte, à partir de la position À L'ÉCRAN du virage (`y`, en pixels
+// depuis le haut d'une vue de hauteur `h`). `base` est le zoom courant de la découverte (ou
+// celui du profil au premier pas). Le résultat ne dépasse jamais le zoom du profil
+// (`camZoom`) — on ne fait que dézoomer — ni le plancher caméra.
+export function revealZoomStep(
+  opts: { y: number; h: number; base: number; camZoom: number; minZoom: number },
+): number {
+  const { y, h, base, camZoom, minZoom } = opts
+  let z = base
+  if (y < h * REVEAL_TOP_SAFE) z = base - REVEAL_ZOOM_STEP
+  else if (y > h * REVEAL_COMFY_MAX) z = base + REVEAL_ZOOM_STEP
+  return Math.min(camZoom, Math.max(minZoom, z))
 }
 
 // ─── Détection d'arrivée ───────────────────────────────────────────────────────

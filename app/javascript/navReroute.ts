@@ -1,4 +1,4 @@
-import { haversine, bearingBetween, nearestGeomIndex } from './routeHelpers'
+import { haversine, bearingBetween, bearingDelta, nearestGeomIndex } from './routeHelpers'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
 
 // Décisions géométriques du reroutage en séance : où raccorder le tracé, quelles étapes
@@ -49,9 +49,7 @@ export function rejoinIndexAhead(
     if (cumDistM[i] > maxDist) break
     const d = haversine(pos, [geometry[i][0], geometry[i][1]])
     if (d < REJOIN_MIN_AHEAD_M) continue
-    let rel = bearingBetween(pos, [geometry[i][0], geometry[i][1]]) - heading
-    while (rel > 180) rel -= 360
-    while (rel < -180) rel += 360
+    const rel = bearingDelta(heading, bearingBetween(pos, [geometry[i][0], geometry[i][1]]))
     if (Math.abs(rel) > REJOIN_FORWARD_ARC) continue
     if (d < bestD) { bestD = d; best = i }
   }

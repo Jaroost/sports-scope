@@ -5,7 +5,7 @@ import { ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
 import { useNavLineWidth, widthRunsCollection } from '../navLineWidth'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
-  haversine, bearingBetween, nearestGeomIndex, nearestGeomIndexPreferring, projectOnRoute,
+  haversine, bearingBetween, bearingDelta, nearestGeomIndex, nearestGeomIndexPreferring, projectOnRoute,
   lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
   buildOffsetDisplayLine, formatDistancePrecise,
 } from '../routeHelpers'
@@ -15,9 +15,12 @@ import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../nav
 import type { Waypoint } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildTurnChain,
-  smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE,
+  smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
+  INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep,
 } from '../navHelpers'
-import type { TurnHint, ClimbInfo, ClimbProfile, ArrivalState } from '../navHelpers'
+import type {
+  TurnHint, ClimbInfo, ClimbProfile, ArrivalState, ReachedTurn, TurnAlertState,
+} from '../navHelpers'
 import { unlockAudio, playManeuverBurst, playOffRoute, playPoi, playArrival } from '../navAudio'
 import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
@@ -580,11 +583,13 @@ let hasInitialZoom = false
 // never take effect until the rider nudges the zoom slider.
 let introPending = false
 let nextTurnPtr = 0          // index of the next unpassed turn in `turns`
-let announcedTurn = -1       // index of the last turn we played a cue for
+// Annonces déjà jouées pour le virage courant (première détection, entrée en zone
+// proche) : voir turnAlertStep.
+let turnAlertState: TurnAlertState = INITIAL_TURN_ALERT_STATE
 // Virage tout juste atteint, conservé pour le maintenir affiché en vert (confirmation
 // « tournez ici » même à l'arrêt à un carrefour). On mémorise sa distance le long du
 // tracé : le maintien dure tant qu'on n'a pas parcouru turn_green_hold_m après le virage.
-let reachedTurn: { direction: 'left' | 'right'; kind: Maneuver; angle: number; exitNumber?: number; distM: number } | null = null
+let reachedTurn: ReachedTurn | null = null
 // Index (dans `turns`) du virage tout juste atteint : sert à colorer en vert SA pastille
 // sur la carte pendant le maintien « now ». -1 quand aucun virage n'est en maintien vert.
 let reachedTurnIdx = -1
@@ -620,10 +625,6 @@ let activeTurn: { kind: Maneuver; direction: 'left' | 'right' } | null = null
 // Vrai quand le virage armé est dans la zone orange (≤ turn_urgent_m) : la répétition
 // du son passe alors à l'intervalle plus court turn_repeat_urgent_ms.
 let activeTurnUrgent = false
-// Pointeur du virage pour lequel le double buzz d'entrée en zone orange a déjà été
-// émis : garantit qu'on ne vibre qu'une fois au franchissement du seuil, pas à
-// chaque frame tant qu'on reste dans la zone.
-let urgentBuzzedTurn = -1
 let turnRepeatId: number | null = null
 // Sourdine du virage courant : l'utilisateur a demandé à ne plus être alerté
 // (son + vibration) pour le virage actuellement en approche. Remis à false
@@ -983,8 +984,7 @@ function resetRouteTracking(atStart: boolean) {
   snapNextIdx = 0
   snapDistAlongM = 0
   nextTurnPtr = 0
-  announcedTurn = -1
-  urgentBuzzedTurn = -1
+  turnAlertState = INITIAL_TURN_ALERT_STATE
   reachedTurn = null
   reachedTurnIdx = -1
   activeTurn = null
@@ -1174,8 +1174,7 @@ function unloadRoute() {
   // indéfiniment après l'effacement du tracé (typiquement quand on efface à un carrefour,
   // alerte en cours). On remet aussi à zéro les pointeurs/anti-rejeu pour repartir propre.
   nextTurnPtr = 0
-  announcedTurn = -1
-  urgentBuzzedTurn = -1
+  turnAlertState = INITIAL_TURN_ALERT_STATE
   reachedTurn = null
   reachedTurnIdx = -1
   activeTurn = null
@@ -1644,8 +1643,7 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   // maintien vert, qui pointe l'ancien passage.
   if (relocated) {
     nextTurnPtr = 0
-    announcedTurn = -1
-    urgentBuzzedTurn = -1
+    turnAlertState = INITIAL_TURN_ALERT_STATE
     reachedTurn = null
     reachedTurnIdx = -1
   }
@@ -1785,27 +1783,22 @@ function revealTurnLngLat(): LngLat | null {
   return [geometry[tp.idx][0], geometry[tp.idx][1]]
 }
 
-// Ajuste le zoom de découverte pour garder le prochain virage visible à l'écran, sans
-// jamais zoomer au-delà du zoom du profil. On projette le virage dans la vue courante
-// (ce qui tient compte de l'inclinaison 3D, contrairement à un calcul analytique) : s'il
-// est trop haut (proche du bord supérieur, voire hors champ), on dézoome d'un cran ; s'il
-// laisse trop d'espace vide devant, on resserre vers le profil. Une bande morte large
-// entre les deux seuils évite toute oscillation. Appelé à chaque frame de suivi, juste
-// avant le jumpTo : le pas par frame se cumule en un dézoom progressif et fluide.
+// Ajuste le zoom de découverte pour garder le prochain virage visible à l'écran. On projette
+// le virage dans la vue courante (ce qui tient compte de l'inclinaison 3D, contrairement à
+// un calcul analytique) et on laisse revealZoomStep décider du pas. Appelé à chaque frame de
+// suivi, juste avant le jumpTo : le pas par frame se cumule en un dézoom fluide.
 function updateRevealZoom() {
   const target = revealTurnLngLat()
   if (!target) { revealZoom = null; return }
   const h = containerH || map?.getContainer()?.clientHeight || 0
   if (!h) { revealZoom = null; return }
-  const y = map.project(target).y
-  const topSafe = h * 0.18    // au-dessus → virage trop haut / hors champ : dézoomer
-  const comfyMax = h * 0.30   // en dessous → trop d'espace devant : resserrer vers le profil
-  const base = revealZoom ?? camZoom.value
-  let z = base
-  if (y < topSafe) z = base - 0.2
-  else if (y > comfyMax) z = base + 0.2
-  // Borné : on ne dépasse jamais le zoom du profil (dézoom seulement) ni le plancher caméra.
-  revealZoom = Math.min(camZoom.value, Math.max(CAM_ZOOM_MIN, z))
+  revealZoom = revealZoomStep({
+    y: map.project(target).y,
+    h,
+    base: revealZoom ?? camZoom.value,
+    camZoom: camZoom.value,
+    minZoom: CAM_ZOOM_MIN,
+  })
 }
 
 // Render loop: between GPS fixes, advance the rider from the last fix along its
@@ -1830,9 +1823,7 @@ function startAnimation() {
         ? lngLatAtDistanceM(displayLine, cumDistM, anchorDistM + extrapSpeedMs * dt)
         : moveLngLat(anchorPos, extrapBearing, extrapSpeedMs * dt)
     }
-    let d = extrapBearing - displayBearing
-    while (d > 180) d -= 360
-    while (d < -180) d += 360
+    const d = bearingDelta(displayBearing, extrapBearing)
 
     // Économie de batterie : on arrête la boucle dès que ses deux sorties ont atteint
     // leur valeur finale — position (immobile ou extrapolation plafonnée) et cap convergé.
@@ -1888,7 +1879,7 @@ function updateTurns(): boolean {
   // Avance le pointeur sur les virages dépassés (>5 m derrière), en mémorisant chacun
   // pour le maintien vert. Le décompte ne démarre donc qu'une fois le virage vraiment
   // laissé derrière soi.
-  while (nextTurnPtr < turns.length && turns[nextTurnPtr].distM < here - 5) {
+  while (nextTurnPtr < turns.length && turns[nextTurnPtr].distM < here - TURN_PASSED_M) {
     rememberReached(turns[nextTurnPtr], nextTurnPtr)
     nextTurnPtr++
   }
@@ -1901,82 +1892,53 @@ function updateTurns(): boolean {
   const turn = turns[nextTurnPtr] as TurnPoint | undefined
   const dist = turn ? turn.distM - here : Infinity
 
-  // Son / répétition : armé tant que le prochain virage est dans la zone d'alerte.
-  let fired = false
-  if (turn && dist <= sportNav.value.turn_alert_m && dist > -5) {
-    // Le virage est dans la zone d'alerte : on l'arme pour la répétition cadencée
-    // par le timer (tickTurnRepeat), indépendante de la fréquence des fixes GPS.
-    activeTurn = { kind: turn.kind, direction: turn.direction }
-    activeTurnUrgent = dist <= sportNav.value.turn_urgent_m
-    // Entrée dans la zone orange : double buzz distinct, une seule fois par virage.
-    const enteringUrgent = activeTurnUrgent && urgentBuzzedTurn !== nextTurnPtr
-    if (enteringUrgent) {
-      urgentBuzzedTurn = nextTurnPtr
-      if (!alertsMuted.value && !turnAlertMuted.value) vibrateApproach()
-    }
-    // Deux déclencheurs d'annonce sonore par virage, chacun rejoué UNE fois à l'entrée
-    // de sa zone : la première détection (zone lointaine) et le passage en zone proche
-    // (orange). Chaque zone joue son propre paquet (turn_repeat[_urgent]_count lectures),
-    // indépendamment de la répétition périodique — sans quoi, répétition coupée, la zone
-    // proche resterait muette puisque seule tickTurnRepeat y sonnait. Si le virage
-    // apparaît déjà dans la zone proche, les deux déclencheurs coïncident : une seule
-    // annonce (compteur de la zone proche), pas de doublon.
-    const firstAnnounce = announcedTurn !== nextTurnPtr
-    if (firstAnnounce || enteringUrgent) {
-      announcedTurn = nextTurnPtr
-      lastTurnReminderMs = Date.now()
-      const burst = activeTurnUrgent ? sportNav.value.turn_repeat_urgent_count : sportNav.value.turn_repeat_count
-      if (soundOn.value && !audioMuted.value && !turnAlertMuted.value) playManeuverBurst(turn.kind, turn.direction, burst)
-      // Vibration de manœuvre à la première détection seulement (l'entrée en zone orange
-      // a sa propre vibration, vibrateApproach ci-dessus).
-      if (firstAnnounce && !alertsMuted.value && !turnAlertMuted.value) vibrateManeuver(turn.kind)
-      fired = true
-    }
-  } else {
-    // Hors zone d'alerte (pas encore assez proche, ou virage franchi) : on coupe
-    // la répétition jusqu'au prochain virage.
-    activeTurn = null
-    activeTurnUrgent = false
+  // Son / vibration : ce qu'il faut annoncer est décidé par turnAlertStep (pur) ; ici on
+  // applique les sourdines et on émet. `activeTurn` reste armé tant que le virage est dans
+  // la zone d'alerte, pour la répétition cadencée par le timer (tickTurnRepeat),
+  // indépendante de la fréquence des fixes GPS.
+  const alert = turnAlertStep(turnAlertState, {
+    ptr: nextTurnPtr,
+    distM: dist,
+    alertM: sportNav.value.turn_alert_m,
+    urgentM: sportNav.value.turn_urgent_m,
+  })
+  turnAlertState = alert.state
+  activeTurn = alert.active && turn ? { kind: turn.kind, direction: turn.direction } : null
+  activeTurnUrgent = alert.active?.urgent ?? false
+  const alertAudible = soundOn.value && !audioMuted.value && !turnAlertMuted.value
+  const alertHaptic = !alertsMuted.value && !turnAlertMuted.value
+  if (alert.buzzApproach && alertHaptic) vibrateApproach()
+  if (alert.announce && turn) {
+    lastTurnReminderMs = Date.now()
+    const burst = alert.urgentBurst ? sportNav.value.turn_repeat_urgent_count : sportNav.value.turn_repeat_count
+    if (alertAudible) playManeuverBurst(turn.kind, turn.direction, burst)
+    if (alert.buzzManeuver && alertHaptic) vibrateManeuver(turn.kind)
   }
+  const fired = alert.announce && turn != null
 
   // Virage atteint dès qu'on est à turn_now_m (15 m par défaut) devant — et tant que le pointeur
   // n'a pas avancé (on est dessus, potentiellement à l'arrêt à un carrefour) : on
   // rafraîchit le maintien vert pour qu'il ne disparaisse pas tant qu'on n'est pas reparti.
   if (turn && dist <= sportNav.value.turn_now_m) rememberReached(turn, nextTurnPtr)
 
-  // Choix de l'affichage. Priorité au prochain virage s'il est proche (« sauf s'il y a
-  // une autre instruction plus proche »). Sinon, on maintient le virage tout juste
-  // franchi en vert pendant turn_green_hold_m après lui. Sinon, le prochain virage en mode lointain.
+  // Choix de l'affichage : cf. turnBanner. Le maintien vert court sur une distance ET une
+  // durée (turn_green_hold_m / _s) — un coureur à l'arrêt au carrefour garde sa
+  // confirmation, mais elle ne s'éternise pas.
   const greenActive = reachedTurn != null
     && here - reachedTurn.distM < greenHoldM.value
     && Date.now() - reachedAtMs < greenHoldMs.value
-  // Rafale des virages qui suivent le prochain de près (≤ TURN_CHAIN_GAP_M entre chacun).
-  const chain = buildTurnChain(turns, nextTurnPtr, here, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX)
-  if (turn && dist > sportNav.value.turn_now_m && dist <= sportNav.value.turn_hint_m) {
-    // Approche classique : prochain virage en grand + sa rafale en dessous.
-    turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'near' }
-    followTurns.value = chain
-  } else if (turn && dist <= sportNav.value.turn_now_m && chain.length) {
-    // On est SUR le virage (zone verte), mais un autre le suit de près : on affiche déjà
-    // le suivant (plus utile qu'un maintien vert du virage qu'on est en train de prendre).
-    // On couvre aussi la fenêtre `dist` ∈ [−5, 0] (virage tout juste passé, pointeur pas
-    // encore avancé) — sinon le vert flasherait le premier virage à cet instant précis.
-    turnHint.value = chain[0]
-    followTurns.value = chain.slice(1)
-  } else if (turn && dist <= sportNav.value.turn_now_m) {
-    // Virage sur nous, sans virage rapproché derrière : confirmation verte.
-    turnHint.value = { direction: turn.direction, distM: 0, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'now' }
-    followTurns.value = []
-  } else if (greenActive && reachedTurn) {
-    turnHint.value = { direction: reachedTurn.direction, distM: 0, kind: reachedTurn.kind, angle: reachedTurn.angle, exitNumber: reachedTurn.exitNumber, state: 'now' }
-    followTurns.value = []
-  } else if (turn && dist > 0) {
-    turnHint.value = { direction: turn.direction, distM: dist, kind: turn.kind, angle: turn.angle, exitNumber: turn.exitNumber, state: 'far' }
-    followTurns.value = []
-  } else {
-    turnHint.value = null
-    followTurns.value = []
-  }
+  const banner = turnBanner({
+    turn,
+    distM: dist,
+    // Rafale des virages qui suivent le prochain de près (≤ TURN_CHAIN_GAP_M entre chacun).
+    chain: buildTurnChain(turns, nextTurnPtr, here, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX),
+    reached: reachedTurn,
+    greenActive,
+    nowM: sportNav.value.turn_now_m,
+    hintM: sportNav.value.turn_hint_m,
+  })
+  turnHint.value = banner.hint
+  followTurns.value = banner.follow
 
   // Confirmation verte (« now ») : on colore en vert SA pastille sur la carte, en
   // cohérence avec le bandeau. Sinon, aucune pastille n'est verte.
@@ -2168,10 +2130,7 @@ function updateOffRoute(here: LngLat, idx: number) {
   if (!offRoute.value) return
   const toRoute = bearingBetween(here, geometry[idx])
   const mapBearing = map ? map.getBearing() : currentBearing
-  let rel = toRoute - mapBearing
-  while (rel > 180) rel -= 360
-  while (rel < -180) rel += 360
-  offRouteRelBearing.value = rel
+  offRouteRelBearing.value = bearingDelta(mapBearing, toRoute)
 }
 
 function updateBearing(pos: GeolocationPosition, here: LngLat) {

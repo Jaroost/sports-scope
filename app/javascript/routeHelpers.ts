@@ -547,6 +547,17 @@ export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
   return (Math.atan2(y, x) * 180) / Math.PI
 }
 
+// Écart signé entre deux caps, replié dans (−180, 180] : positif = `to` est à droite de
+// `from`. Sert partout où l'on compare deux directions — angle d'un virage, point du tracé
+// devant ou derrière le coureur, cap rendu vs cap réel. Sans ce repliement, un passage par
+// le nord (359° → 1°) donnerait un écart de −358° au lieu de +2°.
+export function bearingDelta(from: number, to: number): number {
+  let d = to - from
+  while (d > 180) d -= 360
+  while (d < -180) d += 360
+  return d
+}
+
 // Construit une polyligne d'AFFICHAGE alignée index-pour-index sur `geom` : identique au
 // tracé réel, SAUF là où l'itinéraire se superpose à lui-même (portion empruntée ≥ 2 fois),
 // où les sommets sont décalés perpendiculairement à droite du sens de parcours. Comme aller
@@ -1013,9 +1024,7 @@ export function detectTurns(
     if (a === i || b === i) continue
     const inB = bearingBetween(geometry[a], geometry[i])
     const outB = bearingBetween(geometry[i], geometry[b])
-    let diff = outB - inB
-    while (diff > 180) diff -= 360
-    while (diff < -180) diff += 360
+    const diff = bearingDelta(inB, outB)
     if (Math.abs(diff) >= minAngleDeg) {
       raw.push({ idx: i, distM: cumDistM[i], angle: diff, direction: diff > 0 ? 'right' : 'left', kind: kindFromAngle(Math.abs(diff)) })
     }

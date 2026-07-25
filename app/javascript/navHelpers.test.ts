@@ -3,8 +3,9 @@ import {
   textColorOn, turnIcon, buildTurnChain, turnEta, remainingSeconds, formatDuration,
   arrivalClock, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE,
+  turnBanner, turnAlertStep, INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep,
 } from './navHelpers'
-import type { ArrivalState } from './navHelpers'
+import type { ArrivalState, ReachedTurn, TurnAlertState, TurnHint } from './navHelpers'
 import type { TurnPoint, Climb } from './routeHelpers'
 import { ARRIVAL_M, ARRIVAL_APPROACH_M } from './navConstants'
 
@@ -348,5 +349,176 @@ describe('arrivalStep', () => {
     arrivalStep(state, { remainingM: 5000, hasRoute: true, onRoute: true, arrived: false })
     expect(state).toEqual({ seenEnRoute: false, lastRemainingM: 100 })
     expect(INITIAL_ARRIVAL_STATE).toEqual({ seenEnRoute: false, lastRemainingM: null })
+  })
+})
+
+describe('turnBanner', () => {
+  // Seuils du profil vélo par défaut : « on est dessus » à 15 m, « en grand » à 300 m.
+  const NOW = 15
+  const HINT = 300
+  const next = turn(500, { direction: 'left', kind: 'turn', angle: 80 })
+  const follow: TurnHint = { direction: 'right', distM: 40, kind: 'turn', angle: 70, state: 'near' }
+  const reached: ReachedTurn = { direction: 'right', kind: 'turn', angle: 70, distM: 480 }
+
+  function banner(over: Partial<Parameters<typeof turnBanner>[0]> = {}) {
+    return turnBanner({
+      turn: next, distM: 200, chain: [], reached: null, greenActive: false,
+      nowM: NOW, hintM: HINT, ...over,
+    })
+  }
+
+  it('affiche le prochain virage en grand dans la zone d’approche, avec sa rafale', () => {
+    const { hint, follow: f } = banner({ distM: 120, chain: [follow] })
+    expect(hint).toMatchObject({ state: 'near', distM: 120, direction: 'left', angle: 80 })
+    expect(f).toEqual([follow])
+  })
+
+  it('reste discret au-delà de la zone d’approche, sans rafale', () => {
+    // Une rafale à 2 km ne sert à rien : on ne montre que le virage, en petit.
+    const { hint, follow: f } = banner({ distM: HINT + 1, chain: [follow] })
+    expect(hint).toMatchObject({ state: 'far', distM: HINT + 1 })
+    expect(f).toEqual([])
+  })
+
+  it('sur le virage, passe en confirmation verte à distance nulle', () => {
+    const { hint, follow: f } = banner({ distM: 10 })
+    expect(hint).toMatchObject({ state: 'now', distM: 0, direction: 'left' })
+    expect(f).toEqual([])
+  })
+
+  it('sur le virage, montre déjà le suivant s’il enchaîne de près', () => {
+    // Plus utile qu'un vert sur le virage qu'on est en train de prendre.
+    const second: TurnHint = { ...follow, distM: 30 }
+    const { hint, follow: f } = banner({ distM: 5, chain: [follow, second] })
+    expect(hint).toBe(follow)
+    expect(f).toEqual([second])
+  })
+
+  it('ne fait pas flasher le vert sur un virage tout juste passé', () => {
+    // Fenêtre distM ∈ [−5, 0] : le pointeur n'a pas encore avancé mais un virage suit.
+    const { hint } = banner({ distM: -3, chain: [follow] })
+    expect(hint).toBe(follow)
+  })
+
+  it('maintient en vert le virage franchi quand plus rien ne suit de près', () => {
+    const { hint } = banner({ turn: undefined, distM: Infinity, reached, greenActive: true })
+    expect(hint).toMatchObject({ state: 'now', distM: 0, direction: 'right', angle: 70 })
+  })
+
+  it('donne la priorité au prochain virage sur le maintien vert', () => {
+    const { hint } = banner({ distM: 100, reached, greenActive: true })
+    expect(hint).toMatchObject({ state: 'near', direction: 'left' })
+  })
+
+  it('n’affiche rien en fin de tracé, maintien vert expiré', () => {
+    expect(banner({ turn: undefined, distM: Infinity, reached, greenActive: false }))
+      .toEqual({ hint: null, follow: [] })
+  })
+
+  it('reporte le numéro de sortie d’un rond-point', () => {
+    const rp = turn(100, { kind: 'roundabout', exitNumber: 3 })
+    expect(banner({ turn: rp, distM: 100 }).hint).toMatchObject({ kind: 'roundabout', exitNumber: 3 })
+  })
+})
+
+describe('turnAlertStep', () => {
+  const ALERT = 200
+  const URGENT = 60
+
+  function step(state: TurnAlertState, distM: number, ptr = 0) {
+    return turnAlertStep(state, { ptr, distM, alertM: ALERT, urgentM: URGENT })
+  }
+
+  it('ne dit rien hors de la zone d’alerte', () => {
+    const d = step(INITIAL_TURN_ALERT_STATE, ALERT + 1)
+    expect(d.active).toBeNull()
+    expect(d.announce).toBe(false)
+    expect(d.state).toBe(INITIAL_TURN_ALERT_STATE)      // état inchangé
+  })
+
+  it('annonce une fois à l’entrée dans la zone d’alerte', () => {
+    const d = step(INITIAL_TURN_ALERT_STATE, ALERT)
+    expect(d).toMatchObject({ announce: true, urgentBurst: false, buzzApproach: false, buzzManeuver: true })
+    expect(d.active).toEqual({ urgent: false })
+
+    // Fix suivant, toujours dans la zone lointaine : plus rien (la répétition périodique
+    // prend le relais via `active`).
+    const d2 = step(d.state, 150)
+    expect(d2.announce).toBe(false)
+    expect(d2.active).toEqual({ urgent: false })
+  })
+
+  it('rejoue une annonce à l’entrée en zone proche, avec son propre paquet', () => {
+    let d = step(INITIAL_TURN_ALERT_STATE, ALERT)
+    d = step(d.state, URGENT)
+
+    expect(d).toMatchObject({ announce: true, urgentBurst: true, buzzApproach: true })
+    // La vibration de manœuvre n'appartient qu'à la première détection.
+    expect(d.buzzManeuver).toBe(false)
+    expect(d.active).toEqual({ urgent: true })
+
+    // On reste dans la zone proche : plus d'annonce ni de buzz.
+    const d2 = step(d.state, 30)
+    expect(d2).toMatchObject({ announce: false, buzzApproach: false })
+    expect(d2.active).toEqual({ urgent: true })
+  })
+
+  it('n’annonce qu’une fois un virage apparu déjà en zone proche', () => {
+    // Les deux déclencheurs coïncident (virage détecté tard, ou tracé rerouté sous le nez).
+    const d = step(INITIAL_TURN_ALERT_STATE, 40)
+    expect(d).toMatchObject({ announce: true, urgentBurst: true, buzzApproach: true, buzzManeuver: true })
+
+    const d2 = step(d.state, 20)
+    expect(d2.announce).toBe(false)
+  })
+
+  it('réarme les annonces au virage suivant', () => {
+    const first = step(INITIAL_TURN_ALERT_STATE, 40)
+    const second = step(first.state, 180, 1)
+    expect(second).toMatchObject({ announce: true, urgentBurst: false, buzzManeuver: true })
+  })
+
+  it('tolère quelques mètres derrière soi avant de couper l’alerte', () => {
+    // Le snapping fait osciller la projection : on ne coupe pas l'alerte pile au virage.
+    const armed = step(INITIAL_TURN_ALERT_STATE, 10)
+    expect(step(armed.state, -(TURN_PASSED_M - 1)).active).toEqual({ urgent: true })
+    expect(step(armed.state, -(TURN_PASSED_M + 1)).active).toBeNull()
+  })
+
+  it('ne dit rien en fin de tracé (plus de virage)', () => {
+    expect(step(INITIAL_TURN_ALERT_STATE, Infinity).active).toBeNull()
+  })
+})
+
+describe('revealZoomStep', () => {
+  // Vue de 800 px : bande visée entre 144 px (0,18) et 240 px (0,30) du haut.
+  const H = 800
+  const base = { h: H, camZoom: 16, minZoom: 12 }
+
+  it('dézoome quand le virage est trop haut à l’écran (ou hors champ)', () => {
+    expect(revealZoomStep({ ...base, y: 100, base: 16 })).toBeCloseTo(15.8, 6)
+    // Frame après frame, le dézoom se cumule.
+    expect(revealZoomStep({ ...base, y: 100, base: 15.8 })).toBeCloseTo(15.6, 6)
+  })
+
+  it('resserre vers le zoom du profil quand le virage laisse trop d’espace devant', () => {
+    expect(revealZoomStep({ ...base, y: 400, base: 15 })).toBeCloseTo(15.2, 6)
+  })
+
+  it('ne bouge pas dans la bande morte (pas d’oscillation)', () => {
+    expect(revealZoomStep({ ...base, y: 200, base: 15 })).toBe(15)
+    // Bornes de la bande incluses.
+    expect(revealZoomStep({ ...base, y: H * 0.18, base: 15 })).toBe(15)
+    expect(revealZoomStep({ ...base, y: H * 0.30, base: 15 })).toBe(15)
+  })
+
+  it('ne zoome jamais au-delà du zoom du profil', () => {
+    // Déjà au zoom du profil et virage bas : on ne resserre pas davantage.
+    expect(revealZoomStep({ ...base, y: 700, base: 16 })).toBe(16)
+  })
+
+  it('ne descend pas sous le plancher caméra', () => {
+    expect(revealZoomStep({ ...base, y: 0, base: 12 })).toBe(12)
+    expect(revealZoomStep({ ...base, y: 0, base: 12.1 })).toBe(12)
   })
 })

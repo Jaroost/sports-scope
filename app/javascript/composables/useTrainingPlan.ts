@@ -20,7 +20,9 @@ export interface Current extends Point { form_zone: string; acwr_zone: string | 
 export interface Coverage { power: number; hr: number; estimated: number; total: number }
 export interface Thresholds { ftp_current?: number | null; weight_kg?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; typical_speed_kmh?: number | null; longest_ride_min?: number | null }
 // Répartition du temps par zone d'intensité (cf. ZoneDistribution côté serveur).
-export interface ZoneBucket { zone: string; seconds: number; pct: number }
+// `lo`/`hi` : bornes de la zone en valeur absolue (bpm / W) d'après le seuil courant —
+// nil quand la zone est ouverte de ce côté (première / dernière) ou sans seuil.
+export interface ZoneBucket { zone: string; seconds: number; pct: number; lo?: number | null; hi?: number | null }
 export interface ZoneChannel { total_seconds: number; zones: ZoneBucket[] }
 export interface ZoneSummary { window_days: number; hr: ZoneChannel | null; power: ZoneChannel | null }
 export interface LoadSummary {
@@ -80,6 +82,15 @@ const INTENSITY_ZONE_COLORS: Record<string, string> = {
 }
 export function intensityZoneColor(zone: string): string {
   return INTENSITY_ZONE_COLORS[zone] ?? '#6c757d'
+}
+
+// Plage d'une zone en valeur absolue, pour le survol : « < 138 bpm », « 138–153 bpm »,
+// « ≥ 170 W ». Chaîne vide sans seuil (le serveur n'a alors envoyé aucune borne).
+export function zoneRange(z: ZoneBucket, unit: string): string {
+  if (z.lo == null && z.hi == null) return ''
+  if (z.lo == null) return `< ${z.hi} ${unit}`
+  if (z.hi == null) return `≥ ${z.lo} ${unit}`
+  return `${z.lo}–${z.hi} ${unit}`
 }
 
 // ── Polarisation d'un canal de zones (facile / modéré / intense) + verdict ────

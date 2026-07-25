@@ -65,8 +65,9 @@ module TrainingLoad
   # aux seuils (estimation du TSS d'un itinéraire, cf. routeLoad.ts) ;
   # v3 = ajout de `typical_speed_samples` ; v4 = ajout de `started_at` par activité
   # (le front en fait l'heure de la dernière sortie du jour pour dater le « réalisé ») ;
-  # v5 = ajout de `distance_m` par activité et par jour (total km de la semaine).
-  CACHE_VERSION = 'v5'
+  # v5 = ajout de `distance_m` par activité et par jour (total km de la semaine) ;
+  # v6 = ajout de `lo`/`hi` (bornes bpm/W) à chaque zone d'intensité.
+  CACHE_VERSION = 'v6'
 
   # ── Payload complet consommé par le front ───────────────────────────────────
   # Mis en cache : recalcul lourd (union des 2 tables + EWMA quotidiennes). La clé
@@ -295,8 +296,10 @@ module TrainingLoad
     hr_zone_secs = ZoneDistribution.bucketize(hr_hist, lthr, ZoneDistribution::HR_ZONES, ZoneDistribution::HR_BUCKET)
     {
       window_days: ZONE_WINDOW_DAYS,
-      hr: ZoneDistribution.present(hr_zone_secs, ZoneDistribution::HR_ZONES),
-      power: ZoneDistribution.present(power_zone_secs, ZoneDistribution::POWER_ZONES)
+      hr: ZoneDistribution.present(hr_zone_secs, ZoneDistribution::HR_ZONES, lthr),
+      # Bornes en watts exprimées avec la FTP COURANTE (celle affichée en référence) :
+      # le classement, lui, a utilisé la FTP de la date de chaque sortie.
+      power: ZoneDistribution.present(power_zone_secs, ZoneDistribution::POWER_ZONES, ftp_at.call(Time.zone.today))
     }
   end
 
@@ -339,8 +342,8 @@ module TrainingLoad
     ) : {}
 
     {
-      hr: ZoneDistribution.present(hr_secs, ZoneDistribution::HR_ZONES),
-      power: ZoneDistribution.present(power_secs, ZoneDistribution::POWER_ZONES),
+      hr: ZoneDistribution.present(hr_secs, ZoneDistribution::HR_ZONES, lthr_value),
+      power: ZoneDistribution.present(power_secs, ZoneDistribution::POWER_ZONES, ftp),
       lthr: lthr_value,
       ftp: ftp
     }

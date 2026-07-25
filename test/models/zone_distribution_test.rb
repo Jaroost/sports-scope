@@ -85,9 +85,22 @@ class ZoneDistributionTest < ActiveSupport::TestCase
 
     assert_equal 40, out[:total_seconds]
     assert_equal 5, out[:zones].length   # z1..z5, y compris les zones vides
-    assert_equal({ zone: "z1", seconds: 30, pct: 75.0 }, out[:zones][0])
-    assert_equal({ zone: "z2", seconds: 10, pct: 25.0 }, out[:zones][1])
-    assert_equal({ zone: "z3", seconds: 0, pct: 0.0 }, out[:zones][2])
+    # Sans seuil : pas de bornes absolues.
+    assert_equal({ zone: "z1", seconds: 30, pct: 75.0, lo: nil, hi: nil }, out[:zones][0])
+    assert_equal({ zone: "z2", seconds: 10, pct: 25.0, lo: nil, hi: nil }, out[:zones][1])
+    assert_equal({ zone: "z3", seconds: 0, pct: 0.0, lo: nil, hi: nil }, out[:zones][2])
+  end
+
+  test "present exprime les bornes de chaque zone dans l'unité du seuil" do
+    out = ZoneDistribution.present({ "z1" => 10.0 }, HR_ZONES, 170)
+    los = out[:zones].map { |z| z[:lo] }
+    his = out[:zones].map { |z| z[:hi] }
+
+    assert_nil los.first          # z1 : ouverte vers le bas
+    assert_nil his.last           # z5 : ouverte vers le haut
+    assert_equal [nil, 138, 153, 160, 170], los   # 81 / 90 / 94 / 100 % de 170
+    # Chaque borne haute recolle exactement à la borne basse de la zone suivante.
+    assert_equal los[1..], his[..-2]
   end
 
   test "present renvoie nil quand le total est nul" do

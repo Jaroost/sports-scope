@@ -90,7 +90,7 @@ const ZONE_ORDER = ['fresh', 'neutral', 'productive', 'overreaching', 'very_fres
 // Les seuils athlète sont dérivés de la charge déjà chargée (pas de seconde requête),
 // et servent à estimer le TSS des itinéraires prévus → segment orange de la barre.
 const athlete = computed(() => athleteFromSummary(data.value))
-const { plannedLoads } = usePlannedLoads(athlete)
+const { plannedLoads, plannedDistances } = usePlannedLoads(athlete)
 
 // Bilan des sorties RÉELLES par jour (ISO → { tss, count, at }), pour le planificateur :
 //   • tss   : charge encaissée ce jour-là (RÉEL de la série, pas l'estimé) ;
@@ -118,7 +118,7 @@ const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
   openEventEditor, saveEvent, removeEvent, recommendation, weekPlan, nextWeekPlan,
-} = useTrainingPlan(data, plannedLoads)
+} = useTrainingPlan(data, plannedLoads, plannedDistances)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
 
 // Remonte le résumé au parent dès que la reco ou les zones changent. Verdict des zones :
@@ -589,10 +589,21 @@ watch(rangeDays, () => { hoverIndex.value = null })
               <span class="fw-semibold">
                 <i class="fa-solid fa-square me-1" :style="{ color: WEEK_SEGMENT_COLOR.done }" aria-hidden="true"></i>
                 {{ t('performance.load.week.progress', { done: weekPlan.done, target: weekPlan.target }) }}
+                <!-- Total km : ce que la semaine représente sur le terrain, à côté de ce
+                     qu'elle coûte en TSS. Même code couleur (vert fait / orange prévu). -->
+                <span class="week-km ms-2" :style="{ color: WEEK_SEGMENT_COLOR.done }" :title="t('performance.load.week.km_done_hint')">
+                  <i class="fa-solid fa-road me-1" aria-hidden="true"></i>{{ t('performance.load.week.km_done', { km: weekPlan.doneKm }) }}
+                </span>
                 <span v-if="weekPlan.planned > 0" class="fw-normal ms-2">
                   <i class="fa-solid fa-square me-1" :style="{ color: WEEK_SEGMENT_COLOR.planned }" aria-hidden="true"></i>
                   {{ t('performance.load.week.planned', { tss: weekPlan.planned }) }}
                 </span>
+                <span
+                  v-if="weekPlan.plannedKm > 0"
+                  class="week-km fw-normal ms-2"
+                  :style="{ color: WEEK_SEGMENT_COLOR.planned }"
+                  :title="t('performance.load.week.km_planned_hint')"
+                >{{ t('performance.load.week.km_planned', { km: weekPlan.plannedKm }) }}</span>
               </span>
               <span v-if="weekPlan.remaining > 0" class="text-muted">
                 {{ t('performance.load.week.remaining_to_plan', { tss: weekPlan.remaining, days: weekPlan.daysLeft, duration: fmtDuration(weekPlan.minutesLeft) }) }}
@@ -805,6 +816,11 @@ watch(rangeDays, () => { hoverIndex.value = null })
 }
 .week-progress {
   height: 0.75rem;
+}
+/* Total km : le chiffre ne doit jamais se couper en deux lignes. */
+.week-km {
+  white-space: nowrap;
+  cursor: help;
 }
 /* Repère « objectif » : trait vertical qui déborde légèrement la barre, coiffé d'un
    petit fanion, posé à la position de la cible quand on planifie au-delà. */

@@ -64,8 +64,9 @@ module TrainingLoad
   # cache (12 h) resserviraient sans les nouveaux champs. v2 = ajout de `weight_kg`
   # aux seuils (estimation du TSS d'un itinéraire, cf. routeLoad.ts) ;
   # v3 = ajout de `typical_speed_samples` ; v4 = ajout de `started_at` par activité
-  # (le front en fait l'heure de la dernière sortie du jour pour dater le « réalisé »).
-  CACHE_VERSION = 'v4'
+  # (le front en fait l'heure de la dernière sortie du jour pour dater le « réalisé ») ;
+  # v5 = ajout de `distance_m` par activité et par jour (total km de la semaine).
+  CACHE_VERSION = 'v5'
 
   # ── Payload complet consommé par le front ───────────────────────────────────
   # Mis en cache : recalcul lourd (union des 2 tables + EWMA quotidiennes). La clé
@@ -102,7 +103,10 @@ module TrainingLoad
         activity_type: row['activity_type'],
         # Heure de départ (ISO) : le front compare la plus tardive du jour à la date de
         # création d'un plan pour décider s'il a réellement été réalisé (cf. WeekPlanner).
-        started_at: iso_time(row['started_at'])
+        started_at: iso_time(row['started_at']),
+        # Distance (m) : cumulée par jour (cf. attach_activities) pour le total km
+        # hebdomadaire. 0 quand la sortie n'en porte pas (home-trainer, natation…).
+        distance_m: numeric(row['distance_m'])&.round || 0
       }
     end
     return empty_summary if daily.empty?
@@ -355,11 +359,14 @@ module TrainingLoad
 
   # Attache à chaque point de série les activités du jour (triées par TSS décroissant),
   # pour permettre au front d'ouvrir la séance principale au clic. Jours de repos → [].
+  # La distance du jour est la somme de celles des activités : le front en cumule les
+  # jours de la semaine pour afficher le total km à côté du total TSS.
   def attach_activities(series, daily_activities)
     by_iso = daily_activities.transform_keys(&:iso8601)
     series.each do |point|
       acts = by_iso[point[:date]] || []
       point[:activities] = acts.sort_by { |a| -a[:tss] }
+      point[:distance_m] = acts.sum { |a| a[:distance_m].to_i }
     end
     series
   end
@@ -456,7 +463,8 @@ module TrainingLoad
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
   def load_rows(user)
-    columns = %w[name started_at moving_time_s average_heartrate activity_type normalized_power average_speed]
+    columns = %w[name started_at moving_time_s average_heartrate activity_type normalized_power average_speed
+                 distance_m]
     union = UserActivities.union_sql(user_id: user.id, columns: columns)
     UserActivities.select_all("SELECT * FROM (#{union}) rows", 'TrainingLoad#load_rows')
   end

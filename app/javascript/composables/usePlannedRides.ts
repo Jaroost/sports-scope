@@ -188,6 +188,8 @@ export function planTss(plan: PlannedRide, athlete: AthleteState | null): number
 // TSS planifié par jour (ISO → somme des TSS), sous la forme attendue par
 // `useTrainingPlan`. Les plans dont le TSS n'est pas estimable sont ignorés :
 // mieux vaut une barre qui sous-estime qu'une barre qui invente.
+// `plannedDistances` suit la même règle avec les distances (ISO → mètres) : c'est le
+// pendant « km » du total TSS de la semaine.
 export function usePlannedLoads(athlete: Ref<AthleteState | null>) {
   const { plannedRides } = usePlannedRides()
 
@@ -201,5 +203,15 @@ export function usePlannedLoads(athlete: Ref<AthleteState | null>) {
     return out
   })
 
-  return { plannedLoads }
+  const plannedDistances = computed(() => {
+    const out = new Map<string, number>()
+    for (const plan of plannedRides.value) {
+      const m = plan.route.distance_m
+      if (!m) continue
+      out.set(plan.planned_on, (out.get(plan.planned_on) ?? 0) + m)
+    }
+    return out
+  })
+
+  return { plannedLoads, plannedDistances }
 }

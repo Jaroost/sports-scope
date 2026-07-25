@@ -202,7 +202,9 @@ export function isLoggedIn(): boolean {
   return !!document.querySelector('meta[name="user-preferences"]')
 }
 
-function csrfToken(): string {
+// Jeton CSRF de la page (méta posée par Rails). Exporté : plusieurs modules front en ont
+// besoin pour leurs appels d'écriture.
+export function csrfToken(): string {
   return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 }
 

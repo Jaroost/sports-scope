@@ -1,10 +1,31 @@
 import { BROUTER_URL } from './brouter'
-import { densifyGeometry } from './routeHelpers'
+import { densifyGeometry, nearestGeomIndex } from './routeHelpers'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
 
 // Un point d'ancrage d'itinéraire : position + drapeau « libre » (tronçon entrant
 // tracé en ligne droite plutôt qu'accroché à la route). Aligné sur routeStore.
 export interface Waypoint { lng: number; lat: number; free?: boolean }
+
+// Rang d'insertion d'un nouveau point d'ancrage dans `waypoints` : on repère le tronçon
+// d'ancrages (waypoint[i] → waypoint[i+1]) auquel appartient le sommet du tracé le plus
+// proche du point, et on insère juste après waypoint[i]. À défaut — moins de deux
+// ancrages, tracé absent, ou point au-delà du dernier ancrage — on ajoute en fin.
+// `nearIdx` évite de recalculer le sommet le plus proche quand l'appelant l'a déjà.
+export function waypointInsertIndex(
+  geometry: Coord[],
+  waypoints: Waypoint[],
+  lng: number,
+  lat: number,
+  nearIdx?: number,
+): number {
+  if (waypoints.length < 2 || geometry.length < 2) return waypoints.length
+  const near = nearIdx ?? nearestGeomIndex([lng, lat], geometry).idx
+  const wpIdx = waypoints.map((w) => nearestGeomIndex([w.lng, w.lat], geometry).idx)
+  for (let i = 0; i < wpIdx.length - 1; i++) {
+    if (near >= wpIdx[i] && near <= wpIdx[i + 1]) return i + 1
+  }
+  return waypoints.length
+}
 
 // Cap (angle boussole 0–360) injecté comme direction de départ BRouter. Le moteur place
 // un faux point d'origine à 1 km en arrière dans ce cap, si bien que repartir en sens

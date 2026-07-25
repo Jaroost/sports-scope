@@ -502,18 +502,6 @@ export function generateCircle(center: LngLat, radiusM: number, steps = 64): Lng
   return pts
 }
 
-// Construit l'URL Google Maps Street View d'un point. Quand `heading` est fourni (cap en
-// degrés, 0 = nord), le panorama est orienté dans cette direction — typiquement le cap
-// depuis le tracé vers un POI, pour regarder le POI plutôt que la route. Utilise l'API
-// Google Maps URLs (action `pano`), qui « snappe » au panorama le plus proche du `viewpoint`
-// et, contrairement au format `cbll`, honore l'orientation de la caméra.
-export function streetViewUrl(lat: number, lng: number, heading?: number): string {
-  const base = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`
-  if (heading == null || Number.isNaN(heading)) return base
-  const h = ((Math.round(heading) % 360) + 360) % 360
-  return `${base}&heading=${h}`
-}
-
 // Cap (degrés, 0 = nord) depuis le point du tracé le plus proche de `[lng, lat]` vers ce
 // point : la direction dans laquelle regarder pour voir le POI depuis la route. Renvoie
 // undefined si la géométrie est vide (aucune référence) — l'appelant ouvre alors Street

@@ -22,9 +22,12 @@ import { MARKER_KINDS, markerMeta, markerKindLabel } from '../routeMarkers'
 import type { MarkerKind } from '../routeMarkers'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm,
-  streetViewUrl, bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
+  bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
   nearestGeomIndex,
 } from '../routeHelpers'
+import {
+  streetViewUrl, checkStreetView, probeStreetViewLink, applyStreetViewState,
+} from '../streetView'
 import type { Climb, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 import { createScaledMarkerGroup, MARKER_SCALE_VAR } from '../mapMarkerGroup'
@@ -170,7 +173,6 @@ let insertChoicePopup: any = null
 let detachLongPress: (() => void) | null = null
 let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
-const svCache = new Map<string, boolean>()
 
 // Recherche de lieu : la logique (Nominatim, pays du profil, anti-rebond) vit dans
 // usePlaceSearch, partagée avec la navigation. Ne restent ici que l'état d'affichage de la
@@ -812,11 +814,7 @@ function showPlacePopup(place: Place) {
   })
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
   if (svLink) {
-    checkSV(place.lat, place.lng).then((ok) => {
-      svLink.classList.toggle('place-popup-link--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
+    probeStreetViewLink(svLink, place.lat, place.lng)
   }
 }
 
@@ -908,11 +906,7 @@ function showRoutePointPopup(lng: number, lat: number) {
   })
   const svLink = wrap.querySelector<HTMLElement>('.wp-tooltip-action--streetview')
   if (svLink) {
-    checkSV(lat, lng).then((ok) => {
-      svLink.classList.toggle('wp-tooltip-action--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
+    probeStreetViewLink(svLink, lat, lng, 'wp-tooltip-action--disabled')
   }
 }
 
@@ -1142,11 +1136,7 @@ function showSavedPoiPopup(poi: SavedPoi) {
   })
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
   if (svLink) {
-    checkSV(poi.lat, poi.lng).then((ok) => {
-      svLink.classList.toggle('place-popup-link--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
+    probeStreetViewLink(svLink, poi.lat, poi.lng)
   }
 }
 
@@ -1302,11 +1292,7 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
   })
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
   if (svLink) {
-    checkSV(marker.lat, marker.lng).then((ok) => {
-      svLink.classList.toggle('place-popup-link--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
+    probeStreetViewLink(svLink, marker.lat, marker.lng)
   }
 }
 
@@ -1720,7 +1706,7 @@ function selectWaypoint(idx: number) {
   }
   const wp = routeStore.waypoints.value[idx]
   if (wp) {
-    checkSV(wp.lat, wp.lng).then((ok) => {
+    checkStreetView(wp.lat, wp.lng).then((ok) => {
       if (selectedWpIdx === idx && waypointMarkers[idx]) applySVState(waypointMarkers[idx].getElement(), ok)
     })
   }
@@ -1971,34 +1957,11 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
 
 // ─── Street View ──────────────────────────────────────────────────────────────
 
-function svCacheKey(lat: number, lng: number) { return `${lat.toFixed(4)},${lng.toFixed(4)}` }
-
-function checkSV(lat: number, lng: number): Promise<boolean> {
-  const key = svCacheKey(lat, lng)
-  if (svCache.has(key)) return Promise.resolve(svCache.get(key)!)
-  return new Promise<boolean>((resolve) => {
-    const cb = `_sv${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
-    const s = document.createElement('script')
-    let settled = false
-    const finish = (v: boolean) => {
-      if (settled) return; settled = true
-      clearTimeout(timer); delete (window as any)[cb]; s.remove()
-      svCache.set(key, v); resolve(v)
-    }
-    const timer = setTimeout(() => finish(true), 4000)
-    ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
-    s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
-    s.onerror = () => finish(true)
-    document.head.appendChild(s)
-  })
-}
-
+// Grise le lien Street View DANS la tooltip d'un point d'ancrage (convention de classes
+// propre à ces tooltips). Le lien est re-cherché au moment de la réponse : la sélection a
+// pu changer entre-temps, c'est à l'appelant de vérifier qu'il s'agit encore du bon point.
 function applySVState(markerEl: HTMLElement, available: boolean) {
-  const link = markerEl.querySelector<HTMLElement>('.wp-tooltip-action--streetview')
-  if (!link) return
-  link.classList.toggle('wp-tooltip-action--disabled', !available)
-  if (!available) link.setAttribute('aria-disabled', 'true')
-  else link.removeAttribute('aria-disabled')
+  applyStreetViewState(markerEl.querySelector<HTMLElement>('.wp-tooltip-action--streetview'), available, 'wp-tooltip-action--disabled')
 }
 
 // ─── Map style ────────────────────────────────────────────────────────────────

@@ -5,35 +5,7 @@
 // `.place-popup*` présentes dans les deux composants ; on ne dépend donc d'aucune
 // feuille de style propre à un composant.
 import { t } from './i18n'
-import { streetViewUrl } from './routeHelpers'
-
-// ─── Street View (disponibilité) ───────────────────────────────────────────────
-// Sonde best-effort du service d'imagerie Google (JSONP) : true si une vue existe à
-// proximité. Repli optimiste sur erreur / délai. Le cache est partagé par toutes les
-// tooltips (créateur, navigation, POI) pour éviter de re-sonder un même point.
-const svCache = new Map<string, boolean>()
-
-function svCacheKey(lat: number, lng: number) { return `${lat.toFixed(4)},${lng.toFixed(4)}` }
-
-export function checkStreetView(lat: number, lng: number): Promise<boolean> {
-  const key = svCacheKey(lat, lng)
-  if (svCache.has(key)) return Promise.resolve(svCache.get(key)!)
-  return new Promise<boolean>((resolve) => {
-    const cb = `_sv${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
-    const s = document.createElement('script')
-    let settled = false
-    const finish = (v: boolean) => {
-      if (settled) return; settled = true
-      clearTimeout(timer); delete (window as any)[cb]; s.remove()
-      svCache.set(key, v); resolve(v)
-    }
-    const timer = setTimeout(() => finish(true), 4000)
-    ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
-    s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
-    s.onerror = () => finish(true)
-    document.head.appendChild(s)
-  })
-}
+import { streetViewUrl, probeStreetViewLink } from './streetView'
 
 // Zoom d'ouverture d'OpenStreetMap : assez près pour voir les attributs d'un chemin
 // (nom, surface, accès), sans dépendre du zoom de notre propre carte — on vient
@@ -138,14 +110,7 @@ export function buildCoordPopupContent(
       copyText(btn.dataset.coord || '', btn)
     })
   })
-  const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
-  if (svLink) {
-    checkStreetView(lat, lng).then((ok) => {
-      svLink.classList.toggle('place-popup-link--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
-  }
+  probeStreetViewLink(wrap.querySelector<HTMLElement>('.place-popup-link--streetview'), lat, lng)
   return wrap
 }
 
@@ -201,14 +166,7 @@ export function buildDestPointPopupContent(
       copyText(btn.dataset.coord || '', btn)
     })
   })
-  const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
-  if (svLink) {
-    checkStreetView(lat, lng).then((ok) => {
-      svLink.classList.toggle('place-popup-link--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
-  }
+  probeStreetViewLink(wrap.querySelector<HTMLElement>('.place-popup-link--streetview'), lat, lng)
   return wrap
 }
 

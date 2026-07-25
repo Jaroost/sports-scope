@@ -1,6 +1,7 @@
 import { reactive, ref, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { haversine, streetViewUrl, bearingFromRoute } from '../routeHelpers'
+import { haversine, bearingFromRoute } from '../routeHelpers'
+import { streetViewUrl, probeStreetViewLink } from '../streetView'
 import type { Coord, LngLat } from '../routeHelpers'
 import { userPreferences } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
@@ -82,7 +83,6 @@ export function useNavPois(deps: {
   const placeKey = (p: NavPlace) => `${p.type}:${p.lng}:${p.lat}`
   let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
   let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
-  const svCache = new Map<string, boolean>()     // cache « Street View dispo ? » par POI
 
   // Tailles de base (px) des POI à l'échelle 1. Relevées par rapport au CSS d'origine
   // (32/26) car les POI paraissaient trop petits une fois mis à l'échelle.
@@ -368,14 +368,7 @@ export function useNavPois(deps: {
       closePlacePopup()
       onInsertVia?.(place)
     })
-    const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
-    if (svLink) {
-      checkSV(place.lat, place.lng).then((ok) => {
-        svLink.classList.toggle('place-popup-link--disabled', !ok)
-        if (!ok) svLink.setAttribute('aria-disabled', 'true')
-        else svLink.removeAttribute('aria-disabled')
-      })
-    }
+    probeStreetViewLink(wrap.querySelector<HTMLElement>('.place-popup-link--streetview'), place.lat, place.lng)
   }
 
   // Ferme le popup de POI et retire le surlignage « actif » de son marqueur.
@@ -388,30 +381,6 @@ export function useNavPois(deps: {
     const div = document.createElement('div')
     div.textContent = s
     return div.innerHTML
-  }
-
-  // Interroge le service d'imagerie Google : true si une vue Street View existe près
-  // du point. Repris du créateur (JSONP best-effort, repli optimiste sur erreur/timeout).
-  function svCacheKey(lat: number, lng: number) { return `${lat.toFixed(4)},${lng.toFixed(4)}` }
-
-  function checkSV(lat: number, lng: number): Promise<boolean> {
-    const key = svCacheKey(lat, lng)
-    if (svCache.has(key)) return Promise.resolve(svCache.get(key)!)
-    return new Promise<boolean>((resolve) => {
-      const cb = `_sv${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
-      const s = document.createElement('script')
-      let settled = false
-      const finish = (v: boolean) => {
-        if (settled) return; settled = true
-        clearTimeout(timer); delete (window as any)[cb]; s.remove()
-        svCache.set(key, v); resolve(v)
-      }
-      const timer = setTimeout(() => finish(true), 4000)
-      ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
-      s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
-      s.onerror = () => finish(true)
-      document.head.appendChild(s)
-    })
   }
 
   // ─── POI sauvegardés ──────────────────────────────────────────────────────────

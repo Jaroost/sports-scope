@@ -27,6 +27,28 @@ export function waypointInsertIndex(
   return waypoints.length
 }
 
+// Rang d'insertion d'une étape tapée SUR le trajet d'aperçu d'une navigation vers un lieu
+// (mode « cible »). Sans cela, un point tapé entre deux étapes existantes s'ajouterait en
+// fin de séquence et le trajet ferait un aller-retour. On repère, sur la géométrie BRouter,
+// le sommet le plus proche du tap, puis la première étape dont le sommet le dépasse : le
+// point s'insère juste avant elle. `origin` est le point de départ du trajet (position GPS),
+// qui n'est pas une étape — d'où le décalage de rang. À défaut (tap au-delà de la dernière
+// étape, géométrie absente), on ajoute en fin.
+export function stopInsertIndex(
+  geometry: Coord[],
+  origin: LngLat,
+  stops: LngLat[],
+  tap: LngLat,
+): number {
+  if (geometry.length < 2) return stops.length
+  const tapIdx = nearestGeomIndex(tap, geometry).idx
+  const points = [origin, ...stops]
+  for (let k = 1; k < points.length; k++) {
+    if (tapIdx <= nearestGeomIndex(points[k], geometry).idx) return k - 1
+  }
+  return stops.length
+}
+
 // Cap (angle boussole 0–360) injecté comme direction de départ BRouter. Le moteur place
 // un faux point d'origine à 1 km en arrière dans ce cap, si bien que repartir en sens
 // inverse au départ subit la pleine pénalité de virage (turncost) : le demi-tour initial

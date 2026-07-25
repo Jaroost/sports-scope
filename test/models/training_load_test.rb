@@ -179,6 +179,30 @@ class TrainingLoadTest < ActiveSupport::TestCase
     assert_equal [], series[1][:activities] # jour de repos
   end
 
+  test "attach_activities cumule la distance du jour" do
+    day = Time.zone.today
+    series = [{ date: day.iso8601 }, { date: (day + 1).iso8601 }]
+    activities = { day => [{ name: "matin", tss: 30.0, distance_m: 25_000 },
+                           { name: "soir", tss: 90.0, distance_m: 40_000 }] }
+
+    TrainingLoad.attach_activities(series, activities)
+
+    assert_equal 65_000, series[0][:distance_m]
+    assert_equal 0, series[1][:distance_m] # jour de repos
+  end
+
+  test "attach_activities traite une séance sans distance comme 0" do
+    day = Time.zone.today
+    series = [{ date: day.iso8601 }]
+    # Home-trainer / natation : la sortie porte du TSS mais aucune distance.
+    activities = { day => [{ name: "home-trainer", tss: 60.0, distance_m: nil },
+                           { name: "sortie", tss: 30.0, distance_m: 15_000 }] }
+
+    TrainingLoad.attach_activities(series, activities)
+
+    assert_equal 15_000, series[0][:distance_m]
+  end
+
   # ── auto_lthr : repli quand l'athlète n'a rien saisi ────────────────────────
   test "auto_lthr approxime le seuil depuis la plus haute FC moyenne" do
     rows = [{ "average_heartrate" => 140 }, { "average_heartrate" => 160 }, { "average_heartrate" => nil }]

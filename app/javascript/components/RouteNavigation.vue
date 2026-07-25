@@ -29,7 +29,6 @@ import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
-import type { PlaceResult } from '../composables/usePlaceSearch'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
@@ -52,7 +51,8 @@ import { usePoiBrowse } from '../composables/usePoiBrowse'
 import { useNavToast } from '../composables/useNavToast'
 import { useNavDebug } from '../composables/useNavDebug'
 import { useRouteEditing } from '../composables/useRouteEditing'
-import { buildCoordPopupContent, buildDestPointPopupContent, attachLongPress } from '../mapCoordPopup'
+import { useDestinationNav } from '../composables/useDestinationNav'
+import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
 
 // Page de navigation unifiée : démarre en mode libre (carte + GPS + vitesse, sans
@@ -333,11 +333,6 @@ const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" ar
 // message d'erreur. Voir recalcRoute.
 const rerouting = ref(false)
 const rerouteError = ref<string | null>(null)
-// ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
-// Mode « cible » : on affiche une recherche (recadrage carte) + une consigne, puis un
-// tap sur la carte fixe le point de destination ; « Naviguer ici » calcule un
-// itinéraire depuis la position GPS et remplace le tracé courant (applyReroute).
-const placeNavActive = ref(false)
 // Mode recherche (cible) / édition : l'utilisateur cherche un nouveau lieu / itinéraire ou
 // retouche le tracé — la tête dans la carte et le clavier, pas sur la route. Bipper ou
 // vibrer pour un virage du tracé qu'il s'apprête à abandonner ne serait que du bruit
@@ -358,37 +353,6 @@ const audioMuted = computed(() => alertsMuted.value || controlsVisible.value)
 // l'alerte radar (son + overlay) reste active pendant qu'on parcourt ses POI, car c'est
 // une info de sécurité (voiture arrivant par l'arrière).
 const radarMuted = computed(() => searchOrEditMuted.value || controlsVisible.value)
-// Points d'étape posés au tap avant de valider : la navigation passera par chacun
-// dans l'ordre, depuis la position GPS. Un seul point = destination directe.
-const destPoints = ref<LngLat[]>([])
-const destName = ref('')
-// Libellé du bouton de validation : « Naviguer ici » pour un point, « Naviguer (N
-// points) » dès qu'on a posé plusieurs étapes.
-const confirmLabel = computed(() =>
-  destPoints.value.length > 1
-    ? t('routes.navigate_via_points', { count: destPoints.value.length })
-    : t('routes.navigate_here'),
-)
-// Sport et profil du trajet en cours de composition, ajustables dans le panneau de
-// destination pour ce seul trajet. Réamorcés sur ceux de la séance à chaque ouverture du
-// mode « cible » (cf. startPlaceNav), et reversés dans la séance au lancement du guidage.
-const navSport = ref<Sport>('cycling')
-const navProfile = ref<string>(catalogDefaultForSport('cycling'))
-
-// Sport et profil effectifs du prochain calcul BRouter : ceux du panneau de destination
-// pendant qu'on le compose, ceux de la séance partout ailleurs.
-function navRouting(): { sport: Sport; profile: string } {
-  return placeNavActive.value
-    ? { sport: navSport.value, profile: navProfile.value }
-    : { sport: routeSport.value, profile: routeProfile.value }
-}
-
-// Réglage du trajet en cours de composition : chaque changement relance l'aperçu.
-function applyNavRouting({ sport, profile }: { sport: Sport; profile: string }) {
-  navSport.value = sport
-  navProfile.value = profile
-  updatePlacePreview()
-}
 
 // Adopte le sport et le profil de routage d'un tracé chargé (liste ou lien partagé). Un
 // tracé sauvegardé avant l'introduction des profils, ou avec un profil incohérent avec son
@@ -409,21 +373,11 @@ function applyRouteRouting({ sport, profile }: { sport: Sport; profile: string }
   void recomputeForRoutingChange()
 }
 
-const navStarting = ref(false)
+// Bandeau d'erreur des calculs BRouter de la séance (destination, insertion de via).
 const navError = ref<string | null>(null)
 // Insertion d'un point intermédiaire dans le tracé en cours (POI / clic droit) : appel
 // BRouter du détour en cours. Évite un double déclenchement et neutralise le bouton.
 const viaInserting = ref(false)
-// Marqueurs (numérotés) des points d'étape posés au tap, alignés sur destPoints.
-let destMarkers: any[] = []
-// Aperçu du trajet BRouter à travers les points posés, recalculé à chaque
-// ajout/retrait. previewSeq sert de garde anti-désynchronisation : une réponse
-// arrivée après un nouveau changement de points est ignorée. previewResult est
-// réutilisé tel quel à la validation pour éviter un second appel BRouter.
-const previewLoading = ref(false)
-const previewDistM = ref<number | null>(null)
-let previewResult: { geometry: Coord[]; hints: VoiceHint[] } | null = null
-let previewSeq = 0
 const climbInfo = ref<ClimbInfo | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
@@ -454,9 +408,6 @@ let turnMarkers: any[] = []    // marqueurs DOM des indicateurs de virage (au-de
 let coordPopup: any = null
 let detachCoordLongPress: (() => void) | null = null
 let suppressNextMapClick = false
-// Tooltip d'un point d'étape posé en mode « cible » (clic sur son marqueur) :
-// suppression du point, Google Maps, Street View. Voir mapCoordPopup.
-let destPopup: any = null
 
 // Route data (non-reactive: large arrays, only read inside callbacks)
 let geometry: Coord[] = []
@@ -487,6 +438,30 @@ let rawHints: VoiceHint[] = []
 const routeSport = ref<Sport>(userPreferences().display.default_sport)
 const routeProfile = ref<string>(routeProfileForSport(routeSport.value))
 const routeName = ref('')
+
+// ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
+// Mode « cible » : on affiche une recherche (recadrage carte) + une consigne, puis chaque
+// tap sur la carte pose un point d'étape ; « Naviguer ici » calcule un itinéraire depuis la
+// position GPS à travers ces points et remplace le tracé courant (applyReroute). Tout le
+// sous-système (points, aperçu BRouter, marqueurs) vit dans useDestinationNav — il ne
+// partage avec la navigation que le tracé qu'il installe à la fin.
+const {
+  placeNavActive, destPoints, navSport, navProfile, navStarting,
+  previewLoading, previewDistM, confirmLabel,
+  startPlaceNav, cancelPlaceNav, confirmPlaceNav, applyNavRouting, onLocate,
+  removeLastDestPoint, handleMapTap: handlePlaceNavTap, applyPreviewLinePaint, navigateTo,
+} = useDestinationNav({
+  getMap: () => map,
+  getMaplibre: () => maplibre,
+  getLastPos: () => lastPos,
+  navError,
+  routeSport, routeProfile, routeName, routeToken, following, cameraUnlocked,
+  lineWidthExpr: () => zoomWidthExpr(routeLineWidth.value),
+  applyReroute: (geom, hints) => applyReroute(geom, hints),
+  setRouteVias: (vias) => { routeVias = vias },
+  persistSession: () => persistSession(),
+  hideControls: () => hideControls(),
+})
 
 // Réglages de navigation du sport de la séance : aspect du tracé, indicateurs de direction,
 // distances et cadences des annonces de virage. Réglés PAR SPORT dans le profil — un virage
@@ -527,7 +502,7 @@ function applyRouteLinePaint() {
     map.setPaintProperty('nav-route-remaining', 'line-width', zoomWidthExpr(routeLineWidth.value, true))
     map.setPaintProperty('nav-route-remaining', 'line-opacity', opacity)
   }
-  if (map.getLayer('nav-place-preview')) map.setPaintProperty('nav-place-preview', 'line-width', zoomWidthExpr(routeLineWidth.value))
+  applyPreviewLinePaint()
 }
 
 // ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
@@ -1303,265 +1278,6 @@ function unloadRoute() {
   if (lastPos) { anchorPos = lastPos; anchorTime = performance.now() }
 }
 
-// ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
-
-function startPlaceNav() {
-  // Le trajet part des réglages de la séance ; l'utilisateur peut ensuite les ajuster pour
-  // ce seul trajet, et son choix redeviendra celui de la séance au lancement du guidage.
-  navSport.value = routeSport.value
-  navProfile.value = routeProfile.value
-  placeNavActive.value = true
-  navError.value = null
-  // Le tiroir de commandes et la recherche se disputent le haut de l'écran : on
-  // referme le tiroir pour laisser la barre de recherche seule en tête.
-  hideControls()
-}
-
-function cancelPlaceNav() {
-  placeNavActive.value = false
-  navError.value = null
-  destPoints.value = []
-  destName.value = ''
-  for (const m of destMarkers) m.remove()
-  destMarkers = []
-  closeDestPopup()
-  clearPlacePreview()
-}
-
-// FeatureCollection (une LineString, ou vide) pour la source d'aperçu.
-function previewFC(coords: number[][]) {
-  return {
-    type: 'FeatureCollection' as const,
-    features: coords.length >= 2
-      ? [{ type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: coords }, properties: {} }]
-      : [],
-  }
-}
-
-// Efface l'aperçu (ligne + état) et invalide toute réponse BRouter encore en vol.
-function clearPlacePreview() {
-  previewSeq++
-  previewResult = null
-  previewLoading.value = false
-  previewDistM.value = null
-  const src = map?.getSource('nav-place-preview') as any
-  if (src) src.setData(previewFC([]))
-}
-
-// Recalcule l'aperçu du trajet à travers les points posés (depuis la position GPS).
-// Appelé à chaque ajout/retrait de point. La garde previewSeq écarte les réponses
-// devenues obsolètes (un point posé/retiré pendant le calcul).
-async function updatePlacePreview() {
-  if (!map) return
-  ensurePlacePreviewLayer()
-  const pts = destPoints.value.slice()
-  // Il faut la position GPS + au moins un point pour tracer un trajet.
-  if (!lastPos || pts.length === 0) { clearPlacePreview(); return }
-  const seq = ++previewSeq
-  previewLoading.value = true
-  const { profile } = navRouting()
-  try {
-    const result = await fetchRouteVia([lastPos, ...pts], profile)
-    if (seq !== previewSeq) return
-    previewResult = result
-    const cum = buildDistancesM(result.geometry)
-    previewDistM.value = cum[cum.length - 1] ?? null
-    const src = map.getSource('nav-place-preview') as any
-    if (src) src.setData(previewFC(result.geometry.map(([lng, lat]) => [lng, lat])))
-  } catch {
-    if (seq !== previewSeq) return
-    previewResult = null
-    previewDistM.value = null
-    const src = map.getSource('nav-place-preview') as any
-    if (src) src.setData(previewFC([]))
-  } finally {
-    if (seq === previewSeq) previewLoading.value = false
-  }
-}
-
-// Recadre la carte sur le lieu recherché (sans fixer de destination) : l'utilisateur
-// ajuste ensuite la vue et touche le point exact. Repris de RouteBuilderMap.pickPlace.
-function onLocate(p: PlaceResult) {
-  destName.value = p.display_name.split(',')[0]
-  if (!map) return
-  // On débraye le suivi caméra (comme un déplacement manuel) : sinon la boucle
-  // d'animation rejette aussitôt la caméra sur la position GPS et annule le recadrage
-  // sur le lieu cherché. cameraUnlocked empêche aussi le réarmement auto à l'approche
-  // d'un virage. Le suivi reprend à la validation (confirmPlaceNav) ou via « recentrer ».
-  following.value = false
-  cameraUnlocked.value = true
-  if (p.boundingbox?.length === 4) {
-    const [minLat, maxLat, minLng, maxLng] = p.boundingbox.map(parseFloat)
-    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800, maxZoom: 14 })
-  } else {
-    const lat = parseFloat(p.lat), lng = parseFloat(p.lon)
-    if (!Number.isNaN(lat) && !Number.isNaN(lng)) map.flyTo({ center: [lng, lat], zoom: 13, duration: 800 })
-  }
-}
-
-function closeDestPopup() {
-  if (destPopup) { destPopup.remove(); destPopup = null }
-}
-
-// Tooltip d'un point d'étape (clic sur son marqueur) : suppression, Google Maps,
-// Street View. L'index est recalculé via le marqueur (et non capturé) pour rester
-// juste après un déplacement ou une suppression d'un autre point.
-function showDestPointPopup(marker: any) {
-  if (!maplibre || !map) return
-  const idx = destMarkers.indexOf(marker)
-  if (idx < 0) return
-  closeDestPopup()
-  const [lng, lat] = destPoints.value[idx]
-  destPopup = new maplibre.Popup({ offset: 28, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
-    .setLngLat([lng, lat])
-    .setDOMContent(buildDestPointPopupContent(lng, lat, closeDestPopup, () => {
-      closeDestPopup()
-      const i = destMarkers.indexOf(marker)
-      if (i >= 0) removeDestPointAt(i)
-    }))
-    .addTo(map)
-}
-
-// Renumérote les marqueurs d'après leur position courante dans destMarkers (après
-// insertion, déplacement ou suppression au milieu de la séquence).
-function renumberDestMarkers() {
-  destMarkers.forEach((m, i) => {
-    const span = m.getElement().querySelector('.nav-dest-num')
-    if (span) span.textContent = String(i + 1)
-  })
-}
-
-// Crée un marqueur d'étape déplaçable. Glisser-déposer : à la fin du glissement, on
-// met à jour le point correspondant et on recalcule l'aperçu. Un tap (sans glissement)
-// ouvre la tooltip du point. L'index est résolu dynamiquement (indexOf) car insertions
-// et suppressions décalent les positions.
-function makeDestMarker(lngLat: LngLat): any {
-  const el = document.createElement('div')
-  el.className = 'nav-dest-marker'
-  el.innerHTML = '<i class="fa-solid fa-location-dot"></i><span class="nav-dest-num"></span>'
-  const marker = new maplibre.Marker({ element: el, anchor: 'bottom', draggable: true }).setLngLat(lngLat).addTo(map)
-  // Distingue un glissement d'un simple tap : un dragend émet un clic synthétique
-  // qu'il ne faut pas interpréter comme une ouverture de tooltip.
-  let dragged = false
-  marker.on('dragstart', () => { dragged = true; closeDestPopup() })
-  marker.on('dragend', () => {
-    const idx = destMarkers.indexOf(marker)
-    if (idx >= 0) {
-      const ll = marker.getLngLat()
-      destPoints.value.splice(idx, 1, [ll.lng, ll.lat])
-      updatePlacePreview()
-    }
-    // Le clic synthétique de relâchement (souris) suit le dragend : on laisse `dragged`
-    // armé brièvement pour qu'il soit ignoré, puis on le réarme pour un prochain tap.
-    // (Sur écran tactile, aucun clic ne suit un glissement → ce délai libère le tap.)
-    setTimeout(() => { dragged = false }, 300)
-  })
-  el.addEventListener('click', (ev) => {
-    ev.stopPropagation()
-    if (dragged) return
-    showDestPointPopup(marker)
-  })
-  return marker
-}
-
-// Ajoute un point d'étape au tap sur la carte. Les points s'accumulent (marqueurs
-// numérotés) jusqu'à la validation ; la navigation passera par chacun dans l'ordre.
-function addDestPoint(lngLat: LngLat) {
-  destPoints.value.push(lngLat)
-  navError.value = null
-  if (!map || !maplibre) return
-  destMarkers.push(makeDestMarker(lngLat))
-  renumberDestMarkers()
-  updatePlacePreview()
-}
-
-// Insère un point d'étape à une position donnée de la séquence (tap sur le trajet).
-function insertDestPoint(index: number, lngLat: LngLat) {
-  navError.value = null
-  if (!map || !maplibre) { destPoints.value.splice(index, 0, lngLat); return }
-  destPoints.value.splice(index, 0, lngLat)
-  destMarkers.splice(index, 0, makeDestMarker(lngLat))
-  renumberDestMarkers()
-  updatePlacePreview()
-}
-
-// Tap sur le trajet d'aperçu : insère un point au bon rang de la séquence (entre les
-// deux étapes que ce tronçon relie) plutôt que de l'ajouter en fin. On repère, sur la
-// géométrie BRouter, l'index le plus proche du tap, puis la première étape dont l'index
-// géométrique le dépasse : le point s'insère juste avant elle.
-function insertDestPointOnLine(lngLat: LngLat) {
-  if (!previewResult || !lastPos) { addDestPoint(lngLat); return }
-  const geom = previewResult.geometry
-  const clickIdx = nearestGeomIndex(lngLat, geom).idx
-  const waypoints = [lastPos, ...destPoints.value]
-  let insertAt = destPoints.value.length
-  for (let k = 1; k < waypoints.length; k++) {
-    if (clickIdx <= nearestGeomIndex(waypoints[k], geom).idx) { insertAt = k - 1; break }
-  }
-  insertDestPoint(insertAt, lngLat)
-}
-
-// Retire un point d'étape donné (et son marqueur), puis renumérote.
-function removeDestPointAt(index: number) {
-  destPoints.value.splice(index, 1)
-  const [m] = destMarkers.splice(index, 1)
-  if (m) m.remove()
-  navError.value = null
-  renumberDestMarkers()
-  updatePlacePreview()
-}
-
-// Retire le dernier point d'étape posé.
-function removeLastDestPoint() {
-  if (destPoints.value.length === 0) return
-  removeDestPointAt(destPoints.value.length - 1)
-}
-
-// Itinéraire BRouter depuis la position GPS, passant par une suite de points d'étape
-// (au moins un), qui remplace le tracé courant (applyReroute réinitialise tout le
-// suivi). Cœur partagé entre la destination choisie sur la carte (« Naviguer ici »,
-// éventuellement avec plusieurs étapes) et un POI tapé sur la carte (point unique).
-async function navigateVia(name: string, vias: LngLat[], precomputed?: { geometry: Coord[]; hints: VoiceHint[] }) {
-  if (navStarting.value || !lastPos || vias.length === 0) return
-  navStarting.value = true
-  navError.value = null
-  try {
-    const { sport, profile } = navRouting()
-    // Réutilise l'aperçu déjà calculé (« ce que tu as vu est ce que tu auras »),
-    // sinon route à la volée (cas d'un POI tapé, sans aperçu préalable).
-    const { geometry: geom, hints } = precomputed ?? await fetchRouteVia([lastPos, ...vias], profile)
-    routeName.value = name || t('routes.destination')
-    // Destination ad hoc (non sauvegardée) : pas de token → ni hors-ligne ni reprise.
-    routeToken.value = null
-    routeSport.value = sport
-    routeProfile.value = profile
-    applyReroute(geom, hints)
-    // Étapes retenues comme source de recalcul : ce trajet n'a pas d'autre définition.
-    routeVias = vias.slice()
-    // Réécrit la session : applyReroute l'a déjà persistée, mais sans les étapes ni le
-    // nom définitifs de cette destination.
-    persistSession()
-    cancelPlaceNav()
-    following.value = true
-    cameraUnlocked.value = false
-  } catch {
-    navError.value = t('routes.error_routing')
-  } finally {
-    navStarting.value = false
-  }
-}
-
-// « Naviguer ici » depuis un POI : trajet direct vers un point unique.
-function navigateTo(name: string, dest: LngLat) {
-  navigateVia(name, [dest])
-}
-
-// Lance la navigation par les points d'étape posés sur la carte (un ou plusieurs).
-function confirmPlaceNav() {
-  if (destPoints.value.length === 0) return
-  navigateVia(destName.value, destPoints.value, previewResult ?? undefined)
-}
-
 // ─── Insertion d'un point intermédiaire dans le tracé ──────────────────────────
 // Contrairement à « Naviguer ici » (qui remplace tout par un trajet depuis la position
 // GPS), on insère le point dans l'itinéraire courant au plus proche : on repère le
@@ -1737,18 +1453,9 @@ async function initMap() {
       addEditWaypoint(e.lngLat.lng, e.lngLat.lat)
       return
     }
-    // Mode « cible » : le tap pose un point d'étape au lieu de mettre en veille.
-    // Tooltip d'un point ouverte → un tap ailleurs la referme d'abord. Tap SUR le
-    // trajet d'aperçu → insertion au bon rang ; sinon ajout en fin de séquence.
-    if (placeNavActive.value) {
-      if (destPopup) { closeDestPopup(); return }
-      const onLine = map.getLayer('nav-place-preview-hit')
-        ? map.queryRenderedFeatures(e.point, { layers: ['nav-place-preview-hit'] })
-        : []
-      if (onLine.length) insertDestPointOnLine([e.lngLat.lng, e.lngLat.lat])
-      else addDestPoint([e.lngLat.lng, e.lngLat.lat])
-      return
-    }
+    // Mode « cible » : le tap pose un point d'étape au lieu de mettre en veille (voir
+    // useDestinationNav.handleMapTap, qui dit s'il l'a consommé).
+    if (handlePlaceNavTap(e.point, [e.lngLat.lng, e.lngLat.lat])) return
     // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
     if (pois.hasOpenPopup()) { pois.closePlacePopup(); return }
     if (!screenOff.value) toggleScreenOffManual()
@@ -1795,35 +1502,6 @@ function installRouteLayers() {
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(routeBorderWidth.value, true) } })
   map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
   map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.line_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
-}
-
-// Crée à la demande la couche d'aperçu du trajet en mode « cible » (ligne pointillée,
-// semi-transparente). Indépendante des couches du tracé : en navigation libre, ces
-// dernières n'existent pas encore quand l'utilisateur pose ses premiers points.
-function ensurePlacePreviewLayer() {
-  if (!map || map.getSource('nav-place-preview')) return
-  map.addSource('nav-place-preview', { type: 'geojson', data: previewFC([]) })
-  // Couche de capture transparente et large : tapoter pile sur la ligne fine est
-  // difficile (surtout au doigt), on élargit donc la cible de clic pour l'insertion.
-  map.addLayer({
-    id: 'nav-place-preview-hit',
-    type: 'line',
-    source: 'nav-place-preview',
-    layout: ROUTE_LINE_LAYOUT,
-    paint: { 'line-color': '#000', 'line-opacity': 0.01, 'line-width': 26 },
-  })
-  map.addLayer({
-    id: 'nav-place-preview',
-    type: 'line',
-    source: 'nav-place-preview',
-    layout: ROUTE_LINE_LAYOUT,
-    paint: {
-      'line-color': '#2563eb',
-      'line-width': zoomWidthExpr(routeLineWidth.value),
-      'line-opacity': 0.55,
-      'line-dasharray': [1.4, 1.1],
-    },
-  })
 }
 
 // Indicateurs de virage en marqueurs DOM (et non en couches canvas) : les

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { waypointInsertIndex } from './navRoute'
+import { stopInsertIndex, waypointInsertIndex } from './navRoute'
 import type { Waypoint } from './navRoute'
-import type { Coord } from './routeHelpers'
+import type { Coord, LngLat } from './routeHelpers'
 
 // Rang d'insertion d'un nouveau point d'ancrage : la seule logique pure de navRoute
 // (le reste appelle BRouter). Elle décide où tombe un point tapé sur la carte dans la
@@ -65,5 +65,55 @@ describe('waypointInsertIndex', () => {
 
     expect(waypointInsertIndex(u, waypoints, 6.02, 46.4)).toBe(1)
     expect(waypointInsertIndex(u, waypoints, 6.08, 46.4)).toBe(2)
+  })
+})
+
+// Rang d'insertion d'une étape tapée sur le trajet d'aperçu (mode « cible »). Même enjeu
+// que ci-dessus, mais la séquence commence par la position GPS — qui n'est PAS une étape :
+// tout se décale d'un rang. Un mauvais rang fait faire un aller-retour au trajet.
+describe('stopInsertIndex', () => {
+  const origin: LngLat = [6.0, 46.5]
+  const stop = (lng: number): LngLat => [lng, 46.5]
+
+  it('insère l’étape entre les deux étapes que le tronçon tapé relie', () => {
+    const stops = [stop(6.05), stop(6.1)]
+    // Tap avant la 1re étape → rang 0 (entre la position GPS et elle).
+    expect(stopInsertIndex(geometry, origin, stops, stop(6.02))).toBe(0)
+    // Tap entre les deux étapes → rang 1.
+    expect(stopInsertIndex(geometry, origin, stops, stop(6.07))).toBe(1)
+  })
+
+  it('ajoute en fin quand le tap est au-delà de la dernière étape', () => {
+    const stops = [stop(6.05)]
+    expect(stopInsertIndex(geometry, origin, stops, stop(6.09))).toBe(1)
+  })
+
+  it('ajoute en fin sans géométrie exploitable', () => {
+    const stops = [stop(6.05), stop(6.1)]
+    expect(stopInsertIndex([], origin, stops, stop(6.02))).toBe(2)
+    expect(stopInsertIndex([geometry[0]], origin, stops, stop(6.02))).toBe(2)
+  })
+
+  it('place le tap avant l’unique étape d’un trajet direct', () => {
+    // Une destination simple devient une étape intermédiaire dès qu'on tape le trajet.
+    expect(stopInsertIndex(geometry, origin, [stop(6.1)], stop(6.05))).toBe(0)
+  })
+
+  it('range le tap d’après le trajet, pas d’après la distance à vol d’oiseau', () => {
+    // Trajet en U depuis la position GPS : le bas du U est loin du départ à vol d'oiseau.
+    const u: Coord[] = [
+      [6.0, 46.5, 500], [6.0, 46.4, 500], [6.05, 46.4, 500],
+      [6.1, 46.4, 500], [6.1, 46.5, 500],
+    ]
+    const stops: LngLat[] = [[6.05, 46.4], [6.1, 46.5]]
+
+    expect(stopInsertIndex(u, origin, stops, [6.02, 46.4])).toBe(0)
+    expect(stopInsertIndex(u, origin, stops, [6.08, 46.4])).toBe(1)
+  })
+
+  it('sur une étape existante, insère juste avant elle (pas de doublon en fin)', () => {
+    const stops = [stop(6.05), stop(6.1)]
+    expect(stopInsertIndex(geometry, origin, stops, stop(6.05))).toBe(0)
+    expect(stopInsertIndex(geometry, origin, stops, stop(6.1))).toBe(1)
   })
 })

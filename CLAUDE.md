@@ -205,6 +205,8 @@ PostgreSQL. Credentials par défaut en dev : `postgres/postgres` sur `localhost:
 
 ```bash
 bin/ci          # lance la suite CI complète
-bin/rubocop     # Ruby linting
 bin/brakeman    # sécurité Rails
 ```
+
+Pas de RuboCop : la gem a été retirée du projet (elle faisait planter les conteneurs de
+debug RubyMine). Ne pas la réintroduire ni recréer de `.rubocop.yml`.

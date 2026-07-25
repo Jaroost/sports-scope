@@ -23,11 +23,16 @@ import type { MarkerKind } from '../routeMarkers'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
   streetViewUrl, bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
+  nearestGeomIndex,
 } from '../routeHelpers'
 import type { Climb, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 import { usePlaceSearch, placeShortName, flyToPlace } from '../composables/usePlaceSearch'
 import { useMapMeasure, MEASURE_SOURCE, MEASURE_LINE_LAYER } from '../composables/useMapMeasure'
+import {
+  assignWaypointGeomIndices, waypointPosForEdge, waypointPosForVertex, inheritsFree,
+  insertionPasses,
+} from '../routeInsert'
 import type { PlaceResult } from '../composables/usePlaceSearch'
 
 const props = defineProps<{ state: RouteBuilderState }>()
@@ -1458,68 +1463,9 @@ function fitBounds(sw: [number, number], ne: [number, number], opts = {}) {
 // ─── Waypoints ────────────────────────────────────────────────────────────────
 
 function recomputeWaypointGeomIndices() {
-  const wps = routeStore.waypoints.value
-  const geom = routeStore.geometry.value
-  if (!wps.length || !geom.length) { waypointGeomIndices = []; return }
-  const n = wps.length, m = geom.length
-  // Affectation de chaque waypoint à un sommet de la géométrie routée. La géométrie
-  // parcourt les waypoints DANS L'ORDRE : on veut donc des index strictement croissants
-  // k0 < k1 < … < k(n-1). Le glouton « le sommet le plus proche à partir du précédent »
-  // échoue sur une boucle : quand le retour repasse près du départ, un waypoint précoce
-  // trouve un sommet de FIN globalement plus proche, s'y accroche, et tous les suivants
-  // restent coincés à la fin — le premier tronçon couvre alors tout le tracé et
-  // l'insertion tombe toujours au point 2.
-  //
-  // On résout par programmation dynamique : minimiser la somme des distances² sous la
-  // contrainte d'ordre. Placer un waypoint trop loin force tous les suivants encore plus
-  // loin de leur vraie position, ce que le coût global rejette — la boucle est gérée
-  // nativement. O(n·m), négligeable ici.
-  const cost = (wi: number, j: number) => {
-    const dx = geom[j][0] - wps[wi].lng, dy = geom[j][1] - wps[wi].lat
-    return dx * dx + dy * dy
-  }
-  if (m < n) {
-    // Pas assez de sommets pour un index distinct par waypoint (cas dégénéré) : on
-    // retombe sur un glouton monotone simple plutôt que de risquer une DP infaisable.
-    let from = 0
-    waypointGeomIndices = wps.map((_, wi) => {
-      const start = Math.min(wi === 0 ? 0 : from + 1, m - 1)
-      let best = start, bestDist = Infinity
-      for (let i = start; i < m; i++) { const d = cost(wi, i); if (d < bestDist) { bestDist = d; best = i } }
-      from = best
-      return best
-    })
-    return
-  }
-  // dp[j] = coût minimal pour placer le waypoint courant au sommet j (waypoints
-  // précédents casés à des index < j). par[wi-1][j] = sommet retenu pour le waypoint
-  // wi-1 quand le waypoint wi est en j (pour remonter la solution).
-  let dp = new Float64Array(m)
-  for (let j = 0; j < m; j++) dp[j] = cost(0, j)
-  const par: Int32Array[] = []
-  for (let wi = 1; wi < n; wi++) {
-    const ndp = new Float64Array(m)
-    const p = new Int32Array(m)
-    // Préfixe-min de dp sur les index strictement inférieurs à j.
-    let bestPrev = Infinity, bestPrevIdx = -1
-    for (let j = 0; j < m; j++) {
-      if (j > 0 && dp[j - 1] < bestPrev) { bestPrev = dp[j - 1]; bestPrevIdx = j - 1 }
-      ndp[j] = bestPrevIdx < 0 ? Infinity : bestPrev + cost(wi, j)
-      p[j] = bestPrevIdx
-    }
-    par.push(p)
-    dp = ndp
-  }
-  let endIdx = n - 1, endCost = Infinity
-  for (let j = 0; j < m; j++) if (dp[j] < endCost) { endCost = dp[j]; endIdx = j }
-  const res = new Array<number>(n)
-  res[n - 1] = endIdx
-  for (let wi = n - 1; wi > 0; wi--) res[wi - 1] = par[wi - 1][res[wi]]
-  waypointGeomIndices = res
+  waypointGeomIndices = assignWaypointGeomIndices(routeStore.waypoints.value, routeStore.geometry.value)
 }
 
-// Bloque tout ajout de point au-delà du plafond serveur (sinon le waypoint serait
-// tronqué silencieusement à la sauvegarde). Affiche une erreur et renvoie true.
 function atWaypointLimit(): boolean {
   if (routeStore.waypoints.value.length >= MAX_WAYPOINTS) {
     routeStore.error.value = t('routes.error_max_waypoints', { count: MAX_WAYPOINTS })
@@ -1624,22 +1570,14 @@ function addReturnTo(idx: number) {
 // en silence). Renvoie la fin du tableau si les index sont indisponibles.
 function insertPositionForEdge(edgeIdx: number): number {
   recomputeWaypointGeomIndices()
-  const wps = routeStore.waypoints.value
-  if (waypointGeomIndices.length !== wps.length) return wps.length
-  for (let i = 0; i < waypointGeomIndices.length - 1; i++) {
-    if (edgeIdx >= waypointGeomIndices[i] && edgeIdx < waypointGeomIndices[i + 1]) return i + 1
-  }
-  return wps.length
+  return waypointPosForEdge(edgeIdx, waypointGeomIndices, routeStore.waypoints.value.length)
 }
 
 // Insère un point à un rang donné (index dans le tableau de waypoints), aux coordonnées
 // fournies. Cœur commun de l'insertion sur le tracé (« + », ou choix de passe).
 function insertWaypointAt(insertAt: number, lng: number, lat: number) {
   const next = routeStore.waypoints.value.slice()
-  // Si l'un des deux points encadrants est libre, le point inséré l'est aussi :
-  // on prolonge la nature du tronçon plutôt que d'y forcer un bout routé.
-  const inheritFree = next[insertAt - 1]?.free === true || next[insertAt]?.free === true
-  next.splice(insertAt, 0, inheritFree ? { lng, lat, free: true } : { lng, lat })
+  next.splice(insertAt, 0, inheritsFree(next, insertAt) ? { lng, lat, free: true } : { lng, lat })
   routeStore.waypoints.value = next
   hideHoverMarker()
   refreshWaypointMarkers()
@@ -1662,48 +1600,16 @@ function insertWaypointAtHover(hit: { lng: number; lat: number; edgeIdx: number 
 // ambiguïté à trancher par l'utilisateur.
 function insertionCandidatesAt(point: { x: number; y: number }): Array<{ lng: number; lat: number; insertAt: number }> {
   if (!mapInstance || routeStore.geometry.value.length < 2) return []
-  const geom = routeStore.geometry.value
-  const px = geom.map((pt) => mapInstance.project([pt[0], pt[1]]))
-  const dists = new Array<number>(px.length - 1)
-  const ts = new Array<number>(px.length - 1)
-  let bestDist = Infinity
-  for (let j = 0; j < px.length - 1; j++) {
-    const a = px[j], b = px[j + 1]
-    const vx = b.x - a.x, vy = b.y - a.y
-    const len2 = vx * vx + vy * vy
-    let tt = len2 > 0 ? ((point.x - a.x) * vx + (point.y - a.y) * vy) / len2 : 0
-    if (tt < 0) tt = 0; else if (tt > 1) tt = 1
-    const cx = a.x + tt * vx, cy = a.y + tt * vy
-    const dx = cx - point.x, dy = cy - point.y
-    dists[j] = dx * dx + dy * dy
-    ts[j] = tt
-    if (dists[j] < bestDist) bestDist = dists[j]
-  }
-  if (bestDist === Infinity) return []
-  const TOL_PX = 8
-  const limitSq = (Math.sqrt(bestDist) + TOL_PX) ** 2
+  const px = routeStore.geometry.value.map((pt) => mapInstance.project([pt[0], pt[1]]))
   recomputeWaypointGeomIndices()
-  const wps = routeStore.waypoints.value
-  const wgi = waypointGeomIndices
-  if (wgi.length !== wps.length) return []
-  const posForEdge = (edgeIdx: number) => {
-    for (let i = 0; i < wgi.length - 1; i++) if (edgeIdx >= wgi[i] && edgeIdx < wgi[i + 1]) return i + 1
-    return wps.length
-  }
-  const byPos = new Map<number, { dist: number; lng: number; lat: number }>()
-  for (let j = 0; j < dists.length; j++) {
-    if (dists[j] > limitSq) continue
-    const pos = posForEdge(j)
-    const prev = byPos.get(pos)
-    if (!prev || dists[j] < prev.dist) {
-      const a = px[j], b = px[j + 1], tt = ts[j]
-      const ll = mapInstance.unproject([a.x + tt * (b.x - a.x), a.y + tt * (b.y - a.y)])
-      byPos.set(pos, { dist: dists[j], lng: ll.lng, lat: ll.lat })
-    }
-  }
-  return [...byPos.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([insertAt, v]) => ({ lng: v.lng, lat: v.lat, insertAt }))
+  const passes = insertionPasses(px, point, waypointGeomIndices, routeStore.waypoints.value.length)
+  // Retour en coordonnées géographiques : le point projeté vit sur l'arête, entre ses deux
+  // sommets écran (une déprojection par passe, pas une par arête candidate).
+  return passes.map(({ edgeIdx, t, insertAt }) => {
+    const a = px[edgeIdx], b = px[edgeIdx + 1]
+    const ll = mapInstance.unproject([a.x + t * (b.x - a.x), a.y + t * (b.y - a.y)])
+    return { lng: ll.lng, lat: ll.lat, insertAt }
+  })
 }
 
 function closeInsertChoicePopup() {
@@ -1758,20 +1664,10 @@ function insertWaypointSmart(lng: number, lat: number) {
     addWaypoint(lng, lat)
     return
   }
-  let nearIdx = 0, bestDist = Infinity
-  for (let i = 0; i < geom.length; i++) {
-    const d = haversine([lng, lat], geom[i])
-    if (d < bestDist) { bestDist = d; nearIdx = i }
-  }
-  let insertAt = wps.length
-  for (let i = 0; i < waypointGeomIndices.length - 1; i++) {
-    if (nearIdx >= waypointGeomIndices[i] && nearIdx <= waypointGeomIndices[i + 1]) { insertAt = i + 1; break }
-  }
+  const nearIdx = nearestGeomIndex([lng, lat], geom).idx
+  const insertAt = waypointPosForVertex(nearIdx, waypointGeomIndices, wps.length)
   const next = wps.slice()
-  // Si l'un des deux points encadrants est libre, le point inséré l'est aussi :
-  // on prolonge la nature du tronçon plutôt que d'y forcer un bout routé.
-  const inheritFree = next[insertAt - 1]?.free === true || next[insertAt]?.free === true
-  next.splice(insertAt, 0, inheritFree ? { lng, lat, free: true } : { lng, lat })
+  next.splice(insertAt, 0, inheritsFree(next, insertAt) ? { lng, lat, free: true } : { lng, lat })
   routeStore.waypoints.value = next
   deselectAll()
   refreshWaypointMarkers()

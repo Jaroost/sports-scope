@@ -21,12 +21,14 @@ import { categoryForType, POI_CATEGORIES } from '../poiCategories'
 import { MARKER_KINDS, markerMeta, markerKindLabel } from '../routeMarkers'
 import type { MarkerKind } from '../routeMarkers'
 import {
-  GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
+  GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm,
   streetViewUrl, bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
   nearestGeomIndex,
 } from '../routeHelpers'
 import type { Climb, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
+import { createScaledMarkerGroup, MARKER_SCALE_VAR } from '../mapMarkerGroup'
+import { useMapLocation } from '../composables/useMapLocation'
 import { usePlaceSearch, placeShortName, flyToPlace } from '../composables/usePlaceSearch'
 import { useMapMeasure, MEASURE_SOURCE, MEASURE_LINE_LAYER } from '../composables/useMapMeasure'
 import {
@@ -66,17 +68,17 @@ function sportIcon() {
 
 let mapInstance: any = null
 let _maplibregl: any = null
+// Accès paresseux à la carte pour les groupes de marqueurs (créés avant elle).
+const markerGroupDeps = { getMap: () => mapInstance, getMaplibre: () => _maplibregl }
 const waypointMarkers: any[] = []
 let hoverMarker: any = null
 // Point d'insertion sous le curseur, projeté sur l'arête du tracé (pas snappé au sommet).
 // Mémorisé au survol pour que le clic insère exactement sous le « + », et non sur le
 // sommet de géométrie le plus proche (qui sautait « par grille » sur les tronçons droits).
 let hoverInsert: { lng: number; lat: number; edgeIdx: number } | null = null
-let locationMarker: any = null
-let lastLocationCoords: [number, number] | null = null
-let lastLocationAccuracy = 0
-const locationVisible = ref(false)
-const locating = ref(false)
+// « Ma position » (point bleu + disque d'incertitude) : voir useMapLocation.
+const { locationVisible, locating, toggle: toggleLocation, reinstallLayers: reinstallLocation } =
+  useMapLocation(markerGroupDeps)
 const hoverMarkerVisible = ref(false)
 let suppressNextMapClick = false
 let suppressNextWpClick = false
@@ -88,12 +90,10 @@ let selectionMarkerB: any = null
 let selectionMarkerAKm: number | null = null
 let selectionMarkerBKm: number | null = null
 let selectionMarkerDragging = false
-const climbMarkers: any[] = []
-const climbMarkerObservers: MutationObserver[] = []
+const climbGroup = createScaledMarkerGroup(markerGroupDeps)
 const turnAnomalyMarkers: any[] = []
 const snapMarkers: any[] = []
-const placeMarkers: any[] = []
-const placeMarkerObservers: MutationObserver[] = []
+const placeGroup = createScaledMarkerGroup(markerGroupDeps)
 // Permet de retrouver l'élément DOM d'un POI à partir de ses coordonnées, pour
 // surligner le bon marqueur au survol (depuis la carte ou la liste latérale).
 const placeMarkerEls = new Map<string, HTMLElement>()
@@ -101,8 +101,7 @@ const placeMarkerEls = new Map<string, HTMLElement>()
 // Marqueurs persistants distincts des POI Overpass : posés à la main ou épinglés,
 // rendus en permanence (indépendamment d'une recherche Overpass). Badge étoile pour
 // les distinguer ; clic → popup renommer/supprimer.
-const savedPoiMarkers: any[] = []
-const savedPoiMarkerObservers: MutationObserver[] = []
+const savedPoiGroup = createScaledMarkerGroup(markerGroupDeps)
 let savedPoiPopup: any = null
 // Mode d'édition courant, piloté par le dropdown « Mode d'édition » (hors lecture
 // seule) : 'route' modifie le tracé au clic, 'poi' pose un POI, 'marker' pose un
@@ -121,8 +120,7 @@ const POI_CATS = POI_CATEGORIES
 // Posés à la main et enregistrés avec l'itinéraire (routeStore.markers). Rendus en
 // permanence, déplaçables, éditables via popup. Distincts des POI (cf. routeMarkers.ts).
 const MARKER_KIND_LIST = MARKER_KINDS
-const routeMarkerObjs: any[] = []
-const routeMarkerObservers: MutationObserver[] = []
+const routeMarkerGroup = createScaledMarkerGroup(markerGroupDeps)
 let routeMarkerPopup: any = null
 // Dialogue de création d'un repère (type + libellé optionnel).
 const markerDialog = ref<{ lng: number; lat: number; kind: MarkerKind; label: string } | null>(null)
@@ -427,10 +425,12 @@ async function initMap() {
         setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 500)
       })
       mapInstance.on('moveend', () => { if (!routeStore.currentId.value) saveMapView() })
+      // Facteur d'échelle des marqueurs, publié pour le CSS ET pour les groupes de
+      // marqueurs, qui le réappliquent après chaque repositionnement (cf. mapMarkerGroup).
       const applyMarkerScale = () => {
         const z = mapInstance.getZoom()
         const scale = Math.max(0.35, Math.min(1, (z - 5) / 9))
-        mapInstance.getContainer().style.setProperty('--wp-scale', String(scale))
+        mapInstance.getContainer().style.setProperty(MARKER_SCALE_VAR, String(scale))
       }
       mapInstance.on('zoom', applyMarkerScale)
       applyMarkerScale()
@@ -693,34 +693,13 @@ function updateDivergentLayer() {
 // ─── Climb markers ────────────────────────────────────────────────────────────
 
 function installClimbMarkers() {
-  if (!_maplibregl || !mapInstance) return
-  climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
-  climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
+  climbGroup.clear()
   if (!props.state.showClimbs || routeStore.geometry.value.length < 2) return
   routeStore.detectedClimbs.value.forEach((climb) => {
     const pt = routeStore.geometry.value[climb.startIdx]
     if (!pt) return
-    const el = buildClimbMarkerEl(climb)
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom-left' })
-      .setLngLat([pt[0], pt[1]])
-      .addTo(mapInstance)
-    climbMarkerObservers.push(attachClimbMarkerScaleObserver(el))
-    climbMarkers.push(marker)
+    climbGroup.add(buildClimbMarkerEl(climb), [pt[0], pt[1]], { anchor: 'bottom-left' })
   })
-}
-
-function attachClimbMarkerScaleObserver(el: HTMLElement) {
-  let lastSet = ''
-  const obs = new MutationObserver(() => {
-    const raw = el.style.transform
-    if (!raw || raw === lastSet) return
-    const base = raw.replace(/ scale\([^)]+\)$/, '')
-    const s = parseFloat(mapInstance.getContainer().style.getPropertyValue('--wp-scale') || '1')
-    lastSet = `${base} scale(${s})`
-    el.style.transform = lastSet
-  })
-  obs.observe(el, { attributes: true, attributeFilter: ['style'] })
-  return obs
 }
 
 function buildClimbMarkerEl(climb: Climb) {
@@ -763,8 +742,7 @@ function closePlacePopup() {
 }
 
 function clearPlaceMarkers() {
-  placeMarkerObservers.forEach((obs) => obs.disconnect()); placeMarkerObservers.length = 0
-  placeMarkers.forEach((m) => m.remove()); placeMarkers.length = 0
+  placeGroup.clear()
   placeMarkerEls.clear(); hoveredPlaceEl = null
   closePlacePopup()
 }
@@ -942,18 +920,13 @@ function showRoutePointPopup(lng: number, lat: number) {
 // boulangeries, cimetières…). Réutilise le pattern des marqueurs de cols
 // (observateur de scale au zoom). Les localités n'ont pas de marqueur (liste seule).
 function installPlaceMarkers() {
-  if (!_maplibregl || !mapInstance) return
   clearPlaceMarkers()
   if (!props.state.showPois) return
   for (const place of placesStore.filteredPlaces.value) {
     const cat = categoryForType(place.type)
     if (!cat || !cat.point) continue
     const el = buildPlaceMarkerEl(place)
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
-      .setLngLat([place.markerLng, place.markerLat])
-      .addTo(mapInstance)
-    placeMarkerObservers.push(attachClimbMarkerScaleObserver(el))
-    placeMarkers.push(marker)
+    placeGroup.add(el, [place.markerLng, place.markerLat], { anchor: 'bottom' })
     placeMarkerEls.set(placeMarkerKey(place.markerLng, place.markerLat), el)
   }
 }
@@ -1087,22 +1060,15 @@ function hidePlaceHoverMarker() {
 // l'état d'affichage par catégorie (savedPoisStore.show).
 
 function clearSavedPoiMarkers() {
-  savedPoiMarkerObservers.forEach((o) => o.disconnect()); savedPoiMarkerObservers.length = 0
-  savedPoiMarkers.forEach((m) => m.remove()); savedPoiMarkers.length = 0
+  savedPoiGroup.clear()
 }
 
 function installSavedPoiMarkers() {
-  if (!_maplibregl || !mapInstance) return
   clearSavedPoiMarkers()
   if (!props.state.showPois) return
   for (const poi of savedPoisStore.pois.value) {
     if (savedPoisStore.show[poi.category] === false) continue
-    const el = buildSavedPoiMarkerEl(poi)
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
-      .setLngLat([poi.lng, poi.lat])
-      .addTo(mapInstance)
-    savedPoiMarkerObservers.push(attachClimbMarkerScaleObserver(el))
-    savedPoiMarkers.push(marker)
+    savedPoiGroup.add(buildSavedPoiMarkerEl(poi), [poi.lng, poi.lat], { anchor: 'bottom' })
   }
 }
 
@@ -1214,22 +1180,17 @@ async function savePlaceAsPoi(place: Place) {
 // / suppression) et au chargement d'un itinéraire (refreshRouteMarkers).
 
 function clearRouteMarkers() {
-  routeMarkerObservers.forEach((obs) => obs.disconnect()); routeMarkerObservers.length = 0
-  routeMarkerObjs.forEach((m) => m.remove()); routeMarkerObjs.length = 0
+  routeMarkerGroup.clear()
 }
 
 function installRouteMarkers() {
-  if (!_maplibregl || !mapInstance) return
   clearRouteMarkers()
   if (!props.state.showMarkers) return
   const editable = !routeStore.readOnly.value
   routeStore.markers.value.forEach((marker, idx) => {
-    const el = buildRouteMarkerEl(marker)
-    const m = new _maplibregl.Marker({ element: el, anchor: 'bottom-left', draggable: editable })
-      .setLngLat([marker.lng, marker.lat])
-      .addTo(mapInstance)
-    // Réduit le repère quand on dézoome (comme les cols), via --wp-scale.
-    routeMarkerObservers.push(attachClimbMarkerScaleObserver(el))
+    // Le groupe réduit le repère quand on dézoome (comme les cols), via --wp-scale.
+    const m = routeMarkerGroup.add(buildRouteMarkerEl(marker), [marker.lng, marker.lat], { anchor: 'bottom-left', draggable: editable })
+    if (!m) return
     if (editable) {
       // Fige le déplacement de la carte pendant le drag et écrit la nouvelle position
       // dans le store à la fin (le tableau reste indexé comme au rendu).
@@ -1241,7 +1202,6 @@ function installRouteMarkers() {
         overClimbMarker = false
       })
     }
-    routeMarkerObjs.push(m)
   })
 }
 
@@ -2041,55 +2001,6 @@ function applySVState(markerEl: HTMLElement, available: boolean) {
   else link.removeAttribute('aria-disabled')
 }
 
-// ─── Location ─────────────────────────────────────────────────────────────────
-
-function installLocationLayers(coords: [number, number], accuracy: number) {
-  if (!mapInstance) return
-  const data = { type: 'Feature' as const, geometry: { type: 'Polygon' as const, coordinates: [generateCircle(coords, accuracy)] } }
-  if (!mapInstance.getSource('user-location')) {
-    mapInstance.addSource('user-location', { type: 'geojson', data })
-    mapInstance.addLayer({ id: 'user-location-fill', type: 'fill', source: 'user-location', paint: { 'fill-color': '#4285f4', 'fill-opacity': 0.12 } })
-    mapInstance.addLayer({ id: 'user-location-stroke', type: 'line', source: 'user-location', paint: { 'line-color': '#4285f4', 'line-width': 1.5, 'line-opacity': 0.5 } })
-  } else { mapInstance.getSource('user-location').setData(data) }
-}
-
-function showLocation(coords: [number, number], accuracy: number) {
-  if (!mapInstance || !_maplibregl) return
-  lastLocationCoords = coords; lastLocationAccuracy = accuracy
-  installLocationLayers(coords, accuracy)
-  if (locationMarker) { locationMarker.setLngLat(coords) } else {
-    const el = document.createElement('div')
-    el.className = 'user-location-dot'
-    locationMarker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(coords).addTo(mapInstance)
-  }
-  locationVisible.value = true
-}
-
-function hideLocation() {
-  if (locationMarker) { locationMarker.remove(); locationMarker = null }
-  lastLocationCoords = null
-  if (mapInstance) {
-    if (mapInstance.getLayer('user-location-stroke')) mapInstance.removeLayer('user-location-stroke')
-    if (mapInstance.getLayer('user-location-fill')) mapInstance.removeLayer('user-location-fill')
-    if (mapInstance.getSource('user-location')) mapInstance.removeSource('user-location')
-  }
-  locationVisible.value = false
-}
-
-async function toggleLocation() {
-  if (locationVisible.value) { hideLocation(); return }
-  locating.value = true
-  try {
-    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 })
-    })
-    const coords: [number, number] = [pos.coords.longitude, pos.coords.latitude]
-    mapInstance?.flyTo({ center: coords, zoom: 14, duration: 800 })
-    showLocation(coords, pos.coords.accuracy)
-  } catch { /* permission refusée */ }
-  finally { locating.value = false }
-}
-
 // ─── Map style ────────────────────────────────────────────────────────────────
 
 // Choix manuel de l'utilisateur : ce fond devient le style par défaut du compte pour le
@@ -2122,7 +2033,7 @@ function applyMapStyle(id: string) {
   mapInstance.once('style.load', () => {
     installRouteLayer(); installOverlays()
     updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); updateMeasureLayer(); installClimbMarkers(); installPlaceMarkers(); installSavedPoiMarkers()
-    if (locationVisible.value && lastLocationCoords) installLocationLayers(lastLocationCoords, lastLocationAccuracy)
+    reinstallLocation()
     if (props.state.is3D) {
       if (!mapInstance.getSource('terrain-dem')) {
         mapInstance.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
@@ -2357,8 +2268,7 @@ watch(savedPoisStore.show, () => installSavedPoiMarkers(), { deep: true })
 onBeforeUnmount(() => {
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
   divergentMarkers.forEach((m) => m.remove()); divergentMarkers.length = 0
-  climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
-  climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
+  climbGroup.clear()
   clearTurnAnomalyMarkers()
   clearPlaceMarkers()
   clearSavedPoiMarkers()
@@ -2368,7 +2278,6 @@ onBeforeUnmount(() => {
   closeInsertChoicePopup()
   if (detachLongPress) { detachLongPress(); detachLongPress = null }
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
-  if (locationMarker) { locationMarker.remove(); locationMarker = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
 

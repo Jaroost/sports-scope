@@ -185,6 +185,11 @@ export function useMapMeasure(opts: UseMapMeasureOptions) {
       })
       midMarkers.push(marker)
     }
+    // Les poignées naissent avec un libellé vide : c'est refreshLabels qui les remplit,
+    // puisqu'il faut la distance cumulée depuis le départ. Sans cet appel, les distances
+    // n'apparaissaient qu'au glissement d'une poignée (seul autre appelant) et
+    // s'effaçaient à son relâchement, qui repasse par ici.
+    refreshLabels()
   }
 
   // Glisser-déposer d'une poignée de mesure (souris + tactile), calqué sur

@@ -70,6 +70,10 @@ function setup() {
 // Point situé à `m` mètres à l'est du départ (les distances restent lisibles).
 const east = (m: number): LngLat => moveLngLat(START, 90, m)
 
+// Libellés affichés sur les poignées, dans l'ordre du tracé.
+const labels = () =>
+  s.dots().map((mk) => mk.el.querySelector('.measure-marker-label')?.textContent)
+
 let s: ReturnType<typeof setup>
 beforeEach(() => { s = setup() })
 
@@ -180,6 +184,41 @@ describe('useMapMeasure', () => {
     expect(haversine(s.m.points.value[1], east(100))).toBeLessThan(1)
     // Deux segments désormais, donc deux poignées « + ».
     expect(s.mids()).toHaveLength(2)
+  })
+
+  it('étiquette chaque poignée : départ, puis distance cumulée', () => {
+    s.m.addPoint(...east(0))
+    s.m.addPoint(...east(100))
+    s.m.addPoint(...east(1500))
+
+    expect(labels()).toEqual(['Départ', '100 m', '1.50 km'])
+  })
+
+  it('réétiquette les poignées quand la mesure change', () => {
+    s.m.addPoint(...east(0))
+    s.m.addPoint(...east(100))
+    s.m.addPoint(...east(300))
+    expect(labels()).toEqual(['Départ', '100 m', '300 m'])
+
+    // Le point du milieu disparaît : le suivant reprend son rang et son libellé change.
+    s.dots()[1].el.querySelector<HTMLElement>('.measure-tooltip-delete')!.dispatchEvent(new Event('click'))
+    expect(labels()).toEqual(['Départ', '300 m'])
+
+    s.m.undoPoint()
+    expect(labels()).toEqual(['Départ'])
+  })
+
+  it('garde les libellés à jour après un glisser-déposer', () => {
+    s.m.addPoint(...east(0))
+    s.m.addPoint(...east(100))
+    const marker = s.dots()[1]
+
+    marker.el.dispatchEvent(new MouseEvent('mousedown', { button: 0 }))
+    window.dispatchEvent(new MouseEvent('mousemove', { clientX: 250, clientY: 0 }))
+    expect(labels()).toEqual(['Départ', '250 m'])     // suivi en direct pendant le geste
+
+    window.dispatchEvent(new MouseEvent('mouseup'))
+    expect(labels()).toEqual(['Départ', '250 m'])     // et conservés après le relâchement
   })
 
   it('déplace un point au glisser-déposer', () => {

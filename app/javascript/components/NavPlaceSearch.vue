@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { t } from '../i18n'
-import { usePlaceSearch } from '../composables/usePlaceSearch'
+import { usePlaceSearch, placeShortName } from '../composables/usePlaceSearch'
 import type { PlaceResult } from '../composables/usePlaceSearch'
 
 // Boîte de recherche de lieu pour la navigation (libre ou sur itinéraire). La
@@ -14,7 +14,7 @@ const { searchQuery, searchResults, searchOpen, searching, clearSearch } = usePl
 
 function pick(p: PlaceResult) {
   searchOpen.value = false
-  searchQuery.value = p.display_name.split(',')[0]
+  searchQuery.value = placeShortName(p)
   emit('locate', p)
 }
 </script>

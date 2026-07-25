@@ -26,6 +26,9 @@ import {
 } from '../routeHelpers'
 import type { Climb, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
+import { usePlaceSearch, placeShortName, flyToPlace } from '../composables/usePlaceSearch'
+import { useMapMeasure, MEASURE_SOURCE, MEASURE_LINE_LAYER } from '../composables/useMapMeasure'
+import type { PlaceResult } from '../composables/usePlaceSearch'
 
 const props = defineProps<{ state: RouteBuilderState }>()
 const emit = defineEmits<{
@@ -122,23 +125,21 @@ const markerDialog = ref<{ lng: number; lat: number; kind: MarkerKind; label: st
 // ── Mesure à vol d'oiseau ────────────────────────────────────────────────────
 // Mode « règle » : chaque clic pose un point, et l'on affiche la distance directe
 // (orthodromie) cumulée le long des segments posés. Purement éphémère — rien n'est
-// enregistré avec l'itinéraire, et le tracé n'est jamais modifié.
-const measurePoints = ref<LngLat[]>([])
-const measureMarkers: any[] = []
-// Poignées « + » au milieu de chaque segment (insertion d'un point intermédiaire).
-const measureMidMarkers: any[] = []
-// Point de mesure dont la tooltip (suppression) est ouverte, ou -1. Piloté en DOM comme
-// les waypoints : une classe sur le marqueur, pas de re-rendu.
-let measureSelectedIdx = -1
-// Distances cumulées, index par index (measureCumM[0] === 0).
-const measureCumM = computed(() => {
-  const out = [0]
-  for (let i = 1; i < measurePoints.value.length; i++) {
-    out.push(out[i - 1] + haversine(measurePoints.value[i - 1], measurePoints.value[i]))
-  }
-  return out
+// enregistré avec l'itinéraire, et le tracé n'est jamais modifié. Tout le sous-système
+// (points, poignées, glisser-déposer, ligne) vit dans useMapMeasure.
+const {
+  points: measurePoints, totalM: measureTotalM,
+  addPoint: addMeasurePoint, undoPoint: undoMeasurePoint, clear: clearMeasure,
+  onMapClick: onMeasureMapClick, updateLayer: updateMeasureLayer,
+} = useMapMeasure({
+  getMap: () => mapInstance,
+  getMaplibre: () => _maplibregl,
+  suppressNextMapClick: () => {
+    // Le relâchement d'une poignée produit un clic sur la carte si le curseur l'a quittée.
+    suppressNextMapClick = true
+    setTimeout(() => { suppressNextMapClick = false }, 50)
+  },
 })
-const measureTotalM = computed(() => measureCumM.value[measureCumM.value.length - 1] ?? 0)
 
 // Dropdown ouvert dans la toolbar de la carte, ou null. Un seul à la fois : ouvrir
 // un dropdown (style de carte / « Affichage » / « Mode d'édition ») ferme l'autre.
@@ -168,13 +169,15 @@ let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
 const svCache = new Map<string, boolean>()
 
-const searchQuery = ref('')
-const searchResults = ref<any[]>([])
-const searchOpen = ref(false)
-const searching = ref(false)
+// Recherche de lieu : la logique (Nominatim, pays du profil, anti-rebond) vit dans
+// usePlaceSearch, partagée avec la navigation. Ne restent ici que l'état d'affichage de la
+// barre repliable et le recadrage de la carte, qui appartiennent au créateur.
+const {
+  searchQuery, searchResults, searchOpen, searching,
+  clearSearch: resetSearch,
+} = usePlaceSearch()
 const searchExpanded = ref(false)
 const searchInputEl = useTemplateRef('searchInputEl')
-let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
@@ -297,9 +300,7 @@ async function initMap() {
         // tracé. Testé avant la garde de lecture seule : mesurer reste possible sur un
         // itinéraire verrouillé.
         if (measureMode.value) {
-          // Tooltip de suppression ouverte : le clic ne fait que la refermer.
-          if (measureSelectedIdx >= 0) { selectMeasurePoint(-1); return }
-          addMeasurePoint(e.lngLat.lng, e.lngLat.lat)
+          onMeasureMapClick(e.lngLat.lng, e.lngLat.lat)
           return
         }
         // Mode « poser un POI » : le clic ouvre le dialogue de création d'un POI
@@ -468,9 +469,9 @@ function installRouteLayer() {
   }
   // Mesure à vol d'oiseau : segments droits en traitillé, au-dessus du tracé, dans une
   // couleur qui ne se confond ni avec l'itinéraire ni avec les tronçons libres.
-  if (!mapInstance.getSource('builder-measure')) {
-    mapInstance.addSource('builder-measure', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
-    mapInstance.addLayer({ id: 'builder-measure-line', type: 'line', source: 'builder-measure', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0f766e', 'line-width': 3, 'line-dasharray': [2, 1.6] } })
+  if (!mapInstance.getSource(MEASURE_SOURCE)) {
+    mapInstance.addSource(MEASURE_SOURCE, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
+    mapInstance.addLayer({ id: MEASURE_LINE_LAYER, type: 'line', source: MEASURE_SOURCE, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0f766e', 'line-width': 3, 'line-dasharray': [2, 1.6] } })
   }
   // Flèches de sens de parcours : espacées en pixels écran (constantes au zoom) et
   // posées au-dessus du tracé, sur la géométrie continue de `builder-route`.
@@ -1354,219 +1355,6 @@ function setEditMode(mode: EditMode) {
   // Quitter le mode mesure efface la mesure en cours : elle n'est ni enregistrée ni
   // visible ailleurs, la garder afficherait une ligne orpheline sur la carte.
   if (mode !== 'measure') clearMeasure()
-}
-
-// ─── Mesure à vol d'oiseau ────────────────────────────────────────────────────
-
-function addMeasurePoint(lng: number, lat: number) {
-  measurePoints.value.push([lng, lat])
-  renderMeasure()
-}
-
-function undoMeasurePoint() {
-  measurePoints.value.pop()
-  measureSelectedIdx = -1
-  renderMeasure()
-}
-
-function clearMeasure() {
-  if (!measurePoints.value.length) return
-  measurePoints.value = []
-  measureSelectedIdx = -1
-  renderMeasure()
-}
-
-function removeMeasurePoint(idx: number) {
-  measurePoints.value.splice(idx, 1)
-  measureSelectedIdx = -1
-  renderMeasure()
-}
-
-// Ouvre la tooltip du point `idx` (-1 = aucune). Les index changent à chaque
-// insertion/suppression : on referme plutôt que de tenter de suivre le point.
-function selectMeasurePoint(idx: number) {
-  measureSelectedIdx = idx
-  measureMarkers.forEach((m, i) => m.getElement().classList.toggle('measure-marker--selected', i === idx))
-}
-
-// Insère un point au milieu du segment `idx` (entre les points idx et idx+1) et renvoie
-// son index. Sert au clic comme au glisser d'une poignée « + ».
-function insertMeasurePoint(idx: number): number {
-  const [a, b] = [measurePoints.value[idx], measurePoints.value[idx + 1]]
-  measurePoints.value.splice(idx + 1, 0, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2])
-  measureSelectedIdx = -1
-  renderMeasure()
-  return idx + 1
-}
-
-// Redessine ligne + poignées de la mesure. Tout est recréé (poignées peu nombreuses) :
-// les libellés dépendent de la distance cumulée, donc de tous les points qui précèdent,
-// et les index capturés dans les gestionnaires doivent suivre les insertions/suppressions.
-function renderMeasure() {
-  updateMeasureLayer()
-  while (measureMarkers.length) measureMarkers.pop().remove()
-  while (measureMidMarkers.length) measureMidMarkers.pop().remove()
-  if (!mapInstance || !_maplibregl) return
-  measurePoints.value.forEach((p, idx) => {
-    const el = document.createElement('div')
-    el.className = idx === measureSelectedIdx ? 'measure-marker measure-marker--selected' : 'measure-marker'
-    el.innerHTML = `
-      <span class="measure-marker-dot"></span>
-      <span class="measure-marker-label"></span>
-      <div class="measure-tooltip">
-        <button type="button" class="measure-tooltip-delete">
-          <i class="fa-solid fa-trash" aria-hidden="true"></i>
-          <span>${t('routes.measure_remove_point')}</span>
-        </button>
-        <div class="measure-tooltip-arrow"></div>
-      </div>`
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(p).addTo(mapInstance)
-    // Un clic sur la poignée ne doit pas traverser jusqu'à la carte (qui poserait un
-    // point de plus) : il ouvre/ferme la tooltip de suppression. Le clic droit supprime
-    // directement.
-    el.addEventListener('click', (ev: Event) => {
-      ev.stopPropagation()
-      if ((ev.target as Element).closest('.measure-tooltip')) return
-      selectMeasurePoint(idx === measureSelectedIdx ? -1 : idx)
-    })
-    el.querySelector('.measure-tooltip-delete')!.addEventListener('click', (ev: Event) => {
-      ev.stopPropagation(); ev.preventDefault()
-      removeMeasurePoint(idx)
-    })
-    el.addEventListener('contextmenu', (ev: Event) => {
-      ev.preventDefault(); ev.stopPropagation()
-      removeMeasurePoint(idx)
-    })
-    attachMeasureDrag(el, marker, {
-      start: () => { selectMeasurePoint(-1); return marker },
-      move: (lng, lat) => { measurePoints.value[idx] = [lng, lat]; updateMeasureLayer(); refreshMeasureLabels() },
-      end: renderMeasure,
-      // Tactile seulement (cf. attachMeasureDrag) : l'appui n'y produit pas de `click`.
-      tap: () => selectMeasurePoint(idx === measureSelectedIdx ? -1 : idx),
-    })
-    measureMarkers.push(marker)
-  })
-  // Poignées « + » au milieu de chaque segment : clic = insérer un point là, glisser =
-  // insérer et emmener le nouveau point sous le curseur.
-  for (let i = 0; i < measurePoints.value.length - 1; i++) {
-    const el = document.createElement('div')
-    el.className = 'measure-mid-marker'
-    el.innerHTML = '<i class="fa-solid fa-plus"></i>'
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(midOfMeasureSegment(i)).addTo(mapInstance)
-    el.addEventListener('click', (ev: Event) => { ev.stopPropagation(); insertMeasurePoint(i) })
-    let dragIdx = -1
-    attachMeasureDrag(el, marker, {
-      // Le glissement promeut la poignée en vrai point : renderMeasure recrée les
-      // marqueurs, on rend le nouveau pour que le glissement continue sur lui.
-      start: () => { dragIdx = insertMeasurePoint(i); return measureMarkers[dragIdx] },
-      move: (lng, lat) => { measurePoints.value[dragIdx] = [lng, lat]; updateMeasureLayer(); refreshMeasureLabels() },
-      end: renderMeasure,
-      tap: () => insertMeasurePoint(i),
-    })
-    measureMidMarkers.push(marker)
-  }
-}
-
-function midOfMeasureSegment(i: number): LngLat {
-  const [a, b] = [measurePoints.value[i], measurePoints.value[i + 1]]
-  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
-}
-
-// Mise à jour légère pendant un glissement : les marqueurs restent en place (les
-// recréer casserait le geste), seuls leur libellé et la position des « + » changent.
-function refreshMeasureLabels() {
-  measureMarkers.forEach((m, idx) => {
-    const lbl = m.getElement().querySelector('.measure-marker-label')
-    if (lbl) lbl.textContent = idx === 0 ? t('routes.measure_start') : formatDistancePrecise(measureCumM.value[idx])
-  })
-  measureMidMarkers.forEach((m, i) => {
-    if (i < measurePoints.value.length - 1) m.setLngLat(midOfMeasureSegment(i))
-  })
-}
-
-// Glisser-déposer d'une poignée de mesure (souris + tactile), calqué sur
-// attachWaypointDrag : pan de la carte désactivé le temps du geste, suivi du curseur en
-// direct, et neutralisation du clic de relâchement (il poserait un point de plus).
-// `start` peut renvoyer un autre marqueur à déplacer que celui saisi (poignée « + »).
-function attachMeasureDrag(
-  el: HTMLElement,
-  marker: any,
-  hooks: { start?: () => any; move: (lng: number, lat: number) => void; end: () => void; tap?: () => void },
-) {
-  const unproject = (clientX: number, clientY: number) => {
-    const rect = mapInstance.getContainer().getBoundingClientRect()
-    return mapInstance.unproject([clientX - rect.left, clientY - rect.top])
-  }
-  // `isTouch` : sur un appui tactile, `touchstart` est annulé (preventDefault) donc
-  // aucun `click` n'est émis — c'est `tap` qui rend l'appui. À la souris, le `click`
-  // arrive normalement et c'est lui qui agit : déclencher `tap` en plus ferait double.
-  const endDrag = (moved: boolean, isTouch: boolean) => {
-    mapInstance.dragPan.enable()
-    el.style.cursor = ''
-    if (!moved) { if (isTouch) hooks.tap?.(); return }
-    // Le relâchement produit un clic sur la carte si le curseur a quitté la poignée.
-    suppressNextMapClick = true
-    setTimeout(() => { suppressNextMapClick = false }, 50)
-    hooks.end()
-  }
-
-  el.addEventListener('mousedown', (ev: MouseEvent) => {
-    if (ev.button !== 0) return
-    ev.preventDefault(); ev.stopPropagation()
-    let moved = false
-    let target = marker
-    mapInstance.dragPan.disable()
-    el.style.cursor = 'grabbing'
-    const onMove = (e: MouseEvent) => {
-      if (!moved) { moved = true; target = hooks.start?.() ?? marker }
-      const ll = unproject(e.clientX, e.clientY)
-      target.setLngLat([ll.lng, ll.lat])
-      hooks.move(ll.lng, ll.lat)
-    }
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      endDrag(moved, false)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  })
-
-  el.addEventListener('touchstart', (ev: TouchEvent) => {
-    if (ev.touches.length !== 1) return
-    ev.preventDefault(); ev.stopPropagation()
-    const start = ev.touches[0]
-    let moved = false
-    let target = marker
-    mapInstance.dragPan.disable()
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return
-      e.preventDefault()
-      const touch = e.touches[0]
-      const dx = touch.clientX - start.clientX, dy = touch.clientY - start.clientY
-      // Seuil anti-tremblement : sous 5 px on considère que c'est un appui, pas un glissé.
-      if (!moved && dx * dx + dy * dy < 25) return
-      if (!moved) { moved = true; target = hooks.start?.() ?? marker }
-      const ll = unproject(touch.clientX, touch.clientY)
-      target.setLngLat([ll.lng, ll.lat])
-      hooks.move(ll.lng, ll.lat)
-    }
-    const onTouchEnd = () => {
-      el.removeEventListener('touchmove', onTouchMove)
-      el.removeEventListener('touchend', onTouchEnd)
-      el.removeEventListener('touchcancel', onTouchEnd)
-      endDrag(moved, true)
-    }
-    el.addEventListener('touchmove', onTouchMove, { passive: false })
-    el.addEventListener('touchend', onTouchEnd)
-    el.addEventListener('touchcancel', onTouchEnd)
-  }, { passive: false })
-}
-
-function updateMeasureLayer() {
-  const src = mapInstance?.getSource('builder-measure')
-  if (!src) return
-  src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: measurePoints.value } })
 }
 
 // Ouvre le dialogue de création (type + libellé) au point cliqué en mode « poser ».
@@ -2635,69 +2423,17 @@ function toggleReadOnly() {
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
-// Liste ordonnée des pays privilégiés, configurée dans le profil
-// (search.country_codes). L'ordre = la priorité d'affichage ; on la passe aussi
-// en `countrycodes` à Nominatim pour qu'il ne renvoie d'abord que ces pays.
-const PREFERRED_COUNTRIES = userPreferences().search.country_codes
-const PREFERRED_COUNTRY_CODES = PREFERRED_COUNTRIES.join(',')
-// Étendre la recherche au monde entier quand aucun résultat n'est trouvé dans les
-// pays privilégiés (réglage du profil ; false par défaut).
-const WORLDWIDE_FALLBACK = userPreferences().search.worldwide_fallback
-
-// Rang de priorité d'un pays = sa position dans la liste du profil ; les pays
-// hors liste (repli mondial) passent après tous les autres.
-function searchCountryPriority(cc: string): number {
-  const i = PREFERRED_COUNTRIES.indexOf(cc)
-  return i === -1 ? PREFERRED_COUNTRIES.length : i
-}
-
-async function fetchPlaces(q: string, countrycodes?: string): Promise<any[]> {
-  let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=10&addressdetails=1`
-  if (countrycodes) url += `&countrycodes=${countrycodes}`
-  const res = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) return []
-  const raw = await res.json()
-  return Array.isArray(raw) ? raw : []
-}
-
-async function searchPlaces(q: string) {
-  searching.value = true
-  try {
-    // On restreint d'abord aux pays privilégiés ; si Nominatim ne renvoie rien
-    // (lieu hors zone) et que le repli mondial est activé, on refait une recherche
-    // mondiale. Liste vide ⇒ recherche mondiale d'emblée (pas de second appel).
-    let data = await fetchPlaces(q, PREFERRED_COUNTRY_CODES)
-    if (data.length === 0 && PREFERRED_COUNTRY_CODES && WORLDWIDE_FALLBACK) data = await fetchPlaces(q)
-    searchResults.value = data
-      .sort((a, b) => searchCountryPriority(a.address?.country_code ?? '') - searchCountryPriority(b.address?.country_code ?? ''))
-      .slice(0, 6)
-    searchOpen.value = searchResults.value.length > 0
-  } catch { searchResults.value = []; searchOpen.value = false }
-  finally { searching.value = false }
-}
-
-watch(searchQuery, (q) => {
-  if (searchTimer) clearTimeout(searchTimer)
-  const trimmed = q.trim()
-  if (trimmed.length < 3) { searchResults.value = []; searchOpen.value = false; return }
-  searchTimer = setTimeout(() => searchPlaces(trimmed), 350)
-})
-
-function pickPlace(p: any) {
+// Résultat choisi : on recadre la carte dessus et on referme la liste. Le créateur ne fait
+// que déplacer la vue — poser un point reste un geste explicite de l'utilisateur.
+function pickPlace(p: PlaceResult) {
   searchOpen.value = false
-  searchQuery.value = p.display_name.split(',')[0]
-  if (!mapInstance) return
-  if (p.boundingbox?.length === 4) {
-    const [minLat, maxLat, minLng, maxLng] = p.boundingbox.map(parseFloat)
-    mapInstance.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800, maxZoom: 14 })
-  } else {
-    const lat = parseFloat(p.lat), lng = parseFloat(p.lon)
-    if (!Number.isNaN(lat) && !Number.isNaN(lng)) mapInstance.flyTo({ center: [lng, lat], zoom: 13, duration: 800 })
-  }
+  searchQuery.value = placeShortName(p)
+  flyToPlace(mapInstance, p)
 }
 
 function clearSearch() {
-  searchQuery.value = ''; searchResults.value = []; searchOpen.value = false; searchExpanded.value = false
+  resetSearch()
+  searchExpanded.value = false
 }
 
 async function openSearch() {
@@ -2728,8 +2464,6 @@ onBeforeUnmount(() => {
   climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
   climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
   clearTurnAnomalyMarkers()
-  measureMarkers.forEach((m) => m.remove()); measureMarkers.length = 0
-  measureMidMarkers.forEach((m) => m.remove()); measureMidMarkers.length = 0
   clearPlaceMarkers()
   clearSavedPoiMarkers()
   closeSavedPoiPopup()

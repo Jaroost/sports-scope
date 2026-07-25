@@ -7,6 +7,7 @@ import { fetchRouteVia, stopInsertIndex } from '../navRoute'
 import { buildDestPointPopupContent } from '../mapCoordPopup'
 import { catalogDefaultForSport } from '../brouter'
 import type { Sport } from '../userPreferences'
+import { placeShortName, flyToPlace } from './usePlaceSearch'
 import type { PlaceResult } from './usePlaceSearch'
 
 // Identifiants des couches d'aperçu, internes au sous-système : la couche `…-hit` est une
@@ -221,9 +222,9 @@ export function useDestinationNav(opts: UseDestinationNavOptions) {
   // ─── Points d'étape ────────────────────────────────────────────────────────────
 
   // Recadre la carte sur le lieu recherché (sans fixer de destination) : l'utilisateur
-  // ajuste ensuite la vue et touche le point exact. Repris de RouteBuilderMap.pickPlace.
+  // ajuste ensuite la vue et touche le point exact.
   function onLocate(p: PlaceResult) {
-    destName.value = p.display_name.split(',')[0]
+    destName.value = placeShortName(p)
     const map = getMap()
     if (!map) return
     // On débraye le suivi caméra (comme un déplacement manuel) : sinon la boucle
@@ -232,13 +233,7 @@ export function useDestinationNav(opts: UseDestinationNavOptions) {
     // d'un virage. Le suivi reprend à la validation (confirmPlaceNav) ou via « recentrer ».
     following.value = false
     cameraUnlocked.value = true
-    if (p.boundingbox?.length === 4) {
-      const [minLat, maxLat, minLng, maxLng] = p.boundingbox.map(parseFloat)
-      map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800, maxZoom: 14 })
-    } else {
-      const lat = parseFloat(p.lat), lng = parseFloat(p.lon)
-      if (!Number.isNaN(lat) && !Number.isNaN(lng)) map.flyTo({ center: [lng, lat], zoom: 13, duration: 800 })
-    }
+    flyToPlace(map, p)
   }
 
   function closeDestPopup() {

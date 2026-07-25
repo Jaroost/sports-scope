@@ -3,6 +3,7 @@ import { estimateRouteLoad } from '../routeLoad'
 import type { AthleteState } from '../routeLoad'
 import type { Sport } from '../userPreferences'
 import { speedForSport } from '../userPreferences'
+import { csrfToken } from '../csrf'
 
 // ─── Itinéraires prévus sur un jour ───────────────────────────────────────────
 // La brique qui relie le coût d'un itinéraire (routeLoad.ts) à la cible de volume
@@ -35,10 +36,6 @@ export interface PlannedRide {
   position: number // ordre intra-jour choisi par l'utilisateur
   created_at: string // ISO8601 (horodatage complet) — date à laquelle le plan a été posé
   route: PlannedRouteSummary
-}
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 }
 
 const JSON_HEADERS = () => ({

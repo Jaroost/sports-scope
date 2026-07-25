@@ -24,6 +24,7 @@ import {
   efficiencyFactor,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
+import { csrfToken } from '../csrf'
 
 const props = defineProps({
   streams: { type: Object, default: null },
@@ -1206,10 +1207,6 @@ async function setLastUsed(id) {
     })
     lastUsedId.value = id
   } catch { /* fire-and-forget */ }
-}
-
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 }
 
 async function savePresetAs() {

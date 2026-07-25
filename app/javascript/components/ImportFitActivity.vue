@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'
 import { computeElevGain } from '../activityHelpers'
+import { csrfToken } from '../csrf'
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
@@ -13,10 +14,6 @@ const error = ref(null)
 const uploadStatus = ref('idle') // 'idle' | 'parsing' | 'uploading' | 'done'
 const fileInputEl = ref(null)
 const dragOver = ref(false)
-
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 async function fetchList() {
   loading.value = true

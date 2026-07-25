@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { t } from '../i18n'
+import { csrfToken } from '../csrf'
 
 interface BackfillRun {
   id: number
@@ -28,10 +29,6 @@ const loading = ref(true)
 const refreshing = ref(false)
 const error = ref<string | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 const isActive = computed(() => {
   const s = run.value?.status

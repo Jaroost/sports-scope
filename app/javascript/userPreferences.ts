@@ -8,6 +8,7 @@
 // Le schéma reflète User::DEFAULT_PREFERENCES côté serveur.
 
 import { isProfileValidForSport, catalogDefaultForSport } from './brouter'
+import { csrfToken } from './csrf'
 
 export type MapStyleId = 'cyclosm' | 'topo' | 'swisstopo' | 'swissgrau' | 'swissimage' | 'liberty'
 export type Sport = 'cycling' | 'mtb' | 'hiking'
@@ -200,12 +201,6 @@ export function sportPreferences(sport: Sport = currentSport()): SportPreference
 // à jour côté serveur.
 export function isLoggedIn(): boolean {
   return !!document.querySelector('meta[name="user-preferences"]')
-}
-
-// Jeton CSRF de la page (méta posée par Rails). Exporté : plusieurs modules front en ont
-// besoin pour leurs appels d'écriture.
-export function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 }
 
 // Reporte sur le profil le style de carte choisi dans le créateur d'itinéraire : il

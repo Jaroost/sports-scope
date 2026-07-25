@@ -23,6 +23,7 @@ import RouteBuilderMap from './RouteBuilderMap.vue'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import RouteAlternativesDialog from './RouteAlternativesDialog.vue'
 import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
+import { csrfToken } from '../csrf'
 
 const props = defineProps({
   routeId: { type: [String, Number], default: null },
@@ -215,10 +216,6 @@ const exportChartMounted = ref(false)
 let recomputeToken = 0
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
-
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 function isEditMode() {
   return routeStore.currentId.value != null

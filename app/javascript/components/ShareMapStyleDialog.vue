@@ -10,10 +10,7 @@
 import { ref, computed, watch } from 'vue'
 import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS } from '../mapStyles'
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
+import { csrfToken } from '../csrf'
 
 const props = defineProps<{
   show: boolean

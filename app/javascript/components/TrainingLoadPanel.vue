@@ -11,6 +11,7 @@ import { usePlannedLoads } from '../composables/usePlannedRides'
 import ZoneDistribution from './ZoneDistribution.vue'
 import WeekPlanner from './WeekPlanner.vue'
 import MetricChart from './MetricChart.vue'
+import { csrfToken } from '../csrf'
 
 const props = defineProps({
   admin: { type: Boolean, default: false },
@@ -41,10 +42,6 @@ const RANGES: { key: string; days: number }[] = [
 // LTHR (édition manuelle)
 const editingLthr = ref(false)
 const lthrInput = ref<string | number>('')
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''

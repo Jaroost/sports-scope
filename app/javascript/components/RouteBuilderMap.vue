@@ -200,10 +200,6 @@ function saveMapView() {
   } catch { /* ignore */ }
 }
 
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
-
 function flagSvg(kind: 'start' | 'end') {
   if (kind === 'start') {
     return `<svg width="28" height="36" viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg">

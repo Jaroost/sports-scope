@@ -15,6 +15,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { formatPace, paceMinPerKm, formatChrono } from '../activityHelpers'
 import SegmentHistoryChart from './SegmentHistoryChart.vue'
+import { csrfToken } from '../csrf'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -117,10 +118,6 @@ const savingName = ref(false)
 const nameInput = ref<HTMLInputElement | null>(null)
 // Les `li` de la liste, pour ramener à l'écran celle qu'on vient d'ouvrir.
 const rowEls: HTMLElement[] = []
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 // Le champ n'existe qu'une fois la ligne passée en édition : on attend le rendu pour
 // lui donner le focus. `select()` présélectionne le nom existant — renommer, c'est le

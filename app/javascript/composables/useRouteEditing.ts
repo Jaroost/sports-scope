@@ -6,7 +6,7 @@ import { fetchRouteFromWaypoints, waypointInsertIndex } from '../navRoute'
 import type { Waypoint } from '../navRoute'
 import { MAX_WAYPOINTS } from '../stores/routeStore'
 import { buildDestPointPopupContent } from '../mapCoordPopup'
-import { csrfToken } from '../userPreferences'
+import { csrfToken } from '../csrf'
 
 export interface UseRouteEditingOptions {
   getMap: () => any

@@ -9,6 +9,7 @@ import { profilesForSport } from '../brouter'
 import { SPORTS } from '../userPreferences'
 import type { Sport, UserPreferences } from '../userPreferences'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
+import { csrfToken } from '../csrf'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -189,10 +190,6 @@ const { dragIndex: dragCountryIndex, overIndex: dragOverCountryIndex, onDown: on
     const [moved] = arr.splice(from, 1)
     arr.splice(to, 0, moved)
   })
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 async function save() {
   saving.value = true

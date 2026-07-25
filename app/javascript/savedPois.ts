@@ -2,6 +2,8 @@
 // Persistance des points d'intérêt posés à la main dans le créateur ou épinglés
 // depuis une découverte Overpass. Consommé par savedPoisStore (créateur + navigation).
 
+import { csrfToken } from './csrf'
+
 // `category` est une clé du registre POI_CATEGORIES (poiCategories.ts). `source`
 // distingue un POI posé à la main d'un POI Overpass épinglé.
 export interface SavedPoi {
@@ -20,10 +22,6 @@ export interface SavedPoiInput {
   lat: number
   lng: number
   source?: 'custom' | 'overpass'
-}
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 }
 
 const JSON_HEADERS = () => ({

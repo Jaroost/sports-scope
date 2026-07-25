@@ -1182,6 +1182,8 @@ en:
     return_via_same_route: "Add to end of route"
     reverse_route: "Reverse route"
     route_point: "Route point"
+    insert_choice_title: "The route passes here more than once — where to insert?"
+    insert_as_point: "Insert as point %{n}"
     map_point: "Map point"
     add_to_route: "Add to route"
     street_view: "Street View"

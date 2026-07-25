@@ -1182,6 +1182,8 @@ fr:
     return_via_same_route: "Ajouter à la fin de l'itinéraire"
     reverse_route: "Inverser le parcours"
     route_point: "Point du trajet"
+    insert_choice_title: "Le tracé passe ici plusieurs fois — où insérer ?"
+    insert_as_point: "Insérer comme point %{n}"
     map_point: "Point sur la carte"
     add_to_route: "Ajouter à l'itinéraire"
     street_view: "Street View"

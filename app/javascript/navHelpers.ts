@@ -3,6 +3,7 @@
 // réutilisable par les sous-composants (NavTurnBanner, NavClimbCard, NavScreenOff…).
 import { colorForGrade, gradeForIndex } from './routeHelpers'
 import type { Climb, LngLat, Maneuver, TurnPoint } from './routeHelpers'
+import { ARRIVAL_M, ARRIVAL_APPROACH_M } from './navConstants'
 
 // ─── Types partagés des overlays de navigation ─────────────────────────────────
 
@@ -107,6 +108,17 @@ export function turnEta(distM: number, speedKmh: number): string | null {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+// Lissage exponentiel de la vitesse servant à l'ETA : la vitesse instantanée saute trop
+// pour une estimation stable, et tomber à 0 à chaque feu rouge la ferait exploser. On
+// n'alimente donc la moyenne qu'en roulant, et on l'amorce sur la première vitesse
+// exploitable (sans quoi elle rattraperait la réalité en plusieurs minutes).
+const ETA_SMOOTH = 0.05
+const ETA_SPEED_FLOOR = 3   // km/h — en dessous, on considère l'arrêt et on ne moyenne pas
+export function smoothEtaSpeed(avgKmh: number, kmh: number): number {
+  if (kmh <= ETA_SPEED_FLOOR) return avgKmh
+  return avgKmh > 0 ? avgKmh + (kmh - avgKmh) * ETA_SMOOTH : kmh
+}
+
 // Durée restante estimée (en secondes) à `speedKmh`. Renvoie null sous 1 km/h :
 // l'estimation exploserait à l'arrêt et n'aurait aucun sens. À alimenter avec une
 // vitesse lissée (et non instantanée) pour une ETA stable feu rouge / relance.
@@ -127,6 +139,48 @@ export function formatDuration(sec: number): string {
 export function arrivalClock(sec: number, now: Date = new Date()): string {
   const d = new Date(now.getTime() + sec * 1000)
   return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// ─── Détection d'arrivée ───────────────────────────────────────────────────────
+
+// Marge au-delà de la zone d'arrivée à partir de laquelle on considère le coureur
+// franchement « en route ». Sans marge, osciller autour d'ARRIVAL_M suffirait à armer la
+// détection alors qu'on n'a jamais vraiment quitté la destination.
+const ARRIVAL_EN_ROUTE_MARGIN_M = 50
+
+// État de la détection d'arrivée, porté d'un fix GPS au suivant.
+export interface ArrivalState {
+  /** Vrai dès qu'on a été franchement en route (au-delà de la zone d'arrivée). */
+  seenEnRoute: boolean
+  /** Distance restante au fix précédent (sur le tracé) : sert à juger du rapprochement. */
+  lastRemainingM: number | null
+}
+
+export const INITIAL_ARRIVAL_STATE: ArrivalState = { seenEnRoute: false, lastRemainingM: null }
+
+// Fait avancer la détection d'arrivée d'un fix GPS. L'arrivée n'est retenue que si :
+//   • on a d'abord été clairement en route (`seenEnRoute`) — sans quoi un tracé minuscule,
+//     ou une boucle dont le départ se projette près de la fin, s'annoncerait « arrivé » au
+//     tout premier fix ;
+//   • le fix précédent était DÉJÀ dans les derniers ARRIVAL_APPROACH_M — on ne franchit pas
+//     30 km en une seconde, donc un saut brutal du restant vers zéro trahit une projection
+//     qui a changé de passage (tracé qui se recoupe), pas un coureur arrivé ;
+//   • on est sur le tracé : hors-trajet, la progression n'est pas fiable.
+// Un trou GPS ne retarde donc l'annonce que d'un fix. `arrived` (déjà annoncé) coupe court :
+// on n'annonce qu'une fois par tracé.
+export function arrivalStep(
+  state: ArrivalState,
+  opts: { remainingM: number; hasRoute: boolean; onRoute: boolean; arrived: boolean },
+): ArrivalState & { justArrived: boolean } {
+  const { remainingM, hasRoute, onRoute, arrived } = opts
+  const seenEnRoute = state.seenEnRoute || (hasRoute && remainingM > ARRIVAL_M + ARRIVAL_EN_ROUTE_MARGIN_M)
+  const approaching = state.lastRemainingM != null && state.lastRemainingM <= ARRIVAL_M + ARRIVAL_APPROACH_M
+  return {
+    seenEnRoute,
+    // Référence du prochain fix : seulement sur le tracé.
+    lastRemainingM: onRoute ? remainingM : state.lastRemainingM,
+    justArrived: !arrived && seenEnRoute && approaching && onRoute && remainingM <= ARRIVAL_M,
+  }
 }
 
 // ─── Géométrie ────────────────────────────────────────────────────────────────

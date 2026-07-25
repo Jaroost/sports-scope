@@ -11,11 +11,13 @@ import {
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
 import { fetchRouteToPlace, fetchRouteVia, waypointInsertIndex } from '../navRoute'
+import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../navReroute'
 import type { Waypoint } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildTurnChain,
+  smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE,
 } from '../navHelpers'
-import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
+import type { TurnHint, ClimbInfo, ClimbProfile, ArrivalState } from '../navHelpers'
 import { unlockAudio, playManeuverBurst, playOffRoute, playPoi, playArrival } from '../navAudio'
 import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
@@ -45,7 +47,7 @@ import {
 } from '../composables/useNavCamera'
 import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
-import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX, ARRIVAL_M, ARRIVAL_APPROACH_M } from '../navConstants'
+import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX } from '../navConstants'
 import { useOfflineMaps } from '../composables/useOfflineMaps'
 import { usePoiBrowse } from '../composables/usePoiBrowse'
 import { useNavToast } from '../composables/useNavToast'
@@ -54,6 +56,7 @@ import { useRouteEditing } from '../composables/useRouteEditing'
 import { useDestinationNav } from '../composables/useDestinationNav'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
+import { loadProgress, saveProgress, clearProgress, clearAllProgress } from '../navProgress'
 
 // Page de navigation unifiée : démarre en mode libre (carte + GPS + vitesse, sans
 // tracé) et peut charger/décharger un itinéraire à chaud. shareToken : si présent
@@ -313,20 +316,14 @@ const remainingM = ref(0)
 const remainingGainM = ref(0)
 const doneRatio = ref(0)
 const speedKmh = ref(0)
-// Arrivée à destination : bascule à vrai (une seule fois) quand la distance restante le
-// long du tracé passe sous ARRIVAL_M. `seenEnRoute` garantit qu'on a d'abord été
-// franchement en route — évite un faux « arrivé » au tout premier fix (tracé minuscule
-// ou boucle dont le départ se projette près de la fin). `lastRemainingM` ajoute la
-// plausibilité du rapprochement : l'arrivée doit être approchée progressivement.
+// Arrivée à destination : bascule à vrai (une seule fois par tracé) quand la distance
+// restante le long du tracé passe sous le seuil, avec les garde-fous anti-faux-positif
+// d'arrivalStep. Son état (déjà été en route, restant du fix précédent) est porté d'un fix
+// au suivant et remis à zéro avec le suivi.
 const arrived = ref(false)
-let seenEnRoute = false
-let lastRemainingM: number | null = null
-// Vitesse lissée (EMA) dédiée à l'heure d'arrivée : la vitesse instantanée saute
-// trop pour une ETA stable, et tomber à 0 à chaque feu rouge la ferait exploser.
-// On n'alimente la moyenne qu'en roulant (> ETA_SPEED_FLOOR) pour ignorer les arrêts.
+let arrivalState: ArrivalState = INITIAL_ARRIVAL_STATE
+// Vitesse lissée dédiée à l'heure d'arrivée : voir smoothEtaSpeed.
 const avgSpeedKmh = ref(0)
-const ETA_SMOOTH = 0.05
-const ETA_SPEED_FLOOR = 3
 const offRoute = ref(false)
 const offRouteRelBearing = ref(0)   // on-screen angle of the "back to route" arrow
 // Reroutage manuel (bouton du bandeau hors-tracé) : appel BRouter en cours et dernier
@@ -859,73 +856,16 @@ function rebuildRouteState(newGeometry: Coord[], hints: VoiceHint[]) {
 // préserve ainsi l'itinéraire choisi à la main (cols, routes) au lieu de le remplacer.
 // On passe le cap courant à BRouter (heading) : le moteur interdit alors un demi-tour
 // collé au départ et repart vers l'avant — voir fetchRouteToPlace / headingParam.
+//
+// Le choix du point de raccord, les étapes restantes et l'épissage lui-même sont de la
+// géométrie pure : ils vivent dans navReroute (rejoinIndexAhead, viasAhead, spliceDetour).
+// Ne reste ici que l'orchestration : garde anti-concurrence, appels BRouter, état.
 
-// Raccord visé un peu en avant du sommet retenu, pour ne pas viser un point qu'on
-// s'apprête déjà à dépasser.
-const REJOIN_LOOKAHEAD_M = 30
-// Demi-angle (deg) autour du cap dans lequel un point du tracé est considéré « devant »
-// le coureur. Au-delà, le rejoindre imposerait de faire demi-tour.
-const REJOIN_FORWARD_ARC = 85
-// Distance minimale (m) au point de raccord : on ne raccorde pas juste à côté de soi.
-const REJOIN_MIN_AHEAD_M = 40
-// Saut maximal (m) LE LONG du tracé pour un raccord. Au-delà, on ne « rejoint » plus le
-// tracé : on en escamote une portion entière. Décisif sur une boucle, dont l'arrivée
-// passe à quelques mètres du départ — sans ce plafond, un écart en début de parcours
-// raccorde les derniers sommets (les plus proches à vol d'oiseau) et le trajet est
-// aussitôt fini. Le plafond est large : un détour normal raccroche à quelques centaines
-// de mètres au plus.
-const REJOIN_MAX_SKIP_M = 2000
 let rerouteToken = 0
-
-// Sommet du tracé restant où raccorder. On privilégie le sommet le plus proche situé
-// DEVANT le coureur (dans l'arc autour de son cap) : continuer tout droit raccroche alors
-// le tracé plus loin, au lieu de raccorder derrière soi (point le plus proche après un
-// virage manqué) et de ressortir aussitôt. À défaut de point exploitable devant (cap peu
-// fiable à l'arrêt, ou tracé entièrement derrière), on retombe sur le sommet le plus proche
-// depuis la progression : BRouter, guidé par le cap, en tracera quand même un accès qui
-// repart vers l'avant, sans demi-tour collé au départ.
-function rejoinIndexAhead(pos: LngLat, heading: number, fromIdx: number): number {
-  // Fenêtre de raccord : les sommets à moins de REJOIN_MAX_SKIP_M devant la progression
-  // (cumDistM est croissant, on peut donc s'arrêter net). Voir REJOIN_MAX_SKIP_M.
-  const maxDist = (cumDistM[fromIdx] ?? 0) + REJOIN_MAX_SKIP_M
-  let best = -1
-  let bestD = Infinity
-  for (let i = fromIdx; i < geometry.length; i++) {
-    if (cumDistM[i] > maxDist) break
-    const d = haversine(pos, [geometry[i][0], geometry[i][1]])
-    if (d < REJOIN_MIN_AHEAD_M) continue
-    let rel = bearingBetween(pos, [geometry[i][0], geometry[i][1]]) - heading
-    while (rel > 180) rel -= 360
-    while (rel < -180) rel += 360
-    if (Math.abs(rel) > REJOIN_FORWARD_ARC) continue
-    if (d < bestD) { bestD = d; best = i }
-  }
-  if (best < 0) {
-    best = fromIdx
-    bestD = Infinity
-    for (let i = fromIdx; i < geometry.length; i++) {
-      if (cumDistM[i] > maxDist) break
-      const d = haversine(pos, [geometry[i][0], geometry[i][1]])
-      if (d < bestD) { bestD = d; best = i }
-    }
-  }
-  let j = best
-  while (j < geometry.length - 1 && cumDistM[j] - cumDistM[best] < REJOIN_LOOKAHEAD_M) j++
-  return j
-}
-
-// Étapes d'une destination ad hoc encore devant le coureur : on projette chacune sur le
-// tracé et on garde celles situées au-delà de sa position. Repli sur la destination seule
-// si le GPS les a toutes « dépassées » — il reste toujours quelque part où aller.
-function viasAhead(): LngLat[] {
-  if (routeVias.length === 0) return []
-  const ahead = routeVias.filter((v) => nearestGeomIndex(v, geometry).idx > lastIdx)
-  return ahead.length > 0 ? ahead : [routeVias[routeVias.length - 1]]
-}
 
 // Refait le trajet d'une destination ad hoc depuis la position, par les étapes restantes.
 async function recomputeVias(): Promise<boolean> {
-  const ahead = viasAhead()
+  const ahead = viasAhead(routeVias, geometry, lastIdx)
   if (!lastPos || ahead.length === 0) return false
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return false
   rerouting.value = true
@@ -984,7 +924,7 @@ async function recalcRoute() {
   // échec hors-ligne n'enchaîne pas une rafale de tentatives.
   lastAutoReroute = performance.now()
   const fromIdx = Math.max(0, Math.min(lastIdx, geometry.length - 1))
-  await rerouteToward(rejoinIndexAhead(lastPos, currentBearing, fromIdx))
+  await rerouteToward(rejoinIndexAhead(geometry, cumDistM, lastPos, currentBearing, fromIdx))
 }
 
 // Calcule un détour de la position courante jusqu'au sommet `rejoinIdx` du tracé, puis
@@ -1012,15 +952,10 @@ async function rerouteToward(rejoinIdx: number): Promise<boolean> {
     // Réponse périmée (clic plus récent) ou composant démonté : on n'écrase rien.
     if (token !== rerouteToken) return false
 
-    // Épissage : détour (départ → raccord) + suite inchangée du tracé original.
-    const tail = geometry.slice(rejoinIdx)
-    const newGeometry = detour.concat(tail)
-    // On ne garde des hints originaux que ceux du tronçon restant : leurs coordonnées
-    // (ancrées à l'identique sur les sommets du tracé sauvegardé) existent encore dans
-    // `tail`. turnsFromVoiceHints les ré-attache au bon passage du nouveau tracé.
-    const tailKeys = new Set(tail.map((c) => `${c[0]},${c[1]}`))
-    const tailHints = rawHints.filter((h) => tailKeys.has(`${h.lng},${h.lat}`))
-    applyReroute(newGeometry, detourHints.concat(tailHints))
+    // Épissage : détour (départ → raccord) + suite inchangée du tracé original, dont on
+    // conserve les voicehints. Voir spliceDetour.
+    const spliced = spliceDetour(geometry, rawHints, detour, detourHints, 0, rejoinIdx)
+    applyReroute(spliced.geometry, spliced.hints)
     // Le détour occupe désormais la tête du tracé : on retient où il se raccorde, pour
     // pouvoir le refaire au même endroit si le profil change avant qu'on l'ait parcouru.
     // applyReroute a remis lastIdx à 0, donc le raccord est bien devant nous.
@@ -1059,26 +994,18 @@ function resetRouteTracking(atStart: boolean) {
   mutedTurnPtr = -1
   // Nouveau tracé (ou reroutage) : on réarme la détection d'arrivée.
   arrived.value = false
-  seenEnRoute = false
-  lastRemainingM = null
+  arrivalState = INITIAL_ARRIVAL_STATE
   // Recalculé au prochain fix ; remis à faux pour que le bandeau hors-tracé disparaisse.
   offRoute.value = false
   // La progression mémorisée pointe un passage de l'ancien tracé : on l'efface.
-  try { localStorage.removeItem(progressKey()) } catch { /* quota / private mode */ }
+  clearProgress(routeToken.value)
 }
 
-// Réinitialisation manuelle depuis Réglages : efface TOUTES les progressions mémorisées
-// (`sportsScope.navProgress.*`, une par tracé), pas seulement celle du tracé actif. Une
-// entrée corrompue ou obsolète peut faire repartir la navigation sur le mauvais passage
-// d'un tracé auto-recoupant et donc dérailler les alertes de virage/arrivée ; on repart
-// d'une ardoise propre. Le suivi en cours est relancé (recherche globale au prochain fix).
+// Réinitialisation manuelle depuis Réglages : repart d'une ardoise propre côté
+// progressions mémorisées (cf. clearAllProgress) et relance le suivi en cours — recherche
+// globale du point le plus proche au prochain fix.
 function resetNavigationState() {
-  try {
-    for (let i = localStorage.length - 1; i >= 0; i--) {
-      const k = localStorage.key(i)
-      if (k && k.startsWith('sportsScope.navProgress.')) localStorage.removeItem(k)
-    }
-  } catch { /* stockage indisponible */ }
+  clearAllProgress()
   if (hasRoute.value) resetRouteTracking(false)
   activePanel.value = null
   showPoiToast(true, t('routes.nav_reset_done'))
@@ -1258,8 +1185,7 @@ function unloadRoute() {
   climbInfo.value = null
   offRoute.value = false
   arrived.value = false
-  seenEnRoute = false
-  lastRemainingM = null
+  arrivalState = INITIAL_ARRIVAL_STATE
   remainingM.value = 0
   remainingGainM.value = 0
   doneRatio.value = 0
@@ -1299,29 +1225,19 @@ async function insertViaIntoRoute(lng: number, lat: number) {
     const nearIdx = nearestGeomIndex([lng, lat], geometry).idx
     // Ancrages du détour, ~40 m de part et d'autre du sommet le plus proche, pour
     // laisser BRouter raccorder proprement le passage par le nouveau point.
-    let a = nearIdx
-    while (a > 0 && cumDistM[nearIdx] - cumDistM[a] < VIA_ANCHOR_GAP_M) a--
-    let b = nearIdx
-    while (b < geometry.length - 1 && cumDistM[b] - cumDistM[nearIdx] < VIA_ANCHOR_GAP_M) b++
+    const { a, b } = detourAnchors(geometry, cumDistM, nearIdx, VIA_ANCHOR_GAP_M)
     const { geometry: detour, hints: detourHints } = await fetchRouteVia(
       [[geometry[a][0], geometry[a][1]], [lng, lat], [geometry[b][0], geometry[b][1]]],
       routeProfile.value,
     )
-    const head = geometry.slice(0, a)
-    const tail = geometry.slice(b + 1)
-    const newGeometry = head.concat(detour).concat(tail)
-    // Voicehints des portions inchangées : leurs coordonnées (ancrées sur les sommets
-    // conservés) existent encore. On les garde dans l'ordre tête → détour → queue, comme
-    // l'attend turnsFromVoiceHints (appariement monotone le long du tracé).
-    const headKeys = new Set(head.map((c) => `${c[0]},${c[1]}`))
-    const tailKeys = new Set(tail.map((c) => `${c[0]},${c[1]}`))
-    const headHints = rawHints.filter((h) => headKeys.has(`${h.lng},${h.lat}`))
-    const tailHints = rawHints.filter((h) => tailKeys.has(`${h.lng},${h.lat}`))
+    // Le détour remplace la portion a…b ; les voicehints des portions conservées (tête et
+    // queue) sont réutilisés. Voir spliceDetour.
+    const spliced = spliceDetour(geometry, rawHints, detour, detourHints, a, b + 1)
     // Garde les points d'ancrage en phase avec la géométrie : le point inséré devient un
     // vrai ancrage (au bon rang), pour que l'édition ultérieure ne le perde pas. Calculé
     // sur l'ancienne géométrie (nearIdx), avant qu'elle ne soit remplacée ci-dessous.
     if (routeWaypoints.length >= 2) routeWaypoints.splice(waypointInsertIndex(geometry, routeWaypoints, lng, lat, nearIdx), 0, { lng, lat })
-    rebuildRouteState(newGeometry, headHints.concat(detourHints).concat(tailHints))
+    rebuildRouteState(spliced.geometry, spliced.hints)
     // Le tracé a changé : on relocalise au prochain fix (le coureur peut être n'importe
     // où dessus) plutôt que de repartir du début.
     resetRouteTracking(false)
@@ -1654,42 +1570,10 @@ function afterStyleLoad() {
 }
 
 // ─── Reprise après rechargement (tracés auto-recoupants) ──────────────────────
-// La position GPS seule ne distingue pas les passages d'un tracé qui se recoupe :
-// au même endroit, lng/lat peut appartenir à 2–3 passages. On mémorise donc la
-// progression (le sommet courant le long du tracé) dans localStorage et on s'en
-// sert comme indice au premier fix après un rechargement, pour repartir sur le bon
-// passage au lieu d'une recherche globale ambiguë. L'entrée expire afin de ne pas
-// « téléporter » un rider qui relance la même route un autre jour ; la validité est
-// en plus confirmée par la proximité réelle au fix GPS (sinon repli global).
-// Clé de reprise dérivée du trajet actif (token), ou 'none' en mode libre. Dynamique
-// (et non figée au montage) car l'itinéraire peut être chargé/changé en séance.
-function progressKey(): string {
-  return `sportsScope.navProgress.${routeToken.value ?? 'none'}`
-}
-const RESUME_MAX_AGE_MS = 30 * 60 * 1000
+// La progression le long du tracé est mémorisée dans le localStorage pour repartir sur le
+// BON passage d'un tracé qui se recoupe après un rechargement — voir navProgress. Ici on ne
+// garde que l'état du throttle d'écriture.
 let lastProgressSaveMs = 0
-
-// Indice de reprise (sommet) si une progression récente est mémorisée, sinon -1.
-function resumeHintIdx(): number {
-  try {
-    const key = progressKey()
-    const raw = localStorage.getItem(key)
-    if (!raw) return -1
-    const saved = JSON.parse(raw) as { idx: number; t: number }
-    if (!saved || typeof saved.idx !== 'number' || typeof saved.t !== 'number') return -1
-    if (Date.now() - saved.t > RESUME_MAX_AGE_MS) { localStorage.removeItem(key); return -1 }
-    return saved.idx >= 0 && saved.idx < geometry.length ? saved.idx : -1
-  } catch { return -1 }
-}
-
-// Sauvegarde throttlée de la progression (≤ 1 écriture / 3 s). Best-effort : un
-// localStorage indisponible (mode privé, quota) ne doit pas casser la séance.
-function persistProgress() {
-  const now = Date.now()
-  if (now - lastProgressSaveMs < 3000) return
-  lastProgressSaveMs = now
-  try { localStorage.setItem(progressKey(), JSON.stringify({ idx: lastIdx, t: now })) } catch { /* indisponible : best-effort */ }
-}
 
 // ─── GPS tracking ───────────────────────────────────────────────────────────
 
@@ -1719,7 +1603,7 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   // mètres du départ) : on privilégie donc le passage le plus proche du DÉPART, sinon
   // un simple fix bruité au point de départ nous place sur les derniers mètres du tracé
   // — parcours affiché comme terminé, arrivée annoncée aussitôt.
-  const hint = located ? lastIdx : resumeHintIdx()
+  const hint = located ? lastIdx : loadProgress(routeToken.value, geometry.length)
   let { idx, distM } = hint >= 0
     ? nearestGeomIndex(here, geometry, hint)
     : nearestGeomIndexPreferring(here, geometry, cumDistM, 0, LOOP_AMBIGUITY_TOL_M)
@@ -1783,7 +1667,7 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   // rechargement. On ne sauvegarde que sur le tracé : un point hors-tracé pourrait
   // figer un mauvais passage. nextTurnPtr et snapDistAlongM se recalent d'eux-mêmes
   // au premier fix de reprise (pilotés par l'indice restauré), rien d'autre à stocker.
-  if (!offRoute.value) persistProgress()
+  if (!offRoute.value) lastProgressSaveMs = saveProgress(routeToken.value, lastIdx, lastProgressSaveMs)
 
   // Heading: trust the GPS heading when moving fast enough, otherwise derive it.
   updateBearing(pos, here)
@@ -2274,13 +2158,7 @@ function updateSpeed(pos: GeolocationPosition, here: LngLat) {
   lastFixTime = pos.timestamp
   const kmh = Math.max(0, ms * 3.6)
   speedKmh.value = kmh
-  // Moyenne lissée pour l'ETA : seulement en roulant, pour qu'un arrêt n'effondre
-  // pas l'estimation. Amorcée sur la première vitesse exploitable.
-  if (kmh > ETA_SPEED_FLOOR) {
-    avgSpeedKmh.value = avgSpeedKmh.value > 0
-      ? avgSpeedKmh.value + (kmh - avgSpeedKmh.value) * ETA_SMOOTH
-      : kmh
-  }
+  avgSpeedKmh.value = smoothEtaSpeed(avgSpeedKmh.value, kmh)
 }
 
 // When off route, point an arrow back to the nearest vertex of the route. The
@@ -2311,22 +2189,20 @@ function updateProgress(idx: number) {
   remainingM.value = p.remainingM
   remainingGainM.value = p.remainingGainM
   doneRatio.value = p.doneRatio
-  // Détection d'arrivée : on a été clairement en route (au-delà de la zone d'arrivée),
-  // puis la distance restante retombe sous ARRIVAL_M, en étant toujours sur le tracé —
-  // et en s'en étant approché progressivement (le fix précédent était déjà dans les
-  // ARRIVAL_APPROACH_M derniers mètres). Sans cette dernière condition, un changement de
-  // passage de la projection (boucle, tracé qui se recoupe) suffirait à déclarer arrivé
-  // un coureur qui vient de partir. Un trou GPS retarde l'annonce d'un fix, pas plus.
-  if (hasRoute.value && p.remainingM > ARRIVAL_M + 50) seenEnRoute = true
-  const approaching = lastRemainingM != null && lastRemainingM <= ARRIVAL_M + ARRIVAL_APPROACH_M
-  if (!arrived.value && seenEnRoute && approaching && !offRoute.value && p.remainingM <= ARRIVAL_M) {
+  // Détection d'arrivée (heuristique anti-faux-positif sur les tracés qui se recoupent) :
+  // voir arrivalStep, qui porte l'état d'un fix au suivant.
+  const step = arrivalStep(arrivalState, {
+    remainingM: p.remainingM,
+    hasRoute: hasRoute.value,
+    onRoute: !offRoute.value,
+    arrived: arrived.value,
+  })
+  arrivalState = { seenEnRoute: step.seenEnRoute, lastRemainingM: step.lastRemainingM }
+  if (step.justArrived) {
     arrived.value = true
     if (soundOn.value && !audioMuted.value) playArrival()
     if (!alertsMuted.value) vibrateArrival()
   }
-  // Référence du prochain fix : seulement sur le tracé, une projection hors-trajet
-  // n'ayant pas de progression fiable.
-  if (!offRoute.value) lastRemainingM = p.remainingM
   // Débug : une carte de col factice est épinglée, on ne la réécrit pas depuis le GPS.
   if (dbgClimb.value) { refreshRemaining(); return }
   const ac = activeClimb(idx, climbs, cumDistM, snapDistAlongM)

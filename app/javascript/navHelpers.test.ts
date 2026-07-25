@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   textColorOn, turnIcon, buildTurnChain, turnEta, remainingSeconds, formatDuration,
   arrivalClock, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
+  smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE,
 } from './navHelpers'
+import type { ArrivalState } from './navHelpers'
 import type { TurnPoint, Climb } from './routeHelpers'
+import { ARRIVAL_M, ARRIVAL_APPROACH_M } from './navConstants'
 
 // Helpers purs de la navigation : couleurs, icônes, ETA, géométrie et profil de col.
 // Tout est sans état ni dépendance à MapLibre — testable directement.
@@ -233,5 +236,117 @@ describe('buildDebugClimb', () => {
     expect(info.posY).toBeGreaterThan(info.topY)
     expect(info.posY).toBeLessThan(96)
     expect(['#111827', '#ffffff']).toContain(info.gradeText)
+  })
+})
+
+describe('smoothEtaSpeed', () => {
+  it('s’amorce sur la première vitesse exploitable (sans rampe depuis zéro)', () => {
+    expect(smoothEtaSpeed(0, 28)).toBe(28)
+  })
+
+  it('ignore les arrêts et les allures de marche à pied', () => {
+    // Feu rouge : la moyenne de l'ETA ne s'effondre pas.
+    expect(smoothEtaSpeed(28, 0)).toBe(28)
+    expect(smoothEtaSpeed(28, 3)).toBe(28)
+  })
+
+  it('converge lentement vers la vitesse courante', () => {
+    const once = smoothEtaSpeed(20, 30)
+    expect(once).toBeCloseTo(20.5, 6)          // 5 % de l'écart
+
+    // Une accélération durable finit par être prise en compte, sans à-coup.
+    let avg = 20
+    for (let i = 0; i < 100; i++) avg = smoothEtaSpeed(avg, 30)
+    expect(avg).toBeGreaterThan(29)
+    expect(avg).toBeLessThan(30)
+  })
+})
+
+describe('arrivalStep', () => {
+  // Suite de fixes : chaque distance restante est passée à la machine, qui porte son état.
+  // `onRoute` par défaut, car hors-tracé la progression n'est pas fiable.
+  function run(remainings: number[], opts: { onRoute?: (i: number) => boolean } = {}) {
+    let state: ArrivalState = INITIAL_ARRIVAL_STATE
+    let arrived = false
+    const arrivedAt: number[] = []
+    remainings.forEach((remainingM, i) => {
+      const step = arrivalStep(state, {
+        remainingM,
+        hasRoute: true,
+        onRoute: opts.onRoute ? opts.onRoute(i) : true,
+        arrived,
+      })
+      state = { seenEnRoute: step.seenEnRoute, lastRemainingM: step.lastRemainingM }
+      if (step.justArrived) { arrived = true; arrivedAt.push(i) }
+    })
+    return { state, arrived, arrivedAt }
+  }
+
+  it('annonce l’arrivée après une approche progressive', () => {
+    const { arrived, arrivedAt } = run([5000, 2000, 400, 200, 60, 10])
+    expect(arrived).toBe(true)
+    expect(arrivedAt).toEqual([5])            // au fix qui passe sous le seuil
+  })
+
+  it('n’annonce qu’une fois', () => {
+    const { arrivedAt } = run([5000, 200, 10, 8, 5])
+    expect(arrivedAt).toEqual([2])
+  })
+
+  it('n’annonce pas au premier fix d’un tracé minuscule', () => {
+    // Jamais été en route : un tracé de 20 m ne doit pas s'annoncer arrivé d'emblée.
+    const { arrived, state } = run([20, 15, 10])
+    expect(arrived).toBe(false)
+    expect(state.seenEnRoute).toBe(false)
+  })
+
+  it('n’annonce pas sur un saut brutal du restant (changement de passage)', () => {
+    // Boucle dont l'arrivée frôle le départ : la projection saute de 30 km à 10 m.
+    const { arrived } = run([30000, 29000, 10])
+    expect(arrived).toBe(false)
+  })
+
+  it('accepte un trou GPS dès que le fix suivant confirme', () => {
+    // Le saut n'annonce rien, mais le fix d'après (précédent déjà proche) le fait.
+    const { arrived, arrivedAt } = run([30000, 29000, 10, 8])
+    expect(arrived).toBe(true)
+    expect(arrivedAt).toEqual([3])
+  })
+
+  it('n’annonce pas hors-tracé, et ne retient pas sa distance comme référence', () => {
+    // Fix 2 hors-tracé à 10 m : pas d'annonce, et sa distance n'arme pas l'approche —
+    // le fix 3, sur le tracé, part donc encore de la référence de 2000 m.
+    const { arrived } = run([5000, 2000, 10, 10], { onRoute: (i) => i !== 2 })
+    expect(arrived).toBe(false)
+  })
+
+  it('exige d’avoir été franchement en route, pas juste au bord de la zone', () => {
+    // Osciller autour du seuil d'arrivée n'arme pas la détection.
+    const { state } = run([ARRIVAL_M + 10, ARRIVAL_M + 20, ARRIVAL_M + 40])
+    expect(state.seenEnRoute).toBe(false)
+    // Franchir la marge, si.
+    expect(run([ARRIVAL_M + 60]).state.seenEnRoute).toBe(true)
+  })
+
+  it('garde la fenêtre d’approche à ARRIVAL_APPROACH_M', () => {
+    // Restant précédent juste au-delà de la fenêtre : pas encore d'annonce…
+    expect(run([5000, ARRIVAL_M + ARRIVAL_APPROACH_M + 1, 5]).arrived).toBe(false)
+    // … juste dedans : oui.
+    expect(run([5000, ARRIVAL_M + ARRIVAL_APPROACH_M, 5]).arrived).toBe(true)
+  })
+
+  it('sans tracé, ne s’arme jamais (navigation libre)', () => {
+    const step = arrivalStep(INITIAL_ARRIVAL_STATE, {
+      remainingM: 0, hasRoute: false, onRoute: true, arrived: false,
+    })
+    expect(step.seenEnRoute).toBe(false)
+    expect(step.justArrived).toBe(false)
+  })
+
+  it('ne mute pas l’état qu’on lui passe', () => {
+    const state: ArrivalState = { seenEnRoute: false, lastRemainingM: 100 }
+    arrivalStep(state, { remainingM: 5000, hasRoute: true, onRoute: true, arrived: false })
+    expect(state).toEqual({ seenEnRoute: false, lastRemainingM: 100 })
+    expect(INITIAL_ARRIVAL_STATE).toEqual({ seenEnRoute: false, lastRemainingM: null })
   })
 })

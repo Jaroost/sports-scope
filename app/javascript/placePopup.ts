@@ -1,5 +1,6 @@
 import { t } from './i18n'
 import { escapeHtml } from './html'
+import './styles/placePopup.css'
 
 export { escapeHtml }
 
@@ -10,8 +11,11 @@ export { escapeHtml }
 // la navigation et la tooltip « point quelconque ». Le balisage était recopié à chaque fois,
 // avec des écarts qui n'avaient aucune raison d'être : libellé de fermeture parfois en dur
 // (« Fermer ») au lieu de la traduction, titre tantôt échappé tantôt non, quatre copies de
-// `escapeHtml`. Les classes CSS (`.place-popup*`) sont globales et partagées par les
-// composants : c'est le contrat de rendu de ces briques.
+// `escapeHtml`. Les classes CSS (`.place-popup*`, `.place-marker*`) sont le pendant
+// visuel de ce contrat : elles vivent dans `styles/placePopup.css`, importé ici même —
+// qui produit le balisage embarque son style. Elles étaient auparavant recopiées dans les
+// blocs `<style>` de RouteBuilderMap.vue et RouteNavigation.vue, chaque composant
+// dépendant en pratique de la copie de l'autre.
 
 /** Lien Google Maps centré sur un point (fiche du lieu, pas un itinéraire). */
 export function googleMapsUrl(lat: number, lng: number): string {

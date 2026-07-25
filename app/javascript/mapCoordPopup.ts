@@ -2,8 +2,8 @@
 // navigation : un clic droit (ordinateur) ou un appui long (mobile) n'importe où sur
 // la carte ouvre un popup MapLibre affichant la latitude / longitude (copiables) ainsi
 // que des liens Google Maps et Street View. Le rendu réutilise les classes globales
-// `.place-popup*` présentes dans les deux composants ; on ne dépend donc d'aucune
-// feuille de style propre à un composant.
+// `.place-popup*` (`styles/placePopup.css`, chargée par `placePopup.ts`) ; on ne dépend
+// donc d'aucune feuille de style propre à un composant.
 import { t } from './i18n'
 import { streetViewUrl, probeStreetViewLink } from './streetView'
 import {

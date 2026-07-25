@@ -1,0 +1,165 @@
+/* Contrat de rendu partagé des « popups de lieu » et de leurs marqueurs POI.
+
+   Ces classes habillent du balisage construit en JS (placePopup.ts, mapCoordPopup.ts,
+   composables/useNavPois.ts, RouteBuilderMap.vue) et non un template Vue : le CSS doit
+   donc rester global. Il vivait auparavant en double, recopié à l'identique dans les
+   blocs `<style>` de RouteBuilderMap.vue et RouteNavigation.vue — d'où un
+   `.place-popup-link--delete` rendu par le créateur d'itinéraire mais stylé uniquement
+   par la navigation, qui ne marchait que parce que les deux composants partent dans le
+   même bundle.
+
+   Chargé par un `import` en tête de placePopup.ts : qui produit le balisage embarque
+   son style. */
+/* Marqueurs POI (cimetières / boulangeries), identiques dans le créateur d'itinéraire
+   et la navigation. */
+.place-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid currentColor;
+  box-shadow: 0 3px 8px -2px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  user-select: none;
+  transform-origin: bottom center;
+  transition: box-shadow 0.1s ease;
+  /* Sous les indicateurs de virage (z-index 2) : un POI ne doit jamais les masquer. */
+  z-index: 1;
+}
+.place-marker i { font-size: 0.78rem; }
+/* POI sauvegardé : badge étoile pour le distinguer d'un POI Overpass découvert. */
+.place-marker--saved { position: relative; }
+.place-marker--saved::after {
+  content: '\2605';
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 0.6rem;
+  line-height: 1;
+  color: #f59e0b;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff;
+}
+/* Survol souris, surbrillance synchronisée (carte ou liste, créateur d'itinéraire
+   uniquement) ou popup ouvert : le marqueur s'inverse — le fond se remplit de sa
+   couleur, l'icône passe en blanc. */
+.place-marker:hover,
+.place-marker--hover,
+.place-marker--active { background: currentColor; box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.5); }
+.place-marker:hover i,
+.place-marker--hover i,
+.place-marker--active i { color: #fff; }
+/* La couleur de chaque marqueur est posée en inline depuis le registre POI
+   (poiCategories.ts) ; currentColor pilote la bordure et le remplissage. */
+/* Sur petit écran tactile, cible de clic plus généreuse (même traitement que les points
+   du tracé, cf. routeBuilderMarkers.css). */
+@media (max-width: 767px) {
+  .place-marker { width: 32px; height: 32px; }
+  .place-marker i { font-size: 0.92rem; }
+}
+
+/* Popup d'un lieu : titre, coordonnées copiables, liens Google Maps / Street View. */
+/* Toujours au-dessus des autres marqueurs (en navigation : POI z 1, virages 2/3,
+   destination 4, position 5) : sans z-index explicite, le popup maplibre (auto = 0)
+   passe dessous. */
+.place-popup-container { z-index: 10; }
+.place-popup-container .maplibregl-popup-content {
+  padding: 4px;
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18), 0 1px 4px rgba(0, 0, 0, 0.10);
+}
+.place-popup { display: flex; flex-direction: column; gap: 2px; min-width: 180px; }
+.place-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.2rem 0.65rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  margin-bottom: 2px;
+}
+.place-popup-name {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #6b7280;
+  max-width: 14rem;
+}
+.place-popup-close {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0, 0, 0, 0.07);
+  color: #6b7280;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.place-popup-close:hover { background: rgba(0, 0, 0, 0.14); color: #111827; }
+.place-popup-link {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.45rem 0.65rem;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #212529;
+  text-decoration: none;
+}
+.place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
+.place-popup-link:hover { background: rgba(0, 0, 0, 0.06); color: #212529; text-decoration: none; }
+.place-popup-link--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
+.place-popup-link--copy {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.place-popup-coords-row { display: flex; gap: 0.25rem; }
+.place-popup-coords-row .place-popup-link { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; }
+.place-popup-coords-row .place-popup-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.place-popup-link--navigate {
+  border: none;
+  cursor: pointer;
+  background: #fc4c02;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.place-popup-link--navigate:hover { background: #e34602; color: #fff; }
+/* « Ajouter à l'itinéraire » (insertion, ne remplace pas) : violet pour le distinguer
+   de l'orange « Naviguer ici » (remplacement). */
+.place-popup-link--add-route {
+  border: none;
+  cursor: pointer;
+  background: #7c3aed;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.place-popup-link--add-route:hover { background: #6d28d9; color: #fff; }
+/* « Supprimer ce point » (tooltip d'un point d'étape) : rouge pour l'action destructrice. */
+.place-popup-link--delete {
+  border: none;
+  cursor: pointer;
+  background: #dc2626;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+}
+.place-popup-link--delete:hover { background: #b91c1c; color: #fff; }

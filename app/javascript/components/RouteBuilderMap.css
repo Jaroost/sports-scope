@@ -1,0 +1,295 @@
+/* Styles du composant RouteBuilderMap.vue (bloc `<style scoped>` extrait).
+   Importé par `<style scoped src="./RouteBuilderMap.css">` : le compilateur SFC le traite
+   exactement comme un bloc inline, `:deep()` compris. */
+/* Menu déroulant plus haut que la fenêtre : on plafonne et on fait défiler le contenu,
+   plutôt que de laisser les dernières entrées hors écran. */
+.dropdown-scrollable {
+  max-height: min(70vh, 26rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.map-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.map-wrap.expanded {
+  position: fixed;
+  top: 4rem;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1020;
+  background: #fff;
+  box-shadow: 0 -2px 20px rgba(0,0,0,0.2);
+}
+.route-builder-map {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+/* La barre capte les clics sur toute son emprise, gouttières comprises : viser à côté
+   d'un menu ne doit pas traverser jusqu'à la carte et y poser un point. Son emprise reste
+   celle de son contenu (largeur du plus large bouton), les menus ouverts étant en
+   position absolue ils ne l'élargissent pas. */
+.map-controls {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+  pointer-events: auto;
+}
+.map-controls-right {
+  position: absolute;
+  top: 56px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+  pointer-events: none;
+}
+.map-controls-right > * { pointer-events: auto; }
+.map-ctrl-btn {
+  background: #ffffff;
+  border-color: rgba(0,0,0,0.08);
+  width: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+}
+/* Déclencheur de menu avec libellé (« Affichage ») : on relâche le carré fixe pour
+   laisser la place à l'icône + le texte, comme le bouton « Fond de carte ». */
+.map-ctrl-btn--labeled {
+  width: auto;
+  aspect-ratio: auto;
+  padding: 0.25rem 0.5rem;
+}
+/* Les trois menus de la colonne gauche (Fond de carte, Affichage, Mode) partagent la
+   même largeur sur desktop, et leur chevron est aligné au bord droit. Le bouton du
+   fond de carte vit dans un composant enfant → :deep pour l'atteindre. Ciblé au
+   contexte de la carte du créateur (MapStyleDropdown est réutilisé ailleurs). */
+.map-controls :deep(.map-ctrl-btn) > i:last-child { margin-left: auto; }
+/* Largeur commune aux trois menus, chevron aligné à droite. Plus compacte sur mobile
+   (libellés courts : « Carte » / « Affichage » / « Mode ») que sur desktop
+   (« Fond de carte »). */
+.map-controls :deep(.map-ctrl-btn) { min-width: 7.5rem; }
+@media (min-width: 768px) {
+  .map-controls :deep(.map-ctrl-btn) { min-width: 9.5rem; }
+}
+.map-ctrl-btn.active,
+.map-ctrl-btn.active:hover,
+.map-ctrl-btn.active:focus {
+  background: #ffc107;
+  color: #212529;
+  border-color: rgba(252,76,2,0.7);
+}
+.map-search {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.map-search--expanded { width: min(420px, calc(100% - 220px)); }
+.map-search-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; }
+.map-search-results {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0.25rem 0;
+  background: #fff;
+  border-radius: 0.4rem;
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+.map-search-result {
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+}
+.map-search-result:last-child { border-bottom: 0; }
+.map-search-result:hover { background: rgba(252,76,2,0.08); }
+/* Panneau de mesure : centré en bas de la carte. */
+.measure-panel {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: calc(100% - 1.5rem);
+  padding: 0.3rem 0.4rem 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(15,118,110,0.95);
+  color: #fff;
+  font-size: 0.85rem;
+}
+.measure-panel-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+.measure-panel-total {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.measure-panel-hint {
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Sur téléphone, le bandeau se cale juste au-dessus du bouton de stats (distance /
+   dénivelé), aligné sur lui plutôt que centré. Même seuil que ce bouton. */
+@media (max-width: 767px), (max-height: 500px) {
+  .measure-panel {
+    left: 5px;
+    right: auto;
+    bottom: 44px;
+    transform: none;
+    max-width: calc(100% - 10px);
+  }
+}
+@media (max-width: 575.98px) {
+  .measure-panel-hint { display: none; }
+}
+.map-overlay-hint {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(33,37,41,0.88);
+  color: #fff;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+  z-index: 4;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+.map-overlay-loading {
+  position: absolute;
+  top: 12px;
+  right: 60px;
+  background: rgba(255,255,255,0.95);
+  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  z-index: 5;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  display: flex;
+  align-items: center;
+}
+/* Sur mobile, l'indicateur de chargement (tracé / altitude / POI) passe en bas à
+   droite, clairement au-dessus de l'attribution (qui occupe ~10–34px du bas) pour
+   ne pas la recouvrir, et libérer le haut de la carte. */
+@media (max-width: 767px), (max-height: 500px) {
+  .map-overlay-loading {
+    top: auto;
+    right: 8px;
+    bottom: 5px;
+  }
+}
+.mobile-sheet-toggle {
+  position: absolute;
+  bottom: 5px;
+  left: 5px;
+  z-index: 6;
+  white-space: nowrap;
+  display: none;
+}
+@media (max-width: 767px), (max-height: 500px) { .mobile-sheet-toggle { display: flex; } }
+
+/* Fond swisstopo gris : les contrôles blancs se fondent dans la carte. On les passe
+   en jaune (fond + bordure) pour les redétacher. Le bouton du fond de carte vit dans
+   MapStyleDropdown → :deep pour l'atteindre. */
+.map-wrap--grey-basemap :deep(.map-ctrl-btn),
+.map-wrap--grey-basemap .map-search-toggle,
+.map-wrap--grey-basemap .mobile-sheet-toggle,
+.map-wrap--grey-basemap :deep(.map-ctrl-btn:hover),
+.map-wrap--grey-basemap .map-search-toggle:hover,
+.map-wrap--grey-basemap .mobile-sheet-toggle:hover {
+  background: #ffc107;
+  border: 2px solid #ffc107;
+  color: #212529;
+}
+.map-wrap--grey-basemap :deep(.map-ctrl-btn:hover),
+.map-wrap--grey-basemap .map-search-toggle:hover,
+.map-wrap--grey-basemap .mobile-sheet-toggle:hover {
+  background: #ffcd39;
+  border-color: #ffcd39;
+}
+/* Recherche dépliée : la loupe (préfixe du champ) et le bouton de fermeture suivent
+   le même traitement ; le champ garde son fond blanc mais une bordure jaune, sinon
+   il se détacherait des deux boutons. `.bg-white` étant !important, on surcharge. */
+.map-wrap--grey-basemap .map-search .input-group-text,
+.map-wrap--grey-basemap .map-search .btn-light {
+  background: #ffc107 !important;
+  border: 2px solid #ffc107;
+  color: #212529;
+}
+.map-wrap--grey-basemap .map-search .btn-light:hover {
+  background: #ffcd39 !important;
+  border-color: #ffcd39;
+}
+.map-wrap--grey-basemap .map-search .form-control {
+  border-top: 2px solid #ffc107;
+  border-bottom: 2px solid #ffc107;
+}
+.map-wrap--grey-basemap .map-search-results {
+  border: 2px solid #ffc107;
+}
+
+/* Bannière d'échec de chargement des POI — visible uniquement sur mobile,
+   la sidebar Stats (masquée sur mobile) gérant déjà le cas sur desktop. */
+.map-overlay-places-error {
+  position: absolute;
+  bottom: 5px;
+  right: 8px;
+  display: none;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(33,37,41,0.9);
+  color: #fff;
+  border: none;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+}
+.map-overlay-places-retry { color: #6ea8fe; font-weight: 600; white-space: nowrap; }
+@media (max-width: 767px) { .map-overlay-places-error { display: flex; } }
+
+/* Dialogue de création d'un POI sauvegardé (mode « poser un POI »). */
+.poi-dialog-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+.poi-dialog { width: min(320px, 90%); border: none; }

@@ -14,10 +14,10 @@ import { fetchRouteToPlace, fetchRouteVia, fetchRouteFromWaypoints } from '../na
 import type { Waypoint } from '../navRoute'
 import { MAX_WAYPOINTS } from '../stores/routeStore'
 import {
-  textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb, buildTurnChain,
+  textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildTurnChain,
 } from '../navHelpers'
 import type { TurnHint, ClimbInfo, ClimbProfile } from '../navHelpers'
-import { unlockAudio, playManeuver, playManeuverBurst, playOffRoute, playPoi, playArrival } from '../navAudio'
+import { unlockAudio, playManeuverBurst, playOffRoute, playPoi, playArrival } from '../navAudio'
 import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
 import RadarOverlay from './RadarOverlay.vue'
@@ -51,6 +51,7 @@ import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TU
 import { useOfflineMaps } from '../composables/useOfflineMaps'
 import { usePoiBrowse } from '../composables/usePoiBrowse'
 import { useNavToast } from '../composables/useNavToast'
+import { useNavDebug } from '../composables/useNavDebug'
 import { buildCoordPopupContent, buildDestPointPopupContent, attachLongPress } from '../mapCoordPopup'
 import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
 
@@ -730,97 +731,17 @@ const approachingTurn = computed(
 )
 
 // ─── Mode débug (preview des overlays) ────────────────────────────────────────
-// Réservé aux comptes pouvant tout faire (can? :manage, :all → prop canDebug), ou
-// forçable via `?debug=1` dans l'URL. Il révèle un bouton « flacon » dans le tiroir
-// de commandes qui ouvre un panneau permettant d'injecter des données factices pour
-// prévisualiser, sans GPS / col réel / radar Varia, les overlays clés :
-//   • le radar arrière (RadarOverlay)
-//   • la carte de col (climbInfo)
-//   • la notification de virage (turnHint)
-//   • la notification de POI (poiHint)
-// Tant qu'une bascule est active, les mises à jour live (updateTurns / updateProgress /
-// updatePoiProximity) ne réécrivent PAS l'overlay correspondant (gardes dbgTurn /
-// dbgClimb / dbgPoi), pour qu'un vrai fix GPS ne l'efface pas pendant qu'on l'inspecte.
-const debugMode = props.canDebug === true || (() => {
-  try { return new URLSearchParams(window.location.search).has('debug') } catch { return false }
-})()
-const dbgRadar = ref(false)
-const dbgClimb = ref(false)
-const dbgTurn = ref(false)
-const dbgPoi = ref(false)
-
-// Scénarios de virage parcourus en boucle (un clic = scénario suivant, puis « off »).
-// Couvre chaque état visuel : lointain (gris), approche (violet), urgent (orange),
-// rond-point (numéro de sortie) et virage atteint (vert).
-const DBG_TURNS: { label: string; state: 'far' | 'near' | 'now'; kind: Maneuver; direction: 'left' | 'right'; angle: number; distM: number; exitNumber?: number; follow?: TurnHint[] }[] = [
-  { label: 'Lointain', state: 'far', kind: 'turn', direction: 'right', angle: 60, distM: 850 },
-  { label: 'Approche', state: 'near', kind: 'turn', direction: 'left', angle: -70, distM: 180 },
-  { label: 'Urgent', state: 'near', kind: 'sharp', direction: 'right', angle: 110, distM: Math.min(sportNav.value.turn_urgent_m, 40) },
-  { label: 'Rond-point', state: 'near', kind: 'roundabout', direction: 'right', angle: 90, distM: 120, exitNumber: 2 },
-  { label: 'Rafale', state: 'near', kind: 'turn', direction: 'left', angle: -80, distM: 90, follow: [
-    { direction: 'right', distM: 120, kind: 'turn', angle: 85, state: 'near' },
-    { direction: 'left', distM: 155, kind: 'sharp', angle: -110, state: 'near' },
-  ] },
-  { label: 'Maintenant', state: 'now', kind: 'turn', direction: 'left', angle: -70, distM: 0 },
-]
-const dbgTurnIdx = ref(0)
-// Libellé du scénario de virage débug en cours (null quand off) — passé au tiroir.
-const dbgTurnLabel = computed(() => (dbgTurn.value ? DBG_TURNS[dbgTurnIdx.value].label : null))
-
-function cycleDebugTurn() {
-  dbgTurnIdx.value = dbgTurn.value ? dbgTurnIdx.value + 1 : 0
-  if (dbgTurnIdx.value >= DBG_TURNS.length) {
-    dbgTurn.value = false
-    turnHint.value = null
-    followTurns.value = []
-    return
-  }
-  dbgTurn.value = true
-  hasFix.value = true
-  const p = DBG_TURNS[dbgTurnIdx.value]
-  turnHint.value = { direction: p.direction, distM: p.distM, kind: p.kind, angle: p.angle, exitNumber: p.exitNumber, state: p.state }
-  followTurns.value = p.follow ?? []
-  // Prévisualisation sonore : joue le bip du virage correspondant (comme en vrai).
-  if (soundOn.value) playManeuver(p.kind, p.direction)
-}
-
-function toggleDebugClimb() {
-  if (dbgClimb.value) { dbgClimb.value = false; climbInfo.value = null; return }
-  dbgClimb.value = true
-  hasFix.value = true
-  climbInfo.value = buildDebugClimb()
-}
-
-// Notification POI factice : épingle un bandeau « boulangerie » à 80 m pour
-// prévisualiser le rendu (bas d'écran, et en veille via NavScreenOff) sans devoir
-// passer à portée d'un vrai POI.
-function toggleDebugPoi() {
-  if (dbgPoi.value) { dbgPoi.value = false; poiHint.value = null; return }
-  dbgPoi.value = true
-  hasFix.value = true
-  const cat = categoryForType('bakery')
-  poiHint.value = {
-    name: 'Boulangerie du Col',
-    icon: cat?.icon ?? 'fa-location-dot',
-    color: cat?.color ?? '#6b7280',
-    distM: 80,
-  }
-  // Prévisualisation sonore : joue la ritournelle d'approche POI (comme en vrai).
-  if (soundOn.value) playPoi()
-}
-
-// Radar factice : on passe le store en « connecté » sans Bluetooth (pas de watchdog,
-// donc les cibles persistent) et on injecte deux voitures, dont une sous le seuil
-// rapproché → bandeau rouge « Attention » + alertes sonores (via le watch existant).
-function toggleDebugRadar() {
-  if (dbgRadar.value) { dbgRadar.value = false; radarStore.reset(); return }
-  dbgRadar.value = true
-  radarStore.status.value = 'connected'
-  radarStore.setTargets([
-    { id: 1, distanceM: 18, speedMps: 9 },
-    { id: 2, distanceM: 72, speedMps: 6 },
-  ])
-}
+// Panneau d'injection de données factices (virage, col, POI, radar) pour prévisualiser
+// les overlays sans GPS ni matériel. Voir useNavDebug : les gardes dbgTurn / dbgClimb /
+// dbgPoi ci-dessous empêchent les mises à jour live d'écraser l'overlay inspecté.
+const {
+  debugMode, dbgRadar, dbgClimb, dbgTurn, dbgPoi, dbgTurnLabel,
+  cycleDebugTurn, toggleDebugClimb, toggleDebugPoi, toggleDebugRadar,
+} = useNavDebug({
+  canDebug: props.canDebug,
+  getTurnUrgentM: () => sportNav.value.turn_urgent_m,
+  hasFix, turnHint, followTurns, climbInfo, poiHint, soundOn,
+})
 
 // ─── Lifecycle ──────────────────────────────────────────────────────────────
 

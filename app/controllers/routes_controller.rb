@@ -410,7 +410,7 @@ class RoutesController < ApplicationController
 
   def send_gpx(route)
     send_data build_gpx(route, step: gpx_densify_step),
-              filename: "#{route.name.parameterize.presence || 'route'}.gpx",
+              filename: "#{route.name.parameterize.presence || 'route'}#{params[:step] ? '-dense': ''}.gpx",
               type: "application/gpx+xml"
   end
 

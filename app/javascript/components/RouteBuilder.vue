@@ -9,10 +9,11 @@ import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
 import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, shareVersionParam } from '../routeHelpers'
-import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
+import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport } from '../userPreferences'
-import { BROUTER_URL, profilesForSport } from '../brouter'
+import { profilesForSport } from '../brouter'
+import { routeLegs, LegRoutingError } from '../brouterLegs'
 import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
 import { parseGpxWaypoints } from '../gpxImport'
@@ -214,6 +215,10 @@ const exportChartRef = useTemplateRef('exportChartRef')
 const exportChartMounted = ref(false)
 
 let recomputeToken = 0
+// Le routage part maintenant en plusieurs requêtes parallèles (une par tronçon, cf.
+// brouterLegs) : un recalcul obsolète doit pouvoir les annuler toutes d'un coup, sinon
+// un drag continu les empilerait jusqu'à saturer le pool de connexions du navigateur.
+let recomputeAbort: AbortController | null = null
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
@@ -350,6 +355,9 @@ function onChangeProfile(profile: string) {
 
 async function recomputeRoute() {
   const token = ++recomputeToken
+  recomputeAbort?.abort()
+  const abort = new AbortController()
+  recomputeAbort = abort
   selectionStore.clear()
   // Le tracé change : les avertissements portaient sur le précédent, et un éventuel
   // « enregistrer quand même » ne vaut plus. Ils seront recalculés à la prochaine
@@ -376,45 +384,24 @@ async function recomputeRoute() {
   routeStore.error.value = null
 
   try {
+    // Routage tronçon par tronçon (une requête à 2 points par paire de waypoints) plutôt
+    // qu'une requête unique à N waypoints : sur une requête multi-waypoints, BRouter
+    // élimine les demi-tours aux points de passage et supprime donc les waypoints posés
+    // dans une impasse — jusqu'à ne plus rien renvoyer du tout sur une boucle. Détail et
+    // mesures dans brouterLegs.ts.
     const wps = routeStore.waypoints.value
-    const lonlats = wps.map((w) => `${w.lng},${w.lat}`).join('|')
-    // Un waypoint « libre » n'affecte que son tronçon entrant : on trace une ligne droite
-    // (beeline BRouter) depuis le point précédent jusqu'à lui. Le tronçon sortant (libre →
-    // point suivant) reste routé/accroché à la route, sauf si le point suivant est lui aussi
-    // libre. `straight` indexe des tronçons : le tronçon i relie waypoint[i] → waypoint[i+1],
-    // donc le tronçon i est droit ssi waypoint[i+1] est libre.
-    const straight = new Set<number>()
-    wps.forEach((w, i) => {
-      if (i > 0 && w.free) straight.add(i - 1)
-    })
-    const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
-    // timode=2 makes BRouter emit turn-by-turn voicehints in the GeoJSON properties.
-    const profile = routeStore.profile.value
-    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${straightParam}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
-    const data = await res.json()
+    const routed = await routeLegs(wps, routeStore.profile.value, abort.signal)
     if (token !== recomputeToken) return
-    const feature = data?.features?.[0]
-    const coords = feature?.geometry?.coordinates
-    if (!Array.isArray(coords) || coords.length < 2) throw new Error('Routing impossible (no route)')
-    const trackLen = parseFloat(feature.properties?.['track-length'] || '0')
-    routeStore.distanceM.value = Number.isFinite(trackLen) && trackLen > 0 ? trackLen : 0
-    let geom = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null]) as Coord[]
-    // Voicehints BRouter : [indexInTrack, command, exitNumber, distanceToNext, angle].
-    // On les ancre sur la coordonnée brute (avant densification, qui décalerait les
-    // index) ; la navigation les reprojettera sur la géométrie sauvegardée.
-    const rawHints = Array.isArray(feature.properties?.voicehints) ? feature.properties.voicehints : []
-    routeStore.voiceHints.value = rawHints
-      .map((h: number[]) => {
-        const c = coords[h[0]]
-        return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0, exit_number: h[2] ?? 0 } : null
-      })
-      .filter(Boolean) as VoiceHint[]
+    if (routed.geometry.length < 2) throw new Error('Routing impossible (no route)')
+    routeStore.distanceM.value = routed.distanceM
+    // Les voicehints sont déjà ancrés sur leur coordonnée (et non sur un index de tracé),
+    // ce qui les rend insensibles à la concaténation des tronçons comme à la densification.
+    routeStore.voiceHints.value = routed.voiceHints
     // Les tronçons droits (points libres) ne contiennent que leurs extrémités : on les
     // densifie pour qu'open-meteo échantillonne le relief le long de la ligne.
-    if (straight.size) geom = densifyGeometry(geom)
-    routeStore.geometry.value = geom
+    routeStore.geometry.value = routed.hasStraight
+      ? densifyGeometry(routed.geometry)
+      : routed.geometry
 
 
     // Recalcule d'abord les index géométriques des waypoints : le rendu du tracé
@@ -444,8 +431,17 @@ async function recomputeRoute() {
       await fetchElevation(token)
     }
   } catch (e: any) {
+    // Recalcul supplanté par un plus récent : on a nous-mêmes annulé ses requêtes,
+    // ce n'est pas une erreur à montrer.
+    if (e?.name === 'AbortError') return
     if (token === recomputeToken) {
-      routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
+      // Le découpage en tronçons rend l'échec localisable : on nomme les deux points
+      // entre lesquels le routage a échoué (numérotés comme sur la carte, à partir de 1)
+      // au lieu du « erreur de routage » global et muet d'avant.
+      routeStore.error.value =
+        e instanceof LegRoutingError
+          ? `${t('routes.error_routing_leg', { from: e.legIndex + 1, to: e.legIndex + 2 })}: ${e.message}`
+          : `${t('routes.error_routing')}: ${e.message}`
       // Le tracé garde l'ancienne géométrie alors que les waypoints, eux, ont déjà changé :
       // on réaligne les index dessus, sinon l'insertion de point resterait bloquée.
       mapRef.value?.recomputeWaypointGeomIndices()

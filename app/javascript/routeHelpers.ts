@@ -745,9 +745,35 @@ export function nearestGeomIndex(
     lo = Math.max(0, hintIdx - window)
     hi = Math.min(geometry.length, hintIdx + window)
   }
+  // Sur un aller-retour, la voie du retour REPASSE PAR LES SOMMETS DE L'ALLER : autour du
+  // demi-tour, geometry[i-k] et geometry[i+k] sont la même coordonnée, donc à distance
+  // rigoureusement égale du coureur. Un simple `d < bestDist` retient alors le premier
+  // rencontré, c'est-à-dire l'indice le plus BAS — l'aller. Au retour, la flèche redescend
+  // donc le tracé de l'aller et la progression recule.
+  // On départage à distance (quasi) égale sur la CONTINUITÉ DU SUIVI : l'indice le plus
+  // proche du précédent, et à égalité celui qui va de l'avant. Sur le trajet aller ce
+  // départage ne change rien (le sommet courant est plus proche du curseur que son miroir,
+  // donc aucun saut sur la voie du retour) ; il ne tranche qu'au sommet du demi-tour, où
+  // les deux candidats sont à égale distance du curseur — et où le coureur repart.
+  // Sans indice précédent (recherche globale), aucune direction de marche n'est connue :
+  // on garde le comportement historique.
+  const TIE_M = 0.5
+  const closerToHint = (i: number, cur: number): boolean => {
+    const di = Math.abs(i - hintIdx)
+    const dc = Math.abs(cur - hintIdx)
+    return di < dc || (di === dc && i > cur)
+  }
   for (let i = lo; i < hi; i++) {
     const d = haversine(pos, geometry[i])
-    if (d < bestDist) { bestDist = d; bestIdx = i }
+    if (d < bestDist - TIE_M) { bestDist = d; bestIdx = i; continue }
+    if (hintIdx < 0 || d > bestDist + TIE_M) {
+      if (d < bestDist) { bestDist = d; bestIdx = i }
+      continue
+    }
+    if (closerToHint(i, bestIdx)) {
+      bestIdx = i
+      if (d < bestDist) bestDist = d
+    }
   }
   let distM = bestDist
   if (bestIdx > 0) distM = Math.min(distM, pointToSegmentM(pos, geometry[bestIdx - 1], geometry[bestIdx]))
@@ -973,14 +999,22 @@ export function turnsFromVoiceHints(
   geometry: Coord[],
   cumDistM: number[],
 ): TurnPoint[] {
-  // Recul autorisé (en sommets) sous le curseur : assez pour absorber la jitter de
-  // densification, mais bien inférieur à l'écart d'index entre deux passages d'une
-  // même jonction, pour ne jamais re-cibler un passage déjà franchi.
-  const BACK_TOL = 10
+  // Recul autorisé sous le curseur, exprimé EN MÈTRES LE LONG DU TRACÉ et non en nombre
+  // de sommets. Le recul sert à absorber le léger dépassement du curseur quand deux hints
+  // se suivent de près (amas d'un rond-point) ; il ne doit jamais atteindre le passage
+  // précédent sur un tracé qui se recoupe. Un compte de sommets confond ces deux échelles :
+  // la densification espace les sommets de 100 m, si bien que 10 sommets valaient tantôt
+  // quelques mètres, tantôt près d'un kilomètre. Sur un aller-retour, le curseur posé au
+  // demi-tour reculait alors jusqu'au passage de l'aller et y ré-ancrait le virage du
+  // retour : deux virages annoncés au même endroit, et celui du retour jamais donné.
+  const BACK_TOL_M = 50
   const out: TurnPoint[] = []
   let cursor = 0
   for (const h of hints) {
-    const idx = firstPassFrom([h.lng, h.lat], geometry, Math.max(0, cursor - BACK_TOL))
+    const floorM = (cumDistM[cursor] ?? 0) - BACK_TOL_M
+    let from = cursor
+    while (from > 0 && (cumDistM[from - 1] ?? 0) >= floorM) from--
+    const idx = firstPassFrom([h.lng, h.lat], geometry, from)
     cursor = idx
     if (VOICE_HINT_SKIP.has(h.cmd)) continue
     const { kind, direction } = maneuverFromCmd(h.cmd, h.angle)

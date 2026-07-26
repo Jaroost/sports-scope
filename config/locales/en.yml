@@ -1106,6 +1106,7 @@ en:
     error_min_points: "Add at least 2 points on the map."
     error_max_waypoints: "Limit reached: a route cannot exceed %{count} points."
     error_routing: "Routing error"
+    error_routing_leg: "Routing error between points %{from} and %{to}"
     error_elevation: "Elevation error"
     error_shared_not_found: "This shared route can't be found or is no longer available."
     turn_warning_title: "Suspicious turns detected"

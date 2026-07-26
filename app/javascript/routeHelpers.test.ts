@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { bearingDelta, bearingBetween, buildDistancesM, detectTurns } from './routeHelpers'
-import type { Coord, LngLat } from './routeHelpers'
+import { bearingDelta, bearingBetween, buildDistancesM, detectTurns, turnsFromVoiceHints, nearestGeomIndex } from './routeHelpers'
+import type { Coord, LngLat, VoiceHint } from './routeHelpers'
 // moveLngLat (navHelpers) sert à bâtir les tracés en MÈTRES : les seuils de detectTurns
 // (35°, 18 m, 25 m) ne veulent rien dire exprimés en degrés de longitude.
 import { moveLngLat } from './navHelpers'
@@ -204,5 +204,90 @@ describe('detectTurns', () => {
     expect(turnsOf(jittery, 35, 1).length).toBeGreaterThan(0)
     // … que la fenêtre par défaut (18 m) absorbe : la route est droite.
     expect(turnsOf(jittery)).toEqual([])
+  })
+})
+
+// ─── Tracés qui se recoupent (aller-retour) ────────────────────────────────────
+
+// Un aller-retour repasse EXACTEMENT par les sommets de l'aller : c'est le cas qui piège
+// à la fois l'appariement des virages aux voicehints et le suivi de position, les deux
+// s'appuyant sur des distances qui deviennent rigoureusement égales entre deux passages.
+//
+// Le tracé, au pas de 25 m : 300 m vers l'est jusqu'à une intersection, puis un éperon
+// de 200 m vers le sud en cul-de-sac, demi-tour, retour par la même intersection, et
+// 300 m vers l'ouest. L'éperon est court À DESSEIN — 8 sommets — car c'est ce qui met
+// en défaut un recul de curseur compté en sommets plutôt qu'en mètres.
+const outAndBack = path([
+  { bearing: 90, lengthM: 300 },
+  { bearing: 180, lengthM: 200 },
+  { bearing: 0, lengthM: 200 },
+  { bearing: 270, lengthM: 300 },
+])
+const outAndBackCum = buildDistancesM(outAndBack)
+const JUNCTION_OUT = 12   // l'intersection, à 300 m
+const DEAD_END = 20       // le bout de l'éperon, à 500 m
+const JUNCTION_BACK = 28  // la même intersection au retour, à 700 m
+
+describe('turnsFromVoiceHints sur un aller-retour', () => {
+  const at = (i: number, cmd: number, angle: number): VoiceHint =>
+    ({ lng: outAndBack[i][0], lat: outAndBack[i][1], cmd, angle, exit_number: 0 })
+
+  it('ancre les deux passages d’une même intersection sur des sommets distincts', () => {
+    // Ordre de parcours : virage à l'aller, demi-tour au cul-de-sac, virage au retour.
+    const hints = [at(JUNCTION_OUT, 5, 90), at(DEAD_END, 15, 180), at(JUNCTION_BACK, 2, -90)]
+
+    const turns = turnsFromVoiceHints(hints, outAndBack, outAndBackCum)
+
+    // Le troisième hint porte sur le passage du RETOUR. Ancré sur celui de l'aller, il
+    // produirait deux virages au même endroit et laisserait le virage du retour muet.
+    expect(turns.map((t) => t.idx)).toEqual([JUNCTION_OUT, DEAD_END, JUNCTION_BACK])
+    expect(turns.map((t) => Math.round(t.distM))).toEqual([300, 500, 700])
+  })
+
+  it('tolère un léger dépassement du curseur entre deux hints proches', () => {
+    // Deux hints à 25 m d'écart, le second légèrement EN ARRIÈRE du premier : le recul
+    // autorisé doit encore permettre de l'apparier au bon sommet.
+    const turns = turnsFromVoiceHints([at(5, 5, 45), at(4, 5, 45)], outAndBack, outAndBackCum)
+
+    expect(turns.map((t) => t.idx)).toEqual([4, 5])
+  })
+})
+
+describe('nearestGeomIndex sur un aller-retour', () => {
+  it('ne fait jamais reculer la progression quand on suit le tracé', () => {
+    // Le coureur passe par chaque sommet, dans l'ordre. Sans départage, le retour
+    // s'apparie aux sommets de l'aller (mêmes coordonnées, distance égale) : la flèche
+    // redescend le tracé de l'aller et la progression baisse.
+    let lastIdx = -1
+    const backwards: number[] = []
+    for (let truth = 0; truth < outAndBack.length; truth++) {
+      const here: LngLat = [outAndBack[truth][0], outAndBack[truth][1]]
+      const { idx } = nearestGeomIndex(here, outAndBack, lastIdx)
+      if (lastIdx >= 0 && outAndBackCum[idx] < outAndBackCum[lastIdx] - 1) backwards.push(truth)
+      lastIdx = idx
+    }
+
+    expect(backwards).toEqual([])
+  })
+
+  it('suit la voie du retour après le demi-tour', () => {
+    // Juste après le cul-de-sac, le sommet réel et son miroir sur l'aller sont la MÊME
+    // coordonnée : seul le suivi du curseur peut les distinguer.
+    expect(outAndBack[DEAD_END - 2].slice(0, 2)).toEqual(outAndBack[DEAD_END + 2].slice(0, 2))
+
+    const here: LngLat = [outAndBack[DEAD_END + 2][0], outAndBack[DEAD_END + 2][1]]
+    expect(nearestGeomIndex(here, outAndBack, DEAD_END + 1).idx).toBe(DEAD_END + 2)
+  })
+
+  it('reste sur la voie de l’aller tant qu’on ne l’a pas quittée', () => {
+    // Le départage ne doit pas propulser le coureur sur le retour dès l'aller.
+    const here: LngLat = [outAndBack[16][0], outAndBack[16][1]]
+    expect(nearestGeomIndex(here, outAndBack, 15).idx).toBe(16)
+  })
+
+  it('sans indice précédent, garde la recherche globale', () => {
+    // Aucune direction de marche connue : le premier passage reste la réponse.
+    const here: LngLat = [outAndBack[DEAD_END + 2][0], outAndBack[DEAD_END + 2][1]]
+    expect(nearestGeomIndex(here, outAndBack).idx).toBe(DEAD_END - 2)
   })
 })

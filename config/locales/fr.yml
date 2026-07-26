@@ -1106,6 +1106,7 @@ fr:
     error_min_points: "Ajoute au moins 2 points sur la carte."
     error_max_waypoints: "Limite atteinte : un itinéraire ne peut pas dépasser %{count} points."
     error_routing: "Erreur de routage"
+    error_routing_leg: "Erreur de routage entre les points %{from} et %{to}"
     error_elevation: "Erreur altitude"
     error_shared_not_found: "Cet itinéraire partagé est introuvable ou n'est plus disponible."
     turn_warning_title: "Virages suspects détectés"

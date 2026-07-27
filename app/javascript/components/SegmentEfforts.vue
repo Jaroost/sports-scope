@@ -7,6 +7,7 @@ import type { PropType } from 'vue'
 import { t } from '../i18n'
 import { formatPace, paceMinPerKm, formatChrono } from '../activityHelpers'
 import SegmentHistoryChart from './SegmentHistoryChart.vue'
+import ReverseBadge from './ReverseBadge.vue'
 import type { SegmentEffort } from '../segmentTypes'
 
 const props = defineProps({
@@ -72,6 +73,9 @@ function effortDate(effort: SegmentEffort): string {
             <th scope="col">{{ t('strava.segments.date') }}</th>
             <th scope="col">{{ t('strava.segments.time') }}</th>
             <th scope="col">{{ t('strava.segments.delta') }}</th>
+            <!-- Vitesse (ou allure en course) : le chrono seul ne dit rien tant qu'on
+                 n'a pas la longueur du segment en tête. -->
+            <th scope="col">{{ isRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth') }}</th>
             <th scope="col"></th>
           </tr>
         </thead>
@@ -79,21 +83,23 @@ function effortDate(effort: SegmentEffort): string {
           <tr class="table-active">
             <td>
               {{ t('strava.segments.this_activity') }}
-              <span v-if="currentReverse" class="badge text-bg-light border ms-1">{{ t('strava.segments.reverse') }}</span>
+              <ReverseBadge v-if="currentReverse" />
             </td>
             <td class="fw-semibold">{{ chrono(currentDurationS) }}</td>
             <td class="text-muted">=</td>
             <td class="text-muted small">{{ speed(currentDurationS) }}</td>
+            <td></td>
           </tr>
           <tr v-for="effort in efforts" :key="`${effort.source}-${effort.external_id}-${effort.started_at}-${effort.duration_s}`">
             <td>{{ effortDate(effort) }}</td>
             <td>
               {{ chrono(effort.duration_s) }}
-              <span v-if="effort.reverse" class="badge text-bg-light border ms-1">{{ t('strava.segments.reverse') }}</span>
+              <ReverseBadge v-if="effort.reverse" />
             </td>
             <td :class="effort.duration_s < currentDurationS ? 'text-success' : 'text-danger'">
               {{ effort.reverse === currentReverse ? delta(effort.duration_s, currentDurationS) : '–' }}
             </td>
+            <td class="text-muted small">{{ speed(effort.duration_s) }}</td>
             <td class="small">
               <a :href="activityUrl(effort)" class="link-secondary text-decoration-none">
                 {{ effort.name }}

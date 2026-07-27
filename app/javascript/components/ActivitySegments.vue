@@ -15,6 +15,7 @@ import { ref, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { formatPace, paceMinPerKm, formatChrono } from '../activityHelpers'
 import SegmentEfforts from './SegmentEfforts.vue'
+import ReverseBadge from './ReverseBadge.vue'
 import type { Segment, SegmentEffort } from '../segmentTypes'
 import { csrfToken } from '../csrf'
 
@@ -338,9 +339,7 @@ function scrollRowIntoView(index: number) {
                 {{ km(segment.distance_m) }}
                 <span v-if="segment.elevation_gain_m"> · D+{{ segment.elevation_gain_m }} m</span>
                 <!-- Sens de référence = celui enregistré au baptême du segment. -->
-                <span v-if="segment.current.reverse" class="badge text-bg-light border ms-1">
-                  {{ t('strava.segments.reverse') }}
-                </span>
+                <ReverseBadge v-if="segment.current.reverse" />
               </div>
             </div>
 

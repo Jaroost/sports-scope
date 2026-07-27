@@ -2642,15 +2642,6 @@ function onScreenOffTap() {
       @close="stopPoiBrowse"
     />
 
-    <!-- Capteurs BLE tenus par l'application mobile (cardio, puissance, cadence, Di2).
-         Invisible dans un navigateur : rien ne remplit le store. Suit les mêmes règles
-         d'escamotage que la barre de stats, sauf en veille où il reste lisible comme le
-         bandeau radar. -->
-    <CompanionSensors
-      v-if="bottomOverlaysVisible && !poiBrowseActive"
-      :elevated="screenOff"
-    />
-
     <!-- Bottom stats : barre complète (distance / D+ / ETA / progression) en navigation
          sur itinéraire (masquable par le geste latéral) ; en navigation libre, carte
          réduite à la vitesse. Escamotée pendant le parcours des POI, où le bandeau de
@@ -2666,6 +2657,9 @@ function onScreenOffTap() {
     <div v-else-if="!hasRoute && !poiBrowseActive" class="nav-stats nav-stats--free shadow">
       <div class="nav-stat-value">{{ Math.round(speedKmh) }}<span class="nav-stat-unit"> km/h</span></div>
       <div class="nav-stat-label">{{ t('routes.speed') }}</div>
+      <!-- En navigation libre il n'y a pas de barre de stats : les capteurs de
+           l'application mobile se rangent sous la vitesse. -->
+      <CompanionSensors />
     </div>
 
     <!-- Révélation du tiroir de commandes : zone alignée sur la barre du bas (avancement /
@@ -2829,7 +2823,9 @@ function onScreenOffTap() {
 .nav-bottom-reveal-zone--sleep .nav-bottom-grabber { background: rgba(255, 255, 255, 0.25); }
 
 .nav-banner {
-  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  /* + --app-inset-top : encoche du téléphone quand l'application mobile affiche
+     la navigation en plein écran (0 dans un navigateur). Voir NavTurnBanner. */
+  position: absolute; top: calc(0.75rem + var(--app-inset-top, 0px)); left: 50%; transform: translateX(-50%);
   z-index: 3; padding: 0.45rem 0.9rem; border-radius: 999px;
   font-weight: 600; font-size: 0.9rem; white-space: nowrap;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -2922,7 +2918,9 @@ function onScreenOffTap() {
 /* Mode « cible » : barre de recherche centrée en haut + consigne ; au-dessus du
    tiroir de commandes (z 8) car il est replié pendant ce mode. */
 .nav-place-picker {
-  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  /* + --app-inset-top : encoche du téléphone quand l'application mobile affiche
+     la navigation en plein écran (0 dans un navigateur). Voir NavTurnBanner. */
+  position: absolute; top: calc(0.75rem + var(--app-inset-top, 0px)); left: 50%; transform: translateX(-50%);
   z-index: 9; width: min(440px, calc(100% - 1.5rem));
   display: flex; flex-direction: column; align-items: stretch; gap: 0.5rem;
 }
@@ -2970,7 +2968,9 @@ function onScreenOffTap() {
 /* Mode édition : bandeau de consigne en haut (au-dessus de la carte, sous le tiroir
    replié z 8) + barre d'actions ancrée en bas, au-dessus du bandeau de stats. */
 .nav-edit-banner {
-  position: absolute; top: 0.75rem; left: 50%; transform: translateX(-50%);
+  /* + --app-inset-top : encoche du téléphone quand l'application mobile affiche
+     la navigation en plein écran (0 dans un navigateur). Voir NavTurnBanner. */
+  position: absolute; top: calc(0.75rem + var(--app-inset-top, 0px)); left: 50%; transform: translateX(-50%);
   z-index: 7; width: min(440px, calc(100% - 1.5rem));
   background: rgba(124, 58, 237, 0.96); color: #fff;
   padding: 0.5rem 0.9rem; border-radius: 0.6rem;

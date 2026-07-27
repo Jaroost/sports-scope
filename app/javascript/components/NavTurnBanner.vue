@@ -77,7 +77,11 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
    commandes (z-index 9). pointer-events: none laisse les taps/swipes traverser le
    bandeau (veille / révélation des boutons) ; seul le mute capte les siens. */
 .nav-turn {
-  position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem;
+  /* --app-inset-top : hauteur de la zone matériellement obstruée en haut de
+     l'écran (encoche, caméra), poussée par l'application mobile qui affiche
+     cette page en plein écran. Absente d'un navigateur ordinaire, où elle vaut
+     0. Sans elle, le bandeau se retrouve pile sous la caméra, illisible. */
+  position: absolute; top: calc(0.75rem + var(--app-inset-top, 0px)); left: 0.75rem; right: 0.75rem;
   z-index: 7;
   display: flex; flex-direction: column; align-items: stretch; gap: 0.6rem;
   background: #7c3aed; color: #fff; padding: 1.1rem 1.5rem;

@@ -62,7 +62,9 @@ const iconCount = computed(() => Math.min(count.value, MAX_ICONS))
 <style scoped>
 .radar-banner {
   position: absolute;
-  top: 0;
+  /* Voir NavTurnBanner : l'encoche du téléphone, quand l'application mobile
+     affiche la navigation en plein écran. 0 dans un navigateur. */
+  top: var(--app-inset-top, 0px);
   left: 0;
   right: 0;
   /* Au-dessus de la carte, sous le tiroir de commandes (déployé en bas, il ne monte

@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { t } from '../i18n'
 import { formatDistanceShort } from '../routeHelpers'
 import { remainingSeconds, arrivalClock } from '../navHelpers'
+import CompanionSensors from './CompanionSensors.vue'
 
 // speedKmh : vitesse instantanée (affichée). etaSpeedKmh : vitesse lissée servant
 // uniquement au calcul de l'heure d'arrivée, pour une ETA stable malgré les arrêts.
@@ -46,6 +47,9 @@ const eta = computed(() => {
     <div class="progress nav-progress">
       <div class="progress-bar bg-primary" :style="{ width: `${donePercent}%` }"></div>
     </div>
+    <!-- Capteurs BLE de l'application mobile, sous l'avancement : ils se lisent
+         avec le reste des chiffres. Ne s'affiche que dans l'appli. -->
+    <CompanionSensors />
   </div>
 </template>
 

@@ -11,9 +11,10 @@ import { t } from '../i18n'
 // en veille, appli tuée) : une valeur de cardio figée est pire qu'une absence,
 // elle se lit comme une mesure.
 
-// elevated — la veille d'écran recouvre la carte d'un voile noir ; les capteurs
-// restent lisibles au-dessus, comme le bandeau radar.
-defineProps<{ elevated?: boolean }>()
+// Le composant ne se positionne pas lui-même : il s'insère dans la barre de
+// stats, sous la barre d'avancement, et en navigation libre sous la vitesse.
+// Les capteurs se lisent avec le reste des chiffres, pas dans un bandeau
+// supplémentaire qui mangerait de la carte.
 
 const visible = computed(() => companionStore.hasValues.value && !companionStore.stale.value)
 
@@ -33,7 +34,7 @@ const gearLabel = computed(() => {
 </script>
 
 <template>
-  <div v-if="visible" class="companion-sensors shadow" :class="{ 'companion-sensors--elevated': elevated }">
+  <div v-if="visible" class="companion-sensors">
     <div v-if="heartRate != null" class="companion-sensor">
       <i class="fa-solid fa-heart-pulse text-danger"></i>
       <span class="companion-value">{{ heartRate }}</span>
@@ -57,29 +58,15 @@ const gearLabel = computed(() => {
 </template>
 
 <style scoped>
-/* Aligné sur le bandeau radar : même largeur, même marge, juste au-dessus de la
-   barre de stats du bas. --nav-bottom-inset est posé par RouteNavigation et
-   remonte l'ensemble quand le tiroir de commandes se déploie. */
+/* Une ligne de plus dans la carte qui l'accueille, séparée par un filet : elle
+   n'a ni fond ni ombre propres, et ne se positionne pas. */
 .companion-sensors {
-  position: absolute;
-  left: 0.75rem;
-  right: 0.75rem;
-  bottom: calc(5.5rem + var(--nav-bottom-inset, 0rem));
-  z-index: 6;
   display: flex;
   justify-content: space-around;
   gap: 0.5rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 0.5rem;
-  background: rgba(33, 37, 41, 0.85);
-  color: #fff;
-  transition: bottom 0.28s ease;
-}
-
-/* Au-dessus du voile de veille, comme le radar : ce sont les deux seules
-   informations qu'on veut encore pouvoir lire écran éteint. */
-.companion-sensors--elevated {
-  z-index: 1051;
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid rgba(128, 128, 128, 0.25);
 }
 
 .companion-sensor {

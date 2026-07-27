@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.sports_scope_companion",
+      "sha256_cert_fingerprints": [
+        "9B:52:EA:20:60:4C:63:4E:28:5E:8C:AE:EB:46:EA:33:44:13:21:FF:44:A9:FF:D2:9F:D2:38:0E:1A:BF:AB:73"
+      ]
+    }
+  }
+]

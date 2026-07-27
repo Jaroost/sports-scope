@@ -1010,6 +1010,23 @@ function closeActionsDropdown() {
   if (actionsToggleEl.value) Dropdown.getOrCreateInstance(actionsToggleEl.value).hide()
 }
 
+// Le menu s'ouvre sous son bouton, qui est lui-même sous la navbar ET sous le bandeau du
+// créateur : une hauteur plafonnée à « fenêtre moins navbar » le fait donc déborder par le
+// bas de la hauteur du bandeau. Comme .route-builder-page est en overflow: hidden et que la
+// page ne défile pas, ce débordement est rogné : le défilement interne du menu n'atteignait
+// jamais ses dernières entrées (« Profil »). On mesure donc l'espace réellement disponible
+// sous le bouton à chaque ouverture.
+function sizeActionsMenu() {
+  const toggle = actionsToggleEl.value
+  const menu = toggle?.parentElement?.querySelector('.route-actions-menu') as HTMLElement | null
+  if (!toggle || !menu) return
+  // 8px : le décalage que Bootstrap applique au menu, plus une marge de respiration.
+  const avail = window.innerHeight - toggle.getBoundingClientRect().bottom - 8
+  // Plancher : sur une fenêtre très basse, mieux vaut un menu qui déborde un peu (et se
+  // fait rogner) qu'un menu haut de deux lignes, illisible.
+  menu.style.maxHeight = `${Math.max(180, Math.round(avail))}px`
+}
+
 const menuGroups = computed<MenuGroup[]>(() => {
   const groups: MenuGroup[] = []
 
@@ -1539,6 +1556,9 @@ async function exportImage() {
     // Élargit le tracé proportionnellement à la résolution (sinon quasi invisible sur une
     // grande image), puis attend le re-rendu avant la capture.
     mapRef.value?.setRouteLineScale(s)
+    // Sur une image figée, le flux animé du sens de parcours ne dit plus rien : on repasse
+    // aux flèches (et la carte cesse de se repeindre, donc la capture est déterministe).
+    mapRef.value?.setDirectionStatic(true)
     await new Promise<void>((resolve) => mapInst.once('idle', resolve))
     // Ratio réel des pixels du canvas (CSS → buffer) : sert à projeter les cols exactement
     // là où ils sont rendus, quel que soit le pixelRatio effectif de MapLibre.
@@ -1591,6 +1611,7 @@ async function exportImage() {
     container.style.cssText = savedContainerCss
     document.documentElement.style.overflow = savedHtmlOverflow
     mapRef.value?.setRouteLineScale(1)
+    mapRef.value?.setDirectionStatic(false)
     mapInst.setPixelRatio(savedPixelRatio)
     mapInst.resize()
     // Démonte le chart d'export (Vue détruit l'instance Chart.js via onBeforeUnmount).
@@ -1809,6 +1830,7 @@ function onWindowResize() {
   const mobile = computeIsMobile()
   if (mobile !== isMobile.value) isMobile.value = mobile
   updateNavbarHeight()
+  sizeActionsMenu()  // menu ouvert pendant un redimensionnement de la fenêtre
   setTimeout(() => mapRef.value?.resize(), 100)
 }
 
@@ -1866,6 +1888,9 @@ onMounted(async () => {
   }
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('beforeunload', onBeforeUnload)
+  // Hauteur du menu d'actions : mesurée juste avant chaque ouverture, la navbar comme le
+  // bandeau pouvant avoir changé de hauteur entre-temps.
+  actionsToggleEl.value?.addEventListener('show.bs.dropdown', sizeActionsMenu)
   // En mode PWA standalone, le visual viewport peut changer sans déclencher
   // window.resize (ex. clavier virtuel). On s'y abonne pour garder --rb-available-h
   // à jour et éviter que le bouton de profil disparaisse sous la barre maison.
@@ -1943,6 +1968,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   navbarResizeObserver?.disconnect(); navbarResizeObserver = null
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
+  actionsToggleEl.value?.removeEventListener('show.bs.dropdown', sizeActionsMenu)
   if (savedTimer) clearTimeout(savedTimer)
   if (shareCopiedTimer) clearTimeout(shareCopiedTimer)
   document.body.style.removeProperty('--rb-navbar-h')
@@ -2590,10 +2616,13 @@ onBeforeUnmount(() => {
 /* Le menu d'actions loge les contrôles de type d'itinéraire : il lui faut de la
    largeur, sinon les libellés de sport et de profil sont à l'étroit. Il loge aussi
    les bascules de POI (une entrée par catégorie) : sur un écran bas, il dépasserait
-   la fenêtre — d'où la hauteur plafonnée et le défilement interne. */
+   la fenêtre — d'où la hauteur plafonnée et le défilement interne.
+   Le plafond exact est posé en JS à l'ouverture (sizeActionsMenu), à partir de la
+   position réelle du bouton ; la valeur ci-dessous n'est qu'un repli, volontairement
+   prudent — la place perdue sous le bandeau du créateur y est déduite en dur. */
 .route-actions-menu {
   min-width: 16rem;
-  max-height: calc(100dvh - var(--rb-navbar-h, 4rem) - 1rem);
+  max-height: calc(100dvh - var(--rb-navbar-h, 4rem) - 4rem);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

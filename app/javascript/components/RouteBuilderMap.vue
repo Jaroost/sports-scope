@@ -235,6 +235,72 @@ function flagSvg(kind: 'start' | 'end') {
   </svg>`
 }
 
+// ─── Sens de parcours ─────────────────────────────────────────────────────────
+
+const FLOW_LAYER = 'builder-route-flow'
+// Halo sombre sous le flux, pour que le blanc reste lisible sur les couleurs claires du
+// dégradé de pente (jaune / orange) comme sur une couleur de tracé claire.
+const FLOW_HALO_LAYER = 'builder-route-flow-halo'
+// Largeur du halo relative à celle du flux. `line-dasharray` s'exprimant en multiples de
+// la largeur du trait, le motif du halo doit être divisé d'autant pour se superposer
+// exactement à celui du flux.
+const FLOW_HALO_RATIO = 2
+const ARROWS_LAYER = 'builder-route-arrows'
+const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+// `line-dasharray` n'est pas interpolable : on anime en cyclant sur une séquence de motifs
+// dont la partie pleine avance d'un cran à chaque pas (période de 7 unités de largeur de
+// trait). Le traitillé blanc semble ainsi défiler dans le sens du tracé. La séquence est
+// fixe et courte pour que MapLibre garde ses motifs en cache.
+const FLOW_DASHES: number[][] = [
+  [0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0],
+  [0, 0.5, 3, 3.5], [0, 1, 3, 3], [0, 1.5, 3, 2.5], [0, 2, 3, 2], [0, 2.5, 3, 1.5], [0, 3, 3, 1], [0, 3.5, 3, 0.5],
+]
+const FLOW_STEP_MS = 55
+let flowRaf: number | null = null
+let flowStep = -1
+let directionStatic = false
+
+// Boucle d'animation du flux. requestAnimationFrame se met en pause tout seul quand
+// l'onglet passe en arrière-plan ; on ne repeint la carte que lorsque le motif change
+// vraiment (≈18 fois par seconde, pas à chaque frame).
+function startRouteFlow() {
+  if (flowRaf !== null || REDUCED_MOTION || directionStatic || !mapInstance) return
+  const tick = (ts: number) => {
+    flowRaf = requestAnimationFrame(tick)
+    if (!mapInstance?.getLayer(FLOW_LAYER)) return
+    const step = Math.floor(ts / FLOW_STEP_MS) % FLOW_DASHES.length
+    if (step === flowStep) return
+    flowStep = step
+    mapInstance.setPaintProperty(FLOW_LAYER, 'line-dasharray', FLOW_DASHES[step])
+    if (mapInstance.getLayer(FLOW_HALO_LAYER)) {
+      mapInstance.setPaintProperty(FLOW_HALO_LAYER, 'line-dasharray', FLOW_DASHES[step].map((d) => d / FLOW_HALO_RATIO))
+    }
+  }
+  flowRaf = requestAnimationFrame(tick)
+}
+
+function stopRouteFlow() {
+  if (flowRaf === null) return
+  cancelAnimationFrame(flowRaf)
+  flowRaf = null
+}
+
+// Bascule le repère de sens en mode statique (flèches). Utilisé par l'export image :
+// une animation n'y veut rien dire, et une carte qui se repeint en continu rendrait la
+// capture non déterministe.
+function setDirectionStatic(on: boolean) {
+  directionStatic = on
+  if (!mapInstance) return
+  const static_ = on || REDUCED_MOTION
+  if (mapInstance.getLayer(ARROWS_LAYER)) mapInstance.setLayoutProperty(ARROWS_LAYER, 'visibility', static_ ? 'visible' : 'none')
+  for (const id of [FLOW_HALO_LAYER, FLOW_LAYER]) {
+    if (mapInstance.getLayer(id)) mapInstance.setLayoutProperty(id, 'visibility', static_ ? 'none' : 'visible')
+  }
+  if (static_) stopRouteFlow()
+  else if (routeStore.geometry.value.length >= 2) startRouteFlow()
+}
+
 // Chevron blanc (cerné de noir translucide pour rester lisible sur tout fond de
 // tracé) pointant vers la droite. La couche symbole le fait pivoter pour l'aligner
 // sur le sens de la ligne, indiquant ainsi le sens de parcours.
@@ -483,14 +549,40 @@ function installRouteLayer() {
     mapInstance.addSource(MEASURE_SOURCE, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
     mapInstance.addLayer({ id: MEASURE_LINE_LAYER, type: 'line', source: MEASURE_SOURCE, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0f766e', 'line-width': 3, 'line-dasharray': [2, 1.6] } })
   }
-  // Flèches de sens de parcours : espacées en pixels écran (constantes au zoom) et
-  // posées au-dessus du tracé, sur la géométrie continue de `builder-route`.
+  // Sens de parcours : flux animé (traitillé blanc qui défile vers l'avant) posé au-dessus
+  // du tracé, sur la géométrie continue de `builder-route`.
+  if (!mapInstance.getLayer(FLOW_LAYER)) {
+    flowStep = -1
+    const flowLayout = { 'line-join': 'round', 'line-cap': 'butt', visibility: REDUCED_MOTION || directionStatic ? 'none' : 'visible' }
+    mapInstance.addLayer({
+      id: FLOW_HALO_LAYER,
+      type: 'line',
+      source: 'builder-route',
+      layout: { ...flowLayout },
+      paint: {
+        'line-color': 'rgba(0,0,0,0.45)',
+        'line-width': 4,
+        'line-opacity': props.state.routeOpacity,
+        'line-dasharray': FLOW_DASHES[0].map((d) => d / FLOW_HALO_RATIO),
+      },
+    })
+    mapInstance.addLayer({
+      id: FLOW_LAYER,
+      type: 'line',
+      source: 'builder-route',
+      layout: { ...flowLayout },
+      paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-opacity': props.state.routeOpacity, 'line-dasharray': FLOW_DASHES[0] },
+    })
+  }
+  // Variante statique du même repère : flèches espacées en pixels écran (constantes au
+  // zoom). Masquée par défaut, elle prend le relais du flux quand l'animation n'a pas de
+  // sens — export image, ou préférence système « animations réduites ».
   if (!mapInstance.hasImage('route-arrow')) {
     mapInstance.addImage('route-arrow', buildArrowImage(28), { pixelRatio: 2 })
   }
-  if (!mapInstance.getLayer('builder-route-arrows')) {
+  if (!mapInstance.getLayer(ARROWS_LAYER)) {
     mapInstance.addLayer({
-      id: 'builder-route-arrows',
+      id: ARROWS_LAYER,
       type: 'symbol',
       source: 'builder-route',
       layout: {
@@ -501,6 +593,7 @@ function installRouteLayer() {
         'icon-rotation-alignment': 'map',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
+        visibility: REDUCED_MOTION || directionStatic ? 'visible' : 'none',
       },
     })
   }
@@ -516,6 +609,11 @@ function routeLineBaseWidths(): Record<string, number> {
     'builder-route-border': width + 3,
     'builder-route-line': width,
     'builder-route-straight-line': Math.max(2, width - 1),
+    // Plus fin que le tracé : la couleur de l'itinéraire reste visible de part et d'autre
+    // du flux blanc (et la longueur des traitillés suit, `line-dasharray` étant exprimé
+    // en multiples de la largeur du trait).
+    [FLOW_LAYER]: Math.max(1.5, width * 0.45),
+    [FLOW_HALO_LAYER]: Math.max(1.5, width * 0.45) * FLOW_HALO_RATIO,
     'builder-route-selected-line': width + 2,
     'builder-divergent-line': 4,
   }
@@ -553,6 +651,9 @@ function updateRouteLayer() {
   } else {
     selectionStore.cumDistKm = []
   }
+  // Sans tracé, rien à animer : on évite de repeindre la carte pour rien.
+  if (geom.length >= 2) startRouteFlow()
+  else stopRouteFlow()
   applyColorMode()
 }
 
@@ -2018,7 +2119,7 @@ watch(() => props.state.overlayOpacity, applyOverlayOpacity)
 // (installRouteLayer), d'où un simple repeint ici.
 function applyRouteOpacity() {
   if (!mapInstance) return
-  for (const id of ['builder-route-line', 'builder-route-straight-line']) {
+  for (const id of ['builder-route-line', 'builder-route-straight-line', FLOW_HALO_LAYER, FLOW_LAYER]) {
     if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-opacity', props.state.routeOpacity)
   }
 }
@@ -2191,6 +2292,7 @@ watch(savedPoisStore.show, () => installSavedPoiMarkers(), { deep: true })
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 onBeforeUnmount(() => {
+  stopRouteFlow()
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
   divergentMarkers.forEach((m) => m.remove()); divergentMarkers.length = 0
   climbGroup.clear()
@@ -2212,6 +2314,7 @@ defineExpose({
   initMap,
   updateRouteLayer,
   setRouteLineScale,
+  setDirectionStatic,
   applyColorMode,
   installClimbMarkers,
   installPlaceMarkers,

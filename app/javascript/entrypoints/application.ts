@@ -3,9 +3,15 @@
 import 'bootstrap'
 
 import { setupI18n } from '../i18n'
+import { installCompanionBridge, revealCompanionLinks } from '../companionBridge'
 import { mountVueIslands } from '../mountVueIslands'
 
 const i18nReady = setupI18n()
+
+// Pont vers l'application mobile (sports-scope-companion), qui affiche la
+// navigation dans un WebView et y pousse ses capteurs BLE. Installé avant tout
+// montage : l'appli peut publier un état dès le chargement de la page.
+installCompanionBridge()
 
 // PWA : enregistre le service worker en production (HTTPS requis ; localhost OK).
 // Désactivé en dev pour ne pas interférer avec le HMR de Vite.
@@ -72,6 +78,7 @@ function trackNavbar(): void {
 
 whenDomReady(async () => {
   trackNavbar()
+  revealCompanionLinks()
   await i18nReady
   mountVueIslands()
 })

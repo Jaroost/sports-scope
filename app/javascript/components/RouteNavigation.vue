@@ -25,6 +25,7 @@ import { unlockAudio, playManeuverBurst, playOffRoute, playPoi, playArrival } fr
 import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
 import RadarOverlay from './RadarOverlay.vue'
+import CompanionSensors from './CompanionSensors.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
 import NavPoiBanner from './NavPoiBanner.vue'
 import NavPoiBrowser from './NavPoiBrowser.vue'
@@ -2639,6 +2640,15 @@ function onScreenOffTap() {
       @next="browseNext"
       @set-filter="setPoiBrowseFilter"
       @close="stopPoiBrowse"
+    />
+
+    <!-- Capteurs BLE tenus par l'application mobile (cardio, puissance, cadence, Di2).
+         Invisible dans un navigateur : rien ne remplit le store. Suit les mêmes règles
+         d'escamotage que la barre de stats, sauf en veille où il reste lisible comme le
+         bandeau radar. -->
+    <CompanionSensors
+      v-if="bottomOverlaysVisible && !poiBrowseActive"
+      :elevated="screenOff"
     />
 
     <!-- Bottom stats : barre complète (distance / D+ / ETA / progression) en navigation

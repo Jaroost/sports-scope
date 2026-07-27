@@ -1,0 +1,81 @@
+import { ref, computed } from 'vue'
+
+// Mesures poussées par l'application mobile (sports-scope-companion) quand la
+// navigation tourne dans son WebView.
+//
+// Pourquoi passer par elle plutôt que par Web Bluetooth : le navigateur ne sait
+// ouvrir qu'une partie des capteurs (pas de Di2 Shimano, rien sur iOS, rien en
+// arrière-plan), là où l'appli tient les connexions BLE pour toute la sortie et
+// les enregistre. La page reçoit donc un état déjà décodé et ne fait que
+// l'afficher.
+//
+// Le radar n'est pas ici : il alimente le `radarStore` existant, pour que le
+// bandeau d'alerte marche à l'identique qu'il vienne de l'appli ou de Web
+// Bluetooth.
+
+export interface CompanionGears {
+  // Positions brutes publiées par le Di2 (1 = plus facile).
+  front: number
+  rear: number
+  frontCount: number
+  rearCount: number
+  // Dents et braquet, calculés côté appli à partir de la transmission
+  // configurée. `null` si la position sort de la transmission connue : on
+  // affiche alors la position seule plutôt qu'un braquet faux.
+  frontTeeth: number | null
+  rearTeeth: number | null
+  ratio: number | null
+  developmentM: number | null
+}
+
+// Au-delà de ce délai sans message, on considère l'appli muette (WebView mis en
+// veille, appli tuée) et on cesse d'afficher des valeurs qui ne bougent plus.
+const STALE_MS = 10_000
+
+class CompanionStore {
+  // L'appli a-t-elle publié son pont ? Faux dans un navigateur ordinaire.
+  readonly present = ref(false)
+  readonly heartRate = ref<number | null>(null)
+  readonly power = ref<number | null>(null)
+  readonly cadence = ref<number | null>(null)
+  readonly gears = ref<CompanionGears | null>(null)
+  // Horodatage (ms) du dernier message reçu.
+  readonly lastUpdate = ref(0)
+
+  // Au moins une mesure à afficher.
+  readonly hasValues = computed(() =>
+    this.heartRate.value != null ||
+    this.power.value != null ||
+    this.cadence.value != null ||
+    this.gears.value != null,
+  )
+
+  readonly stale = computed(() =>
+    this.lastUpdate.value > 0 && Date.now() - this.lastUpdate.value > STALE_MS,
+  )
+
+  update(values: {
+    heartRate?: number | null
+    power?: number | null
+    cadence?: number | null
+    gears?: CompanionGears | null
+  }): void {
+    this.present.value = true
+    this.heartRate.value = values.heartRate ?? null
+    this.power.value = values.power ?? null
+    this.cadence.value = values.cadence ?? null
+    this.gears.value = values.gears ?? null
+    this.lastUpdate.value = Date.now()
+  }
+
+  reset(): void {
+    this.present.value = false
+    this.heartRate.value = null
+    this.power.value = null
+    this.cadence.value = null
+    this.gears.value = null
+    this.lastUpdate.value = 0
+  }
+}
+
+export const companionStore = new CompanionStore()

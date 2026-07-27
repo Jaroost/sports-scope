@@ -1024,6 +1024,8 @@ en:
       view_hint: "Map, elevation profile and stats, read-only."
       navigate: "Navigate"
       navigate_hint: "Turn-by-turn guidance from your phone."
+      navigate_app: "Navigate in the app"
+      navigate_app_hint: "Same guidance, with your Bluetooth sensors."
       gpx: "Download GPX"
       gpx_hint: "For your bike computer or another app."
       footer: "Shared from %{app}"
@@ -1050,6 +1052,8 @@ en:
     progress: "Progress"
     speed: "Speed"
     arrival: "ETA"
+    # Cadence unit in the mobile app's sensor bar.
+    rpm: "rpm"
     off_route: "Off route"
     reroute: "Recalculate"
     rerouting: "Calculating…"

@@ -185,6 +185,19 @@
         <small class="text-body-secondary"><%= t("routes.summary.navigate_hint") %></small>
       </span>
     <% end %>
+    <%# Même navigation, mais dans l'application mobile, qui y ajoute les capteurs BLE
+        (Di2, puissance, cardio, radar) que le navigateur ne sait pas ouvrir. Le lien
+        ne mène nulle part si l'appli n'est pas installée : on ne l'affiche donc que
+        sur Android, et discrètement — c'est une variante, pas une deuxième action. %>
+    <a href="sportsscope://navigate/<%= @route.share_token %>"
+       class="list-group-item list-group-item-action d-flex align-items-center gap-3 d-none"
+       data-companion-link>
+      <i class="fa-solid fa-mobile-screen fa-fw text-warning" aria-hidden="true"></i>
+      <span>
+        <span class="d-block fw-semibold"><%= t("routes.summary.navigate_app") %></span>
+        <small class="text-body-secondary"><%= t("routes.summary.navigate_app_hint") %></small>
+      </span>
+    </a>
   </div>
 
   <% localities = Array(@route.localities) %>

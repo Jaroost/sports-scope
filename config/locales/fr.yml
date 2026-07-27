@@ -1024,6 +1024,8 @@ fr:
       view_hint: "Carte, profil altimétrique et statistiques, en lecture seule."
       navigate: "Naviguer"
       navigate_hint: "Guidage GPS depuis votre téléphone."
+      navigate_app: "Naviguer dans l'application"
+      navigate_app_hint: "Même guidage, avec vos capteurs Bluetooth."
       gpx: "Télécharger le GPX"
       gpx_hint: "Pour votre compteur ou une autre application."
       footer: "Partagé depuis %{app}"
@@ -1050,6 +1052,8 @@ fr:
     progress: "Progression"
     speed: "Vitesse"
     arrival: "Arrivée"
+    # Unité de cadence du bandeau des capteurs de l'application mobile.
+    rpm: "tr/min"
     off_route: "Hors itinéraire"
     reroute: "Recalculer"
     rerouting: "Calcul…"

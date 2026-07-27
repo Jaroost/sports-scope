@@ -414,6 +414,10 @@ en:
     map_empty: "No outing with a track to show on the map."
     map_count: "%{count} outings"
     map_capped: "Too many outings: only the 500 most recent matching the filter are shown on the map."
+    totals:
+      distance: "Total distance of the filtered activities"
+      duration: "Total moving time of the filtered activities"
+      elevation: "Total elevation gain of the filtered activities"
     filters:
       title: "Filters"
       toggle: "Filter"

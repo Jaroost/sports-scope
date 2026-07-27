@@ -28,6 +28,8 @@ const hasLoaded = ref(false) // au moins une requête réussie
 const error = ref(null)
 const activities = ref([]) // page courante renvoyée par le serveur
 const total = ref(null) // total historique (toutes activités, sans filtre)
+// Cumuls de la sélection courante (toutes pages du filtre), calculés par le serveur.
+const totals = ref(null)
 
 const title = computed(() => t('strava.recent_activities'))
 const emptyText = computed(() => t('strava.no_activities'))
@@ -252,6 +254,7 @@ async function fetchActivities() {
     activities.value = payload.activities || []
     total.value = payload.total ?? activities.value.length
     filteredTotal.value = payload.filtered_total ?? activities.value.length
+    totals.value = payload.totals ?? null
     totalPages.value = payload.total_pages ?? 1
     perPage.value = payload.per_page ?? perPage.value
     // Le serveur borne la page dans [1, total_pages] : on resynchronise l'état local.
@@ -411,6 +414,32 @@ function formatDuration(seconds) {
   return h > 0 ? `${h}h ${m}min` : `${m}min`
 }
 
+// --- Cumuls de la sélection (distance / temps / dénivelé) ---
+// Séparateurs de milliers selon la langue de la page : les cumuls se comptent vite
+// en dizaines de milliers de km ou de mètres de D+.
+function formatNumber(value, digits = 0) {
+  return value.toLocaleString(lang || undefined, {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+}
+
+// Sous les 100 km, une décimale garde du sens (une semaine de course) ; au-delà,
+// le dixième de km est du bruit.
+const totalDistance = computed(() => {
+  const km = (totals.value?.distance_m ?? 0) / 1000
+  return `${formatNumber(km, km < 100 ? 1 : 0)} km`
+})
+
+// Cumul en heures pleines : à cette échelle, « 412h 07min » se lit mieux en « 412h ».
+const totalDuration = computed(() => {
+  const seconds = totals.value?.moving_time_s ?? 0
+  const hours = Math.floor(seconds / 3600)
+  return hours > 0 ? `${formatNumber(hours)}h` : `${Math.round(seconds / 60)}min`
+})
+
+const totalElevation = computed(() => `${formatNumber(Math.round(totals.value?.elevation_gain_m ?? 0))} m`)
+
 function tssHint(source) {
   const key = source === 'power' ? 'tss_hint_power' : source === 'hr' ? 'tss_hint_hr' : 'tss_hint_estimated'
   return t(`strava.${key}`)
@@ -428,11 +457,28 @@ function hasThumb(activity) {
   <div class="card shadow-sm border-0">
     <div ref="stickyEl" class="activity-sticky-top">
       <div class="card-header activity-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <h2 class="h5 mb-0 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
-          <span>{{ title }}</span>
-          <span v-if="countBadge" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ countBadge }}</span>
-        </h2>
+        <div class="d-flex align-items-center flex-wrap gap-2 gap-md-3">
+          <h2 class="h5 mb-0 d-flex align-items-center gap-2">
+            <i class="fa-solid fa-list-check text-warning" aria-hidden="true"></i>
+            <span>{{ title }}</span>
+            <span v-if="countBadge" class="badge rounded-pill text-bg-secondary" :title="t('strava.activity_count')">{{ countBadge }}</span>
+          </h2>
+          <!-- Cumuls de la sélection courante : ils suivent les filtres et couvrent
+               toutes les pages, pas seulement celle affichée. -->
+          <!-- Masqués quand la sélection est vide : « 0 km · 0min · 0 m » se lit comme
+               une mesure alors qu'il n'y a rien à mesurer. -->
+          <div v-if="totals && filteredTotal" class="activity-totals d-flex align-items-center flex-wrap gap-3 small">
+            <span :title="t('strava.totals.distance')">
+              <i class="fa-solid fa-route me-1 text-warning" aria-hidden="true"></i>{{ totalDistance }}
+            </span>
+            <span :title="t('strava.totals.duration')">
+              <i class="fa-regular fa-clock me-1 text-muted" aria-hidden="true"></i>{{ totalDuration }}
+            </span>
+            <span :title="t('strava.totals.elevation')">
+              <i class="fa-solid fa-arrow-trend-up me-1 text-success" aria-hidden="true"></i>{{ totalElevation }}
+            </span>
+          </div>
+        </div>
         <div class="d-flex align-items-center flex-wrap gap-2 gap-md-3">
           <div class="btn-group btn-group-sm" role="group" :aria-label="title">
             <button
@@ -737,6 +783,13 @@ function hasThumb(activity) {
   top: var(--navbar-h, 3.5rem);
   z-index: 5;
   background: var(--bs-card-bg, var(--bs-body-bg));
+}
+
+/* Cumuls du header : chiffres tabulaires pour qu'ils ne « sautent » pas d'un
+   rafraîchissement à l'autre quand un filtre change. */
+.activity-totals {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 /* Panneau de filtres en superposition, ancré sous le header. Sorti du flux pour ne

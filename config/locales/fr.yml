@@ -414,6 +414,10 @@ fr:
     map_empty: "Aucune sortie avec un tracé à afficher sur la carte."
     map_count: "%{count} sorties"
     map_capped: "Trop de sorties : seules les 500 plus récentes du filtre sont affichées sur la carte."
+    totals:
+      distance: "Distance cumulée des activités filtrées"
+      duration: "Temps de déplacement cumulé des activités filtrées"
+      elevation: "Dénivelé positif cumulé des activités filtrées"
     filters:
       title: "Filtres"
       toggle: "Filtrer"

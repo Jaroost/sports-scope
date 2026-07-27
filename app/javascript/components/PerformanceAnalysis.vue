@@ -350,6 +350,9 @@ const tabs = computed(() => {
   return [{ key: 'all', count: data.value.count }, ...data.value.sports]
 })
 
+// Onglet courant — le menu déroulant mobile affiche son libellé et son compteur.
+const selectedTab = computed(() => tabs.value.find((tab) => tab.key === selectedSport.value))
+
 const group = computed<SportGroup | null>(() => {
   if (!data.value) return null
   return data.value.by_sport[selectedSport.value] ?? data.value.by_sport['all'] ?? null
@@ -651,7 +654,37 @@ onBeforeUnmount(() => {
       <div class="performance-filters-sticky">
         <!-- Barre : onglets de sport à gauche, bouton « Filtrer » à droite. -->
         <div class="performance-sticky-bar d-flex justify-content-between align-items-center gap-3 py-2 mb-3">
-          <ul v-if="tabs.length" class="nav nav-pills flex-wrap gap-2 mb-0 performance-sport-tabs">
+          <!-- Mobile : un menu déroulant plutôt que la rangée de pastilles — avec cinq
+               sports ou plus, la barre défilante cachait la moitié des choix hors écran. -->
+          <div v-if="tabs.length" class="dropdown d-md-none min-w-0">
+            <button
+              type="button"
+              class="btn btn-sm d-flex align-items-center gap-2 w-100 performance-sport-select"
+              data-bs-toggle="dropdown"
+              data-bs-auto-close="true"
+              aria-expanded="false"
+            >
+              <i :class="`fa-solid ${sportIcon(selectedSport)}`" aria-hidden="true"></i>
+              <span class="text-truncate">{{ sportLabel(selectedSport) }}</span>
+              <span class="badge rounded-pill performance-tab-count">{{ selectedTab?.count ?? 0 }}</span>
+              <i class="fa-solid fa-chevron-down ms-auto small" aria-hidden="true"></i>
+            </button>
+            <ul class="dropdown-menu performance-sport-menu">
+              <li v-for="tab in tabs" :key="tab.key">
+                <button
+                  type="button"
+                  class="dropdown-item d-flex align-items-center gap-2"
+                  :class="{ active: selectedSport === tab.key }"
+                  @click="selectSport(tab.key)"
+                >
+                  <i :class="`fa-solid ${sportIcon(tab.key)}`" aria-hidden="true"></i>
+                  <span>{{ sportLabel(tab.key) }}</span>
+                  <span class="badge rounded-pill performance-tab-count ms-auto">{{ tab.count }}</span>
+                </button>
+              </li>
+            </ul>
+          </div>
+          <ul v-if="tabs.length" class="nav nav-pills flex-wrap gap-2 mb-0 performance-sport-tabs d-none d-md-flex">
             <li v-for="tab in tabs" :key="tab.key" class="nav-item">
               <button
                 type="button"
@@ -1005,20 +1038,29 @@ onBeforeUnmount(() => {
   margin-top: 1rem;
 }
 
-/* Sur mobile, les onglets défilent horizontalement plutôt que de passer à la ligne :
-   une barre sticky sur plusieurs lignes mangerait la moitié de l'écran. */
-@media (max-width: 767px) {
-  .performance-sticky-bar .performance-sport-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .performance-sticky-bar .performance-sport-tabs::-webkit-scrollbar {
-    display: none;
-  }
-  .performance-sticky-bar .nav-item {
-    flex: 0 0 auto;
-  }
+/* Déclencheur du menu déroulant mobile : même habillage qu'une pastille active, pour
+   qu'il se lise comme la sélection de sport et non comme un bouton d'action. */
+.performance-sport-select {
+  background-color: #fc4c02;
+  border: 1px solid #fc4c02;
+  color: #fff;
+}
+.performance-sport-select:hover,
+.performance-sport-select:focus,
+.performance-sport-select.show {
+  background-color: #e04502;
+  border-color: #e04502;
+  color: #fff;
+}
+.performance-sport-select .performance-tab-count {
+  background: rgba(255, 255, 255, 0.28);
+}
+.performance-sport-menu .dropdown-item.active {
+  background-color: #fc4c02;
+  color: #fff;
+}
+.performance-sport-menu .dropdown-item.active .performance-tab-count {
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .performance-sport-tabs .nav-link {

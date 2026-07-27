@@ -61,6 +61,9 @@ Rails.application.routes.draw do
   get "/strava/activities/:id/zones", to: "strava#zones", as: :strava_activity_zones, constraints: { id: /\d+/ }
   get "/strava/activities/:id/photos", to: "strava#photos", as: :strava_activity_photos, constraints: { id: /\d+/ }
   get "/strava/activities/:id/segments", to: "strava#segments", as: :strava_activity_segments, constraints: { id: /\d+/ }
+  # Comparaison d'un tronçon choisi à la main (poignées A/B, col, split) : mêmes
+  # chronos et même classement qu'un segment découvert, sur une plage arbitraire.
+  get "/strava/activities/:id/segments/range", to: "strava#segment_range", constraints: { id: /\d+/ }
 
   # Analyse de performance (records / cumuls / courbe de puissance — JSON pour Vue)
   get "/api/performance", to: "performance#show", as: :api_performance
@@ -117,6 +120,7 @@ Rails.application.routes.draw do
   get "/api/imported_activities/:id/best_efforts", to: "imported_activities#best_efforts", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/zones", to: "imported_activities#zones", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/segments", to: "imported_activities#segments", constraints: { id: /\d+/ }
+  get "/api/imported_activities/:id/segments/range", to: "imported_activities#segment_range", constraints: { id: /\d+/ }
 
   # Noms donnés aux segments découverts automatiquement
   post   "/api/named_segments", to: "named_segments#create"

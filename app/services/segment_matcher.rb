@@ -15,11 +15,17 @@
 #   3. plages     — regroupement des passages qui couvrent la même portion. Les
 #                   segments sont voulus AUSSI LONGS QUE POSSIBLE : un passage ne
 #                   rejoint une plage que s'il la couvre presque entièrement, sinon
-#                   il fonde la sienne, plus courte (`cluster`, `COVER_RATIO`)
+#                   il fonde la sienne, plus courte (`cluster`, `COVER_RATIO`). Les
+#                   chemins que l'utilisateur a baptisés sont semés en plus
+#                   (`named_ranges`) : eux ne dépendent pas de la découverte
 #   4. segments   — chaque plage retenue reprend TOUS les passages qui la couvrent
 #                   (`reattach`), les morceaux redondants sont écartés
 #                   (`prune_nested`), et le temps de chacun est recalculé sur la
 #                   portion commune (sinon incomparables)
+#
+# Deux entrées : `.for` analyse toute l'activité (onglet Segments), `.compare` ne
+# chronomètre qu'une plage choisie à la main (poignées A/B, col, split) — même
+# appariement, une seule plage.
 #
 # Les activités dont les streams n'ont jamais été récupérés n'ont pas d'empreinte et
 # sont donc invisibles ici : c'est le backfill des streams qui peuple l'historique.
@@ -112,6 +118,17 @@ class SegmentMatcher
     Rails.cache.fetch(key, expires_in: 12.hours) { new(user, activity).call }
   end
 
+  # Comparaison d'un tronçon CHOISI (poignées A/B de la carte, col, split, intervalle)
+  # et non découvert : mêmes candidats, mêmes appariements, mais une seule plage —
+  # celle demandée. Renvoie le segment monté, ou `nil` si le tronçon est trop court ou
+  # n'a jamais été refait. Les bornes sont des index de STREAM, comme partout côté front.
+  def self.compare(user, activity, start_idx, end_idx)
+    source = activity.is_a?(StravaActivity) ? 'strava' : 'imported'
+    key = ['activity_range', CACHE_VERSION, source, activity.id, start_idx, end_idx,
+           UserActivities.data_version(user.id), naming_version(user)].join('/')
+    Rails.cache.fetch(key, expires_in: 12.hours) { new(user, activity).compare(start_idx, end_idx) }
+  end
+
   # Les noms font partie du résultat : renommer un segment doit invalider le cache
   # de toutes les activités qui le traversent, d'où cette empreinte dans la clé.
   def self.naming_version(user)
@@ -134,19 +151,43 @@ class SegmentMatcher
     efforts = candidates.flat_map { |row| efforts_against(row) }
     return [] if efforts.empty?
 
-    ranges = reattach(consolidate(cluster(efforts)), efforts)
+    ranges = reattach(with_named_ranges(consolidate(cluster(efforts))), efforts)
     segments = prune_nested(ranges.filter_map { |range| build_segment(range) })
-    # Le podium d'abord (or, argent, bronze) : c'est l'information qu'on cherche en
-    # ouvrant l'onglet. Ensuite les chemins les plus refaits, puis les plus longs. Le
-    # tri précède le plafonnement, donc une médaille n'est jamais coupée au profit
-    # d'un chemin banal.
-    result = segments.sort_by { |s| [s[:current][:podium] || PODIUM_PLACES + 1, -s[:count], -s[:distance_m]] }
-                     .first(MAX_SEGMENTS)
-    result.each { |s| s.delete(:cell_range) }
+    result = segments.sort_by { |s| [display_rank(s), -s[:count], -s[:distance_m]] }.first(MAX_SEGMENTS)
+    result.each { |s| s.except!(:cell_range, :seeded) }
     # Repli d'affichage : les segments encore anonymes prennent le nom de la localité
     # la plus proche. Fait après le plafonnement pour ne géolocaliser que ce qu'on rend.
     assign_place_names(result)
     result
+  end
+
+  # Comparaison d'un tronçon choisi — cf. `SegmentMatcher.compare`, qui met en cache.
+  # Le montage d'une plage ne coûte qu'une milliseconde ; tout le temps part dans
+  # l'appariement (~200 ms), le même que pour l'onglet Segments.
+  def compare(start_idx, end_idx)
+    return nil if a_cells.length < 2
+
+    from, to = cell_range(start_idx, end_idx)
+    return nil if from.nil? || to.nil?
+    return nil if span_metres(a_dists, from, to) < MIN_SEGMENT_M
+
+    efforts = candidates.flat_map { |row| efforts_against(row) }
+    segment = build_segment({ a_start: from, a_end: to,
+                              efforts: efforts.select { |e| covers?(e, from, to) } })
+    return nil unless segment
+
+    segment.except!(:cell_range, :seeded)
+    assign_place_names([segment])
+    segment
+  end
+
+  # Ordre d'affichage. Le podium d'abord (or, argent, bronze) : c'est l'information
+  # qu'on cherche en ouvrant l'onglet. Puis les segments que l'utilisateur a lui-même
+  # baptisés — il les a nommés, il veut les suivre —, puis le reste. Le tri précède le
+  # plafonnement, donc ni une médaille ni un segment nommé n'est coupé au profit d'un
+  # chemin banal.
+  def display_rank(segment)
+    segment[:current][:podium] || (segment[:named_segment_id] ? PODIUM_PLACES + 1 : PODIUM_PLACES + 2)
   end
 
   private
@@ -411,6 +452,63 @@ class SegmentMatcher
     kept
   end
 
+  # ── Plages semées par les segments nommés ──────────────────────────────────
+  # Les plages nommées passent devant les plages découvertes : quand les deux
+  # décrivent le même chemin aux bornes près, ce sont les bornes de l'utilisateur
+  # qu'on garde.
+  def with_named_ranges(ranges)
+    named = named_ranges
+    return ranges if named.empty?
+
+    named + ranges.reject { |r|
+      named.any? { |n| overlap_ratio(n[:a_start], n[:a_end], r[:a_start], r[:a_end]) >= DEDUP_OVERLAP_RATIO }
+    }
+  end
+
+  # Plages des segments NOMMÉS que cette sortie traverse. Sans elles, un chemin
+  # baptisé ne ressort que si la découverte automatique retombe par hasard sur des
+  # bornes voisines : baptiser un bout de 3 km inclus dans un chemin de 9 km le
+  # faisait disparaître des sorties suivantes. Semé ici, le tracé nommé est TOUJOURS
+  # évalué — c'est ce qui fait d'un segment nommé un segment suivi de sortie en sortie.
+  def named_ranges
+    named_segments.flat_map do |named|
+      # `named` : cette plage EST le chemin baptisé, pas une portion découverte. Elle
+      # reste donc listée même si aucune AUTRE sortie ne la couvre (l'appariement peut
+      # échouer là où le nom, lui, tient), et elle prime sur les portions découvertes
+      # qui décrivent le même chemin (`dedupe_named`).
+      passes_over(named).map { |from, to| { a_start: from, a_end: to, efforts: [], named: true } }
+    end
+  end
+
+  # Passages de la sortie sur le chemin d'un segment nommé : les positions de ses
+  # cellules dans la trace, découpées en tronçons continus (un aller-retour en donne
+  # deux, un par sens), et seulement ceux qui en couvrent assez pour être ce chemin-là
+  # et non un bout partagé.
+  def passes_over(named)
+    positions = a_cells.each_index.select { |i| named.cell_set.include?(a_cells[i]) }
+    return [] if positions.empty?
+
+    positions.slice_when { |a, b| b - a > MERGE_GAP_CELLS }.filter_map do |run|
+      next if run.size < MIN_RUN_CELLS
+      next if run.size.to_f / named.cell_set.size < NamedSegment::MATCH_RATIO
+      next if span_metres(a_dists, run.first, run.last) < MIN_SEGMENT_M
+
+      [run.first, run.last]
+    end
+  end
+
+  # Index de STREAM → index de CELLULE, pour une plage choisie côté front. Même
+  # conversion que `TrackFingerprint.slice` (qui, lui, découpe le chemin pour
+  # l'enregistrer) : la première cellule entrée après `start_idx`, la dernière entrée
+  # avant `end_idx`.
+  def cell_range(start_idx, end_idx)
+    from = a_idx.index { |i| i >= start_idx.to_i }
+    to = a_idx.rindex { |i| i <= end_idx.to_i }
+    return [nil, nil] if from.nil? || to.nil? || to - from < 1
+
+    [from, to]
+  end
+
   # Ré-attribution des passages aux plages retenues. Le regroupement est glouton :
   # chaque passage n'entre que dans UNE plage, la première qui l'accueille. Un même
   # passage peut pourtant valoir pour plusieurs segments — qui a refait les 20 km a
@@ -419,7 +517,7 @@ class SegmentMatcher
   # juste sur les segments courts inclus dans de plus longs.
   def reattach(clusters, efforts)
     clusters.each { |c| c[:efforts] = efforts.select { |e| covers?(e, c[:a_start], c[:a_end]) } }
-    clusters.reject { |c| c[:efforts].empty? }
+    clusters.reject { |c| c[:efforts].empty? && !c[:named] }
   end
 
   # Ce passage couvre-t-il toute la plage ? Condition pour le chronométrer dessus :
@@ -435,7 +533,14 @@ class SegmentMatcher
   # contient — sinon c'est le même chemin raconté deux fois.
   def prune_nested(segments)
     kept = []
-    segments.sort_by { |s| -s[:distance_m] }.each do |segment|
+    dedupe_named(segments).sort_by { |s| -s[:distance_m] }.each do |segment|
+      # Un chemin que l'utilisateur a baptisé n'est jamais écarté : il l'a nommé pour
+      # le suivre, y compris quand il est inclus dans une portion plus longue.
+      if segment[:named_segment_id]
+        kept << segment
+        next
+      end
+
       # Le contenant le plus SERRÉ fait référence (la liste est en longueur
       # décroissante, on la remonte donc à l'envers) : c'est à son voisin immédiat
       # qu'un morceau doit apporter quelque chose, pas au grand tour.
@@ -443,6 +548,14 @@ class SegmentMatcher
       kept << segment if host.nil? || segment[:count] >= host[:count] * NESTED_COUNT_FACTOR
     end
     kept
+  end
+
+  # Un chemin baptisé ne sort qu'une fois : la plage SEMÉE depuis le segment nommé
+  # fait foi, la portion découverte qui a hérité du même nom (bornes voisines) est un
+  # doublon. Un aller-retour garde bien ses deux lignes : les deux sont semées.
+  def dedupe_named(segments)
+    seeded = segments.filter_map { |s| s[:named_segment_id] if s[:seeded] }.to_set
+    segments.reject { |s| !s[:seeded] && seeded.include?(s[:named_segment_id]) }
   end
 
   def nested?(segment, host)
@@ -507,7 +620,9 @@ class SegmentMatcher
     # sens. Sinon on s'en tient au sens parcouru.
     out_and_back = efforts.any? { |e| e[:own] && e[:reverse] != current_reverse }
     efforts = efforts.select { |e| e[:reverse] == current_reverse } unless out_and_back
-    return nil if efforts.empty?
+    # Une portion découverte sans deuxième passage n'est pas un segment ; un chemin
+    # baptisé, si.
+    return nil if efforts.empty? && !cluster[:named]
 
     # Un passage en sens inverse (montée vs descente) n'est pas comparable : il
     # compte dans le nombre de fois, jamais dans le classement ni le record. Les
@@ -520,9 +635,11 @@ class SegmentMatcher
     segment = {
       start_idx: start_idx,
       end_idx: end_idx,
-      # Plage en CELLULES, seule comparable d'un segment à l'autre (`prune_nested`).
-      # Clé interne, retirée avant le rendu.
+      # Clés internes, retirées avant le rendu : la plage en CELLULES (seule
+      # comparable d'un segment à l'autre, cf. `prune_nested`) et l'origine de la
+      # plage — semée depuis un segment nommé, ou découverte.
       cell_range: [start_cell, end_cell],
+      seeded: cluster[:named] || false,
       distance_m: distance.round,
       elevation_gain_m: elevation_gain(start_idx, end_idx),
       count: efforts.length + 1,

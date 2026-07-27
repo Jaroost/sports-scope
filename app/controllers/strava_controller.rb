@@ -198,6 +198,18 @@ class StravaController < ApplicationController
     render json: { error: e.message }, status: status
   end
 
+  # GET /strava/activities/:id/segments/range?start_idx=&end_idx=
+  # `segment` est nul quand le tronçon est trop court ou n'a jamais été refait — ce
+  # n'est pas une erreur, le front l'affiche comme tel.
+  def segment_range
+    activity = current_user.strava_activities.find_by(strava_id: params[:id])
+    return head :not_found unless activity
+    return head :unprocessable_entity if activity.track_cells.blank?
+
+    render json: { segment: SegmentMatcher.compare(current_user, activity,
+                                                   params[:start_idx].to_i, params[:end_idx].to_i) }
+  end
+
   # POST /strava/backfill — récupère en masse les streams manquants. Réutilise un
   # run actif s'il y en a un (idempotent) ; ne (ré)enfile un job que si rien ne
   # tourne déjà, pour ne pas dupliquer le travail.

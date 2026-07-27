@@ -29,6 +29,7 @@ import ActivityConditions from './ActivityConditions.vue'
 import ActivityDataQuality from './ActivityDataQuality.vue'
 import ActivityZones from './ActivityZones.vue'
 import ActivitySegments from './ActivitySegments.vue'
+import SegmentCompare from './SegmentCompare.vue'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -640,6 +641,17 @@ onMounted(async () => {
         :activity-id="props.activityId"
         :source="props.source"
         :active="effectiveTab === 'zones'"
+      />
+
+      <!-- Comparaison d'un tronçon choisi à la main : même sélection partagée, mais
+           la plage vient de l'utilisateur et non de la découverte automatique. -->
+      <SegmentCompare
+        v-if="effectiveTab === 'segments'"
+        :activity-id="props.activityId"
+        :source="props.source"
+        :is-run="isRun(activity)"
+        :selection="selection"
+        :activity-date="activity?.start_date_local || activity?.start_date || ''"
       />
 
       <!-- Portions déjà parcourues lors d'autres sorties : découvertes côté serveur

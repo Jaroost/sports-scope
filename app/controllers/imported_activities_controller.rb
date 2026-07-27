@@ -100,6 +100,18 @@ class ImportedActivitiesController < ApplicationController
     render json: { segments: SegmentMatcher.for(current_user, activity) }
   end
 
+  # GET /api/imported_activities/:id/segments/range?start_idx=&end_idx=
+  # Pendant de `#segments` pour un tronçon choisi à la main. `segment` nul = tronçon
+  # trop court ou jamais refait.
+  def segment_range
+    activity = current_user.imported_activities.find_by(id: params[:id])
+    return head :not_found unless activity
+    return head :unprocessable_entity if activity.track_cells.blank?
+
+    render json: { segment: SegmentMatcher.compare(current_user, activity,
+                                                   params[:start_idx].to_i, params[:end_idx].to_i) }
+  end
+
   # DELETE /api/imported_activities/:id
   def destroy
     activity = current_user.imported_activities.find_by(id: params[:id])

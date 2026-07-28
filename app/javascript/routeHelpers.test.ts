@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bearingDelta, bearingBetween, buildDistancesM, detectTurns, turnsFromVoiceHints, nearestGeomIndex } from './routeHelpers'
+import { bearingDelta, bearingBetween, buildDistancesM, detectTurns, turnsFromVoiceHints, nearestGeomIndex, sliceLineBetween, maneuverEndIdx } from './routeHelpers'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
 // moveLngLat (navHelpers) sert à bâtir les tracés en MÈTRES : les seuils de detectTurns
 // (35°, 18 m, 25 m) ne veulent rien dire exprimés en degrés de longitude.
@@ -302,5 +302,109 @@ describe('nearestGeomIndex sur un aller-retour', () => {
     // Aucune direction de marche connue : le premier passage reste la réponse.
     const here: LngLat = [outAndBack[DEAD_END + 2][0], outAndBack[DEAD_END + 2][1]]
     expect(nearestGeomIndex(here, outAndBack).idx).toBe(DEAD_END - 2)
+  })
+})
+
+// Tronçon surligné autour d'un virage (RouteNavigation) : ce qui compte est que les deux
+// extrémités tombent EXACTEMENT à la distance demandée — sinon le bout de couleur sauterait
+// d'un sommet à l'autre au lieu de rester centré sur le virage.
+
+describe('sliceLineBetween', () => {
+  // Ligne droite est-ouest, un sommet tous les 10 m, wscale décroissant pour vérifier
+  // l'alignement index-pour-index.
+  const line: LngLat[] = Array.from({ length: 11 }, (_, i) => moveLngLat([6, 46], 90, i * 10))
+  const cum = buildDistancesM(line)
+  const wscale = line.map((_, i) => 1 - i * 0.01)
+
+  it('interpole les deux extrémités à la distance demandée', () => {
+    const { line: cut } = sliceLineBetween(line, cum, wscale, 25, 55)
+    const cutCum = buildDistancesM(cut)
+    expect(cutCum[cutCum.length - 1]).toBeCloseTo(30, 1)
+    // Sommets intérieurs : 30, 40, 50 → 3, plus les deux extrémités interpolées.
+    expect(cut.length).toBe(5)
+  })
+
+  it('rend autant de wscale que de sommets', () => {
+    const { line: cut, wscale: w } = sliceLineBetween(line, cum, wscale, 25, 55)
+    expect(w.length).toBe(cut.length)
+    expect(w[1]).toBeCloseTo(1 - 3 * 0.01, 5)   // le sommet à 30 m garde SON échelle
+  })
+
+  it('borne aux extrémités du tracé (virage en début ou fin de parcours)', () => {
+    const { line: cut } = sliceLineBetween(line, cum, wscale, -40, 20)
+    expect(cut[0]).toEqual(line[0])
+    const cutCum = buildDistancesM(cut)
+    expect(cutCum[cutCum.length - 1]).toBeCloseTo(20, 1)
+  })
+
+  it('rend un tronçon vide quand la plage est nulle ou inversée', () => {
+    expect(sliceLineBetween(line, cum, wscale, 50, 50).line).toEqual([])
+    expect(sliceLineBetween(line, cum, wscale, 60, 20).line).toEqual([])
+    expect(sliceLineBetween([line[0]], [0], [1], 0, 10).line).toEqual([])
+  })
+})
+
+// Fin de manœuvre : c'est ce qui permet de colorer un rond-point ENTIER (l'anneau + la
+// branche de sortie). Les hints BRouter n'ancrent qu'un point à l'entrée : la sortie ne
+// peut venir que de la géométrie.
+
+describe('maneuverEndIdx', () => {
+  // Rond-point de 25 m de rayon : approche vers l'est, 3/4 d'anneau, sortie vers le nord.
+  // Points tous les ~5 m, comme une géométrie BRouter.
+  const RADIUS = 25
+  const center = moveLngLat([6, 46], 0, RADIUS)   // l'entrée est au sud de l'anneau
+  const roundabout = (arcDeg: number): { geom: LngLat[]; entry: number; exit: number } => {
+    const geom: LngLat[] = []
+    for (let d = 60; d > 0; d -= 5) geom.push(moveLngLat([6, 46], 270, d))   // approche est
+    const entry = geom.length
+    geom.push([6, 46])
+    // Anneau parcouru dans le sens horaire (rond-point à droite) depuis le sud.
+    const stepDeg = 5 / RADIUS * 180 / Math.PI
+    for (let a = stepDeg; a <= arcDeg; a += stepDeg) geom.push(moveLngLat(center, 180 - a, RADIUS))
+    const exit = geom.length - 1
+    const last = geom[exit]
+    const outB = bearingBetween(geom[exit - 1], last)
+    for (let d = 5; d <= 120; d += 5) geom.push(moveLngLat(last, outB, d))   // branche de sortie
+    return { geom, entry, exit }
+  }
+
+  it('suit l’anneau jusqu’à la sortie (3/4 de tour)', () => {
+    const { geom, entry, exit } = roundabout(270)
+    const cum = buildDistancesM(geom)
+    const end = maneuverEndIdx(geom, cum, entry)
+    // La détection se fait sur une fenêtre de 25 m : on tolère cet ordre de grandeur.
+    expect(Math.abs(cum[end] - cum[exit])).toBeLessThan(30)
+    // ... et surtout, on est bien allé au-delà des 40 m du surlignage de base.
+    expect(cum[end] - cum[entry]).toBeGreaterThan(80)
+  })
+
+  it('s’arrête à la sortie d’un petit rond-point (quart de tour)', () => {
+    const { geom, entry, exit } = roundabout(90)
+    const cum = buildDistancesM(geom)
+    const end = maneuverEndIdx(geom, cum, entry)
+    expect(Math.abs(cum[end] - cum[exit])).toBeLessThan(30)
+  })
+
+  it('rend le sommet lui-même quand rien ne tourne (tracé droit)', () => {
+    const straight: LngLat[] = Array.from({ length: 40 }, (_, i) => moveLngLat([6, 46], 90, i * 5))
+    const cum = buildDistancesM(straight)
+    expect(maneuverEndIdx(straight, cum, 10)).toBe(10)
+  })
+
+  it('respecte le garde-fou maxM sur une courbe qui n’en finit pas', () => {
+    // Cercle complet et répété : jamais de portion droite.
+    const loop: LngLat[] = []
+    for (let a = 0; a < 720; a += 5) loop.push(moveLngLat(center, a, RADIUS))
+    const cum = buildDistancesM(loop)
+    const end = maneuverEndIdx(loop, cum, 0, { maxM: 120 })
+    expect(cum[end]).toBeGreaterThan(120)
+    expect(cum[end]).toBeLessThan(140)
+  })
+
+  it('ne déborde pas en fin de tracé', () => {
+    const { geom, entry } = roundabout(270)
+    const cut = geom.slice(0, entry + 12)   // le tracé s'arrête DANS l'anneau
+    const cum = buildDistancesM(cut)
+    expect(maneuverEndIdx(cut, cum, entry)).toBe(cut.length - 1)
   })
 })

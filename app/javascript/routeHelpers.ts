@@ -724,6 +724,100 @@ export function lngLatAtDistanceM(geometry: Array<Coord | LngLat>, cumDistM: num
   return [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])]
 }
 
+// Tronçon de polyligne compris entre deux distances cumulées, avec ses `wscale`
+// alignés index pour index. Les deux extrémités sont interpolées (et non ramenées au
+// sommet le plus proche) pour que le morceau commence et finisse exactement où on le
+// demande — sert à surligner le bout de tracé autour d'un virage. Les extrémités
+// reprennent l'échelle de largeur de leur tronçon d'origine. Pure.
+export function sliceLineBetween(
+  line: Array<Coord | LngLat>,
+  cumDistM: number[],
+  wscale: number[],
+  fromM: number,
+  toM: number,
+): { line: LngLat[]; wscale: number[] } {
+  const empty = { line: [] as LngLat[], wscale: [] as number[] }
+  const n = Math.min(line.length, cumDistM.length)
+  if (n < 2) return empty
+  const total = cumDistM[n - 1]
+  const a = Math.max(0, Math.min(total, fromM))
+  const b = Math.max(0, Math.min(total, toM))
+  if (b <= a) return empty
+  // Échelle du sommet qui ferme le tronçon contenant `d` (même convention que
+  // lngLatAtDistanceM, qui interpole dans [lo-1, lo]).
+  const scaleAt = (d: number) => {
+    let lo = 0
+    let hi = n - 1
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if (cumDistM[mid] < d) lo = mid + 1
+      else hi = mid
+    }
+    return wscale[lo] ?? 1
+  }
+  const out: LngLat[] = [lngLatAtDistanceM(line, cumDistM, a)]
+  const w: number[] = [scaleAt(a)]
+  for (let i = 0; i < n; i++) {
+    if (cumDistM[i] <= a) continue
+    if (cumDistM[i] >= b) break
+    out.push([line[i][0], line[i][1]])
+    w.push(wscale[i] ?? 1)
+  }
+  out.push(lngLatAtDistanceM(line, cumDistM, b))
+  w.push(scaleAt(b))
+  return { line: out, wscale: w }
+}
+
+// Sommet où se termine la manœuvre entamée au sommet `idx` : on avance tant que le tracé
+// TOURNE encore, et on s'arrête dès qu'il redevient droit sur `straightM` mètres. Sert à
+// surligner un rond-point en entier (l'anneau ne fait pas 40 m : sans ça, on voit le
+// virage mais pas par quelle sortie on ressort). Les hints BRouter n'ancrent qu'un point
+// à l'entrée de l'anneau — la sortie ne peut donc venir que de la géométrie.
+//
+// `leadM` tolère une ancre posée un sommet trop tôt (un bout droit avant la courbe) ;
+// si rien ne tourne dans cette avance, la manœuvre est ponctuelle et on rend `idx`.
+export function maneuverEndIdx(
+  geometry: Array<Coord | LngLat>,
+  cumDistM: number[],
+  idx: number,
+  opts: { straightM?: number; straightDeg?: number; leadM?: number; maxM?: number } = {},
+): number {
+  const straightM = opts.straightM ?? 25    // longueur sur laquelle on juge « c'est droit »
+  const straightDeg = opts.straightDeg ?? 15 // écart de cap toléré sur cette longueur
+  const leadM = opts.leadM ?? 30            // avance tolérée avant le début de la courbe
+  const maxM = opts.maxM ?? 400             // garde-fou (très grand rond-point ≈ 300 m d'anneau)
+  const n = Math.min(geometry.length, cumDistM.length)
+  if (idx < 0 || idx >= n - 1) return Math.max(0, Math.min(idx, n - 1))
+  // Cap local en un sommet : direction sur les ~10 m qui suivent, pour lisser le bruit
+  // d'une géométrie dense. `null` = plus assez de tracé devant.
+  const headingAt = (j: number): number | null => {
+    let k = j
+    while (k < n - 1 && cumDistM[k] - cumDistM[j] < 10) k++
+    return k > j ? bearingBetween(geometry[j], geometry[k]) : null
+  }
+  const straightFrom = (j: number): boolean | null => {
+    let k = j
+    while (k < n - 1 && cumDistM[k] - cumDistM[j] < straightM) k++
+    const h0 = headingAt(j)
+    const h1 = headingAt(k)
+    if (h0 == null || h1 == null) return null
+    return Math.abs(bearingDelta(h0, h1)) <= straightDeg
+  }
+  // 1) début réel de la courbe
+  let start = idx
+  while (start < n - 1 && cumDistM[start] - cumDistM[idx] <= leadM && straightFrom(start) === true) start++
+  if (start >= n - 1 || cumDistM[start] - cumDistM[idx] > leadM) return idx
+  // 2) fin de la courbe : premier sommet d'où le tracé repart droit
+  let j = start
+  while (j < n - 1 && cumDistM[j] - cumDistM[idx] <= maxM) {
+    const s = straightFrom(j)
+    if (s === null) return n - 1   // le tracé se termine dans la courbe
+    if (s) return j
+    j++
+  }
+  return j
+}
+
 // Index of the geometry vertex closest to `pos`, plus the lateral distance (m).
 // The distance is measured to the nearest point on the polyline (the two segments
 // adjacent to the nearest vertex), not to the vertex itself — so a position

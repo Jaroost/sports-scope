@@ -6,7 +6,7 @@ import { useNavLineWidth, widthRunsCollection } from '../navLineWidth'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
   haversine, bearingBetween, bearingDelta, nearestGeomIndex, nearestGeomIndexPreferring, projectOnRoute,
-  lngLatAtDistanceM, progressFor, activeClimb, gradeForIndex, colorForGrade,
+  lngLatAtDistanceM, sliceLineBetween, maneuverEndIdx, progressFor, activeClimb, gradeForIndex, colorForGrade,
   buildOffsetDisplayLine, formatDistancePrecise,
 } from '../routeHelpers'
 import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
@@ -404,6 +404,10 @@ let maplibre: any = null
 let locationMarker: any = null
 let watchId: number | null = null
 let turnMarkers: any[] = []    // marqueurs DOM des indicateurs de virage (au-dessus des POI)
+// Clé d'idempotence du surlignage du virage courant (cf. refreshTurnHighlight). Déclarée
+// ici, avec l'état de la carte : applyRouteLinePaint tourne dès le setup (watch immédiat)
+// et la lit — une déclaration plus bas dans le script la mettrait en zone morte.
+let hiKey = ''
 // Tooltip d'un point quelconque de la carte (clic droit / appui long) : coordonnées
 // copiables, Google Maps, Street View. Voir mapCoordPopup. suppressNextMapClick neutralise
 // le clic synthétique de relâchement d'un appui long (sinon il basculerait la veille).
@@ -503,6 +507,14 @@ function applyRouteLinePaint() {
     map.setPaintProperty('nav-route-remaining', 'line-color', color)
     map.setPaintProperty('nav-route-remaining', 'line-width', zoomWidthExpr(routeLineWidth.value, true))
     map.setPaintProperty('nav-route-remaining', 'line-opacity', opacity)
+  }
+  if (map.getLayer('nav-turn-highlight')) {
+    // La couleur, elle, suit le virage montré (orange/vert) : c'est refreshTurnHighlight
+    // qui la pose — d'où le hiKey remis à zéro pour qu'un changement de sport la rejoue.
+    map.setPaintProperty('nav-turn-highlight', 'line-width', zoomWidthExpr(routeLineWidth.value, true))
+    map.setPaintProperty('nav-turn-highlight', 'line-opacity', opacity)
+    hiKey = ''
+    refreshTurnHighlight()
   }
   applyPreviewLinePaint()
 }
@@ -1207,10 +1219,10 @@ function unloadRoute() {
   for (const m of turnMarkers) m.remove()
   turnMarkers = []
   if (map) {
-    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining']) {
+    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining', 'nav-turn-highlight']) {
       if (map.getLayer(id)) map.removeLayer(id)
     }
-    for (const id of ['nav-route', 'nav-remaining']) {
+    for (const id of ['nav-route', 'nav-remaining', 'nav-turn-hi']) {
       if (map.getSource(id)) map.removeSource(id)
     }
   }
@@ -1433,7 +1445,17 @@ function installRouteLayers() {
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(routeBorderWidth.value, true) } })
   map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
   map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.line_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
+  // Surlignage du prochain virage : même ruban (largeur, opacité, amincissement des
+  // recouvrements) mais à la couleur de la pastille, posé PAR-DESSUS le tracé restant.
+  map.addSource('nav-turn-hi', { type: 'geojson', data: widthRunsCollection([], []) })
+  map.addLayer({ id: 'nav-turn-highlight', type: 'line', source: 'nav-turn-hi', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.turn_marker_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
+  hiKey = ''
+  refreshTurnHighlight()
 }
+
+// Longueur (m) de tracé colorée de part et d'autre du virage mis en avant. Assez court
+// pour rester lisible en zoom de navigation sans manger le virage suivant d'une rafale.
+const TURN_HIGHLIGHT_M = 40
 
 // Indicateurs de virage en marqueurs DOM (et non en couches canvas) : les
 // marqueurs MapLibre sont des overlays HTML, toujours rendus AU-DESSUS du canvas
@@ -1444,6 +1466,10 @@ function renderTurnMarkers() {
   if (!map || !maplibre) return
   for (const m of turnMarkers) m.remove()
   turnMarkers = []
+  // Nouveau jeu de virages (reroutage, changement de sport) : le surlignage est recalculé
+  // depuis la nouvelle géométrie — y compris pour l'effacer s'il n'y a plus de pastilles.
+  hiKey = ''
+  refreshTurnHighlight()
   if (!turnsFromBRouter || !turns.length) return
   const dot = turnMarkerSize.value * 2      // diamètre de la pastille (rayon → diamètre)
   for (const tp of turns) {
@@ -1505,6 +1531,7 @@ function updateTurnVisibility() {
     el.classList.toggle('nav-turn-marker--inactive', i !== nextTurnPtr)
     el.classList.toggle('nav-turn-marker--selected', i === nextTurnPtr)
   })
+  refreshTurnHighlight()
 }
 
 // Couleur verte du virage atteint, alignée sur le bandeau « now » (NavTurnBanner).
@@ -1532,6 +1559,44 @@ function setGreenTurn(idx: number) {
   if (greenTurnIdx >= 0) paint(greenTurnIdx, false)
   greenTurnIdx = idx
   if (idx >= 0) paint(idx, true)
+  refreshTurnHighlight()
+}
+
+// Colore un bout de tracé (TURN_HIGHLIGHT_M avant ET après) autour du virage mis en
+// avant, en plus du halo de sa pastille : de loin, on lit d'un coup d'œil PAR OÙ ça
+// passe, pas seulement où est le virage. Le virage montré et sa couleur suivent la
+// pastille — orange sur le prochain virage, vert sur le virage tout juste franchi
+// pendant le maintien « now ». Idempotent via `hiKey` (appelé à chaque fix GPS).
+function refreshTurnHighlight() {
+  const src = map?.getSource('nav-turn-hi')
+  if (!src) return
+  const green = greenTurnIdx >= 0
+  const idx = green ? greenTurnIdx : nextTurnPtr
+  const tp = turns[idx] as TurnPoint | undefined
+  // Pas de virage à montrer (fin de tracé, virages géométriques sans pastille) : on vide.
+  if (!tp || !turnsFromBRouter || displayLine.length < 2) {
+    if (hiKey === '') return
+    hiKey = ''
+    src.setData(widthRunsCollection([], []))
+    return
+  }
+  const color = green ? TURN_NOW_COLOR : sportNav.value.turn_marker_color
+  const key = `${idx}|${tp.distM.toFixed(1)}|${displayLine.length}|${color}`
+  if (key === hiKey) return
+  hiKey = key
+  // displayLine est indexée comme geometry : cumDistM s'y applique tel quel (c'est déjà
+  // l'hypothèse de lngLatAtDistanceM ailleurs), décalage des recouvrements compris.
+  // En aval, la couleur va au moins jusqu'à la FIN de la manœuvre : sur un grand
+  // rond-point, 40 m s'arrêtent dans l'anneau et on ne voit pas par où ressortir. Le
+  // TURN_HIGHLIGHT_M s'ajoute après la sortie, pour montrer la branche prise.
+  // Garde-fou plus large pour l'anneau (jusqu'à ~300 m sur un très grand rond-point) que
+  // pour un virage ordinaire, où une route sinueuse pourrait sinon tout colorer.
+  const maxM = tp.kind === 'roundabout' ? 400 : 120
+  const endM = cumDistM[maneuverEndIdx(geometry, cumDistM, tp.idx, { maxM })] ?? tp.distM
+  const afterM = Math.max(tp.distM, endM) + TURN_HIGHLIGHT_M
+  const cut = sliceLineBetween(displayLine, cumDistM, displayWScale, tp.distM - TURN_HIGHLIGHT_M, afterM)
+  map.setPaintProperty('nav-turn-highlight', 'line-color', color)
+  src.setData(widthRunsCollection(cut.line, cut.wscale))
 }
 
 // Met les pastilles de virage à l'échelle du zoom, selon la même loi que le tracé

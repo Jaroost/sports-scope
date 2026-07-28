@@ -97,6 +97,22 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return
 
+  // Authentification : jamais interceptée, jamais cachée.
+  //
+  // Ces réponses sont des REDIRECTIONS qui posent un cookie de session :
+  // `/auth/handoff` échange le jeton du lien « ouvrir dans l'application » contre
+  // une session, `/auth/<provider>/callback` clôt le tour de Keycloak. Les faire
+  // passer par `networkFirst` cassait la navigation : dans un service worker,
+  // `fetch()` d'une requête de navigation qui répond une redirection rejette, et le
+  // repli sur le cache ne trouve évidemment rien — la promesse de `respondWith`
+  // partait donc en erreur réseau. Résultat côté appli : le passage de session
+  // échouait en silence et la navigation s'ouvrait en anonyme.
+  //
+  // Ne pas répondre du tout laisse le navigateur suivre la redirection lui-même,
+  // cookie compris. Rien à mettre en cache ici de toute façon : une session ne
+  // s'ouvre pas hors ligne.
+  if (reqUrl.pathname.startsWith('/auth/')) return
+
   // Récupération one-shot du GPX partagé par le créateur : on sert depuis le cache
   // puis on purge l'entrée pour ne pas rejouer un vieux fichier au lancement suivant.
   if (reqUrl.pathname === SHARED_GPX_URL) {

@@ -1,4 +1,4 @@
-import { haversine, bearingBetween, bearingDelta, nearestGeomIndex } from './routeHelpers'
+import { haversine, bearingBetween, bearingDelta, nearestGeomIndex, hintAnchorIndices, buildDistancesM } from './routeHelpers'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
 
 // Décisions géométriques du reroutage en séance : où raccorder le tracé, quelles étapes
@@ -99,10 +99,18 @@ export function detourAnchors(
 // de la position du coureur et remplace tout jusqu'au raccord) comme à l'insertion d'un
 // point intermédiaire (le détour remplace une petite portion au milieu).
 //
-// Les voicehints des portions CONSERVÉES sont réutilisés : leurs coordonnées sont ancrées
-// à l'identique sur les sommets gardés, on les retrouve donc par leur clé lng,lat. Ceux de
-// la portion remplacée disparaissent avec elle. L'ordre tête → détour → queue est celui du
-// tracé, comme l'attend turnsFromVoiceHints (appariement monotone le long du tracé).
+// Les voicehints des portions CONSERVÉES sont réutilisés ; ceux de la portion remplacée
+// disparaissent avec elle. L'ordre tête → détour → queue est celui du tracé, comme
+// l'attend turnsFromVoiceHints (appariement monotone le long du tracé).
+//
+// Le tri se fait sur le RANG de chaque hint le long du tracé (hintAnchorIndices), et non
+// sur l'appartenance de sa coordonnée à la tête ou à la queue : sur une boucle ou un
+// aller-retour, les sommets du début REVIENNENT en fin de tracé, si bien que les hints de
+// la portion remplacée passaient pour des hints de queue. Placés en tête de liste alors
+// qu'ils appartiennent à la fin, ils empoisonnaient l'appariement monotone de
+// turnsFromVoiceHints : le curseur sautait aussitôt à la fin du tracé et TOUS les virages
+// suivants s'y entassaient — après un reroutage, le guidage n'annonçait plus qu'un seul
+// virage, à l'autre bout du parcours.
 export function spliceDetour(
   geometry: Coord[],
   hints: VoiceHint[],
@@ -113,11 +121,9 @@ export function spliceDetour(
 ): { geometry: Coord[]; hints: VoiceHint[] } {
   const head = geometry.slice(0, fromIdx)
   const tail = geometry.slice(toIdx)
-  const key = (lng: number, lat: number) => `${lng},${lat}`
-  const headKeys = new Set(head.map((c) => key(c[0], c[1])))
-  const tailKeys = new Set(tail.map((c) => key(c[0], c[1])))
-  const headHints = head.length ? hints.filter((h) => headKeys.has(key(h.lng, h.lat))) : []
-  const tailHints = tail.length ? hints.filter((h) => tailKeys.has(key(h.lng, h.lat))) : []
+  const anchors = hintAnchorIndices(hints, geometry, buildDistancesM(geometry))
+  const headHints = hints.filter((_, i) => anchors[i] >= 0 && anchors[i] < fromIdx)
+  const tailHints = hints.filter((_, i) => anchors[i] >= toIdx)
   return {
     geometry: head.concat(detour).concat(tail),
     hints: headHints.concat(detourHints).concat(tailHints),

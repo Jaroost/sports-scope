@@ -183,7 +183,7 @@ describe('spliceDetour', () => {
     expect(out.hints).toEqual(detourHints)
   })
 
-  it('apparie les hints sur les coordonnées exactes, pas sur le rang', () => {
+  it('apparie les hints sur la géométrie, pas sur le rang dans la liste', () => {
     // Un hint dont les coordonnées ne correspondent à aucun sommet conservé (tracé
     // recalculé entre-temps) est écarté au lieu d'être ré-attaché au hasard.
     const orphan = [hint(99.9)]
@@ -191,12 +191,30 @@ describe('spliceDetour', () => {
     expect(out.hints).toEqual(detourHints)
   })
 
-  it('un tracé qui repasse au même endroit ne duplique pas ses hints', () => {
-    // Deux sommets identiques (aller-retour sur le même segment) : une seule entrée de
-    // hint doit ressortir par sommet conservé, pas une par occurrence de la clé.
-    const doubled: Coord[] = [[6.0, 46.5, 500], [6.1, 46.5, 500], [6.0, 46.5, 500], [6.2, 46.5, 500]]
-    const out = spliceDetour(doubled, [hint(6.0)], detour, [], 0, 2)
-    // Le sommet 6.0 conservé (rang 2) réhabilite son hint, une fois.
-    expect(out.hints.map((h) => h.lng)).toEqual([6.0])
+  it('ne ressuscite pas un hint remplacé dont la coordonnée revient plus loin', () => {
+    // Boucle : les sommets du DÉBUT reviennent en fin de tracé. Le hint du sommet 6.0
+    // appartient au passage remplacé par le détour ; le retrouver dans la queue (même
+    // coordonnée, rang 4) le remettait en tête de liste, où il empoisonnait l'appariement
+    // monotone de turnsFromVoiceHints — tous les virages suivants s'entassaient alors à la
+    // fin du tracé. Il doit disparaître avec la portion qu'il décrivait.
+    const loop: Coord[] = [
+      [6.0, 46.5, 500], [6.001, 46.5, 500], [6.002, 46.5, 500],
+      [6.001, 46.5, 500], [6.0, 46.5, 500],
+    ]
+    const out = spliceDetour(loop, [hint(6.0), hint(6.002, 5)], detour, [], 0, 3)
+    // Seul le hint du sommet 6.002 (rang 2 < 3) disparaît aussi : il est dans la portion
+    // remplacée. Reste la queue, sans hint — et surtout pas le hint du départ.
+    expect(out.hints).toEqual([])
+  })
+
+  it('garde les hints de la queue d’une boucle qui revient sur ses pas', () => {
+    // Même boucle, détour raccordé plus tôt : le hint du sommet 6.002 (rang 2) est dans la
+    // queue conservée et doit rester, une seule fois.
+    const loop: Coord[] = [
+      [6.0, 46.5, 500], [6.001, 46.5, 500], [6.002, 46.5, 500],
+      [6.001, 46.5, 500], [6.0, 46.5, 500],
+    ]
+    const out = spliceDetour(loop, [hint(6.0), hint(6.002, 5)], detour, [], 0, 2)
+    expect(out.hints.map((h) => h.lng)).toEqual([6.002])
   })
 })

@@ -1005,9 +1005,19 @@ function resetRouteTracking(atStart: boolean) {
 // Réinitialisation manuelle depuis Réglages : repart d'une ardoise propre côté
 // progressions mémorisées (cf. clearAllProgress) et relance le suivi en cours — recherche
 // globale du point le plus proche au prochain fix.
+//
+// On RECONSTRUIT aussi tout ce qui est dérivé du tracé (virages, cols, distances) : sans
+// ça, le bouton ne remettait à zéro que les pointeurs de suivi, et une chaîne de virages
+// abîmée — ce pour quoi on l'actionne — survivait intacte. « Rien ne se passe » : il
+// fallait sortir de la navigation et y revenir.
 function resetNavigationState() {
   clearAllProgress()
-  if (hasRoute.value) resetRouteTracking(false)
+  if (hasRoute.value) {
+    rebuildRouteState(geometry, rawHints)
+    resetRouteTracking(false)
+    ensureRouteInstalled()
+    refreshRemaining()
+  }
   activePanel.value = null
   showPoiToast(true, t('routes.nav_reset_done'))
 }

@@ -251,6 +251,19 @@ describe('turnsFromVoiceHints sur un aller-retour', () => {
 
     expect(turns.map((t) => t.idx)).toEqual([4, 5])
   })
+
+  it('ignore un hint étranger au tracé sans décrocher les suivants', () => {
+    // Un hint hors tracé (portion remplacée par un détour, tracé recalculé depuis
+    // l'enregistrement) ne doit ni produire un virage fantôme, ni faire avancer le
+    // curseur : sinon tous les hints suivants s'apparient depuis un curseur trop avancé et
+    // se retrouvent entassés en fin de tracé.
+    const alien: VoiceHint = { lng: outAndBack[0][0] + 0.5, lat: outAndBack[0][1] + 0.5, cmd: 2, angle: -90, exit_number: 0 }
+    const hints = [alien, at(JUNCTION_OUT, 5, 90), at(DEAD_END, 15, 180), at(JUNCTION_BACK, 2, -90)]
+
+    const turns = turnsFromVoiceHints(hints, outAndBack, outAndBackCum)
+
+    expect(turns.map((t) => t.idx)).toEqual([JUNCTION_OUT, DEAD_END, JUNCTION_BACK])
+  })
 })
 
 describe('nearestGeomIndex sur un aller-retour', () => {

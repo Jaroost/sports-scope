@@ -42,6 +42,7 @@ import {
   insertionPasses,
 } from '../routeInsert'
 import type { PlaceResult } from '../composables/usePlaceSearch'
+import { useDismissOnOutside } from '../composables/useDismissOnOutside'
 
 const props = defineProps<{ state: RouteBuilderState }>()
 const emit = defineEmits<{
@@ -2275,6 +2276,31 @@ async function openSearch() {
   searchInputEl.value?.focus()
 }
 
+// ─── Fermeture des menus au geste extérieur ───────────────────────────────────
+
+// Les menus de la toolbar (fond de carte, « Affichage », « Mode d'édition ») ne sont pas
+// des dropdowns Bootstrap : rien ne les refermait quand on cliquait ailleurs, ni à la
+// souris ni au doigt. On écoute donc nous-mêmes (cf. useDismissOnOutside pour le pourquoi
+// de la phase capture et du touchstart).
+const mapControlsEl = useTemplateRef('mapControlsEl')
+const searchEl = useTemplateRef('searchEl')
+
+useDismissOnOutside(() => mapControlsEl.value, (target) => {
+  if (openMenu.value == null) return
+  openMenu.value = null
+  // Le geste n'a servi qu'à refermer : s'il tombe sur la carte, on neutralise le clic
+  // qui suivrait, sinon refermer un menu pose un point au passage.
+  if (target?.closest('.route-builder-map')) {
+    suppressNextMapClick = true
+    suppressNextWpClick = true
+    setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 500)
+  }
+})
+
+// Liste des résultats de recherche : même traitement, mais sans neutraliser le clic —
+// la liste ne recouvre pas la carte, un appui dessus reste une interaction voulue.
+useDismissOnOutside(() => searchEl.value, () => { searchOpen.value = false })
+
 // ─── Watchers ─────────────────────────────────────────────────────────────────
 
 watch(selectionStore.selectionRange, () => {
@@ -2351,7 +2377,7 @@ defineExpose({
   <div class="map-wrap" :class="{ expanded: state.mapExpanded, 'map-wrap--grey-basemap': state.mapStyleId === 'swissgrau' }">
     <div ref="mapEl" class="route-builder-map"></div>
 
-    <div class="map-controls">
+    <div ref="mapControlsEl" class="map-controls">
       <MapStyleDropdown :model-value="state.mapStyleId" :active-overlays="state.overlays"
         :mobile-label="t('strava.map_style_short')" @update:model-value="setMapStyle"
         :open="openMenu === 'style'" @update:open="(v) => openMenu = v ? 'style' : null" />
@@ -2526,7 +2552,7 @@ defineExpose({
     </div>
 
     <!-- Search -->
-    <div v-if="!routeStore.readOnly.value" class="map-search" :class="{ 'map-search--expanded': searchExpanded }">
+    <div v-if="!routeStore.readOnly.value" ref="searchEl" class="map-search" :class="{ 'map-search--expanded': searchExpanded }">
       <button v-if="!searchExpanded" type="button" class="btn btn-light btn-sm shadow-sm map-search-toggle" @click="openSearch" :title="t('routes.search_placeholder')">
         <i class="fa-solid fa-magnifying-glass"></i>
       </button>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, useTemplateRef } from 'vue'
+import { useDismissOnOutside } from '../composables/useDismissOnOutside'
 import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS, MAP_STYLE_COMBOS } from '../mapStyles'
 
@@ -60,10 +61,18 @@ function select(id) {
   emit('update:modelValue', id)
   isOpen.value = false
 }
+
+// Un geste hors du menu le referme. En mode contrôlé (v-model:open), c'est le parent qui
+// s'en charge : il coordonne plusieurs dropdowns et sait ce que le geste doit annuler par
+// ailleurs — s'en occuper ici aussi ferait fermer le menu avant qu'il ne le voie ouvert.
+const rootEl = useTemplateRef('rootEl')
+useDismissOnOutside(() => rootEl.value, () => {
+  if (!controlled.value) internalOpen.value = false
+})
 </script>
 
 <template>
-  <div class="position-relative shadow-sm">
+  <div ref="rootEl" class="position-relative shadow-sm">
     <button
       type="button"
       class="btn btn-sm map-ctrl-btn d-flex align-items-center gap-1"

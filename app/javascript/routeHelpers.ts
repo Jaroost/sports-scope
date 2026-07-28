@@ -945,7 +945,8 @@ const ROUNDABOUT_CMDS = new Set([13, 14])
 // ultérieur (une route qui se recoupe repasse à la même coordonnée plus loin, à
 // ~0 m elle aussi : prendre le minimum global choisirait un passage au hasard).
 // Repli : si aucun sommet n'est assez proche (densification, hint légèrement hors
-// tracé), on prend le plus proche au-delà de `fromIdx`.
+// tracé), on prend le plus proche au-delà de `fromIdx`. Renvoie -1 quand même ce repli
+// reste au-delà de MAX_ANCHOR_M : le hint n'est alors pas sur ce tracé.
 function firstPassFrom(pos: LngLat, geometry: Coord[], fromIdx: number, proximityM = 20): number {
   let clusterIdx = -1
   let clusterDist = Infinity
@@ -976,7 +977,45 @@ function firstPassFrom(pos: LngLat, geometry: Coord[], fromIdx: number, proximit
     const d = haversine(pos, geometry[i])
     if (d < bestDist) { bestDist = d; bestIdx = i }
   }
-  return bestIdx
+  return bestDist <= MAX_ANCHOR_M ? bestIdx : -1
+}
+
+// Écart maximal (m) toléré entre un hint et le sommet auquel on l'ancre. Un hint du tracé
+// tombe sur son sommet au mètre près ; au-delà de ce seuil il n'appartient pas à ce tracé
+// (portion remplacée par un détour, tracé recalculé depuis l'enregistrement du hint). On
+// l'ignore alors SANS avancer le curseur : le poser au petit bonheur ajouterait un virage
+// fantôme, et décaler le curseur décrocherait tous les hints suivants.
+const MAX_ANCHOR_M = 100
+
+// Rang, le long de `geometry`, de chaque hint de `hints` (-1 s'il n'appartient pas au
+// tracé, cf. MAX_ANCHOR_M). Appariement MONOTONE — voir turnsFromVoiceHints pour le
+// pourquoi. Sert aussi à l'épissage d'un détour (navReroute.spliceDetour), qui doit savoir
+// dans quelle portion du tracé tombe chaque hint.
+export function hintAnchorIndices(
+  hints: VoiceHint[],
+  geometry: Coord[],
+  cumDistM: number[],
+): number[] {
+  // Recul autorisé sous le curseur, exprimé EN MÈTRES LE LONG DU TRACÉ et non en nombre
+  // de sommets. Le recul sert à absorber le léger dépassement du curseur quand deux hints
+  // se suivent de près (amas d'un rond-point) ; il ne doit jamais atteindre le passage
+  // précédent sur un tracé qui se recoupe. Un compte de sommets confond ces deux échelles :
+  // la densification espace les sommets de 100 m, si bien que 10 sommets valaient tantôt
+  // quelques mètres, tantôt près d'un kilomètre. Sur un aller-retour, le curseur posé au
+  // demi-tour reculait alors jusqu'au passage de l'aller et y ré-ancrait le virage du
+  // retour : deux virages annoncés au même endroit, et celui du retour jamais donné.
+  const BACK_TOL_M = 50
+  const out: number[] = []
+  let cursor = 0
+  for (const h of hints) {
+    const floorM = (cumDistM[cursor] ?? 0) - BACK_TOL_M
+    let from = cursor
+    while (from > 0 && (cumDistM[from - 1] ?? 0) >= floorM) from--
+    const idx = firstPassFrom([h.lng, h.lat], geometry, from)
+    if (idx >= 0) cursor = idx
+    out.push(idx)
+  }
+  return out
 }
 
 // Map stored BRouter voice hints onto the current geometry, producing the same
@@ -999,29 +1038,16 @@ export function turnsFromVoiceHints(
   geometry: Coord[],
   cumDistM: number[],
 ): TurnPoint[] {
-  // Recul autorisé sous le curseur, exprimé EN MÈTRES LE LONG DU TRACÉ et non en nombre
-  // de sommets. Le recul sert à absorber le léger dépassement du curseur quand deux hints
-  // se suivent de près (amas d'un rond-point) ; il ne doit jamais atteindre le passage
-  // précédent sur un tracé qui se recoupe. Un compte de sommets confond ces deux échelles :
-  // la densification espace les sommets de 100 m, si bien que 10 sommets valaient tantôt
-  // quelques mètres, tantôt près d'un kilomètre. Sur un aller-retour, le curseur posé au
-  // demi-tour reculait alors jusqu'au passage de l'aller et y ré-ancrait le virage du
-  // retour : deux virages annoncés au même endroit, et celui du retour jamais donné.
-  const BACK_TOL_M = 50
+  const anchors = hintAnchorIndices(hints, geometry, cumDistM)
   const out: TurnPoint[] = []
-  let cursor = 0
-  for (const h of hints) {
-    const floorM = (cumDistM[cursor] ?? 0) - BACK_TOL_M
-    let from = cursor
-    while (from > 0 && (cumDistM[from - 1] ?? 0) >= floorM) from--
-    const idx = firstPassFrom([h.lng, h.lat], geometry, from)
-    cursor = idx
-    if (VOICE_HINT_SKIP.has(h.cmd)) continue
+  hints.forEach((h, i) => {
+    const idx = anchors[i]
+    if (idx < 0 || VOICE_HINT_SKIP.has(h.cmd)) return
     const { kind, direction } = maneuverFromCmd(h.cmd, h.angle)
     const exit = h.exit_number ?? 0
     const exitNumber = ROUNDABOUT_CMDS.has(h.cmd) && exit > 0 ? exit : undefined
     out.push({ idx, distM: cumDistM[idx] || 0, angle: h.angle, direction, kind, exitNumber })
-  }
+  })
   return out.sort((a, b) => a.distM - b.distM)
 }
 

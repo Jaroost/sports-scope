@@ -409,6 +409,23 @@ let maplibre: any = null
 let locationMarker: any = null
 let watchId: number | null = null
 let turnMarkers: any[] = []    // marqueurs DOM des indicateurs de virage (au-dessus des POI)
+// ─── Flux animé du surlignage de virage ───────────────────────────────────────
+// Le bout de tracé coloré autour du prochain virage porte un traitillé blanc qui défile
+// vers l'avant : le sens du virage se lit sur la CARTE, à l'endroit où il faut tourner,
+// sans avoir à décoder la flèche du bandeau. Même technique que le sens de parcours du
+// créateur (RouteBuilderMap) : `line-dasharray` n'étant pas interpolable, on cycle sur une
+// séquence de motifs dont la partie pleine avance d'un cran (période de 7 unités de
+// largeur de trait). Déclaré ici, avec l'état de la carte : applyRouteLinePaint tourne dès
+// le setup (watch immédiat) et lit ces constantes — plus bas, elles seraient en zone morte.
+const TURN_FLOW_LAYER = 'nav-turn-flow'
+const TURN_FLOW_DASHES: number[][] = [
+  [0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0],
+  [0, 0.5, 3, 3.5], [0, 1, 3, 3], [0, 1.5, 3, 2.5], [0, 2, 3, 2], [0, 2.5, 3, 1.5], [0, 3, 3, 1], [0, 3.5, 3, 0.5],
+]
+const TURN_FLOW_STEP_MS = 55
+const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+let turnFlowRaf: number | null = null
+let turnFlowStep = -1
 // Clé d'idempotence du surlignage du virage courant (cf. refreshTurnHighlight). Déclarée
 // ici, avec l'état de la carte : applyRouteLinePaint tourne dès le setup (watch immédiat)
 // et la lit — une déclaration plus bas dans le script la mettrait en zone morte.
@@ -484,6 +501,10 @@ const sportNav = computed(() => sportPreferences(routeSport.value).navigation)
 // Largeur (px) du tracé ; la bordure ajoute 4 px de part et d'autre.
 const routeLineWidth = computed(() => sportNav.value.line_width)
 const routeBorderWidth = computed(() => routeLineWidth.value + 4)
+// Flux animé du surlignage de virage : plus fin que le ruban coloré, pour que la couleur
+// du virage reste visible de part et d'autre du traitillé blanc (dont la longueur suit,
+// `line-dasharray` étant exprimé en multiples de la largeur du trait).
+const turnFlowWidth = computed(() => Math.max(1.2, routeLineWidth.value * 0.45))
 // Rayon (px) des pastilles de changement de direction.
 const turnMarkerSize = computed(() => sportNav.value.turn_marker_size)
 
@@ -520,6 +541,10 @@ function applyRouteLinePaint() {
     map.setPaintProperty('nav-turn-highlight', 'line-opacity', opacity)
     hiKey = ''
     refreshTurnHighlight()
+  }
+  if (map.getLayer(TURN_FLOW_LAYER)) {
+    map.setPaintProperty(TURN_FLOW_LAYER, 'line-width', zoomWidthExpr(turnFlowWidth.value, true))
+    map.setPaintProperty(TURN_FLOW_LAYER, 'line-opacity', opacity)
   }
   applyPreviewLinePaint()
 }
@@ -802,6 +827,7 @@ onBeforeUnmount(() => {
   if (watchId != null) navigator.geolocation.clearWatch(watchId)
   if (turnRepeatId != null) { clearInterval(turnRepeatId); turnRepeatId = null }
   stopAnimation()
+  stopTurnFlow()
   window.removeEventListener('pointerdown', onFirstGesture, true)
   window.removeEventListener('touchstart', onFirstGesture, true)
   window.removeEventListener('online', refreshBaseMap)
@@ -1224,7 +1250,8 @@ function unloadRoute() {
   for (const m of turnMarkers) m.remove()
   turnMarkers = []
   if (map) {
-    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining', 'nav-turn-highlight']) {
+    stopTurnFlow()
+    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining', 'nav-turn-highlight', TURN_FLOW_LAYER]) {
       if (map.getLayer(id)) map.removeLayer(id)
     }
     for (const id of ['nav-route', 'nav-remaining', 'nav-turn-hi']) {
@@ -1454,6 +1481,21 @@ function installRouteLayers() {
   // recouvrements) mais à la couleur de la pastille, posé PAR-DESSUS le tracé restant.
   map.addSource('nav-turn-hi', { type: 'geojson', data: widthRunsCollection([], []) })
   map.addLayer({ id: 'nav-turn-highlight', type: 'line', source: 'nav-turn-hi', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.turn_marker_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
+  // Flux animé PAR-DESSUS le surlignage : traitillé blanc qui défile vers le virage, donc
+  // dans le sens où il faut tourner (le tracé est orienté dans le sens de parcours).
+  turnFlowStep = -1
+  map.addLayer({
+    id: TURN_FLOW_LAYER,
+    type: 'line',
+    source: 'nav-turn-hi',
+    layout: { 'line-join': 'round', 'line-cap': 'butt', visibility: REDUCED_MOTION ? 'none' : 'visible' },
+    paint: {
+      'line-color': '#ffffff',
+      'line-width': zoomWidthExpr(turnFlowWidth.value, true),
+      'line-opacity': sportNav.value.line_opacity,
+      'line-dasharray': TURN_FLOW_DASHES[0],
+    },
+  })
   hiKey = ''
   refreshTurnHighlight()
 }
@@ -1461,6 +1503,30 @@ function installRouteLayers() {
 // Longueur (m) de tracé colorée de part et d'autre du virage mis en avant. Assez court
 // pour rester lisible en zoom de navigation sans manger le virage suivant d'une rafale.
 const TURN_HIGHLIGHT_M = 40
+
+// Boucle d'animation du flux (cf. la déclaration de TURN_FLOW_LAYER plus haut).
+// requestAnimationFrame se met en pause tout seul quand l'onglet passe en arrière-plan ;
+// on ne repeint la carte que lorsque le motif change vraiment (≈18 fois par seconde, pas à
+// chaque frame), et jamais en veille — l'écran noir masque la carte, la repeindre ne
+// ferait que consommer la batterie.
+function startTurnFlow() {
+  if (turnFlowRaf !== null || REDUCED_MOTION || !map) return
+  const tick = (ts: number) => {
+    turnFlowRaf = requestAnimationFrame(tick)
+    if (screenOff.value || !map?.getLayer(TURN_FLOW_LAYER)) return
+    const step = Math.floor(ts / TURN_FLOW_STEP_MS) % TURN_FLOW_DASHES.length
+    if (step === turnFlowStep) return
+    turnFlowStep = step
+    map.setPaintProperty(TURN_FLOW_LAYER, 'line-dasharray', TURN_FLOW_DASHES[step])
+  }
+  turnFlowRaf = requestAnimationFrame(tick)
+}
+
+function stopTurnFlow() {
+  if (turnFlowRaf === null) return
+  cancelAnimationFrame(turnFlowRaf)
+  turnFlowRaf = null
+}
 
 // Indicateurs de virage en marqueurs DOM (et non en couches canvas) : les
 // marqueurs MapLibre sont des overlays HTML, toujours rendus AU-DESSUS du canvas
@@ -1580,6 +1646,8 @@ function refreshTurnHighlight() {
   const tp = turns[idx] as TurnPoint | undefined
   // Pas de virage à montrer (fin de tracé, virages géométriques sans pastille) : on vide.
   if (!tp || !turnsFromBRouter || displayLine.length < 2) {
+    // Rien de coloré : plus rien à animer non plus (on ne repeint pas la carte pour rien).
+    stopTurnFlow()
     if (hiKey === '') return
     hiKey = ''
     src.setData(widthRunsCollection([], []))
@@ -1602,6 +1670,8 @@ function refreshTurnHighlight() {
   const cut = sliceLineBetween(displayLine, cumDistM, displayWScale, tp.distM - TURN_HIGHLIGHT_M, afterM)
   map.setPaintProperty('nav-turn-highlight', 'line-color', color)
   src.setData(widthRunsCollection(cut.line, cut.wscale))
+  if (cut.line.length >= 2) startTurnFlow()
+  else stopTurnFlow()
 }
 
 // Met les pastilles de virage à l'échelle du zoom, selon la même loi que le tracé

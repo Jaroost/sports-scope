@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { installCompanionBridge, inCompanionApp, revealCompanionLinks } from './companionBridge'
+import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen } from './companionBridge'
 import { companionStore } from './stores/companionStore'
 import { radarStore } from './stores/radarStore'
 
@@ -11,9 +11,12 @@ function push(payload: unknown): void {
   ;(window as any).sportsScopeCompanion.push(payload)
 }
 
-// Simule le canal injecté par le WebView de l'appli.
-function fakeChannel(): void {
-  ;(window as any).SportsScopeCompanion = { postMessage: () => {} }
+// Simule le canal injecté par le WebView de l'appli, et retient ce que la page
+// lui envoie.
+function fakeChannel(): string[] {
+  const sent: string[] = []
+  ;(window as any).SportsScopeCompanion = { postMessage: (m: string) => sent.push(m) }
+  return sent
 }
 
 describe('companionBridge', () => {
@@ -104,6 +107,25 @@ describe('companionBridge', () => {
 
       expect(radarStore.isConnected.value).toBe(true)
       expect(radarStore.targets.value).toHaveLength(1)
+    })
+  })
+
+  describe('companionScreen', () => {
+    it('demande à l\'appli d\'éteindre puis de rallumer le rétroéclairage', () => {
+      const sent = fakeChannel()
+
+      companionScreen('dimmed')
+      companionScreen('normal')
+
+      expect(sent.map((m) => JSON.parse(m))).toEqual([
+        { type: 'screen', state: 'dimmed' },
+        { type: 'screen', state: 'normal' },
+      ])
+    })
+
+    it('ne fait rien dans un navigateur ordinaire', () => {
+      // Pas de canal : la veille reste un simple voile noir, sans erreur.
+      expect(() => companionScreen('dimmed')).not.toThrow()
     })
   })
 

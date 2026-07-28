@@ -35,6 +35,7 @@ import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
+import { companionScreen } from '../companionBridge'
 import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
@@ -792,6 +793,10 @@ onBeforeUnmount(() => {
   if (detachCoordLongPress) { detachCoordLongPress(); detachCoordLongPress = null }
   closeCoordPopup()
   destroyEditOverlays()
+  // Quitter la navigation en veille ne doit pas laisser le téléphone à 1 % de
+  // luminosité sur l'écran suivant. L'appli reprend le même réflexe de son côté,
+  // pour le cas où c'est la page entière qui disparaît.
+  companionScreen('normal')
   if (map) { map.remove(); map = null }
 })
 
@@ -2279,6 +2284,10 @@ function toggleScreenOff() {
   } else {
     if (located) startAnimation()
   }
+  // Dans l'appli mobile, la veille éteint aussi le rétroéclairage : le voile
+  // noir ne coûte plus que le GPS et les capteurs. Sans effet dans un
+  // navigateur ordinaire, qui n'a pas la main sur la luminosité.
+  companionScreen(screenOff.value ? 'dimmed' : 'normal')
 }
 
 // Bascule manuelle (tap utilisateur) : on annule l'état « réveil automatique » pour

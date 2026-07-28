@@ -36,6 +36,20 @@ export function inCompanionApp(): boolean {
   return channel() != null
 }
 
+// Veille de la navigation : la page noircit ses pixels mais garde son verrou
+// d'écran, donc la dalle reste alimentée — de loin le premier poste de
+// consommation sur un guidon, devant le GPS et le BLE. L'appli, elle, peut
+// couper le rétroéclairage, ce qu'un navigateur ne sait pas faire.
+//
+// On envoie l'intention (« je suis en veille »), pas un niveau : le choix du
+// réglage appartient à l'appli, qui seule connaît la plateforme. Rien n'est
+// endormi au passage — JavaScript, position et détection de virage continuent
+// de tourner, et c'est ce qui permet à la page de redemander `normal` d'elle-même
+// à l'approche d'un virage.
+export function companionScreen(state: 'dimmed' | 'normal'): void {
+  channel()?.postMessage(JSON.stringify({ type: 'screen', state }))
+}
+
 // Le radar de l'appli alimente le store existant : le bandeau d'alerte, les
 // bips et les seuils marchent alors à l'identique, qu'il vienne d'ici ou de Web
 // Bluetooth.

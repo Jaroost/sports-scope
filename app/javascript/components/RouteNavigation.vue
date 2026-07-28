@@ -398,6 +398,11 @@ const followTurns = ref<TurnHint[]>([])
 // repassage. Le rayon de notification est relu à chaque fix (réglable au profil).
 const poiHint = ref<{ name: string; icon: string; color: string; distM: number } | null>(null)
 let announcedPoiKey: string | null = null
+// POI effectivement signalé par le bandeau (le bandeau n'en porte que l'affichage) :
+// gardé pour le tap sur la notification, qui recadre la carte sur le coureur ET le POI
+// (cf. focusPoiHint). Null quand le bandeau vient du mode débug (POI factice, sans
+// coordonnées) — le tap retombe alors sur la bascule de veille.
+let poiHintPlace: NavPlace | null = null
 
 let map: any = null
 let maplibre: any = null
@@ -2159,6 +2164,7 @@ function updatePoiProximity(here: LngLat) {
   if (dbgPoi.value) return
   if (placeNavActive.value || editMode.value || offRoute.value) {
     poiHint.value = null
+    poiHintPlace = null
     announcedPoiKey = null
     return
   }
@@ -2166,9 +2172,11 @@ function updatePoiProximity(here: LngLat) {
   const near = alertM > 0 ? pois.nearestVisiblePoi(here, alertM) : null
   if (!near) {
     poiHint.value = null
+    poiHintPlace = null
     announcedPoiKey = null
     return
   }
+  poiHintPlace = near.place
   const cat = categoryForType(near.place.type)
   poiHint.value = {
     name: near.place.name || t('routes.point_of_interest'),
@@ -2184,6 +2192,50 @@ function updatePoiProximity(here: LngLat) {
     if (soundOn.value && !audioMuted.value) playPoi()
     if (!alertsMuted.value) vibratePoi()
   }
+}
+
+// Tap sur la notification de POI : recadre la carte pour montrer d'un coup le coureur ET
+// le POI signalé (boîte englobant les deux, donc un dézoom — jamais un zoom au-delà du
+// zoom courant, d'où maxZoom), et ouvre la bulle du POI (Google Maps / Street View).
+// Le suivi caméra est débrayé le temps du coup d'œil, comme pendant le parcours des POI :
+// le bouton « Recentrer » ramène sur le coureur.
+//
+// Deux cas retombent sur l'ancien comportement (bascule de veille) : en veille, où le tap
+// sert à réveiller l'écran ; et sans POI géolocalisé sous la main (notification factice du
+// mode débug) ou sans position connue, où il n'y a rien à cadrer.
+function focusPoiHint() {
+  const here = anchorPos ?? lastPos
+  if (screenOff.value || !poiHintPlace || !here || !map || !maplibre) {
+    toggleScreenOffManual()
+    return
+  }
+  // Referme le tiroir de commandes s'il est ouvert : il mange la moitié basse de la carte,
+  // qu'on vient justement de cadrer.
+  hideControls()
+  // Détache la caméra : la boucle de rendu ne réécrit plus la vue (cf. `tick`), seul le
+  // marqueur de position continue de bouger. cameraUnlocked empêche aussi la reprise
+  // automatique du suivi à l'approche d'un virage.
+  following.value = false
+  cameraUnlocked.value = true
+  const b = new maplibre.LngLatBounds(here, here)
+  b.extend([poiHintPlace.lng, poiHintPlace.lat])
+  // Marges : de quoi laisser respirer les deux points sous les bandeaux (virage en haut,
+  // notification POI + barre de stats en bas), bornées à une fraction de la hauteur pour
+  // ne jamais dépasser la carte sur un petit écran.
+  const h = containerH || map.getContainer()?.clientHeight || 0
+  map.fitBounds(b, {
+    padding: {
+      top: Math.min(90, Math.round(h * 0.15)),
+      bottom: Math.min(180, Math.round(h * 0.3)),
+      left: 60,
+      right: 60,
+    },
+    maxZoom: camZoom.value,
+    bearing: 0,
+    pitch: 0,
+    duration: 700,
+  })
+  pois.openPlacePopup(poiHintPlace)
 }
 
 // Instantaneous speed in km/h: trust the GPS-reported speed when present,
@@ -2707,7 +2759,7 @@ function onScreenOffTap() {
          rendu ici (et non dans NavScreenOff) pour échapper au contexte d'empilement du
          voile et pouvoir passer AU-DESSUS de la carte de col en veille (z-index relevé
          via screen-off). -->
-    <NavPoiBanner v-if="poiHint && hasFix && bottomOverlaysVisible && !poiBrowseActive" :poi-hint="poiHint" :screen-off="screenOff" @toggle="toggleScreenOffManual" />
+    <NavPoiBanner v-if="poiHint && hasFix && bottomOverlaysVisible && !poiBrowseActive" :poi-hint="poiHint" :screen-off="screenOff" @focus-poi="focusPoiHint" />
 
     <!-- Parcours des POI : bandeau de pilotage (précédent / suivant) qui enchaîne les POI
          visibles, du plus proche au plus loin, en faisant voler la caméra sur chacun.

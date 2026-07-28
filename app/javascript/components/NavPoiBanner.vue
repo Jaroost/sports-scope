@@ -12,12 +12,13 @@ defineProps<{
   screenOff?: boolean
 }>()
 
-// Un tap sur le bandeau bascule entre navigation et veille (comme la carte de col).
-defineEmits<{ (e: 'toggle'): void }>()
+// Un tap sur le bandeau cadre le POI avec le coureur (l'hôte dézoome sur les deux et ouvre
+// la bulle du lieu) ; en veille, il réveille l'écran comme un tap carte.
+defineEmits<{ (e: 'focus-poi'): void }>()
 </script>
 
 <template>
-  <div class="nav-poi shadow" :class="{ 'nav-poi--sleep': screenOff }" :style="{ background: poiHint.color }" @click="$emit('toggle')">
+  <div class="nav-poi shadow" :class="{ 'nav-poi--sleep': screenOff }" :style="{ background: poiHint.color }" @click="$emit('focus-poi')">
     <i class="fa-solid nav-poi-icon" :class="poiHint.icon" aria-hidden="true"></i>
     <span class="nav-poi-info">
       <span class="nav-poi-name">{{ poiHint.name }}</span>
@@ -33,7 +34,7 @@ defineEmits<{ (e: 'toggle'): void }>()
    recouvrirait la notification, alors qu'on la veut « par-dessus la barre d'avancement ».
    Passe aussi au-dessus de TOUTE la couche de marqueurs de la carte (POI z1 … flèche z5),
    overlays DOM MapLibre remontés à la racine. Cliquable (cursor: pointer) : un tap
-   bascule la veille. */
+   cadre le POI avec le coureur (ou réveille l'écran en veille). */
 .nav-poi {
   /* --nav-bottom-inset (posé par RouteNavigation, hérité au travers des styles scopés)
      remonte le bandeau au-dessus du tiroir de commandes quand il est déployé en bas. */

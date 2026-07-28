@@ -45,6 +45,11 @@ Rails.application.routes.draw do
   # OmniAuth (POST entry points, GET callbacks)
   post "/auth/:provider", to: "sessions#passthrough", as: :auth_request, constraints: { provider: /keycloak|strava/ }
   match "/auth/:provider/callback", to: "sessions#create", via: [:get, :post]
+  # Passage de session du navigateur à l'application mobile : le lien « ouvrir dans
+  # l'application » porte un jeton à usage unique, échangé ici contre une session puis
+  # suivi d'une redirection vers `next`. Cf. SessionHandoff.
+  get "/auth/handoff", to: "sessions#handoff", as: :auth_handoff
+  post "/api/session_handoff", to: "sessions#create_handoff"
   get "/auth/failure", to: "sessions#failure"
   delete "/logout", to: "sessions#destroy", as: :logout
 

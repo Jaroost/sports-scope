@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen } from './companionBridge'
+import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen, companionLinkTarget } from './companionBridge'
 import { companionStore } from './stores/companionStore'
 import { radarStore } from './stores/radarStore'
 
@@ -166,6 +166,48 @@ describe('companionBridge', () => {
       revealCompanionLinks()
 
       expect(document.querySelector('[data-companion-link]')!.classList.contains('d-none')).toBe(true)
+    })
+  })
+
+  describe('companionLinkTarget', () => {
+    const realFetch = globalThis.fetch
+
+    afterEach(() => {
+      globalThis.fetch = realFetch
+    })
+
+    function stubFetch(response: unknown): void {
+      globalThis.fetch = (async () => response) as unknown as typeof fetch
+    }
+
+    it('joint le jeton de passage au lien', async () => {
+      stubFetch({ ok: true, json: async () => ({ token: 'jeton-1' }) })
+
+      expect(await companionLinkTarget('sportsscope://navigate/abc'))
+        .toBe('sportsscope://navigate/abc?handoff=jeton-1')
+    })
+
+    it('ouvre le lien tel quel quand le serveur refuse', async () => {
+      // Session expirée entre l'affichage de la page et le tap : la navigation
+      // partagée reste publique, elle s'ouvrira en anonyme.
+      stubFetch({ ok: false, json: async () => ({}) })
+
+      expect(await companionLinkTarget('sportsscope://navigate/abc'))
+        .toBe('sportsscope://navigate/abc')
+    })
+
+    it('ouvre le lien tel quel hors ligne', async () => {
+      globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+
+      expect(await companionLinkTarget('sportsscope://navigate/abc'))
+        .toBe('sportsscope://navigate/abc')
+    })
+
+    it('fonctionne aussi sur l\'App Link https', async () => {
+      stubFetch({ ok: true, json: async () => ({ token: 'jeton-2' }) })
+
+      expect(await companionLinkTarget('https://sports.logicraft.ch/routes/abc/navigate'))
+        .toBe('https://sports.logicraft.ch/routes/abc/navigate?handoff=jeton-2')
     })
   })
 })

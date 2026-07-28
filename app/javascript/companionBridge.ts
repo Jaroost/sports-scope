@@ -1,5 +1,6 @@
 import { companionStore, type CompanionGears } from './stores/companionStore'
 import { radarStore } from './stores/radarStore'
+import { csrfToken } from './csrf'
 
 // Réception des capteurs de l'application mobile (sports-scope-companion).
 //
@@ -93,7 +94,55 @@ export function revealCompanionLinks(): void {
 
   document.querySelectorAll('[data-companion-link]').forEach((el) => {
     el.classList.remove('d-none')
+    el.addEventListener('click', onCompanionLinkClick as EventListener)
   })
+}
+
+// Passe la session du navigateur à l'appli au moment du tap.
+//
+// Le WebView de l'appli a son propre pot de cookies : sans ça, un utilisateur connecté
+// ici rouvrirait la navigation en anonyme dans l'appli — sans ses itinéraires, sans son
+// fond de carte, sans ses POI — et devrait se connecter une deuxième fois. On demande
+// donc un jeton à usage unique (cf. SessionHandoff côté Rails) et on le joint au lien ;
+// l'appli l'échange contre une vraie session avant d'ouvrir la page.
+//
+// Le jeton est demandé ici, et pas au rendu de la page : il ne vaut que quelques
+// minutes, alors qu'une page de partage peut rester ouverte bien plus longtemps.
+//
+// Tout échec (hors ligne, session expirée entre-temps) laisse simplement le lien
+// d'origine s'ouvrir : la navigation partagée est publique, elle marchera en anonyme.
+// Le transfert de session est un confort, jamais une condition.
+async function onCompanionLinkClick(event: MouseEvent): Promise<void> {
+  const link = (event.currentTarget as HTMLAnchorElement | null)
+  // L'attribut n'est posé que pour un utilisateur connecté : sans session à passer,
+  // le lien s'ouvre tel quel.
+  if (!link || link.dataset.companionHandoff === undefined) return
+
+  event.preventDefault()
+  window.location.href = await companionLinkTarget(link.href)
+}
+
+// Le lien à ouvrir réellement : celui de la page, plus le jeton de passage si le
+// serveur veut bien en émettre un. Séparé du gestionnaire de clic pour être
+// testable sans provoquer de navigation.
+export async function companionLinkTarget(href: string): Promise<string> {
+  let token = ''
+  try {
+    const res = await fetch('/api/session_handoff', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    })
+    if (res.ok) token = (await res.json()).token ?? ''
+  } catch {
+    // Réseau absent : on ouvre l'appli sans passer la session.
+  }
+
+  if (!token) return href
+
+  const url = new URL(href)
+  url.searchParams.set('handoff', token)
+  return url.toString()
 }
 
 export function installCompanionBridge(): void {

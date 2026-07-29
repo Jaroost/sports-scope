@@ -11,7 +11,7 @@ import { POI_CATEGORIES, isPointType } from '../poiCategories'
 import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, shareVersionParam } from '../routeHelpers'
 import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
-import { turnAnomalyDiameterForSport, snapWarnDistanceForSport } from '../userPreferences'
+import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
 import { profilesForSport } from '../brouter'
 import { routeLegs, LegRoutingError } from '../brouterLegs'
 import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
@@ -1169,6 +1169,11 @@ const alternativesLoading = ref(false)
 const alternativesError = ref<string | null>(null)
 // Géométrie du tronçon actuel, tracée en référence dans la dialogue des variantes.
 const altCurrentCoords = ref<Coord[]>([])
+// Sport / profil de routage utilisés pour CE tronçon : initialisés sur ceux de
+// l'itinéraire, mais modifiables dans la dialogue (p. ex. chercher un raccourci en
+// sentier sur un parcours vélo) sans toucher aux réglages de l'itinéraire.
+const altSport = ref<Sport>(routeStore.sport.value)
+const altProfile = ref<string>(routeStore.profile.value)
 // Bornes géométrie de la sélection au moment de la proposition (figées : la sélection
 // est effacée à l'application, mais on en a besoin pour le splice).
 let altBounds: { lo: number; hi: number } | null = null
@@ -1178,7 +1183,29 @@ let altToken = 0
 // variantes trouvées) et se referme via cancelAlternatives.
 const showAlternativesDialog = computed(() => alternativesLoading.value || alternativesError.value != null || alternatives.value.length > 0)
 
-async function proposeAlternatives() {
+// Entrée depuis la toolbar : (re)part des réglages de l'itinéraire.
+function proposeAlternatives() {
+  altSport.value = routeStore.sport.value
+  altProfile.value = routeStore.profile.value
+  searchAlternatives()
+}
+
+// Changement de sport dans la dialogue : le profil retombe sur le défaut du sport
+// (préférence compte ou défaut catalogue), comme routeStore.setSport.
+function onAlternativesSport(sport: Sport) {
+  if (sport === altSport.value) return
+  altSport.value = sport
+  altProfile.value = routeProfileForSport(sport)
+  searchAlternatives()
+}
+
+function onAlternativesProfile(profile: string) {
+  if (profile === altProfile.value) return
+  altProfile.value = profile
+  searchAlternatives()
+}
+
+async function searchAlternatives() {
   if (routeStore.readOnly.value) return
   const range = selectionStore.selectionRange.value
   const geom = routeStore.geometry.value
@@ -1206,7 +1233,7 @@ async function proposeAlternatives() {
   try {
     const p0: LngLat = [geom[loI][0], geom[loI][1]]
     const p1: LngLat = [geom[hiI][0], geom[hiI][1]]
-    const alts = await fetchSegmentAlternatives(p0, p1, routeStore.profile.value)
+    const alts = await fetchSegmentAlternatives(p0, p1, altProfile.value)
     if (token !== altToken) return
     // Écarte les variantes identiques au tronçon actuel : rien à proposer d'utile.
     const distinct = alts.filter((a) => !equivalentGeometry(a, { coords: currentCoords, distanceM: currentDist }))
@@ -2413,9 +2440,13 @@ onBeforeUnmount(() => {
         :alternatives="alternatives"
         :current-coords="altCurrentCoords"
         :map-style-id="state.mapStyleId"
+        :sport="altSport"
+        :profile="altProfile"
         :loading="alternativesLoading"
         :error="alternativesError"
         @select="onSelectAlternative"
+        @update:sport="onAlternativesSport"
+        @update:profile="onAlternativesProfile"
         @close="cancelAlternatives"
       />
     </Transition>

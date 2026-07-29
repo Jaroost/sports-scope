@@ -7,8 +7,10 @@
 import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor } from '../mapStyles'
+import { profilesForSport } from '../brouter'
 import { formatDistancePrecise, formatDistanceShort } from '../routeHelpers'
 import type { Coord } from '../routeHelpers'
+import type { Sport } from '../userPreferences'
 
 interface AltView {
   idx: number
@@ -25,6 +27,11 @@ const props = defineProps<{
   alternatives: AltView[]
   currentCoords: Coord[]
   mapStyleId: string
+  // Sport + profil BRouter utilisés pour chercher les variantes de CE tronçon : le
+  // parent les initialise sur ceux de l'itinéraire, la dialogue permet d'en changer
+  // (relance de la recherche) sans modifier l'itinéraire.
+  sport: Sport
+  profile: string
   loading: boolean
   error: string | null
 }>()
@@ -32,7 +39,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   select: [altId: number]
+  'update:sport': [sport: Sport]
+  'update:profile': [profile: string]
 }>()
+
+const SPORTS: Sport[] = ['cycling', 'mtb', 'hiking']
+function sportIcon(s: Sport) {
+  return s === 'hiking' ? 'fa-person-hiking' : s === 'mtb' ? 'fa-mountain' : 'fa-bicycle'
+}
 
 const mapEl = ref<HTMLElement | null>(null)
 const hoveredId = ref<number | null>(null)
@@ -259,6 +273,44 @@ onBeforeUnmount(() => {
           <i class="fa-solid fa-code-branch me-1" aria-hidden="true"></i>
           {{ t('routes.alternatives_title') }}
         </span>
+
+        <!-- Sport + profil de routage du tronçon : changer l'un ou l'autre relance la
+             recherche de variantes (l'itinéraire, lui, n'est pas modifié). -->
+        <div class="raltd-routing">
+          <div class="btn-group btn-group-sm" role="group" :aria-label="t('routes.wt_sport')">
+            <button
+              v-for="s in SPORTS"
+              :key="s"
+              type="button"
+              class="btn"
+              :class="sport === s ? 'btn-primary' : 'btn-outline-secondary'"
+              :title="t(`routes.wt_sport_${s}`)"
+              :aria-label="t(`routes.wt_sport_${s}`)"
+              :disabled="loading"
+              @click="emit('update:sport', s)"
+            >
+              <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
+            </button>
+          </div>
+          <select
+            class="form-select form-select-sm raltd-profile-select"
+            :value="profile"
+            :aria-label="t('routes.profile_label')"
+            :title="t(`routes.brouter_profile.${profile}_desc`)"
+            :disabled="loading"
+            @change="emit('update:profile', ($event.target as HTMLSelectElement).value)"
+          >
+            <option
+              v-for="p in profilesForSport(sport)"
+              :key="p"
+              :value="p"
+              :title="t(`routes.brouter_profile.${p}_desc`)"
+            >
+              {{ t(`routes.brouter_profile.${p}`) }}
+            </option>
+          </select>
+        </div>
+
         <button type="button" class="raltd-close" :aria-label="t('routes.close')" @click="emit('close')">×</button>
       </div>
 
@@ -337,6 +389,16 @@ onBeforeUnmount(() => {
   flex: none;
 }
 .raltd-title { font-weight: 600; }
+/* Sélecteur sport + profil : collé à droite, juste avant la croix de fermeture. */
+.raltd-routing {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  margin-right: 0.5rem;
+  min-width: 0;
+}
+.raltd-profile-select { width: auto; max-width: 14rem; }
 .raltd-close {
   border: none;
   background: transparent;
@@ -424,6 +486,14 @@ onBeforeUnmount(() => {
     max-height: 100%;
     border-radius: 0;
   }
+  /* Le sélecteur de routage passe sous le titre : la barre serait sinon illisible. */
+  .raltd-header { flex-wrap: wrap; padding: 0.6rem 0.8rem; }
+  .raltd-routing {
+    order: 3;
+    width: 100%;
+    margin: 0.5rem 0 0;
+  }
+  .raltd-profile-select { flex: 1; max-width: none; }
   .raltd-legend { padding: 0.6rem 0.8rem 0.75rem; }
   .raltd-hint { margin-bottom: 0.4rem; }
 }

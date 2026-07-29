@@ -30,12 +30,20 @@ const ALT_INDICES = [0, 1, 2, 3]
 // routier en local (donc pas la position des jonctions), et un via mal placé produit
 // des allers-retours, là où un disque interdit rend toujours un P0→P1 propre.
 
-// Rayon du disque de la passe automatique, puis paliers du bouton « chercher plus
-// large ». Mesuré : 150 m est le meilleur compromis (les grands rayons donnent surtout
-// des doublons et des détours absurdes), les paliers supérieurs servent justement à
-// forcer les contournements lointains quand on les demande explicitement.
+// Rayon du disque de la passe automatique. Mesuré : 150 m est le meilleur compromis
+// (les grands rayons donnent surtout des doublons et des détours absurdes).
 export const BLOCK_RADIUS_M = 150
-export const WIDEN_RADII_M = [400, 900]
+// « Chercher plus large » : +500 m de rayon par clic, 10 paliers. Les grands rayons
+// forcent des contournements de plus en plus lointains — c'est ce qu'on veut quand on
+// les demande explicitement. Combien de paliers sont réellement praticables dépend du
+// tronçon : voir usableWidenLevels().
+export const WIDEN_STEP_M = 500
+export const WIDEN_LEVELS = 10
+
+// Rayon du palier `step` (0 = premier clic).
+export function widenRadiusForStep(step: number): number {
+  return BLOCK_RADIUS_M + (step + 1) * WIDEN_STEP_M
+}
 
 // Positions des disques le long du tronçon. Les extrémités sont exclues : un disque qui
 // avale P0 ou P1 rend le routage impossible (BRouter ne renvoie alors aucune route).
@@ -143,6 +151,17 @@ export function blockPointsAlong(coords: Coord[], radiusM: number): LngLat[] {
     points.push([c[0], c[1]])
   }
   return points
+}
+
+// Nombre de paliers d'élargissement réellement praticables sur ce tronçon. Passé une
+// certaine taille, le disque engloberait une extrémité où qu'on le pose : le routage
+// devient impossible et la passe ne peut plus rien rapporter. Proposer ces paliers-là
+// donnerait un bouton qui ne fait rien.
+export function usableWidenLevels(segmentCoords: Coord[]): number {
+  for (let step = 0; step < WIDEN_LEVELS; step++) {
+    if (!blockPointsAlong(segmentCoords, widenRadiusForStep(step)).length) return step
+  }
+  return WIDEN_LEVELS
 }
 
 // Variantes obtenues en interdisant tour à tour un morceau du tronçon. Le résultat est

@@ -37,6 +37,10 @@ const props = defineProps<{
   widening: boolean
   // Reste-t-il un palier de rayon à essayer ?
   canWiden: boolean
+  // Rayon du prochain palier, et progression dans les paliers praticables sur ce tronçon.
+  widenRadiusM: number
+  widenStep: number
+  widenLevels: number
   // Message court quand un élargissement n'a rien apporté de neuf.
   widenNote: string | null
   error: string | null
@@ -406,13 +410,15 @@ onBeforeUnmount(() => {
             v-if="canWiden"
             type="button"
             class="btn btn-sm btn-outline-secondary raltd-widen"
-            :title="t('routes.alternatives_widen_title')"
+            :title="t('routes.alternatives_widen_title', { radius: formatDistancePrecise(widenRadiusM) })"
             :disabled="widening"
             @click="emit('widen')"
           >
             <span v-if="widening" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
             <i v-else class="fa-solid fa-arrows-left-right-to-line me-1" aria-hidden="true"></i>
             {{ t('routes.alternatives_widen') }}
+            <span class="raltd-widen-radius">{{ formatDistancePrecise(widenRadiusM) }}</span>
+            <span v-if="widenLevels > 1" class="raltd-widen-level">{{ widenStep + 1 }}/{{ widenLevels }}</span>
           </button>
         </div>
       </div>
@@ -504,6 +510,13 @@ onBeforeUnmount(() => {
 }
 .raltd-legend-main { flex: 1; min-width: 0; }
 .raltd-widen { flex: none; white-space: nowrap; }
+.raltd-widen-radius { font-weight: 600; margin-left: 0.35rem; }
+.raltd-widen-level {
+  margin-left: 0.4rem;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
 .raltd-widen-note {
   flex: none;
   font-size: 0.8rem;

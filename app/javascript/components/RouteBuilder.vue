@@ -14,7 +14,7 @@ import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
 import { profilesForSport } from '../brouter'
 import { routeLegs, LegRoutingError } from '../brouterLegs'
-import { fetchSegmentAlternatives, fetchBlockedAlternatives, equivalentGeometry, BLOCK_RADIUS_M, WIDEN_RADII_M } from '../routeAlternatives'
+import { fetchSegmentAlternatives, fetchBlockedAlternatives, equivalentGeometry, usableWidenLevels, widenRadiusForStep, BLOCK_RADIUS_M } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
 import { parseGpxWaypoints } from '../gpxImport'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
@@ -1192,9 +1192,13 @@ let altFound: RouteAlternative[] = []
 let altEndpoints: { p0: LngLat; p1: LngLat } | null = null
 let altCurrentDist = 0
 let altCurrentGain = 0
-// Palier d'élargissement déjà consommé (index dans WIDEN_RADII_M).
+// Paliers d'élargissement déjà consommés, et ce qu'il reste de praticable sur ce
+// tronçon (un rayon trop grand pour lui ne peut plus rien rapporter — cf.
+// usableWidenLevels).
 const altWidenStep = ref(0)
-const canWidenAlternatives = computed(() => altWidenStep.value < WIDEN_RADII_M.length)
+const altWidenLevels = computed(() => usableWidenLevels(altCurrentCoords.value))
+const canWidenAlternatives = computed(() => altWidenStep.value < altWidenLevels.value)
+const nextWidenRadiusM = computed(() => widenRadiusForStep(altWidenStep.value))
 
 // La dialogue s'ouvre dès qu'une proposition est en cours (chargement, erreur ou
 // variantes trouvées) et se referme via cancelAlternatives.
@@ -1276,8 +1280,8 @@ async function searchAlternatives() {
 // plus de terrain, BRouter doit contourner plus loin — c'est ce qui fait apparaître les
 // variantes qui repartent en arrière ou vont chercher un autre versant.
 async function widenAlternatives() {
-  const radius = WIDEN_RADII_M[altWidenStep.value]
-  if (radius == null || !altEndpoints || alternativesLoading.value || alternativesWidening.value) return
+  if (!canWidenAlternatives.value || !altEndpoints || alternativesLoading.value || alternativesWidening.value) return
+  const radius = nextWidenRadiusM.value
 
   const token = altToken
   altWidenStep.value++
@@ -2525,6 +2529,9 @@ onBeforeUnmount(() => {
         :loading="alternativesLoading"
         :widening="alternativesWidening"
         :can-widen="canWidenAlternatives"
+        :widen-radius-m="nextWidenRadiusM"
+        :widen-step="altWidenStep"
+        :widen-levels="altWidenLevels"
         :widen-note="alternativesWidenNote"
         :error="alternativesError"
         @select="onSelectAlternative"

@@ -1160,7 +1160,7 @@ fr:
     alternatives_variant: "Variante %{n}"
     alternatives_widen: "Chercher plus large"
     alternatives_widen_none: "Rien de plus à ce rayon"
-    alternatives_widen_title: "Interdit une zone plus grande autour du tracé actuel : fait ressortir les variantes qui contournent de plus loin."
+    alternatives_widen_title: "Interdit une zone de %{radius} de rayon autour du tracé actuel : fait ressortir les variantes qui contournent de plus loin. Chaque clic élargit encore."
     apply_alternative: "Choisir"
     # Libellés de type d'activité, réutilisés par plusieurs composants (sélecteurs de
     # sport). Nom hérité de l'ancien sélecteur Waymarked Trails, désormais générique.

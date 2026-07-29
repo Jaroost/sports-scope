@@ -1160,7 +1160,7 @@ en:
     alternatives_variant: "Variant %{n}"
     alternatives_widen: "Search wider"
     alternatives_widen_none: "Nothing more at this radius"
-    alternatives_widen_title: "Blocks a larger area around the current route, surfacing variants that detour further out."
+    alternatives_widen_title: "Blocks a %{radius} radius around the current route, surfacing variants that detour further out. Each click widens it again."
     apply_alternative: "Choose"
     # Activity-type labels, reused by several components (sport pickers). Name inherited
     # from the former Waymarked Trails selector, now generic.

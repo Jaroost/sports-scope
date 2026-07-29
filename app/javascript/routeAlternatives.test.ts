@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { blockPointsAlong, equivalentGeometry } from './routeAlternatives'
+import {
+  blockPointsAlong, equivalentGeometry, usableWidenLevels, widenRadiusForStep,
+  BLOCK_RADIUS_M, WIDEN_STEP_M, WIDEN_LEVELS,
+} from './routeAlternatives'
 import { haversine } from './routeHelpers'
 import type { Coord } from './routeHelpers'
 
@@ -47,6 +50,41 @@ describe('blockPointsAlong', () => {
     expect(blockPointsAlong([[6.0, 46.5, 500]], 150)).toEqual([])
     // Tous les points confondus : longueur nulle, aucune position à échantillonner.
     expect(blockPointsAlong([[6.0, 46.5, 500], [6.0, 46.5, 500]], 150)).toEqual([])
+  })
+})
+
+describe('widenRadiusForStep', () => {
+  it('part du rayon automatique et ajoute un pas par palier', () => {
+    expect(widenRadiusForStep(0)).toBe(BLOCK_RADIUS_M + WIDEN_STEP_M)
+    expect(widenRadiusForStep(1)).toBe(BLOCK_RADIUS_M + 2 * WIDEN_STEP_M)
+    expect(widenRadiusForStep(WIDEN_LEVELS - 1)).toBe(BLOCK_RADIUS_M + WIDEN_LEVELS * WIDEN_STEP_M)
+  })
+})
+
+describe('usableWidenLevels', () => {
+  // ~7,7 km de tracé : les premiers paliers passent, les plus grands finissent par
+  // englober une extrémité où qu'on les pose.
+  it('s’arrête au premier palier qui ne peut plus rien bloquer', () => {
+    const levels = usableWidenLevels(line)
+
+    expect(levels).toBeGreaterThan(0)
+    expect(levels).toBeLessThan(WIDEN_LEVELS)
+    for (let step = 0; step < levels; step++) {
+      expect(blockPointsAlong(line, widenRadiusForStep(step)).length).toBeGreaterThan(0)
+    }
+    expect(blockPointsAlong(line, widenRadiusForStep(levels)).length).toBe(0)
+  })
+
+  it('offre tous les paliers sur un tronçon assez long', () => {
+    const long: Coord[] = Array.from({ length: 101 }, (_, i) => [6.0 + i * 0.01, 46.5, 500] as Coord)
+
+    expect(usableWidenLevels(long)).toBe(WIDEN_LEVELS)
+  })
+
+  it('n’en offre aucun sur un tronçon trop court', () => {
+    const tiny: Coord[] = [[6.0, 46.5, 500], [6.001, 46.5, 500]]
+
+    expect(usableWidenLevels(tiny)).toBe(0)
   })
 })
 

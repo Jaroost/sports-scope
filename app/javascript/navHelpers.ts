@@ -44,6 +44,106 @@ export interface ClimbInfo {
   gradeText: string   // couleur de texte contrastée (noir/blanc)
 }
 
+// ─── État publié à l'application mobile ────────────────────────────────────────
+
+// Ce que la page dit de la navigation à l'appli qui l'héberge (cf. companionBridge).
+// Volontairement plat et scalaire : l'appli le reçoit ~1 fois par seconde, et rien
+// ici ne doit coûter une sérialisation lourde.
+export interface CompanionNavTurn {
+  state: TurnHint['state']
+  distM: number
+  direction: TurnHint['direction']
+  kind: Maneuver
+  exitNumber: number | null
+  // Position du virage. C'est elle qui permet à l'appli de juger l'approche avec
+  // son propre GPS quand la page ne parle plus (carte masquée, WebView ralenti) :
+  // sans ça, une page silencieuse voudrait dire « aucun virage en vue ».
+  lat: number | null
+  lng: number | null
+}
+
+export interface CompanionNavClimb {
+  ratio: number
+  remainingGainM: number
+  grade: number
+  gain: number
+  lengthM: number
+  category: string | null
+}
+
+export interface CompanionNavState {
+  type: 'nav'
+  at: number
+  // Suit-on un itinéraire ? Faux en navigation libre, où virages et arrivée
+  // n'ont pas de sens.
+  route: boolean
+  turn: CompanionNavTurn | null
+  offRoute: boolean
+  arrived: boolean
+  speedKmh: number
+  remainingM: number
+  remainingGainM: number
+  climb: CompanionNavClimb | null
+}
+
+// Assemble l'état à publier. Pur : tout vient des paramètres, donc testable sans
+// GPS ni carte.
+//
+// `turnCoord` est la position du virage annoncé (`geometry[turn.idx]`), pas celle
+// du coureur. On ne publie pas le profil du col (segments / aire / points) : il est
+// volumineux, statique pour tout le col, et le renvoyer chaque seconde ne servirait
+// à rien — il aura son propre message le jour où l'appli le dessinera.
+export function navStateFor(input: {
+  hasRoute: boolean
+  hint: TurnHint | null
+  turnCoord: LngLat | null
+  offRoute: boolean
+  arrived: boolean
+  speedKmh: number
+  remainingM: number
+  remainingGainM: number
+  climb: ClimbInfo | null
+  at?: number
+}): CompanionNavState {
+  const { hasRoute, hint, turnCoord, offRoute, arrived, climb } = input
+
+  // Hors trajet, le virage annoncé porte sur un tracé qu'on a quitté : le publier
+  // ferait ramener l'appli sur la carte pour une consigne qui ne s'applique plus.
+  const turn: CompanionNavTurn | null = hasRoute && hint && !offRoute
+    ? {
+        state: hint.state,
+        distM: hint.distM,
+        direction: hint.direction,
+        kind: hint.kind,
+        exitNumber: hint.exitNumber ?? null,
+        lat: turnCoord ? turnCoord[1] : null,
+        lng: turnCoord ? turnCoord[0] : null,
+      }
+    : null
+
+  return {
+    type: 'nav',
+    at: input.at ?? Date.now(),
+    route: hasRoute,
+    turn,
+    offRoute: hasRoute && offRoute,
+    arrived: hasRoute && arrived,
+    speedKmh: input.speedKmh,
+    remainingM: hasRoute ? input.remainingM : 0,
+    remainingGainM: hasRoute ? input.remainingGainM : 0,
+    climb: climb
+      ? {
+          ratio: climb.ratio,
+          remainingGainM: climb.remainingGainM,
+          grade: climb.grade,
+          gain: climb.climb.gain,
+          lengthM: climb.climb.lengthM,
+          category: climb.climb.category,
+        }
+      : null,
+  }
+}
+
 // ─── Couleurs / icônes ──────────────────────────────────────────────────────────
 
 // Noir ou blanc, selon ce qui se lit le mieux sur `hex` (luminance perçue, BT.601).

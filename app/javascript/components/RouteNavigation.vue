@@ -16,7 +16,7 @@ import type { Waypoint } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildTurnChain,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
-  INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep,
+  INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep, navStateFor,
 } from '../navHelpers'
 import type {
   TurnHint, ClimbInfo, ClimbProfile, ArrivalState, ReachedTurn, TurnAlertState,
@@ -34,7 +34,7 @@ import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
-import { companionScreen } from '../companionBridge'
+import { companionScreen, companionNav } from '../companionBridge'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
@@ -1849,6 +1849,36 @@ function onPositionFree(pos: GeolocationPosition, here: LngLat) {
   lastPos = here
 }
 
+// Publie l'état de la navigation vers l'application mobile, une fois par fix.
+//
+// Appelé ici plutôt que dans updateTurns : la charge utile mélange le virage, le
+// hors-trace, l'arrivée, la vitesse et le col, qui sont posés par plusieurs
+// fonctions du même fix. Même esprit que autoWakeForTurns — un appel impératif au
+// point où l'état est complet, pas un `watch` qui redéclencherait à contretemps.
+//
+// La coordonnée publiée est celle du PROCHAIN virage du tracé, pas forcément celle
+// que le bandeau affiche : quand on est déjà sur un virage, le bandeau montre le
+// suivant de la rafale. C'est le prochain virage qui intéresse l'appli, puisqu'elle
+// s'en sert pour juger l'approche avec son propre GPS.
+function publishNavState() {
+  const turn = hasRoute.value ? turns[nextTurnPtr] : undefined
+  const coord = turn && geometry[turn.idx]
+    ? ([geometry[turn.idx][0], geometry[turn.idx][1]] as LngLat)
+    : null
+
+  companionNav(navStateFor({
+    hasRoute: hasRoute.value,
+    hint: turnHint.value,
+    turnCoord: coord,
+    offRoute: offRoute.value,
+    arrived: arrived.value,
+    speedKmh: speedKmh.value,
+    remainingM: remainingM.value,
+    remainingGainM: remainingGainM.value,
+    climb: climbInfo.value,
+  }))
+}
+
 function onPosition(pos: GeolocationPosition) {
   gpsError.value = null
   hasFix.value = true
@@ -1863,6 +1893,8 @@ function onPosition(pos: GeolocationPosition) {
 
   // Notification de proximité d'un POI (bandeau du bas), en mode itinéraire comme libre.
   updatePoiProximity(here)
+
+  publishNavState()
 
   if (!hasInitialZoom) {
     // First fix: a smooth intro that also applies the profile zoom once,

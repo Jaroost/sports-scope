@@ -4,8 +4,9 @@ import {
   arrivalClock, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE,
   turnBanner, turnAlertStep, INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep,
+  navStateFor,
 } from './navHelpers'
-import type { ArrivalState, ReachedTurn, TurnAlertState, TurnHint } from './navHelpers'
+import type { ArrivalState, ReachedTurn, TurnAlertState, TurnHint, ClimbInfo } from './navHelpers'
 import type { TurnPoint, Climb } from './routeHelpers'
 import { ARRIVAL_M, ARRIVAL_APPROACH_M } from './navConstants'
 
@@ -520,5 +521,94 @@ describe('revealZoomStep', () => {
   it('ne descend pas sous le plancher caméra', () => {
     expect(revealZoomStep({ ...base, y: 0, base: 12 })).toBe(12)
     expect(revealZoomStep({ ...base, y: 0, base: 12.1 })).toBe(12)
+  })
+})
+
+describe('navStateFor', () => {
+  const hint: TurnHint = {
+    direction: 'left', distM: 128.4, kind: 'turn', angle: -85, state: 'near',
+  }
+  const base = {
+    hasRoute: true,
+    hint: null as TurnHint | null,
+    turnCoord: null as [number, number] | null,
+    offRoute: false,
+    arrived: false,
+    speedKmh: 27.4,
+    remainingM: 18450,
+    remainingGainM: 312,
+    climb: null as ClimbInfo | null,
+    at: 1753790000000,
+  }
+
+  it('publie le virage avec sa position', () => {
+    // La position est ce qui permet à l'appli de juger l'approche avec son propre
+    // GPS quand la page ne parle plus.
+    const state = navStateFor({ ...base, hint, turnCoord: [6.63229, 46.52313] })
+
+    expect(state.type).toBe('nav')
+    expect(state.at).toBe(1753790000000)
+    expect(state.turn).toEqual({
+      state: 'near', distM: 128.4, direction: 'left', kind: 'turn',
+      exitNumber: null, lat: 46.52313, lng: 6.63229,
+    })
+    expect(state.speedKmh).toBe(27.4)
+    expect(state.remainingM).toBe(18450)
+  })
+
+  it('tolère un virage sans position connue', () => {
+    const state = navStateFor({ ...base, hint, turnCoord: null })
+
+    expect(state.turn?.lat).toBeNull()
+    expect(state.turn?.lng).toBeNull()
+    expect(state.turn?.state).toBe('near')
+  })
+
+  it('tait le virage hors-trace', () => {
+    // Le virage annoncé porte sur un tracé qu'on a quitté : le publier ferait
+    // revenir l'appli sur la carte pour une consigne qui ne s'applique plus.
+    const state = navStateFor({ ...base, hint, turnCoord: [6.6, 46.5], offRoute: true })
+
+    expect(state.turn).toBeNull()
+    expect(state.offRoute).toBe(true)
+  })
+
+  it('n’a ni virage ni arrivée en navigation libre', () => {
+    const state = navStateFor({
+      ...base, hasRoute: false, hint, turnCoord: [6.6, 46.5], arrived: true,
+    })
+
+    expect(state.route).toBe(false)
+    expect(state.turn).toBeNull()
+    expect(state.arrived).toBe(false)
+    expect(state.remainingM).toBe(0)
+    // La vitesse, elle, garde son sens sans tracé.
+    expect(state.speedKmh).toBe(27.4)
+  })
+
+  it('résume le col sans son profil', () => {
+    // Les segments SVG sont volumineux et statiques pour tout le col : les
+    // renvoyer chaque seconde ne servirait à rien.
+    const climb = {
+      climb: {
+        startIdx: 10, endIdx: 90, gain: 780, lengthM: 12400,
+        avgGrade: 6.3, category: '2', startKm: 4, endKm: 16.4,
+      },
+      ratio: 0.42, remainingGainM: 210, segments: [{ d: 'M0,0', color: '#f00' }],
+      areaD: 'M0,0 L100,100 Z', posX: 42, posY: 60, topY: 5,
+      grade: 6.4, gradeColor: '#f00', gradeText: '#fff',
+    } as ClimbInfo
+
+    const state = navStateFor({ ...base, climb })
+
+    expect(state.climb).toEqual({
+      ratio: 0.42, remainingGainM: 210, grade: 6.4,
+      gain: 780, lengthM: 12400, category: '2',
+    })
+    expect(JSON.stringify(state)).not.toContain('M0,0')
+  })
+
+  it('n’a pas de col hors d’un col', () => {
+    expect(navStateFor(base).climb).toBeNull()
   })
 })

@@ -75,6 +75,9 @@ Rails.application.routes.draw do
   get "/api/performance/ftp", to: "performance#ftp", as: :api_performance_ftp
   get "/api/performance/training_load", to: "performance#training_load", as: :api_performance_training_load
 
+  # Seuils + zones du cycliste, pour l'application mobile (cf. RiderProfilesController)
+  get "/api/rider_profile", to: "rider_profiles#show", as: :api_rider_profile
+
   # Seuils physiologiques de l'athlète (FTP manuelle, poids — JSON pour Vue)
   patch "/api/athlete", to: "profiles#update_athlete"
 

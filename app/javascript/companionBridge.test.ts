@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen, companionLinkTarget } from './companionBridge'
+import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen, companionLinkTarget, companionNav } from './companionBridge'
+import { navStateFor } from './navHelpers'
+import type { TurnHint } from './navHelpers'
 import { companionStore } from './stores/companionStore'
 
 // Le pont installe une fonction globale que l'application mobile appelle depuis son
@@ -68,6 +70,65 @@ describe('companionBridge', () => {
 
     expect(companionStore.gears.value?.frontTeeth).toBe(50)
     expect(companionStore.gears.value?.ratio).toBeCloseTo(4.5454, 3)
+  })
+
+  describe('companionNav', () => {
+    const hint: TurnHint = {
+      direction: 'left', distM: 128.4, kind: 'turn', angle: -85, state: 'near',
+    }
+    const state = (over: Partial<Parameters<typeof navStateFor>[0]> = {}) => navStateFor({
+      hasRoute: true, hint, turnCoord: [6.63229, 46.52313], offRoute: false,
+      arrived: false, speedKmh: 27.4, remainingM: 18450, remainingGainM: 312,
+      climb: null, at: 1_000_000, ...over,
+    })
+
+    it('publie le virage et sa position vers l\'appli', () => {
+      const sent = fakeChannel()
+
+      companionNav(state())
+
+      expect(JSON.parse(sent[0])).toMatchObject({
+        type: 'nav',
+        turn: { state: 'near', lat: 46.52313, lng: 6.63229 },
+      })
+    })
+
+    it('ne renvoie pas deux fois le même état dans la seconde', () => {
+      // À l'arrêt, la position ne bouge plus : republier à l'identique ne dirait
+      // rien de neuf et réveillerait l'appli pour rien.
+      const sent = fakeChannel()
+
+      companionNav(state({ at: 1_000_000 }))
+      companionNav(state({ at: 1_000_400 }))
+
+      expect(sent).toHaveLength(1)
+    })
+
+    it('republie passé la seconde, même identique', () => {
+      // Un signe de vie régulier : c'est lui qui dit à l'appli que
+      // l'information est encore fraîche.
+      const sent = fakeChannel()
+
+      companionNav(state({ at: 2_000_000 }))
+      companionNav(state({ at: 2_001_500 }))
+
+      expect(sent).toHaveLength(2)
+    })
+
+    it('republie aussitôt quand l\'état change', () => {
+      const sent = fakeChannel()
+
+      companionNav(state({ at: 3_000_000 }))
+      companionNav(state({ at: 3_000_100, hint: { ...hint, distM: 40 } }))
+
+      expect(sent).toHaveLength(2)
+      expect(JSON.parse(sent[1]).turn.distM).toBe(40)
+    })
+
+    it('ne fait rien dans un navigateur ordinaire', () => {
+      // Pas de canal injecté : la navigation web marche seule, sans erreur.
+      expect(() => companionNav(state())).not.toThrow()
+    })
   })
 
   describe('companionScreen', () => {

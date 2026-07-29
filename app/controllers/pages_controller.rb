@@ -43,8 +43,8 @@ class PagesController < ApplicationController
   end
 
   def free_navigation
-    # Page de navigation unifiée : démarre en navigation libre (carte + vitesse + radar
-    # + veille) et peut charger un itinéraire à la volée. Public, aucun login requis.
+    # Page de navigation unifiée : démarre en navigation libre (carte + vitesse +
+    # veille) et peut charger un itinéraire à la volée. Public, aucun login requis.
     #
     # `fresh=1` (posé par les menus, cf. NavbarHelper) : on veut vraiment repartir en
     # libre, donc sans reprendre l'itinéraire mémorisé. Sans le paramètre — typiquement

@@ -72,7 +72,7 @@ export interface UserPreferences {
     alert_m: number
   }
   search: { country_codes: string[]; worldwide_fallback: boolean }
-  navigation: { default_style: MapStyleId; zoom: number; nav_fps: number; sound_volume: number; show_climb_card: boolean; radar_close_m: number; auto_reroute: boolean; auto_reroute_cooldown_s: number }
+  navigation: { default_style: MapStyleId; zoom: number; nav_fps: number; sound_volume: number; show_climb_card: boolean; auto_reroute: boolean; auto_reroute_cooldown_s: number }
   display: {
     default_sport: Sport
     show_grade_colors: boolean
@@ -141,7 +141,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     country_codes: ['ch', 'fr', 'it', 'at', 'de'],
     worldwide_fallback: false,
   },
-  navigation: { default_style: 'liberty', zoom: 17, nav_fps: 8, sound_volume: 100, show_climb_card: true, radar_close_m: 30, auto_reroute: true, auto_reroute_cooldown_s: 10 },
+  navigation: { default_style: 'liberty', zoom: 17, nav_fps: 8, sound_volume: 100, show_climb_card: true, auto_reroute: true, auto_reroute_cooldown_s: 10 },
   display: {
     default_sport: 'cycling',
     show_grade_colors: true,

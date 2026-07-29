@@ -3,7 +3,7 @@ import { ref, onBeforeUnmount } from 'vue'
 // Auto-masquage des boutons de commande (interface épurée en séance). Partagé entre
 // navigation libre et navigation sur itinéraire.
 //
-// Les commandes (retour, style de carte, son, radar, caméra, POI…) encombrent la vue
+// Les commandes (retour, style de carte, son, caméra, POI…) encombrent la vue
 // une fois la séance lancée. On les affiche au démarrage (découvrabilité) puis on les
 // estompe après quelques secondes d'inactivité ; un swipe vers le haut depuis le bord
 // bas les rappelle (cf. useRevealGesture).

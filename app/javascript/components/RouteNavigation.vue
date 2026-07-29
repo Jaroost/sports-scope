@@ -24,7 +24,6 @@ import type {
 import { unlockAudio, playManeuverBurst, playOffRoute, playPoi, playArrival } from '../navAudio'
 import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
-import RadarOverlay from './RadarOverlay.vue'
 import CompanionSensors from './CompanionSensors.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
 import NavPoiBanner from './NavPoiBanner.vue'
@@ -36,7 +35,6 @@ import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import { companionScreen } from '../companionBridge'
-import { radarStore } from '../stores/radarStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
@@ -46,7 +44,6 @@ import type { NavPlace } from '../composables/useNavPois'
 import type { RouteMarker } from '../routeMarkers'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
 import { useNavSound } from '../composables/useNavSound'
-import { useRadarAlerts } from '../composables/useRadarAlerts'
 import {
   useNavCamera, CAM_ZOOM_MIN, CAM_ZOOM_MAX,
 } from '../composables/useNavCamera'
@@ -122,7 +119,7 @@ const following = ref(true)
 // suppresses the automatic snap-back on turn approach so the view stays where
 // they left it; tapping "recenter" clears it and resumes following.
 const cameraUnlocked = ref(false)
-// Son de la séance (alertes virage / radar). Voir useNavSound.
+// Son de la séance (alertes de virage). Voir useNavSound.
 const { soundOn, toggleSound, soundVolume, setVolume } = useNavSound()
 const activePanel = ref<string | null>(null)
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
@@ -249,7 +246,7 @@ const loggedIn = isLoggedIn()
 const screenOff = ref(false)
 
 // ─── Auto-masquage des boutons (interface épurée en séance) ────────────────────
-// Les commandes (retour, style de carte, son, radar, caméra, POI) encombrent la
+// Les commandes (retour, style de carte, son, caméra, POI) encombrent la
 // vue une fois la séance lancée. On les affiche au démarrage (découvrabilité) puis
 // on les estompe après quelques secondes d'inactivité ; un swipe vers le haut depuis
 // le bas de l'écran les rappelle. On ne masque pas tant qu'un sous-panneau (caméra /
@@ -342,19 +339,13 @@ const rerouteError = ref<string | null>(null)
 const searchOrEditMuted = computed(() => placeNavActive.value || editMode.value)
 // Sourdine des alertes du TRACÉ (virage, hors-trace, POI) — sons ET vibrations. On y
 // ajoute le parcours des POI : pendant qu'il enchaîne ses POI à la main, on ne le
-// dérange pas avec les indications du tracé. Le radar, lui, n'est PAS coupé par le
-// parcours POI (cf. radarMuted) : une voiture qui arrive derrière reste une alerte de
-// sécurité, à signaler quoi qu'il fasse.
+// dérange pas avec les indications du tracé.
 const alertsMuted = computed(() => searchOrEditMuted.value || poiBrowseActive.value)
 // Sourdine AUDIO des alertes du tracé = sourdine alertes OU tiroir de commandes affiché.
 // Tant que le panneau de boutons est visible (l'utilisateur le consulte / ajuste un
 // réglage), on coupe les sons (virage, hors-trace, POI) — un bip par-dessus le menu serait
 // du bruit parasite. Les vibrations, elles, restent pilotées par alertsMuted.
 const audioMuted = computed(() => alertsMuted.value || controlsVisible.value)
-// Sourdine du RADAR : mêmes conditions que les sons du tracé MAIS sans le parcours POI —
-// l'alerte radar (son + overlay) reste active pendant qu'on parcourt ses POI, car c'est
-// une info de sécurité (voiture arrivant par l'arrière).
-const radarMuted = computed(() => searchOrEditMuted.value || controlsVisible.value)
 
 // Adopte le sport et le profil de routage d'un tracé chargé (liste ou lien partagé). Un
 // tracé sauvegardé avant l'introduction des profils, ou avec un profil incohérent avec son
@@ -735,15 +726,6 @@ let lastTickT = 0                      // performance.now() de la dernière fram
 
 const donePercent = computed(() => Math.round(doneRatio.value * 100))
 
-// ─── Radar arrière (Garmin Varia) ─────────────────────────────────────────────
-// Connexion/déconnexion + alertes sonores (une par véhicule). Voir useRadarAlerts.
-const { radarKnown, toggleRadar } = useRadarAlerts({ soundOn, muted: radarMuted })
-
-// Le bandeau radar (RadarOverlay) occupe le tout-haut de l'écran. Quand il est
-// visible, on descend la vitesse/le virage pour ne pas passer dessous. Même
-// condition d'affichage que le composant.
-const radarBannerVisible = computed(() => radarStore.isConnected.value)
-
 // Vrai à l'approche d'un virage (bandeau violet/orange « near ») et au virage atteint
 // (bandeau vert « now ») : le virage prime alors sur le col, on masque la carte de col
 // pour ne pas encombrer l'écran et laisser toute la place à l'indication de direction.
@@ -755,12 +737,12 @@ const approachingTurn = computed(
 )
 
 // ─── Mode débug (preview des overlays) ────────────────────────────────────────
-// Panneau d'injection de données factices (virage, col, POI, radar) pour prévisualiser
-// les overlays sans GPS ni matériel. Voir useNavDebug : les gardes dbgTurn / dbgClimb /
+// Panneau d'injection de données factices (virage, col, POI) pour prévisualiser
+// les overlays sans GPS. Voir useNavDebug : les gardes dbgTurn / dbgClimb /
 // dbgPoi ci-dessous empêchent les mises à jour live d'écraser l'overlay inspecté.
 const {
-  debugMode, dbgRadar, dbgClimb, dbgTurn, dbgPoi, dbgTurnLabel,
-  cycleDebugTurn, toggleDebugClimb, toggleDebugPoi, toggleDebugRadar,
+  debugMode, dbgClimb, dbgTurn, dbgPoi, dbgTurnLabel,
+  cycleDebugTurn, toggleDebugClimb, toggleDebugPoi,
 } = useNavDebug({
   canDebug: props.canDebug,
   getTurnUrgentM: () => sportNav.value.turn_urgent_m,
@@ -2200,8 +2182,8 @@ function handleOffRouteSound(wasOffRoute: boolean) {
 // Le tiroir ouvert suspend aussi les relances : c'est là qu'on choisit le profil de
 // routage du détour, et un recalcul parti au milieu de la sélection l'aurait calculé avec
 // l'ancien profil. À la fermeture, le cooldown est déjà écoulé, donc le détour part
-// aussitôt — avec le profil retenu. Même raisonnement que audioMuted / radarMuted, qui
-// tiennent déjà « tiroir ouvert » pour « l'utilisateur est en train de régler ».
+// aussitôt — avec le profil retenu. Même raisonnement que audioMuted, qui tient
+// déjà « tiroir ouvert » pour « l'utilisateur est en train de régler ».
 function maybeAutoReroute() {
   if (!navPrefs.auto_reroute) return
   if (!offRoute.value) return
@@ -2546,9 +2528,9 @@ function onScreenOffTap() {
     ></div>
 
     <!-- Panneau de commandes : feuille qui glisse depuis le BAS au swipe vers le haut.
-         Regroupe TOUS les boutons (retour, profil, style de carte, son, radar, caméra,
+         Regroupe TOUS les boutons (retour, profil, style de carte, son, caméra,
          POI) — à portée de pouce, et le haut de l'écran reste aux notifications pleine
-         largeur (virage / radar). Masqué hors séance, rappelé par la zone de swipe. -->
+         largeur (virage, POI). Masqué hors séance, rappelé par la zone de swipe. -->
     <NavControlsPanel
       :controls-visible="controlsVisible"
       :screen-off="screenOff"
@@ -2574,7 +2556,6 @@ function onScreenOffTap() {
       :route-profile="routeProfile"
       :edit-mode="editMode"
       :climb-card-visible="hasRoute ? showClimbCard : undefined"
-      :radar-known="radarKnown"
       v-model:cam-zoom="camZoom"
       :zoom-saved="zoomSaved"
       :cam-zoom-min="CAM_ZOOM_MIN"
@@ -2585,7 +2566,6 @@ function onScreenOffTap() {
       :poi-loading="poiLoading"
       :poi-browse-count="poiBrowseCount"
       :route-search="hasRoute"
-      :dbg-radar="dbgRadar"
       :dbg-climb="dbgClimb"
       :dbg-turn-label="dbgTurnLabel"
       :dbg-poi="dbgPoi"
@@ -2599,7 +2579,6 @@ function onScreenOffTap() {
       @toggle-sound="toggleSound"
       @update:sound-volume="setVolume"
       @toggle-climb-card="showClimbCard = !showClimbCard"
-      @toggle-radar="toggleRadar"
       @zoom-input="onZoomInput"
       @save-zoom="saveZoomToProfile"
       @toggle-poi="pois.togglePoi"
@@ -2610,7 +2589,6 @@ function onScreenOffTap() {
       @cancel-offline="cancelOfflineDownload"
       @remove-offline="removeOfflineMap"
       @toggle-offline-layer="toggleOfflineLayer"
-      @toggle-debug-radar="toggleDebugRadar"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
       @toggle-debug-poi="toggleDebugPoi"
@@ -2735,10 +2713,6 @@ function onScreenOffTap() {
       </div>
     </div>
 
-    <!-- Radar arrière (Garmin Varia) — élevé au-dessus du voile de veille pour rester
-         visible en mode veille (info de sécurité). -->
-    <RadarOverlay :elevated="screenOff" />
-
     <!-- Upcoming turn indicator. Masqué en mode recherche : l'utilisateur a la tête
          dans la carte pour choisir une nouvelle destination, pas sur le tracé courant. -->
     <NavTurnBanner
@@ -2746,7 +2720,6 @@ function onScreenOffTap() {
       :turn-hint="turnHint"
       :follow-turns="followTurns"
       :urgent-m="sportNav.turn_urgent_m"
-      :radar-banner-visible="radarBannerVisible"
       :speed-kmh="speedKmh"
       :muted="turnAlertMuted"
       @mute="muteTurnAlert"

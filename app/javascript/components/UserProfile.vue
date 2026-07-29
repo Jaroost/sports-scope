@@ -799,13 +799,6 @@ function placePreviewMarker(coords: [number, number]) {
             <p class="text-muted small mb-0">{{ t('profile.navigation.auto_reroute_cooldown_s_help') }}</p>
           </div>
           <div class="col-sm-6">
-            <label for="nav-radar-close" class="form-label mb-1">
-              {{ t('profile.navigation.radar_close_m') }} : <strong>{{ prefs.navigation.radar_close_m }} m</strong>
-            </label>
-            <input id="nav-radar-close" v-model.number="prefs.navigation.radar_close_m" type="range" class="form-range" min="10" max="100" step="5">
-            <p class="text-muted small mb-0">{{ t('profile.navigation.radar_close_m_help') }}</p>
-          </div>
-          <div class="col-sm-6">
             <label for="nav-sound-volume" class="form-label mb-1">
               <i class="fa-solid fa-volume-high me-1" aria-hidden="true"></i>{{ t('profile.navigation.sound_volume') }} : <strong>{{ prefs.navigation.sound_volume }} %</strong>
             </label>

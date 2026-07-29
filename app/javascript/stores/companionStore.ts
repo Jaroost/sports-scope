@@ -8,10 +8,6 @@ import { ref, computed } from 'vue'
 // arrière-plan), là où l'appli tient les connexions BLE pour toute la sortie et
 // les enregistre. La page reçoit donc un état déjà décodé et ne fait que
 // l'afficher.
-//
-// Le radar n'est pas ici : il alimente le `radarStore` existant, pour que le
-// bandeau d'alerte marche à l'identique qu'il vienne de l'appli ou de Web
-// Bluetooth.
 
 export interface CompanionGears {
   // Positions brutes publiées par le Di2 (1 = plus facile).

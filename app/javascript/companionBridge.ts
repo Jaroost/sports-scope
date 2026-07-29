@@ -1,5 +1,4 @@
 import { companionStore, type CompanionGears } from './stores/companionStore'
-import { radarStore } from './stores/radarStore'
 import { csrfToken } from './csrf'
 
 // Réception des capteurs de l'application mobile (sports-scope-companion).
@@ -19,7 +18,6 @@ interface CompanionPayload {
   power?: number | null
   cadence?: number | null
   gears?: CompanionGears | null
-  radar?: { connected?: boolean; targets?: { id: number; distanceM: number; speedMps: number }[] }
   sensors?: { name: string; connected: boolean; kinds: string[] }[]
 }
 
@@ -49,37 +47,6 @@ export function inCompanionApp(): boolean {
 // à l'approche d'un virage.
 export function companionScreen(state: 'dimmed' | 'normal'): void {
   channel()?.postMessage(JSON.stringify({ type: 'screen', state }))
-}
-
-// Le radar de l'appli alimente le store existant : le bandeau d'alerte, les
-// bips et les seuils marchent alors à l'identique, qu'il vienne d'ici ou de Web
-// Bluetooth.
-function applyRadar(radar: CompanionPayload['radar']): void {
-  // Clé absente : l'appli ne dit rien du radar, ce qui n'est pas la même chose
-  // que « pas de radar ». On ne touche alors pas au store — sinon un radar
-  // connecté en Web Bluetooth par la page serait coupé par le premier message
-  // venu.
-  if (radar === undefined || radar === null) return
-
-  if (!radar.connected) {
-    // Radar débranché côté appli : on ne laisse pas un bandeau figé annoncer
-    // une voie dégagée qu'on ne surveille plus.
-    if (radarStore.status.value === 'connected') radarStore.reset()
-    return
-  }
-
-  if (radarStore.status.value !== 'connected') {
-    radarStore.status.value = 'connected'
-    radarStore.deviceName.value = 'Varia'
-  }
-
-  const targets = (radar.targets ?? []).map((t) => ({
-    id: t.id,
-    distanceM: t.distanceM,
-    speedMps: t.speedMps,
-  }))
-  if (targets.length) radarStore.setTargets(targets)
-  else radarStore.clearTargets()
 }
 
 // Affiche les liens « ouvrir dans l'application » (`sportsscope://`), masqués par
@@ -157,7 +124,6 @@ export function installCompanionBridge(): void {
           cadence: payload.cadence,
           gears: payload.gears,
         })
-        applyRadar(payload.radar)
       } catch {
         // Une charge utile inattendue ne doit jamais casser la navigation :
         // mieux vaut des valeurs figées qu'une carte morte.

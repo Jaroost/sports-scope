@@ -3,7 +3,6 @@ import { ref } from 'vue'
 import { useNavDebug, debugModeEnabled, debugTurnScenarios } from './useNavDebug'
 import type { NavPoiHint } from './useNavDebug'
 import type { TurnHint, ClimbInfo } from '../navHelpers'
-import { radarStore } from '../stores/radarStore'
 
 // Le mode débug ne fait que piloter des refs partagées avec le composant : on les
 // fabrique ici et on vérifie ce qu'il y écrit. Le son est mocké — on veut savoir qu'il
@@ -33,7 +32,6 @@ function setup(over: { turnUrgentM?: number; soundOn?: boolean } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  radarStore.reset()
 })
 
 describe('debugModeEnabled', () => {
@@ -160,28 +158,5 @@ describe('toggleDebugPoi', () => {
 
     setup({ soundOn: true }).debug.toggleDebugPoi()
     expect(playPoi).toHaveBeenCalledOnce()
-  })
-})
-
-describe('toggleDebugRadar', () => {
-  it('simule une connexion radar avec deux véhicules', () => {
-    const { debug } = setup()
-
-    debug.toggleDebugRadar()
-    expect(debug.dbgRadar.value).toBe(true)
-    expect(radarStore.isConnected.value).toBe(true)
-    expect(radarStore.threatCount.value).toBe(2)
-    // Le store trie du plus proche au plus lointain : la voiture rapprochée passe devant.
-    expect(radarStore.nearest.value?.distanceM).toBe(18)
-  })
-
-  it('remet le store à zéro en sortant', () => {
-    const { debug } = setup()
-    debug.toggleDebugRadar()
-    debug.toggleDebugRadar()
-
-    expect(debug.dbgRadar.value).toBe(false)
-    expect(radarStore.isConnected.value).toBe(false)
-    expect(radarStore.threatCount.value).toBe(0)
   })
 })

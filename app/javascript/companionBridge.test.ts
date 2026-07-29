@@ -2,7 +2,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen, companionLinkTarget } from './companionBridge'
 import { companionStore } from './stores/companionStore'
-import { radarStore } from './stores/radarStore'
 
 // Le pont installe une fonction globale que l'application mobile appelle depuis son
 // WebView. Les tests jouent le rôle de l'appli : ils poussent des charges utiles et
@@ -22,7 +21,6 @@ function fakeChannel(): string[] {
 describe('companionBridge', () => {
   beforeEach(() => {
     companionStore.reset()
-    radarStore.reset()
     delete (window as any).SportsScopeCompanion
     delete (window as any).sportsScopeCompanion
     installCompanionBridge()
@@ -72,44 +70,6 @@ describe('companionBridge', () => {
     expect(companionStore.gears.value?.ratio).toBeCloseTo(4.5454, 3)
   })
 
-  describe('radar', () => {
-    it('alimente le store radar existant', () => {
-      // Tout l'intérêt : le bandeau, les bips et les seuils marchent à
-      // l'identique, que le radar vienne de l'appli ou de Web Bluetooth.
-      push({ radar: { connected: true, targets: [{ id: 2, distanceM: 90, speedMps: 3 }, { id: 1, distanceM: 42, speedMps: 7 }] } })
-
-      expect(radarStore.isConnected.value).toBe(true)
-      expect(radarStore.targets.value).toHaveLength(2)
-      expect(radarStore.nearest.value?.distanceM).toBe(42)
-    })
-
-    it('distingue voie dégagée et radar absent', () => {
-      push({ radar: { connected: true, targets: [] } })
-
-      expect(radarStore.isConnected.value).toBe(true)
-      expect(radarStore.targets.value).toEqual([])
-    })
-
-    it('coupe le bandeau quand le radar se débranche', () => {
-      // Un bandeau figé annoncerait une voie dégagée qu'on ne surveille plus.
-      push({ radar: { connected: true, targets: [{ id: 1, distanceM: 30, speedMps: 5 }] } })
-      push({ radar: { connected: false, targets: [] } })
-
-      expect(radarStore.isConnected.value).toBe(false)
-      expect(radarStore.targets.value).toEqual([])
-    })
-
-    it('ne touche pas au radar Web Bluetooth quand l\'appli n\'en publie pas', () => {
-      radarStore.status.value = 'connected'
-      radarStore.setTargets([{ id: 1, distanceM: 20, speedMps: 4 }])
-
-      push({ heartRate: 120 })
-
-      expect(radarStore.isConnected.value).toBe(true)
-      expect(radarStore.targets.value).toHaveLength(1)
-    })
-  })
-
   describe('companionScreen', () => {
     it('demande à l\'appli d\'éteindre puis de rallumer le rétroéclairage', () => {
       const sent = fakeChannel()
@@ -133,7 +93,6 @@ describe('companionBridge', () => {
     // La navigation prime : mieux vaut des valeurs figées qu'une carte morte.
     expect(() => push(null)).not.toThrow()
     expect(() => push('bonjour')).not.toThrow()
-    expect(() => push({ radar: 'oui' })).not.toThrow()
   })
 
   describe('revealCompanionLinks', () => {

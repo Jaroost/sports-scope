@@ -20,7 +20,7 @@ export function unlockAudio(): void {
 // OS to "duck" (lower) the music the user is playing, so the cues are mixed on
 // top of it at full music volume — they have to be loud and bright to cut
 // through. This base value is then scaled by the user's volume preference
-// (`setSoundVolume`, 0–100 %), so every cue — turns and radar — is retuned at once.
+// (`setSoundVolume`, 0–100 %), so every cue is retuned at once.
 const BASE_GAIN = 10
 let MASTER_GAIN = BASE_GAIN
 // Facteur de volume courant (1 = 100 %). Mémorisé à part pour faire monter aussi le
@@ -28,7 +28,7 @@ let MASTER_GAIN = BASE_GAIN
 // plafond à 100 % et l'augmentation du pourcentage resterait inaudible pour eux.
 let volumeFactor = 1
 
-// Règle le volume général des alertes (virages + radar), en pourcentage du volume
+// Règle le volume général des alertes de navigation, en pourcentage du volume
 // de base (100 % = comportement par défaut). Piloté par la préférence du profil
 // `navigation.sound_volume`. Borné à [0, 200] %.
 export function setSoundVolume(percent: number): void {
@@ -119,7 +119,7 @@ export function playOffRoute(): void {
 // Petite ritournelle enjouée — un point d'intérêt approche. Une courte montée en
 // arpège majeur (do-mi-sol-do) suivie d'une note d'accroche, plus musicale qu'un
 // simple bip : ça s'entend comme « tiens, il y a quelque chose à voir ici ».
-// Volontairement plus douce que les alertes virage/radar : c'est une invitation,
+// Volontairement plus douce que les alertes de virage : c'est une invitation,
 // pas une consigne de sécurité.
 export function playPoi(): void {
   unlockAudio()
@@ -145,20 +145,3 @@ export function playArrival(): void {
   })
 }
 
-// Two quick rising notes — a car has just entered radar range behind you. Kept
-// distinct from the turn cues (which carry a left/right pitch direction) so it
-// reads clearly as "vehicle approaching", not a maneuver.
-export function playRadarThreat(): void {
-  unlockAudio()
-  beep(880, 0, 0.09, 0.2)
-  beep(1180, 0.1, 0.14, 0.2)
-}
-
-// Three fast, louder notes — the car has closed in (under ~30 m). More insistent
-// than the entry cue so it stands out as "it's right behind you now".
-export function playRadarClose(): void {
-  unlockAudio()
-  beep(1180, 0, 0.08, 0.24)
-  beep(1180, 0.1, 0.08, 0.24)
-  beep(1180, 0.2, 0.16, 0.24)
-}

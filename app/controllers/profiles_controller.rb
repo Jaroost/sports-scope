@@ -32,7 +32,6 @@ class ProfilesController < ApplicationController
   NAV_TURN_GREEN_HOLD_S_RANGE = (2..60)
   NAV_SOUND_VOLUME_RANGE = (0..200)
   NAV_TURN_MARKER_SIZE_RANGE = (5..200)
-  NAV_RADAR_CLOSE_RANGE = (10..100)
   NAV_AUTO_REROUTE_COOLDOWN_RANGE = (3..120)
   COUNTRY_CODES_MAX = 100
   FTP_MANUAL_RANGE = (50..600)     # watts plausibles pour une FTP saisie à la main
@@ -122,7 +121,6 @@ class ProfilesController < ApplicationController
         "nav_fps" => clamp_float(navigation[:nav_fps], NAV_FPS_RANGE, 8),
         "sound_volume" => clamp_int(navigation[:sound_volume], NAV_SOUND_VOLUME_RANGE, 100),
         "show_climb_card" => to_bool(navigation[:show_climb_card], true),
-        "radar_close_m" => clamp_int(navigation[:radar_close_m], NAV_RADAR_CLOSE_RANGE, 30),
         "auto_reroute" => to_bool(navigation[:auto_reroute], true),
         "auto_reroute_cooldown_s" => clamp_int(navigation[:auto_reroute_cooldown_s], NAV_AUTO_REROUTE_COOLDOWN_RANGE, 10),
       },

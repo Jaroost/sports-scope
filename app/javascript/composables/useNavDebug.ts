@@ -4,7 +4,6 @@ import type { TurnHint, ClimbInfo } from '../navHelpers'
 import type { Maneuver } from '../routeHelpers'
 import { categoryForType } from '../poiCategories'
 import { playManeuver, playPoi } from '../navAudio'
-import { radarStore } from '../stores/radarStore'
 
 // Bandeau de notification d'un POI à proximité (bas d'écran + veille).
 export interface NavPoiHint { name: string; icon: string; color: string; distM: number }
@@ -62,9 +61,8 @@ export interface UseNavDebugOptions {
 // Mode débug de la navigation (preview des overlays). Extrait de RouteNavigation.vue.
 //
 // Il révèle un bouton « flacon » dans le tiroir de commandes qui ouvre un panneau
-// permettant d'injecter des données factices pour prévisualiser, sans GPS / col réel /
-// radar Varia, les overlays clés :
-//   • le radar arrière (RadarOverlay)
+// permettant d'injecter des données factices pour prévisualiser, sans GPS ni col réel,
+// les overlays clés :
 //   • la carte de col (climbInfo)
 //   • la notification de virage (turnHint)
 //   • la notification de POI (poiHint)
@@ -78,7 +76,6 @@ export function useNavDebug(opts: UseNavDebugOptions) {
   const { getTurnUrgentM, hasFix, turnHint, followTurns, climbInfo, poiHint, soundOn } = opts
 
   const debugMode = debugModeEnabled(opts.canDebug, typeof window === 'undefined' ? '' : window.location.search)
-  const dbgRadar = ref(false)
   const dbgClimb = ref(false)
   const dbgTurn = ref(false)
   const dbgPoi = ref(false)
@@ -133,21 +130,8 @@ export function useNavDebug(opts: UseNavDebugOptions) {
     if (soundOn.value) playPoi()
   }
 
-  // Radar factice : on passe le store en « connecté » sans Bluetooth (pas de watchdog,
-  // donc les cibles persistent) et on injecte deux voitures, dont une sous le seuil
-  // rapproché → bandeau rouge « Attention » + alertes sonores (via le watch existant).
-  function toggleDebugRadar() {
-    if (dbgRadar.value) { dbgRadar.value = false; radarStore.reset(); return }
-    dbgRadar.value = true
-    radarStore.status.value = 'connected'
-    radarStore.setTargets([
-      { id: 1, distanceM: 18, speedMps: 9 },
-      { id: 2, distanceM: 72, speedMps: 6 },
-    ])
-  }
-
   return {
-    debugMode, dbgRadar, dbgClimb, dbgTurn, dbgPoi, dbgTurnLabel,
-    cycleDebugTurn, toggleDebugClimb, toggleDebugPoi, toggleDebugRadar,
+    debugMode, dbgClimb, dbgTurn, dbgPoi, dbgTurnLabel,
+    cycleDebugTurn, toggleDebugClimb, toggleDebugPoi,
   }
 }

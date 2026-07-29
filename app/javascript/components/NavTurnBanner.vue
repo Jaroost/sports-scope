@@ -8,7 +8,6 @@ const props = defineProps<{
   turnHint: TurnHint
   followTurns?: TurnHint[]
   urgentM: number
-  radarBannerVisible: boolean
   speedKmh: number
   muted?: boolean
 }>()
@@ -25,7 +24,6 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
       'nav-turn--urgent': isUrgent(),
       'nav-turn--far': turnHint.state === 'far',
       'nav-turn--now': turnHint.state === 'now',
-      'nav-turn--radar': radarBannerVisible,
     }"
   >
     <div class="nav-turn-main">
@@ -108,8 +106,6 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
   width: 1.5rem; height: 1.5rem; border-radius: 50%;
   background: rgba(255,255,255,0.25); font-size: 1rem; font-weight: 700;
 }
-/* Bandeau radar visible (pleine largeur en tout-haut) : on descend le virage dessous. */
-.nav-turn--radar { top: 4.5rem; }
 /* Distance (en avant) + temps estimé (en dessous, plus discret) du prochain virage. */
 .nav-turn-info { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
 .nav-turn-dist { font-size: 2.1rem; font-weight: 700; }

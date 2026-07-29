@@ -2,8 +2,6 @@
 import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS } from '../mapStyles'
-import { radarStore } from '../stores/radarStore'
-import { radarSupported } from '../variaRadar'
 import type { PoiCategory } from '../poiCategories'
 import type { Sport } from '../userPreferences'
 import NavRoutingPicker from './NavRoutingPicker.vue'
@@ -24,7 +22,6 @@ const props = defineProps<{
   // tous les calculs d'itinéraire de la navigation.
   routeSport: Sport
   routeProfile: string
-  radarKnown: boolean
   camZoom: number
   zoomSaved: boolean
   camZoomMin: number
@@ -35,7 +32,6 @@ const props = defineProps<{
   poiLoading?: boolean
   poiBrowseCount?: number
   routeSearch?: boolean
-  dbgRadar: boolean
   dbgClimb: boolean
   dbgPoi: boolean
   dbgTurnLabel: string | null
@@ -67,14 +63,12 @@ const emit = defineEmits<{
   (e: 'toggle-sound'): void
   (e: 'update:soundVolume', v: number): void
   (e: 'toggle-climb-card'): void
-  (e: 'toggle-radar'): void
   (e: 'zoom-input'): void
   (e: 'save-zoom'): void
   (e: 'toggle-poi', key: string): void
   (e: 'search-pois'): void
   (e: 'search-pois-route'): void
   (e: 'browse-pois'): void
-  (e: 'toggle-debug-radar'): void
   (e: 'toggle-debug-climb'): void
   (e: 'cycle-debug-turn'): void
   (e: 'toggle-debug-poi'): void
@@ -483,11 +477,6 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
 
         <!-- Debug -->
         <template v-else-if="activePanel === 'debug'">
-          <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgRadar }" @click="$emit('toggle-debug-radar')">
-            <i class="fa-solid fa-tower-broadcast" aria-hidden="true"></i>
-            <span>Radar</span>
-            <span class="nav-debug-state">{{ dbgRadar ? 'on' : 'off' }}</span>
-          </button>
           <button type="button" class="nav-debug-btn" :class="{ 'nav-debug-btn--on': dbgClimb }" @click="$emit('toggle-debug-climb')">
             <i class="fa-solid fa-mountain" aria-hidden="true"></i>
             <span>Col</span>
@@ -543,22 +532,6 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
           <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
         </button>
         <button
-          v-if="radarSupported()"
-          type="button"
-          class="btn btn-sm btn-light shadow-sm"
-          :class="{ 'nav-radar-btn--connected': radarStore.isConnected.value, 'text-danger': radarStore.status.value === 'error' }"
-          :disabled="radarStore.status.value === 'connecting'"
-          :title="radarStore.isConnected.value ? t('routes.radar_disconnect') : radarKnown ? t('routes.radar_reconnect') : t('routes.radar_connect')"
-          :aria-label="radarStore.isConnected.value ? t('routes.radar_disconnect') : radarKnown ? t('routes.radar_reconnect') : t('routes.radar_connect')"
-          @click="$emit('toggle-radar')"
-        >
-          <i
-            class="fa-solid"
-            :class="radarStore.status.value === 'connecting' ? 'fa-spinner fa-spin' : 'fa-tower-broadcast'"
-            aria-hidden="true"
-          ></i>
-        </button>
-        <button
           type="button"
           class="btn btn-sm btn-light shadow-sm"
           :title="t('nav.settings')"
@@ -576,7 +549,7 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
 <style scoped>
 /* Tiroir de commandes : feuille ancrée en BAS de l'écran (le pouce y accède sans lâcher
    le guidon), déployée par un swipe vers le haut. Le haut de l'écran reste libre pour
-   les notifications pleine largeur (virage / radar). */
+   les notifications pleine largeur (virage, POI). */
 .nav-controls-panel {
   position: absolute; bottom: 0; left: 0; right: 0; z-index: 8;
   display: flex; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 0.6rem;
@@ -657,10 +630,6 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
   font-size: 1.35rem; border-radius: 0.7rem;
 }
 
-.nav-radar-btn--connected,
-.nav-radar-btn--connected:hover,
-.nav-radar-btn--connected:focus,
-.nav-radar-btn--connected:active,
 .nav-climb-btn--visible,
 .nav-climb-btn--visible:hover,
 .nav-climb-btn--visible:focus,

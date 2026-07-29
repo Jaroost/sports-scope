@@ -4,7 +4,8 @@ import type { Coord, LngLat } from './routeHelpers'
 
 // Une variante de tracé pour un tronçon : la géométrie routée par BRouter entre les
 // deux extrémités de la sélection, avec ses statistiques. `idx` est l'alternativeidx
-// BRouter d'origine (0 = tracé de référence, 1..3 = variantes).
+// BRouter d'origine (0 = tracé de référence, 1..3 = variantes), ou -1 pour une variante
+// obtenue par blocage (cf. fetchBlockedAlternatives).
 export interface RouteAlternative {
   idx: number
   coords: Coord[]
@@ -17,6 +18,29 @@ export interface RouteAlternative {
 // référence pour l'affichage des écarts), 1..3 sont des variantes empruntant
 // d'autres routes/chemins.
 const ALT_INDICES = [0, 1, 2, 3]
+
+// ─── Variantes par blocage ────────────────────────────────────────────────────
+// alternativeidx n'explore qu'une bande de coût étroite autour de l'optimum : sur un
+// couloir à une seule route, il renvoie 4 fois la même géométrie. Pour aller chercher
+// les vraies bifurcations, on interdit tour à tour un disque (`nogos`) posé sur le
+// tronçon actuel et on relance le routage : BRouter doit alors contourner, ce qui fait
+// ressortir des tracés à +50/+100 % de coût qu'il ne proposerait jamais seul.
+//
+// Le disque est préféré au passage forcé par une jonction : on n'a pas le graphe
+// routier en local (donc pas la position des jonctions), et un via mal placé produit
+// des allers-retours, là où un disque interdit rend toujours un P0→P1 propre.
+
+// Rayon du disque de la passe automatique, puis paliers du bouton « chercher plus
+// large ». Mesuré : 150 m est le meilleur compromis (les grands rayons donnent surtout
+// des doublons et des détours absurdes), les paliers supérieurs servent justement à
+// forcer les contournements lointains quand on les demande explicitement.
+export const BLOCK_RADIUS_M = 150
+export const WIDEN_RADII_M = [400, 900]
+
+// Positions des disques le long du tronçon. Les extrémités sont exclues : un disque qui
+// avale P0 ou P1 rend le routage impossible (BRouter ne renvoie alors aucune route).
+const BLOCK_FRACTIONS = [0.15, 0.3, 0.45, 0.6, 0.75]
+const BLOCK_ENDPOINT_MARGIN_M = 50
 
 // Deux variantes sont considérées identiques si leur longueur diffère de moins de
 // ~1,5 % ET que quelques points échantillonnés coïncident (< 25 m). BRouter renvoie
@@ -46,9 +70,16 @@ export function equivalentGeometry(
   return true
 }
 
-async function fetchOne(p0: LngLat, p1: LngLat, profile: string, idx: number): Promise<RouteAlternative | null> {
+async function fetchOne(
+  p0: LngLat,
+  p1: LngLat,
+  profile: string,
+  idx: number,
+  nogo?: { at: LngLat; radiusM: number },
+): Promise<RouteAlternative | null> {
   const lonlats = `${p0[0]},${p0[1]}|${p1[0]},${p1[1]}`
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=${idx}&format=geojson&timode=2`
+  const nogos = nogo ? `&nogos=${nogo.at[0]},${nogo.at[1]},${Math.round(nogo.radiusM)}` : ''
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=${idx}&format=geojson&timode=2${nogos}`
   const res = await fetch(url)
   if (!res.ok) return null
   const data = await res.json()
@@ -79,6 +110,62 @@ export async function fetchSegmentAlternatives(
   const raw = settled
     .map((r) => (r.status === 'fulfilled' ? r.value : null))
     .filter((a): a is RouteAlternative => a != null)
+
+  const distinct: RouteAlternative[] = []
+  for (const alt of raw) {
+    if (distinct.some((d) => equivalentGeometry(d, alt))) continue
+    distinct.push(alt)
+  }
+  return distinct
+}
+
+// Points du tronçon sur lesquels poser un disque interdit : répartis le long du tracé,
+// en écartant ceux trop proches d'une extrémité (le disque l'engloberait).
+export function blockPointsAlong(coords: Coord[], radiusM: number): LngLat[] {
+  if (coords.length < 2) return []
+  const cum: number[] = [0]
+  for (let i = 1; i < coords.length; i++) cum.push(cum[i - 1] + haversine(coords[i - 1], coords[i]))
+  const total = cum[cum.length - 1]
+  if (total <= 0) return []
+
+  const p0 = coords[0]
+  const p1 = coords[coords.length - 1]
+  const minGap = radiusM + BLOCK_ENDPOINT_MARGIN_M
+  const points: LngLat[] = []
+  for (const f of BLOCK_FRACTIONS) {
+    const target = total * f
+    let i = cum.findIndex((d) => d >= target)
+    if (i < 0) i = coords.length - 1
+    const c = coords[i]
+    // Distance réelle aux extrémités, pas la distance le long du tracé : un tronçon qui
+    // revient sur lui-même peut frôler son départ en son milieu.
+    if (haversine(c, p0) < minGap || haversine(c, p1) < minGap) continue
+    points.push([c[0], c[1]])
+  }
+  return points
+}
+
+// Variantes obtenues en interdisant tour à tour un morceau du tronçon. Le résultat est
+// dédoublonné entre variantes ; l'appelant reste chargé d'écarter celles équivalentes au
+// tronçon actuel et de classer l'ensemble.
+export async function fetchBlockedAlternatives(
+  p0: LngLat,
+  p1: LngLat,
+  profile: string,
+  segmentCoords: Coord[],
+  radiusM: number,
+): Promise<RouteAlternative[]> {
+  const blocks = blockPointsAlong(segmentCoords, radiusM)
+  if (!blocks.length) return []
+
+  const settled = await Promise.allSettled(
+    blocks.map((at) => fetchOne(p0, p1, profile, 0, { at, radiusM })),
+  )
+  const raw = settled
+    .map((r) => (r.status === 'fulfilled' ? r.value : null))
+    .filter((a): a is RouteAlternative => a != null)
+    // `idx` n'a pas de sens ici : ces variantes ne viennent pas d'un alternativeidx.
+    .map((a) => ({ ...a, idx: -1 }))
 
   const distinct: RouteAlternative[] = []
   for (const alt of raw) {

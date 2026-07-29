@@ -1155,7 +1155,12 @@ fr:
     alternatives_error: "Erreur lors de la recherche de variantes"
     alternatives_hint: "Cliquez sur une variante pour voir ses stats, puis choisissez-la."
     alternatives_current: "Tracé actuel"
+    alternatives_start: "Début du tronçon"
+    alternatives_end: "Fin du tronçon"
     alternatives_variant: "Variante %{n}"
+    alternatives_widen: "Chercher plus large"
+    alternatives_widen_none: "Rien de plus à ce rayon"
+    alternatives_widen_title: "Interdit une zone plus grande autour du tracé actuel : fait ressortir les variantes qui contournent de plus loin."
     apply_alternative: "Choisir"
     # Libellés de type d'activité, réutilisés par plusieurs composants (sélecteurs de
     # sport). Nom hérité de l'ancien sélecteur Waymarked Trails, désormais générique.

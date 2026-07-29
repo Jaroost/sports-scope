@@ -33,6 +33,12 @@ const props = defineProps<{
   sport: Sport
   profile: string
   loading: boolean
+  // Passe d'élargissement en cours : les variantes déjà trouvées restent affichées.
+  widening: boolean
+  // Reste-t-il un palier de rayon à essayer ?
+  canWiden: boolean
+  // Message court quand un élargissement n'a rien apporté de neuf.
+  widenNote: string | null
   error: string | null
 }>()
 
@@ -41,6 +47,7 @@ const emit = defineEmits<{
   select: [altId: number]
   'update:sport': [sport: Sport]
   'update:profile': [profile: string]
+  widen: []
 }>()
 
 const SPORTS: Sport[] = ['cycling', 'mtb', 'hiking']
@@ -57,6 +64,9 @@ let _maplibregl: any = null
 let mapReady = false
 let popup: any = null
 let activeStateId: number | null = null
+// Marqueurs des deux extrémités du tronçon : elles sont communes au tracé actuel et à
+// toutes les variantes, ce sont les seuls points fixes de la comparaison.
+let endpointMarkers: any[] = []
 
 const CURRENT_COLOR = '#64748b' // gris ardoise : le tronçon actuel, en référence
 
@@ -155,7 +165,37 @@ function renderAlternatives() {
     })
   }
 
+  renderEndpoints()
   fitToAll()
+}
+
+// Repose les deux marqueurs d'extrémité. Le sens est celui du tronçon dans l'itinéraire
+// (départ = borne basse de la sélection), pour que la lecture des variantes suive le sens
+// de parcours.
+function renderEndpoints() {
+  clearEndpoints()
+  const coords = props.currentCoords
+  if (!mapInstance || !_maplibregl || coords.length < 2) return
+
+  const ends: Array<{ at: Coord; cls: string; icon: string; label: string }> = [
+    { at: coords[0], cls: 'raltd-end-marker raltd-end-marker--start', icon: 'fa-flag', label: t('routes.alternatives_start') },
+    { at: coords[coords.length - 1], cls: 'raltd-end-marker raltd-end-marker--finish', icon: 'fa-flag-checkered', label: t('routes.alternatives_end') },
+  ]
+  for (const e of ends) {
+    const el = document.createElement('div')
+    el.className = e.cls
+    el.title = e.label
+    el.setAttribute('aria-label', e.label)
+    el.innerHTML = `<i class="fa-solid ${e.icon}" aria-hidden="true"></i>`
+    endpointMarkers.push(
+      new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([e.at[0], e.at[1]]).addTo(mapInstance),
+    )
+  }
+}
+
+function clearEndpoints() {
+  endpointMarkers.forEach((m) => m.remove())
+  endpointMarkers = []
 }
 
 function fitToAll() {
@@ -261,6 +301,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   closePopup()
+  clearEndpoints()
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
 </script>
@@ -318,7 +359,7 @@ onBeforeUnmount(() => {
         <div class="raltd-map-wrap">
           <div ref="mapEl" class="raltd-map"></div>
 
-          <div v-if="loading" class="raltd-overlay">
+          <div v-if="loading || (widening && !alternatives.length)" class="raltd-overlay">
             <span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>
             {{ t('routes.alternatives_loading') }}
           </div>
@@ -330,30 +371,49 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-if="!loading && !error && alternatives.length" class="raltd-legend">
-          <span class="raltd-hint">{{ t('routes.alternatives_hint') }}</span>
-          <div class="raltd-chips">
-            <span class="raltd-chip raltd-chip--current">
-              <span class="raltd-swatch raltd-swatch--dashed"></span>
-              {{ t('routes.alternatives_current') }}
-            </span>
-            <button
-              v-for="(alt, i) in alternatives"
-              :key="alt.idx"
-              type="button"
-              class="raltd-chip"
-              :class="{ 'raltd-chip--active': hoveredId === i }"
-              @mouseenter="onChipEnter(i)"
-              @mouseleave="onChipLeave"
-              @click="onChipClick(i)"
-            >
-              <span class="raltd-swatch" :style="{ background: alt.color }"></span>
-              {{ t('routes.alternatives_variant', { n: i + 1 }) }}
-              <span class="raltd-chip-delta" :class="alt.deltaDistanceM <= 0 ? 'raltd-pos' : 'raltd-neg'">
-                {{ fmtDelta(alt.deltaDistanceM, 'dist') }}
+        <!-- Toujours rendu hors chargement initial : le bouton « chercher plus large »
+             doit rester atteignable même quand aucune variante n'a été trouvée, c'est
+             justement là qu'il sert. -->
+        <div v-if="!loading" class="raltd-legend">
+          <div class="raltd-legend-main">
+            <span v-if="alternatives.length" class="raltd-hint">{{ t('routes.alternatives_hint') }}</span>
+            <div v-if="alternatives.length" class="raltd-chips">
+              <span class="raltd-chip raltd-chip--current">
+                <span class="raltd-swatch raltd-swatch--dashed"></span>
+                {{ t('routes.alternatives_current') }}
               </span>
-            </button>
+              <button
+                v-for="(alt, i) in alternatives"
+                :key="i"
+                type="button"
+                class="raltd-chip"
+                :class="{ 'raltd-chip--active': hoveredId === i }"
+                @mouseenter="onChipEnter(i)"
+                @mouseleave="onChipLeave"
+                @click="onChipClick(i)"
+              >
+                <span class="raltd-swatch" :style="{ background: alt.color }"></span>
+                {{ t('routes.alternatives_variant', { n: i + 1 }) }}
+                <span class="raltd-chip-delta" :class="alt.deltaDistanceM <= 0 ? 'raltd-pos' : 'raltd-neg'">
+                  {{ fmtDelta(alt.deltaDistanceM, 'dist') }}
+                </span>
+              </button>
+            </div>
           </div>
+
+          <span v-if="widenNote" class="raltd-widen-note">{{ widenNote }}</span>
+          <button
+            v-if="canWiden"
+            type="button"
+            class="btn btn-sm btn-outline-secondary raltd-widen"
+            :title="t('routes.alternatives_widen_title')"
+            :disabled="widening"
+            @click="emit('widen')"
+          >
+            <span v-if="widening" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+            <i v-else class="fa-solid fa-arrows-left-right-to-line me-1" aria-hidden="true"></i>
+            {{ t('routes.alternatives_widen') }}
+          </button>
         </div>
       </div>
     </div>
@@ -434,9 +494,21 @@ onBeforeUnmount(() => {
 }
 .raltd-legend {
   flex: none;
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   padding: 0.7rem 1rem 0.9rem;
   border-top: 1px solid #e5e7eb;
   background: #f9fafb;
+}
+.raltd-legend-main { flex: 1; min-width: 0; }
+.raltd-widen { flex: none; white-space: nowrap; }
+.raltd-widen-note {
+  flex: none;
+  font-size: 0.8rem;
+  color: #6b7280;
+  padding-bottom: 0.35rem;
 }
 .raltd-hint {
   display: block;
@@ -499,9 +571,24 @@ onBeforeUnmount(() => {
 }
 </style>
 
-<!-- Styles de l'infobulle MapLibre : non-scoped car son DOM est créé dynamiquement et
-     injecté hors de l'arbre scopé du composant. -->
+<!-- Styles de l'infobulle MapLibre et des marqueurs d'extrémité : non-scoped car leur DOM
+     est créé dynamiquement et n'hérite donc pas de l'attribut de scope du composant. -->
 <style>
+.raltd-end-marker {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 0.72rem;
+  cursor: default;
+}
+.raltd-end-marker--start { background: #16a34a; }
+.raltd-end-marker--finish { background: #111827; }
 .raltd-popup-container .maplibregl-popup-content {
   border-radius: 0.6rem;
   padding: 0.7rem 0.85rem;

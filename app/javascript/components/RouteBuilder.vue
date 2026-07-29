@@ -14,7 +14,7 @@ import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
 import { profilesForSport } from '../brouter'
 import { routeLegs, LegRoutingError } from '../brouterLegs'
-import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
+import { fetchSegmentAlternatives, fetchBlockedAlternatives, equivalentGeometry, BLOCK_RADIUS_M, WIDEN_RADII_M } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
 import { parseGpxWaypoints } from '../gpxImport'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
@@ -1162,10 +1162,17 @@ interface AlternativeView extends RouteAlternative {
   deltaDistanceM: number
   deltaGainM: number
 }
-const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828']
+// 6 teintes : la passe automatique en remplit rarement plus de 3 ou 4, mais « chercher
+// plus large » en ajoute, et une variante trouvée ne doit pas être évincée de l'écran.
+const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828', '#2a9d8f', '#ff006e']
 
 const alternatives = ref<AlternativeView[]>([])
 const alternativesLoading = ref(false)
+// Passe d'élargissement : distincte du chargement initial, pour garder à l'écran les
+// variantes déjà trouvées pendant qu'on en cherche d'autres.
+const alternativesWidening = ref(false)
+// Retour du bouton « chercher plus large » quand le palier n'a rien apporté de neuf.
+const alternativesWidenNote = ref<string | null>(null)
 const alternativesError = ref<string | null>(null)
 // Géométrie du tronçon actuel, tracée en référence dans la dialogue des variantes.
 const altCurrentCoords = ref<Coord[]>([])
@@ -1178,6 +1185,16 @@ const altProfile = ref<string>(routeStore.profile.value)
 // est effacée à l'application, mais on en a besoin pour le splice).
 let altBounds: { lo: number; hi: number } | null = null
 let altToken = 0
+// Vivier des variantes retenues, toutes passes confondues : « chercher plus large »
+// s'ajoute à l'existant au lieu de le remplacer. `alternatives` n'en est que le dessus
+// du panier, classé et plafonné au nombre de couleurs.
+let altFound: RouteAlternative[] = []
+let altEndpoints: { p0: LngLat; p1: LngLat } | null = null
+let altCurrentDist = 0
+let altCurrentGain = 0
+// Palier d'élargissement déjà consommé (index dans WIDEN_RADII_M).
+const altWidenStep = ref(0)
+const canWidenAlternatives = computed(() => altWidenStep.value < WIDEN_RADII_M.length)
 
 // La dialogue s'ouvre dès qu'une proposition est en cours (chargement, erreur ou
 // variantes trouvées) et se referme via cancelAlternatives.
@@ -1219,7 +1236,10 @@ async function searchAlternatives() {
   altBounds = { lo: loI, hi: hiI }
   alternatives.value = []
   alternativesError.value = null
+  alternativesWidenNote.value = null
   alternativesLoading.value = true
+  altFound = []
+  altWidenStep.value = 0
 
   // Tronçon actuel (entre les extrémités) : sert de référence pour les écarts, pour
   // écarter les variantes identiques au tracé déjà en place, et de tracé de référence
@@ -1227,28 +1247,83 @@ async function searchAlternatives() {
   const currentCoords = geom.slice(loI, hiI + 1)
   altCurrentCoords.value = currentCoords
   const currentDists = buildDistancesM(currentCoords)
-  const currentDist = currentDists[currentDists.length - 1] ?? 0
-  const currentGL = computeGainLoss(currentCoords)
+  altCurrentDist = currentDists[currentDists.length - 1] ?? 0
+  altCurrentGain = computeGainLoss(currentCoords).gain
+
+  const p0: LngLat = [geom[loI][0], geom[loI][1]]
+  const p1: LngLat = [geom[hiI][0], geom[hiI][1]]
+  altEndpoints = { p0, p1 }
 
   try {
-    const p0: LngLat = [geom[loI][0], geom[loI][1]]
-    const p1: LngLat = [geom[hiI][0], geom[hiI][1]]
-    const alts = await fetchSegmentAlternatives(p0, p1, altProfile.value)
+    // Les deux passes en parallèle : les alternativeidx de BRouter (variantes proches de
+    // l'optimum) et le blocage de morceaux du tronçon (vraies bifurcations, souvent bien
+    // plus coûteuses — cf. fetchBlockedAlternatives).
+    const [byIdx, byBlock] = await Promise.all([
+      fetchSegmentAlternatives(p0, p1, altProfile.value),
+      fetchBlockedAlternatives(p0, p1, altProfile.value, currentCoords, BLOCK_RADIUS_M),
+    ])
     if (token !== altToken) return
-    // Écarte les variantes identiques au tronçon actuel : rien à proposer d'utile.
-    const distinct = alts.filter((a) => !equivalentGeometry(a, { coords: currentCoords, distanceM: currentDist }))
-    if (!distinct.length) { alternativesError.value = t('routes.alternatives_none'); return }
-    alternatives.value = distinct.slice(0, ALT_COLORS.length).map((a, i) => ({
-      ...a,
-      color: ALT_COLORS[i % ALT_COLORS.length],
-      deltaDistanceM: a.distanceM - currentDist,
-      deltaGainM: a.gainM - currentGL.gain,
-    }))
+    mergeAlternatives([...byIdx, ...byBlock])
+    if (!altFound.length) alternativesError.value = t('routes.alternatives_none')
   } catch (e: any) {
     if (token === altToken) alternativesError.value = `${t('routes.alternatives_error')}: ${e.message}`
   } finally {
     if (token === altToken) alternativesLoading.value = false
   }
+}
+
+// Relance une passe de blocage avec un rayon plus grand : le disque interdit couvrant
+// plus de terrain, BRouter doit contourner plus loin — c'est ce qui fait apparaître les
+// variantes qui repartent en arrière ou vont chercher un autre versant.
+async function widenAlternatives() {
+  const radius = WIDEN_RADII_M[altWidenStep.value]
+  if (radius == null || !altEndpoints || alternativesLoading.value || alternativesWidening.value) return
+
+  const token = altToken
+  altWidenStep.value++
+  alternativesWidenNote.value = null
+  alternativesWidening.value = true
+  try {
+    const more = await fetchBlockedAlternatives(
+      altEndpoints.p0, altEndpoints.p1, altProfile.value, altCurrentCoords.value, radius,
+    )
+    if (token !== altToken) return
+    const before = altFound.length
+    mergeAlternatives(more)
+    // Une passe qui n'apporte rien ne doit pas laisser croire à un bug : on le dit. Si
+    // rien n'a jamais été trouvé, le message plein écran suffit ; sinon on l'affiche à
+    // côté du bouton, sans toucher aux variantes déjà à l'écran.
+    if (altFound.length === before) {
+      if (altFound.length) alternativesWidenNote.value = t('routes.alternatives_widen_none')
+      else alternativesError.value = t('routes.alternatives_none')
+    }
+  } catch (e: any) {
+    if (token === altToken) alternativesError.value = `${t('routes.alternatives_error')}: ${e.message}`
+  } finally {
+    if (token === altToken) alternativesWidening.value = false
+  }
+}
+
+// Ajoute des candidates au vivier : on écarte celles équivalentes au tronçon actuel ou à
+// une variante déjà retenue, puis on republie la liste classée par écart de distance
+// croissant (les détours les plus modestes en premier).
+function mergeAlternatives(candidates: RouteAlternative[]) {
+  const current = { coords: altCurrentCoords.value, distanceM: altCurrentDist }
+  for (const c of candidates) {
+    if (equivalentGeometry(c, current)) continue
+    if (altFound.some((f) => equivalentGeometry(f, c))) continue
+    altFound.push(c)
+  }
+  const ranked = [...altFound].sort(
+    (a, b) => Math.abs(a.distanceM - altCurrentDist) - Math.abs(b.distanceM - altCurrentDist),
+  )
+  alternatives.value = ranked.slice(0, ALT_COLORS.length).map((a, i) => ({
+    ...a,
+    color: ALT_COLORS[i % ALT_COLORS.length],
+    deltaDistanceM: a.distanceM - altCurrentDist,
+    deltaGainM: a.gainM - altCurrentGain,
+  }))
+  if (alternatives.value.length) alternativesError.value = null
 }
 
 // La dialogue émet `select` avec l'index de la variante choisie.
@@ -1267,9 +1342,14 @@ function cancelAlternatives() {
   altToken++
   alternatives.value = []
   alternativesError.value = null
+  alternativesWidenNote.value = null
   alternativesLoading.value = false
+  alternativesWidening.value = false
   altCurrentCoords.value = []
   altBounds = null
+  altFound = []
+  altEndpoints = null
+  altWidenStep.value = 0
 }
 
 // La sélection disparaît (effacée, ou tracé recalculé) → on ferme la dialogue.
@@ -2443,10 +2523,14 @@ onBeforeUnmount(() => {
         :sport="altSport"
         :profile="altProfile"
         :loading="alternativesLoading"
+        :widening="alternativesWidening"
+        :can-widen="canWidenAlternatives"
+        :widen-note="alternativesWidenNote"
         :error="alternativesError"
         @select="onSelectAlternative"
         @update:sport="onAlternativesSport"
         @update:profile="onAlternativesProfile"
+        @widen="widenAlternatives"
         @close="cancelAlternatives"
       />
     </Transition>

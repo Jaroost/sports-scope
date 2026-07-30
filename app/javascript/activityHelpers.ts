@@ -185,6 +185,95 @@ export const STREAM_CHIP_ORDER: string[] = ['grade_smooth', 'watts', 'velocity_s
 // on the Ruby side so server-stored values align with on-screen rows).
 export const PEAK_POWER_DURATIONS: number[] = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400]
 
+// Grille dense (quasi log) pour tracer la *courbe* de puissance de la sortie —
+// le tableau, lui, garde les durées standard ci-dessus. Même fenêtre 5 s → 1 h 30
+// que `PEAK_POWER_DURATIONS`, simplement échantillonnée plus finement : les deux
+// courbes du graphique couvrent ainsi exactement le même domaine. Le pas resserré
+// aux courtes durées suit la forme de la courbe (elle chute vite sous la minute) ;
+// posée sur un axe de catégories, une grille log donne un axe log gratuitement.
+export const POWER_CURVE_DURATIONS: number[] = [
+  5, 8, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 300, 420, 600, 780, 900,
+  1200, 1500, 1800, 2400, 3000, 3600, 4500, 5400,
+]
+
+export interface PeakPowerPoint {
+  duration: number
+  avgPower: number
+  startIdx: number
+  endIdx: number
+}
+
+// Un point d'une courbe de puissance telle que la trace `PowerCurveChart`.
+// `href` / `startedAt` ne sont portés que par la courbe « tous les temps »,
+// dont chaque point vient d'une activité identifiée.
+export interface CurvePoint {
+  duration: number
+  watts: number
+  href?: string | null
+  startedAt?: string | null
+  isCurrent?: boolean
+}
+
+// Une série du graphique de courbes de puissance. Les séries partagent l'axe des
+// durées (union de leurs points) et l'axe des watts — jamais deux échelles.
+export interface CurveSeries {
+  label: string
+  color: string
+  points: CurvePoint[]
+  // Marqueurs visibles (série courte) plutôt qu'une ligne lisse (série dense).
+  showPoints?: boolean
+  dashed?: boolean
+  fill?: boolean
+}
+
+// Meilleure puissance moyenne pour chaque durée demandée (courbe de puissance).
+// Intègre l'énergie cumulée puis balaie en deux pointeurs, si bien qu'un
+// échantillonnage irrégulier ou une pause ne fausse pas la moyenne :
+// avg = (E[j] - E[i]) / (t[j] - t[i]). `durations` doit être trié croissant —
+// on s'arrête à la première durée plus longue que l'activité.
+export function peakPowerCurve(
+  streams: { time?: { data?: number[] }; watts?: { data?: (number | null)[] } } | null | undefined,
+  durations: number[] = PEAK_POWER_DURATIONS,
+): PeakPowerPoint[] {
+  const times = streams?.time?.data
+  const watts = streams?.watts?.data
+  if (!Array.isArray(times) || !Array.isArray(watts) || times.length < 2) return []
+  const n = Math.min(times.length, watts.length)
+  if (n < 2) return []
+  const E = new Float64Array(n)
+  for (let i = 1; i < n; i++) {
+    const dt = times[i] - times[i - 1]
+    const w = watts[i - 1]
+    const wv = (typeof w === 'number' && Number.isFinite(w)) ? w : 0
+    E[i] = E[i - 1] + wv * Math.max(0, dt)
+  }
+  const totalSpan = times[n - 1] - times[0]
+  const out: PeakPowerPoint[] = []
+  for (const D of durations) {
+    if (D > totalSpan) break
+    let best: number | null = null
+    let bestStart = 0
+    let bestEnd = 0
+    let j = 0
+    for (let i = 0; i < n; i++) {
+      while (j < n && times[j] - times[i] < D) j++
+      if (j >= n) break
+      const dt = times[j] - times[i]
+      if (dt <= 0) continue
+      const avg = (E[j] - E[i]) / dt
+      if (best == null || avg > best) {
+        best = avg
+        bestStart = i
+        bestEnd = j
+      }
+    }
+    if (best != null && Number.isFinite(best) && best > 0) {
+      out.push({ duration: D, avgPower: best, startIdx: bestStart, endIdx: bestEnd })
+    }
+  }
+  return out
+}
+
 // ─── Puissance normalisée (NP) sur une tranche ───────────────────────────────
 // Même formule que le serveur (TrainingLoad.normalized_power) : moyenne mobile
 // 30 échantillons de la puissance, élevée à la 4, moyennée, puis racine 4e.

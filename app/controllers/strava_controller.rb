@@ -141,7 +141,12 @@ class StravaController < ApplicationController
     render json: {
       current: current,
       bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['strava', id]),
-      podium: PeakPowerCurve.podium_for(current_user, current, exclude: ['strava', id])
+      podium: PeakPowerCurve.podium_for(current_user, current, exclude: ['strava', id]),
+      # Seuils (FTP / LTHR) que CETTE sortie prouve, + ceux de l'athlète pour comparer.
+      thresholds: ActivityThresholds.for_activity(
+        current_user, peak_powers: current, streams: streams,
+        activity_type: activity&.activity_type
+      )
     }
   rescue StravaStreamsFetcher::ApiError => e
     status = e.status == 404 ? :not_found : :bad_gateway

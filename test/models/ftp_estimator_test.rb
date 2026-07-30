@@ -87,6 +87,41 @@ class FtpEstimatorTest < ActiveSupport::TestCase
     assert_equal "forte", entries[300][:activity][:name]
   end
 
+  # ── estimate_activity : la FTP que prouve UNE sortie (page d'activité) ───────
+  test "estimate_activity applique les mêmes méthodes à la courbe d'une seule sortie" do
+    est = FtpEstimator.estimate_activity("1200" => 300.0)
+
+    assert_equal "ftp_20min", est[:method]
+    assert_equal 285, est[:watts]
+    assert_equal 300, est[:best_20min]
+    # Les durées qui ont porté l'estimation remplacent les `contributors` (inutiles
+    # quand une seule sortie est en jeu).
+    assert_equal [1200], est[:durations]
+    assert_nil est[:contributors]
+    assert_nil est[:samples]
+  end
+
+  test "estimate_activity garde le modèle CP et les durées ajustées" do
+    cp = 250.0
+    wprime = 5_000.0
+    power = ->(t) { cp + wprime / t }
+
+    est = FtpEstimator.estimate_activity(
+      "300" => power.call(300), "600" => power.call(600), "1200" => power.call(1200)
+    )
+
+    assert_equal "cp_model", est[:method]
+    assert_equal [300, 600, 1200], est[:durations]
+  end
+
+  test "estimate_activity renvoie nil sans courbe exploitable" do
+    assert_nil FtpEstimator.estimate_activity(nil)
+    assert_nil FtpEstimator.estimate_activity({})
+    assert_nil FtpEstimator.estimate_activity("pas un hash")
+    # Sortie courte : aucune durée de la bande seuil, donc aucune méthode applicable.
+    assert_nil FtpEstimator.estimate_activity("5" => 600.0, "60" => 400.0)
+  end
+
   private
 
   def activity(peak:, name: "sortie", started_at: nil)

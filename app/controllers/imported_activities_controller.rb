@@ -62,7 +62,12 @@ class ImportedActivitiesController < ApplicationController
     render json: {
       current: activity.peak_powers,
       bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['imported', activity.id]),
-      podium: PeakPowerCurve.podium_for(current_user, activity.peak_powers, exclude: ['imported', activity.id])
+      podium: PeakPowerCurve.podium_for(current_user, activity.peak_powers, exclude: ['imported', activity.id]),
+      # Seuils (FTP / LTHR) que CETTE sortie prouve, + ceux de l'athlète pour comparer.
+      thresholds: ActivityThresholds.for_activity(
+        current_user, peak_powers: activity.peak_powers, streams: activity.streams,
+        activity_type: activity.activity_type
+      )
     }
   end
 

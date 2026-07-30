@@ -14,7 +14,8 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
 import {
-  PEAK_POWER_DURATIONS, detectPauses, totalPausedSeconds, aerobicDecoupling,
+  PEAK_POWER_DURATIONS, POWER_CURVE_DURATIONS, peakPowerCurve,
+  detectPauses, totalPausedSeconds, aerobicDecoupling,
   efficiencyFactor, gradeAdjustedPace, segmentStats, computeSplits, computeLaps, isRun, paceMinPerKm,
   detectIntervals, dataQualityFlags,
 } from '../activityHelpers'
@@ -214,48 +215,13 @@ const segmentSummary = computed(() => {
   return segmentStats(streams.value, activity.value, s.startIdx, s.endIdx)
 })
 
-// Best average power per standard duration (peak-power curve). Uses a
-// cumulative-energy integral so non-uniform sampling and stoppages don't
-// distort the result: avg = (E[j] - E[i]) / (time[j] - time[i]).
-const peakPowers = computed(() => {
-  const times = streams.value?.time?.data
-  const watts = streams.value?.watts?.data
-  if (!Array.isArray(times) || !Array.isArray(watts) || times.length < 2) return []
-  const n = Math.min(times.length, watts.length)
-  if (n < 2) return []
-  const E = new Float64Array(n)
-  for (let i = 1; i < n; i++) {
-    const dt = times[i] - times[i - 1]
-    const w = watts[i - 1]
-    const wv = (typeof w === 'number' && Number.isFinite(w)) ? w : 0
-    E[i] = E[i - 1] + wv * Math.max(0, dt)
-  }
-  const totalSpan = times[n - 1] - times[0]
-  const out = []
-  for (const D of PEAK_POWER_DURATIONS) {
-    if (D > totalSpan) break
-    let best = null
-    let bestStart = null
-    let bestEnd = null
-    let j = 0
-    for (let i = 0; i < n; i++) {
-      while (j < n && times[j] - times[i] < D) j++
-      if (j >= n) break
-      const dt = times[j] - times[i]
-      if (dt <= 0) continue
-      const avg = (E[j] - E[i]) / dt
-      if (best == null || avg > best) {
-        best = avg
-        bestStart = i
-        bestEnd = j
-      }
-    }
-    if (best != null && Number.isFinite(best) && best > 0) {
-      out.push({ duration: D, avgPower: best, startIdx: bestStart, endIdx: bestEnd })
-    }
-  }
-  return out
-})
+// Best average power per standard duration (peak-power curve) — les durées du
+// tableau des meilleures puissances moyennes.
+const peakPowers = computed(() => peakPowerCurve(streams.value, PEAK_POWER_DURATIONS))
+
+// Même calcul sur une grille dense : c'est la *courbe* de puissance de la sortie
+// (graphique), là où `peakPowers` n'en donne que les 11 durées de référence.
+const powerCurve = computed(() => peakPowerCurve(streams.value, POWER_CURVE_DURATIONS))
 
 // Anomalies d'enregistrement (trous de capteur, pics de puissance, pertes du cardio)
 // qui peuvent fausser l'analyse. Signalées discrètement sous la carte ; n'altèrent
@@ -606,7 +572,10 @@ onMounted(async () => {
         :climbs-with-vam="climbsWithVam"
         :intervals="intervals"
         :peak-powers="peakPowers"
+        :power-curve="powerCurve"
         :peak-power-ranks="peakPowerRanks"
+        :thresholds="peakPowerRanks?.thresholds || null"
+        :avg-watts="activity?.average_watts ?? null"
         :best-efforts="bestEfforts"
         :selection="selection"
         v-model:hovered-climb-start-idx="hoveredClimbStartIdx"

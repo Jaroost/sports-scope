@@ -34,7 +34,7 @@ import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
-import { companionScreen, companionNav } from '../companionBridge'
+import { companionScreen, companionNav, inCompanionApp } from '../companionBridge'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
@@ -245,6 +245,22 @@ const screenWake = useScreenWakeLock()
 const loggedIn = isLoggedIn()
 const screenOff = ref(false)
 
+// ─── Chrome cédé à l'application mobile ────────────────────────────────────────
+// Dans l'appli, la coquille native possède le bas de l'écran (bandeau de valeurs,
+// pages de données) et le bord droit (poignée de sortie de carte) — exactement où la
+// page pose ses deux zones de révélation. Deux poignées superposées au même endroit,
+// c'est un geste sur deux qui part au mauvais destinataire.
+//
+// La page rend donc les deux : le tiroir de commandes ne s'ouvre plus, et le geste de
+// masquage disparaît. Elle rend aussi ce que ce geste servait à dégager et que l'appli
+// affiche désormais elle-même — la barre d'avancement (distance, D+, ETA, progression)
+// et le profil du col. Restent à la page le bandeau de virage, celui des POI et le voile
+// de veille, dont l'appli ne sait rien.
+//
+// Constante et non réactive : le canal est injecté avant le premier rendu et ne
+// disparaît jamais en cours de route.
+const appOwnsChrome = inCompanionApp()
+
 // ─── Auto-masquage des boutons (interface épurée en séance) ────────────────────
 // Les commandes (retour, style de carte, son, caméra, POI) encombrent la
 // vue une fois la séance lancée. On les affiche au démarrage (découvrabilité) puis
@@ -254,6 +270,7 @@ const screenOff = ref(false)
 const { controlsVisible, armControlsHide, showControls, hideControls } = useControlsHide({
   isPanelOpen: () => activePanel.value !== null,
   closePanels: () => { activePanel.value = null },
+  enabled: !appOwnsChrome,
 })
 
 // Ouverture du tiroir par un geste sur la zone de révélation. Sur mobile, le tap y
@@ -688,7 +705,12 @@ let displayBearing = 0                 // smoothed bearing actually rendered
 // Affichage du profil des cols (carte d'altitude en bas d'écran), basculable depuis
 // le tiroir de commandes. Valeur initiale issue du profil (section Navigation) ;
 // masqué, la carte n'est plus rétrécie et le bas de l'écran est dégagé.
-const showClimbCard = ref(navPrefs.show_climb_card ?? true)
+//
+// Toujours masqué dans l'appli, qui dessine le profil du col elle-même : c'est le point
+// d'extinction unique du col (isClimbing en découle, donc le rétrécissement de la carte
+// et le redimensionnement MapLibre suivent sans qu'on ait à les traiter à part). Rien ne
+// peut le rallumer, la bascule vivant dans le tiroir de commandes, lui aussi rendu.
+const showClimbCard = ref(appOwnsChrome ? false : (navPrefs.show_climb_card ?? true))
 // La carte n'est rétrécie que quand la carte de col est EFFECTIVEMENT affichée : cette
 // condition doit donc rester alignée sur le v-if de NavClimbCard (showClimbCard +
 // overlays du bas visibles + col en cours + ni approche de virage, ni hors-tracé, ni
@@ -2517,7 +2539,7 @@ function onScreenOffTap() {
     class="nav-page"
     :class="{
       'nav-page--drawer': controlsVisible && activePanel === null,
-      'nav-page--nobar': hasRoute && !bottomOverlaysVisible,
+      'nav-page--nobar': hasRoute && (!bottomOverlaysVisible || appOwnsChrome),
     }"
   >
     <div ref="mapEl" class="nav-map" :class="{ 'nav-map--climbing': isClimbing }"></div>
@@ -2858,7 +2880,7 @@ function onScreenOffTap() {
          réduite à la vitesse. Escamotée pendant le parcours des POI, où le bandeau de
          parcours prend sa place tout en bas. -->
     <NavStatsBar
-      v-if="hasRoute && bottomOverlaysVisible && !poiBrowseActive"
+      v-if="hasRoute && bottomOverlaysVisible && !poiBrowseActive && !appOwnsChrome"
       :remaining-m="remainingM"
       :remaining-gain-m="remainingGainM"
       :done-percent="donePercent"
@@ -2878,7 +2900,7 @@ function onScreenOffTap() {
          inférieur. Active tant que le tiroir est replié, y compris en veille (elle passe
          alors au-dessus du voile noir, comme le tiroir lui-même). -->
     <div
-      v-if="!controlsVisible"
+      v-if="!controlsVisible && !appOwnsChrome"
       class="nav-menu-reveal-zone"
       :class="{
         'nav-menu-reveal-zone--sleep': screenOff,
@@ -2902,7 +2924,7 @@ function onScreenOffTap() {
          vers la droite quand tout est visible (geste → masquer) et vers la gauche quand
          c'est masqué (geste → réafficher). -->
     <div
-      v-if="hasRoute && !placeNavActive && !editMode"
+      v-if="hasRoute && !placeNavActive && !editMode && !appOwnsChrome"
       class="nav-bottom-reveal-zone"
       :class="{ 'nav-bottom-reveal-zone--sleep': screenOff }"
       @pointerdown="onBottomDown"

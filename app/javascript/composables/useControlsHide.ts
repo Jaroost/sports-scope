@@ -1,4 +1,4 @@
-import { ref, onBeforeUnmount } from 'vue'
+import { ref, onScopeDispose } from 'vue'
 
 // Auto-masquage des boutons de commande (interface épurée en séance). Partagé entre
 // navigation libre et navigation sur itinéraire.
@@ -12,17 +12,25 @@ import { ref, onBeforeUnmount } from 'vue'
 // débug) est ouvert, auquel cas on ne masque pas (l'utilisateur règle quelque chose)
 // et on réarme le minuteur — et closePanels(), appelé par hideControls pour refermer
 // ces sous-panneaux immédiatement.
+//
+// enabled: false désactive le tiroir de bout en bout — il ne s'ouvre jamais, pas même
+// les quelques secondes du départ. C'est le cas de l'application mobile, dont la
+// coquille native possède désormais le bas de l'écran et affichera ces réglages
+// elle-même : un tiroir web qu'on ne peut plus rappeler ne ferait que voler de la
+// carte au démarrage.
 const CONTROLS_HIDE_MS = 4000
 
 export function useControlsHide(deps: {
   isPanelOpen: () => boolean
   closePanels: () => void
+  enabled?: boolean
 }) {
-  const { isPanelOpen, closePanels } = deps
-  const controlsVisible = ref(true)
+  const { isPanelOpen, closePanels, enabled = true } = deps
+  const controlsVisible = ref(enabled)
   let controlsHideId: number | null = null
 
   function armControlsHide() {
+    if (!enabled) return
     if (controlsHideId != null) clearTimeout(controlsHideId)
     controlsHideId = window.setTimeout(() => {
       controlsHideId = null
@@ -32,6 +40,7 @@ export function useControlsHide(deps: {
   }
 
   function showControls() {
+    if (!enabled) return
     controlsVisible.value = true
     armControlsHide()
   }
@@ -45,7 +54,10 @@ export function useControlsHide(deps: {
     controlsVisible.value = false
   }
 
-  onBeforeUnmount(() => {
+  // onScopeDispose et non onBeforeUnmount : identique au démontage d'un composant (son
+  // scope de setup est arrêté à ce moment-là), mais valable aussi hors composant — ce
+  // qui rend le composable vérifiable dans un simple effect scope.
+  onScopeDispose(() => {
     if (controlsHideId != null) { clearTimeout(controlsHideId); controlsHideId = null }
   })
 

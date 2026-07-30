@@ -1,14 +1,15 @@
 <script setup lang="ts">
 // Dialogue de comparaison des variantes d'un tronçon. Rejoue le tronçon actuel (en
 // référence, tracé neutre) et les variantes BRouter (colorées) sur une carte MapLibre
-// dédiée. Un clic sur une variante ouvre une infobulle (distance, dénivelé, écarts) avec
-// un bouton « Choisir » qui émet `select`. Le montage/démontage de la carte suit le
-// cycle de vie du composant (la modale est montée via v-if côté parent).
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+// dédiée. Un clic sur une variante (carte ou pastille) la sélectionne : ses stats et le
+// bouton « Choisir » apparaissent alors dans la barre du bas — pas en infobulle sur la
+// carte, qui masquerait justement les tracés qu'on compare. Le montage/démontage de la
+// carte suit le cycle de vie du composant (la modale est montée via v-if côté parent).
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor } from '../mapStyles'
 import { profilesForSport } from '../brouter'
-import { formatDistancePrecise, formatDistanceShort } from '../routeHelpers'
+import { computeGainLoss, formatDistancePrecise, formatDistanceShort, haversine } from '../routeHelpers'
 import type { Coord } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 
@@ -60,19 +61,34 @@ function sportIcon(s: Sport) {
 }
 
 const mapEl = ref<HTMLElement | null>(null)
+// Survol (carte ou pastille) et tracé choisi. Le choisi l'emporte : tant qu'il est là,
+// promener la souris ailleurs ne défait pas la mise en avant. `CURRENT_ID` désigne le
+// tracé actuel, manipulé comme une variante de plus (survol, sélection, mise en retrait
+// des autres) — le choisir revient à ne rien changer, donc à fermer la modale.
+const CURRENT_ID = -1
 const hoveredId = ref<number | null>(null)
+const selectedId = ref<number | null>(null)
+const highlightedId = computed(() => selectedId.value ?? hoveredId.value)
+
+function chooseSelected() {
+  if (selectedId.value == null) return
+  if (selectedId.value === CURRENT_ID) emit('close')
+  else emit('select', selectedId.value)
+}
 
 // Instance MapLibre + module (chargés dynamiquement, comme la carte principale).
 let mapInstance: any = null
 let _maplibregl: any = null
 let mapReady = false
-let popup: any = null
-let activeStateId: number | null = null
 // Marqueurs des deux extrémités du tronçon : elles sont communes au tracé actuel et à
 // toutes les variantes, ce sont les seuls points fixes de la comparaison.
 let endpointMarkers: any[] = []
 
 const CURRENT_COLOR = '#64748b' // gris ardoise : le tronçon actuel, en référence
+// Quand un tracé est survolé/choisi, les autres sont carrément masqués : on ne compare
+// bien qu'un tracé à la fois. Les pastilles, elles, restent visibles (à 30 %, cf. CSS) —
+// ce sont elles qui permettent de revenir sur les tracés cachés.
+const DIM_OPACITY = 0
 
 // Écart d'une variante vs le tronçon actuel, avec signe explicite (± quand nul).
 function fmtDelta(m: number, kind: 'dist' | 'elev'): string {
@@ -80,6 +96,21 @@ function fmtDelta(m: number, kind: 'dist' | 'elev'): string {
   const abs = Math.abs(Math.round(m))
   return kind === 'elev' ? `${sign}${abs} m` : `${sign}${formatDistanceShort(abs)}`
 }
+
+// Pente moyenne : le D+ rapporté à la longueur (et non le dénivelé net), comme pour les
+// montées — c'est ce qui dit à quel point ça grimpe.
+function avgGrade(gainM: number, distanceM: number): number {
+  return distanceM > 0 ? (gainM / distanceM) * 100 : 0
+}
+
+// Stats du tronçon actuel : les variantes arrivent chiffrées du parent, le tracé actuel
+// n'est passé qu'en géométrie — on le mesure ici pour pouvoir l'afficher comme les autres.
+const currentStats = computed(() => {
+  const c = props.currentCoords
+  let distanceM = 0
+  for (let i = 1; i < c.length; i++) distanceM += haversine(c[i - 1], c[i])
+  return { distanceM, gainM: computeGainLoss(c).gain }
+})
 
 async function initMap() {
   if (!mapEl.value) return
@@ -107,20 +138,32 @@ async function initMap() {
 }
 
 function installLayers() {
-  // Tronçon actuel : trait pointillé neutre, sous les variantes (référence visuelle).
+  // Tronçon actuel : trait pointillé neutre, sous les variantes (référence visuelle). Il
+  // se survole et se sélectionne comme une variante, d'où le calque de saisie invisible :
+  // un pointillé de 4 px est trop fin pour être visé au doigt ou à la souris.
   mapInstance.addSource('alt-current', { type: 'geojson', data: emptyFeature() })
   mapInstance.addLayer({
     id: 'alt-current-line', type: 'line', source: 'alt-current',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
     paint: { 'line-color': CURRENT_COLOR, 'line-width': 4, 'line-dasharray': [1.6, 1.4], 'line-opacity': 0.9 },
   })
+  mapInstance.addLayer({
+    id: 'alt-current-hit', type: 'line', source: 'alt-current',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': CURRENT_COLOR, 'line-width': 16, 'line-opacity': 0 },
+  })
   // Variantes : bordure sombre + trait coloré ; la variante survolée/active est élargie
-  // via l'état de feature `active`.
+  // via l'état de feature `active`, et les autres reculent (`dimmed`) pour qu'on suive
+  // celle qu'on regarde sans être brouillé par les tracés voisins.
   mapInstance.addSource('alt-variants', { type: 'geojson', data: emptyCollection() })
   mapInstance.addLayer({
     id: 'alt-variants-border', type: 'line', source: 'alt-variants',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': 'rgba(0,0,0,0.45)', 'line-width': ['case', ['boolean', ['feature-state', 'active'], false], 12, 9] },
+    paint: {
+      'line-color': 'rgba(0,0,0,0.45)',
+      'line-width': ['case', ['boolean', ['feature-state', 'active'], false], 12, 9],
+      'line-opacity': ['case', ['boolean', ['feature-state', 'dimmed'], false], DIM_OPACITY, 1],
+    },
   })
   mapInstance.addLayer({
     id: 'alt-variants-line', type: 'line', source: 'alt-variants',
@@ -128,12 +171,21 @@ function installLayers() {
     paint: {
       'line-color': ['get', 'color'],
       'line-width': ['case', ['boolean', ['feature-state', 'active'], false], 7.5, 5],
-      'line-opacity': ['case', ['boolean', ['feature-state', 'active'], false], 1, 0.85],
+      'line-opacity': [
+        'case',
+        ['boolean', ['feature-state', 'active'], false], 1,
+        ['boolean', ['feature-state', 'dimmed'], false], DIM_OPACITY,
+        0.85,
+      ],
     },
   })
   mapInstance.on('mousemove', 'alt-variants-line', onLineMove)
   mapInstance.on('mouseleave', 'alt-variants-line', onLineLeave)
   mapInstance.on('click', 'alt-variants-line', onLineClick)
+  mapInstance.on('mousemove', 'alt-current-hit', onCurrentMove)
+  mapInstance.on('mouseleave', 'alt-current-hit', onLineLeave)
+  mapInstance.on('click', 'alt-current-hit', onCurrentClick)
+  mapInstance.on('click', onMapClick)
 }
 
 function emptyFeature() {
@@ -146,8 +198,10 @@ function emptyCollection() {
 // (Re)pose le tronçon actuel + les variantes et recadre la carte sur l'ensemble.
 function renderAlternatives() {
   if (!mapReady || !mapInstance) return
-  closePopup()
-  setActive(null)
+  // La liste change (nouvelle passe d'élargissement) : les index ne désignent plus les
+  // mêmes tracés, on repart sans sélection.
+  selectedId.value = null
+  hoveredId.value = null
 
   const cur = mapInstance.getSource('alt-current')
   if (cur) {
@@ -168,6 +222,8 @@ function renderAlternatives() {
       })),
     })
   }
+  // Les états de feature survivent au setData : on les remet à plat sur la nouvelle liste.
+  paintHighlight(null)
 
   renderEndpoints()
   fitToAll()
@@ -212,87 +268,95 @@ function fitToAll() {
   mapInstance.fitBounds(bounds, { padding: 60, duration: 0 })
 }
 
-function setActive(id: number | null) {
-  if (!mapInstance) return
-  if (activeStateId != null) mapInstance.setFeatureState({ source: 'alt-variants', id: activeStateId }, { active: false })
-  activeStateId = id
-  if (id != null) mapInstance.setFeatureState({ source: 'alt-variants', id }, { active: true })
-  hoveredId.value = id
+// Peint la mise en avant : le tracé visé passe en trait large et pleine opacité, tous les
+// autres — tracé actuel compris — tombent à `DIM_OPACITY`. `null` remet tout à plat.
+function paintHighlight(id: number | null) {
+  if (!mapReady || !mapInstance) return
+  for (let i = 0; i < props.alternatives.length; i++) {
+    mapInstance.setFeatureState(
+      { source: 'alt-variants', id: i },
+      { active: id === i, dimmed: id != null && id !== i },
+    )
+  }
+  // Le tracé actuel n'a qu'une feature : sa mise en avant passe par le paint du calque.
+  const curActive = id === CURRENT_ID
+  const curDimmed = id != null && !curActive
+  mapInstance.setPaintProperty('alt-current-line', 'line-width', curActive ? 6 : 4)
+  mapInstance.setPaintProperty('alt-current-line', 'line-opacity', curActive ? 1 : curDimmed ? DIM_OPACITY : 0.9)
+}
+
+watch(highlightedId, (id) => paintHighlight(id))
+
+// Un point de la carte est-il sur une variante ? Les variantes passent devant le tracé
+// actuel : quand les deux se superposent, c'est la variante qui répond au survol/clic.
+function overVariant(point: any): boolean {
+  return mapInstance
+    .queryRenderedFeatures(point, { layers: ['alt-variants-line'] })
+    .some((f: any) => isInteractive(f.properties?.altId ?? 0))
+}
+
+// Tant qu'un tracé est sélectionné, les autres sont masqués : ils ne doivent plus
+// répondre à la souris. On ne vise pas ce qu'on ne voit pas, et un clic dans ce qui est
+// devenu du vide doit désélectionner, pas attraper un tracé invisible.
+function isInteractive(id: number): boolean {
+  return selectedId.value == null || selectedId.value === id
 }
 
 function onLineMove(e: any) {
   const f = e.features?.[0]
   if (!f) return
+  const id = f.properties?.altId ?? 0
+  if (!isInteractive(id)) return
   mapInstance.getCanvas().style.cursor = 'pointer'
-  const id = f.properties?.altId ?? null
-  if (id !== activeStateId) setActive(id)
+  hoveredId.value = id
 }
 
 function onLineLeave() {
   mapInstance.getCanvas().style.cursor = ''
-  if (!popup) setActive(null)
+  hoveredId.value = null
 }
 
 function onLineClick(e: any) {
   const f = e.features?.[0]
   if (!f) return
   const id = f.properties?.altId ?? 0
-  openPopup(id, [e.lngLat.lng, e.lngLat.lat])
+  if (isInteractive(id)) selectedId.value = id
 }
 
-// Ouvre l'infobulle d'une variante (stats + écarts + bouton « Choisir »). `at` est le
-// point d'ancrage : le point cliqué sur la carte, ou le milieu de la variante depuis la
-// légende.
-function openPopup(id: number, at: [number, number]) {
-  const alt = props.alternatives[id]
-  if (!alt || !mapInstance) return
-  setActive(id)
-  closePopup()
-
-  const wrap = document.createElement('div')
-  wrap.className = 'raltd-popup'
-  const deltaDistClass = alt.deltaDistanceM <= 0 ? 'raltd-pos' : 'raltd-neg'
-  const deltaGainClass = alt.deltaGainM <= 0 ? 'raltd-pos' : 'raltd-neg'
-  wrap.innerHTML = `
-    <div class="raltd-popup-head">
-      <span class="raltd-swatch" style="background:${alt.color}"></span>
-      <strong>${t('routes.alternatives_variant', { n: id + 1 })}</strong>
-    </div>
-    <div class="raltd-popup-row">
-      <i class="fa-solid fa-ruler-horizontal"></i>
-      <span>${formatDistancePrecise(alt.distanceM)}</span>
-      <span class="raltd-delta ${deltaDistClass}">${fmtDelta(alt.deltaDistanceM, 'dist')}</span>
-    </div>
-    <div class="raltd-popup-row">
-      <i class="fa-solid fa-arrow-trend-up"></i>
-      <span>+${Math.round(alt.gainM)} m</span>
-      <span class="raltd-delta ${deltaGainClass}">${fmtDelta(alt.deltaGainM, 'elev')}</span>
-    </div>
-    <button type="button" class="raltd-choose">${t('routes.apply_alternative')}</button>`
-  wrap.querySelector('.raltd-choose')?.addEventListener('click', () => emit('select', id))
-
-  popup = new _maplibregl.Popup({ offset: 16, closeButton: true, closeOnClick: false, className: 'raltd-popup-container' })
-    .setLngLat(at)
-    .setDOMContent(wrap)
-    .addTo(mapInstance)
-  popup.on('close', () => { popup = null; setActive(null) })
+function onCurrentMove(e: any) {
+  if (!isInteractive(CURRENT_ID) || overVariant(e.point)) return
+  mapInstance.getCanvas().style.cursor = 'pointer'
+  hoveredId.value = CURRENT_ID
 }
 
-function closePopup() {
-  if (popup) { const p = popup; popup = null; p.remove() }
+function onCurrentClick(e: any) {
+  if (!isInteractive(CURRENT_ID) || overVariant(e.point)) return
+  selectedId.value = CURRENT_ID
 }
 
-// Légende : survol → surligne la variante ; clic → ouvre son infobulle en son milieu.
-function onChipEnter(id: number) { if (!popup) setActive(id) }
-function onChipLeave() { if (!popup) setActive(null) }
+// Clic à côté de tout tracé visible : on désélectionne (les handlers de calque ci-dessus
+// ont déjà traité le cas « sur un tracé »).
+function onMapClick(e: any) {
+  const hits = mapInstance.queryRenderedFeatures(e.point, { layers: ['alt-variants-line', 'alt-current-hit'] })
+  const onVisible = hits.some((f: any) =>
+    isInteractive(f.layer.id === 'alt-current-hit' ? CURRENT_ID : f.properties?.altId ?? 0),
+  )
+  if (!onVisible) selectedId.value = null
+}
+
+// Légende : survol → surligne la variante ; clic → la sélectionne (re-clic = désélection).
+function onChipEnter(id: number) { hoveredId.value = id }
+function onChipLeave() { hoveredId.value = null }
 function onChipClick(id: number) {
-  const alt = props.alternatives[id]
-  if (!alt || !alt.coords.length) return
-  const mid = alt.coords[Math.floor(alt.coords.length / 2)]
-  openPopup(id, [mid[0], mid[1]])
+  selectedId.value = selectedId.value === id ? null : id
 }
 
-function onKeydown(e: KeyboardEvent) { if (e.key === 'Escape') emit('close') }
+// Échap : d'abord abandonner la sélection en cours, et seulement ensuite fermer.
+function onKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (selectedId.value != null) selectedId.value = null
+  else emit('close')
+}
 
 // Recadre / re-pose dès que les variantes arrivent (la modale s'ouvre pendant le
 // chargement, la carte est déjà montée).
@@ -304,7 +368,6 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
-  closePopup()
   clearEndpoints()
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
@@ -381,27 +444,92 @@ onBeforeUnmount(() => {
         <div v-if="!loading" class="raltd-legend">
           <div class="raltd-legend-main">
             <span v-if="alternatives.length" class="raltd-hint">{{ t('routes.alternatives_hint') }}</span>
+            <!-- `div` et non `button` : la pastille sélectionnée contient elle-même le
+                 bouton « Choisir », et un bouton dans un bouton est invalide. D'où le
+                 rôle + la gestion clavier à la main (`.self` pour ne pas intercepter la
+                 touche Entrée destinée au bouton interne). -->
             <div v-if="alternatives.length" class="raltd-chips">
-              <span class="raltd-chip raltd-chip--current">
+              <div
+                class="raltd-chip"
+                role="button"
+                tabindex="0"
+                :aria-pressed="selectedId === CURRENT_ID"
+                :class="{
+                  'raltd-chip--active': highlightedId === CURRENT_ID,
+                  'raltd-chip--selected': selectedId === CURRENT_ID,
+                  'raltd-chip--dimmed': highlightedId !== null && highlightedId !== CURRENT_ID,
+                }"
+                @mouseenter="onChipEnter(CURRENT_ID)"
+                @mouseleave="onChipLeave"
+                @focus="onChipEnter(CURRENT_ID)"
+                @blur="onChipLeave"
+                @click="onChipClick(CURRENT_ID)"
+                @keydown.enter.self.prevent="onChipClick(CURRENT_ID)"
+                @keydown.space.self.prevent="onChipClick(CURRENT_ID)"
+              >
                 <span class="raltd-swatch raltd-swatch--dashed"></span>
                 {{ t('routes.alternatives_current') }}
-              </span>
-              <button
+                <span class="raltd-chip-grade" :title="t('routes.alternatives_avg_grade')">
+                  {{ avgGrade(currentStats.gainM, currentStats.distanceM).toFixed(1) }}%
+                </span>
+                <!-- Choisir le tracé actuel = ne rien changer : on referme, c'est tout. -->
+                <button
+                  v-if="selectedId === CURRENT_ID"
+                  type="button"
+                  class="raltd-choose"
+                  @click.stop="chooseSelected"
+                >
+                  {{ t('routes.alternatives_keep_current') }}
+                </button>
+              </div>
+              <div
                 v-for="(alt, i) in alternatives"
                 :key="i"
-                type="button"
                 class="raltd-chip"
-                :class="{ 'raltd-chip--active': hoveredId === i }"
+                role="button"
+                tabindex="0"
+                :aria-pressed="selectedId === i"
+                :class="{
+                  'raltd-chip--active': highlightedId === i,
+                  'raltd-chip--selected': selectedId === i,
+                  'raltd-chip--dimmed': highlightedId !== null && highlightedId !== i,
+                }"
                 @mouseenter="onChipEnter(i)"
                 @mouseleave="onChipLeave"
+                @focus="onChipEnter(i)"
+                @blur="onChipLeave"
                 @click="onChipClick(i)"
+                @keydown.enter.self.prevent="onChipClick(i)"
+                @keydown.space.self.prevent="onChipClick(i)"
               >
                 <span class="raltd-swatch" :style="{ background: alt.color }"></span>
                 {{ t('routes.alternatives_variant', { n: i + 1 }) }}
-                <span class="raltd-chip-delta" :class="alt.deltaDistanceM <= 0 ? 'raltd-pos' : 'raltd-neg'">
+                <span
+                  class="raltd-chip-delta"
+                  :class="alt.deltaDistanceM <= 0 ? 'raltd-pos' : 'raltd-neg'"
+                  :title="`${t('routes.alternatives_delta_distance')} — ${formatDistancePrecise(alt.distanceM)}`"
+                >
                   {{ fmtDelta(alt.deltaDistanceM, 'dist') }}
                 </span>
-              </button>
+                <span
+                  class="raltd-chip-delta"
+                  :class="alt.deltaGainM <= 0 ? 'raltd-pos' : 'raltd-neg'"
+                  :title="`${t('routes.alternatives_delta_gain')} — +${Math.round(alt.gainM)} m`"
+                >
+                  {{ fmtDelta(alt.deltaGainM, 'elev') }}
+                </span>
+                <span class="raltd-chip-grade" :title="t('routes.alternatives_avg_grade')">
+                  {{ avgGrade(alt.gainM, alt.distanceM).toFixed(1) }}%
+                </span>
+                <button
+                  v-if="selectedId === i"
+                  type="button"
+                  class="raltd-choose"
+                  @click.stop="chooseSelected"
+                >
+                  {{ t('routes.apply_alternative') }}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -541,15 +669,28 @@ onBeforeUnmount(() => {
   font-size: 0.85rem;
   color: #111827;
   cursor: pointer;
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color 0.12s, box-shadow 0.12s, opacity 0.12s;
 }
 .raltd-chip:hover, .raltd-chip--active {
   border-color: #0096c7;
   box-shadow: 0 0 0 1px #0096c7;
 }
-.raltd-chip--current { cursor: default; color: #6b7280; }
-.raltd-chip--current:hover { border-color: #d1d5db; box-shadow: none; }
-.raltd-chip-delta { font-weight: 600; }
+.raltd-chip--selected {
+  border-color: #0096c7;
+  box-shadow: 0 0 0 2px #0096c7;
+}
+/* Même mise en retrait que les tracés correspondants sur la carte. */
+.raltd-chip--dimmed { opacity: 0.3; }
+.raltd-chip-delta { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Pente moyenne : valeur absolue (pas un écart) — en retrait pour ne pas la confondre
+   avec les deux écarts qui la précèdent. */
+.raltd-chip-grade {
+  color: #6b7280;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  padding-left: 0.35rem;
+  border-left: 1px solid #e5e7eb;
+}
 .raltd-swatch {
   width: 14px;
   height: 4px;
@@ -561,6 +702,21 @@ onBeforeUnmount(() => {
 }
 .raltd-pos { color: #16a34a; }
 .raltd-neg { color: #6b7280; }
+
+/* Bouton d'action, à l'intérieur de la pastille sélectionnée : il déborde du padding de
+   la pastille pour en occuper le bord droit sans la faire grossir en hauteur. */
+.raltd-choose {
+  margin: -0.3rem -0.6rem -0.3rem 0.1rem;
+  border: none;
+  border-radius: 999px;
+  background: #0096c7;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+}
+.raltd-choose:hover { background: #007ea7; }
 
 /* Sur téléphone : plein écran pour laisser la carte respirer et faciliter le clic. */
 @media (max-width: 640px) {
@@ -584,8 +740,8 @@ onBeforeUnmount(() => {
 }
 </style>
 
-<!-- Styles de l'infobulle MapLibre et des marqueurs d'extrémité : non-scoped car leur DOM
-     est créé dynamiquement et n'hérite donc pas de l'attribut de scope du composant. -->
+<!-- Styles des marqueurs d'extrémité : non-scoped car leur DOM est créé dynamiquement et
+     n'hérite donc pas de l'attribut de scope du composant. -->
 <style>
 .raltd-end-marker {
   width: 26px;
@@ -602,39 +758,4 @@ onBeforeUnmount(() => {
 }
 .raltd-end-marker--start { background: #16a34a; }
 .raltd-end-marker--finish { background: #111827; }
-.raltd-popup-container .maplibregl-popup-content {
-  border-radius: 0.6rem;
-  padding: 0.7rem 0.85rem;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-}
-.raltd-popup { min-width: 168px; font-size: 0.85rem; color: #111827; }
-.raltd-popup-head {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-bottom: 0.5rem;
-}
-.raltd-popup-head .raltd-swatch { width: 16px; height: 5px; border-radius: 2px; }
-.raltd-popup-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.3rem;
-}
-.raltd-popup-row i { width: 1rem; color: #6b7280; text-align: center; }
-.raltd-popup .raltd-delta { margin-left: auto; font-weight: 600; }
-.raltd-popup .raltd-pos { color: #16a34a; }
-.raltd-popup .raltd-neg { color: #6b7280; }
-.raltd-choose {
-  margin-top: 0.55rem;
-  width: 100%;
-  border: none;
-  border-radius: 0.45rem;
-  background: #0096c7;
-  color: #fff;
-  font-weight: 600;
-  padding: 0.4rem 0.6rem;
-  cursor: pointer;
-}
-.raltd-choose:hover { background: #007ea7; }
 </style>

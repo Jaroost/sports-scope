@@ -2534,12 +2534,16 @@ function onScreenOffTap() {
   <!-- nav-page--drawer : le tiroir de commandes est déployé en barre (pas en panneau) et
        occupe le bas de l'écran — les overlays du bas remontent d'autant pour rester
        lisibles (cf. --nav-bottom-inset). En mode panneau, la feuille est haute et les
-       recouvre volontairement : on règle quelque chose, la carte passe au second plan. -->
+       recouvre volontairement : on règle quelque chose, la carte passe au second plan.
+
+       nav-page--nobar : rien n'occupe le bas, donc le bouton « recentrer » descend à ras
+       du bord. Dans l'appli c'est vrai en permanence — elle masque les deux barres, avec
+       ou sans itinéraire — d'où la condition en tête et non plus accrochée à hasRoute. -->
   <div
     class="nav-page"
     :class="{
       'nav-page--drawer': controlsVisible && activePanel === null,
-      'nav-page--nobar': hasRoute && (!bottomOverlaysVisible || appOwnsChrome),
+      'nav-page--nobar': appOwnsChrome || (hasRoute && !bottomOverlaysVisible),
     }"
   >
     <div ref="mapEl" class="nav-map" :class="{ 'nav-map--climbing': isClimbing }"></div>
@@ -2878,7 +2882,12 @@ function onScreenOffTap() {
     <!-- Bottom stats : barre complète (distance / D+ / ETA / progression) en navigation
          sur itinéraire (masquable par le geste latéral) ; en navigation libre, carte
          réduite à la vitesse. Escamotée pendant le parcours des POI, où le bandeau de
-         parcours prend sa place tout en bas. -->
+         parcours prend sa place tout en bas.
+
+         Ni l'une ni l'autre dans l'appli mobile (`appOwnsChrome`) : elle a son propre
+         bandeau, natif, juste sous le WebView. La garde manquait sur la carte de
+         navigation libre, et vitesse et cardio s'y affichaient donc deux fois, l'un
+         au-dessus de l'autre. -->
     <NavStatsBar
       v-if="hasRoute && bottomOverlaysVisible && !poiBrowseActive && !appOwnsChrome"
       :remaining-m="remainingM"
@@ -2887,7 +2896,10 @@ function onScreenOffTap() {
       :speed-kmh="speedKmh"
       :eta-speed-kmh="avgSpeedKmh"
     />
-    <div v-else-if="!hasRoute && !poiBrowseActive" class="nav-stats nav-stats--free shadow">
+    <div
+      v-else-if="!hasRoute && !poiBrowseActive && !appOwnsChrome"
+      class="nav-stats nav-stats--free shadow"
+    >
       <div class="nav-stat-value">{{ Math.round(speedKmh) }}<span class="nav-stat-unit"> km/h</span></div>
       <div class="nav-stat-label">{{ t('routes.speed') }}</div>
       <!-- En navigation libre il n'y a pas de barre de stats : les capteurs de

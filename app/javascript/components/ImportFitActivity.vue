@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { t } from '../i18n'
 import { formatDaysAgo } from '../timeAgo'
 import { computeElevGain } from '../activityHelpers'
+import { fillHoles } from '../fitStreams'
 import { csrfToken } from '../csrf'
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
@@ -134,14 +135,14 @@ function buildPayload(data, filename) {
   const streams: Record<string, { data: any[] }> = {}
   streams.time = { data: time }
   if (distance.some((v) => v > 0)) streams.distance = { data: distance }
-  // latlng filters out nulls but Strava preserves alignment — keep nulls as
-  // placeholder pairs [0,0] would corrupt the map. Instead, drop the stream
-  // entirely if too sparse.
+  // Position et altitude se comblent par la valeur connue la plus proche, jamais
+  // par un zéro : voir `fitStreams.ts`. Le seuil de moitié reste — une trace dont
+  // le GPS a manqué la majorité des points ne vaut pas d'être dessinée.
   const llValid = latlng.filter((p) => p != null)
   if (llValid.length >= 2 && llValid.length >= latlng.length * 0.5) {
-    streams.latlng = { data: latlng.map((p) => p ?? [0, 0]) }
+    streams.latlng = { data: fillHoles(latlng) }
   }
-  if (altitude.some((v) => v != null)) streams.altitude = { data: altitude.map((v) => v ?? 0) }
+  if (altitude.some((v) => v != null)) streams.altitude = { data: fillHoles(altitude) }
   if (velocity.some((v) => v != null)) streams.velocity_smooth = { data: velocity.map((v) => v ?? 0) }
   if (heartrate.some((v) => v != null)) streams.heartrate = { data: heartrate.map((v) => v ?? 0) }
   if (cadence.some((v) => v != null)) streams.cadence = { data: cadence.map((v) => v ?? 0) }

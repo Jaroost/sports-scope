@@ -73,4 +73,77 @@ class LthrEstimatorTest < ActiveSupport::TestCase
       "time" => (0..600).to_a, "heartrate" => Array.new(601, 170)
     )
   end
+
+  # ── Seuil de l'athlète : agrégation sur plusieurs sorties ───────────────────
+  def ride(curve, started_at: 3.days.ago, name: "Sortie", max_hr: nil)
+    { started_at: started_at, curve: curve, max_hr: max_hr,
+      name: name, source: "imported", external_id: "1" }
+  end
+
+  test "les deux ancres peuvent venir de deux sorties différentes" do
+    # Le col donne le meilleur 20 min, le contre-la-montre la meilleure heure :
+    # deux preuves indépendantes du même seuil, qu'on ne veut pas s'obliger à
+    # trouver dans une seule sortie.
+    est = LthrEstimator.estimate_from([
+                                        ride({ "1200" => 170.0 }, name: "Col"),
+                                        ride({ "3600" => 168.0 }, name: "CLM")
+                                      ])
+
+    assert_equal "lthr_60min", est[:method] # 168 > 170 × 0,98
+    assert_equal 168, est[:bpm]
+    assert_equal 170, est[:best_20min]
+    assert_equal 168, est[:best_60min]
+    assert_equal 2, est[:samples]
+    assert_equal "CLM", est[:contributors].first[:name]
+  end
+
+  test "l'estimation nomme la sortie qui la porte" do
+    est = LthrEstimator.estimate_from([
+                                        ride({ "1200" => 175.0 }, name: "Col de la Croix"),
+                                        ride({ "1200" => 150.0 }, name: "Récup")
+                                      ])
+
+    assert_equal "lthr_20min", est[:method]
+    assert_equal 172, est[:bpm] # 175 × 0,98
+    # Un seuil dont on ne peut pas remonter à l'effort qui le prouve se discute
+    # sans fin ; avec la sortie nommée, il se vérifie.
+    assert_equal 1, est[:contributors].length
+    assert_equal "Col de la Croix", est[:contributors].first[:name]
+    assert_equal 1200, est[:contributors].first[:duration]
+    assert_equal 175, est[:contributors].first[:bpm]
+  end
+
+  test "une sortie tranquille ne rabaisse pas le seuil de l'athlète" do
+    # C'est toute la différence avec l'estimation d'UNE sortie : en agrégeant, il
+    # suffit d'un effort soutenu dans la fenêtre pour que le seuil soit juste.
+    est = LthrEstimator.estimate_from([
+                                        ride({ "1200" => 174.0 }, name: "Intervalles"),
+                                        ride({ "1200" => 120.0, "3600" => 115.0 }, name: "Balade")
+                                      ])
+
+    assert_equal 171, est[:bpm] # 174 × 0,98, la balade n'y change rien
+  end
+
+  test "estimate_between ne garde que la fenêtre demandée" do
+    acts = [
+      ride({ "1200" => 176.0 }, started_at: 100.days.ago, name: "L'hiver dernier"),
+      ride({ "1200" => 160.0 }, started_at: 5.days.ago, name: "Cette semaine")
+    ]
+
+    recent = LthrEstimator.estimate_between(acts, LthrEstimator::WINDOW_DAYS.days.ago, nil)
+    all_time = LthrEstimator.estimate_between(acts, nil, nil)
+
+    assert_equal 157, recent[:bpm] # 160 × 0,98 : la forme du moment
+    assert_equal 172, all_time[:bpm] # 176 × 0,98 : le meilleur de tous les temps
+  end
+
+  test "estimate_from ne rend rien sans sortie exploitable" do
+    assert_nil LthrEstimator.estimate_from([])
+    # Une courbe sans ancre : la sortie existe mais aucune durée utile.
+    assert_nil LthrEstimator.estimate_from([ride({ "300" => 180.0 })])
+  end
+
+  test "le plancher de vraisemblance vaut aussi pour l'agrégat" do
+    assert_nil LthrEstimator.estimate_from([ride({ "1200" => 95.0 }), ride({ "1200" => 90.0 })])
+  end
 end

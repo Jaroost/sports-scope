@@ -252,8 +252,10 @@ en:
       lthr_method_title: "HR threshold (LTHR)"
       lthr_method_what: "It's your lactate threshold heart rate: the highest HR you can hold in a steady state for ~1 h of maximal effort. Below it, your body clears lactate as fast as it produces it; above it, lactate builds up and you fade within minutes. It's the heart-rate equivalent of FTP — hence its role as the denominator of IF above."
       lthr_method_manual: "If you set it, your value is used as-is — by far the most reliable. It's measured with a 30 min solo all-out test, keeping the average HR of the LAST 20 minutes: HR drifts upward early in the effort, so the full average would underrate you."
-      lthr_method_auto: "Otherwise it's estimated from your history: the highest average HR across your activities ÷ 0.92 approximates your max HR, then LTHR ≈ 0.90 × max HR."
-      lthr_method_auto_warning: "This estimate is rough: it starts from average HRs, never your real max HR. If your HR-based TSS looks wrong, set the threshold manually."
+      lthr_method_auto: "Otherwise it's estimated from your last 6 weeks of rides, using the same anchors as the test: the average HR of your best ~1 h effort, or your best 20 min × 0.98. We keep the higher of the two — each is a floor of what you held, never a ceiling."
+      lthr_method_proxy: "With no ride carrying a detailed recording, we fall back to a ballpark figure: the highest average HR across your activities ÷ 0.92 approximates your max HR, then LTHR ≈ 0.90 × max HR."
+      lthr_method_auto_warning: "Your threshold comes from that ballpark figure: it starts from average HRs, never a measured effort. If your HR-based TSS looks wrong, set the threshold manually."
+      lthr_stale_hint: "No ride with heart rate in the last 6 weeks: this threshold comes from further back in your history. Still usable, but it describes your form back then."
       no_data: "Not enough activities yet to chart your training load."
       widget:
         see_analysis: "See analysis"

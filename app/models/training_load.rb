@@ -66,8 +66,9 @@ module TrainingLoad
   # v3 = ajout de `typical_speed_samples` ; v4 = ajout de `started_at` par activité
   # (le front en fait l'heure de la dernière sortie du jour pour dater le « réalisé ») ;
   # v5 = ajout de `distance_m` par activité et par jour (total km de la semaine) ;
-  # v6 = ajout de `lo`/`hi` (bornes bpm/W) à chaque zone d'intensité.
-  CACHE_VERSION = 'v6'
+  # v6 = ajout de `lo`/`hi` (bornes bpm/W) à chaque zone d'intensité ;
+  # v7 = LTHR estimé sur les courbes cardio persistées (+ `lthr_method`, `lthr_stale`).
+  CACHE_VERSION = 'v7'
 
   # ── Payload complet consommé par le front ───────────────────────────────────
   # Mis en cache : recalcul lourd (union des 2 tables + EWMA quotidiennes). La clé
@@ -132,6 +133,11 @@ module TrainingLoad
         lthr: lthr_info[:value],
         lthr_source: lthr_info[:source],
         lthr_auto: lthr_info[:auto],
+        # Comment l'estimation a été obtenue (`lthr_20min`, `lthr_60min`,
+        # `hr_max_proxy`) : c'est ce qui distingue une mesure d'un ordre de grandeur,
+        # et le front n'avertit que dans le second cas.
+        lthr_method: lthr_info[:method],
+        lthr_stale: lthr_info[:stale],
         typical_speed_kmh: typical_cycling_speed(rows),
         # Nombre de sorties derrière la médiane : le front en fait un indice de
         # fiabilité avant de proposer cette vitesse.
@@ -403,13 +409,37 @@ module TrainingLoad
     end
   end
 
-  # LTHR effectif (bpm) : valeur manuelle si renseignée, sinon estimation auto
-  # ≈ 90 % de la FC max observée. Renvoie la source + l'auto (pour l'UI).
+  # LTHR effectif (bpm) : valeur manuelle si renseignée, sinon estimation.
+  #
+  # Trois rangs, du plus fiable au moins fiable, et `method` dit lequel a servi :
+  #   1. `manual` — une valeur de test, saisie dans les préférences ;
+  #   2. `lthr_20min` / `lthr_60min` — `LthrEstimator`, sur les courbes cardio
+  #      persistées des sorties vélo (une vraie mesure d'effort soutenu) ;
+  #   3. `hr_max_proxy` — le vieux repli grossier ci-dessous, pour qui n'a pas de
+  #      courbe cardio à vélo : coureur à pied, ou sorties Strava dont les streams
+  #      n'ont jamais été récupérés.
+  #
+  # `auto` reste le bpm brut de l'estimation (le front l'affiche tel quel).
   def lthr(user, rows)
-    manual = FtpEstimator.numeric(FtpEstimator.athlete(user)['lthr_manual'])&.round
-    auto = auto_lthr(rows)
+    summary = LthrEstimator.summary(user)
+    manual = summary[:manual][:bpm]
+    estimated = summary.dig(:auto, :bpm)
+    auto = estimated || auto_lthr(rows)
     value = manual&.positive? ? manual : auto
-    { value: value, auto: auto, source: (manual&.positive? ? 'manual' : (auto ? 'auto' : nil)) }
+
+    {
+      value: value,
+      auto: auto,
+      source: (manual&.positive? ? 'manual' : (auto ? 'auto' : nil)),
+      method: if manual&.positive?
+                nil
+              else
+                estimated ? summary.dig(:auto, :method) : (auto ? 'hr_max_proxy' : nil)
+              end,
+      # Seulement quand l'estimation a dû sortir de la fenêtre glissante : un seuil
+      # de l'hiver dernier reste utilisable, mais le front doit pouvoir le dire.
+      stale: estimated ? summary.dig(:current, :stale) : false
+    }
   end
 
   # Vitesses moyennes (m/s) des sorties vélo, telles qu'enregistrées. Attention :
@@ -455,10 +485,16 @@ module TrainingLoad
     (durations.max / 60.0).round
   end
 
+  # Dernier repli, quand `LthrEstimator` n'a rien : aucune sortie **vélo** ne porte
+  # de courbe cardio persistée — coureur à pied, ou activités Strava dont les
+  # streams n'ont jamais été récupérés (la courbe se calcule à partir d'eux).
+  #
+  # Deux approximations empilées, d'où son rang : `average_heartrate` sous-estime la
+  # FC max, on l'approxime par le plus haut des FC moyennes /0,92, puis
+  # LTHR ≈ 0,9 × FC max. Grossier mais borné — et surtout disponible sans streams,
+  # ce qui reste sa seule raison d'exister.
   def auto_lthr(rows)
     max_hr = rows.filter_map { |r| numeric(r['average_heartrate']) }.max
-    # `average_heartrate` sous-estime la FC max ; on approxime la FC max par le plus
-    # haut des FC moyennes /0.92, puis LTHR ≈ 0,9 × FC max. Grossier mais borné.
     return nil unless max_hr&.positive?
 
     (max_hr / 0.92 * 0.9).round

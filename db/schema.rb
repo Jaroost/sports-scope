@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_28_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_31_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -80,6 +80,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_120000) do
     t.integer "moving_time_s"
     t.string "name", null: false
     t.float "normalized_power"
+    t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
     t.jsonb "power_histogram", default: {}, null: false
     t.string "source", default: "fit", null: false
@@ -207,6 +208,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_28_120000) do
     t.integer "moving_time_s"
     t.string "name", null: false
     t.float "normalized_power"
+    t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
     t.jsonb "photo_thumbs"
     t.jsonb "power_histogram", default: {}, null: false

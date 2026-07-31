@@ -161,6 +161,11 @@ const tsbTrend = computed(() => computeTrend('tsb', 2, 'up'))   // fraîcheur : 
 // ── LTHR ─────────────────────────────────────────────────────────────────────
 const lthr = computed(() => data.value?.thresholds?.lthr ?? null)
 const lthrSource = computed(() => data.value?.thresholds?.lthr_source ?? null)
+// Comment l'estimation a été obtenue : `lthr_20min` / `lthr_60min` = un vrai effort
+// mesuré sur la courbe cardio d'une sortie ; `hr_max_proxy` = le repli grossier, pour
+// qui n'a aucune sortie vélo avec streams. La distinction change ce qu'on affiche.
+const lthrMethod = computed(() => data.value?.thresholds?.lthr_method ?? null)
+const lthrStale = computed(() => data.value?.thresholds?.lthr_stale === true)
 
 function startEditLthr() {
   lthrInput.value = data.value?.thresholds?.lthr_source === 'manual' && lthr.value != null ? lthr.value : ''
@@ -675,8 +680,15 @@ watch(rangeDays, () => { hoverIndex.value = null })
               <p class="mb-1 text-body">{{ t('performance.load.lthr_method_what') }}</p>
               <p class="mb-1">{{ t('performance.load.lthr_method_manual') }}</p>
               <p class="mb-1">{{ t('performance.load.lthr_method_auto') }}</p>
-              <p class="mb-0 text-body-tertiary">
+              <p class="mb-1">{{ t('performance.load.lthr_method_proxy') }}</p>
+              <!-- L'avertissement ne s'adresse qu'à ceux qui tombent réellement sur le
+                   proxy : montré à tout le monde, il faisait douter d'une estimation
+                   qui, elle, repose sur un effort mesuré. -->
+              <p v-if="lthrMethod === 'hr_max_proxy'" class="mb-0 text-body-tertiary">
                 <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ t('performance.load.lthr_method_auto_warning') }}
+              </p>
+              <p v-else-if="lthrStale" class="mb-0 text-body-tertiary">
+                <i class="fa-solid fa-clock-rotate-left me-1" aria-hidden="true"></i>{{ t('performance.load.lthr_stale_hint') }}
               </p>
             </div>
           </details>

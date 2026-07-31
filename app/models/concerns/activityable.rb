@@ -25,6 +25,11 @@ module Activityable
   # dépendent de seuils (TSS, zones, FTP…) restent calculées à la lecture.
   STREAM_DERIVATIONS = {
     peak_powers: ->(streams) { PeakPowerCurve.compute_from(streams) },
+    # La jumelle cardio de `peak_powers`, restreinte aux durées qui ancrent un seuil
+    # (`LthrEstimator::DURATIONS`) : en deçà de 20 min on lirait surtout l'inertie du
+    # cœur, pas un palier. C'est elle qui rend le LTHR estimable au niveau de
+    # l'athlète, et plus seulement sortie par sortie.
+    peak_heartrates: ->(streams) { PeakPowerCurve.mean_max(streams, 'heartrate', LthrEstimator::DURATIONS) },
     normalized_power: ->(streams) { TrainingLoad.normalized_power(streams) },
     hr_histogram: ->(streams) { ZoneDistribution.histogram(streams, 'heartrate', ZoneDistribution::HR_BUCKET) },
     power_histogram: ->(streams) { ZoneDistribution.histogram(streams, 'watts', ZoneDistribution::POWER_BUCKET) },

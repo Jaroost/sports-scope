@@ -252,8 +252,10 @@ fr:
       lthr_method_title: "Seuil FC (LTHR)"
       lthr_method_what: "C'est ta FC au seuil lactique : la fréquence cardiaque la plus haute que tu peux tenir en régime stable sur ~1 h d'effort maximal. En dessous, ton corps évacue le lactate aussi vite qu'il le produit ; au-dessus, il s'accumule et tu craques en quelques minutes. C'est l'équivalent cardiaque de la FTP — d'où son rôle de dénominateur de l'IF ci-dessus."
       lthr_method_manual: "Si tu le renseignes, ta valeur est utilisée telle quelle — de loin le plus fiable. On le mesure sur un test de 30 min à fond en solo, en gardant la FC moyenne des 20 DERNIÈRES minutes : la FC dérive à la hausse en début d'effort, la moyenne complète te sous-estimerait."
-      lthr_method_auto: "Sinon il est estimé depuis ton historique : la plus haute FC moyenne de tes sorties ÷ 0,92 approxime ta FC max, puis LTHR ≈ 0,90 × FC max."
-      lthr_method_auto_warning: "Cette estimation est grossière : elle part de FC moyennes, jamais de ta FC max réelle. Si ton TSS en FC te semble faux, renseigne ton seuil à la main."
+      lthr_method_auto: "Sinon il est estimé sur tes sorties vélo des 6 dernières semaines, avec les mêmes ancres que le test : la FC moyenne de ton meilleur effort d'~1 h, ou celle de ton meilleur 20 min × 0,98. On garde la plus haute des deux — chacune est un plancher de ce que tu as tenu, jamais un plafond."
+      lthr_method_proxy: "Faute de sortie vélo avec enregistrement détaillé, on retombe sur un simple ordre de grandeur : la plus haute FC moyenne de tes activités ÷ 0,92 approxime ta FC max, puis LTHR ≈ 0,90 × FC max."
+      lthr_method_auto_warning: "Ton seuil vient justement de cet ordre de grandeur : il part de FC moyennes, jamais d'un effort mesuré. Si ton TSS en FC te semble faux, renseigne ton seuil à la main."
+      lthr_stale_hint: "Aucune sortie vélo au cardio depuis 6 semaines : ce seuil vient de plus loin dans ton historique. Il reste utilisable, mais il décrit ta forme d'alors."
       no_data: "Pas encore assez d'activités pour tracer ta charge d'entraînement."
       widget:
         see_analysis: "Voir l'analyse"

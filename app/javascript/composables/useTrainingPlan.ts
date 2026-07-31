@@ -18,7 +18,11 @@ export interface DayActivity { source: string; external_id: string; name: string
 export interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; acwr: number | null; activities?: DayActivity[]; distance_m?: number }
 export interface Current extends Point { form_zone: string; acwr_zone: string | null }
 export interface Coverage { power: number; hr: number; estimated: number; total: number }
-export interface Thresholds { ftp_current?: number | null; weight_kg?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; typical_speed_kmh?: number | null; longest_ride_min?: number | null }
+// `lthr_method` : comment l'estimation a été obtenue — `lthr_20min` / `lthr_60min`
+// (un effort mesuré sur la courbe cardio d'une sortie) ou `hr_max_proxy` (le repli
+// grossier, sans aucune sortie vélo détaillée). `lthr_stale` : l'estimation a dû
+// sortir de la fenêtre glissante de 6 semaines.
+export interface Thresholds { ftp_current?: number | null; weight_kg?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; lthr_method?: string | null; lthr_stale?: boolean | null; typical_speed_kmh?: number | null; longest_ride_min?: number | null }
 // Répartition du temps par zone d'intensité (cf. ZoneDistribution côté serveur).
 // `lo`/`hi` : bornes de la zone en valeur absolue (bpm / W) d'après le seuil courant —
 // nil quand la zone est ouverte de ce côté (première / dernière) ou sans seuil.

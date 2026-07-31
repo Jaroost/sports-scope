@@ -4,6 +4,7 @@ import { t } from '../i18n'
 import { ACTION_STYLE, ZONE_VERDICT_COLOR } from '../composables/useTrainingPlan'
 import FitnessGlossary from './FitnessGlossary.vue'
 import FtpPanel from './FtpPanel.vue'
+import LthrPanel from './LthrPanel.vue'
 import TrainingLoadPanel from './TrainingLoadPanel.vue'
 
 const props = defineProps({
@@ -261,28 +262,37 @@ watch(fitnessSub, (s) => {
 rememberHashTarget()
 
 // Indicateurs remontés par les panneaux enfants (montés en permanence), pour afficher
-// un badge sous chaque sous-onglet : FTP courante, reco du jour, verdict des zones.
+// un badge sous chaque sous-onglet : les deux seuils, la reco du jour, le verdict des
+// zones.
 const ftpWatts = ref<number | null>(null)
+const lthrBpm = ref<number | null>(null)
 const recoAction = ref<string | null>(null)
 const zonesVerdict = ref<string | null>(null)
 
 function onFtpSummary(p: { ftpWatts: number | null }) { ftpWatts.value = p.ftpWatts }
+function onLthrSummary(p: { lthrBpm: number | null }) { lthrBpm.value = p.lthrBpm }
 function onFitnessSummary(p: { recoAction: string | null; zonesVerdict: string | null }) {
   recoAction.value = p.recoAction
   zonesVerdict.value = p.zonesVerdict
 }
 
-// Contenu du badge (texte + couleur) d'un sous-onglet, ou null si pas encore d'info.
-function subBadge(key: FitnessSub): { text: string; color: string } | null {
+// Badges d'un sous-onglet : une liste, parce que « Seuils » en porte deux (watts et
+// bpm). Chacun garde la couleur de son panneau — l'orange de la FTP, le rouge du
+// cardio — pour qu'on sache lequel on lit sans lire l'unité. Vide tant qu'aucun
+// panneau n'a répondu.
+function subBadge(key: FitnessSub): { text: string; color: string }[] {
   if (key === 'ftp') {
-    return ftpWatts.value != null ? { text: `${ftpWatts.value} W`, color: '#fc4c02' } : null
+    return [
+      ...(ftpWatts.value != null ? [{ text: `${ftpWatts.value} W`, color: '#fc4c02' }] : []),
+      ...(lthrBpm.value != null ? [{ text: `${lthrBpm.value} bpm`, color: '#dc3545' }] : []),
+    ]
   }
   if (key === 'load') {
     const a = recoAction.value
-    return a ? { text: t(`performance.load.reco.action_${a}`), color: ACTION_STYLE[a]?.color ?? '#6c757d' } : null
+    return a ? [{ text: t(`performance.load.reco.action_${a}`), color: ACTION_STYLE[a]?.color ?? '#6c757d' }] : []
   }
   const v = zonesVerdict.value
-  return v ? { text: t(`performance.zones.verdict_${v}`), color: ZONE_VERDICT_COLOR[v as keyof typeof ZONE_VERDICT_COLOR] ?? '#6c757d' } : null
+  return v ? [{ text: t(`performance.zones.verdict_${v}`), color: ZONE_VERDICT_COLOR[v as keyof typeof ZONE_VERDICT_COLOR] ?? '#6c757d' }] : []
 }
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
@@ -976,12 +986,17 @@ onBeforeUnmount(() => {
                 <i :class="`fa-solid ${sub.icon}`" aria-hidden="true"></i>
                 <span>{{ t(`performance.fitness_subs.${sub.key}`) }}</span>
               </span>
-              <!-- Badge indicateur (FTP courante / reco du jour / verdict des zones). -->
-              <span
-                v-if="subBadge(sub.key)"
-                class="badge fitness-sub-badge"
-                :style="{ backgroundColor: subBadge(sub.key)!.color }"
-              >{{ subBadge(sub.key)!.text }}</span>
+              <!-- Badges indicateurs (les deux seuils / reco du jour / verdict des zones).
+                   Côte à côte : l'onglet empile déjà libellé et pastilles, deux pastilles
+                   l'une sous l'autre lui feraient trois étages. -->
+              <span v-if="subBadge(sub.key).length" class="d-flex flex-wrap justify-content-center gap-1">
+                <span
+                  v-for="badge in subBadge(sub.key)"
+                  :key="badge.text"
+                  class="badge fitness-sub-badge"
+                  :style="{ backgroundColor: badge.color }"
+                >{{ badge.text }}</span>
+              </span>
             </button>
           </li>
         </ul>
@@ -989,14 +1004,19 @@ onBeforeUnmount(() => {
         <!-- Panneaux montés en permanence (v-show) : un seul fetch chacun. FTP est à
              part ; TrainingLoadPanel bascule forme↔zones via `section`, sans recharger.
              Les deux remontent leur résumé (@summary) pour les badges ci-dessus. -->
+        <!-- Les deux seuils ensemble : ils se lisent l'un par rapport à l'autre (sans
+             capteur de puissance, c'est le seuil FC qui porte tout), et ils se
+             modifient au même endroit. -->
         <div v-show="fitnessSub === 'ftp'">
           <FtpPanel @summary="onFtpSummary" />
+          <LthrPanel @summary="onLthrSummary" />
         </div>
         <TrainingLoadPanel
           v-show="fitnessSub !== 'ftp'"
           :admin="props.admin"
           :section="fitnessSub === 'zones' ? 'zones' : 'load'"
           @summary="onFitnessSummary"
+          @goto="fitnessSub = $event"
         />
 
         <!-- Lexique commun aux trois sous-onglets : les sigles des graphiques (TSS, CTL,
@@ -1079,19 +1099,23 @@ onBeforeUnmount(() => {
 .performance-sport-tabs .nav-link.active .performance-tab-count {
   background: rgba(255, 255, 255, 0.28);
 }
-/* Sous-onglet forme : libellé au-dessus, badge indicateur en dessous. */
+/* Sous-onglet forme : libellé au-dessus, pastilles en dessous — deux étages, jamais
+   trois. L'onglet s'élargit pour que ses pastilles tiennent chacune sur une ligne et
+   restent côte à côte ; c'est la barre entière qui passe à la ligne si la place
+   manque (`flex-wrap` sur la liste), pas le contenu d'un onglet. */
 .fitness-sub-link {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.25rem;
+  /* De quoi loger « 250 W » et « 161 bpm » sur la même ligne. */
+  min-width: 9.5rem;
 }
 .fitness-sub-badge {
-  max-width: 13rem;
   color: #fff;
   font-size: 0.68rem;
   font-weight: 600;
-  white-space: normal;
+  white-space: nowrap;
   line-height: 1.2;
 }
 .performance-record-badge {

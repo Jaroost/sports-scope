@@ -23,11 +23,15 @@ const props = defineProps({
 
 // Résumé remonté au parent pour les badges de sous-onglets : la reco du jour (badge
 // « Forme & fatigue ») et le verdict de polarisation des zones (badge « Zones »).
-const emit = defineEmits<{ summary: [payload: { recoAction: string | null; zonesVerdict: string | null }] }>()
+const emit = defineEmits<{
+  summary: [payload: { recoAction: string | null; zonesVerdict: string | null }]
+  // Demande de changement de sous-onglet (le parent possède la navigation) : le seuil
+  // FC se modifie dans « Seuils », pas ici.
+  goto: [sub: 'ftp']
+}>()
 
 const loading = ref(true)
 const error = ref<string | null>(null)
-const saving = ref(false)
 const data = ref<LoadSummary | null>(null)
 
 // Fenêtre d'affichage (jours). Infinity = tout.
@@ -38,10 +42,6 @@ const RANGES: { key: string; days: number }[] = [
   { key: 'range_12m', days: 365 },
   { key: 'range_all', days: Number.POSITIVE_INFINITY },
 ]
-
-// LTHR (édition manuelle)
-const editingLthr = ref(false)
-const lthrInput = ref<string | number>('')
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
@@ -167,33 +167,12 @@ const lthrSource = computed(() => data.value?.thresholds?.lthr_source ?? null)
 const lthrMethod = computed(() => data.value?.thresholds?.lthr_method ?? null)
 const lthrStale = computed(() => data.value?.thresholds?.lthr_stale === true)
 
-function startEditLthr() {
-  lthrInput.value = data.value?.thresholds?.lthr_source === 'manual' && lthr.value != null ? lthr.value : ''
-  editingLthr.value = true
-}
-
-async function saveLthr() {
-  saving.value = true
-  try {
-    const res = await fetch('/api/athlete', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
-      credentials: 'same-origin',
-      body: JSON.stringify({ athlete: { lthr_manual: String(lthrInput.value ?? '').trim() } }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    editingLthr.value = false
-    await fetchData()
-  } catch (e) {
-    error.value = (e as Error).message
-  } finally {
-    saving.value = false
-  }
-}
-
-async function resetLthr() {
-  lthrInput.value = ''
-  await saveLthr()
+// La saisie du seuil vit dans `LthrPanel` (sous-onglet Seuils), avec son historique et
+// son estimation : ici on ne fait que rappeler la valeur qui sert de dénominateur au
+// TSS, et y renvoyer. Deux éditeurs pour un même chiffre, c'est deux endroits où
+// vérifier ce qu'on vient de saisir.
+function goToThresholds() {
+  emit('goto', 'ftp')
 }
 
 // ── Maintenance admin : backfill unifié des métriques dérivées ───────────────
@@ -637,26 +616,15 @@ watch(rangeDays, () => { hoverIndex.value = null })
               {{ t('performance.load.coverage', { total: data.coverage.total, power: data.coverage.power, hr: data.coverage.hr, estimated: data.coverage.estimated }) }}
             </div>
             <div class="col-12 col-md-5 text-md-end">
-              <template v-if="!editingLthr">
-                <span class="text-muted me-2">{{ t('performance.load.lthr_title') }} :</span>
-                <strong v-if="lthr">{{ t('performance.load.lthr_value', { bpm: lthr }) }}</strong>
-                <span v-else class="text-muted">—</span>
-                <span v-if="lthr && lthrSource" class="badge ms-1" :class="lthrSource === 'manual' ? 'text-bg-primary' : 'text-bg-secondary'">
-                  {{ lthrSource === 'manual' ? t('performance.ftp.source_manual') : t('performance.ftp.source_auto') }}
-                </span>
-                <button type="button" class="btn btn-sm btn-link p-0 ms-2" @click="startEditLthr">
-                  <i class="fa-solid fa-pen" aria-hidden="true"></i>
-                </button>
-              </template>
-              <div v-else class="d-inline-flex align-items-center gap-2">
-                <div class="input-group input-group-sm" style="width:9rem">
-                  <input v-model="lthrInput" type="number" min="100" max="220" class="form-control" :placeholder="t('performance.ftp.auto_placeholder')" />
-                  <span class="input-group-text">bpm</span>
-                </div>
-                <button type="button" class="btn btn-sm btn-primary" :disabled="saving" @click="saveLthr">{{ t('performance.ftp.save') }}</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="saving" @click="resetLthr">{{ t('performance.ftp.use_auto') }}</button>
-                <button type="button" class="btn btn-sm btn-link text-muted" :disabled="saving" @click="editingLthr = false">{{ t('performance.ftp.cancel') }}</button>
-              </div>
+              <span class="text-muted me-2">{{ t('performance.load.lthr_title') }} :</span>
+              <strong v-if="lthr">{{ t('performance.load.lthr_value', { bpm: lthr }) }}</strong>
+              <span v-else class="text-muted">—</span>
+              <span v-if="lthr && lthrSource" class="badge ms-1" :class="lthrSource === 'manual' ? 'text-bg-primary' : 'text-bg-secondary'">
+                {{ lthrSource === 'manual' ? t('performance.ftp.source_manual') : t('performance.ftp.source_auto') }}
+              </span>
+              <button type="button" class="btn btn-sm btn-link p-0 ms-2" :title="t('performance.load.lthr_goto')" @click="goToThresholds">
+                <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+              </button>
             </div>
           </div>
 

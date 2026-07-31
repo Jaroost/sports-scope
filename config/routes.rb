@@ -73,6 +73,7 @@ Rails.application.routes.draw do
   # Analyse de performance (records / cumuls / courbe de puissance — JSON pour Vue)
   get "/api/performance", to: "performance#show", as: :api_performance
   get "/api/performance/ftp", to: "performance#ftp", as: :api_performance_ftp
+  get "/api/performance/lthr", to: "performance#lthr", as: :api_performance_lthr
   get "/api/performance/training_load", to: "performance#training_load", as: :api_performance_training_load
 
   # Seuils + zones du cycliste, pour l'application mobile (cf. RiderProfilesController)

@@ -146,4 +146,39 @@ class LthrEstimatorTest < ActiveSupport::TestCase
   test "le plancher de vraisemblance vaut aussi pour l'agrégat" do
     assert_nil LthrEstimator.estimate_from([ride({ "1200" => 95.0 }), ride({ "1200" => 90.0 })])
   end
+
+  # ── Historique mensuel (le graphique de la page Performances) ───────────────
+  test "l'historique donne un point par mois, sur la fenêtre glissante" do
+    acts = [
+      ride({ "1200" => 160.0 }, started_at: 4.months.ago, name: "Reprise"),
+      ride({ "1200" => 175.0 }, started_at: 2.days.ago, name: "Intervalles")
+    ]
+
+    points = LthrEstimator.history(acts)
+
+    # Un point par mois depuis la première sortie, sauf les mois dont la fenêtre de
+    # 6 semaines ne contient aucun effort.
+    assert points.length >= 2
+    assert_equal 157, points.first[:bpm] # 160 × 0,98, le mois de la reprise
+    assert_equal 172, points.last[:bpm]  # 175 × 0,98, le mois en cours
+    assert_equal Time.current.strftime("%Y-%m"), points.last[:date]
+    assert_equal "Intervalles", points.last[:contributors].first[:name]
+  end
+
+  test "un trou dans l'entraînement fait redescendre la courbe" do
+    # Tout l'intérêt de la fenêtre glissante : un record de janvier ne doit pas
+    # tenir la courbe en l'air jusqu'à la fin des temps, sinon elle ne dirait plus
+    # rien du désentraînement.
+    acts = [ride({ "1200" => 175.0 }, started_at: 5.months.ago)]
+
+    points = LthrEstimator.history(acts)
+
+    assert_equal 172, points.first[:bpm]
+    refute_equal Time.current.strftime("%Y-%m"), points.last[:date],
+                 "le mois en cours n'a aucun effort : il ne doit pas porter de point"
+  end
+
+  test "sans sortie, pas d'historique" do
+    assert_equal [], LthrEstimator.history([])
+  end
 end

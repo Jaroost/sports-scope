@@ -4,7 +4,7 @@ import {
   arrivalClock, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE,
   turnBanner, turnAlertStep, INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep,
-  navStateFor,
+  navStateFor, resyncOnTurn, turnLabel, turnsNearTap, TURN_TAP_RADIUS_PX,
 } from './navHelpers'
 import type { ArrivalState, ReachedTurn, TurnAlertState, TurnHint, ClimbInfo } from './navHelpers'
 import type { TurnPoint, Climb } from './routeHelpers'
@@ -350,6 +350,87 @@ describe('arrivalStep', () => {
     arrivalStep(state, { remainingM: 5000, hasRoute: true, onRoute: true, arrived: false })
     expect(state).toEqual({ seenEnRoute: false, lastRemainingM: 100 })
     expect(INITIAL_ARRIVAL_STATE).toEqual({ seenEnRoute: false, lastRemainingM: null })
+  })
+})
+
+describe('resyncOnTurn', () => {
+  // Aller-retour : 10 sommets tous les 100 m à l'aller, demi-tour au sommet 10, puis les
+  // mêmes 10 sommets à l'envers. Le demi-tour est le virage d'indice 0 de `turns`.
+  const cumDistM = Array.from({ length: 21 }, (_, i) => i * 100)
+  const turns = [
+    turn(1000, { idx: 10, kind: 'uturn' }),
+    turn(1500, { idx: 15, direction: 'left' }),
+  ]
+
+  it('ancre la projection APRÈS le virage donné pour franchi, et avance le pointeur', () => {
+    // C'est cette ancre qui compte : elle sort la fenêtre de recherche de la voie de
+    // l'aller (sommets ≤ 10) pour la poser sur celle du retour.
+    expect(resyncOnTurn(turns, cumDistM, 0, true)).toEqual({ idx: 11, distAlongM: 1100, nextTurnPtr: 1 })
+  })
+
+  it('ancre AVANT le virage donné pour non franchi, et y ramène le pointeur', () => {
+    expect(resyncOnTurn(turns, cumDistM, 1, false)).toEqual({ idx: 14, distAlongM: 1400, nextTurnPtr: 1 })
+  })
+
+  it('ne sort jamais de la géométrie', () => {
+    // Dernier virage donné pour franchi : l'ancre s'arrête au dernier sommet, pas au-delà.
+    const last = [turn(2000, { idx: 20 })]
+    expect(resyncOnTurn(last, cumDistM, 0, true)).toMatchObject({ idx: 20, distAlongM: 2000 })
+    // Virage sur le tout premier sommet, donné pour non franchi.
+    const first = [turn(0, { idx: 0 })]
+    expect(resyncOnTurn(first, cumDistM, 0, false)).toMatchObject({ idx: 0, distAlongM: 0 })
+  })
+
+  it('rend null sur un virage inexistant ou sans géométrie', () => {
+    expect(resyncOnTurn(turns, cumDistM, 7, true)).toBeNull()
+    expect(resyncOnTurn(turns, [], 0, true)).toBeNull()
+  })
+})
+
+describe('turnsNearTap', () => {
+  // Un aller et un retour qui se superposent à l'écran : virages 1 et 2 au même pixel.
+  const projected = [
+    { ptr: 0, x: 500, y: 500 },
+    { ptr: 1, x: 100, y: 100 },
+    { ptr: 2, x: 104, y: 98 },
+  ]
+
+  it('ne rend rien pour un tap dans le vide', () => {
+    expect(turnsNearTap(projected, { x: 300, y: 300 })).toEqual([])
+  })
+
+  it('rend TOUS les virages sous le doigt, du plus proche au plus loin', () => {
+    // Deux passages superposés : choisir le plus proche priverait le coureur de l'autre,
+    // qui est précisément celui qu'il vient de faire une fois sur deux.
+    expect(turnsNearTap(projected, { x: 104, y: 98 })).toEqual([2, 1])
+    expect(turnsNearTap(projected, { x: 100, y: 100 })).toEqual([1, 2])
+  })
+
+  it('vise bien plus large que la pastille, mais pas au-delà du rayon', () => {
+    // 20 px du centre : hors de la pastille (11 px de rayon), dans la zone tactile.
+    expect(turnsNearTap([{ ptr: 0, x: 0, y: 0 }], { x: 20, y: 0 })).toEqual([0])
+    expect(turnsNearTap([{ ptr: 0, x: 0, y: 0 }], { x: TURN_TAP_RADIUS_PX + 1, y: 0 })).toEqual([])
+  })
+
+  it('départage deux virages à distance égale sur leur rang', () => {
+    // Sinon l'ordre de la liste dépendrait de l'arrondi flottant, donc du zoom.
+    const tied = [{ ptr: 5, x: 10, y: 0 }, { ptr: 3, x: -10, y: 0 }]
+    expect(turnsNearTap(tied, { x: 0, y: 0 })).toEqual([3, 5])
+  })
+})
+
+describe('turnLabel', () => {
+  it('nomme la manœuvre, en distinguant demi-tour et rond-point', () => {
+    expect(turnLabel({ kind: 'uturn', direction: 'left' })).toEqual({ key: 'routes.turn_uturn' })
+    expect(turnLabel({ kind: 'roundabout', direction: 'right', exitNumber: 3 }))
+      .toEqual({ key: 'routes.turn_roundabout', params: { exit: 3 } })
+    expect(turnLabel({ kind: 'turn', direction: 'left' })).toEqual({ key: 'routes.turn_left' })
+    expect(turnLabel({ kind: 'sharp', direction: 'right' })).toEqual({ key: 'routes.turn_right' })
+  })
+
+  it('tolère un rond-point sans numéro de sortie', () => {
+    // BRouter n'en donne pas toujours ; « sortie 0 » vaut mieux qu'un libellé cassé.
+    expect(turnLabel({ kind: 'roundabout', direction: 'right' })).toEqual({ key: 'routes.turn_roundabout', params: { exit: 0 } })
   })
 })
 

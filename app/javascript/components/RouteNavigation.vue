@@ -17,6 +17,7 @@ import {
   textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildTurnChain,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
   INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep, navStateFor,
+  resyncOnTurn, turnLabel, turnsNearTap, turnIcon,
 } from '../navHelpers'
 import type {
   TurnHint, ClimbInfo, ClimbProfile, ArrivalState, ReachedTurn, TurnAlertState,
@@ -57,6 +58,7 @@ import { useNavDebug } from '../composables/useNavDebug'
 import { useRouteEditing } from '../composables/useRouteEditing'
 import { useDestinationNav } from '../composables/useDestinationNav'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
+import { popupHeaderHtml, popupActionHtml, escapeHtml } from '../placePopup'
 import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
 import { loadProgress, saveProgress, clearProgress, clearAllProgress } from '../navProgress'
 
@@ -839,6 +841,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', refreshContainerH)
   if (detachCoordLongPress) { detachCoordLongPress(); detachCoordLongPress = null }
   closeCoordPopup()
+  closeTurnPopup()
   destroyEditOverlays()
   // Quitter la navigation en veille ne doit pas laisser le téléphone à 1 % de
   // luminosité sur l'écran suivant. L'appli reprend le même réflexe de son côté,
@@ -1437,6 +1440,12 @@ async function initMap() {
     if (handlePlaceNavTap(e.point, [e.lngLat.lng, e.lngLat.lat])) return
     // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
     if (pois.hasOpenPopup()) { pois.closePlacePopup(); return }
+    // Idem pour la tooltip d'un virage.
+    if (turnPopup) { closeTurnPopup(); return }
+    // Tap sur une pastille de virage : tooltip « franchi / pas encore », pas de veille.
+    // Placé juste avant la veille pour ne rien voler aux modes qui précèdent (édition,
+    // cible, POI), qui ont tous leur propre usage du tap.
+    if (handleTurnTap(e.point)) return
     if (!screenOff.value) toggleScreenOffManual()
   })
   // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View.
@@ -1539,6 +1548,8 @@ function stopTurnFlow() {
 // Posés une seule fois (les marqueurs survivent à un setStyle).
 function renderTurnMarkers() {
   if (!map || !maplibre) return
+  // Les pastilles vont être détruites : la tooltip pointerait un virage d'un autre tracé.
+  closeTurnPopup()
   for (const m of turnMarkers) m.remove()
   turnMarkers = []
   // Nouveau jeu de virages (reroutage, changement de sport) : le surlignage est recalculé
@@ -1623,7 +1634,8 @@ function setGreenTurn(idx: number) {
     const m = turnMarkers[i]
     if (!m) return
     const el = m.getElement() as HTMLElement
-    const body = el.firstElementChild as HTMLElement | null
+    // Par classe et non par rang : la racine porte aussi la zone tactile.
+    const body = el.querySelector<HTMLElement>('.nav-turn-marker-body')
     const color = green ? TURN_NOW_COLOR : sportNav.value.turn_marker_color
     if (body) {
       body.style.background = color
@@ -1635,6 +1647,129 @@ function setGreenTurn(idx: number) {
   greenTurnIdx = idx
   if (idx >= 0) paint(idx, true)
   refreshTurnHighlight()
+}
+
+// ─── Tooltip d'un virage : fait / pas encore fait ──────────────────────────────
+
+let turnPopup: any = null
+
+function closeTurnPopup() {
+  if (turnPopup) { turnPopup.remove(); turnPopup = null }
+}
+
+// Tap sur la carte : y avait-il des virages sous le doigt ? Le test est fait ICI, dans le
+// gestionnaire de clic de MapLibre, et non sur la pastille elle-même. Deux raisons, toutes
+// deux liées au pouce en roulant :
+//   • la tolérance. MapLibre n'émet ce clic qu'au-delà de son clickTolerance (10 px, élargi
+//     exprès pour les taps qui dérivent en mouvement) ; un écouteur DOM sur la pastille,
+//     lui, dépendrait de la tolérance du navigateur, et un tap qui glisse de quelques
+//     pixels tomberait à côté — donc sur la carte, qui met l'écran en veille. Le geste le
+//     plus difficile à réussir déclencherait exactement ce qu'on ne veut pas.
+//   • la cible. Une pastille fait 22 px au zoom par défaut et rétrécit en dézoom ; en
+//     pixels d'écran on vise ce qu'on veut, indépendamment du zoom.
+// Renvoie vrai si le tap a été consommé — l'appelant ne met alors pas l'écran en veille.
+function handleTurnTap(point: { x: number; y: number }): boolean {
+  if (!map || !turnsFromBRouter || !turns.length) return false
+  const projected = turns.map((tp, ptr) => {
+    const p = map.project([geometry[tp.idx][0], geometry[tp.idx][1]])
+    return { ptr, x: p.x, y: p.y }
+  })
+  const hits = turnsNearTap(projected, point)
+  if (!hits.length) return false
+  showTurnPopup(hits)
+  return true
+}
+
+// Tooltip des virages sous le doigt : ce que dit la navigation de chacun (franchi ou non),
+// et de quoi la contredire. Le coureur est le seul à savoir : la projection, elle, peut
+// être coincée sur le mauvais passage d'un aller-retour (cf. resyncOnTurn) et annoncer
+// indéfiniment un virage déjà pris.
+//
+// Plusieurs virages quand le tracé repasse au même endroit : on les liste tous plutôt que
+// d'en choisir un. Chacun est nommé par son point kilométrique, seul repère qui distingue
+// deux passages superposés — « le virage du km 42 » et non « celui du dessus ».
+function showTurnPopup(ptrs: number[]) {
+  if (!maplibre || !map) return
+  const shown = ptrs.map((ptr) => ({ ptr, tp: turns[ptr] })).filter((c) => c.tp)
+  if (!shown.length) return
+  closeTurnPopup()
+  const many = shown.length > 1
+  const wrap = document.createElement('div')
+  wrap.className = 'place-popup'
+  const rows = shown.map(({ ptr, tp }) => {
+    const done = ptr < nextTurnPtr
+    const label = turnLabel(tp)
+    // Combien de virages ce seul geste ferait basculer : celui-ci plus tous ceux qui le
+    // séparent du pointeur courant. C'est LA réponse à « il faudra en marquer cinquante ? » —
+    // non, un seul tap sur le virage où l'on est règle tous les précédents d'un coup.
+    const span = done ? nextTurnPtr - ptr : ptr - nextTurnPtr + 1
+    const state = done ? t('routes.turn_marked_done') : t('routes.turn_marked_todo')
+    return `
+      <div class="nav-turn-popup-row">
+        <div class="nav-turn-popup-state">
+          <i class="fa-solid ${turnIcon(tp)}" aria-hidden="true"></i>
+          <span>${escapeHtml(many ? `${t(label.key, label.params)} · ${formatDistancePrecise(tp.distM)}` : state)}</span>
+        </div>
+        ${many ? `<div class="nav-turn-popup-state">${escapeHtml(state)}</div>` : ''}
+        ${span > 1 ? `<div class="nav-turn-popup-span">${escapeHtml(t('routes.turn_mark_span', { count: span }))}</div>` : ''}
+        ${popupActionHtml({
+          className: `place-popup-link--turn-mark-${ptr}`,
+          icon: done ? 'fa-solid fa-rotate-left' : 'fa-solid fa-check',
+          label: done ? t('routes.turn_mark_todo') : t('routes.turn_mark_done'),
+        })}
+      </div>`
+  })
+  const first = shown[0]
+  const title = many
+    ? t('routes.turns_here', { count: shown.length })
+    : t(turnLabel(first.tp).key, turnLabel(first.tp).params)
+  wrap.innerHTML = popupHeaderHtml(title) + rows.join('')
+  turnPopup = new maplibre.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([geometry[first.tp.idx][0], geometry[first.tp.idx][1]])
+    .setDOMContent(wrap)
+    .addTo(map)
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', closeTurnPopup)
+  for (const { ptr } of shown) {
+    wrap.querySelector(`.place-popup-link--turn-mark-${ptr}`)?.addEventListener('click', () => {
+      closeTurnPopup()
+      markTurn(ptr, ptr >= nextTurnPtr)
+    })
+  }
+}
+
+// Applique la déclaration du coureur : le virage `ptr` est fait (ou ne l'est pas). Tout
+// le raisonnement est dans resyncOnTurn (pur, testé) ; ici on ne fait que reposer l'état
+// de suivi sur l'ancre qu'il rend, comme le ferait un fix GPS arrivant à cet endroit.
+function markTurn(ptr: number, done: boolean) {
+  const target = resyncOnTurn(turns, cumDistM, ptr, done)
+  if (!target) return
+  lastIdx = target.idx
+  located = true
+  nextTurnPtr = target.nextTurnPtr
+  snapPoint = [geometry[target.idx][0], geometry[target.idx][1]]
+  snapNextIdx = Math.min(target.idx + 1, geometry.length - 1)
+  snapDistAlongM = target.distAlongM
+  displaySnapPoint = lngLatAtDistanceM(displayLine, cumDistM, snapDistAlongM)
+  // Annonces et maintien vert portaient sur le passage qu'on vient de quitter.
+  turnAlertState = INITIAL_TURN_ALERT_STATE
+  reachedTurn = null
+  reachedTurnIdx = -1
+  turnAlertMuted.value = false
+  mutedTurnPtr = -1
+  setGreenTurn(-1)
+  // Écriture immédiate (lastSaveMs = 0 court-circuite le throttle) : la progression
+  // mémorisée pointait le mauvais passage, et c'est elle qui servirait de reprise si la
+  // page était rechargée dans la minute.
+  lastProgressSaveMs = saveProgress(routeToken.value, lastIdx, 0)
+  // La flèche doit sauter tout de suite : la boucle d'extrapolation part de l'ancre, et
+  // le prochain fix GPS peut être à une seconde. Sans ça, le recalage semblerait sans effet.
+  anchorOnRoute = displaySnapPoint != null
+  anchorPos = displaySnapPoint ?? snapPoint
+  anchorDistM = snapDistAlongM
+  anchorTime = performance.now()
+  updateProgress(target.idx)
+  updateTurnVisibility()
+  updateTurns()
 }
 
 // Colore un bout de tracé (TURN_HIGHLIGHT_M avant ET après) autour du virage mis en
@@ -1688,7 +1823,7 @@ function applyMarkerScale() {
   if (!map) return
   const s = zoomWidthScale(map.getZoom())
   for (const m of turnMarkers) {
-    const body = (m.getElement() as HTMLElement).firstElementChild as HTMLElement | null
+    const body = (m.getElement() as HTMLElement).querySelector<HTMLElement>('.nav-turn-marker-body')
     if (body) body.style.transform = `scale(${s})`
   }
 }
@@ -3348,6 +3483,33 @@ function onScreenOffTap() {
 }
 .nav-turn-marker-arrow { width: 73%; height: 73%; display: block; }
 .nav-turn-marker-exit { color: #fff; font-weight: 700; line-height: 1; }
+
+/* Tooltip de virage (« franchi / pas encore »). Les pastilles gardent
+   `pointer-events: none` : le tap est reconnu en pixels dans le gestionnaire de clic de
+   la carte (cf. handleTurnTap), pas par un écouteur DOM sur la pastille. */
+
+/* Un virage listé : son état, puis le bouton qui le contredit. Séparés d'un filet quand
+   le tracé repasse au même endroit et qu'il y en a plusieurs à départager. */
+.nav-turn-popup-row + .nav-turn-popup-row {
+  border-top: 1px solid #e5e7eb;
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+}
+.nav-turn-popup-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem 0.1rem;
+  font-size: 0.9rem;
+  color: #4b5563;
+}
+/* Portée du geste (« et les 52 virages avant lui ») : discrète, mais c'est elle qui dit
+   qu'un seul tap suffit à rattraper tout un tronçon. */
+.nav-turn-popup-span {
+  padding: 0 0.6rem 0.25rem;
+  font-size: 0.8rem;
+  color: #6b7280;
+}
 
 /* Suivi d'itinéraire : toutes les pastilles restent posées sur le tracé. Les virages
    autres que le prochain sont grisés (désaturés + estompés) comme désactivés, pour

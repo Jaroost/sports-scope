@@ -329,6 +329,83 @@ export function turnBanner(input: TurnBannerInput): { hint: TurnHint | null; fol
   return { hint: null, follow: [] }
 }
 
+// ─── Recalage manuel sur un virage ─────────────────────────────────────────────
+
+// Rayon de la zone tactile d'une pastille de virage, en pixels d'écran. Bien plus large
+// que la pastille (22 px de diamètre au zoom par défaut, et elle rétrécit encore en
+// dézoom) : on vise au pouce, en roulant. Constant en pixels, donc indépendant du zoom.
+export const TURN_TAP_RADIUS_PX = 26
+
+// Virages sous le doigt, du plus proche au plus loin. Rendu en pixels d'écran et non en
+// mètres : c'est la taille APPARENTE qui décide de ce qu'on peut viser, et deux virages à
+// 40 m l'un de l'autre sont deux cibles distinctes en zoom serré, une seule en zoom large.
+//
+// Renvoie une LISTE et non le meilleur candidat, parce qu'un tracé qui repasse au même
+// endroit (aller-retour, boucle en huit) y superpose deux virages à quelques pixels près :
+// le plus proche du doigt n'est pas forcément le passage que le coureur a en tête, et
+// choisir à sa place le priverait de l'autre — celui-là même qu'il vient de faire.
+export function turnsNearTap(
+  projected: { ptr: number; x: number; y: number }[],
+  tap: { x: number; y: number },
+  radiusPx = TURN_TAP_RADIUS_PX,
+): number[] {
+  return projected
+    .map((p) => ({ ptr: p.ptr, d: Math.hypot(p.x - tap.x, p.y - tap.y) }))
+    .filter((c) => c.d <= radiusPx)
+    .sort((a, b) => a.d - b.d || a.ptr - b.ptr)
+    .map((c) => c.ptr)
+}
+
+// Où repartir quand le coureur déclare lui-même un virage fait (ou pas encore fait).
+export interface TurnResync {
+  /** Sommet de la géométrie où ré-ancrer la projection. */
+  idx: number
+  /** Distance le long du tracé à ce sommet. */
+  distAlongM: number
+  /** Nouveau pointeur de prochain virage. */
+  nextTurnPtr: number
+}
+
+// Pourquoi cette commande existe : un aller-retour REPASSE PAR LES MÊMES SOMMETS —
+// autour du demi-tour, geometry[k−n] et geometry[k+n] sont la même coordonnée. Tant que
+// le coureur atteint la pointe, le départage de nearestGeomIndex (l'indice le plus proche
+// du précédent) le fait basculer sur la voie du retour. Mais un demi-tour pris EN AVANCE
+// — on a compris avant le GPS qu'on était au bout — laisse la projection sur la voie de
+// l'aller : au retour, les sommets de l'aller restent les plus proches du dernier indice
+// connu, la progression RECULE, le pointeur ne franchit jamais le demi-tour, et la
+// navigation ne repart plus de la sortie. Aucun reroutage ne rattrape ça : on est pile
+// sur le tracé, donc jamais hors-trajet.
+//
+// Le pointeur de virage n'est pas l'essentiel du recalage : c'est l'ANCRE DE PROJECTION
+// (`idx`). La fenêtre de ±60 sommets de nearestGeomIndex repart de là au fix suivant, donc
+// la poser d'un sommet APRÈS le virage déclaré fait (ou d'un sommet AVANT s'il reste à
+// faire) suffit à faire basculer la fenêtre sur le bon passage ; le fix suivant affine la
+// position. Poser le pointeur sans l'ancre ne servirait à rien — la projection le
+// ramènerait en arrière au fix d'après.
+export function resyncOnTurn(
+  turns: TurnPoint[],
+  cumDistM: number[],
+  ptr: number,
+  done: boolean,
+): TurnResync | null {
+  const tp = turns[ptr]
+  if (!tp || cumDistM.length === 0) return null
+  const idx = Math.min(cumDistM.length - 1, Math.max(0, done ? tp.idx + 1 : tp.idx - 1))
+  return { idx, distAlongM: cumDistM[idx] ?? tp.distM, nextTurnPtr: done ? ptr + 1 : ptr }
+}
+
+// Clé i18n (et paramètres) nommant une manœuvre en toutes lettres, pour la tooltip de la
+// carte. Le bandeau, lui, se contente d'une flèche (turnIcon) : à l'arrêt devant la
+// tooltip on a le temps de lire, et « Demi-tour » lève l'ambiguïté d'une flèche vers le
+// bas que rien ne distingue d'un virage serré sur une pastille de 22 px.
+export function turnLabel(
+  t: { kind: Maneuver; direction: 'left' | 'right'; exitNumber?: number },
+): { key: string; params?: Record<string, unknown> } {
+  if (t.kind === 'roundabout') return { key: 'routes.turn_roundabout', params: { exit: t.exitNumber ?? 0 } }
+  if (t.kind === 'uturn') return { key: 'routes.turn_uturn' }
+  return { key: t.direction === 'right' ? 'routes.turn_right' : 'routes.turn_left' }
+}
+
 // Temps estimé jusqu'au prochain virage, à la vitesse actuelle. Renvoie null tant
 // qu'on est quasi à l'arrêt (vitesse < 1 km/h) : l'estimation exploserait et n'aurait
 // aucun sens. Format horloge m:ss au-delà d'une minute, « N s » en deçà.

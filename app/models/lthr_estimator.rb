@@ -82,8 +82,13 @@ module LthrEstimator
   # sont soit déjà mis en cache (`TrainingLoad.summary`), soit rares et hors page
   # (le profil envoyé à l'appli au départ d'une navigation). Une requête indexée par
   # utilisateur, sur quelques colonnes étroites, ne mérite pas une clé de plus à
-  # invalider — mesuré à 50 ms pour 750 sorties, avec le reste du calcul de charge.
-  def summary(user)
+  # invalider — mesuré à 5 ms sur un compte de 750 activités.
+  #
+  # [with_history] à faux pour les appelants qui ne veulent que la valeur courante : la
+  # série mensuelle est un calcul de page Performances, alors que `RiderProfile`, lui,
+  # répond au départ d'une navigation — le moment où l'on veut la réponse la plus
+  # courte possible.
+  def summary(user, with_history: true)
     acts = hr_activities(user)
     manual = manual_lthr(user)
 
@@ -102,7 +107,7 @@ module LthrEstimator
       },
       auto: auto,
       manual: { bpm: manual, at: FtpEstimator.athlete(user)['lthr_manual_at'] },
-      history: history(acts)
+      history: with_history ? history(acts) : []
     }
   end
 

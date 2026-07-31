@@ -13,12 +13,23 @@
 module RiderProfile
   module_function
 
+  # Les deux seuils sont pris à leur valeur COURANTE, celle-là même qui sert au TSS
+  # et aux zones du site : manuelle si l'athlète l'a saisie, estimée sinon. L'appli
+  # n'a donc jamais de zones qui contredisent celles du site.
+  #
+  # Le cardio a longtemps fait exception — seule une LTHR saisie à la main comptait,
+  # faute d'estimation digne de ce nom au niveau de l'athlète. Depuis que la courbe
+  # cardio est persistée par sortie (`peak_heartrates`), `LthrEstimator` estime le
+  # seuil sur une fenêtre glissante comme le fait `FtpEstimator` pour la puissance :
+  # l'exception n'a plus lieu d'être, et un cycliste qui n'a jamais rien saisi voit
+  # enfin ses zones cardio au guidon.
+  #
   def summary(user)
     ftp = FtpEstimator.summary(user)
-    athlete = user.preferences_with_defaults["athlete"] || {}
+    lthr = LthrEstimator.summary(user, with_history: false)
 
     watts = ftp.dig(:current, :watts)
-    lthr = athlete["lthr_manual"]
+    bpm = lthr.dig(:current, :bpm)
 
     {
       ftp: {
@@ -26,10 +37,13 @@ module RiderProfile
         source: ftp.dig(:current, :source),
         w_per_kg: ftp.dig(:current, :w_per_kg)
       },
-      lthr: lthr,
+      lthr: bpm,
+      # `manual` ou `auto` — l'appli en fait la différence entre un seuil mesuré et un
+      # seuil déduit. Même vocabulaire que `ftp.source`.
+      lthr_source: lthr.dig(:current, :source),
       weight_kg: ftp[:weight_kg],
       power_zones: bounds(ZoneDistribution::POWER_ZONES, watts),
-      hr_zones: bounds(ZoneDistribution::HR_ZONES, lthr)
+      hr_zones: bounds(ZoneDistribution::HR_ZONES, bpm)
     }
   end
 

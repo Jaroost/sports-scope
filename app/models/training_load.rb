@@ -421,7 +421,9 @@ module TrainingLoad
   #
   # `auto` reste le bpm brut de l'estimation (le front l'affiche tel quel).
   def lthr(user, rows)
-    summary = LthrEstimator.summary(user)
+    # Sans l'historique : c'est la valeur du jour qui sert au TSS, et la série
+    # mensuelle a son propre appel depuis la page Performances.
+    summary = LthrEstimator.summary(user, with_history: false)
     manual = summary[:manual][:bpm]
     estimated = summary.dig(:auto, :bpm)
     auto = estimated || auto_lthr(rows)

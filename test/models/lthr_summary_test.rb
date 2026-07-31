@@ -95,6 +95,41 @@ class LthrSummaryTest < ActiveSupport::TestCase
     assert_nil LthrEstimator.summary(owner)[:auto]
   end
 
+  # ── RiderProfile : ce que reçoit l'application mobile ───────────────────────
+  test "le profil envoyé à l'appli porte le seuil estimé et ses zones" do
+    owner = user
+    ride(owner, curve: { "1200" => 170.0 })
+
+    profile = RiderProfile.summary(owner)
+
+    # Le point de tout ce chantier : sans rien avoir saisi, le cycliste a des zones
+    # cardio au guidon.
+    assert_equal 167, profile[:lthr]
+    assert_equal "auto", profile[:lthr_source]
+    assert_equal 5, profile[:hr_zones].length
+    assert_equal 167, profile[:hr_zones].last[:lo], "z5 démarre au seuil"
+  end
+
+  test "le profil marque un seuil saisi à la main comme tel" do
+    owner = user
+    ride(owner, curve: { "1200" => 170.0 })
+    owner.update!(preferences: { "athlete" => { "lthr_manual" => 165 } })
+
+    profile = RiderProfile.summary(owner)
+
+    assert_equal 165, profile[:lthr]
+    assert_equal "manual", profile[:lthr_source]
+    assert_equal 165, profile[:hr_zones].last[:lo]
+  end
+
+  test "sans rien de connu, le profil n'invente aucune zone cardio" do
+    profile = RiderProfile.summary(user)
+
+    assert_nil profile[:lthr]
+    assert_nil profile[:lthr_source]
+    assert_equal [], profile[:hr_zones]
+  end
+
   # ── TrainingLoad : le rang des trois sources ────────────────────────────────
   test "TrainingLoad préfère l'estimation cardio au vieux proxy" do
     owner = user

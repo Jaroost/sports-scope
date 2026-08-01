@@ -45,6 +45,47 @@ function observeMarkerScale(el: HTMLElement, getMap: () => any): MutationObserve
   return obs
 }
 
+export interface MarkerScreenPoint { x: number; y: number }
+
+/**
+ * Regroupe des marqueurs qui se chevauchent à l'écran. Rend, pour chaque marqueur :
+ *  - `mergedInto[i]` : l'index du marqueur qui le représente, ou −1 s'il reste affiché ;
+ *  - `hides[i]`      : le nombre de marqueurs qu'il représente en plus de lui-même.
+ *
+ * Un marqueur « prend » tous ceux qui tombent à moins de `minGapPx` de LUI (pas de chaîne
+ * de proche en proche : sinon une file de points serrés s'effondrerait en un seul amas d'un
+ * bout à l'autre du tracé). Un marqueur qui en représente déjà d'autres ne peut plus être
+ * pris par un troisième — il resterait masqué tout en portant un badge.
+ *
+ * `priority` passe en tête : c'est le marqueur qu'on veut voir survivre à son amas (le point
+ * sélectionné, dont la tooltip est ouverte). Pure : tout est en pixels écran.
+ */
+export function mergeOverlappingMarkers(
+  points: Array<MarkerScreenPoint | null>,
+  minGapPx: number,
+  priority = -1,
+): { mergedInto: number[]; hides: number[] } {
+  const n = points.length
+  const mergedInto = new Array<number>(n).fill(-1)
+  const hides = new Array<number>(n).fill(0)
+  const minGapSq = minGapPx * minGapPx
+  const order = Array.from({ length: n }, (_, i) => i)
+  if (priority >= 0 && priority < n) order.unshift(priority)
+  for (const i of order) {
+    const a = points[i]
+    if (!a || mergedInto[i] >= 0 || hides[i] > 0) continue
+    for (let j = 0; j < n; j++) {
+      const b = points[j]
+      if (j === i || !b || mergedInto[j] >= 0 || hides[j] > 0) continue
+      const dx = b.x - a.x, dy = b.y - a.y
+      if (dx * dx + dy * dy > minGapSq) continue
+      mergedInto[j] = i
+      hides[i]++
+    }
+  }
+  return { mergedInto, hides }
+}
+
 export function createScaledMarkerGroup(deps: MarkerGroupDeps): ScaledMarkerGroup {
   const { getMap, getMaplibre } = deps
   const markers: any[] = []

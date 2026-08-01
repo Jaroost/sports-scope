@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createScaledMarkerGroup, MARKER_SCALE_VAR } from './mapMarkerGroup'
+import { createScaledMarkerGroup, mergeOverlappingMarkers, MARKER_SCALE_VAR } from './mapMarkerGroup'
 
 // Les marqueurs mis à l'échelle sont des overlays HTML : MapLibre réécrit leur `transform` à
 // chaque frame et efface le scale() posé par le CSS. Le groupe le ré-applique via un
@@ -151,5 +151,61 @@ describe('createScaledMarkerGroup', () => {
     const marker = s.group.add(el(), [6.2, 46.6])
 
     expect(s.group.markers).toEqual([marker])
+  })
+})
+
+// Amas de marqueurs (points de passage du créateur d'itinéraire) : en dézoomant, plusieurs
+// points tombent sur les mêmes pixels et le dernier dessiné masque les autres sans que rien
+// ne le signale. Un seul marqueur est gardé par amas, avec le nombre de points qu'il cache.
+
+describe('mergeOverlappingMarkers', () => {
+  const p = (x: number, y: number) => ({ x, y })
+
+  it('laisse intacts des marqueurs suffisamment écartés', () => {
+    const { mergedInto, hides } = mergeOverlappingMarkers([p(0, 0), p(100, 0), p(200, 0)], 26)
+    expect(mergedInto).toEqual([-1, -1, -1])
+    expect(hides).toEqual([0, 0, 0])
+  })
+
+  it('garde le premier d’un amas et compte ce qu’il cache', () => {
+    // Trois points au même pixel : seul l'indice 0 reste affiché, avec « +2 ».
+    const { mergedInto, hides } = mergeOverlappingMarkers([p(10, 10), p(12, 11), p(9, 12)], 26)
+    expect(mergedInto).toEqual([-1, 0, 0])
+    expect(hides[0]).toBe(2)
+  })
+
+  it('ne chaîne pas de proche en proche', () => {
+    // Une file de points espacés de 20 px : 0 prend 1, mais 2 (à 40 px de 0) reste un amas
+    // à part. Sans cette règle, un tracé aux points serrés s'effondrerait d'un bout à l'autre.
+    const { mergedInto, hides } = mergeOverlappingMarkers([p(0, 0), p(20, 0), p(40, 0), p(60, 0)], 26)
+    expect(mergedInto[1]).toBe(0)
+    expect(mergedInto[2]).toBe(-1)
+    expect(hides[2]).toBe(1)
+    expect(mergedInto[3]).toBe(2)
+  })
+
+  it('ne masque pas un marqueur qui en représente déjà d’autres', () => {
+    // 1 prend 0 (priorité), puis 2 est proche de 1 : il ne doit pas l'avaler, sinon 1
+    // resterait masqué tout en portant son badge.
+    const { mergedInto, hides } = mergeOverlappingMarkers([p(0, 0), p(10, 0), p(20, 0)], 26, 1)
+    expect(mergedInto[1]).toBe(-1)
+    expect(hides[1]).toBe(2)
+    expect(mergedInto[0]).toBe(1)
+    expect(mergedInto[2]).toBe(1)
+  })
+
+  it('fait survivre le marqueur prioritaire à son amas', () => {
+    // Sans priorité, l'indice 0 représenterait l'amas ; avec, c'est le point sélectionné.
+    const pts = [p(0, 0), p(5, 0), p(8, 0)]
+    expect(mergeOverlappingMarkers(pts, 26).mergedInto).toEqual([-1, 0, 0])
+    const { mergedInto, hides } = mergeOverlappingMarkers(pts, 26, 2)
+    expect(mergedInto).toEqual([2, 2, -1])
+    expect(hides[2]).toBe(2)
+  })
+
+  it('ignore les marqueurs sans position', () => {
+    const { mergedInto, hides } = mergeOverlappingMarkers([null, p(0, 0), p(3, 0)], 26)
+    expect(mergedInto).toEqual([-1, -1, 1])
+    expect(hides[1]).toBe(1)
   })
 })

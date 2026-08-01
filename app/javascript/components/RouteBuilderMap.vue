@@ -30,7 +30,7 @@ import {
 } from '../streetView'
 import type { Climb, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
-import { createScaledMarkerGroup, MARKER_SCALE_VAR } from '../mapMarkerGroup'
+import { createScaledMarkerGroup, mergeOverlappingMarkers, MARKER_SCALE_VAR } from '../mapMarkerGroup'
 import {
   escapeHtml, googleMapsUrl, popupHeaderHtml, popupLinkHtml, popupMapLinksHtml,
 } from '../placePopup'
@@ -500,6 +500,9 @@ async function initMap() {
         setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 500)
       })
       mapInstance.on('moveend', () => { if (!routeStore.currentId.value) saveMapView() })
+      // Le chevauchement des marqueurs de points ne dépend que de la caméra : on le
+      // réévalue quand elle s'immobilise (cf. regroupWaypointMarkers).
+      mapInstance.on('moveend', regroupWaypointMarkers)
       // Facteur d'échelle des marqueurs, publié pour le CSS ET pour les groupes de
       // marqueurs, qui le réappliquent après chaque repositionnement (cf. mapMarkerGroup).
       const applyMarkerScale = () => {
@@ -665,6 +668,9 @@ function setRouteLineScale(factor: number) {
 let displayLine: LngLat[] = []
 // Décalage appliqué à chaque sommet, en mètres. > 0 ⇔ l'affichage s'écarte du tracé réel.
 let displayOff: number[] = []
+// Vrai dès qu'une portion du tracé est dédoublée : réserve aux tracés concernés les
+// calculs qui n'ont de sens que là (position des marqueurs sur leur voie).
+let displayHasOffset = false
 // Seuil au-delà duquel on considère le sommet décalé (le même que celui sous lequel
 // buildOffsetDisplayLine laisse le sommet en place).
 const OFFSET_EPS_M = 1e-3
@@ -692,6 +698,7 @@ function updateRouteLayer() {
     displayLine = geom.map(([lng, lat]) => [lng, lat] as LngLat)
     displayOff = new Array(geom.length).fill(0)
   }
+  displayHasOffset = displayOff.some((o) => o >= OFFSET_EPS_M)
   // Repère de sens (flux animé, flèches) : sur la ligne d'affichage, sinon il courrait
   // entre les deux voies au lieu d'indiquer le sens de chacune d'elles.
   const dispSrc = mapInstance.getSource('builder-route')
@@ -714,6 +721,23 @@ function displayReady(): boolean {
 function displayCoords(lo = 0, hi = routeStore.geometry.value.length - 1): LngLat[] {
   if (displayReady()) return displayLine.slice(lo, hi + 1)
   return routeStore.geometry.value.slice(lo, hi + 1).map(([lng, lat]) => [lng, lat] as LngLat)
+}
+
+// Position d'AFFICHAGE d'un point de passage : celle de la voie à laquelle il appartient
+// quand le tracé s'y dédouble. Deux points au même endroit — l'aller et le retour d'un
+// même trajet, le départ et l'arrivée d'une boucle — empilaient sinon leurs marqueurs au
+// même pixel : seul le dernier dessiné restait lisible, et c'était le seul qu'on pouvait
+// attraper. Chacun rejoint désormais SA voie, celle du passage auquel il appartient.
+//
+// Le point n'est pas déplacé pour autant : routeStore.waypoints garde ses coordonnées, et
+// un glisser-déposer écrit la position du curseur (attachWaypointDrag), pas celle du
+// marqueur — le décalage ne s'accumule donc pas à chaque manipulation.
+function waypointDisplayPos(idx: number, w: { lng: number; lat: number }): LngLat {
+  if (!displayHasOffset || !displayReady()) return [w.lng, w.lat]
+  if (waypointGeomIndices.length !== routeStore.waypoints.value.length) return [w.lng, w.lat]
+  const g = waypointGeomIndices[idx]
+  if (g == null || displayOff[g] < OFFSET_EPS_M) return [w.lng, w.lat]
+  return displayLine[g]
 }
 
 // Portions du tracé RÉEL sur lesquelles l'affichage s'écarte, en coordonnées vraies : ce
@@ -1854,6 +1878,7 @@ function selectWaypoint(idx: number) {
   if (selectedWpIdx === idx) {
     selectedWpIdx = -1
     waypointMarkers.forEach((m) => { if (m) m.getElement().style.zIndex = '' })
+    regroupWaypointMarkers()
     return
   }
   selectedWpIdx = idx
@@ -1862,6 +1887,8 @@ function selectWaypoint(idx: number) {
     el.classList.add('wp-marker--selected')
     el.style.zIndex = '9999'
   }
+  // Le point sélectionné doit rester visible : il prend la tête de son amas.
+  regroupWaypointMarkers()
   const wp = routeStore.waypoints.value[idx]
   if (wp) {
     checkStreetView(wp.lat, wp.lng).then((ok) => {
@@ -1877,6 +1904,71 @@ function deselectAll() {
     m.getElement().style.zIndex = ''
   })
   selectedWpIdx = -1
+  regroupWaypointMarkers()
+}
+
+// Deux marqueurs plus proches que ça à l'écran se chevauchent pour de bon : c'est le
+// diamètre d'un marqueur (.wp-marker fait 28 px, mis à l'échelle par --wp-scale).
+const CLUSTER_GAP_PX = 26
+
+// Regroupement à l'écran des points de passage. En dézoomant, plusieurs points tombent sur
+// les mêmes pixels : le marqueur dessiné en dernier masquait alors purement et simplement
+// les autres, sans que rien ne le signale — on croyait voir un point là où il y en avait
+// cinq, et on ne pouvait attraper que celui du dessus. On n'en affiche donc plus qu'un par
+// amas, portant le nombre de points qu'il représente ; les autres réapparaissent en zoomant.
+//
+// Les marqueurs ne sont pas reconstruits (leurs tooltips sont lourdes) : on ne fait
+// qu'ajouter ou retirer une classe et un attribut. Le regroupement ne dépendant que de la
+// caméra, il est recalculé à chaque fin de mouvement.
+// Représentant de chaque marqueur dans son amas (−1 s'il est lui-même affiché), tel que
+// rendu par le dernier regroupWaypointMarkers. Lu au clic pour retrouver les points cachés.
+let waypointMergedInto: number[] = []
+
+function regroupWaypointMarkers() {
+  if (!mapInstance || !waypointMarkers.length) return
+  const scale = parseFloat(mapInstance.getContainer().style.getPropertyValue(MARKER_SCALE_VAR) || '1')
+  const pts = waypointMarkers.map((m) => (m ? mapInstance.project(m.getLngLat()) : null))
+  // Le point sélectionné (tooltip ouverte) est prioritaire : il représente son amas au lieu
+  // d'être masqué par un voisin, sinon la tooltip disparaîtrait sous le curseur.
+  const { mergedInto, hides } = mergeOverlappingMarkers(pts, CLUSTER_GAP_PX * (scale || 1), selectedWpIdx)
+  waypointMergedInto = mergedInto
+  waypointMarkers.forEach((m, i) => {
+    if (!m) return
+    const el = m.getElement() as HTMLElement
+    el.classList.toggle('wp-marker--merged', mergedInto[i] >= 0)
+    if (hides[i] > 0) el.dataset.merged = String(hides[i])
+    else delete el.dataset.merged
+  })
+}
+
+// Nombre de niveaux de zoom qu'un clic sur un amas peut franchir d'un coup. Deux points
+// rigoureusement confondus ne se sépareront jamais : mieux vaut avancer par paliers que
+// foncer au zoom maximal pour rien. Un amas qui résiste se re-clique.
+const CLUSTER_ZOOM_STEP = 4
+
+// Clic (ou tap) sur un point de passage. Sur un marqueur d'amas, ouvrir la tooltip du seul
+// point visible n'aurait guère de sens : on zoome sur l'amas jusqu'à ce que ses points se
+// séparent. Le badge disparaît alors de lui-même et le clic reprend son rôle normal.
+function activateWaypoint(idx: number) {
+  if (!mapInstance) return
+  // Point déjà ouvert : le clic le referme, comme partout ailleurs. Un amas dont la tooltip
+  // est ouverte (on a dézoomé après l'avoir sélectionné) resterait sinon impossible à fermer
+  // autrement que par sa croix.
+  if (selectedWpIdx === idx) { selectWaypoint(idx); return }
+  const hidden = waypointMergedInto.length === waypointMarkers.length
+    ? waypointMarkers.map((_, i) => i).filter((i) => waypointMergedInto[i] === idx)
+    : []
+  if (!hidden.length) { selectWaypoint(idx); return }
+  const lls = [idx, ...hidden].map((i) => waypointMarkers[i].getLngLat())
+  const lngs = lls.map((l) => l.lng), lats = lls.map((l) => l.lat)
+  // Marge proportionnée à la carte : 80 px de chaque côté n'ont pas de sens sur la vue
+  // réduite d'un téléphone.
+  const box = mapInstance.getContainer()
+  const pad = Math.max(20, Math.min(80, Math.floor(Math.min(box.clientWidth, box.clientHeight) / 6)))
+  mapInstance.fitBounds(
+    [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+    { padding: pad, maxZoom: mapInstance.getZoom() + CLUSTER_ZOOM_STEP, duration: 500 },
+  )
 }
 
 async function copyCoords(btn: HTMLElement, text: string) {
@@ -1911,6 +2003,14 @@ function refreshWaypointMarkers() {
   // tooltip informatif (coordonnées, Google Maps, Street View, Komoot), mais sans les
   // éléments d'édition (déplacement, réordonnancement, inversion, libération, suppression).
   const ro = routeStore.readOnly.value
+  // Place chaque marqueur sur la voie de son passage là où le tracé se dédouble
+  // (waypointDisplayPos) : il faut pour cela savoir à quel sommet de la géométrie chaque
+  // point correspond. Sur le chemin normal (recomputeRoute) les index viennent d'être
+  // recalculés ; on ne refait le calcul — une programmation dynamique sur toute la
+  // géométrie — que s'ils sont manifestement périmés.
+  if (displayHasOffset && waypointGeomIndices.length !== routeStore.waypoints.value.length) {
+    recomputeWaypointGeomIndices()
+  }
   routeStore.waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
     el.className = w.free ? 'wp-marker wp-marker--free' : 'wp-marker'
@@ -1980,13 +2080,13 @@ function refreshWaypointMarkers() {
       </div>
       <span class="wp-marker-num">${idx + 1}</span>
     `
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([w.lng, w.lat]).addTo(mapInstance)
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(waypointDisplayPos(idx, w)).addTo(mapInstance)
     if (!ro) attachWaypointDrag(el, marker, idx)
     el.addEventListener('click', (ev: any) => {
       ev.stopPropagation()
       if (suppressNextWpClick) { suppressNextWpClick = false; return }
       if (ev.target.closest('.wp-tooltip')) return
-      selectWaypoint(idx)
+      activateWaypoint(idx)
     })
     el.querySelector('.wp-tooltip-close')!.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     // Actions purement informatives : présentes aussi en lecture seule (vue partagée).
@@ -2038,6 +2138,7 @@ function refreshWaypointMarkers() {
     }
     waypointMarkers.push(marker)
   })
+  regroupWaypointMarkers()
 }
 
 function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
@@ -2098,7 +2199,7 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       el.removeEventListener('touchend', onTouchEnd)
       el.removeEventListener('touchcancel', onTouchEnd)
       mapInstance.dragPan.enable()
-      if (!moved) { selectWaypoint(idx); return }
+      if (!moved) { activateWaypoint(idx); return }
       suppressNextWpClick = true
       setTimeout(() => { suppressNextWpClick = false }, 50)
       const pos = marker.getLngLat()

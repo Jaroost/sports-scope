@@ -1907,9 +1907,13 @@ function deselectAll() {
   regroupWaypointMarkers()
 }
 
-// Deux marqueurs plus proches que ça à l'écran se chevauchent pour de bon : c'est le
-// diamètre d'un marqueur (.wp-marker fait 28 px, mis à l'échelle par --wp-scale).
-const CLUSTER_GAP_PX = 26
+// Écart écran en deçà duquel deux points sont regroupés. Volontairement la MOITIÉ du
+// diamètre d'un marqueur (.wp-marker fait 28 px, mis à l'échelle par --wp-scale) : on tolère
+// qu'ils se chevauchent à moitié plutôt que d'exiger qu'ils ne se touchent pas. Un seuil
+// deux fois plus petit sépare les points un niveau de zoom entier plus tôt — chaque niveau
+// double les distances à l'écran. Deux disques à demi superposés restent distincts et
+// cliquables ; en deçà, les numéros deviennent illisibles et regrouper reprend son intérêt.
+const CLUSTER_GAP_PX = 13
 
 // Regroupement à l'écran des points de passage. En dézoomant, plusieurs points tombent sur
 // les mêmes pixels : le marqueur dessiné en dernier masquait alors purement et simplement
@@ -1949,17 +1953,25 @@ const CLUSTER_ZOOM_STEP = 4
 // Clic (ou tap) sur un point de passage. Sur un marqueur d'amas, ouvrir la tooltip du seul
 // point visible n'aurait guère de sens : on zoome sur l'amas jusqu'à ce que ses points se
 // séparent. Le badge disparaît alors de lui-même et le clic reprend son rôle normal.
+// Indices des points que le marqueur `idx` représente à l'écran, lui compris : un seul
+// élément s'il est isolé, tout son amas s'il en cache d'autres.
+function clusterMembers(idx: number): number[] {
+  const n = routeStore.waypoints.value.length
+  if (waypointMergedInto.length !== n) return [idx]
+  const members = [idx]
+  for (let i = 0; i < n; i++) if (waypointMergedInto[i] === idx) members.push(i)
+  return members
+}
+
 function activateWaypoint(idx: number) {
   if (!mapInstance) return
   // Point déjà ouvert : le clic le referme, comme partout ailleurs. Un amas dont la tooltip
   // est ouverte (on a dézoomé après l'avoir sélectionné) resterait sinon impossible à fermer
   // autrement que par sa croix.
   if (selectedWpIdx === idx) { selectWaypoint(idx); return }
-  const hidden = waypointMergedInto.length === waypointMarkers.length
-    ? waypointMarkers.map((_, i) => i).filter((i) => waypointMergedInto[i] === idx)
-    : []
-  if (!hidden.length) { selectWaypoint(idx); return }
-  const lls = [idx, ...hidden].map((i) => waypointMarkers[i].getLngLat())
+  const members = clusterMembers(idx)
+  if (members.length < 2) { selectWaypoint(idx); return }
+  const lls = members.map((i) => waypointMarkers[i].getLngLat())
   const lngs = lls.map((l) => l.lng), lats = lls.map((l) => l.lat)
   // Marge proportionnée à la carte : 80 px de chaque côté n'ont pas de sens sur la vue
   // réduite d'un téléphone.
@@ -2141,6 +2153,24 @@ function refreshWaypointMarkers() {
   regroupWaypointMarkers()
 }
 
+// Fin d'un glisser-déposer de marqueur. Un marqueur d'amas représente plusieurs points
+// empilés : on les emmène TOUS, du même écart. N'emporter que celui du dessus disloquerait
+// l'amas en silence — on croit déplacer ce qu'on voit, c'est-à-dire l'ensemble, et les
+// points restés en arrière ne réapparaîtraient qu'en zoomant, le tracé déjà refait.
+// Le point saisi, lui, atterrit exactement sous le curseur.
+function dropWaypointAt(idx: number, lng: number, lat: number) {
+  const wps = routeStore.waypoints.value
+  const from = wps[idx]
+  if (!from) return
+  const dLng = lng - from.lng, dLat = lat - from.lat
+  const next = wps.slice()
+  for (const i of clusterMembers(idx)) {
+    next[i] = { ...next[i], lng: next[i].lng + dLng, lat: next[i].lat + dLat }
+  }
+  routeStore.waypoints.value = next
+  emit('waypoints-changed')
+}
+
 function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
   el.addEventListener('mousedown', (ev: MouseEvent) => {
     if (ev.button !== 0) return
@@ -2167,10 +2197,7 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       suppressNextWpClick = true
       setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 50)
       const pos = marker.getLngLat()
-      const next = routeStore.waypoints.value.slice()
-      next[idx] = { ...next[idx], lng: pos.lng, lat: pos.lat }
-      routeStore.waypoints.value = next
-      emit('waypoints-changed')
+      dropWaypointAt(idx, pos.lng, pos.lat)
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -2203,10 +2230,7 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       suppressNextWpClick = true
       setTimeout(() => { suppressNextWpClick = false }, 50)
       const pos = marker.getLngLat()
-      const next = routeStore.waypoints.value.slice()
-      next[idx] = { ...next[idx], lng: pos.lng, lat: pos.lat }
-      routeStore.waypoints.value = next
-      emit('waypoints-changed')
+      dropWaypointAt(idx, pos.lng, pos.lat)
     }
     el.addEventListener('touchmove', onTouchMove, { passive: false })
     el.addEventListener('touchend', onTouchEnd)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bearingDelta, bearingBetween, buildDistancesM, detectTurns, turnsFromVoiceHints, nearestGeomIndex, sliceLineBetween, maneuverEndIdx } from './routeHelpers'
+import { bearingDelta, bearingBetween, buildDistancesM, buildOffsetDisplayLine, detectTurns, turnsFromVoiceHints, nearestGeomIndex, sliceLineBetween, maneuverEndIdx } from './routeHelpers'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
 // moveLngLat (navHelpers) sert à bâtir les tracés en MÈTRES : les seuils de detectTurns
 // (35°, 18 m, 25 m) ne veulent rien dire exprimés en degrés de longitude.
@@ -406,5 +406,64 @@ describe('maneuverEndIdx', () => {
     const cut = geom.slice(0, entry + 12)   // le tracé s'arrête DANS l'anneau
     const cum = buildDistancesM(cut)
     expect(maneuverEndIdx(cut, cum, entry)).toBe(cut.length - 1)
+  })
+})
+
+// Dédoublement des portions parcourues deux fois : c'est ce décalage qui rend l'aller et le
+// retour lisibles séparément sur la carte (couleurs de pente notamment). `off` dit OÙ
+// l'affichage s'écarte du tracé — l'éditeur d'itinéraire s'en sert pour n'y dessiner sa
+// ligne de repère que là.
+
+describe('buildOffsetDisplayLine', () => {
+  // Aller-retour plein est sur 300 m : un sommet tous les 10 m à l'aller, puis les mêmes
+  // sommets en sens inverse. Tout se superpose, sauf autour du demi-tour où les deux
+  // passages sont trop proches LE LONG du parcours pour compter comme un recouvrement.
+  const out: LngLat[] = Array.from({ length: 31 }, (_, i) => moveLngLat([6, 46], 90, i * 10))
+  const outAndBack: LngLat[] = [...out, ...out.slice(0, -1).reverse()]
+  const cum = buildDistancesM(outAndBack)
+
+  it('rend un décalage et une largeur par sommet', () => {
+    const { line, wscale, off } = buildOffsetDisplayLine(outAndBack, cum)
+    expect(line.length).toBe(outAndBack.length)
+    expect(wscale.length).toBe(outAndBack.length)
+    expect(off.length).toBe(outAndBack.length)
+  })
+
+  it('écarte l’aller et le retour de part et d’autre du tracé', () => {
+    const { line, off } = buildOffsetDisplayLine(outAndBack, cum)
+    // Sommet 5 (50 m à l'aller) et son jumeau au retour : même position réelle…
+    const back = outAndBack.length - 1 - 5
+    expect(outAndBack[back]).toEqual(outAndBack[5])
+    expect(off[5]).toBeGreaterThan(0)
+    expect(off[back]).toBeGreaterThan(0)
+    // …mais dessinés de part et d'autre, puisqu'ils sont parcourus en sens opposés.
+    const dOut = line[5][1] - outAndBack[5][1]
+    const dBack = line[back][1] - outAndBack[back][1]
+    expect(Math.sign(dOut)).toBe(-Math.sign(dBack))
+    expect(Math.abs(dOut)).toBeGreaterThan(0)
+  })
+
+  it('laisse le demi-tour sur le tracé réel', () => {
+    // Autour du sommet 30 (le point de rebroussement), aller et retour sont à moins de
+    // minSeparationM l'un de l'autre le long du parcours : de simples voisins, pas un
+    // recouvrement. Les décaler y creuserait une boucle parasite.
+    const { line, off } = buildOffsetDisplayLine(outAndBack, cum)
+    expect(off[30]).toBeLessThan(0.5)
+    expect(line[30][1]).toBeCloseTo(outAndBack[30][1], 6)
+  })
+
+  it('ne touche pas un tracé qui ne se recoupe pas', () => {
+    const cumOut = buildDistancesM(out)
+    const { line, off, wscale } = buildOffsetDisplayLine(out, cumOut)
+    expect(off.every((o) => o === 0)).toBe(true)
+    expect(wscale.every((w) => w === 1)).toBe(true)
+    expect(line).toEqual(out)
+  })
+
+  it('rend le tracé tel quel quand il est trop court pour se superposer', () => {
+    const two: LngLat[] = [out[0], out[1]]
+    expect(buildOffsetDisplayLine(two, buildDistancesM(two))).toEqual({
+      line: two, wscale: [1, 1], off: [0, 0],
+    })
   })
 })

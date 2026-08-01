@@ -556,12 +556,15 @@ export function bearingDelta(from: number, to: number): number {
 // Renvoie, alignés index-pour-index sur `geom` :
 //  - `line`   : la polyligne d'affichage (décalée sur les recouvrements) ;
 //  - `wscale` : un facteur de largeur ∈ [1−narrowFrac, 1], abaissé sur les recouvrements
-//               pour amincir le tracé là où il se dédouble (deux voies serrées plus lisibles).
+//               pour amincir le tracé là où il se dédouble (deux voies serrées plus lisibles) ;
+//  - `off`    : le décalage effectivement appliqué à chaque sommet, en mètres (0 hors
+//               recouvrement, rampes comprises). Permet de savoir OÙ l'affichage s'écarte du
+//               tracé réel — l'éditeur s'en sert pour n'y dessiner sa ligne de repère que là.
 export function buildOffsetDisplayLine(
   geom: Array<Coord | LngLat>,
   cumDistM: number[],
   opts: { offsetM?: number; proximityM?: number; minSeparationM?: number; rampM?: number; narrowFrac?: number } = {},
-): { line: LngLat[]; wscale: number[] } {
+): { line: LngLat[]; wscale: number[]; off: number[] } {
   const offsetM = opts.offsetM ?? 3          // décalage latéral appliqué aux portions superposées (aller et retour s'écartent du double : ~6 m)
   const proximityM = opts.proximityM ?? 12   // en deçà, deux points sont « au même endroit »
   const minSeparationM = opts.minSeparationM ?? 50  // écart le long du parcours au-delà duquel un rapprochement est un vrai recouvrement (et non de simples voisins)
@@ -569,7 +572,7 @@ export function buildOffsetDisplayLine(
   const narrowFrac = opts.narrowFrac ?? 0.3  // amincissement max du tracé sur les recouvrements (30 %)
   const n = geom.length
   const pts: LngLat[] = geom.map((c) => [c[0], c[1]])
-  if (n < 3) return { line: pts, wscale: new Array(n).fill(1) }
+  if (n < 3) return { line: pts, wscale: new Array(n).fill(1), off: new Array(n).fill(0) }
 
   // 1) Détection du recouvrement via grille de hachage spatiale (≈ O(n)). On indexe chaque
   // sommet dans une cellule de ~proximityM, puis on ne compare qu'aux 8 cellules voisines.
@@ -633,7 +636,7 @@ export function buildOffsetDisplayLine(
   // Largeur : on amincit proportionnellement au décalage déjà lissé (off/offsetM ∈ [0,1]),
   // donc le tracé maigrit exactement là où il se dédouble, avec les mêmes rampes douces.
   const wscale = off.map((o) => 1 - narrowFrac * (o / offsetM))
-  return { line: out, wscale }
+  return { line: out, wscale, off }
 }
 
 // Closest point on the segment [a, b] to `p`, using an equirectangular

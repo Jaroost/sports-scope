@@ -23,7 +23,7 @@ import type { MarkerKind } from '../routeMarkers'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm,
   bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
-  nearestGeomIndex,
+  nearestGeomIndex, buildOffsetDisplayLine,
 } from '../routeHelpers'
 import {
   streetViewUrl, checkStreetView, probeStreetViewLink, applyStreetViewState,
@@ -247,6 +247,9 @@ const FLOW_HALO_LAYER = 'builder-route-flow-halo'
 // exactement à celui du flux.
 const FLOW_HALO_RATIO = 2
 const ARROWS_LAYER = 'builder-route-arrows'
+// Ligne de repère sur le tracé réel, sous les voies dédoublées (cf. displayLine).
+const BASE_SOURCE = 'builder-route-base'
+const BASE_LAYER = 'builder-route-base-line'
 const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
 // `line-dasharray` n'est pas interpolable : on anime en cyclant sur une séquence de motifs
@@ -521,12 +524,24 @@ async function initMap() {
 
 function installRouteLayer() {
   if (!mapInstance) return
+  // Tracé continu en une seule feature, porteur des repères de sens (flux animé, flèches).
+  // Il reçoit la ligne d'AFFICHAGE (dédoublée sur les recouvrements, cf. displayLine), pas
+  // la géométrie brute : sur un aller-retour, chaque voie a ainsi son propre sens.
   if (!mapInstance.getSource('builder-route')) {
     mapInstance.addSource('builder-route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
   }
   if (!mapInstance.getSource('builder-route-graded')) {
     mapInstance.addSource('builder-route-graded', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     mapInstance.addLayer({ id: 'builder-route-border', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
+    // Ligne de repère : le tracé RÉEL, en couleur unie et plus fin, dessiné uniquement là où
+    // l'affichage se dédouble (cf. displayLine). Elle donne la position exacte de
+    // l'itinéraire entre ses deux voies, et reste la cible d'édition — c'est elle qu'on
+    // survole et qu'on clique pour insérer un point, sans avoir à viser une voie décalée.
+    mapInstance.addSource(BASE_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+    mapInstance.addLayer({
+      id: BASE_LAYER, type: 'line', source: BASE_SOURCE, layout: ROUTE_LINE_LAYOUT,
+      paint: { 'line-color': routePrefs().color, 'line-width': 2, 'line-opacity': props.state.routeOpacity },
+    })
     mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5, 'line-opacity': props.state.routeOpacity } })
   }
   // Tronçons « libres » : tracés en ligne droite (beeline) entre points, rendus en
@@ -610,6 +625,9 @@ function routeLineBaseWidths(): Record<string, number> {
     'builder-route-border': width + 3,
     'builder-route-line': width,
     'builder-route-straight-line': Math.max(2, width - 1),
+    // Nettement plus fine que les voies : la ligne de repère marque la position du tracé,
+    // elle ne doit pas se lire comme un troisième passage.
+    [BASE_LAYER]: Math.max(1.5, width * 0.4),
     // Plus fin que le tracé : la couleur de l'itinéraire reste visible de part et d'autre
     // du flux blanc (et la longueur des traitillés suit, `line-dasharray` étant exprimé
     // en multiples de la largeur du trait).
@@ -633,29 +651,96 @@ function setRouteLineScale(factor: number) {
   }
 }
 
+// Polyligne d'AFFICHAGE alignée index-pour-index sur routeStore.geometry : identique au
+// tracé réel, SAUF sur les portions empruntées plusieurs fois, où elle est décalée
+// latéralement pour que chaque passage forme sa propre voie (buildOffsetDisplayLine, le
+// même dédoublement qu'en navigation). Sans elle le passage dessiné en dernier masque
+// l'autre — et en mode pente une descente recouvre alors entièrement la montée
+// correspondante, qui devient impossible à repérer sur la carte.
+//
+// `routeStore.geometry` reste la vérité géométrique : distances, altitudes, insertion de
+// points et export GPX s'appuient sur elle, jamais sur `displayLine`. Elle reste d'ailleurs
+// dessinée telle quelle sous les voies (BASE_LAYER), en couleur unie : c'est la ligne qu'on
+// vise pour éditer, elle ne bouge donc jamais sous le curseur.
+let displayLine: LngLat[] = []
+// Décalage appliqué à chaque sommet, en mètres. > 0 ⇔ l'affichage s'écarte du tracé réel.
+let displayOff: number[] = []
+// Seuil au-delà duquel on considère le sommet décalé (le même que celui sous lequel
+// buildOffsetDisplayLine laisse le sommet en place).
+const OFFSET_EPS_M = 1e-3
+
 function updateRouteLayer() {
   if (!mapInstance) return
   // Le tracé a changé : une éventuelle tooltip de point du trajet pointe désormais
   // sur une géométrie obsolète, on la referme.
   closeRoutePointPopup()
-  const baseSrc = mapInstance.getSource('builder-route')
-  if (baseSrc) {
-    baseSrc.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: routeStore.geometry.value.map(([lng, lat]) => [lng, lat]) } })
-  }
   // Tient selectionStore.cumDistKm à jour même quand le chart n'est pas monté (mobile).
   const geom = routeStore.geometry.value
+  const cumDistM = [0]
   if (geom.length >= 2) {
-    const cumDistKm = [0]
     let d = 0
-    for (let i = 1; i < geom.length; i++) { d += haversine(geom[i - 1], geom[i]); cumDistKm.push(d / 1000) }
-    selectionStore.cumDistKm = cumDistKm
+    for (let i = 1; i < geom.length; i++) { d += haversine(geom[i - 1], geom[i]); cumDistM.push(d) }
+    selectionStore.cumDistKm = cumDistM.map((m) => m / 1000)
   } else {
     selectionStore.cumDistKm = []
+  }
+  if (geom.length >= 2) {
+    const disp = buildOffsetDisplayLine(geom, cumDistM)
+    displayLine = disp.line
+    displayOff = disp.off
+  } else {
+    displayLine = geom.map(([lng, lat]) => [lng, lat] as LngLat)
+    displayOff = new Array(geom.length).fill(0)
+  }
+  // Repère de sens (flux animé, flèches) : sur la ligne d'affichage, sinon il courrait
+  // entre les deux voies au lieu d'indiquer le sens de chacune d'elles.
+  const dispSrc = mapInstance.getSource('builder-route')
+  if (dispSrc) {
+    dispSrc.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: displayLine } })
   }
   // Sans tracé, rien à animer : on évite de repeindre la carte pour rien.
   if (geom.length >= 2) startRouteFlow()
   else stopRouteFlow()
   applyColorMode()
+}
+
+// Vrai si la ligne d'affichage est à jour : sinon (appel avant updateRouteLayer) on
+// retombe partout sur la géométrie brute plutôt que de mélanger deux versions du tracé.
+function displayReady(): boolean {
+  return displayLine.length === routeStore.geometry.value.length
+}
+
+// Coordonnées à DESSINER pour les sommets [lo, hi] de la géométrie.
+function displayCoords(lo = 0, hi = routeStore.geometry.value.length - 1): LngLat[] {
+  if (displayReady()) return displayLine.slice(lo, hi + 1)
+  return routeStore.geometry.value.slice(lo, hi + 1).map(([lng, lat]) => [lng, lat] as LngLat)
+}
+
+// Portions du tracé RÉEL sur lesquelles l'affichage s'écarte, en coordonnées vraies : ce
+// sont elles que la ligne de repère dessine (une feature par portion contiguë). Ailleurs
+// les voies sont déjà sur le tracé, la ligne de repère n'aurait rien à montrer.
+function offsetRunFeatures(): any[] {
+  const geom = routeStore.geometry.value
+  if (!displayReady() || displayOff.length !== geom.length) return []
+  const features: any[] = []
+  let i = 0
+  while (i < geom.length) {
+    if (displayOff[i] < OFFSET_EPS_M) { i++; continue }
+    let k = i
+    while (k < geom.length && displayOff[k] >= OFFSET_EPS_M) k++
+    // On déborde d'un sommet de chaque côté quand c'est possible : la ligne de repère
+    // rejoint ainsi les voies au lieu de s'arrêter net là où le décalage s'annule.
+    const lo = Math.max(0, i - 1), hi = Math.min(geom.length - 1, k)
+    if (hi - lo >= 1) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: geom.slice(lo, hi + 1).map(([lng, lat]) => [lng, lat]) },
+        properties: {},
+      })
+    }
+    i = k
+  }
+  return features
 }
 
 // Pour chaque arête j (geom[j] → geom[j+1]), renvoie true si elle appartient à un
@@ -686,7 +771,10 @@ function applyColorMode() {
   const straightSrc = mapInstance.getSource('builder-route-straight')
   if (!src) return
   const geom = routeStore.geometry.value
-  const coords: LngLat[] = geom.map((c) => [c[0], c[1]])
+  // Les features sont dessinées sur la ligne d'AFFICHAGE (dédoublée sur les recouvrements),
+  // mais toujours découpées et colorées d'après la géométrie réelle : altitudes, distances
+  // et pentes ci-dessous restent celles de `geom`, index pour index.
+  const coords: LngLat[] = displayCoords()
   const gradeMode = props.state.colorMode === 'grade'
   const routedFeatures: any[] = []
   const straightFeatures: any[] = []
@@ -723,6 +811,11 @@ function applyColorMode() {
 
   src.setData({ type: 'FeatureCollection', features: routedFeatures })
   if (straightSrc) straightSrc.setData({ type: 'FeatureCollection', features: straightFeatures })
+  // La ligne de repère garde la couleur du tracé même en mode pente : elle marque la
+  // position réelle de l'itinéraire, ce sont les voies qui portent l'information de pente.
+  const baseSrc = mapInstance.getSource(BASE_SOURCE)
+  if (baseSrc) baseSrc.setData({ type: 'FeatureCollection', features: offsetRunFeatures() })
+  if (mapInstance.getLayer(BASE_LAYER)) mapInstance.setPaintProperty(BASE_LAYER, 'line-color', routePrefs().color)
   if (mapInstance.getLayer('builder-route-line')) mapInstance.setPaintProperty('builder-route-line', 'line-color', paint)
   // Le traitillé suit le même code couleur que la ligne pleine en mode pente.
   if (mapInstance.getLayer('builder-route-straight-line')) mapInstance.setPaintProperty('builder-route-straight-line', 'line-color', paint)
@@ -786,8 +879,9 @@ function updateSelectionLayer() {
   const i0 = geomIdxForKm(selectionStore.selectionRange.value.startKm, selectionStore.cumDistKm)
   const i1 = geomIdxForKm(selectionStore.selectionRange.value.endKm, selectionStore.cumDistKm)
   const lo = Math.min(i0, i1), hi = Math.max(i0, i1)
-  const coords = routeStore.geometry.value.slice(lo, hi + 1).map(([lng, lat]) => [lng, lat])
-  src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
+  // Sur la ligne d'affichage : une sélection dans le graphe vise UN passage précis, elle
+  // doit donc surligner la voie correspondante et pas le milieu des deux.
+  src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: displayCoords(lo, hi) } })
 }
 
 function updateDivergentLayer() {
@@ -1688,7 +1782,7 @@ function nearestGeomIndexAt(point: { x: number; y: number }) {
   if (!mapInstance || !routeStore.geometry.value.length) return null
   const features = mapInstance.queryRenderedFeatures(
     [[point.x - 6, point.y - 6], [point.x + 6, point.y + 6]],
-    { layers: ['builder-route-line', 'builder-route-straight-line'] },
+    { layers: ['builder-route-line', 'builder-route-straight-line', BASE_LAYER] },
   )
   if (!features.length) return null
   let best = -1, bestDist = Infinity
@@ -1713,7 +1807,7 @@ function nearestPointOnRouteAt(point: { x: number; y: number }) {
   if (!mapInstance || routeStore.geometry.value.length < 2) return null
   const features = mapInstance.queryRenderedFeatures(
     [[point.x - 6, point.y - 6], [point.x + 6, point.y + 6]],
-    { layers: ['builder-route-line', 'builder-route-straight-line'] },
+    { layers: ['builder-route-line', 'builder-route-straight-line', BASE_LAYER] },
   )
   if (!features.length) return null
   const geom = routeStore.geometry.value
@@ -2120,7 +2214,7 @@ watch(() => props.state.overlayOpacity, applyOverlayOpacity)
 // (installRouteLayer), d'où un simple repeint ici.
 function applyRouteOpacity() {
   if (!mapInstance) return
-  for (const id of ['builder-route-line', 'builder-route-straight-line', FLOW_HALO_LAYER, FLOW_LAYER]) {
+  for (const id of ['builder-route-line', 'builder-route-straight-line', BASE_LAYER, FLOW_HALO_LAYER, FLOW_LAYER]) {
     if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-opacity', props.state.routeOpacity)
   }
 }

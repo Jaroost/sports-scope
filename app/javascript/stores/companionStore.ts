@@ -35,6 +35,11 @@ class CompanionStore {
   readonly power = ref<number | null>(null)
   readonly cadence = ref<number | null>(null)
   readonly gears = ref<CompanionGears | null>(null)
+  // Cap du téléphone (degrés, nord géographique), publié UNIQUEMENT à l'arrêt et
+  // seulement si l'appli a pu vérifier sa boussole contre la course GPS. C'est
+  // la seule mesure d'ici qui ne vient pas d'un capteur du vélo, et la seule que
+  // la page consomme au lieu de l'afficher — cf. updateBearing.
+  readonly headingDeg = ref<number | null>(null)
   // Horodatage (ms) du dernier message reçu.
   readonly lastUpdate = ref(0)
 
@@ -55,12 +60,14 @@ class CompanionStore {
     power?: number | null
     cadence?: number | null
     gears?: CompanionGears | null
+    headingDeg?: number | null
   }): void {
     this.present.value = true
     this.heartRate.value = values.heartRate ?? null
     this.power.value = values.power ?? null
     this.cadence.value = values.cadence ?? null
     this.gears.value = values.gears ?? null
+    this.headingDeg.value = values.headingDeg ?? null
     this.lastUpdate.value = Date.now()
   }
 
@@ -70,6 +77,7 @@ class CompanionStore {
     this.power.value = null
     this.cadence.value = null
     this.gears.value = null
+    this.headingDeg.value = null
     this.lastUpdate.value = 0
   }
 }

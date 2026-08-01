@@ -19,6 +19,7 @@ interface CompanionPayload {
   power?: number | null
   cadence?: number | null
   gears?: CompanionGears | null
+  headingDeg?: number | null
   sensors?: { name: string; connected: boolean; kinds: string[] }[]
 }
 
@@ -160,6 +161,7 @@ export function installCompanionBridge(): void {
           power: payload.power,
           cadence: payload.cadence,
           gears: payload.gears,
+          headingDeg: payload.headingDeg,
         })
       } catch {
         // Une charge utile inattendue ne doit jamais casser la navigation :

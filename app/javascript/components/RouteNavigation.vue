@@ -36,6 +36,7 @@ import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import { companionScreen, companionNav, inCompanionApp } from '../companionBridge'
+import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
@@ -2512,9 +2513,22 @@ function updateBearing(pos: GeolocationPosition, here: LngLat) {
   const heading = pos.coords.heading
   if (heading != null && !Number.isNaN(heading) && speed != null && speed > MIN_SPEED_MS) {
     currentBearing = heading
-  } else if (lastPos) {
-    if (haversine(lastPos, here) > MIN_MOVE_M) currentBearing = bearingBetween(lastPos, here)
+    return
   }
+  if (lastPos && haversine(lastPos, here) > MIN_MOVE_M) {
+    currentBearing = bearingBetween(lastPos, here)
+    return
+  }
+  // À l'ARRÊT, un GPS n'a plus aucun cap à donner : la course se déduit du
+  // déplacement, et il n'y en a pas. La flèche restait donc figée sur la
+  // dernière direction connue — pile au moment (feu, carrefour, hésitation) où
+  // l'on cherche par où repartir, et où une flèche fausse envoie dans la
+  // mauvaise rue. L'appli compagnon, elle, a une boussole : elle ne publie ce
+  // cap QUE quand elle est à l'arrêt et qu'elle a pu vérifier son magnétomètre
+  // contre la course GPS (les supports aimantés le rendent inutilisable), donc
+  // sa seule présence vaut autorisation de s'en servir.
+  const compass = companionStore.headingDeg.value
+  if (compass != null) currentBearing = compass
 }
 
 function updateProgress(idx: number) {

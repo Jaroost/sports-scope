@@ -84,6 +84,12 @@ services:
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
       RAILS_SERVE_STATIC_FILES: "true"
       RAILS_LOG_TO_STDOUT: "true"
+    volumes:
+      # APK de l'app compagnon + son manifeste (cf. CompanionRelease). Un volume et
+      # non l'image : le binaire sort du dépôt Flutter voisin, il est déposé par
+      # `script/push-apk.sh` sans redéployer le site, et il survit aux mises à jour
+      # de l'image.
+      - companion_apk:/app/storage/companion
     networks:
       - default
       - traefik-net
@@ -203,6 +209,7 @@ volumes:
   brouter_segments:
   brouter_profiles:
   osm_pois_data:
+  companion_apk:
 
 networks:
   default:

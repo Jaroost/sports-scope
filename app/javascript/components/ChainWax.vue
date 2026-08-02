@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { Modal } from 'bootstrap'
 import { t } from '../i18n'
 import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
+import { csrfToken } from '../csrf'
 
 // compact : sur le tableau de bord on n'affiche que la chaîne montée de chaque vélo
 // + un lien vers la page dédiée. En mode complet (/chains) on gère tout.
@@ -24,10 +25,6 @@ const openMount = ref<number | null>(null)
 const mountDate = ref(todayStr())
 const editSeuil = ref<number | null>(null)
 const seuilValue = ref(300)
-
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 function todayStr() {
   const d = new Date()

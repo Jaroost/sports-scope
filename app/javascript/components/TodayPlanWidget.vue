@@ -30,7 +30,7 @@ function onStravaRefreshed() { fetchData(true) }
 // Seuils athlète dérivés de la charge déjà chargée : ils servent à estimer le TSS
 // des itinéraires prévus, qui alimente le segment orange de la barre.
 const athlete = computed(() => athleteFromSummary(data.value))
-const { plannedLoads } = usePlannedLoads(athlete)
+const { plannedLoads, plannedDistances } = usePlannedLoads(athlete)
 
 // Bilan des sorties réelles par jour (cf. TrainingLoadPanel) : nourrit le vert des
 // jours/itinéraires réalisés et l'historique de la semaine dans WeekPlanner. Sans
@@ -54,7 +54,7 @@ const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
   openEventEditor, saveEvent, removeEvent, recommendation, weekPlan, nextWeekPlan,
-} = useTrainingPlan(data, plannedLoads)
+} = useTrainingPlan(data, plannedLoads, plannedDistances)
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 // Le lien « voir l'analyse » descend directement sur la section Forme & fatigue
@@ -144,12 +144,23 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
 
         <!-- Semaine en cours : version resserrée (barre + avancée), détail sur /performance -->
         <div v-if="weekPlan" class="week-strip mt-2 pt-2">
-          <div class="d-flex align-items-baseline gap-2 small">
+          <div class="d-flex align-items-baseline flex-wrap gap-2 small">
             <span class="text-muted">{{ t('performance.load.week.title') }}</span>
             <span class="fw-semibold">{{ t('performance.load.week.progress', { done: weekPlan.done, target: weekPlan.target }) }}</span>
+            <!-- Total km : ce que la semaine représente sur le terrain, à côté de ce
+                 qu'elle coûte en TSS. Vert = déjà parcouru, orange = encore prévu. -->
+            <span class="week-km fw-semibold" :style="{ color: WEEK_SEGMENT_COLOR.done }" :title="t('performance.load.week.km_done_hint')">
+              <i class="fa-solid fa-road me-1" aria-hidden="true"></i>{{ t('performance.load.week.km_done', { km: weekPlan.doneKm }) }}
+            </span>
             <span v-if="weekPlan.planned > 0" :style="{ color: WEEK_SEGMENT_COLOR.planned }">
               {{ t('performance.load.week.planned', { tss: weekPlan.planned }) }}
             </span>
+            <span
+              v-if="weekPlan.plannedKm > 0"
+              class="week-km"
+              :style="{ color: WEEK_SEGMENT_COLOR.planned }"
+              :title="t('performance.load.week.km_planned_hint')"
+            >{{ t('performance.load.week.km_planned', { km: weekPlan.plannedKm }) }}</span>
             <span class="ms-auto" :style="{ color: WEEK_PACE_COLOR[weekPlan.pace] }">{{ t(`performance.load.week.pace_${weekPlan.pace}`) }}</span>
           </div>
           <!-- Vert = fait, orange = prévu, gris = à placer (détail sur /performance).
@@ -273,6 +284,11 @@ onBeforeUnmount(() => { window.removeEventListener(STRAVA_REFRESHED_EVENT, onStr
 }
 .week-strip {
   border-top: 1px solid var(--bs-border-color);
+}
+/* Total km : le chiffre ne doit jamais se couper en deux lignes. */
+.week-km {
+  white-space: nowrap;
+  cursor: help;
 }
 .week-progress {
   height: 0.5rem;

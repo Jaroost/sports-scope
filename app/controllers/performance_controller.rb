@@ -14,6 +14,13 @@ class PerformanceController < ApplicationController
     render json: FtpEstimator.summary(current_user)
   end
 
+  # GET /api/performance/lthr — seuil cardiaque estimé (auto/manuel) et son historique.
+  # Jumeau de `ftp` : même forme de payload et même panneau côté front, l'un en watts,
+  # l'autre en bpm.
+  def lthr
+    render json: LthrEstimator.summary(current_user)
+  end
+
   # GET /api/performance/training_load — courbe forme/fatigue (CTL/ATL/TSB) tous sports.
   def training_load
     render json: TrainingLoad.summary(current_user)

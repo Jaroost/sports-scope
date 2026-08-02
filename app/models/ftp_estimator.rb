@@ -134,6 +134,26 @@ module FtpEstimator
     }
   end
 
+  # Estimation de FTP sur UNE sortie, à partir de sa seule courbe `peak_powers`
+  # ({ "1200" => watts, … }). Mêmes méthodes que l'estimation utilisateur (modèle
+  # CP, ancre 60 min, 95 % du 20 min) : c'est la FTP que cette sortie « prouve »
+  # à elle seule. Elle ne remplace jamais la FTP de l'athlète — une sortie n'est
+  # pas forcément maximale, une sortie tranquille donne donc une valeur basse.
+  # nil quand la courbe ne porte aucun effort exploitable (pas de puissance, ou
+  # sortie trop courte pour la bande seuil).
+  def estimate_activity(peak_powers)
+    curve = peak_powers.is_a?(Hash) ? peak_powers : {}
+    return nil if curve.empty?
+
+    est = estimate_from([{ started_at: nil, peak: curve, name: nil, source: nil, external_id: nil }])
+    return nil unless est
+
+    # `contributors` (nom/lien de la sortie détentrice) n'a pas de sens ici : une
+    # seule sortie est en jeu. On n'en garde que les durées qui ont porté le calcul.
+    est.except(:contributors, :samples)
+       .merge(durations: est[:contributors].map { |c| c[:duration] })
+  end
+
   # Courbe puissance-durée agrégée du sous-ensemble : pour chaque durée standard, la
   # meilleure puissance atteinte, toutes sorties confondues (façon « mean-max curve »),
   # AVEC l'activité qui la détient (deux durées peuvent venir de sorties différentes).

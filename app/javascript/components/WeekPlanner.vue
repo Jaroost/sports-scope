@@ -351,6 +351,19 @@ async function moveToDay(iso: string) {
             <span>
               {{ t('performance.load.week.target', { tss: wp.target }) }}
               <span v-if="wp.planned > 0" class="text-body-tertiary">· {{ t('performance.load.week.planned', { tss: wp.planned }) }}</span>
+              <!-- Total km de la semaine : déjà parcouru (vert) puis encore prévu (orange). -->
+              <span
+                v-if="wp.doneKm > 0"
+                class="week-km"
+                :style="{ color: WEEK_SEGMENT_COLOR.done }"
+                :title="t('performance.load.week.km_done_hint')"
+              >· {{ t('performance.load.week.km_done', { km: wp.doneKm }) }}</span>
+              <span
+                v-if="wp.plannedKm > 0"
+                class="week-km"
+                :style="{ color: WEEK_SEGMENT_COLOR.planned }"
+                :title="t('performance.load.week.km_planned_hint')"
+              >· {{ t('performance.load.week.km_planned', { km: wp.plannedKm }) }}</span>
             </span>
             <span v-if="wp.remaining > 0" class="text-muted">
               {{ t('performance.load.week.remaining_to_plan', { tss: wp.remaining, days: wp.daysLeft, duration: fmtDuration(wp.minutesLeft) }) }}
@@ -626,6 +639,11 @@ async function moveToDay(iso: string) {
 }
 .planner-week-progress {
   height: 0.5rem;
+}
+/* Total km : le chiffre ne doit jamais se couper en deux lignes. */
+.week-km {
+  white-space: nowrap;
+  cursor: help;
 }
 .planner-week-plan-labels {
   display: flex;

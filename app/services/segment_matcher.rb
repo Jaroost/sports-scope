@@ -12,8 +12,20 @@
 #   1. candidats  — activités de l'utilisateur passées dans la même zone (préfiltre
 #                   SQL sur les cellules grossières) et de la même catégorie de sport
 #   2. diagonales — sous-suites communes avec l'activité courante, dans les deux sens
-#   3. segments   — regroupement des passages qui couvrent la même portion, temps de
-#                   chacun recalculé sur la portion COMMUNE (sinon incomparables)
+#   3. plages     — regroupement des passages qui couvrent la même portion. Les
+#                   segments sont voulus AUSSI LONGS QUE POSSIBLE : un passage ne
+#                   rejoint une plage que s'il la couvre presque entièrement, sinon
+#                   il fonde la sienne, plus courte (`cluster`, `COVER_RATIO`). Les
+#                   chemins que l'utilisateur a baptisés sont semés en plus
+#                   (`named_ranges`) : eux ne dépendent pas de la découverte
+#   4. segments   — chaque plage retenue reprend TOUS les passages qui la couvrent
+#                   (`reattach`), les morceaux redondants sont écartés
+#                   (`prune_nested`), et le temps de chacun est recalculé sur la
+#                   portion commune (sinon incomparables)
+#
+# Deux entrées : `.for` analyse toute l'activité (onglet Segments), `.compare` ne
+# chronomètre qu'une plage choisie à la main (poignées A/B, col, split) — même
+# appariement, une seule plage.
 #
 # Les activités dont les streams n'ont jamais été récupérés n'ont pas d'empreinte et
 # sont donc invisibles ici : c'est le backfill des streams qui peuple l'historique.
@@ -34,14 +46,38 @@ class SegmentMatcher
   MIN_MATCH_RATIO = 0.6
   # Écart de longueur toléré entre les deux côtés d'un appariement.
   MAX_LENGTH_DRIFT = 0.3
-  # Recouvrement (part de la portion la plus courte) à partir duquel deux passages
-  # sont considérés comme étant sur le MÊME segment.
-  OVERLAP_RATIO = 0.6
-  # Recouvrement (part de la portion la plus courte) au-delà duquel deux SEGMENTS
-  # découverts sont jugés être la même route aux bornes floues, et dédupliqués
-  # (`consolidate`). Plus haut qu'OVERLAP_RATIO : on ne fusionne que des quasi-doublons,
-  # pas deux portions qui se recouvrent à moitié.
+  # Part de la portion déjà retenue qu'un passage doit couvrir pour rejoindre le
+  # groupe (`cluster`). Élevé À DESSEIN : le groupe est ramené à l'intersection de
+  # ses passages, donc tout passage admis le RACCOURCIT d'autant. À 0,9, un passage
+  # qui ne fait qu'effleurer le chemin ne peut plus le rogner — il fonde son propre
+  # segment, plus court.
+  COVER_RATIO = 0.9
+  # Garde-fou contre l'effet cliquet : chaque admission rogne un peu, et la suivante
+  # se mesure sur la plage déjà rognée. Un segment ne descend jamais sous cette part
+  # de sa longueur d'origine (celle du passage qui l'a fondé).
+  MIN_KEEP_RATIO = 0.7
+  # Tolérance de bord (en cellules, ~60 m) pour dire qu'un passage COUVRE une plage,
+  # et donc qu'on peut le chronométrer dessus (`reattach`). Serrée à dessein, et sans
+  # rapport avec `COVER_RATIO` : un passage à qui il manque un bout de segment serait
+  # chronométré sur ce qu'il a fait tout en étant comparé à ceux qui ont tout fait —
+  # un faux record. Une cellule de jeu absorbe le tremblement du GPS aux bornes.
+  MEASURE_SLACK_CELLS = 1
+  # Recouvrement (part de la portion la plus LONGUE) au-delà duquel deux plages
+  # découvertes sont jugées être la même route aux bornes floues, et dédupliquées
+  # (`consolidate`). On ne fusionne que des quasi-doublons de même longueur : une
+  # portion incluse dans une plus longue n'est pas un doublon, c'est un segment
+  # plus court (cf. `prune_nested`).
   DEDUP_OVERLAP_RATIO = 0.7
+  # Part d'un segment incluse dans un autre à partir de laquelle il est considéré
+  # comme un MORCEAU de celui-ci (`prune_nested`) : le grand tour, la montée dedans,
+  # le sprint dans la montée. On garde le plus long.
+  NESTED_RATIO = 0.7
+  # …sauf si le morceau est BEAUCOUP plus fréquenté que le chemin qui le contient :
+  # là, il vaut la peine d'être détaillé à part (la bosse quotidienne au milieu d'une
+  # sortie refaite une fois). Le facteur est franc parce qu'un morceau est toujours un
+  # peu plus fréquenté que son contenant : à 1,5, le même chemin ressortait à quatre
+  # échelles emboîtées (2, 5, 12, 19 passages…) au lieu d'une.
+  NESTED_COUNT_FACTOR = 3.0
   # Bornes de coût : la comparaison fine est en O(appariements) par candidat.
   MAX_CANDIDATES = 300
   MAX_SEGMENTS = 30
@@ -59,9 +95,13 @@ class SegmentMatcher
   # localités — ~5,5 km en latitude, cohérent avec PLACE_NAME_MAX_M.
   PLACE_BBOX_BUFFER_DEG = 0.05
 
+  # Lecture d'un index « cellule → positions » sans le faire grossir : le hash a un
+  # bloc par défaut qui INSÈRE la clé absente (cf. `position_index`).
+  EMPTY = [].freeze
+
   # Bumper invalide les résultats déjà en cache (`ActivitiesController` / contrôleurs
   # d'activité), en plus de `UserActivities.data_version`.
-  CACHE_VERSION = 7
+  CACHE_VERSION = 8
 
   # `fp` = l'empreinte du candidat, déjà chargée : le chronométrage sur la portion
   # commune la relit sans requête supplémentaire.
@@ -76,6 +116,17 @@ class SegmentMatcher
     key = ['activity_segments', CACHE_VERSION, source, activity.id,
            UserActivities.data_version(user.id), naming_version(user)].join('/')
     Rails.cache.fetch(key, expires_in: 12.hours) { new(user, activity).call }
+  end
+
+  # Comparaison d'un tronçon CHOISI (poignées A/B de la carte, col, split, intervalle)
+  # et non découvert : mêmes candidats, mêmes appariements, mais une seule plage —
+  # celle demandée. Renvoie le segment monté, ou `nil` si le tronçon est trop court ou
+  # n'a jamais été refait. Les bornes sont des index de STREAM, comme partout côté front.
+  def self.compare(user, activity, start_idx, end_idx)
+    source = activity.is_a?(StravaActivity) ? 'strava' : 'imported'
+    key = ['activity_range', CACHE_VERSION, source, activity.id, start_idx, end_idx,
+           UserActivities.data_version(user.id), naming_version(user)].join('/')
+    Rails.cache.fetch(key, expires_in: 12.hours) { new(user, activity).compare(start_idx, end_idx) }
   end
 
   # Les noms font partie du résultat : renommer un segment doit invalider le cache
@@ -100,17 +151,43 @@ class SegmentMatcher
     efforts = candidates.flat_map { |row| efforts_against(row) }
     return [] if efforts.empty?
 
-    segments = consolidate(cluster(efforts)).filter_map { |cluster| build_segment(cluster) }
-    # Le podium d'abord (or, argent, bronze) : c'est l'information qu'on cherche en
-    # ouvrant l'onglet. Ensuite les chemins les plus refaits, puis les plus longs. Le
-    # tri précède le plafonnement, donc une médaille n'est jamais coupée au profit
-    # d'un chemin banal.
-    result = segments.sort_by { |s| [s[:current][:podium] || PODIUM_PLACES + 1, -s[:count], -s[:distance_m]] }
-                     .first(MAX_SEGMENTS)
+    ranges = reattach(with_named_ranges(consolidate(cluster(efforts))), efforts)
+    segments = prune_nested(ranges.filter_map { |range| build_segment(range) })
+    result = segments.sort_by { |s| [display_rank(s), -s[:count], -s[:distance_m]] }.first(MAX_SEGMENTS)
+    result.each { |s| s.except!(:cell_range, :seeded) }
     # Repli d'affichage : les segments encore anonymes prennent le nom de la localité
     # la plus proche. Fait après le plafonnement pour ne géolocaliser que ce qu'on rend.
     assign_place_names(result)
     result
+  end
+
+  # Comparaison d'un tronçon choisi — cf. `SegmentMatcher.compare`, qui met en cache.
+  # Le montage d'une plage ne coûte qu'une milliseconde ; tout le temps part dans
+  # l'appariement (~200 ms), le même que pour l'onglet Segments.
+  def compare(start_idx, end_idx)
+    return nil if a_cells.length < 2
+
+    from, to = cell_range(start_idx, end_idx)
+    return nil if from.nil? || to.nil?
+    return nil if span_metres(a_dists, from, to) < MIN_SEGMENT_M
+
+    efforts = candidates.flat_map { |row| efforts_against(row) }
+    segment = build_segment({ a_start: from, a_end: to,
+                              efforts: efforts.select { |e| covers?(e, from, to) } })
+    return nil unless segment
+
+    segment.except!(:cell_range, :seeded)
+    assign_place_names([segment])
+    segment
+  end
+
+  # Ordre d'affichage. Le podium d'abord (or, argent, bronze) : c'est l'information
+  # qu'on cherche en ouvrant l'onglet. Puis les segments que l'utilisateur a lui-même
+  # baptisés — il les a nommés, il veut les suivre —, puis le reste. Le tri précède le
+  # plafonnement, donc ni une médaille ni un segment nommé n'est coupé au profit d'un
+  # chemin banal.
+  def display_rank(segment)
+    segment[:current][:podium] || (segment[:named_segment_id] ? PODIUM_PLACES + 1 : PODIUM_PLACES + 2)
   end
 
   private
@@ -315,8 +392,9 @@ class SegmentMatcher
   # temps portent sur exactement le même chemin.
   def cluster(efforts)
     clusters = []
-    # Du plus long au plus court : le premier passage fixe la portion, les suivants
-    # la rognent. Un passage n'est rattaché que si l'intersection reste un segment.
+    # Du plus long au plus court : le premier passage fonde le groupe et fixe la
+    # portion, les suivants ne peuvent que la rogner. D'où l'exigence de couverture
+    # (`fits?`) — c'est elle qui décide de la longueur finale des segments.
     efforts.sort_by { |e| -(e.a_end - e.a_start) }.each do |effort|
       target = clusters.find { |c| fits?(c, effort) }
       if target
@@ -324,56 +402,188 @@ class SegmentMatcher
         target[:a_end] = [target[:a_end], effort.a_end].min
         target[:efforts] << effort
       else
-        clusters << { a_start: effort.a_start, a_end: effort.a_end, efforts: [effort] }
+        clusters << { a_start: effort.a_start, a_end: effort.a_end,
+                      seed_m: span_metres(a_dists, effort.a_start, effort.a_end),
+                      efforts: [effort] }
       end
     end
     clusters
   end
 
+  # Ce que deviendrait le groupe si ce passage le rejoignait : l'intersection des
+  # deux plages. Elle doit rester un segment (assez longue dans l'absolu), couvrir
+  # l'essentiel de la plage actuelle, et ne pas trop s'éloigner de la longueur
+  # d'origine.
   def fits?(cluster, effort)
-    return false if overlap_ratio(cluster[:a_start], cluster[:a_end], effort.a_start, effort.a_end) < OVERLAP_RATIO
+    lo = [cluster[:a_start], effort.a_start].max
+    hi = [cluster[:a_end], effort.a_end].min
+    return false if hi <= lo
 
-    span_metres(a_dists, [cluster[:a_start], effort.a_start].max,
-                [cluster[:a_end], effort.a_end].min) >= MIN_SEGMENT_M
+    kept = span_metres(a_dists, lo, hi)
+    return false if kept < MIN_SEGMENT_M
+    return false if kept < cluster[:seed_m] * MIN_KEEP_RATIO
+
+    current = span_metres(a_dists, cluster[:a_start], cluster[:a_end])
+    current.positive? && kept / current >= COVER_RATIO
   end
 
-  # Déduplication des groupes qui décrivent la même route. Le regroupement glouton
+  # Déduplication des plages qui décrivent la même route. Le regroupement glouton
   # ci-dessus rétrécit chaque groupe à l'intersection de ses passages : deux passages
-  # du même chemin aux bornes un peu différentes atterrissent alors dans DEUX groupes
-  # voisins, qui se recouvrent largement (bornes floues). Fusionner à l'intersection ne
-  # marche pas ici — un chemin d'à peine MIN_SEGMENT_M a une partie commune qui tombe
-  # juste sous le seuil et disparaîtrait. On garde donc le groupe le MIEUX ÉTAYÉ (le
-  # plus de passages, à égalité le plus long) et on y verse les passages des groupes
-  # qu'il recouvre. `dedupe_efforts` retire ensuite les sorties comptées deux fois (une
-  # même sortie est dans les deux groupes puisque c'est la même route), et projette les
-  # passages rescapés sur la plage retenue.
+  # du même chemin aux bornes un peu différentes fondent alors DEUX groupes voisins,
+  # qui se recouvrent presque entièrement (bornes floues). Fusionner à l'intersection
+  # ne marche pas ici — un chemin d'à peine MIN_SEGMENT_M a une partie commune qui
+  # tombe juste sous le seuil et disparaîtrait. On garde donc la plage la plus LONGUE
+  # (à égalité, la mieux étayée) : c'est elle qui décrit le chemin en entier, et
+  # `reattach` lui rendra de toute façon tous les passages qui la couvrent.
   #
-  # Le recouvrement se mesure sur la portion la plus COURTE (`overlap_ratio`) : deux
+  # Le recouvrement se mesure sur la portion la plus LONGUE (`overlap_ratio`) : deux
   # routes distinctes qui ne font que se croiser près d'un même lieu restent séparées
-  # (c'est la numérotation qui les distingue), seuls les quasi-doublons fusionnent.
+  # (c'est la numérotation qui les distingue), et une portion incluse dans une plus
+  # longue n'est pas absorbée ici — c'est `prune_nested` qui tranche, une fois les
+  # passages recomptés.
   def consolidate(clusters)
     kept = []
-    clusters.sort_by { |c| [-c[:efforts].size, c[:a_start] - c[:a_end]] }.each do |c|
+    clusters.sort_by { |c| [c[:a_start] - c[:a_end], -c[:efforts].size] }.each do |c|
       host = kept.find do |k|
         overlap_ratio(k[:a_start], k[:a_end], c[:a_start], c[:a_end]) >= DEDUP_OVERLAP_RATIO
       end
-      if host
-        host[:efforts] += c[:efforts]
-      else
-        kept << c
-      end
+      kept << c unless host
     end
     kept
   end
 
-  # Part de la portion la plus courte couverte par les deux plages (en mètres).
+  # ── Plages semées par les segments nommés ──────────────────────────────────
+  # Les plages nommées passent devant les plages découvertes : quand les deux
+  # décrivent le même chemin aux bornes près, ce sont les bornes de l'utilisateur
+  # qu'on garde.
+  def with_named_ranges(ranges)
+    named = named_ranges
+    return ranges if named.empty?
+
+    named + ranges.reject { |r|
+      named.any? { |n| overlap_ratio(n[:a_start], n[:a_end], r[:a_start], r[:a_end]) >= DEDUP_OVERLAP_RATIO }
+    }
+  end
+
+  # Plages des segments NOMMÉS que cette sortie traverse. Sans elles, un chemin
+  # baptisé ne ressort que si la découverte automatique retombe par hasard sur des
+  # bornes voisines : baptiser un bout de 3 km inclus dans un chemin de 9 km le
+  # faisait disparaître des sorties suivantes. Semé ici, le tracé nommé est TOUJOURS
+  # évalué — c'est ce qui fait d'un segment nommé un segment suivi de sortie en sortie.
+  def named_ranges
+    named_segments.flat_map do |named|
+      # `named` : cette plage EST le chemin baptisé, pas une portion découverte. Elle
+      # reste donc listée même si aucune AUTRE sortie ne la couvre (l'appariement peut
+      # échouer là où le nom, lui, tient), et elle prime sur les portions découvertes
+      # qui décrivent le même chemin (`dedupe_named`).
+      passes_over(named).map { |from, to| { a_start: from, a_end: to, efforts: [], named: true } }
+    end
+  end
+
+  # Passages de la sortie sur le chemin d'un segment nommé : les positions de ses
+  # cellules dans la trace, découpées en tronçons continus (un aller-retour en donne
+  # deux, un par sens), et seulement ceux qui en couvrent assez pour être ce chemin-là
+  # et non un bout partagé.
+  def passes_over(named)
+    positions = a_cells.each_index.select { |i| named.cell_set.include?(a_cells[i]) }
+    return [] if positions.empty?
+
+    positions.slice_when { |a, b| b - a > MERGE_GAP_CELLS }.filter_map do |run|
+      next if run.size < MIN_RUN_CELLS
+      next if run.size.to_f / named.cell_set.size < NamedSegment::MATCH_RATIO
+      next if span_metres(a_dists, run.first, run.last) < MIN_SEGMENT_M
+
+      [run.first, run.last]
+    end
+  end
+
+  # Index de STREAM → index de CELLULE, pour une plage choisie côté front. Même
+  # conversion que `TrackFingerprint.slice` (qui, lui, découpe le chemin pour
+  # l'enregistrer) : la première cellule entrée après `start_idx`, la dernière entrée
+  # avant `end_idx`.
+  def cell_range(start_idx, end_idx)
+    from = a_idx.index { |i| i >= start_idx.to_i }
+    to = a_idx.rindex { |i| i <= end_idx.to_i }
+    return [nil, nil] if from.nil? || to.nil? || to - from < 1
+
+    [from, to]
+  end
+
+  # Ré-attribution des passages aux plages retenues. Le regroupement est glouton :
+  # chaque passage n'entre que dans UNE plage, la première qui l'accueille. Un même
+  # passage peut pourtant valoir pour plusieurs segments — qui a refait les 20 km a
+  # forcément refait la bosse de 800 m qui est dedans. On reprend donc, pour chaque
+  # plage, tout le vivier des passages qui la couvrent : c'est ce qui rend `count`
+  # juste sur les segments courts inclus dans de plus longs.
+  def reattach(clusters, efforts)
+    clusters.each { |c| c[:efforts] = efforts.select { |e| covers?(e, c[:a_start], c[:a_end]) } }
+    clusters.reject { |c| c[:efforts].empty? && !c[:named] }
+  end
+
+  # Ce passage couvre-t-il toute la plage ? Condition pour le chronométrer dessus :
+  # au-delà de sa portion appariée, `project` n'extrapole pas, il bute sur la borne —
+  # le passage gagnerait le temps du bout qui lui manque.
+  def covers?(effort, a_start, a_end)
+    effort.a_start <= a_start + MEASURE_SLACK_CELLS && effort.a_end >= a_end - MEASURE_SLACK_CELLS
+  end
+
+  # Un même chemin ressort à plusieurs longueurs : la sortie refaite en entier, la
+  # montée qui est dedans, le sprint qui est dans la montée. On garde le plus long, et
+  # on ne détaille un morceau que s'il est nettement plus fréquenté que ce qui le
+  # contient — sinon c'est le même chemin raconté deux fois.
+  def prune_nested(segments)
+    kept = []
+    dedupe_named(segments).sort_by { |s| -s[:distance_m] }.each do |segment|
+      # Un chemin que l'utilisateur a baptisé n'est jamais écarté : il l'a nommé pour
+      # le suivre, y compris quand il est inclus dans une portion plus longue.
+      if segment[:named_segment_id]
+        kept << segment
+        next
+      end
+
+      # Le contenant le plus SERRÉ fait référence (la liste est en longueur
+      # décroissante, on la remonte donc à l'envers) : c'est à son voisin immédiat
+      # qu'un morceau doit apporter quelque chose, pas au grand tour.
+      host = kept.reverse_each.find { |k| nested?(segment, k) }
+      kept << segment if host.nil? || segment[:count] >= host[:count] * NESTED_COUNT_FACTOR
+    end
+    kept
+  end
+
+  # Un chemin baptisé ne sort qu'une fois : la plage SEMÉE depuis le segment nommé
+  # fait foi, la portion découverte qui a hérité du même nom (bornes voisines) est un
+  # doublon. Un aller-retour garde bien ses deux lignes : les deux sont semées.
+  def dedupe_named(segments)
+    seeded = segments.filter_map { |s| s[:named_segment_id] if s[:seeded] }.to_set
+    segments.reject { |s| !s[:seeded] && seeded.include?(s[:named_segment_id]) }
+  end
+
+  def nested?(segment, host)
+    s1, e1 = host[:cell_range]
+    s2, e2 = segment[:cell_range]
+    lo = [s1, s2].max
+    hi = [e1, e2].min
+    return false if hi <= lo
+
+    span = span_metres(a_dists, s2, e2)
+    span.positive? && span_metres(a_dists, lo, hi) / span >= NESTED_RATIO
+  end
+
+  # Part de la portion la plus LONGUE couverte par les deux plages (en mètres).
+  #
+  # C'est ce qui garde les segments longs. Mesuré sur la plus courte, un bout de
+  # 500 m partagé par hasard avec un chemin de 20 km « recouvrait » ce chemin à
+  # 100 % : il rejoignait son groupe et le rognait à 500 m pour tout le monde
+  # (`cluster` ramène le groupe à l'intersection de ses passages). Sur la plus
+  # longue, ce bout ne recouvre que 2,5 % du chemin : il forme son propre segment,
+  # plus court mais souvent plus fréquenté, et le chemin reste entier.
   def overlap_ratio(s1, e1, s2, e2)
     lo = [s1, s2].max
     hi = [e1, e2].min
     return 0.0 if hi <= lo
 
-    shortest = [span_metres(a_dists, s1, e1), span_metres(a_dists, s2, e2)].min
-    shortest.positive? ? span_metres(a_dists, lo, hi) / shortest : 0.0
+    longest = [span_metres(a_dists, s1, e1), span_metres(a_dists, s2, e2)].max
+    longest.positive? ? span_metres(a_dists, lo, hi) / longest : 0.0
   end
 
   def build_segment(cluster)
@@ -410,7 +620,9 @@ class SegmentMatcher
     # sens. Sinon on s'en tient au sens parcouru.
     out_and_back = efforts.any? { |e| e[:own] && e[:reverse] != current_reverse }
     efforts = efforts.select { |e| e[:reverse] == current_reverse } unless out_and_back
-    return nil if efforts.empty?
+    # Une portion découverte sans deuxième passage n'est pas un segment ; un chemin
+    # baptisé, si.
+    return nil if efforts.empty? && !cluster[:named]
 
     # Un passage en sens inverse (montée vs descente) n'est pas comparable : il
     # compte dans le nombre de fois, jamais dans le classement ni le record. Les
@@ -423,6 +635,11 @@ class SegmentMatcher
     segment = {
       start_idx: start_idx,
       end_idx: end_idx,
+      # Clés internes, retirées avant le rendu : la plage en CELLULES (seule
+      # comparable d'un segment à l'autre, cf. `prune_nested`) et l'origine de la
+      # plage — semée depuis un segment nommé, ou découverte.
+      cell_range: [start_cell, end_cell],
+      seeded: cluster[:named] || false,
       distance_m: distance.round,
       elevation_gain_m: elevation_gain(start_idx, end_idx),
       count: efforts.length + 1,
@@ -509,17 +726,37 @@ class SegmentMatcher
     a.first <= b.last && b.first <= a.last
   end
 
+  # L'interpolation le long de la diagonale ne donne qu'une ESTIMATION : elle suppose
+  # les deux tracés parcourus en parallèle d'un bout à l'autre, ce qui dérive sur une
+  # longue diagonale (un détour d'un côté décale tout le reste). Quand la cellule
+  # cherchée existe telle quelle chez le candidat — le cas normal, c'est le même
+  # terrain —, on prend l'occurrence la plus proche de l'estimation : l'appariement
+  # redevient exact à la cellule près (~60 m), quelle que soit la longueur de la
+  # diagonale. C'est ce qui autorise `reattach` à chronométrer un long passage sur un
+  # court segment inclus dedans.
   def project(effort, a_cell)
     span = effort.a_end - effort.a_start
     ratio = span.positive? ? (a_cell - effort.a_start).to_f / span : 0.0
-    ratio = ratio.clamp(0.0, 1.0)
-    (effort.b_start + ((effort.b_end - effort.b_start) * ratio)).round
+    estimate = (effort.b_start + ((effort.b_end - effort.b_start) * ratio.clamp(0.0, 1.0))).round
+
+    lo, hi = [effort.b_start, effort.b_end].minmax
+    hits = b_positions(effort).fetch(a_cells[a_cell], EMPTY).select { |j| j.between?(lo, hi) }
+    hits.empty? ? estimate : hits.min_by { |j| (j - estimate).abs }
+  end
+
+  # Index « cellule → positions » du candidat, monté une fois par activité candidate
+  # (les passages d'une même sortie le partagent).
+  def b_positions(effort)
+    @b_positions ||= {}
+    @b_positions[[effort.source, effort.external_id]] ||= position_index(Array(effort.fp['cells']))
   end
 
   # Cumul des montées entre deux index de stream de l'activité courante, seuil de
   # bruit barométrique comme le profil d'altitude du front.
   def elevation_gain(start_idx, end_idx)
-    alts = TrackFingerprint.stream_values(activity.streams, 'altitude')
+    # Mémoïsé : `build_segment` tourne sur toutes les plages candidates, y compris
+    # celles que `prune_nested` écartera ensuite.
+    alts = @altitudes ||= TrackFingerprint.stream_values(activity.streams, 'altitude')
     return nil unless alts.is_a?(Array) && alts.length > end_idx
 
     gain = 0.0

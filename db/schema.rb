@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_23_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_02_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -80,6 +80,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_140000) do
     t.integer "moving_time_s"
     t.string "name", null: false
     t.float "normalized_power"
+    t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
     t.jsonb "power_histogram", default: {}, null: false
     t.string "source", default: "fit", null: false
@@ -173,6 +174,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_140000) do
     t.index ["user_id"], name: "index_routes_on_user_id"
   end
 
+  create_table "session_handoffs", force: :cascade do |t|
+    t.datetime "consumed_at"
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "token_digest", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["expires_at"], name: "index_session_handoffs_on_expires_at"
+    t.index ["token_digest"], name: "index_session_handoffs_on_token_digest", unique: true
+    t.index ["user_id"], name: "index_session_handoffs_on_user_id"
+  end
+
   create_table "strava_activities", force: :cascade do |t|
     t.string "activity_type"
     t.float "average_cadence"
@@ -195,6 +208,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_140000) do
     t.integer "moving_time_s"
     t.string "name", null: false
     t.float "normalized_power"
+    t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
     t.jsonb "photo_thumbs"
     t.jsonb "power_histogram", default: {}, null: false
@@ -247,6 +261,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_140000) do
   create_table "users", force: :cascade do |t|
     t.boolean "admin", default: false, null: false
     t.jsonb "chart_layout"
+    t.jsonb "companion_settings", default: {}, null: false
     t.datetime "created_at", null: false
     t.string "display_name"
     t.string "email", null: false
@@ -278,6 +293,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_23_140000) do
   add_foreign_key "planned_rides", "users"
   add_foreign_key "pois", "users"
   add_foreign_key "routes", "users"
+  add_foreign_key "session_handoffs", "users"
   add_foreign_key "strava_activities", "users"
   add_foreign_key "strava_backfill_runs", "users"
   add_foreign_key "strava_gears", "users"

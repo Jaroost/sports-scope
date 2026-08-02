@@ -1,10 +1,54 @@
 import { BROUTER_URL } from './brouter'
-import { densifyGeometry } from './routeHelpers'
+import { routeLegs } from './brouterLegs'
+import { densifyGeometry, nearestGeomIndex } from './routeHelpers'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
 
 // Un point d'ancrage d'itinéraire : position + drapeau « libre » (tronçon entrant
 // tracé en ligne droite plutôt qu'accroché à la route). Aligné sur routeStore.
 export interface Waypoint { lng: number; lat: number; free?: boolean }
+
+// Rang d'insertion d'un nouveau point d'ancrage dans `waypoints` : on repère le tronçon
+// d'ancrages (waypoint[i] → waypoint[i+1]) auquel appartient le sommet du tracé le plus
+// proche du point, et on insère juste après waypoint[i]. À défaut — moins de deux
+// ancrages, tracé absent, ou point au-delà du dernier ancrage — on ajoute en fin.
+// `nearIdx` évite de recalculer le sommet le plus proche quand l'appelant l'a déjà.
+export function waypointInsertIndex(
+  geometry: Coord[],
+  waypoints: Waypoint[],
+  lng: number,
+  lat: number,
+  nearIdx?: number,
+): number {
+  if (waypoints.length < 2 || geometry.length < 2) return waypoints.length
+  const near = nearIdx ?? nearestGeomIndex([lng, lat], geometry).idx
+  const wpIdx = waypoints.map((w) => nearestGeomIndex([w.lng, w.lat], geometry).idx)
+  for (let i = 0; i < wpIdx.length - 1; i++) {
+    if (near >= wpIdx[i] && near <= wpIdx[i + 1]) return i + 1
+  }
+  return waypoints.length
+}
+
+// Rang d'insertion d'une étape tapée SUR le trajet d'aperçu d'une navigation vers un lieu
+// (mode « cible »). Sans cela, un point tapé entre deux étapes existantes s'ajouterait en
+// fin de séquence et le trajet ferait un aller-retour. On repère, sur la géométrie BRouter,
+// le sommet le plus proche du tap, puis la première étape dont le sommet le dépasse : le
+// point s'insère juste avant elle. `origin` est le point de départ du trajet (position GPS),
+// qui n'est pas une étape — d'où le décalage de rang. À défaut (tap au-delà de la dernière
+// étape, géométrie absente), on ajoute en fin.
+export function stopInsertIndex(
+  geometry: Coord[],
+  origin: LngLat,
+  stops: LngLat[],
+  tap: LngLat,
+): number {
+  if (geometry.length < 2) return stops.length
+  const tapIdx = nearestGeomIndex(tap, geometry).idx
+  const points = [origin, ...stops]
+  for (let k = 1; k < points.length; k++) {
+    if (tapIdx <= nearestGeomIndex(points[k], geometry).idx) return k - 1
+  }
+  return stops.length
+}
 
 // Cap (angle boussole 0–360) injecté comme direction de départ BRouter. Le moteur place
 // un faux point d'origine à 1 km en arrière dans ce cap, si bien que repartir en sens
@@ -68,30 +112,15 @@ export async function fetchRouteVia(
 export async function fetchRouteFromWaypoints(
   waypoints: Waypoint[],
   profile: string,
+  signal?: AbortSignal,
 ): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
-  const lonlats = waypoints.map((w) => `${w.lng},${w.lat}`).join('|')
-  // Un waypoint « libre » rend son tronçon ENTRANT droit : le tronçon i (waypoint[i] →
-  // waypoint[i+1]) est droit ssi waypoint[i+1] est libre.
-  const straight = new Set<number>()
-  waypoints.forEach((w, i) => { if (i > 0 && w.free) straight.add(i - 1) })
-  const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${straightParam}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
-  const data = await res.json()
-  const feature = data?.features?.[0]
-  const coords = feature?.geometry?.coordinates
-  if (!Array.isArray(coords) || coords.length < 2) throw new Error('no route')
-  let geometry = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null]) as Coord[]
-  const rawHints = Array.isArray(feature.properties?.voicehints) ? feature.properties.voicehints : []
-  const hints = rawHints
-    .map((h: number[]) => {
-      const c = coords[h[0]]
-      return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0, exit_number: h[2] ?? 0 } : null
-    })
-    .filter(Boolean) as VoiceHint[]
+  // Routage tronçon par tronçon, comme le créateur : la requête unique à N waypoints
+  // faisait élaguer à BRouter les points de passage exigeant un demi-tour (cf.
+  // brouterLegs.ts). Le drapeau « libre » de chaque point est géré par routeLegs.
+  const routed = await routeLegs(waypoints, profile, signal ?? new AbortController().signal)
+  if (routed.geometry.length < 2) throw new Error('no route')
   // Les tronçons droits (points libres) ne contiennent que leurs extrémités : on les
   // densifie pour un tracé et une progression lisses (comme le créateur).
-  if (straight.size) geometry = densifyGeometry(geometry)
-  return { geometry, hints }
+  const geometry = routed.hasStraight ? densifyGeometry(routed.geometry) : routed.geometry
+  return { geometry, hints: routed.voiceHints }
 }

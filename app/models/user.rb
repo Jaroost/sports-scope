@@ -107,9 +107,8 @@ class User < ApplicationRecord
       "default_style" => "swissgrau",
       "zoom" => 17,      # zoom de la caméra de suivi
       "nav_fps" => 8,      # fréquence de la boucle d'animation (0.5–60 fps)
-      "sound_volume" => 100, # volume général des alertes sonores (virages + radar), en % du volume de base
+      "sound_volume" => 100, # volume général des alertes sonores de navigation, en % du volume de base
       "show_climb_card" => true, # afficher le profil des cols (graphique d'altitude) pendant la navigation
-      "radar_close_m" => 30, # distance (m) sous laquelle le radar passe en alerte rapprochée (rouge + bip insistant)
       "auto_reroute" => true, # recalculer automatiquement l'itinéraire dès qu'on quitte le tracé (hors-course)
       "auto_reroute_cooldown_s" => 10, # délai (s) entre deux recalculs automatiques tant qu'on reste hors-course
     },

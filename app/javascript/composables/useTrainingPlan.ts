@@ -13,13 +13,20 @@ import type { AthleteState } from '../routeLoad'
 // forme de Ref ; ce composable ne fait aucun fetch et ne s'occupe pas du rendu.
 
 // ── Types du payload /api/performance/training_load ──────────────────────────
-export interface DayActivity { source: string; external_id: string; name: string; tss: number; source_tss: string; started_at?: string | null; activity_type?: string | null }
-export interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; acwr: number | null; activities?: DayActivity[] }
+export interface DayActivity { source: string; external_id: string; name: string; tss: number; source_tss: string; started_at?: string | null; activity_type?: string | null; distance_m?: number }
+// `distance_m` : somme des distances des activités du jour (0 les jours de repos).
+export interface Point { date: string; tss: number; ctl: number; atl: number; tsb: number; acwr: number | null; activities?: DayActivity[]; distance_m?: number }
 export interface Current extends Point { form_zone: string; acwr_zone: string | null }
 export interface Coverage { power: number; hr: number; estimated: number; total: number }
-export interface Thresholds { ftp_current?: number | null; weight_kg?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; typical_speed_kmh?: number | null; longest_ride_min?: number | null }
+// `lthr_method` : comment l'estimation a été obtenue — `lthr_20min` / `lthr_60min`
+// (un effort mesuré sur la courbe cardio d'une sortie) ou `hr_max_proxy` (le repli
+// grossier, sans aucune sortie vélo détaillée). `lthr_stale` : l'estimation a dû
+// sortir de la fenêtre glissante de 6 semaines.
+export interface Thresholds { ftp_current?: number | null; weight_kg?: number | null; lthr?: number | null; lthr_source?: string | null; lthr_auto?: number | null; lthr_method?: string | null; lthr_stale?: boolean | null; typical_speed_kmh?: number | null; longest_ride_min?: number | null }
 // Répartition du temps par zone d'intensité (cf. ZoneDistribution côté serveur).
-export interface ZoneBucket { zone: string; seconds: number; pct: number }
+// `lo`/`hi` : bornes de la zone en valeur absolue (bpm / W) d'après le seuil courant —
+// nil quand la zone est ouverte de ce côté (première / dernière) ou sans seuil.
+export interface ZoneBucket { zone: string; seconds: number; pct: number; lo?: number | null; hi?: number | null }
 export interface ZoneChannel { total_seconds: number; zones: ZoneBucket[] }
 export interface ZoneSummary { window_days: number; hr: ZoneChannel | null; power: ZoneChannel | null }
 export interface LoadSummary {
@@ -79,6 +86,15 @@ const INTENSITY_ZONE_COLORS: Record<string, string> = {
 }
 export function intensityZoneColor(zone: string): string {
   return INTENSITY_ZONE_COLORS[zone] ?? '#6c757d'
+}
+
+// Plage d'une zone en valeur absolue, pour le survol : « < 138 bpm », « 138–153 bpm »,
+// « ≥ 170 W ». Chaîne vide sans seuil (le serveur n'a alors envoyé aucune borne).
+export function zoneRange(z: ZoneBucket, unit: string): string {
+  if (z.lo == null && z.hi == null) return ''
+  if (z.lo == null) return `< ${z.hi} ${unit}`
+  if (z.hi == null) return `≥ ${z.lo} ${unit}`
+  return `${z.lo}–${z.hi} ${unit}`
 }
 
 // ── Polarisation d'un canal de zones (facile / modéré / intense) + verdict ────
@@ -171,6 +187,10 @@ export type WeekPlan = {
   target: number
   done: number
   planned: number // TSS des itinéraires prévus sur les jours à venir
+  // Volume de la semaine en km — le pendant « distance » de done / planned. Le TSS dit
+  // ce que la semaine coûte, les km disent ce qu'elle représente sur le terrain.
+  doneKm: number
+  plannedKm: number
   remaining: number // ce qu'il reste à PLACER : target − done − planned
   donePct: number
   plannedPct: number
@@ -225,7 +245,13 @@ export function eventDateFmt(iso: string): string {
 // sans lui la barre garde ses deux états (fait / restant), comme avant. Ce
 // composable ne fait toujours AUCUN fetch : c'est l'appelant qui compose les
 // sources (charge, plans, seuils athlète).
-export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Ref<Map<string, number>>) {
+// `plannedDistances` : distance prévue par jour (ISO → mètres), même origine — sans
+// elle le total km de la semaine ne porte que le réalisé.
+export function useTrainingPlan(
+  data: Ref<LoadSummary | null>,
+  plannedLoads?: Ref<Map<string, number>>,
+  plannedDistances?: Ref<Map<string, number>>,
+) {
   const current = computed<Current | null>(() => data.value?.current ?? null)
 
   // ── Objectif générique (persisté) ──────────────────────────────────────────
@@ -447,11 +473,12 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
     target = Math.max(0, Math.round(target))
 
     // « Fait » : seulement la semaine en cours porte du réel ; une semaine future = 0.
-    const done = weekOffset === 0
-      ? Math.round(
-          series.filter((p) => p.date >= mondayISO && p.date <= todayLocalISO).reduce((sum, p) => sum + p.tss, 0)
-        )
-      : 0
+    const elapsedDays = weekOffset === 0
+      ? series.filter((p) => p.date >= mondayISO && p.date <= todayLocalISO)
+      : []
+    const done = Math.round(elapsedDays.reduce((sum, p) => sum + p.tss, 0))
+    // Distance déjà parcourue depuis lundi (m → km).
+    const doneKm = Math.round(elapsedDays.reduce((sum, p) => sum + (p.distance_m ?? 0), 0) / 1000)
 
     // Charge prévue restant à encaisser. On ne compte QUE les jours à venir : un
     // plan d'un jour passé n'a pas été tenu, il ne promet plus rien.
@@ -459,20 +486,27 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
     // on ne prend que ce que le plan ajoute PAR-DESSUS, sinon la sortie déjà faite
     // serait comptée deux fois (une fois en vert, une fois en orange).
     let planned = 0
+    // Distance prévue (m) sur ces mêmes jours, avec la même règle anti-double-comptage.
+    let plannedM = 0
     // Jours restants encore libres : ce sont eux qui devront porter `remaining`.
     let daysToPlace = 0
-    const realToday = series.find((p) => p.date === todayLocalISO)?.tss ?? 0
+    const todayPoint = series.find((p) => p.date === todayLocalISO)
+    const realToday = todayPoint?.tss ?? 0
+    const realTodayM = todayPoint?.distance_m ?? 0
     for (let i = 0; i < 7; i++) {
       const day = new Date(monday)
       day.setDate(day.getDate() + i)
       const iso = isoLocal(day)
       if (iso < todayLocalISO) continue
+      const meters = plannedDistances?.value.get(iso) ?? 0
+      if (meters) plannedM += iso > todayLocalISO ? meters : Math.max(0, meters - realTodayM)
       const tss = plannedLoads?.value.get(iso) ?? 0
       if (!tss) { daysToPlace += 1; continue }
       if (iso > todayLocalISO) planned += tss
       else planned += Math.max(0, tss - realToday)
     }
     planned = Math.round(planned)
+    const plannedKm = Math.round(plannedM / 1000)
 
     // Ce qu'il reste à PLACER une fois le prévu déduit — la question que se pose
     // l'utilisateur en composant sa semaine.
@@ -503,6 +537,8 @@ export function useTrainingPlan(data: Ref<LoadSummary | null>, plannedLoads?: Re
       target,
       done,
       planned,
+      doneKm,
+      plannedKm,
       remaining,
       donePct,
       plannedPct,

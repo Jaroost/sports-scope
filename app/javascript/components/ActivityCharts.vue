@@ -16,6 +16,7 @@ import {
   detectPauses,
   detectRecordingGaps,
   computeElevGain,
+  elevGainOptions,
   GRADE_BUCKETS,
   bucketGrade,
   gradeForIndex,
@@ -24,6 +25,7 @@ import {
   efficiencyFactor,
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
+import { csrfToken } from '../csrf'
 
 const props = defineProps({
   streams: { type: Object, default: null },
@@ -277,7 +279,10 @@ const rangeElevation = computed(() => {
   }
 
   // With a selection: compute both from the smoothed stream slice.
-  const { gain: up, loss: down } = computeElevGain(alt.slice(start, end + 1))
+  const { gain: up, loss: down } = computeElevGain(
+    alt.slice(start, end + 1),
+    elevGainOptions(props.streams as any, start, end + 1),
+  )
   return { up, down }
 })
 
@@ -1206,10 +1211,6 @@ async function setLastUsed(id) {
     })
     lastUsedId.value = id
   } catch { /* fire-and-forget */ }
-}
-
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 }
 
 async function savePresetAs() {

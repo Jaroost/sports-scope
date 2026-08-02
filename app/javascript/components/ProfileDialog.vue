@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { Modal } from 'bootstrap'
 import { t } from '../i18n'
 import UserProfile from './UserProfile.vue'
+import { csrfToken } from '../csrf'
 
 // Boîte de dialogue « profil » montée une seule fois dans le layout (îlot global).
 // S'ouvre quand on clique sur n'importe quel élément portant `data-profile-trigger`
@@ -29,10 +30,6 @@ const changed = ref(false)
 const sections = ref<string[] | undefined>(undefined)
 
 let modal: Modal | null = null
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 // Vrai si la section doit être affichée (toutes par défaut quand le périmètre est omis).
 // Couvre aussi la card Strava ('strava'), gérée ici plutôt que dans UserProfile.

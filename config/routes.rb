@@ -10,6 +10,13 @@ Rails.application.routes.draw do
     # charger un itinéraire à la volée. Publique (aucun login requis).
     get "/navigate", to: "pages#free_navigation", as: :free_navigate
     get "/routes/new", to: "pages#route_builder", as: :new_route
+    # Atterrissage d'un `.fit` partagé à l'app ou ouvert avec elle. Le format est
+    # ambigu — une sortie enregistrée et un parcours planifié partagent le même
+    # conteneur — donc la page lit le fichier, montre ce qu'il contient et laisse
+    # choisir : le journaliser, ou en faire un itinéraire. C'est l'action déclarée
+    # dans `file_handlers` (manifest), sans préfixe de langue : le scope la rend
+    # facultative.
+    get "/import/fit", to: "pages#import_fit", as: :import_fit
     get "/routes/:id/edit", to: "pages#route_builder", as: :edit_route, constraints: { id: /\d+/ }
     # Navigation is addressed by share_token (not id) so the link is shareable
     # and unguessable; the page and its API are public.
@@ -29,14 +36,35 @@ Rails.application.routes.draw do
     delete "/profile/strava/activities", to: "profiles#delete_strava_activities", as: :delete_strava_activities
     # Suivi du cirage de chaîne (par vélo)
     get "/chains", to: "pages#chains", as: :chains
+    # Diffusion de l'app compagnon Android : la page et le fichier demandent une
+    # session (l'app ne sert à rien sans compte). L'endpoint de version, lui, est
+    # public et déclaré hors du scope de langue, plus bas.
+    get "/companion", to: "companion#show", as: :companion
+    get "/companion/download", to: "companion#download", as: :companion_download
+
+    # L'éditeur des profils de sortie. Dans le scope de langue, contrairement à
+    # l'API : c'est une page, elle a des libellés (cf. CompanionSettingsController).
+    get "/companion/dashboard", to: "companion_settings#edit", as: :companion_dashboard
   end
+
+  # Contrôle de mise à jour de l'app compagnon. Sans préfixe de langue : l'application
+  # interroge une URL fixe, et ne lit qu'un numéro de version — aucune donnée
+  # d'utilisateur, donc rien à protéger par une session qu'elle n'a de toute façon pas
+  # côté Dart (cf. CompanionController).
+  get "/api/companion_version", to: "companion#version"
 
   # Web Share Target (Android) : le service worker intercepte normalement ce POST
   # côté client (cf. public/service-worker.js) et n'atteint jamais le serveur. Cette
   # route est un filet de sécurité quand le SW n'intercepte pas (SW obsolète, lancement
-  # à froid avant prise de contrôle, navigateur non compatible) : le serveur lit le .gpx
-  # partagé et rend le créateur avec le tracé chargé. Hors scope de langue : l'action
-  # déclarée dans le manifest est /routes/share-target, sans préfixe de locale.
+  # à froid avant prise de contrôle, navigateur non compatible) : le serveur lit le
+  # fichier partagé et rend, selon son contenu, le créateur d'itinéraire (.gpx) ou la
+  # page d'atterrissage (.fit). Hors scope de langue : l'action déclarée dans le
+  # manifest est /routes/share-target, sans préfixe de locale.
+  #
+  # Le chemin garde son préfixe /routes/ bien qu'il reçoive désormais les deux formats :
+  # il est enregistré auprès d'Android à l'installation de la PWA, et le renommer
+  # laisserait les installations existantes poster dans le vide jusqu'à leur prochaine
+  # relecture du manifest.
   post "/routes/share-target", to: "pages#share_target"
 
   # User preferences profile (JSON consumed by Vue)
@@ -45,6 +73,11 @@ Rails.application.routes.draw do
   # OmniAuth (POST entry points, GET callbacks)
   post "/auth/:provider", to: "sessions#passthrough", as: :auth_request, constraints: { provider: /keycloak|strava/ }
   match "/auth/:provider/callback", to: "sessions#create", via: [:get, :post]
+  # Passage de session du navigateur à l'application mobile : le lien « ouvrir dans
+  # l'application » porte un jeton à usage unique, échangé ici contre une session puis
+  # suivi d'une redirection vers `next`. Cf. SessionHandoff.
+  get "/auth/handoff", to: "sessions#handoff", as: :auth_handoff
+  post "/api/session_handoff", to: "sessions#create_handoff"
   get "/auth/failure", to: "sessions#failure"
   delete "/logout", to: "sessions#destroy", as: :logout
 
@@ -61,11 +94,24 @@ Rails.application.routes.draw do
   get "/strava/activities/:id/zones", to: "strava#zones", as: :strava_activity_zones, constraints: { id: /\d+/ }
   get "/strava/activities/:id/photos", to: "strava#photos", as: :strava_activity_photos, constraints: { id: /\d+/ }
   get "/strava/activities/:id/segments", to: "strava#segments", as: :strava_activity_segments, constraints: { id: /\d+/ }
+  # Comparaison d'un tronçon choisi à la main (poignées A/B, col, split) : mêmes
+  # chronos et même classement qu'un segment découvert, sur une plage arbitraire.
+  get "/strava/activities/:id/segments/range", to: "strava#segment_range", constraints: { id: /\d+/ }
 
   # Analyse de performance (records / cumuls / courbe de puissance — JSON pour Vue)
   get "/api/performance", to: "performance#show", as: :api_performance
   get "/api/performance/ftp", to: "performance#ftp", as: :api_performance_ftp
+  get "/api/performance/lthr", to: "performance#lthr", as: :api_performance_lthr
   get "/api/performance/training_load", to: "performance#training_load", as: :api_performance_training_load
+
+  # Seuils + zones du cycliste, pour l'application mobile (cf. RiderProfilesController)
+  get "/api/rider_profile", to: "rider_profiles#show", as: :api_rider_profile
+
+  # Profils de sortie de l'appli compagnon : tableau de bord, capteurs, radar.
+  # Authentifié, contrairement à /api/companion_version — ce sont des données de
+  # compte (cf. CompanionSettingsController).
+  get "/api/companion_settings", to: "companion_settings#show", as: :api_companion_settings
+  patch "/api/companion_settings", to: "companion_settings#update"
 
   # Seuils physiologiques de l'athlète (FTP manuelle, poids — JSON pour Vue)
   patch "/api/athlete", to: "profiles#update_athlete"
@@ -117,6 +163,7 @@ Rails.application.routes.draw do
   get "/api/imported_activities/:id/best_efforts", to: "imported_activities#best_efforts", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/zones", to: "imported_activities#zones", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/segments", to: "imported_activities#segments", constraints: { id: /\d+/ }
+  get "/api/imported_activities/:id/segments/range", to: "imported_activities#segment_range", constraints: { id: /\d+/ }
 
   # Noms donnés aux segments découverts automatiquement
   post   "/api/named_segments", to: "named_segments#create"

@@ -9,6 +9,7 @@ import { profilesForSport } from '../brouter'
 import { SPORTS } from '../userPreferences'
 import type { Sport, UserPreferences } from '../userPreferences'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
+import { csrfToken } from '../csrf'
 
 const groupedStyles = computed(() =>
   MAP_STYLE_GROUPS
@@ -189,10 +190,6 @@ const { dragIndex: dragCountryIndex, overIndex: dragOverCountryIndex, onDown: on
     const [moved] = arr.splice(from, 1)
     arr.splice(to, 0, moved)
   })
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 async function save() {
   saving.value = true
@@ -800,13 +797,6 @@ function placePreviewMarker(coords: [number, number]) {
             </label>
             <input id="nav-auto-reroute-cooldown" v-model.number="prefs.navigation.auto_reroute_cooldown_s" type="range" class="form-range" min="3" max="120" step="1">
             <p class="text-muted small mb-0">{{ t('profile.navigation.auto_reroute_cooldown_s_help') }}</p>
-          </div>
-          <div class="col-sm-6">
-            <label for="nav-radar-close" class="form-label mb-1">
-              {{ t('profile.navigation.radar_close_m') }} : <strong>{{ prefs.navigation.radar_close_m }} m</strong>
-            </label>
-            <input id="nav-radar-close" v-model.number="prefs.navigation.radar_close_m" type="range" class="form-range" min="10" max="100" step="5">
-            <p class="text-muted small mb-0">{{ t('profile.navigation.radar_close_m_help') }}</p>
           </div>
           <div class="col-sm-6">
             <label for="nav-sound-volume" class="form-label mb-1">

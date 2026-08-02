@@ -1,6 +1,8 @@
 import { reactive, ref, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { haversine, streetViewUrl, bearingFromRoute } from '../routeHelpers'
+import { haversine, bearingFromRoute } from '../routeHelpers'
+import { streetViewUrl, probeStreetViewLink } from '../streetView'
+import { popupHeaderHtml, popupActionHtml, popupMapLinksHtml, googleMapsUrl } from '../placePopup'
 import type { Coord, LngLat } from '../routeHelpers'
 import { userPreferences } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
@@ -82,7 +84,6 @@ export function useNavPois(deps: {
   const placeKey = (p: NavPlace) => `${p.type}:${p.lng}:${p.lat}`
   let placePopup: any = null            // popup POI ouvert (liens Google Maps / Street View)
   let activePlaceEl: HTMLElement | null = null   // marqueur dont le popup est ouvert
-  const svCache = new Map<string, boolean>()     // cache « Street View dispo ? » par POI
 
   // Tailles de base (px) des POI à l'échelle 1. Relevées par rapport au CSS d'origine
   // (32/26) car les POI paraissaient trop petits une fois mis à l'échelle.
@@ -314,7 +315,7 @@ export function useNavPois(deps: {
     // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
     // le POI. On vise juste à côté pour le laisser visible/cliquable.
     const OFFSET = 0.00008
-    const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
+    const mapsUrl = googleMapsUrl(place.lat + OFFSET, place.lng + OFFSET)
     // Caméra Street View orientée depuis le tracé vers le POI (cap tracé → POI).
     const svUrl = streetViewUrl(place.lat, place.lng, bearingFromRoute(getGeometry(), place.lng, place.lat))
     const wrap = document.createElement('div')
@@ -322,34 +323,18 @@ export function useNavPois(deps: {
     // « Naviguer ici » en tête (action principale) : lance la navigation guidée vers le
     // POI. Présent seulement quand l'appelant fournit onNavigateTo (mode libre).
     const navAction = onNavigateTo
-      ? `<button type="button" class="place-popup-link place-popup-link--navigate">
-        <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
-        <span>${escapeHtml(t('routes.navigate_here'))}</span>
-      </button>`
+      ? popupActionHtml({ className: 'place-popup-link--navigate', icon: 'fa-solid fa-location-arrow', label: t('routes.navigate_here') })
       : ''
     // « Ajouter à l'itinéraire » : insère le POI dans le tracé courant (au plus proche),
     // sans le remplacer. Présent seulement quand un itinéraire est chargé.
     const insertAction = onInsertVia && hasRoute?.()
-      ? `<button type="button" class="place-popup-link place-popup-link--add-route">
-        <i class="fa-solid fa-circle-plus" aria-hidden="true"></i>
-        <span>${escapeHtml(t('routes.add_to_route'))}</span>
-      </button>`
+      ? popupActionHtml({ className: 'place-popup-link--add-route', icon: 'fa-solid fa-circle-plus', label: t('routes.add_to_route') })
       : ''
     wrap.innerHTML = `
-      <div class="place-popup-header">
-        <span class="place-popup-name">${escapeHtml(place.name)}</span>
-        <button type="button" class="place-popup-close" aria-label="${escapeHtml(t('routes.close'))}">×</button>
-      </div>
+      ${popupHeaderHtml(place.name)}
       ${navAction}
       ${insertAction}
-      <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-        <i class="fa-brands fa-google" aria-hidden="true"></i>
-        <span>Google Maps</span>
-      </a>
-      <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-        <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-        <span>${escapeHtml(t('routes.street_view'))}</span>
-      </a>`
+      ${popupMapLinksHtml(mapsUrl, svUrl)}`
     // closeOnClick désactivé : un tap carte met l'écran en veille ; la fermeture du
     // popup sur tap carte est gérée explicitement dans le handler de clic de la carte.
     placePopup = new maplibre.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
@@ -368,50 +353,13 @@ export function useNavPois(deps: {
       closePlacePopup()
       onInsertVia?.(place)
     })
-    const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
-    if (svLink) {
-      checkSV(place.lat, place.lng).then((ok) => {
-        svLink.classList.toggle('place-popup-link--disabled', !ok)
-        if (!ok) svLink.setAttribute('aria-disabled', 'true')
-        else svLink.removeAttribute('aria-disabled')
-      })
-    }
+    probeStreetViewLink(wrap.querySelector<HTMLElement>('.place-popup-link--streetview'), place.lat, place.lng)
   }
 
   // Ferme le popup de POI et retire le surlignage « actif » de son marqueur.
   function closePlacePopup() {
     if (placePopup) { placePopup.remove(); placePopup = null }
     if (activePlaceEl) { activePlaceEl.classList.remove('place-marker--active'); activePlaceEl = null }
-  }
-
-  function escapeHtml(s: string) {
-    const div = document.createElement('div')
-    div.textContent = s
-    return div.innerHTML
-  }
-
-  // Interroge le service d'imagerie Google : true si une vue Street View existe près
-  // du point. Repris du créateur (JSONP best-effort, repli optimiste sur erreur/timeout).
-  function svCacheKey(lat: number, lng: number) { return `${lat.toFixed(4)},${lng.toFixed(4)}` }
-
-  function checkSV(lat: number, lng: number): Promise<boolean> {
-    const key = svCacheKey(lat, lng)
-    if (svCache.has(key)) return Promise.resolve(svCache.get(key)!)
-    return new Promise<boolean>((resolve) => {
-      const cb = `_sv${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
-      const s = document.createElement('script')
-      let settled = false
-      const finish = (v: boolean) => {
-        if (settled) return; settled = true
-        clearTimeout(timer); delete (window as any)[cb]; s.remove()
-        svCache.set(key, v); resolve(v)
-      }
-      const timer = setTimeout(() => finish(true), 4000)
-      ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
-      s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
-      s.onerror = () => finish(true)
-      document.head.appendChild(s)
-    })
   }
 
   // ─── POI sauvegardés ──────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 import { ref, onUnmounted } from 'vue'
 import { t } from '../i18n'
 import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
+import { csrfToken } from '../csrf'
 
 // Bouton unique « Tout rafraîchir » de la page d'accueil. Déclenche le refresh
 // unifié (résumés + vélos + téléchargement des streams en tâche de fond) puis
@@ -16,10 +17,6 @@ const msg = ref<string | null>(null)
 // matériel d'enregistrement encore en cours en arrière-plan) ou erreur.
 const tone = ref<'success' | 'info' | 'error'>('success')
 let msgTimer: ReturnType<typeof setTimeout> | null = null
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 async function refreshAll() {
   if (syncing.value) return

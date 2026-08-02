@@ -6,6 +6,7 @@ import RoutesList from './components/RoutesList.vue'
 import RouteBuilder from './components/RouteBuilder.vue'
 import RouteNavigation from './components/RouteNavigation.vue'
 import ImportFitActivity from './components/ImportFitActivity.vue'
+import ImportFitLanding from './components/ImportFitLanding.vue'
 import UserProfile from './components/UserProfile.vue'
 import ProfileDialog from './components/ProfileDialog.vue'
 import NewRouteButton from './components/NewRouteButton.vue'
@@ -16,6 +17,7 @@ import TodayPlanWidget from './components/TodayPlanWidget.vue'
 import RefreshAll from './components/RefreshAll.vue'
 import ResumeNavigation from './components/ResumeNavigation.vue'
 import SharedRoutePreviewMap from './components/SharedRoutePreviewMap.vue'
+import CompanionDashboard from './components/CompanionDashboard.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
@@ -25,6 +27,7 @@ const registry: Record<string, Component> = {
   RouteBuilder,
   RouteNavigation,
   ImportFitActivity,
+  ImportFitLanding,
   UserProfile,
   ProfileDialog,
   NewRouteButton,
@@ -35,6 +38,7 @@ const registry: Record<string, Component> = {
   RefreshAll,
   ResumeNavigation,
   SharedRoutePreviewMap,
+  CompanionDashboard,
 }
 
 export function mountVueIslands(): void {

@@ -21,11 +21,28 @@ import { categoryForType, POI_CATEGORIES } from '../poiCategories'
 import { MARKER_KINDS, markerMeta, markerKindLabel } from '../routeMarkers'
 import type { MarkerKind } from '../routeMarkers'
 import {
-  GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm, generateCircle,
-  streetViewUrl, bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
+  GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm,
+  bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
+  nearestGeomIndex, buildOffsetDisplayLine,
 } from '../routeHelpers'
+import {
+  streetViewUrl, checkStreetView, probeStreetViewLink, applyStreetViewState,
+} from '../streetView'
 import type { Climb, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
+import { createScaledMarkerGroup, mergeOverlappingMarkers, MARKER_SCALE_VAR } from '../mapMarkerGroup'
+import {
+  escapeHtml, googleMapsUrl, popupHeaderHtml, popupLinkHtml, popupMapLinksHtml,
+} from '../placePopup'
+import { useMapLocation } from '../composables/useMapLocation'
+import { usePlaceSearch, placeShortName, flyToPlace } from '../composables/usePlaceSearch'
+import { useMapMeasure, MEASURE_SOURCE, MEASURE_LINE_LAYER } from '../composables/useMapMeasure'
+import {
+  assignWaypointGeomIndices, waypointPosForEdge, waypointPosForVertex, inheritsFree,
+  insertionPasses,
+} from '../routeInsert'
+import type { PlaceResult } from '../composables/usePlaceSearch'
+import { useDismissOnOutside } from '../composables/useDismissOnOutside'
 
 const props = defineProps<{ state: RouteBuilderState }>()
 const emit = defineEmits<{
@@ -58,17 +75,17 @@ function sportIcon() {
 
 let mapInstance: any = null
 let _maplibregl: any = null
+// Accès paresseux à la carte pour les groupes de marqueurs (créés avant elle).
+const markerGroupDeps = { getMap: () => mapInstance, getMaplibre: () => _maplibregl }
 const waypointMarkers: any[] = []
 let hoverMarker: any = null
 // Point d'insertion sous le curseur, projeté sur l'arête du tracé (pas snappé au sommet).
 // Mémorisé au survol pour que le clic insère exactement sous le « + », et non sur le
 // sommet de géométrie le plus proche (qui sautait « par grille » sur les tronçons droits).
 let hoverInsert: { lng: number; lat: number; edgeIdx: number } | null = null
-let locationMarker: any = null
-let lastLocationCoords: [number, number] | null = null
-let lastLocationAccuracy = 0
-const locationVisible = ref(false)
-const locating = ref(false)
+// « Ma position » (point bleu + disque d'incertitude) : voir useMapLocation.
+const { locationVisible, locating, toggle: toggleLocation, reinstallLayers: reinstallLocation } =
+  useMapLocation(markerGroupDeps)
 const hoverMarkerVisible = ref(false)
 let suppressNextMapClick = false
 let suppressNextWpClick = false
@@ -80,12 +97,10 @@ let selectionMarkerB: any = null
 let selectionMarkerAKm: number | null = null
 let selectionMarkerBKm: number | null = null
 let selectionMarkerDragging = false
-const climbMarkers: any[] = []
-const climbMarkerObservers: MutationObserver[] = []
+const climbGroup = createScaledMarkerGroup(markerGroupDeps)
 const turnAnomalyMarkers: any[] = []
 const snapMarkers: any[] = []
-const placeMarkers: any[] = []
-const placeMarkerObservers: MutationObserver[] = []
+const placeGroup = createScaledMarkerGroup(markerGroupDeps)
 // Permet de retrouver l'élément DOM d'un POI à partir de ses coordonnées, pour
 // surligner le bon marqueur au survol (depuis la carte ou la liste latérale).
 const placeMarkerEls = new Map<string, HTMLElement>()
@@ -93,8 +108,7 @@ const placeMarkerEls = new Map<string, HTMLElement>()
 // Marqueurs persistants distincts des POI Overpass : posés à la main ou épinglés,
 // rendus en permanence (indépendamment d'une recherche Overpass). Badge étoile pour
 // les distinguer ; clic → popup renommer/supprimer.
-const savedPoiMarkers: any[] = []
-const savedPoiMarkerObservers: MutationObserver[] = []
+const savedPoiGroup = createScaledMarkerGroup(markerGroupDeps)
 let savedPoiPopup: any = null
 // Mode d'édition courant, piloté par le dropdown « Mode d'édition » (hors lecture
 // seule) : 'route' modifie le tracé au clic, 'poi' pose un POI, 'marker' pose un
@@ -113,8 +127,7 @@ const POI_CATS = POI_CATEGORIES
 // Posés à la main et enregistrés avec l'itinéraire (routeStore.markers). Rendus en
 // permanence, déplaçables, éditables via popup. Distincts des POI (cf. routeMarkers.ts).
 const MARKER_KIND_LIST = MARKER_KINDS
-const routeMarkerObjs: any[] = []
-const routeMarkerObservers: MutationObserver[] = []
+const routeMarkerGroup = createScaledMarkerGroup(markerGroupDeps)
 let routeMarkerPopup: any = null
 // Dialogue de création d'un repère (type + libellé optionnel).
 const markerDialog = ref<{ lng: number; lat: number; kind: MarkerKind; label: string } | null>(null)
@@ -122,23 +135,21 @@ const markerDialog = ref<{ lng: number; lat: number; kind: MarkerKind; label: st
 // ── Mesure à vol d'oiseau ────────────────────────────────────────────────────
 // Mode « règle » : chaque clic pose un point, et l'on affiche la distance directe
 // (orthodromie) cumulée le long des segments posés. Purement éphémère — rien n'est
-// enregistré avec l'itinéraire, et le tracé n'est jamais modifié.
-const measurePoints = ref<LngLat[]>([])
-const measureMarkers: any[] = []
-// Poignées « + » au milieu de chaque segment (insertion d'un point intermédiaire).
-const measureMidMarkers: any[] = []
-// Point de mesure dont la tooltip (suppression) est ouverte, ou -1. Piloté en DOM comme
-// les waypoints : une classe sur le marqueur, pas de re-rendu.
-let measureSelectedIdx = -1
-// Distances cumulées, index par index (measureCumM[0] === 0).
-const measureCumM = computed(() => {
-  const out = [0]
-  for (let i = 1; i < measurePoints.value.length; i++) {
-    out.push(out[i - 1] + haversine(measurePoints.value[i - 1], measurePoints.value[i]))
-  }
-  return out
+// enregistré avec l'itinéraire, et le tracé n'est jamais modifié. Tout le sous-système
+// (points, poignées, glisser-déposer, ligne) vit dans useMapMeasure.
+const {
+  points: measurePoints, totalM: measureTotalM,
+  addPoint: addMeasurePoint, undoPoint: undoMeasurePoint, clear: clearMeasure,
+  onMapClick: onMeasureMapClick, updateLayer: updateMeasureLayer,
+} = useMapMeasure({
+  getMap: () => mapInstance,
+  getMaplibre: () => _maplibregl,
+  suppressNextMapClick: () => {
+    // Le relâchement d'une poignée produit un clic sur la carte si le curseur l'a quittée.
+    suppressNextMapClick = true
+    setTimeout(() => { suppressNextMapClick = false }, 50)
+  },
 })
-const measureTotalM = computed(() => measureCumM.value[measureCumM.value.length - 1] ?? 0)
 
 // Dropdown ouvert dans la toolbar de la carte, ou null. Un seul à la fois : ouvrir
 // un dropdown (style de carte / « Affichage » / « Mode d'édition ») ferme l'autre.
@@ -160,18 +171,22 @@ let routePointPopup: any = null
 // Popup d'un point quelconque de la carte (clic droit / appui long n'importe où) :
 // coordonnées copiables, Google Maps, Street View. Voir mapCoordPopup.
 let coordPopup: any = null
+// Popup de désambiguïsation d'insertion : quand le point cliqué correspond à plusieurs
+// passes du tracé (même endroit parcouru plusieurs fois), on demande sur laquelle insérer.
+let insertChoicePopup: any = null
 let detachLongPress: (() => void) | null = null
 let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
-const svCache = new Map<string, boolean>()
 
-const searchQuery = ref('')
-const searchResults = ref<any[]>([])
-const searchOpen = ref(false)
-const searching = ref(false)
+// Recherche de lieu : la logique (Nominatim, pays du profil, anti-rebond) vit dans
+// usePlaceSearch, partagée avec la navigation. Ne restent ici que l'état d'affichage de la
+// barre repliable et le recadrage de la carte, qui appartiennent au créateur.
+const {
+  searchQuery, searchResults, searchOpen, searching,
+  clearSearch: resetSearch,
+} = usePlaceSearch()
 const searchExpanded = ref(false)
 const searchInputEl = useTemplateRef('searchInputEl')
-let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
@@ -197,10 +212,6 @@ function saveMapView() {
   } catch { /* ignore */ }
 }
 
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
-
 function flagSvg(kind: 'start' | 'end') {
   if (kind === 'start') {
     return `<svg width="28" height="36" viewBox="0 0 28 36" xmlns="http://www.w3.org/2000/svg">
@@ -223,6 +234,75 @@ function flagSvg(kind: 'start' | 'end') {
     <rect x="4" y="4" width="20" height="15" fill="none" stroke="#7f1d1d" stroke-width="1"/>
     ${cells.join('')}
   </svg>`
+}
+
+// ─── Sens de parcours ─────────────────────────────────────────────────────────
+
+const FLOW_LAYER = 'builder-route-flow'
+// Halo sombre sous le flux, pour que le blanc reste lisible sur les couleurs claires du
+// dégradé de pente (jaune / orange) comme sur une couleur de tracé claire.
+const FLOW_HALO_LAYER = 'builder-route-flow-halo'
+// Largeur du halo relative à celle du flux. `line-dasharray` s'exprimant en multiples de
+// la largeur du trait, le motif du halo doit être divisé d'autant pour se superposer
+// exactement à celui du flux.
+const FLOW_HALO_RATIO = 2
+const ARROWS_LAYER = 'builder-route-arrows'
+// Ligne de repère sur le tracé réel, sous les voies dédoublées (cf. displayLine).
+const BASE_SOURCE = 'builder-route-base'
+const BASE_LAYER = 'builder-route-base-line'
+const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+
+// `line-dasharray` n'est pas interpolable : on anime en cyclant sur une séquence de motifs
+// dont la partie pleine avance d'un cran à chaque pas (période de 7 unités de largeur de
+// trait). Le traitillé blanc semble ainsi défiler dans le sens du tracé. La séquence est
+// fixe et courte pour que MapLibre garde ses motifs en cache.
+const FLOW_DASHES: number[][] = [
+  [0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0],
+  [0, 0.5, 3, 3.5], [0, 1, 3, 3], [0, 1.5, 3, 2.5], [0, 2, 3, 2], [0, 2.5, 3, 1.5], [0, 3, 3, 1], [0, 3.5, 3, 0.5],
+]
+const FLOW_STEP_MS = 55
+let flowRaf: number | null = null
+let flowStep = -1
+let directionStatic = false
+
+// Boucle d'animation du flux. requestAnimationFrame se met en pause tout seul quand
+// l'onglet passe en arrière-plan ; on ne repeint la carte que lorsque le motif change
+// vraiment (≈18 fois par seconde, pas à chaque frame).
+function startRouteFlow() {
+  if (flowRaf !== null || REDUCED_MOTION || directionStatic || !mapInstance) return
+  const tick = (ts: number) => {
+    flowRaf = requestAnimationFrame(tick)
+    if (!mapInstance?.getLayer(FLOW_LAYER)) return
+    const step = Math.floor(ts / FLOW_STEP_MS) % FLOW_DASHES.length
+    if (step === flowStep) return
+    flowStep = step
+    mapInstance.setPaintProperty(FLOW_LAYER, 'line-dasharray', FLOW_DASHES[step])
+    if (mapInstance.getLayer(FLOW_HALO_LAYER)) {
+      mapInstance.setPaintProperty(FLOW_HALO_LAYER, 'line-dasharray', FLOW_DASHES[step].map((d) => d / FLOW_HALO_RATIO))
+    }
+  }
+  flowRaf = requestAnimationFrame(tick)
+}
+
+function stopRouteFlow() {
+  if (flowRaf === null) return
+  cancelAnimationFrame(flowRaf)
+  flowRaf = null
+}
+
+// Bascule le repère de sens en mode statique (flèches). Utilisé par l'export image :
+// une animation n'y veut rien dire, et une carte qui se repeint en continu rendrait la
+// capture non déterministe.
+function setDirectionStatic(on: boolean) {
+  directionStatic = on
+  if (!mapInstance) return
+  const static_ = on || REDUCED_MOTION
+  if (mapInstance.getLayer(ARROWS_LAYER)) mapInstance.setLayoutProperty(ARROWS_LAYER, 'visibility', static_ ? 'visible' : 'none')
+  for (const id of [FLOW_HALO_LAYER, FLOW_LAYER]) {
+    if (mapInstance.getLayer(id)) mapInstance.setLayoutProperty(id, 'visibility', static_ ? 'none' : 'visible')
+  }
+  if (static_) stopRouteFlow()
+  else if (routeStore.geometry.value.length >= 2) startRouteFlow()
 }
 
 // Chevron blanc (cerné de noir translucide pour rester lisible sur tout fond de
@@ -298,9 +378,7 @@ async function initMap() {
         // tracé. Testé avant la garde de lecture seule : mesurer reste possible sur un
         // itinéraire verrouillé.
         if (measureMode.value) {
-          // Tooltip de suppression ouverte : le clic ne fait que la refermer.
-          if (measureSelectedIdx >= 0) { selectMeasurePoint(-1); return }
-          addMeasurePoint(e.lngLat.lng, e.lngLat.lat)
+          onMeasureMapClick(e.lngLat.lng, e.lngLat.lat)
           return
         }
         // Mode « poser un POI » : le clic ouvre le dialogue de création d'un POI
@@ -358,7 +436,13 @@ async function initMap() {
         // visibles, un clic sur la carte ne doit rien faire (pas d'ajout au tracé).
         if (!props.state.showWaypoints) return
         if (hoverInsert) {
-          insertWaypointAtHover(hoverInsert)
+          if (atWaypointLimit()) return
+          // On calcule au clic si le point vise plusieurs passes du tracé (superposition).
+          // Une seule passe → insertion directe ; plusieurs → on demande laquelle.
+          const cands = insertionCandidatesAt(e.point)
+          if (cands.length > 1) showInsertChoicePopup(cands)
+          else if (cands.length === 1) insertWaypointAt(cands[0].insertAt, cands[0].lng, cands[0].lat)
+          else insertWaypointAtHover(hoverInsert)
         } else {
           addWaypoint(e.lngLat.lng, e.lngLat.lat)
         }
@@ -416,10 +500,15 @@ async function initMap() {
         setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 500)
       })
       mapInstance.on('moveend', () => { if (!routeStore.currentId.value) saveMapView() })
+      // Le chevauchement des marqueurs de points ne dépend que de la caméra : on le
+      // réévalue quand elle s'immobilise (cf. regroupWaypointMarkers).
+      mapInstance.on('moveend', regroupWaypointMarkers)
+      // Facteur d'échelle des marqueurs, publié pour le CSS ET pour les groupes de
+      // marqueurs, qui le réappliquent après chaque repositionnement (cf. mapMarkerGroup).
       const applyMarkerScale = () => {
         const z = mapInstance.getZoom()
         const scale = Math.max(0.35, Math.min(1, (z - 5) / 9))
-        mapInstance.getContainer().style.setProperty('--wp-scale', String(scale))
+        mapInstance.getContainer().style.setProperty(MARKER_SCALE_VAR, String(scale))
       }
       mapInstance.on('zoom', applyMarkerScale)
       applyMarkerScale()
@@ -438,12 +527,24 @@ async function initMap() {
 
 function installRouteLayer() {
   if (!mapInstance) return
+  // Tracé continu en une seule feature, porteur des repères de sens (flux animé, flèches).
+  // Il reçoit la ligne d'AFFICHAGE (dédoublée sur les recouvrements, cf. displayLine), pas
+  // la géométrie brute : sur un aller-retour, chaque voie a ainsi son propre sens.
   if (!mapInstance.getSource('builder-route')) {
     mapInstance.addSource('builder-route', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
   }
   if (!mapInstance.getSource('builder-route-graded')) {
     mapInstance.addSource('builder-route-graded', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
     mapInstance.addLayer({ id: 'builder-route-border', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: ROUTE_BORDER_PAINT })
+    // Ligne de repère : le tracé RÉEL, en couleur unie et plus fin, dessiné uniquement là où
+    // l'affichage se dédouble (cf. displayLine). Elle donne la position exacte de
+    // l'itinéraire entre ses deux voies, et reste la cible d'édition — c'est elle qu'on
+    // survole et qu'on clique pour insérer un point, sans avoir à viser une voie décalée.
+    mapInstance.addSource(BASE_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+    mapInstance.addLayer({
+      id: BASE_LAYER, type: 'line', source: BASE_SOURCE, layout: ROUTE_LINE_LAYOUT,
+      paint: { 'line-color': routePrefs().color, 'line-width': 2, 'line-opacity': props.state.routeOpacity },
+    })
     mapInstance.addLayer({ id: 'builder-route-line', type: 'line', source: 'builder-route-graded', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': gradePaintExpression(), 'line-width': 5, 'line-opacity': props.state.routeOpacity } })
   }
   // Tronçons « libres » : tracés en ligne droite (beeline) entre points, rendus en
@@ -463,18 +564,44 @@ function installRouteLayer() {
   }
   // Mesure à vol d'oiseau : segments droits en traitillé, au-dessus du tracé, dans une
   // couleur qui ne se confond ni avec l'itinéraire ni avec les tronçons libres.
-  if (!mapInstance.getSource('builder-measure')) {
-    mapInstance.addSource('builder-measure', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
-    mapInstance.addLayer({ id: 'builder-measure-line', type: 'line', source: 'builder-measure', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0f766e', 'line-width': 3, 'line-dasharray': [2, 1.6] } })
+  if (!mapInstance.getSource(MEASURE_SOURCE)) {
+    mapInstance.addSource(MEASURE_SOURCE, { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } })
+    mapInstance.addLayer({ id: MEASURE_LINE_LAYER, type: 'line', source: MEASURE_SOURCE, layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0f766e', 'line-width': 3, 'line-dasharray': [2, 1.6] } })
   }
-  // Flèches de sens de parcours : espacées en pixels écran (constantes au zoom) et
-  // posées au-dessus du tracé, sur la géométrie continue de `builder-route`.
+  // Sens de parcours : flux animé (traitillé blanc qui défile vers l'avant) posé au-dessus
+  // du tracé, sur la géométrie continue de `builder-route`.
+  if (!mapInstance.getLayer(FLOW_LAYER)) {
+    flowStep = -1
+    const flowLayout = { 'line-join': 'round', 'line-cap': 'butt', visibility: REDUCED_MOTION || directionStatic ? 'none' : 'visible' }
+    mapInstance.addLayer({
+      id: FLOW_HALO_LAYER,
+      type: 'line',
+      source: 'builder-route',
+      layout: { ...flowLayout },
+      paint: {
+        'line-color': 'rgba(0,0,0,0.45)',
+        'line-width': 4,
+        'line-opacity': props.state.routeOpacity,
+        'line-dasharray': FLOW_DASHES[0].map((d) => d / FLOW_HALO_RATIO),
+      },
+    })
+    mapInstance.addLayer({
+      id: FLOW_LAYER,
+      type: 'line',
+      source: 'builder-route',
+      layout: { ...flowLayout },
+      paint: { 'line-color': '#ffffff', 'line-width': 2, 'line-opacity': props.state.routeOpacity, 'line-dasharray': FLOW_DASHES[0] },
+    })
+  }
+  // Variante statique du même repère : flèches espacées en pixels écran (constantes au
+  // zoom). Masquée par défaut, elle prend le relais du flux quand l'animation n'a pas de
+  // sens — export image, ou préférence système « animations réduites ».
   if (!mapInstance.hasImage('route-arrow')) {
     mapInstance.addImage('route-arrow', buildArrowImage(28), { pixelRatio: 2 })
   }
-  if (!mapInstance.getLayer('builder-route-arrows')) {
+  if (!mapInstance.getLayer(ARROWS_LAYER)) {
     mapInstance.addLayer({
-      id: 'builder-route-arrows',
+      id: ARROWS_LAYER,
       type: 'symbol',
       source: 'builder-route',
       layout: {
@@ -485,6 +612,7 @@ function installRouteLayer() {
         'icon-rotation-alignment': 'map',
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
+        visibility: REDUCED_MOTION || directionStatic ? 'visible' : 'none',
       },
     })
   }
@@ -500,6 +628,14 @@ function routeLineBaseWidths(): Record<string, number> {
     'builder-route-border': width + 3,
     'builder-route-line': width,
     'builder-route-straight-line': Math.max(2, width - 1),
+    // Nettement plus fine que les voies : la ligne de repère marque la position du tracé,
+    // elle ne doit pas se lire comme un troisième passage.
+    [BASE_LAYER]: Math.max(1.5, width * 0.4),
+    // Plus fin que le tracé : la couleur de l'itinéraire reste visible de part et d'autre
+    // du flux blanc (et la longueur des traitillés suit, `line-dasharray` étant exprimé
+    // en multiples de la largeur du trait).
+    [FLOW_LAYER]: Math.max(1.5, width * 0.45),
+    [FLOW_HALO_LAYER]: Math.max(1.5, width * 0.45) * FLOW_HALO_RATIO,
     'builder-route-selected-line': width + 2,
     'builder-divergent-line': 4,
   }
@@ -518,26 +654,117 @@ function setRouteLineScale(factor: number) {
   }
 }
 
+// Polyligne d'AFFICHAGE alignée index-pour-index sur routeStore.geometry : identique au
+// tracé réel, SAUF sur les portions empruntées plusieurs fois, où elle est décalée
+// latéralement pour que chaque passage forme sa propre voie (buildOffsetDisplayLine, le
+// même dédoublement qu'en navigation). Sans elle le passage dessiné en dernier masque
+// l'autre — et en mode pente une descente recouvre alors entièrement la montée
+// correspondante, qui devient impossible à repérer sur la carte.
+//
+// `routeStore.geometry` reste la vérité géométrique : distances, altitudes, insertion de
+// points et export GPX s'appuient sur elle, jamais sur `displayLine`. Elle reste d'ailleurs
+// dessinée telle quelle sous les voies (BASE_LAYER), en couleur unie : c'est la ligne qu'on
+// vise pour éditer, elle ne bouge donc jamais sous le curseur.
+let displayLine: LngLat[] = []
+// Décalage appliqué à chaque sommet, en mètres. > 0 ⇔ l'affichage s'écarte du tracé réel.
+let displayOff: number[] = []
+// Vrai dès qu'une portion du tracé est dédoublée : réserve aux tracés concernés les
+// calculs qui n'ont de sens que là (position des marqueurs sur leur voie).
+let displayHasOffset = false
+// Seuil au-delà duquel on considère le sommet décalé (le même que celui sous lequel
+// buildOffsetDisplayLine laisse le sommet en place).
+const OFFSET_EPS_M = 1e-3
+
 function updateRouteLayer() {
   if (!mapInstance) return
   // Le tracé a changé : une éventuelle tooltip de point du trajet pointe désormais
   // sur une géométrie obsolète, on la referme.
   closeRoutePointPopup()
-  const baseSrc = mapInstance.getSource('builder-route')
-  if (baseSrc) {
-    baseSrc.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: routeStore.geometry.value.map(([lng, lat]) => [lng, lat]) } })
-  }
   // Tient selectionStore.cumDistKm à jour même quand le chart n'est pas monté (mobile).
   const geom = routeStore.geometry.value
+  const cumDistM = [0]
   if (geom.length >= 2) {
-    const cumDistKm = [0]
     let d = 0
-    for (let i = 1; i < geom.length; i++) { d += haversine(geom[i - 1], geom[i]); cumDistKm.push(d / 1000) }
-    selectionStore.cumDistKm = cumDistKm
+    for (let i = 1; i < geom.length; i++) { d += haversine(geom[i - 1], geom[i]); cumDistM.push(d) }
+    selectionStore.cumDistKm = cumDistM.map((m) => m / 1000)
   } else {
     selectionStore.cumDistKm = []
   }
+  if (geom.length >= 2) {
+    const disp = buildOffsetDisplayLine(geom, cumDistM)
+    displayLine = disp.line
+    displayOff = disp.off
+  } else {
+    displayLine = geom.map(([lng, lat]) => [lng, lat] as LngLat)
+    displayOff = new Array(geom.length).fill(0)
+  }
+  displayHasOffset = displayOff.some((o) => o >= OFFSET_EPS_M)
+  // Repère de sens (flux animé, flèches) : sur la ligne d'affichage, sinon il courrait
+  // entre les deux voies au lieu d'indiquer le sens de chacune d'elles.
+  const dispSrc = mapInstance.getSource('builder-route')
+  if (dispSrc) {
+    dispSrc.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: displayLine } })
+  }
+  // Sans tracé, rien à animer : on évite de repeindre la carte pour rien.
+  if (geom.length >= 2) startRouteFlow()
+  else stopRouteFlow()
   applyColorMode()
+}
+
+// Vrai si la ligne d'affichage est à jour : sinon (appel avant updateRouteLayer) on
+// retombe partout sur la géométrie brute plutôt que de mélanger deux versions du tracé.
+function displayReady(): boolean {
+  return displayLine.length === routeStore.geometry.value.length
+}
+
+// Coordonnées à DESSINER pour les sommets [lo, hi] de la géométrie.
+function displayCoords(lo = 0, hi = routeStore.geometry.value.length - 1): LngLat[] {
+  if (displayReady()) return displayLine.slice(lo, hi + 1)
+  return routeStore.geometry.value.slice(lo, hi + 1).map(([lng, lat]) => [lng, lat] as LngLat)
+}
+
+// Position d'AFFICHAGE d'un point de passage : celle de la voie à laquelle il appartient
+// quand le tracé s'y dédouble. Deux points au même endroit — l'aller et le retour d'un
+// même trajet, le départ et l'arrivée d'une boucle — empilaient sinon leurs marqueurs au
+// même pixel : seul le dernier dessiné restait lisible, et c'était le seul qu'on pouvait
+// attraper. Chacun rejoint désormais SA voie, celle du passage auquel il appartient.
+//
+// Le point n'est pas déplacé pour autant : routeStore.waypoints garde ses coordonnées, et
+// un glisser-déposer écrit la position du curseur (attachWaypointDrag), pas celle du
+// marqueur — le décalage ne s'accumule donc pas à chaque manipulation.
+function waypointDisplayPos(idx: number, w: { lng: number; lat: number }): LngLat {
+  if (!displayHasOffset || !displayReady()) return [w.lng, w.lat]
+  if (waypointGeomIndices.length !== routeStore.waypoints.value.length) return [w.lng, w.lat]
+  const g = waypointGeomIndices[idx]
+  if (g == null || displayOff[g] < OFFSET_EPS_M) return [w.lng, w.lat]
+  return displayLine[g]
+}
+
+// Portions du tracé RÉEL sur lesquelles l'affichage s'écarte, en coordonnées vraies : ce
+// sont elles que la ligne de repère dessine (une feature par portion contiguë). Ailleurs
+// les voies sont déjà sur le tracé, la ligne de repère n'aurait rien à montrer.
+function offsetRunFeatures(): any[] {
+  const geom = routeStore.geometry.value
+  if (!displayReady() || displayOff.length !== geom.length) return []
+  const features: any[] = []
+  let i = 0
+  while (i < geom.length) {
+    if (displayOff[i] < OFFSET_EPS_M) { i++; continue }
+    let k = i
+    while (k < geom.length && displayOff[k] >= OFFSET_EPS_M) k++
+    // On déborde d'un sommet de chaque côté quand c'est possible : la ligne de repère
+    // rejoint ainsi les voies au lieu de s'arrêter net là où le décalage s'annule.
+    const lo = Math.max(0, i - 1), hi = Math.min(geom.length - 1, k)
+    if (hi - lo >= 1) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: geom.slice(lo, hi + 1).map(([lng, lat]) => [lng, lat]) },
+        properties: {},
+      })
+    }
+    i = k
+  }
+  return features
 }
 
 // Pour chaque arête j (geom[j] → geom[j+1]), renvoie true si elle appartient à un
@@ -568,7 +795,10 @@ function applyColorMode() {
   const straightSrc = mapInstance.getSource('builder-route-straight')
   if (!src) return
   const geom = routeStore.geometry.value
-  const coords: LngLat[] = geom.map((c) => [c[0], c[1]])
+  // Les features sont dessinées sur la ligne d'AFFICHAGE (dédoublée sur les recouvrements),
+  // mais toujours découpées et colorées d'après la géométrie réelle : altitudes, distances
+  // et pentes ci-dessous restent celles de `geom`, index pour index.
+  const coords: LngLat[] = displayCoords()
   const gradeMode = props.state.colorMode === 'grade'
   const routedFeatures: any[] = []
   const straightFeatures: any[] = []
@@ -605,6 +835,11 @@ function applyColorMode() {
 
   src.setData({ type: 'FeatureCollection', features: routedFeatures })
   if (straightSrc) straightSrc.setData({ type: 'FeatureCollection', features: straightFeatures })
+  // La ligne de repère garde la couleur du tracé même en mode pente : elle marque la
+  // position réelle de l'itinéraire, ce sont les voies qui portent l'information de pente.
+  const baseSrc = mapInstance.getSource(BASE_SOURCE)
+  if (baseSrc) baseSrc.setData({ type: 'FeatureCollection', features: offsetRunFeatures() })
+  if (mapInstance.getLayer(BASE_LAYER)) mapInstance.setPaintProperty(BASE_LAYER, 'line-color', routePrefs().color)
   if (mapInstance.getLayer('builder-route-line')) mapInstance.setPaintProperty('builder-route-line', 'line-color', paint)
   // Le traitillé suit le même code couleur que la ligne pleine en mode pente.
   if (mapInstance.getLayer('builder-route-straight-line')) mapInstance.setPaintProperty('builder-route-straight-line', 'line-color', paint)
@@ -668,8 +903,9 @@ function updateSelectionLayer() {
   const i0 = geomIdxForKm(selectionStore.selectionRange.value.startKm, selectionStore.cumDistKm)
   const i1 = geomIdxForKm(selectionStore.selectionRange.value.endKm, selectionStore.cumDistKm)
   const lo = Math.min(i0, i1), hi = Math.max(i0, i1)
-  const coords = routeStore.geometry.value.slice(lo, hi + 1).map(([lng, lat]) => [lng, lat])
-  src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords } })
+  // Sur la ligne d'affichage : une sélection dans le graphe vise UN passage précis, elle
+  // doit donc surligner la voie correspondante et pas le milieu des deux.
+  src.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: displayCoords(lo, hi) } })
 }
 
 function updateDivergentLayer() {
@@ -682,34 +918,13 @@ function updateDivergentLayer() {
 // ─── Climb markers ────────────────────────────────────────────────────────────
 
 function installClimbMarkers() {
-  if (!_maplibregl || !mapInstance) return
-  climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
-  climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
+  climbGroup.clear()
   if (!props.state.showClimbs || routeStore.geometry.value.length < 2) return
   routeStore.detectedClimbs.value.forEach((climb) => {
     const pt = routeStore.geometry.value[climb.startIdx]
     if (!pt) return
-    const el = buildClimbMarkerEl(climb)
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom-left' })
-      .setLngLat([pt[0], pt[1]])
-      .addTo(mapInstance)
-    climbMarkerObservers.push(attachClimbMarkerScaleObserver(el))
-    climbMarkers.push(marker)
+    climbGroup.add(buildClimbMarkerEl(climb), [pt[0], pt[1]], { anchor: 'bottom-left' })
   })
-}
-
-function attachClimbMarkerScaleObserver(el: HTMLElement) {
-  let lastSet = ''
-  const obs = new MutationObserver(() => {
-    const raw = el.style.transform
-    if (!raw || raw === lastSet) return
-    const base = raw.replace(/ scale\([^)]+\)$/, '')
-    const s = parseFloat(mapInstance.getContainer().style.getPropertyValue('--wp-scale') || '1')
-    lastSet = `${base} scale(${s})`
-    el.style.transform = lastSet
-  })
-  obs.observe(el, { attributes: true, attributeFilter: ['style'] })
-  return obs
 }
 
 function buildClimbMarkerEl(climb: Climb) {
@@ -752,8 +967,7 @@ function closePlacePopup() {
 }
 
 function clearPlaceMarkers() {
-  placeMarkerObservers.forEach((obs) => obs.disconnect()); placeMarkerObservers.length = 0
-  placeMarkers.forEach((m) => m.remove()); placeMarkers.length = 0
+  placeGroup.clear()
   placeMarkerEls.clear(); hoveredPlaceEl = null
   closePlacePopup()
 }
@@ -767,7 +981,7 @@ function showPlacePopup(place: Place) {
   // Décalage de ~15 m : centrée pile sur le lieu, l'épingle rouge de Google masque
   // le POI. On vise juste à côté pour le laisser visible/cliquable.
   const OFFSET = 0.00008
-  const mapsUrl = `https://www.google.com/maps?q=${place.lat + OFFSET},${place.lng + OFFSET}`
+  const mapsUrl = googleMapsUrl(place.lat + OFFSET, place.lng + OFFSET)
   // Caméra Street View orientée depuis le tracé vers le POI (s'il y a un tracé chargé).
   const svUrl = streetViewUrl(place.lat, place.lng, bearingFromRoute(routeStore.geometry.value, place.lng, place.lat))
   const wrap = document.createElement('div')
@@ -789,20 +1003,10 @@ function showPlacePopup(place: Place) {
         <span>${escapeHtml(t('routes.save_poi'))}</span>
       </button>`
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${escapeHtml(place.name)}</span>
-      <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
-    </div>
+    ${popupHeaderHtml(place.name)}
     ${addAction}
     ${saveAction}
-    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-brands fa-google" aria-hidden="true"></i>
-      <span>Google Maps</span>
-    </a>
-    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-      <span>${t('routes.street_view')}</span>
-    </a>`
+    ${popupMapLinksHtml(mapsUrl, svUrl)}`
   // closeOnClick désactivé : la fermeture sur clic carte est gérée dans le handler
   // de clic de la carte, pour que ce clic ne fasse que fermer sans ajouter de point.
   placePopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
@@ -823,18 +1027,8 @@ function showPlacePopup(place: Place) {
   })
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
   if (svLink) {
-    checkSV(place.lat, place.lng).then((ok) => {
-      svLink.classList.toggle('place-popup-link--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
+    probeStreetViewLink(svLink, place.lat, place.lng)
   }
-}
-
-function escapeHtml(s: string) {
-  const div = document.createElement('div')
-  div.textContent = s
-  return div.innerHTML
 }
 
 function closeRoutePointPopup() {
@@ -877,10 +1071,7 @@ function showRoutePointPopup(lng: number, lat: number) {
   const wrap = document.createElement('div')
   wrap.className = 'place-popup'
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${t('routes.route_point')}</span>
-      <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
-    </div>
+    ${popupHeaderHtml(t('routes.route_point'))}
     <div class="wp-tooltip-coords-row">
       <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${lat.toFixed(6)}" title="${t('routes.copy_latitude')}">
         <i class="fa-regular fa-copy" aria-hidden="true"></i>
@@ -891,7 +1082,7 @@ function showRoutePointPopup(lng: number, lat: number) {
         <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lng</span>${lng.toFixed(6)}</span>
       </button>
     </div>
-    <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${lat},${lng}" target="_blank" rel="noopener noreferrer">
+    <a class="wp-tooltip-action" href="${googleMapsUrl(lat, lng)}" target="_blank" rel="noopener noreferrer">
       <i class="fa-brands fa-google" aria-hidden="true"></i>
       <span>Google Maps</span>
     </a>
@@ -919,11 +1110,7 @@ function showRoutePointPopup(lng: number, lat: number) {
   })
   const svLink = wrap.querySelector<HTMLElement>('.wp-tooltip-action--streetview')
   if (svLink) {
-    checkSV(lat, lng).then((ok) => {
-      svLink.classList.toggle('wp-tooltip-action--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
+    probeStreetViewLink(svLink, lat, lng, 'wp-tooltip-action--disabled')
   }
 }
 
@@ -931,18 +1118,13 @@ function showRoutePointPopup(lng: number, lat: number) {
 // boulangeries, cimetières…). Réutilise le pattern des marqueurs de cols
 // (observateur de scale au zoom). Les localités n'ont pas de marqueur (liste seule).
 function installPlaceMarkers() {
-  if (!_maplibregl || !mapInstance) return
   clearPlaceMarkers()
   if (!props.state.showPois) return
   for (const place of placesStore.filteredPlaces.value) {
     const cat = categoryForType(place.type)
     if (!cat || !cat.point) continue
     const el = buildPlaceMarkerEl(place)
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
-      .setLngLat([place.markerLng, place.markerLat])
-      .addTo(mapInstance)
-    placeMarkerObservers.push(attachClimbMarkerScaleObserver(el))
-    placeMarkers.push(marker)
+    placeGroup.add(el, [place.markerLng, place.markerLat], { anchor: 'bottom' })
     placeMarkerEls.set(placeMarkerKey(place.markerLng, place.markerLat), el)
   }
 }
@@ -1076,22 +1258,15 @@ function hidePlaceHoverMarker() {
 // l'état d'affichage par catégorie (savedPoisStore.show).
 
 function clearSavedPoiMarkers() {
-  savedPoiMarkerObservers.forEach((o) => o.disconnect()); savedPoiMarkerObservers.length = 0
-  savedPoiMarkers.forEach((m) => m.remove()); savedPoiMarkers.length = 0
+  savedPoiGroup.clear()
 }
 
 function installSavedPoiMarkers() {
-  if (!_maplibregl || !mapInstance) return
   clearSavedPoiMarkers()
   if (!props.state.showPois) return
   for (const poi of savedPoisStore.pois.value) {
     if (savedPoisStore.show[poi.category] === false) continue
-    const el = buildSavedPoiMarkerEl(poi)
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'bottom' })
-      .setLngLat([poi.lng, poi.lat])
-      .addTo(mapInstance)
-    savedPoiMarkerObservers.push(attachClimbMarkerScaleObserver(el))
-    savedPoiMarkers.push(marker)
+    savedPoiGroup.add(buildSavedPoiMarkerEl(poi), [poi.lng, poi.lat], { anchor: 'bottom' })
   }
 }
 
@@ -1120,7 +1295,7 @@ function showSavedPoiPopup(poi: SavedPoi) {
   if (!_maplibregl || !mapInstance) return
   closeSavedPoiPopup()
   const OFFSET = 0.00008
-  const mapsUrl = `https://www.google.com/maps?q=${poi.lat + OFFSET},${poi.lng + OFFSET}`
+  const mapsUrl = googleMapsUrl(poi.lat + OFFSET, poi.lng + OFFSET)
   // Caméra Street View orientée depuis le tracé vers le POI (s'il y a un tracé chargé).
   const svUrl = streetViewUrl(poi.lat, poi.lng, bearingFromRoute(routeStore.geometry.value, poi.lng, poi.lat))
   const wrap = document.createElement('div')
@@ -1135,19 +1310,9 @@ function showSavedPoiPopup(poi: SavedPoi) {
       <span>${escapeHtml(t('routes.delete_poi'))}</span>
     </button>`
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${escapeHtml(poi.name)}</span>
-      <button type="button" class="place-popup-close" aria-label="Fermer">×</button>
-    </div>
+    ${popupHeaderHtml(poi.name)}
     ${editActions}
-    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-brands fa-google" aria-hidden="true"></i>
-      <span>Google Maps</span>
-    </a>
-    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-      <span>${t('routes.street_view')}</span>
-    </a>`
+    ${popupMapLinksHtml(mapsUrl, svUrl)}`
   savedPoiPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([poi.lng, poi.lat])
     .setDOMContent(wrap)
@@ -1165,11 +1330,7 @@ function showSavedPoiPopup(poi: SavedPoi) {
   })
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
   if (svLink) {
-    checkSV(poi.lat, poi.lng).then((ok) => {
-      svLink.classList.toggle('place-popup-link--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
+    probeStreetViewLink(svLink, poi.lat, poi.lng)
   }
 }
 
@@ -1203,22 +1364,17 @@ async function savePlaceAsPoi(place: Place) {
 // / suppression) et au chargement d'un itinéraire (refreshRouteMarkers).
 
 function clearRouteMarkers() {
-  routeMarkerObservers.forEach((obs) => obs.disconnect()); routeMarkerObservers.length = 0
-  routeMarkerObjs.forEach((m) => m.remove()); routeMarkerObjs.length = 0
+  routeMarkerGroup.clear()
 }
 
 function installRouteMarkers() {
-  if (!_maplibregl || !mapInstance) return
   clearRouteMarkers()
   if (!props.state.showMarkers) return
   const editable = !routeStore.readOnly.value
   routeStore.markers.value.forEach((marker, idx) => {
-    const el = buildRouteMarkerEl(marker)
-    const m = new _maplibregl.Marker({ element: el, anchor: 'bottom-left', draggable: editable })
-      .setLngLat([marker.lng, marker.lat])
-      .addTo(mapInstance)
-    // Réduit le repère quand on dézoome (comme les cols), via --wp-scale.
-    routeMarkerObservers.push(attachClimbMarkerScaleObserver(el))
+    // Le groupe réduit le repère quand on dézoome (comme les cols), via --wp-scale.
+    const m = routeMarkerGroup.add(buildRouteMarkerEl(marker), [marker.lng, marker.lat], { anchor: 'bottom-left', draggable: editable })
+    if (!m) return
     if (editable) {
       // Fige le déplacement de la carte pendant le drag et écrit la nouvelle position
       // dans le store à la fin (le tableau reste indexé comme au rendu).
@@ -1230,7 +1386,6 @@ function installRouteMarkers() {
         overClimbMarker = false
       })
     }
-    routeMarkerObjs.push(m)
   })
 }
 
@@ -1270,7 +1425,7 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
   closeRouteMarkerPopup()
   const title = marker.label ? `${markerKindLabel(marker.kind)} — ${marker.label}` : markerKindLabel(marker.kind)
   const OFFSET = 0.00008
-  const mapsUrl = `https://www.google.com/maps?q=${marker.lat + OFFSET},${marker.lng + OFFSET}`
+  const mapsUrl = googleMapsUrl(marker.lat + OFFSET, marker.lng + OFFSET)
   // Navigation Google Maps en voiture depuis la position courante vers le repère
   // (l'app mobile prend le relais du lien si elle est installée) : les repères sont
   // des points d'accès (parking, départ), on s'y rend en voiture.
@@ -1289,23 +1444,11 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
       <span>${escapeHtml(t('routes.marker_delete'))}</span>
     </button>`
   wrap.innerHTML = `
-    <div class="place-popup-header">
-      <span class="place-popup-name">${escapeHtml(title)}</span>
-      <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
-    </div>
+    ${popupHeaderHtml(title)}
     ${editActions}
-    <a class="place-popup-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-brands fa-google" aria-hidden="true"></i>
-      <span>Google Maps</span>
-    </a>
-    <a class="place-popup-link" href="${dirUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
-      <span>${escapeHtml(t('routes.directions'))}</span>
-    </a>
-    <a class="place-popup-link place-popup-link--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-      <span>${t('routes.street_view')}</span>
-    </a>`
+    ${popupLinkHtml({ href: mapsUrl, icon: 'fa-brands fa-google', label: 'Google Maps' })}
+    ${popupLinkHtml({ href: dirUrl, icon: 'fa-solid fa-diamond-turn-right', label: t('routes.directions') })}
+    ${popupLinkHtml({ href: svUrl, icon: 'fa-solid fa-street-view', label: t('routes.street_view'), className: 'place-popup-link--streetview' })}`
   routeMarkerPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([marker.lng, marker.lat])
     .setDOMContent(wrap)
@@ -1331,11 +1474,7 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
   })
   const svLink = wrap.querySelector<HTMLElement>('.place-popup-link--streetview')
   if (svLink) {
-    checkSV(marker.lat, marker.lng).then((ok) => {
-      svLink.classList.toggle('place-popup-link--disabled', !ok)
-      if (!ok) svLink.setAttribute('aria-disabled', 'true')
-      else svLink.removeAttribute('aria-disabled')
-    })
+    probeStreetViewLink(svLink, marker.lat, marker.lng)
   }
 }
 
@@ -1349,219 +1488,6 @@ function setEditMode(mode: EditMode) {
   // Quitter le mode mesure efface la mesure en cours : elle n'est ni enregistrée ni
   // visible ailleurs, la garder afficherait une ligne orpheline sur la carte.
   if (mode !== 'measure') clearMeasure()
-}
-
-// ─── Mesure à vol d'oiseau ────────────────────────────────────────────────────
-
-function addMeasurePoint(lng: number, lat: number) {
-  measurePoints.value.push([lng, lat])
-  renderMeasure()
-}
-
-function undoMeasurePoint() {
-  measurePoints.value.pop()
-  measureSelectedIdx = -1
-  renderMeasure()
-}
-
-function clearMeasure() {
-  if (!measurePoints.value.length) return
-  measurePoints.value = []
-  measureSelectedIdx = -1
-  renderMeasure()
-}
-
-function removeMeasurePoint(idx: number) {
-  measurePoints.value.splice(idx, 1)
-  measureSelectedIdx = -1
-  renderMeasure()
-}
-
-// Ouvre la tooltip du point `idx` (-1 = aucune). Les index changent à chaque
-// insertion/suppression : on referme plutôt que de tenter de suivre le point.
-function selectMeasurePoint(idx: number) {
-  measureSelectedIdx = idx
-  measureMarkers.forEach((m, i) => m.getElement().classList.toggle('measure-marker--selected', i === idx))
-}
-
-// Insère un point au milieu du segment `idx` (entre les points idx et idx+1) et renvoie
-// son index. Sert au clic comme au glisser d'une poignée « + ».
-function insertMeasurePoint(idx: number): number {
-  const [a, b] = [measurePoints.value[idx], measurePoints.value[idx + 1]]
-  measurePoints.value.splice(idx + 1, 0, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2])
-  measureSelectedIdx = -1
-  renderMeasure()
-  return idx + 1
-}
-
-// Redessine ligne + poignées de la mesure. Tout est recréé (poignées peu nombreuses) :
-// les libellés dépendent de la distance cumulée, donc de tous les points qui précèdent,
-// et les index capturés dans les gestionnaires doivent suivre les insertions/suppressions.
-function renderMeasure() {
-  updateMeasureLayer()
-  while (measureMarkers.length) measureMarkers.pop().remove()
-  while (measureMidMarkers.length) measureMidMarkers.pop().remove()
-  if (!mapInstance || !_maplibregl) return
-  measurePoints.value.forEach((p, idx) => {
-    const el = document.createElement('div')
-    el.className = idx === measureSelectedIdx ? 'measure-marker measure-marker--selected' : 'measure-marker'
-    el.innerHTML = `
-      <span class="measure-marker-dot"></span>
-      <span class="measure-marker-label"></span>
-      <div class="measure-tooltip">
-        <button type="button" class="measure-tooltip-delete">
-          <i class="fa-solid fa-trash" aria-hidden="true"></i>
-          <span>${t('routes.measure_remove_point')}</span>
-        </button>
-        <div class="measure-tooltip-arrow"></div>
-      </div>`
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(p).addTo(mapInstance)
-    // Un clic sur la poignée ne doit pas traverser jusqu'à la carte (qui poserait un
-    // point de plus) : il ouvre/ferme la tooltip de suppression. Le clic droit supprime
-    // directement.
-    el.addEventListener('click', (ev: Event) => {
-      ev.stopPropagation()
-      if ((ev.target as Element).closest('.measure-tooltip')) return
-      selectMeasurePoint(idx === measureSelectedIdx ? -1 : idx)
-    })
-    el.querySelector('.measure-tooltip-delete')!.addEventListener('click', (ev: Event) => {
-      ev.stopPropagation(); ev.preventDefault()
-      removeMeasurePoint(idx)
-    })
-    el.addEventListener('contextmenu', (ev: Event) => {
-      ev.preventDefault(); ev.stopPropagation()
-      removeMeasurePoint(idx)
-    })
-    attachMeasureDrag(el, marker, {
-      start: () => { selectMeasurePoint(-1); return marker },
-      move: (lng, lat) => { measurePoints.value[idx] = [lng, lat]; updateMeasureLayer(); refreshMeasureLabels() },
-      end: renderMeasure,
-      // Tactile seulement (cf. attachMeasureDrag) : l'appui n'y produit pas de `click`.
-      tap: () => selectMeasurePoint(idx === measureSelectedIdx ? -1 : idx),
-    })
-    measureMarkers.push(marker)
-  })
-  // Poignées « + » au milieu de chaque segment : clic = insérer un point là, glisser =
-  // insérer et emmener le nouveau point sous le curseur.
-  for (let i = 0; i < measurePoints.value.length - 1; i++) {
-    const el = document.createElement('div')
-    el.className = 'measure-mid-marker'
-    el.innerHTML = '<i class="fa-solid fa-plus"></i>'
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(midOfMeasureSegment(i)).addTo(mapInstance)
-    el.addEventListener('click', (ev: Event) => { ev.stopPropagation(); insertMeasurePoint(i) })
-    let dragIdx = -1
-    attachMeasureDrag(el, marker, {
-      // Le glissement promeut la poignée en vrai point : renderMeasure recrée les
-      // marqueurs, on rend le nouveau pour que le glissement continue sur lui.
-      start: () => { dragIdx = insertMeasurePoint(i); return measureMarkers[dragIdx] },
-      move: (lng, lat) => { measurePoints.value[dragIdx] = [lng, lat]; updateMeasureLayer(); refreshMeasureLabels() },
-      end: renderMeasure,
-      tap: () => insertMeasurePoint(i),
-    })
-    measureMidMarkers.push(marker)
-  }
-}
-
-function midOfMeasureSegment(i: number): LngLat {
-  const [a, b] = [measurePoints.value[i], measurePoints.value[i + 1]]
-  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
-}
-
-// Mise à jour légère pendant un glissement : les marqueurs restent en place (les
-// recréer casserait le geste), seuls leur libellé et la position des « + » changent.
-function refreshMeasureLabels() {
-  measureMarkers.forEach((m, idx) => {
-    const lbl = m.getElement().querySelector('.measure-marker-label')
-    if (lbl) lbl.textContent = idx === 0 ? t('routes.measure_start') : formatDistancePrecise(measureCumM.value[idx])
-  })
-  measureMidMarkers.forEach((m, i) => {
-    if (i < measurePoints.value.length - 1) m.setLngLat(midOfMeasureSegment(i))
-  })
-}
-
-// Glisser-déposer d'une poignée de mesure (souris + tactile), calqué sur
-// attachWaypointDrag : pan de la carte désactivé le temps du geste, suivi du curseur en
-// direct, et neutralisation du clic de relâchement (il poserait un point de plus).
-// `start` peut renvoyer un autre marqueur à déplacer que celui saisi (poignée « + »).
-function attachMeasureDrag(
-  el: HTMLElement,
-  marker: any,
-  hooks: { start?: () => any; move: (lng: number, lat: number) => void; end: () => void; tap?: () => void },
-) {
-  const unproject = (clientX: number, clientY: number) => {
-    const rect = mapInstance.getContainer().getBoundingClientRect()
-    return mapInstance.unproject([clientX - rect.left, clientY - rect.top])
-  }
-  // `isTouch` : sur un appui tactile, `touchstart` est annulé (preventDefault) donc
-  // aucun `click` n'est émis — c'est `tap` qui rend l'appui. À la souris, le `click`
-  // arrive normalement et c'est lui qui agit : déclencher `tap` en plus ferait double.
-  const endDrag = (moved: boolean, isTouch: boolean) => {
-    mapInstance.dragPan.enable()
-    el.style.cursor = ''
-    if (!moved) { if (isTouch) hooks.tap?.(); return }
-    // Le relâchement produit un clic sur la carte si le curseur a quitté la poignée.
-    suppressNextMapClick = true
-    setTimeout(() => { suppressNextMapClick = false }, 50)
-    hooks.end()
-  }
-
-  el.addEventListener('mousedown', (ev: MouseEvent) => {
-    if (ev.button !== 0) return
-    ev.preventDefault(); ev.stopPropagation()
-    let moved = false
-    let target = marker
-    mapInstance.dragPan.disable()
-    el.style.cursor = 'grabbing'
-    const onMove = (e: MouseEvent) => {
-      if (!moved) { moved = true; target = hooks.start?.() ?? marker }
-      const ll = unproject(e.clientX, e.clientY)
-      target.setLngLat([ll.lng, ll.lat])
-      hooks.move(ll.lng, ll.lat)
-    }
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-      endDrag(moved, false)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  })
-
-  el.addEventListener('touchstart', (ev: TouchEvent) => {
-    if (ev.touches.length !== 1) return
-    ev.preventDefault(); ev.stopPropagation()
-    const start = ev.touches[0]
-    let moved = false
-    let target = marker
-    mapInstance.dragPan.disable()
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return
-      e.preventDefault()
-      const touch = e.touches[0]
-      const dx = touch.clientX - start.clientX, dy = touch.clientY - start.clientY
-      // Seuil anti-tremblement : sous 5 px on considère que c'est un appui, pas un glissé.
-      if (!moved && dx * dx + dy * dy < 25) return
-      if (!moved) { moved = true; target = hooks.start?.() ?? marker }
-      const ll = unproject(touch.clientX, touch.clientY)
-      target.setLngLat([ll.lng, ll.lat])
-      hooks.move(ll.lng, ll.lat)
-    }
-    const onTouchEnd = () => {
-      el.removeEventListener('touchmove', onTouchMove)
-      el.removeEventListener('touchend', onTouchEnd)
-      el.removeEventListener('touchcancel', onTouchEnd)
-      endDrag(moved, true)
-    }
-    el.addEventListener('touchmove', onTouchMove, { passive: false })
-    el.addEventListener('touchend', onTouchEnd)
-    el.addEventListener('touchcancel', onTouchEnd)
-  }, { passive: false })
-}
-
-function updateMeasureLayer() {
-  const src = mapInstance?.getSource('builder-measure')
-  if (!src) return
-  src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: measurePoints.value } })
 }
 
 // Ouvre le dialogue de création (type + libellé) au point cliqué en mode « poser ».
@@ -1665,32 +1591,9 @@ function fitBounds(sw: [number, number], ne: [number, number], opts = {}) {
 // ─── Waypoints ────────────────────────────────────────────────────────────────
 
 function recomputeWaypointGeomIndices() {
-  const wps = routeStore.waypoints.value
-  const geom = routeStore.geometry.value
-  if (!wps.length || !geom.length) { waypointGeomIndices = []; return }
-  // La géométrie routée parcourt les waypoints dans l'ordre : on cherche le sommet
-  // le plus proche de chaque waypoint en repartant de l'index du précédent, ce qui
-  // garantit des index monotones croissants. Sinon, sur un itinéraire en boucle où
-  // le dernier waypoint = le premier, il se rattacherait au début du tracé (index 0)
-  // et le tronçon final deviendrait un intervalle vide, cassant l'insertion de point.
-  let from = 0
-  waypointGeomIndices = wps.map((w, wi) => {
-    // Le premier waypoint peut chercher sur tout le tracé ; les suivants repartent
-    // de l'index du précédent pour rester monotones.
-    const start = wi === 0 ? 0 : from
-    let best = start, bestDist = Infinity
-    for (let i = start; i < geom.length; i++) {
-      const dx = geom[i][0] - w.lng, dy = geom[i][1] - w.lat
-      const d = dx * dx + dy * dy
-      if (d < bestDist) { bestDist = d; best = i }
-    }
-    from = best
-    return best
-  })
+  waypointGeomIndices = assignWaypointGeomIndices(routeStore.waypoints.value, routeStore.geometry.value)
 }
 
-// Bloque tout ajout de point au-delà du plafond serveur (sinon le waypoint serait
-// tronqué silencieusement à la sauvegarde). Affiche une erreur et renvoie true.
 function atWaypointLimit(): boolean {
   if (routeStore.waypoints.value.length >= MAX_WAYPOINTS) {
     routeStore.error.value = t('routes.error_max_waypoints', { count: MAX_WAYPOINTS })
@@ -1787,28 +1690,93 @@ function addReturnTo(idx: number) {
   emit('waypoints-changed')
 }
 
-// Insère un point à l'endroit exact du « + » (point projeté sur l'arête `edgeIdx`),
-// dans le tronçon de waypoints qui contient cette arête. L'arête j relie geom[j]→geom[j+1] ;
-// le tronçon entre waypoint i et i+1 couvre les arêtes [wgi[i], wgi[i+1][.
-function insertWaypointAtHover(hit: { lng: number; lat: number; edgeIdx: number }) {
-  if (atWaypointLimit()) return
-  // Les index ne sont rafraîchis que par un routage réussi : après un échec BRouter ils
-  // restent désynchronisés des waypoints, et l'insertion se bloquerait en silence.
+// Rang d'insertion (index dans le tableau de waypoints) pour une arête donnée : le tronçon
+// entre waypoint i et i+1 couvre les arêtes [wgi[i], wgi[i+1][, donc une arête dans ce
+// tronçon s'insère en i+1. Sert à l'insertion ET à l'aperçu « Point N » au survol.
+// Les index ne sont rafraîchis que par un routage réussi : on les recalcule ici pour ne
+// pas dépendre d'un état obsolète (après un échec BRouter, l'insertion se bloquerait sinon
+// en silence). Renvoie la fin du tableau si les index sont indisponibles.
+function insertPositionForEdge(edgeIdx: number): number {
   recomputeWaypointGeomIndices()
-  if (waypointGeomIndices.length !== routeStore.waypoints.value.length) return
-  let insertAt = routeStore.waypoints.value.length
-  for (let i = 0; i < waypointGeomIndices.length - 1; i++) {
-    if (hit.edgeIdx >= waypointGeomIndices[i] && hit.edgeIdx < waypointGeomIndices[i + 1]) { insertAt = i + 1; break }
-  }
+  return waypointPosForEdge(edgeIdx, waypointGeomIndices, routeStore.waypoints.value.length)
+}
+
+// Insère un point à un rang donné (index dans le tableau de waypoints), aux coordonnées
+// fournies. Cœur commun de l'insertion sur le tracé (« + », ou choix de passe).
+function insertWaypointAt(insertAt: number, lng: number, lat: number) {
   const next = routeStore.waypoints.value.slice()
-  // Si l'un des deux points encadrants est libre, le point inséré l'est aussi :
-  // on prolonge la nature du tronçon plutôt que d'y forcer un bout routé.
-  const inheritFree = next[insertAt - 1]?.free === true || next[insertAt]?.free === true
-  next.splice(insertAt, 0, inheritFree ? { lng: hit.lng, lat: hit.lat, free: true } : { lng: hit.lng, lat: hit.lat })
+  next.splice(insertAt, 0, inheritsFree(next, insertAt) ? { lng, lat, free: true } : { lng, lat })
   routeStore.waypoints.value = next
   hideHoverMarker()
   refreshWaypointMarkers()
   emit('waypoints-changed')
+}
+
+// Insère un point à l'endroit exact du « + » (point projeté sur l'arête `edgeIdx`),
+// dans le tronçon de waypoints qui contient cette arête.
+function insertWaypointAtHover(hit: { lng: number; lat: number; edgeIdx: number }) {
+  if (atWaypointLimit()) return
+  insertWaypointAt(insertPositionForEdge(hit.edgeIdx), hit.lng, hit.lat)
+}
+
+// Passes candidates sous un point cliqué. Un tracé qui repasse au même endroit superpose
+// plusieurs arêtes (souvent des sommets identiques, même voie OSM routée deux fois) au
+// pixel près : chacune appartient à un tronçon de waypoints DIFFÉRENT, donc à un rang
+// d'insertion différent. On regroupe les arêtes candidates (à quelques pixels du clic) par
+// rang — une passe couvre plusieurs arêtes — en gardant l'arête la plus proche du clic, et
+// on renvoie une entrée par passe : point projeté + rang d'insertion. Plusieurs entrées =
+// ambiguïté à trancher par l'utilisateur.
+function insertionCandidatesAt(point: { x: number; y: number }): Array<{ lng: number; lat: number; insertAt: number }> {
+  if (!mapInstance || routeStore.geometry.value.length < 2) return []
+  const px = routeStore.geometry.value.map((pt) => mapInstance.project([pt[0], pt[1]]))
+  recomputeWaypointGeomIndices()
+  const passes = insertionPasses(px, point, waypointGeomIndices, routeStore.waypoints.value.length)
+  // Retour en coordonnées géographiques : le point projeté vit sur l'arête, entre ses deux
+  // sommets écran (une déprojection par passe, pas une par arête candidate).
+  return passes.map(({ edgeIdx, t, insertAt }) => {
+    const a = px[edgeIdx], b = px[edgeIdx + 1]
+    const ll = mapInstance.unproject([a.x + t * (b.x - a.x), a.y + t * (b.y - a.y)])
+    return { lng: ll.lng, lat: ll.lat, insertAt }
+  })
+}
+
+function closeInsertChoicePopup() {
+  if (insertChoicePopup) { insertChoicePopup.remove(); insertChoicePopup = null }
+}
+
+// Popup de choix quand plusieurs passes se superposent sous le clic : un bouton par passe,
+// libellé par le numéro du point qui serait créé. Le clic sur un bouton insère ce point.
+function showInsertChoicePopup(cands: Array<{ lng: number; lat: number; insertAt: number }>) {
+  if (!_maplibregl || !mapInstance || !cands.length) return
+  closeInsertChoicePopup()
+  const anchor = cands[0]
+  const wrap = document.createElement('div')
+  wrap.className = 'place-popup insert-choice-popup'
+  const buttons = cands.map((c, i) =>
+    `<button type="button" class="wp-tooltip-action insert-choice-btn" data-i="${i}">
+       <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+       <span>${t('routes.insert_as_point', { n: c.insertAt + 1 })}</span>
+     </button>`).join('')
+  wrap.innerHTML = `
+    <div class="place-popup-header">
+      <span class="place-popup-name">${t('routes.insert_choice_title')}</span>
+      <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
+    </div>
+    ${buttons}
+  `
+  insertChoicePopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
+    .setLngLat([anchor.lng, anchor.lat])
+    .setDOMContent(wrap)
+    .addTo(mapInstance)
+  wrap.querySelector('.place-popup-close')?.addEventListener('click', closeInsertChoicePopup)
+  wrap.querySelectorAll('.insert-choice-btn').forEach((btn) => {
+    btn.addEventListener('click', (ev: any) => {
+      ev.stopPropagation()
+      const c = cands[Number((ev.currentTarget as HTMLElement).dataset.i)]
+      if (c) insertWaypointAt(c.insertAt, c.lng, c.lat)
+      closeInsertChoicePopup()
+    })
+  })
 }
 
 // Insère un point quelconque (POI ou clic droit) dans le tracé, au plus proche : on
@@ -1824,20 +1792,10 @@ function insertWaypointSmart(lng: number, lat: number) {
     addWaypoint(lng, lat)
     return
   }
-  let nearIdx = 0, bestDist = Infinity
-  for (let i = 0; i < geom.length; i++) {
-    const d = haversine([lng, lat], geom[i])
-    if (d < bestDist) { bestDist = d; nearIdx = i }
-  }
-  let insertAt = wps.length
-  for (let i = 0; i < waypointGeomIndices.length - 1; i++) {
-    if (nearIdx >= waypointGeomIndices[i] && nearIdx <= waypointGeomIndices[i + 1]) { insertAt = i + 1; break }
-  }
+  const nearIdx = nearestGeomIndex([lng, lat], geom).idx
+  const insertAt = waypointPosForVertex(nearIdx, waypointGeomIndices, wps.length)
   const next = wps.slice()
-  // Si l'un des deux points encadrants est libre, le point inséré l'est aussi :
-  // on prolonge la nature du tronçon plutôt que d'y forcer un bout routé.
-  const inheritFree = next[insertAt - 1]?.free === true || next[insertAt]?.free === true
-  next.splice(insertAt, 0, inheritFree ? { lng, lat, free: true } : { lng, lat })
+  next.splice(insertAt, 0, inheritsFree(next, insertAt) ? { lng, lat, free: true } : { lng, lat })
   routeStore.waypoints.value = next
   deselectAll()
   refreshWaypointMarkers()
@@ -1848,7 +1806,7 @@ function nearestGeomIndexAt(point: { x: number; y: number }) {
   if (!mapInstance || !routeStore.geometry.value.length) return null
   const features = mapInstance.queryRenderedFeatures(
     [[point.x - 6, point.y - 6], [point.x + 6, point.y + 6]],
-    { layers: ['builder-route-line', 'builder-route-straight-line'] },
+    { layers: ['builder-route-line', 'builder-route-straight-line', BASE_LAYER] },
   )
   if (!features.length) return null
   let best = -1, bestDist = Infinity
@@ -1873,7 +1831,7 @@ function nearestPointOnRouteAt(point: { x: number; y: number }) {
   if (!mapInstance || routeStore.geometry.value.length < 2) return null
   const features = mapInstance.queryRenderedFeatures(
     [[point.x - 6, point.y - 6], [point.x + 6, point.y + 6]],
-    { layers: ['builder-route-line', 'builder-route-straight-line'] },
+    { layers: ['builder-route-line', 'builder-route-straight-line', BASE_LAYER] },
   )
   if (!features.length) return null
   const geom = routeStore.geometry.value
@@ -1920,6 +1878,7 @@ function selectWaypoint(idx: number) {
   if (selectedWpIdx === idx) {
     selectedWpIdx = -1
     waypointMarkers.forEach((m) => { if (m) m.getElement().style.zIndex = '' })
+    regroupWaypointMarkers()
     return
   }
   selectedWpIdx = idx
@@ -1928,9 +1887,11 @@ function selectWaypoint(idx: number) {
     el.classList.add('wp-marker--selected')
     el.style.zIndex = '9999'
   }
+  // Le point sélectionné doit rester visible : il prend la tête de son amas.
+  regroupWaypointMarkers()
   const wp = routeStore.waypoints.value[idx]
   if (wp) {
-    checkSV(wp.lat, wp.lng).then((ok) => {
+    checkStreetView(wp.lat, wp.lng).then((ok) => {
       if (selectedWpIdx === idx && waypointMarkers[idx]) applySVState(waypointMarkers[idx].getElement(), ok)
     })
   }
@@ -1943,6 +1904,83 @@ function deselectAll() {
     m.getElement().style.zIndex = ''
   })
   selectedWpIdx = -1
+  regroupWaypointMarkers()
+}
+
+// Écart écran en deçà duquel deux points sont regroupés. Volontairement la MOITIÉ du
+// diamètre d'un marqueur (.wp-marker fait 28 px, mis à l'échelle par --wp-scale) : on tolère
+// qu'ils se chevauchent à moitié plutôt que d'exiger qu'ils ne se touchent pas. Un seuil
+// deux fois plus petit sépare les points un niveau de zoom entier plus tôt — chaque niveau
+// double les distances à l'écran. Deux disques à demi superposés restent distincts et
+// cliquables ; en deçà, les numéros deviennent illisibles et regrouper reprend son intérêt.
+const CLUSTER_GAP_PX = 13
+
+// Regroupement à l'écran des points de passage. En dézoomant, plusieurs points tombent sur
+// les mêmes pixels : le marqueur dessiné en dernier masquait alors purement et simplement
+// les autres, sans que rien ne le signale — on croyait voir un point là où il y en avait
+// cinq, et on ne pouvait attraper que celui du dessus. On n'en affiche donc plus qu'un par
+// amas, portant le nombre de points qu'il représente ; les autres réapparaissent en zoomant.
+//
+// Les marqueurs ne sont pas reconstruits (leurs tooltips sont lourdes) : on ne fait
+// qu'ajouter ou retirer une classe et un attribut. Le regroupement ne dépendant que de la
+// caméra, il est recalculé à chaque fin de mouvement.
+// Représentant de chaque marqueur dans son amas (−1 s'il est lui-même affiché), tel que
+// rendu par le dernier regroupWaypointMarkers. Lu au clic pour retrouver les points cachés.
+let waypointMergedInto: number[] = []
+
+function regroupWaypointMarkers() {
+  if (!mapInstance || !waypointMarkers.length) return
+  const scale = parseFloat(mapInstance.getContainer().style.getPropertyValue(MARKER_SCALE_VAR) || '1')
+  const pts = waypointMarkers.map((m) => (m ? mapInstance.project(m.getLngLat()) : null))
+  // Le point sélectionné (tooltip ouverte) est prioritaire : il représente son amas au lieu
+  // d'être masqué par un voisin, sinon la tooltip disparaîtrait sous le curseur.
+  const { mergedInto, hides } = mergeOverlappingMarkers(pts, CLUSTER_GAP_PX * (scale || 1), selectedWpIdx)
+  waypointMergedInto = mergedInto
+  waypointMarkers.forEach((m, i) => {
+    if (!m) return
+    const el = m.getElement() as HTMLElement
+    el.classList.toggle('wp-marker--merged', mergedInto[i] >= 0)
+    if (hides[i] > 0) el.dataset.merged = String(hides[i])
+    else delete el.dataset.merged
+  })
+}
+
+// Nombre de niveaux de zoom qu'un clic sur un amas peut franchir d'un coup. Deux points
+// rigoureusement confondus ne se sépareront jamais : mieux vaut avancer par paliers que
+// foncer au zoom maximal pour rien. Un amas qui résiste se re-clique.
+const CLUSTER_ZOOM_STEP = 4
+
+// Clic (ou tap) sur un point de passage. Sur un marqueur d'amas, ouvrir la tooltip du seul
+// point visible n'aurait guère de sens : on zoome sur l'amas jusqu'à ce que ses points se
+// séparent. Le badge disparaît alors de lui-même et le clic reprend son rôle normal.
+// Indices des points que le marqueur `idx` représente à l'écran, lui compris : un seul
+// élément s'il est isolé, tout son amas s'il en cache d'autres.
+function clusterMembers(idx: number): number[] {
+  const n = routeStore.waypoints.value.length
+  if (waypointMergedInto.length !== n) return [idx]
+  const members = [idx]
+  for (let i = 0; i < n; i++) if (waypointMergedInto[i] === idx) members.push(i)
+  return members
+}
+
+function activateWaypoint(idx: number) {
+  if (!mapInstance) return
+  // Point déjà ouvert : le clic le referme, comme partout ailleurs. Un amas dont la tooltip
+  // est ouverte (on a dézoomé après l'avoir sélectionné) resterait sinon impossible à fermer
+  // autrement que par sa croix.
+  if (selectedWpIdx === idx) { selectWaypoint(idx); return }
+  const members = clusterMembers(idx)
+  if (members.length < 2) { selectWaypoint(idx); return }
+  const lls = members.map((i) => waypointMarkers[i].getLngLat())
+  const lngs = lls.map((l) => l.lng), lats = lls.map((l) => l.lat)
+  // Marge proportionnée à la carte : 80 px de chaque côté n'ont pas de sens sur la vue
+  // réduite d'un téléphone.
+  const box = mapInstance.getContainer()
+  const pad = Math.max(20, Math.min(80, Math.floor(Math.min(box.clientWidth, box.clientHeight) / 6)))
+  mapInstance.fitBounds(
+    [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+    { padding: pad, maxZoom: mapInstance.getZoom() + CLUSTER_ZOOM_STEP, duration: 500 },
+  )
 }
 
 async function copyCoords(btn: HTMLElement, text: string) {
@@ -1977,6 +2015,14 @@ function refreshWaypointMarkers() {
   // tooltip informatif (coordonnées, Google Maps, Street View, Komoot), mais sans les
   // éléments d'édition (déplacement, réordonnancement, inversion, libération, suppression).
   const ro = routeStore.readOnly.value
+  // Place chaque marqueur sur la voie de son passage là où le tracé se dédouble
+  // (waypointDisplayPos) : il faut pour cela savoir à quel sommet de la géométrie chaque
+  // point correspond. Sur le chemin normal (recomputeRoute) les index viennent d'être
+  // recalculés ; on ne refait le calcul — une programmation dynamique sur toute la
+  // géométrie — que s'ils sont manifestement périmés.
+  if (displayHasOffset && waypointGeomIndices.length !== routeStore.waypoints.value.length) {
+    recomputeWaypointGeomIndices()
+  }
   routeStore.waypoints.value.forEach((w, idx) => {
     const el = document.createElement('div')
     el.className = w.free ? 'wp-marker wp-marker--free' : 'wp-marker'
@@ -2012,7 +2058,7 @@ function refreshWaypointMarkers() {
             <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lng</span>${w.lng.toFixed(6)}</span>
           </button>
         </div>
-        <a class="wp-tooltip-action" href="https://www.google.com/maps?q=${w.lat},${w.lng}" target="_blank" rel="noopener noreferrer">
+        <a class="wp-tooltip-action" href="${googleMapsUrl(w.lat, w.lng)}" target="_blank" rel="noopener noreferrer">
           <i class="fa-brands fa-google" aria-hidden="true"></i>
           <span>Google Maps</span>
         </a>
@@ -2046,13 +2092,13 @@ function refreshWaypointMarkers() {
       </div>
       <span class="wp-marker-num">${idx + 1}</span>
     `
-    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([w.lng, w.lat]).addTo(mapInstance)
+    const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(waypointDisplayPos(idx, w)).addTo(mapInstance)
     if (!ro) attachWaypointDrag(el, marker, idx)
     el.addEventListener('click', (ev: any) => {
       ev.stopPropagation()
       if (suppressNextWpClick) { suppressNextWpClick = false; return }
       if (ev.target.closest('.wp-tooltip')) return
-      selectWaypoint(idx)
+      activateWaypoint(idx)
     })
     el.querySelector('.wp-tooltip-close')!.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     // Actions purement informatives : présentes aussi en lecture seule (vue partagée).
@@ -2104,6 +2150,25 @@ function refreshWaypointMarkers() {
     }
     waypointMarkers.push(marker)
   })
+  regroupWaypointMarkers()
+}
+
+// Fin d'un glisser-déposer de marqueur. Un marqueur d'amas représente plusieurs points
+// empilés : on les emmène TOUS, du même écart. N'emporter que celui du dessus disloquerait
+// l'amas en silence — on croit déplacer ce qu'on voit, c'est-à-dire l'ensemble, et les
+// points restés en arrière ne réapparaîtraient qu'en zoomant, le tracé déjà refait.
+// Le point saisi, lui, atterrit exactement sous le curseur.
+function dropWaypointAt(idx: number, lng: number, lat: number) {
+  const wps = routeStore.waypoints.value
+  const from = wps[idx]
+  if (!from) return
+  const dLng = lng - from.lng, dLat = lat - from.lat
+  const next = wps.slice()
+  for (const i of clusterMembers(idx)) {
+    next[i] = { ...next[i], lng: next[i].lng + dLng, lat: next[i].lat + dLat }
+  }
+  routeStore.waypoints.value = next
+  emit('waypoints-changed')
 }
 
 function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
@@ -2132,10 +2197,7 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       suppressNextWpClick = true
       setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 50)
       const pos = marker.getLngLat()
-      const next = routeStore.waypoints.value.slice()
-      next[idx] = { ...next[idx], lng: pos.lng, lat: pos.lat }
-      routeStore.waypoints.value = next
-      emit('waypoints-changed')
+      dropWaypointAt(idx, pos.lng, pos.lat)
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -2164,14 +2226,11 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       el.removeEventListener('touchend', onTouchEnd)
       el.removeEventListener('touchcancel', onTouchEnd)
       mapInstance.dragPan.enable()
-      if (!moved) { selectWaypoint(idx); return }
+      if (!moved) { activateWaypoint(idx); return }
       suppressNextWpClick = true
       setTimeout(() => { suppressNextWpClick = false }, 50)
       const pos = marker.getLngLat()
-      const next = routeStore.waypoints.value.slice()
-      next[idx] = { ...next[idx], lng: pos.lng, lat: pos.lat }
-      routeStore.waypoints.value = next
-      emit('waypoints-changed')
+      dropWaypointAt(idx, pos.lng, pos.lat)
     }
     el.addEventListener('touchmove', onTouchMove, { passive: false })
     el.addEventListener('touchend', onTouchEnd)
@@ -2181,83 +2240,11 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
 
 // ─── Street View ──────────────────────────────────────────────────────────────
 
-function svCacheKey(lat: number, lng: number) { return `${lat.toFixed(4)},${lng.toFixed(4)}` }
-
-function checkSV(lat: number, lng: number): Promise<boolean> {
-  const key = svCacheKey(lat, lng)
-  if (svCache.has(key)) return Promise.resolve(svCache.get(key)!)
-  return new Promise<boolean>((resolve) => {
-    const cb = `_sv${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
-    const s = document.createElement('script')
-    let settled = false
-    const finish = (v: boolean) => {
-      if (settled) return; settled = true
-      clearTimeout(timer); delete (window as any)[cb]; s.remove()
-      svCache.set(key, v); resolve(v)
-    }
-    const timer = setTimeout(() => finish(true), 4000)
-    ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
-    s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
-    s.onerror = () => finish(true)
-    document.head.appendChild(s)
-  })
-}
-
+// Grise le lien Street View DANS la tooltip d'un point d'ancrage (convention de classes
+// propre à ces tooltips). Le lien est re-cherché au moment de la réponse : la sélection a
+// pu changer entre-temps, c'est à l'appelant de vérifier qu'il s'agit encore du bon point.
 function applySVState(markerEl: HTMLElement, available: boolean) {
-  const link = markerEl.querySelector<HTMLElement>('.wp-tooltip-action--streetview')
-  if (!link) return
-  link.classList.toggle('wp-tooltip-action--disabled', !available)
-  if (!available) link.setAttribute('aria-disabled', 'true')
-  else link.removeAttribute('aria-disabled')
-}
-
-// ─── Location ─────────────────────────────────────────────────────────────────
-
-function installLocationLayers(coords: [number, number], accuracy: number) {
-  if (!mapInstance) return
-  const data = { type: 'Feature' as const, geometry: { type: 'Polygon' as const, coordinates: [generateCircle(coords, accuracy)] } }
-  if (!mapInstance.getSource('user-location')) {
-    mapInstance.addSource('user-location', { type: 'geojson', data })
-    mapInstance.addLayer({ id: 'user-location-fill', type: 'fill', source: 'user-location', paint: { 'fill-color': '#4285f4', 'fill-opacity': 0.12 } })
-    mapInstance.addLayer({ id: 'user-location-stroke', type: 'line', source: 'user-location', paint: { 'line-color': '#4285f4', 'line-width': 1.5, 'line-opacity': 0.5 } })
-  } else { mapInstance.getSource('user-location').setData(data) }
-}
-
-function showLocation(coords: [number, number], accuracy: number) {
-  if (!mapInstance || !_maplibregl) return
-  lastLocationCoords = coords; lastLocationAccuracy = accuracy
-  installLocationLayers(coords, accuracy)
-  if (locationMarker) { locationMarker.setLngLat(coords) } else {
-    const el = document.createElement('div')
-    el.className = 'user-location-dot'
-    locationMarker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(coords).addTo(mapInstance)
-  }
-  locationVisible.value = true
-}
-
-function hideLocation() {
-  if (locationMarker) { locationMarker.remove(); locationMarker = null }
-  lastLocationCoords = null
-  if (mapInstance) {
-    if (mapInstance.getLayer('user-location-stroke')) mapInstance.removeLayer('user-location-stroke')
-    if (mapInstance.getLayer('user-location-fill')) mapInstance.removeLayer('user-location-fill')
-    if (mapInstance.getSource('user-location')) mapInstance.removeSource('user-location')
-  }
-  locationVisible.value = false
-}
-
-async function toggleLocation() {
-  if (locationVisible.value) { hideLocation(); return }
-  locating.value = true
-  try {
-    const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-      navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 })
-    })
-    const coords: [number, number] = [pos.coords.longitude, pos.coords.latitude]
-    mapInstance?.flyTo({ center: coords, zoom: 14, duration: 800 })
-    showLocation(coords, pos.coords.accuracy)
-  } catch { /* permission refusée */ }
-  finally { locating.value = false }
+  applyStreetViewState(markerEl.querySelector<HTMLElement>('.wp-tooltip-action--streetview'), available, 'wp-tooltip-action--disabled')
 }
 
 // ─── Map style ────────────────────────────────────────────────────────────────
@@ -2292,7 +2279,7 @@ function applyMapStyle(id: string) {
   mapInstance.once('style.load', () => {
     installRouteLayer(); installOverlays()
     updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); updateMeasureLayer(); installClimbMarkers(); installPlaceMarkers(); installSavedPoiMarkers()
-    if (locationVisible.value && lastLocationCoords) installLocationLayers(lastLocationCoords, lastLocationAccuracy)
+    reinstallLocation()
     if (props.state.is3D) {
       if (!mapInstance.getSource('terrain-dem')) {
         mapInstance.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
@@ -2352,7 +2339,7 @@ watch(() => props.state.overlayOpacity, applyOverlayOpacity)
 // (installRouteLayer), d'où un simple repeint ici.
 function applyRouteOpacity() {
   if (!mapInstance) return
-  for (const id of ['builder-route-line', 'builder-route-straight-line']) {
+  for (const id of ['builder-route-line', 'builder-route-straight-line', BASE_LAYER, FLOW_HALO_LAYER, FLOW_LAYER]) {
     if (mapInstance.getLayer(id)) mapInstance.setPaintProperty(id, 'line-opacity', props.state.routeOpacity)
   }
 }
@@ -2489,69 +2476,17 @@ function toggleReadOnly() {
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
-// Liste ordonnée des pays privilégiés, configurée dans le profil
-// (search.country_codes). L'ordre = la priorité d'affichage ; on la passe aussi
-// en `countrycodes` à Nominatim pour qu'il ne renvoie d'abord que ces pays.
-const PREFERRED_COUNTRIES = userPreferences().search.country_codes
-const PREFERRED_COUNTRY_CODES = PREFERRED_COUNTRIES.join(',')
-// Étendre la recherche au monde entier quand aucun résultat n'est trouvé dans les
-// pays privilégiés (réglage du profil ; false par défaut).
-const WORLDWIDE_FALLBACK = userPreferences().search.worldwide_fallback
-
-// Rang de priorité d'un pays = sa position dans la liste du profil ; les pays
-// hors liste (repli mondial) passent après tous les autres.
-function searchCountryPriority(cc: string): number {
-  const i = PREFERRED_COUNTRIES.indexOf(cc)
-  return i === -1 ? PREFERRED_COUNTRIES.length : i
-}
-
-async function fetchPlaces(q: string, countrycodes?: string): Promise<any[]> {
-  let url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=10&addressdetails=1`
-  if (countrycodes) url += `&countrycodes=${countrycodes}`
-  const res = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) return []
-  const raw = await res.json()
-  return Array.isArray(raw) ? raw : []
-}
-
-async function searchPlaces(q: string) {
-  searching.value = true
-  try {
-    // On restreint d'abord aux pays privilégiés ; si Nominatim ne renvoie rien
-    // (lieu hors zone) et que le repli mondial est activé, on refait une recherche
-    // mondiale. Liste vide ⇒ recherche mondiale d'emblée (pas de second appel).
-    let data = await fetchPlaces(q, PREFERRED_COUNTRY_CODES)
-    if (data.length === 0 && PREFERRED_COUNTRY_CODES && WORLDWIDE_FALLBACK) data = await fetchPlaces(q)
-    searchResults.value = data
-      .sort((a, b) => searchCountryPriority(a.address?.country_code ?? '') - searchCountryPriority(b.address?.country_code ?? ''))
-      .slice(0, 6)
-    searchOpen.value = searchResults.value.length > 0
-  } catch { searchResults.value = []; searchOpen.value = false }
-  finally { searching.value = false }
-}
-
-watch(searchQuery, (q) => {
-  if (searchTimer) clearTimeout(searchTimer)
-  const trimmed = q.trim()
-  if (trimmed.length < 3) { searchResults.value = []; searchOpen.value = false; return }
-  searchTimer = setTimeout(() => searchPlaces(trimmed), 350)
-})
-
-function pickPlace(p: any) {
+// Résultat choisi : on recadre la carte dessus et on referme la liste. Le créateur ne fait
+// que déplacer la vue — poser un point reste un geste explicite de l'utilisateur.
+function pickPlace(p: PlaceResult) {
   searchOpen.value = false
-  searchQuery.value = p.display_name.split(',')[0]
-  if (!mapInstance) return
-  if (p.boundingbox?.length === 4) {
-    const [minLat, maxLat, minLng, maxLng] = p.boundingbox.map(parseFloat)
-    mapInstance.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800, maxZoom: 14 })
-  } else {
-    const lat = parseFloat(p.lat), lng = parseFloat(p.lon)
-    if (!Number.isNaN(lat) && !Number.isNaN(lng)) mapInstance.flyTo({ center: [lng, lat], zoom: 13, duration: 800 })
-  }
+  searchQuery.value = placeShortName(p)
+  flyToPlace(mapInstance, p)
 }
 
 function clearSearch() {
-  searchQuery.value = ''; searchResults.value = []; searchOpen.value = false; searchExpanded.value = false
+  resetSearch()
+  searchExpanded.value = false
 }
 
 async function openSearch() {
@@ -2559,6 +2494,31 @@ async function openSearch() {
   await nextTick()
   searchInputEl.value?.focus()
 }
+
+// ─── Fermeture des menus au geste extérieur ───────────────────────────────────
+
+// Les menus de la toolbar (fond de carte, « Affichage », « Mode d'édition ») ne sont pas
+// des dropdowns Bootstrap : rien ne les refermait quand on cliquait ailleurs, ni à la
+// souris ni au doigt. On écoute donc nous-mêmes (cf. useDismissOnOutside pour le pourquoi
+// de la phase capture et du touchstart).
+const mapControlsEl = useTemplateRef('mapControlsEl')
+const searchEl = useTemplateRef('searchEl')
+
+useDismissOnOutside(() => mapControlsEl.value, (target) => {
+  if (openMenu.value == null) return
+  openMenu.value = null
+  // Le geste n'a servi qu'à refermer : s'il tombe sur la carte, on neutralise le clic
+  // qui suivrait, sinon refermer un menu pose un point au passage.
+  if (target?.closest('.route-builder-map')) {
+    suppressNextMapClick = true
+    suppressNextWpClick = true
+    setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 500)
+  }
+})
+
+// Liste des résultats de recherche : même traitement, mais sans neutraliser le clic —
+// la liste ne recouvre pas la carte, un appui dessus reste une interaction voulue.
+useDismissOnOutside(() => searchEl.value, () => { searchOpen.value = false })
 
 // ─── Watchers ─────────────────────────────────────────────────────────────────
 
@@ -2577,21 +2537,19 @@ watch(savedPoisStore.show, () => installSavedPoiMarkers(), { deep: true })
 // ─── Lifecycle ────────────────────────────────────────────────────────────────
 
 onBeforeUnmount(() => {
+  stopRouteFlow()
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
   divergentMarkers.forEach((m) => m.remove()); divergentMarkers.length = 0
-  climbMarkerObservers.forEach((obs) => obs.disconnect()); climbMarkerObservers.length = 0
-  climbMarkers.forEach((m) => m.remove()); climbMarkers.length = 0
+  climbGroup.clear()
   clearTurnAnomalyMarkers()
-  measureMarkers.forEach((m) => m.remove()); measureMarkers.length = 0
-  measureMidMarkers.forEach((m) => m.remove()); measureMidMarkers.length = 0
   clearPlaceMarkers()
   clearSavedPoiMarkers()
   closeSavedPoiPopup()
   closeRoutePointPopup()
   closeCoordPopup()
+  closeInsertChoicePopup()
   if (detachLongPress) { detachLongPress(); detachLongPress = null }
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
-  if (locationMarker) { locationMarker.remove(); locationMarker = null }
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
 
@@ -2601,6 +2559,7 @@ defineExpose({
   initMap,
   updateRouteLayer,
   setRouteLineScale,
+  setDirectionStatic,
   applyColorMode,
   installClimbMarkers,
   installPlaceMarkers,
@@ -2637,7 +2596,7 @@ defineExpose({
   <div class="map-wrap" :class="{ expanded: state.mapExpanded, 'map-wrap--grey-basemap': state.mapStyleId === 'swissgrau' }">
     <div ref="mapEl" class="route-builder-map"></div>
 
-    <div class="map-controls">
+    <div ref="mapControlsEl" class="map-controls">
       <MapStyleDropdown :model-value="state.mapStyleId" :active-overlays="state.overlays"
         :mobile-label="t('strava.map_style_short')" @update:model-value="setMapStyle"
         :open="openMenu === 'style'" @update:open="(v) => openMenu = v ? 'style' : null" />
@@ -2812,7 +2771,7 @@ defineExpose({
     </div>
 
     <!-- Search -->
-    <div v-if="!routeStore.readOnly.value" class="map-search" :class="{ 'map-search--expanded': searchExpanded }">
+    <div v-if="!routeStore.readOnly.value" ref="searchEl" class="map-search" :class="{ 'map-search--expanded': searchExpanded }">
       <button v-if="!searchExpanded" type="button" class="btn btn-light btn-sm shadow-sm map-search-toggle" @click="openSearch" :title="t('routes.search_placeholder')">
         <i class="fa-solid fa-magnifying-glass"></i>
       </button>
@@ -2945,804 +2904,5 @@ defineExpose({
   </div>
 </template>
 
-<style scoped>
-/* Menu déroulant plus haut que la fenêtre : on plafonne et on fait défiler le contenu,
-   plutôt que de laisser les dernières entrées hors écran. */
-.dropdown-scrollable {
-  max-height: min(70vh, 26rem);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-.map-wrap {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.map-wrap.expanded {
-  position: fixed;
-  top: 4rem;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1020;
-  background: #fff;
-  box-shadow: 0 -2px 20px rgba(0,0,0,0.2);
-}
-.route-builder-map {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-}
-/* La barre capte les clics sur toute son emprise, gouttières comprises : viser à côté
-   d'un menu ne doit pas traverser jusqu'à la carte et y poser un point. Son emprise reste
-   celle de son contenu (largeur du plus large bouton), les menus ouverts étant en
-   position absolue ils ne l'élargissent pas. */
-.map-controls {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: flex-start;
-  pointer-events: auto;
-}
-.map-controls-right {
-  position: absolute;
-  top: 56px;
-  right: 10px;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  align-items: flex-end;
-  pointer-events: none;
-}
-.map-controls-right > * { pointer-events: auto; }
-.map-ctrl-btn {
-  background: #ffffff;
-  border-color: rgba(0,0,0,0.08);
-  width: 34px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  aspect-ratio: 1;
-}
-/* Déclencheur de menu avec libellé (« Affichage ») : on relâche le carré fixe pour
-   laisser la place à l'icône + le texte, comme le bouton « Fond de carte ». */
-.map-ctrl-btn--labeled {
-  width: auto;
-  aspect-ratio: auto;
-  padding: 0.25rem 0.5rem;
-}
-/* Les trois menus de la colonne gauche (Fond de carte, Affichage, Mode) partagent la
-   même largeur sur desktop, et leur chevron est aligné au bord droit. Le bouton du
-   fond de carte vit dans un composant enfant → :deep pour l'atteindre. Ciblé au
-   contexte de la carte du créateur (MapStyleDropdown est réutilisé ailleurs). */
-.map-controls :deep(.map-ctrl-btn) > i:last-child { margin-left: auto; }
-/* Largeur commune aux trois menus, chevron aligné à droite. Plus compacte sur mobile
-   (libellés courts : « Carte » / « Affichage » / « Mode ») que sur desktop
-   (« Fond de carte »). */
-.map-controls :deep(.map-ctrl-btn) { min-width: 7.5rem; }
-@media (min-width: 768px) {
-  .map-controls :deep(.map-ctrl-btn) { min-width: 9.5rem; }
-}
-.map-ctrl-btn.active,
-.map-ctrl-btn.active:hover,
-.map-ctrl-btn.active:focus {
-  background: #ffc107;
-  color: #212529;
-  border-color: rgba(252,76,2,0.7);
-}
-.map-search {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
-.map-search--expanded { width: min(420px, calc(100% - 220px)); }
-.map-search-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; }
-.map-search-results {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0.25rem 0;
-  background: #fff;
-  border-radius: 0.4rem;
-  max-height: 260px;
-  overflow-y: auto;
-  font-size: 0.85rem;
-}
-.map-search-result {
-  padding: 0.4rem 0.7rem;
-  cursor: pointer;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.3rem;
-  border-bottom: 1px solid rgba(0,0,0,0.04);
-}
-.map-search-result:last-child { border-bottom: 0; }
-.map-search-result:hover { background: rgba(252,76,2,0.08); }
-/* Panneau de mesure : centré en bas de la carte. */
-.measure-panel {
-  position: absolute;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  max-width: calc(100% - 1.5rem);
-  padding: 0.3rem 0.4rem 0.3rem 0.75rem;
-  border-radius: 999px;
-  background: rgba(15,118,110,0.95);
-  color: #fff;
-  font-size: 0.85rem;
-}
-.measure-panel-main {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-}
-.measure-panel-total {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.measure-panel-hint {
-  opacity: 0.85;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-/* Sur téléphone, le bandeau se cale juste au-dessus du bouton de stats (distance /
-   dénivelé), aligné sur lui plutôt que centré. Même seuil que ce bouton. */
-@media (max-width: 767px), (max-height: 500px) {
-  .measure-panel {
-    left: 5px;
-    right: auto;
-    bottom: 44px;
-    transform: none;
-    max-width: calc(100% - 10px);
-  }
-}
-@media (max-width: 575.98px) {
-  .measure-panel-hint { display: none; }
-}
-.map-overlay-hint {
-  position: absolute;
-  bottom: 18px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(33,37,41,0.88);
-  color: #fff;
-  padding: 0.5rem 1rem;
-  border-radius: 999px;
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  pointer-events: none;
-  z-index: 4;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-}
-.map-overlay-loading {
-  position: absolute;
-  top: 12px;
-  right: 60px;
-  background: rgba(255,255,255,0.95);
-  padding: 0.4rem 0.8rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  z-index: 5;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-  display: flex;
-  align-items: center;
-}
-/* Sur mobile, l'indicateur de chargement (tracé / altitude / POI) passe en bas à
-   droite, clairement au-dessus de l'attribution (qui occupe ~10–34px du bas) pour
-   ne pas la recouvrir, et libérer le haut de la carte. */
-@media (max-width: 767px), (max-height: 500px) {
-  .map-overlay-loading {
-    top: auto;
-    right: 8px;
-    bottom: 5px;
-  }
-}
-.mobile-sheet-toggle {
-  position: absolute;
-  bottom: 5px;
-  left: 5px;
-  z-index: 6;
-  white-space: nowrap;
-  display: none;
-}
-@media (max-width: 767px), (max-height: 500px) { .mobile-sheet-toggle { display: flex; } }
-
-/* Fond swisstopo gris : les contrôles blancs se fondent dans la carte. On les passe
-   en jaune (fond + bordure) pour les redétacher. Le bouton du fond de carte vit dans
-   MapStyleDropdown → :deep pour l'atteindre. */
-.map-wrap--grey-basemap :deep(.map-ctrl-btn),
-.map-wrap--grey-basemap .map-search-toggle,
-.map-wrap--grey-basemap .mobile-sheet-toggle,
-.map-wrap--grey-basemap :deep(.map-ctrl-btn:hover),
-.map-wrap--grey-basemap .map-search-toggle:hover,
-.map-wrap--grey-basemap .mobile-sheet-toggle:hover {
-  background: #ffc107;
-  border: 2px solid #ffc107;
-  color: #212529;
-}
-.map-wrap--grey-basemap :deep(.map-ctrl-btn:hover),
-.map-wrap--grey-basemap .map-search-toggle:hover,
-.map-wrap--grey-basemap .mobile-sheet-toggle:hover {
-  background: #ffcd39;
-  border-color: #ffcd39;
-}
-/* Recherche dépliée : la loupe (préfixe du champ) et le bouton de fermeture suivent
-   le même traitement ; le champ garde son fond blanc mais une bordure jaune, sinon
-   il se détacherait des deux boutons. `.bg-white` étant !important, on surcharge. */
-.map-wrap--grey-basemap .map-search .input-group-text,
-.map-wrap--grey-basemap .map-search .btn-light {
-  background: #ffc107 !important;
-  border: 2px solid #ffc107;
-  color: #212529;
-}
-.map-wrap--grey-basemap .map-search .btn-light:hover {
-  background: #ffcd39 !important;
-  border-color: #ffcd39;
-}
-.map-wrap--grey-basemap .map-search .form-control {
-  border-top: 2px solid #ffc107;
-  border-bottom: 2px solid #ffc107;
-}
-.map-wrap--grey-basemap .map-search-results {
-  border: 2px solid #ffc107;
-}
-
-/* Bannière d'échec de chargement des POI — visible uniquement sur mobile,
-   la sidebar Stats (masquée sur mobile) gérant déjà le cas sur desktop. */
-.map-overlay-places-error {
-  position: absolute;
-  bottom: 5px;
-  right: 8px;
-  display: none;
-  align-items: center;
-  gap: 0.6rem;
-  background: rgba(33,37,41,0.9);
-  color: #fff;
-  border: none;
-  padding: 0.45rem 0.9rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  z-index: 10;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-}
-.map-overlay-places-retry { color: #6ea8fe; font-weight: 600; white-space: nowrap; }
-@media (max-width: 767px) { .map-overlay-places-error { display: flex; } }
-
-/* Dialogue de création d'un POI sauvegardé (mode « poser un POI »). */
-.poi-dialog-backdrop {
-  position: absolute;
-  inset: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.25);
-}
-.poi-dialog { width: min(320px, 90%); border: none; }
-</style>
-
-<style>
-/* JS-created DOM elements — must be global (not scoped) */
-/* Points de mesure à vol d'oiseau : pastille + étiquette de distance cumulée.
-   La pastille FAIT la taille du marqueur (ancré au centre) et l'étiquette est en
-   position absolue au-dessus : sinon elle entre dans le calcul de l'ancrage et décale
-   le point par rapport à l'endroit cliqué. */
-.measure-marker {
-  position: relative;
-  width: 16px;
-  height: 16px;
-  cursor: grab;
-  touch-action: none;
-}
-.measure-marker-dot {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: #0f766e;
-  border: 3px solid #fff;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.35);
-}
-.measure-marker-label {
-  position: absolute;
-  bottom: calc(100% + 4px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(15,118,110,0.95);
-  color: #fff;
-  font-size: 0.72rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  padding: 1px 6px;
-  border-radius: 999px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-  pointer-events: none;
-}
-/* Tooltip de suppression d'un point de mesure. Sous la pastille : l'étiquette de
-   distance occupe déjà le dessus. */
-.measure-tooltip {
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  display: none;
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
-  padding: 3px;
-  z-index: 20;
-  white-space: nowrap;
-}
-.measure-marker--selected .measure-tooltip { display: block; }
-.measure-marker--selected .measure-marker-dot {
-  box-shadow: 0 0 0 3px rgba(15,118,110,0.32), 0 1px 4px rgba(0,0,0,0.35);
-}
-.measure-tooltip-delete {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  border-radius: 7px;
-  padding: 0.3rem 0.6rem;
-  font-size: 0.8rem;
-  color: #b02a37;
-  cursor: pointer;
-}
-.measure-tooltip-delete:hover { background: rgba(176,42,55,0.1); }
-.measure-tooltip-arrow {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 6px solid transparent;
-  border-bottom-color: #fff;
-}
-/* Poignée « + » au milieu d'un segment de mesure. */
-.measure-mid-marker {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #fff;
-  border: 2px solid #0f766e;
-  color: #0f766e;
-  font-size: 0.6rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: grab;
-  touch-action: none;
-  opacity: 0.85;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.3);
-}
-/* Pas de `transform` au survol : MapLibre pose le sien en style inline sur l'élément
-   du marqueur (positionnement), le remplacer déplacerait la poignée. */
-.measure-mid-marker:hover { opacity: 1; background: #0f766e; color: #fff; }
-.wp-marker {
-  position: relative;
-  width: 28px;
-  height: 28px;
-  cursor: pointer;
-}
-.wp-marker-num {
-  position: absolute;
-  top: 1px;
-  left: 1px;
-  transform: scale(var(--wp-scale, 1));
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: #fc4c02;
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
-}
-.wp-marker--free .wp-marker-num {
-  background: #a855f7;
-}
-.wp-marker--selected .wp-marker-num {
-  background: #1d4ed8;
-  box-shadow: 0 0 0 3px rgba(29,78,216,0.32), 0 2px 6px rgba(0,0,0,0.35);
-}
-.wp-marker--free.wp-marker--selected .wp-marker-num {
-  background: #9333ea;
-  box-shadow: 0 0 0 3px rgba(168,85,247,0.32), 0 2px 6px rgba(0,0,0,0.35);
-}
-.wp-tooltip {
-  position: absolute;
-  bottom: calc(100% + 10px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
-  padding: 4px 4px 4px;
-  display: none;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 190px;
-  z-index: 20;
-  white-space: nowrap;
-  pointer-events: auto;
-}
-.wp-marker--selected .wp-tooltip { display: flex; }
-.wp-tooltip-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.2rem 0.65rem 0.2rem 0.65rem;
-  gap: 0.5rem;
-  border-bottom: 1px solid rgba(0,0,0,0.07);
-  margin-bottom: 2px;
-}
-.wp-tooltip-title { font-size: 0.78rem; font-weight: 600; color: #6b7280; display: flex; align-items: center; }
-.wp-tooltip-num-input {
-  width: 3.2em;
-  margin-left: 0.25em;
-  padding: 1px 4px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  color: #111827;
-  text-align: center;
-  border: 1px solid rgba(0,0,0,0.18);
-  border-radius: 6px;
-  background: #fff;
-}
-.wp-tooltip-num-input:focus {
-  outline: none;
-  border-color: #fc4c02;
-  box-shadow: 0 0 0 2px rgba(252,76,2,0.18);
-}
-.wp-tooltip-close {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0,0,0,0.07);
-  color: #6b7280;
-  font-size: 0.85rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.wp-tooltip-close:hover { background: rgba(0,0,0,0.14); color: #111827; }
-.wp-tooltip-arrow {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 0;
-  height: 0;
-  border-left: 7px solid transparent;
-  border-right: 7px solid transparent;
-  border-top: 7px solid #fff;
-  filter: drop-shadow(0 2px 2px rgba(0,0,0,0.10));
-}
-.wp-tooltip-action {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  padding: 0.45rem 0.65rem;
-  border-radius: 7px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  text-decoration: none;
-  color: #212529;
-  cursor: pointer;
-  border: none;
-  background: none;
-  width: 100%;
-  text-align: left;
-  line-height: 1;
-  transition: background 0.1s;
-}
-.wp-tooltip-action i { width: 14px; text-align: center; font-size: 0.78rem; flex-shrink: 0; }
-.wp-tooltip-action:hover { background: rgba(0,0,0,0.06); color: #212529; }
-.wp-tooltip-action--komoot i { color: #6aaf23; }
-.wp-tooltip-action--delete { color: #dc2626; }
-.wp-tooltip-action--delete:hover { background: rgba(220,38,38,0.08); color: #dc2626; }
-.wp-tooltip-action--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
-.wp-tooltip-coords-row { display: flex; gap: 0.25rem; }
-.wp-tooltip-coords-row .wp-tooltip-action { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; padding-right: 0.45rem; }
-.wp-tooltip-coords { display: flex; align-items: baseline; gap: 0.3rem; min-width: 0; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
-.wp-tooltip-coord-label { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; color: #6c757d; flex-shrink: 0; }
-.wp-tooltip-coords--copied { color: #16a34a; }
-.divergent-warning-marker {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: #d62828;
-  color: #fff;
-  border: 2px solid #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  font-size: 0.78rem;
-  cursor: help;
-}
-.climb-marker {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  background: rgba(255,255,255,0.96);
-  padding: 0.18rem 0.45rem 0.18rem 0.4rem;
-  border-radius: 12px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  border: 1.5px solid currentColor;
-  box-shadow: 0 3px 8px -3px rgba(0,0,0,0.35);
-  line-height: 1.4;
-  cursor: pointer;
-  user-select: none;
-  transform-origin: bottom left;
-  transition: box-shadow 0.1s ease;
-}
-.climb-marker:hover { box-shadow: 0 6px 14px -3px rgba(0,0,0,0.45); }
-.climb-marker i { font-size: 0.74rem; }
-.climb-marker .climb-marker-stats { color: #212529; }
-.climb-marker .climb-marker-cat {
-  background: currentColor;
-  color: #fff !important;
-  padding: 0 0.3rem;
-  border-radius: 999px;
-  font-size: 0.6rem;
-  letter-spacing: 0.02em;
-  min-width: 0.85rem;
-  text-align: center;
-}
-.climb-cat-HC    { color: #111827; }
-.climb-cat-1     { color: #b91c1c; }
-.climb-cat-2     { color: #ea580c; }
-.climb-cat-3     { color: #ca8a04; }
-.climb-cat-4     { color: #16a34a; }
-.climb-cat-uncat { color: #6c757d; }
-/* Repère d'itinéraire (départ / arrivée / parking) : pastille à libellé toujours
-   visible, calquée sur .climb-marker, colorée par le type (currentColor). */
-.route-marker {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.28rem;
-  background: rgba(255,255,255,0.96);
-  padding: 0.18rem 0.5rem 0.18rem 0.42rem;
-  border-radius: 12px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  white-space: nowrap;
-  border: 1.5px solid currentColor;
-  box-shadow: 0 3px 8px -3px rgba(0,0,0,0.35);
-  line-height: 1.4;
-  cursor: pointer;
-  user-select: none;
-  transform-origin: bottom left;
-  transition: box-shadow 0.1s ease;
-}
-.route-marker:hover { box-shadow: 0 6px 14px -3px rgba(0,0,0,0.45); }
-.route-marker i { font-size: 0.74rem; }
-.route-marker .route-marker-label { color: #212529; }
-.place-marker {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: #fff;
-  border: 2px solid currentColor;
-  box-shadow: 0 3px 8px -2px rgba(0,0,0,0.4);
-  cursor: pointer;
-  user-select: none;
-  transform-origin: bottom center;
-  transition: box-shadow 0.1s ease;
-}
-.place-marker i { font-size: 0.78rem; }
-/* POI sauvegardé : badge étoile en haut à droite pour le distinguer d'un POI Overpass. */
-.place-marker--saved::after {
-  content: '\2605';
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  font-size: 0.6rem;
-  line-height: 1;
-  color: #f59e0b;
-  text-shadow: 0 0 2px #fff, 0 0 2px #fff;
-}
-.place-marker--saved { position: relative; }
-/* Survol souris, surbrillance synchronisée (carte ou liste) ou popup ouvert : le
-   marqueur s'inverse — le fond se remplit de sa couleur, l'icône passe en blanc. */
-.place-marker:hover,
-.place-marker--hover,
-.place-marker--active { background: currentColor; box-shadow: 0 6px 14px -3px rgba(0,0,0,0.5); }
-.place-marker:hover i,
-.place-marker--hover i,
-.place-marker--active i { color: #fff; }
-/* La couleur de chaque marqueur est posée en inline depuis le registre POI
-   (poiCategories.ts) ; currentColor pilote la bordure et le remplissage au survol. */
-/* Sur petit écran tactile, on agrandit légèrement les marqueurs (points POI et points du
-   tracé) pour offrir une cible de clic plus généreuse et éviter les clics au mauvais endroit. */
-@media (max-width: 767px) {
-  .wp-marker { width: 36px; height: 36px; }
-  .wp-marker-num { top: 3px; left: 3px; width: 30px; height: 30px; font-size: 0.82rem; }
-  .place-marker { width: 32px; height: 32px; }
-  .place-marker i { font-size: 0.92rem; }
-}
-.place-popup-container .maplibregl-popup-content {
-  padding: 4px;
-  border-radius: 10px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.10);
-}
-.place-popup { display: flex; flex-direction: column; gap: 2px; min-width: 180px; }
-.place-popup-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.2rem 0.65rem;
-  border-bottom: 1px solid rgba(0,0,0,0.07);
-  margin-bottom: 2px;
-}
-.place-popup-name {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: #6b7280;
-  max-width: 14rem;
-}
-.place-popup-close {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: none;
-  background: rgba(0,0,0,0.07);
-  color: #6b7280;
-  font-size: 0.85rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.place-popup-close:hover { background: rgba(0,0,0,0.14); color: #111827; }
-.place-popup-link {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: 100%;
-  padding: 0.45rem 0.65rem;
-  border-radius: 7px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: #212529;
-  text-decoration: none;
-}
-.place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
-.place-popup-link:hover { background: rgba(0,0,0,0.06); color: #212529; text-decoration: none; }
-.place-popup-link--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
-.place-popup-link--copy {
-  border: none;
-  background: none;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 500;
-  text-align: left;
-  font-variant-numeric: tabular-nums;
-}
-/* « Ajouter à l'itinéraire » : action d'insertion d'un point (POI / clic droit) dans
-   le tracé, mise en avant en violet (couleur du tracé). */
-.place-popup-link--add-route {
-  border: none;
-  cursor: pointer;
-  background: #7c3aed;
-  color: #fff;
-  font: inherit;
-  font-weight: 600;
-  text-align: left;
-}
-.place-popup-link--add-route:hover { background: #6d28d9; color: #fff; }
-.place-popup-coords-row { display: flex; gap: 0.25rem; }
-.place-popup-coords-row .place-popup-link { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; }
-.place-popup-coords-row .place-popup-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.route-insert-marker {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgba(252,76,2,0.95);
-  border: 2px solid #fff;
-  color: #fff;
-  font-size: 0.7rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-  pointer-events: none;
-  transform: translateY(-1px);
-}
-.chart-cross-marker {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #fc4c02;
-  border: 2px solid #fff;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.45);
-  pointer-events: none;
-}
-/* Repère d'un point accroché au loin. Même gabarit que le marqueur d'amas mais en jaune,
-   pour reprendre le code couleur de son alerte (map-notice--warning). */
-.snap-warning-marker {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: #f59e0b;
-  border: 2px solid #fff;
-  color: #422006;
-  font-size: 0.8rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.45);
-  pointer-events: none;
-}
-.turn-anomaly-marker {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: #dc2626;
-  border: 2px solid #fff;
-  color: #fff;
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-  pointer-events: none;
-  animation: turn-anomaly-pulse 1.4s ease-in-out infinite;
-}
-@keyframes turn-anomaly-pulse {
-  0%, 100% { box-shadow: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 0 rgba(220,38,38,0.55); }
-  50% { box-shadow: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 10px rgba(220,38,38,0); }
-}
-.user-location-dot {
-  width: 16px;
-  height: 16px;
-  background: #4285f4;
-  border: 2.5px solid #fff;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(66,133,244,0.35);
-}
-.sel-flag-marker { cursor: grab; }
-.sel-flag-marker:active { cursor: grabbing; }
-/* Icône d'attribution (compacte) en bas à droite de la carte : marge resserrée à 5px. */
-.maplibregl-ctrl-bottom-right .maplibregl-ctrl { margin: 0 5px 5px 0; }
-</style>
+<style scoped src="./RouteBuilderMap.css"></style>
+<style src="../styles/routeBuilderMarkers.css"></style>

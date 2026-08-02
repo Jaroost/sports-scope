@@ -1,0 +1,23 @@
+<%# L'éditeur des profils de sortie de l'app compagnon.
+    Un îlot Vue, contrairement à la page de téléchargement : composer une grille
+    demande un état riche (profil courant, page ouverte, cellule sélectionnée) qu'un
+    formulaire rechargé à chaque clic rendrait insupportable. %>
+<% content_for :title, t("companion.settings.title") %>
+
+<div class="companion-dashboard mx-auto" style="max-width: 60rem;">
+  <div class="d-flex align-items-baseline gap-2 mb-3">
+    <h1 class="h3 mb-0 flex-grow-1"><%= t("companion.settings.title") %></h1>
+    <%= link_to companion_path, class: "btn btn-sm btn-outline-secondary flex-shrink-0" do %>
+      <i class="fa-brands fa-android me-1" aria-hidden="true"></i><%= t("companion.title") %>
+    <% end %>
+  </div>
+
+  <p class="text-body-secondary"><%= t("companion.settings.intro") %></p>
+
+  <%# Le document ET le catalogue passent en props. Le catalogue vient du serveur
+      et non d'une copie côté front : un composant que l'éditeur proposerait sans
+      que l'assainisseur le connaisse disparaîtrait à l'enregistrement, sous les
+      yeux de l'utilisateur et sans un mot. %>
+  <div data-vue-component="CompanionDashboard"
+       data-vue-props="<%= { document: @document, catalog: @catalog }.to_json %>"></div>
+</div>

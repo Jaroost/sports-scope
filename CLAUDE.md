@@ -205,6 +205,108 @@ PostgreSQL. Credentials par défaut en dev : `postgres/postgres` sur `localhost:
 
 ```bash
 bin/ci          # lance la suite CI complète
-bin/rubocop     # Ruby linting
 bin/brakeman    # sécurité Rails
 ```
+
+Pas de RuboCop : la gem a été retirée du projet (elle faisait planter les conteneurs de
+debug RubyMine). Ne pas la réintroduire ni recréer de `.rubocop.yml`.
+
+## Diffusion de l'app compagnon Android
+
+L'APK de l'app compagnon (dépôt voisin `~/dev/sports-scope-companion`) est distribué
+par le site, hors Play Store. Trois actions dans `CompanionController`, dont le
+partage des rôles est le point à comprendre :
+
+| Route | Accès | Pourquoi |
+|---|---|---|
+| `/companion` | connectés | l'app ne sert à rien sans compte (itinéraires, seuils, POI passent tous par la session) |
+| `/companion/download` | connectés | c'est le fichier lui-même ; un APK en accès libre finit indexé |
+| `/api/companion_version` | **public** | l'app n'a aucun cookie côté Dart et ne lit ici qu'un numéro de version |
+| `/api/companion_settings` | connectés | les profils de sortie ; données de compte, donc authentifié (voir plus bas) |
+| `/companion/dashboard` | connectés | l'éditeur de ces profils |
+
+Cet endpoint public **coupe explicitement la session**
+(`request.session_options[:skip]`) : `set_locale` écrit dans la session à chaque
+requête, ce qui poserait un `Set-Cookie` sur une réponse marquée `cache-control:
+public` — un cache partagé garderait alors le cookie d'un visiteur pour le suivant.
+
+Le binaire **n'est ni dans l'image ni dans `public/`** :
+
+- l'image se build depuis ce dépôt et l'APK sort de l'autre — ce serait ~19 Mo par
+  couche et un redéploiement du site pour livrer une version de l'app ;
+- `public/` reçoit un an d'expiration (`config.public_file_server.headers`), le même
+  piège que corrige déjà `service_worker_cache.rb`.
+
+Il vit donc dans le volume `companion_apk` (monté sur `/app/storage/companion`), avec
+un `manifest.json` que lit `CompanionRelease`. On publie sans redéployer :
+
+```bash
+script/push-apk.sh   # lit l'APK du dépôt voisin, vérifie signature et paquet, dépose
+```
+
+Le script lit `versionCode`/`versionName` **dans l'APK** et pas dans le `pubspec` du
+dépôt voisin : c'est le fichier publié qui fait foi, et le versionCode est ce qui
+déclenche la mise à jour côté app.
+
+## Les profils de sortie de l'app compagnon
+
+`CompanionSettings` décrit **ce que le téléphone affiche en roulant** : les pages du
+tableau de bord dans l'ordre, leur contenu, les jeux de valeurs du bandeau, les
+capteurs utilisés, les réglages radar. Un document JSON par utilisateur
+(`users.companion_settings`), édité par l'îlot `CompanionDashboard`, lu par
+l'application une fois par lancement et à chaque connexion.
+
+Un document et pas une table par profil : l'appli récupère le tout en une requête et
+le met en cache sur le téléphone, et l'éditeur édite le tout. Une table ferait payer
+des jointures pour reconstituer à chaque fois la même chose.
+
+**Le contrat est partagé avec le dépôt voisin.** Les clés de composants (`metric`,
+`zones`, …), de modes (`big`, `bar_only`, …) et de mesures (`speed`, `power_np`, …)
+sont celles de `lib/dashboard/` côté Dart. Y toucher demande de modifier les deux
+dépôts.
+
+### Pourquoi un assainisseur ici alors que l'appli en a déjà un
+
+L'application ne fait jamais confiance à ce document : elle ignore les clés
+inconnues, retombe sur son tableau de bord intégré si rien n'est exploitable, et
+garantit elle-même ce que le format ne peut pas dire — au plus une carte, quatre
+cases de bandeau, pas de cellules qui se recouvrent. C'est ce qui permet de servir
+un profil un peu en avance sur la version installée.
+
+Mais elle le fait **en silence, et sur la route**. Si l'éditeur laissait composer une
+cinquième case ou deux cartes, l'utilisateur verrait à l'écran quelque chose que son
+téléphone jetterait sans un mot. D'où `CompanionSettings.sanitize`, qui applique les
+mêmes règles là où elles peuvent encore se voir — et un `PATCH` qui **rend le document
+assaini**, sur lequel l'éditeur se réaligne. Ce qu'on voit après « Enregistrer » est
+exactement ce que l'appli recevra.
+
+La règle qui gouverne tout : **le serveur peut être plus indulgent que l'application,
+jamais moins.** Ce qui sort de `sanitize` doit être accepté *en entier* par le
+décodeur Dart, sans qu'il ait à retirer quoi que ce soit. D'où deux écarts assumés,
+tous deux dans le sens indulgent : une clé manquante est *fabriquée* plutôt que de
+faire perdre le profil, une clé en double est *suffixée* plutôt que de faire
+disparaître le profil qu'on vient de dupliquer.
+
+Le même raisonnement vaut côté front : `companionSettings.ts` borne l'étendue d'une
+cellule à la place réellement libre (`maxSpan`) au lieu de laisser l'assainisseur
+retirer le recouvrement après coup — sinon la cellule voisine disparaîtrait à
+l'enregistrement.
+
+### Le piège du PATCH
+
+`sanitize` rend les profils par défaut quand il ne trouve rien d'exploitable. C'est
+juste pour **afficher** et catastrophique pour **écrire** : un corps mal formé
+remplacerait des profils composés à la main par ceux d'usine. `update` refuse donc
+tout corps qui n'est pas un objet JSON (400) plutôt que d'écrire. Un corps carrément
+illisible, lui, n'atteint jamais le contrôleur — le middleware de Rails répond 400
+avant.
+
+Le corps est lu par `request.raw_post` et non par `params` : le document est
+profondément imbriqué et de forme libre, et le faire traverser
+`ActionController::Parameters` demanderait un `to_unsafe_h` à chaque étage. C'est
+sans risque parce que **l'assainisseur est la liste blanche** — il ne recopie rien, il
+reconstruit à partir des seules clés qu'il connaît.
+
+⚠️ `WellKnownController` (assetlinks) ne publie **qu'un seul** paquet, celui du TWA.
+Activer l'App Link vérifié de l'app compagnon (`ch.logicraft.sports.companion`)
+demande de le faire porter deux couples paquet/empreintes.

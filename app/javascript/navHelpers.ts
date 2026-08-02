@@ -3,6 +3,7 @@
 // réutilisable par les sous-composants (NavTurnBanner, NavClimbCard, NavScreenOff…).
 import { colorForGrade, gradeForIndex } from './routeHelpers'
 import type { Climb, LngLat, Maneuver, TurnPoint } from './routeHelpers'
+import { ARRIVAL_M, ARRIVAL_APPROACH_M } from './navConstants'
 
 // ─── Types partagés des overlays de navigation ─────────────────────────────────
 
@@ -41,6 +42,106 @@ export interface ClimbInfo {
   grade: number     // pente instantanée au coureur (%)
   gradeColor: string  // couleur de fond du badge (par tranche de pente)
   gradeText: string   // couleur de texte contrastée (noir/blanc)
+}
+
+// ─── État publié à l'application mobile ────────────────────────────────────────
+
+// Ce que la page dit de la navigation à l'appli qui l'héberge (cf. companionBridge).
+// Volontairement plat et scalaire : l'appli le reçoit ~1 fois par seconde, et rien
+// ici ne doit coûter une sérialisation lourde.
+export interface CompanionNavTurn {
+  state: TurnHint['state']
+  distM: number
+  direction: TurnHint['direction']
+  kind: Maneuver
+  exitNumber: number | null
+  // Position du virage. C'est elle qui permet à l'appli de juger l'approche avec
+  // son propre GPS quand la page ne parle plus (carte masquée, WebView ralenti) :
+  // sans ça, une page silencieuse voudrait dire « aucun virage en vue ».
+  lat: number | null
+  lng: number | null
+}
+
+export interface CompanionNavClimb {
+  ratio: number
+  remainingGainM: number
+  grade: number
+  gain: number
+  lengthM: number
+  category: string | null
+}
+
+export interface CompanionNavState {
+  type: 'nav'
+  at: number
+  // Suit-on un itinéraire ? Faux en navigation libre, où virages et arrivée
+  // n'ont pas de sens.
+  route: boolean
+  turn: CompanionNavTurn | null
+  offRoute: boolean
+  arrived: boolean
+  speedKmh: number
+  remainingM: number
+  remainingGainM: number
+  climb: CompanionNavClimb | null
+}
+
+// Assemble l'état à publier. Pur : tout vient des paramètres, donc testable sans
+// GPS ni carte.
+//
+// `turnCoord` est la position du virage annoncé (`geometry[turn.idx]`), pas celle
+// du coureur. On ne publie pas le profil du col (segments / aire / points) : il est
+// volumineux, statique pour tout le col, et le renvoyer chaque seconde ne servirait
+// à rien — il aura son propre message le jour où l'appli le dessinera.
+export function navStateFor(input: {
+  hasRoute: boolean
+  hint: TurnHint | null
+  turnCoord: LngLat | null
+  offRoute: boolean
+  arrived: boolean
+  speedKmh: number
+  remainingM: number
+  remainingGainM: number
+  climb: ClimbInfo | null
+  at?: number
+}): CompanionNavState {
+  const { hasRoute, hint, turnCoord, offRoute, arrived, climb } = input
+
+  // Hors trajet, le virage annoncé porte sur un tracé qu'on a quitté : le publier
+  // ferait ramener l'appli sur la carte pour une consigne qui ne s'applique plus.
+  const turn: CompanionNavTurn | null = hasRoute && hint && !offRoute
+    ? {
+        state: hint.state,
+        distM: hint.distM,
+        direction: hint.direction,
+        kind: hint.kind,
+        exitNumber: hint.exitNumber ?? null,
+        lat: turnCoord ? turnCoord[1] : null,
+        lng: turnCoord ? turnCoord[0] : null,
+      }
+    : null
+
+  return {
+    type: 'nav',
+    at: input.at ?? Date.now(),
+    route: hasRoute,
+    turn,
+    offRoute: hasRoute && offRoute,
+    arrived: hasRoute && arrived,
+    speedKmh: input.speedKmh,
+    remainingM: hasRoute ? input.remainingM : 0,
+    remainingGainM: hasRoute ? input.remainingGainM : 0,
+    climb: climb
+      ? {
+          ratio: climb.ratio,
+          remainingGainM: climb.remainingGainM,
+          grade: climb.grade,
+          gain: climb.climb.gain,
+          lengthM: climb.climb.lengthM,
+          category: climb.climb.category,
+        }
+      : null,
+  }
 }
 
 // ─── Couleurs / icônes ──────────────────────────────────────────────────────────
@@ -95,6 +196,216 @@ export function buildTurnChain(
   return out
 }
 
+// Fenêtre de tolérance derrière le coureur (m) : un virage compte comme « encore devant »
+// jusqu'à 5 m derrière la position projetée. Elle absorbe le bruit du snapping (la
+// projection avance et recule de quelques mètres) — sans elle, le pointeur de virage
+// avancerait puis l'alerte s'éteindrait pile au moment du virage.
+export const TURN_PASSED_M = 5
+
+// État des annonces sonores / vibratoires du virage courant, porté d'un fix au suivant.
+export interface TurnAlertState {
+  /** Rang du dernier virage annoncé (première détection) ; -1 si aucun. */
+  announced: number
+  /** Rang du dernier virage dont l'entrée en zone proche a été buzzée ; -1 si aucun. */
+  urgentBuzzed: number
+}
+
+export const INITIAL_TURN_ALERT_STATE: TurnAlertState = { announced: -1, urgentBuzzed: -1 }
+
+export interface TurnAlertDecision {
+  state: TurnAlertState
+  /** Virage armé pour la répétition cadencée (tickTurnRepeat), ou null hors zone d'alerte. */
+  active: { urgent: boolean } | null
+  /** Jouer un paquet d'annonce maintenant. */
+  announce: boolean
+  /** Ce paquet est celui de la zone proche (compte de lectures différent). */
+  urgentBurst: boolean
+  /** Double buzz d'entrée en zone proche — une seule fois par virage. */
+  buzzApproach: boolean
+  /** Vibration de manœuvre : à la première détection seulement. */
+  buzzManeuver: boolean
+}
+
+// Décide ce qu'il faut annoncer pour le prochain virage, à un fix donné. Deux déclencheurs
+// par virage, chacun rejoué UNE fois à l'entrée de sa zone : la première détection (zone
+// lointaine) et le passage en zone proche. Chaque zone joue son propre paquet,
+// indépendamment de la répétition périodique — sans quoi, répétition coupée, la zone proche
+// resterait muette. Si le virage apparaît déjà dans la zone proche, les deux déclencheurs
+// coïncident : une seule annonce (celle de la zone proche), pas de doublon.
+//
+// Rien n'est joué ici : l'appelant filtre par ses sourdines (son coupé, sourdine manuelle,
+// tiroir ouvert…) puis émet. `ptr` identifie le virage — c'est son changement, et non la
+// distance, qui réarme les annonces.
+export function turnAlertStep(
+  state: TurnAlertState,
+  opts: { ptr: number; distM: number; alertM: number; urgentM: number },
+): TurnAlertDecision {
+  const { ptr, distM, alertM, urgentM } = opts
+  const inRange = distM <= alertM && distM > -TURN_PASSED_M
+  if (!inRange) {
+    // Pas encore assez proche, ou virage franchi : on coupe la répétition jusqu'au suivant.
+    return { state, active: null, announce: false, urgentBurst: false, buzzApproach: false, buzzManeuver: false }
+  }
+  const urgent = distM <= urgentM
+  const enteringUrgent = urgent && state.urgentBuzzed !== ptr
+  const firstAnnounce = state.announced !== ptr
+  const announce = firstAnnounce || enteringUrgent
+  return {
+    state: {
+      announced: announce ? ptr : state.announced,
+      urgentBuzzed: enteringUrgent ? ptr : state.urgentBuzzed,
+    },
+    active: { urgent },
+    announce,
+    urgentBurst: urgent,
+    buzzApproach: enteringUrgent,
+    buzzManeuver: announce && firstAnnounce,
+  }
+}
+
+// Virage tout juste franchi, retenu pour le maintien vert (confirmation « c'est fait »).
+export interface ReachedTurn {
+  direction: 'left' | 'right'
+  kind: Maneuver
+  angle: number
+  exitNumber?: number
+  /** Distance le long du tracé du virage franchi, pour mesurer la longueur du maintien. */
+  distM: number
+}
+
+export interface TurnBannerInput {
+  /** Prochain virage non franchi, ou undefined en fin de tracé. */
+  turn?: TurnPoint
+  /** Distance jusqu'à lui (négative juste après l'avoir passé, tant que le pointeur n'a pas avancé). */
+  distM: number
+  /** Virages qui le suivent de près (cf. buildTurnChain). */
+  chain: TurnHint[]
+  /** Dernier virage franchi et son maintien vert encore actif ? */
+  reached: ReachedTurn | null
+  greenActive: boolean
+  /** Seuils du sport : « on est dessus » et « on l'affiche en grand » (profil). */
+  nowM: number
+  hintM: number
+}
+
+// Que montrer dans le bandeau de virage : l'instruction principale (`hint`) et la rafale
+// affichée en petit dessous (`follow`). Priorité au prochain virage s'il est proche
+// (« sauf s'il y a une autre instruction plus proche »), sinon au maintien vert du virage
+// tout juste franchi, sinon au prochain virage en mode lointain.
+export function turnBanner(input: TurnBannerInput): { hint: TurnHint | null; follow: TurnHint[] } {
+  const { turn, distM, chain, reached, greenActive, nowM, hintM } = input
+  const hintOf = (t: TurnPoint, d: number, state: TurnHint['state']): TurnHint => ({
+    direction: t.direction, distM: d, kind: t.kind, angle: t.angle, exitNumber: t.exitNumber, state,
+  })
+
+  if (turn && distM > nowM && distM <= hintM) {
+    // Approche classique : prochain virage en grand + sa rafale en dessous.
+    return { hint: hintOf(turn, distM, 'near'), follow: chain }
+  }
+  if (turn && distM <= nowM && chain.length) {
+    // On est SUR le virage (zone verte), mais un autre le suit de près : on affiche déjà le
+    // suivant (plus utile qu'un maintien vert du virage qu'on est en train de prendre). Cela
+    // couvre aussi la fenêtre distM ∈ [−5, 0] (virage tout juste passé, pointeur pas encore
+    // avancé) — sinon le vert flasherait le premier virage à cet instant précis.
+    return { hint: chain[0], follow: chain.slice(1) }
+  }
+  if (turn && distM <= nowM) {
+    // Virage sur nous, sans virage rapproché derrière : confirmation verte.
+    return { hint: hintOf(turn, 0, 'now'), follow: [] }
+  }
+  if (greenActive && reached) {
+    return {
+      hint: {
+        direction: reached.direction, distM: 0, kind: reached.kind,
+        angle: reached.angle, exitNumber: reached.exitNumber, state: 'now',
+      },
+      follow: [],
+    }
+  }
+  if (turn && distM > 0) {
+    // Encore loin : bandeau discret, sans rafale.
+    return { hint: hintOf(turn, distM, 'far'), follow: [] }
+  }
+  return { hint: null, follow: [] }
+}
+
+// ─── Recalage manuel sur un virage ─────────────────────────────────────────────
+
+// Rayon de la zone tactile d'une pastille de virage, en pixels d'écran. Bien plus large
+// que la pastille (22 px de diamètre au zoom par défaut, et elle rétrécit encore en
+// dézoom) : on vise au pouce, en roulant. Constant en pixels, donc indépendant du zoom.
+export const TURN_TAP_RADIUS_PX = 26
+
+// Virages sous le doigt, du plus proche au plus loin. Rendu en pixels d'écran et non en
+// mètres : c'est la taille APPARENTE qui décide de ce qu'on peut viser, et deux virages à
+// 40 m l'un de l'autre sont deux cibles distinctes en zoom serré, une seule en zoom large.
+//
+// Renvoie une LISTE et non le meilleur candidat, parce qu'un tracé qui repasse au même
+// endroit (aller-retour, boucle en huit) y superpose deux virages à quelques pixels près :
+// le plus proche du doigt n'est pas forcément le passage que le coureur a en tête, et
+// choisir à sa place le priverait de l'autre — celui-là même qu'il vient de faire.
+export function turnsNearTap(
+  projected: { ptr: number; x: number; y: number }[],
+  tap: { x: number; y: number },
+  radiusPx = TURN_TAP_RADIUS_PX,
+): number[] {
+  return projected
+    .map((p) => ({ ptr: p.ptr, d: Math.hypot(p.x - tap.x, p.y - tap.y) }))
+    .filter((c) => c.d <= radiusPx)
+    .sort((a, b) => a.d - b.d || a.ptr - b.ptr)
+    .map((c) => c.ptr)
+}
+
+// Où repartir quand le coureur déclare lui-même un virage fait (ou pas encore fait).
+export interface TurnResync {
+  /** Sommet de la géométrie où ré-ancrer la projection. */
+  idx: number
+  /** Distance le long du tracé à ce sommet. */
+  distAlongM: number
+  /** Nouveau pointeur de prochain virage. */
+  nextTurnPtr: number
+}
+
+// Pourquoi cette commande existe : un aller-retour REPASSE PAR LES MÊMES SOMMETS —
+// autour du demi-tour, geometry[k−n] et geometry[k+n] sont la même coordonnée. Tant que
+// le coureur atteint la pointe, le départage de nearestGeomIndex (l'indice le plus proche
+// du précédent) le fait basculer sur la voie du retour. Mais un demi-tour pris EN AVANCE
+// — on a compris avant le GPS qu'on était au bout — laisse la projection sur la voie de
+// l'aller : au retour, les sommets de l'aller restent les plus proches du dernier indice
+// connu, la progression RECULE, le pointeur ne franchit jamais le demi-tour, et la
+// navigation ne repart plus de la sortie. Aucun reroutage ne rattrape ça : on est pile
+// sur le tracé, donc jamais hors-trajet.
+//
+// Le pointeur de virage n'est pas l'essentiel du recalage : c'est l'ANCRE DE PROJECTION
+// (`idx`). La fenêtre de ±60 sommets de nearestGeomIndex repart de là au fix suivant, donc
+// la poser d'un sommet APRÈS le virage déclaré fait (ou d'un sommet AVANT s'il reste à
+// faire) suffit à faire basculer la fenêtre sur le bon passage ; le fix suivant affine la
+// position. Poser le pointeur sans l'ancre ne servirait à rien — la projection le
+// ramènerait en arrière au fix d'après.
+export function resyncOnTurn(
+  turns: TurnPoint[],
+  cumDistM: number[],
+  ptr: number,
+  done: boolean,
+): TurnResync | null {
+  const tp = turns[ptr]
+  if (!tp || cumDistM.length === 0) return null
+  const idx = Math.min(cumDistM.length - 1, Math.max(0, done ? tp.idx + 1 : tp.idx - 1))
+  return { idx, distAlongM: cumDistM[idx] ?? tp.distM, nextTurnPtr: done ? ptr + 1 : ptr }
+}
+
+// Clé i18n (et paramètres) nommant une manœuvre en toutes lettres, pour la tooltip de la
+// carte. Le bandeau, lui, se contente d'une flèche (turnIcon) : à l'arrêt devant la
+// tooltip on a le temps de lire, et « Demi-tour » lève l'ambiguïté d'une flèche vers le
+// bas que rien ne distingue d'un virage serré sur une pastille de 22 px.
+export function turnLabel(
+  t: { kind: Maneuver; direction: 'left' | 'right'; exitNumber?: number },
+): { key: string; params?: Record<string, unknown> } {
+  if (t.kind === 'roundabout') return { key: 'routes.turn_roundabout', params: { exit: t.exitNumber ?? 0 } }
+  if (t.kind === 'uturn') return { key: 'routes.turn_uturn' }
+  return { key: t.direction === 'right' ? 'routes.turn_right' : 'routes.turn_left' }
+}
+
 // Temps estimé jusqu'au prochain virage, à la vitesse actuelle. Renvoie null tant
 // qu'on est quasi à l'arrêt (vitesse < 1 km/h) : l'estimation exploserait et n'aurait
 // aucun sens. Format horloge m:ss au-delà d'une minute, « N s » en deçà.
@@ -105,6 +416,17 @@ export function turnEta(distM: number, speedKmh: number): string | null {
   const m = Math.floor(sec / 60)
   const s = Math.round(sec % 60)
   return `${m}:${String(s).padStart(2, '0')}`
+}
+
+// Lissage exponentiel de la vitesse servant à l'ETA : la vitesse instantanée saute trop
+// pour une estimation stable, et tomber à 0 à chaque feu rouge la ferait exploser. On
+// n'alimente donc la moyenne qu'en roulant, et on l'amorce sur la première vitesse
+// exploitable (sans quoi elle rattraperait la réalité en plusieurs minutes).
+const ETA_SMOOTH = 0.05
+const ETA_SPEED_FLOOR = 3   // km/h — en dessous, on considère l'arrêt et on ne moyenne pas
+export function smoothEtaSpeed(avgKmh: number, kmh: number): number {
+  if (kmh <= ETA_SPEED_FLOOR) return avgKmh
+  return avgKmh > 0 ? avgKmh + (kmh - avgKmh) * ETA_SMOOTH : kmh
 }
 
 // Durée restante estimée (en secondes) à `speedKmh`. Renvoie null sous 1 km/h :
@@ -127,6 +449,73 @@ export function formatDuration(sec: number): string {
 export function arrivalClock(sec: number, now: Date = new Date()): string {
   const d = new Date(now.getTime() + sec * 1000)
   return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// ─── Zoom de découverte du prochain virage ─────────────────────────────────────
+
+// Fractions de la hauteur de l'écran délimitant la bande où l'on veut voir le virage :
+// au-dessus de `TOP_SAFE`, il est trop haut (voire hors champ) → dézoomer ; en dessous de
+// `COMFY_MAX`, il reste trop d'espace vide devant → resserrer. La bande morte entre les
+// deux est large exprès : sans elle, la vue oscillerait d'une frame à l'autre.
+const REVEAL_TOP_SAFE = 0.18
+const REVEAL_COMFY_MAX = 0.30
+// Pas de zoom par frame : petit, pour que le cumul donne un dézoom progressif et fluide.
+const REVEAL_ZOOM_STEP = 0.2
+
+// Prochain zoom de découverte, à partir de la position À L'ÉCRAN du virage (`y`, en pixels
+// depuis le haut d'une vue de hauteur `h`). `base` est le zoom courant de la découverte (ou
+// celui du profil au premier pas). Le résultat ne dépasse jamais le zoom du profil
+// (`camZoom`) — on ne fait que dézoomer — ni le plancher caméra.
+export function revealZoomStep(
+  opts: { y: number; h: number; base: number; camZoom: number; minZoom: number },
+): number {
+  const { y, h, base, camZoom, minZoom } = opts
+  let z = base
+  if (y < h * REVEAL_TOP_SAFE) z = base - REVEAL_ZOOM_STEP
+  else if (y > h * REVEAL_COMFY_MAX) z = base + REVEAL_ZOOM_STEP
+  return Math.min(camZoom, Math.max(minZoom, z))
+}
+
+// ─── Détection d'arrivée ───────────────────────────────────────────────────────
+
+// Marge au-delà de la zone d'arrivée à partir de laquelle on considère le coureur
+// franchement « en route ». Sans marge, osciller autour d'ARRIVAL_M suffirait à armer la
+// détection alors qu'on n'a jamais vraiment quitté la destination.
+const ARRIVAL_EN_ROUTE_MARGIN_M = 50
+
+// État de la détection d'arrivée, porté d'un fix GPS au suivant.
+export interface ArrivalState {
+  /** Vrai dès qu'on a été franchement en route (au-delà de la zone d'arrivée). */
+  seenEnRoute: boolean
+  /** Distance restante au fix précédent (sur le tracé) : sert à juger du rapprochement. */
+  lastRemainingM: number | null
+}
+
+export const INITIAL_ARRIVAL_STATE: ArrivalState = { seenEnRoute: false, lastRemainingM: null }
+
+// Fait avancer la détection d'arrivée d'un fix GPS. L'arrivée n'est retenue que si :
+//   • on a d'abord été clairement en route (`seenEnRoute`) — sans quoi un tracé minuscule,
+//     ou une boucle dont le départ se projette près de la fin, s'annoncerait « arrivé » au
+//     tout premier fix ;
+//   • le fix précédent était DÉJÀ dans les derniers ARRIVAL_APPROACH_M — on ne franchit pas
+//     30 km en une seconde, donc un saut brutal du restant vers zéro trahit une projection
+//     qui a changé de passage (tracé qui se recoupe), pas un coureur arrivé ;
+//   • on est sur le tracé : hors-trajet, la progression n'est pas fiable.
+// Un trou GPS ne retarde donc l'annonce que d'un fix. `arrived` (déjà annoncé) coupe court :
+// on n'annonce qu'une fois par tracé.
+export function arrivalStep(
+  state: ArrivalState,
+  opts: { remainingM: number; hasRoute: boolean; onRoute: boolean; arrived: boolean },
+): ArrivalState & { justArrived: boolean } {
+  const { remainingM, hasRoute, onRoute, arrived } = opts
+  const seenEnRoute = state.seenEnRoute || (hasRoute && remainingM > ARRIVAL_M + ARRIVAL_EN_ROUTE_MARGIN_M)
+  const approaching = state.lastRemainingM != null && state.lastRemainingM <= ARRIVAL_M + ARRIVAL_APPROACH_M
+  return {
+    seenEnRoute,
+    // Référence du prochain fix : seulement sur le tracé.
+    lastRemainingM: onRoute ? remainingM : state.lastRemainingM,
+    justArrived: !arrived && seenEnRoute && approaching && onRoute && remainingM <= ARRIVAL_M,
+  }
 }
 
 // ─── Géométrie ────────────────────────────────────────────────────────────────

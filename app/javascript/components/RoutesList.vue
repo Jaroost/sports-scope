@@ -14,6 +14,7 @@ import { MAP_STYLES } from '../mapStyles'
 import NewRouteModal from './NewRouteModal.vue'
 import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
 import RoutesOverviewMap from './RoutesOverviewMap.vue'
+import { csrfToken } from '../csrf'
 
 // canDense : réservé aux admins (can :manage, :all). Débloque l'export d'un GPX
 // densifié (1 point / 5 m) — utile pour les simulateurs de position GPS, à éviter
@@ -287,10 +288,6 @@ const editingId = ref(null)
 const editingName = ref('')
 const savingId = ref(null)
 const editInputs = ref({}) // { [routeId]: HTMLInputElement } — for autofocus
-
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 // Construit la query string à partir des filtres actifs + pagination.
 function buildQuery() {

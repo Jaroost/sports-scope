@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { t } from '../i18n'
-import { intensityZoneColor, fmtSeconds, polarize, ZONE_VERDICT_COLOR, type ZoneChannel, type ZoneSummary } from '../composables/useTrainingPlan'
+import { intensityZoneColor, fmtSeconds, polarize, zoneRange, ZONE_VERDICT_COLOR, type ZoneBucket, type ZoneChannel, type ZoneSummary } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
   zones: ZoneSummary | null
@@ -21,7 +21,7 @@ const channels = computed(() => {
   const z = props.zones
   return [
     {
-      key: 'hr', icon: 'fa-heart-pulse', iconClass: 'text-danger',
+      key: 'hr', icon: 'fa-heart-pulse', iconClass: 'text-danger', unit: 'bpm',
       title: t('performance.zones.hr_title'),
       ref: props.lthr ? t('performance.zones.hr_ref', { bpm: props.lthr }) : '',
       channel: z?.hr ?? null,
@@ -30,7 +30,7 @@ const channels = computed(() => {
       empty: props.lthr ? t('performance.zones.no_hr') : t('performance.zones.set_lthr_hint'),
     },
     {
-      key: 'power', icon: 'fa-bolt', iconClass: 'text-warning',
+      key: 'power', icon: 'fa-bolt', iconClass: 'text-warning', unit: 'W',
       title: t('performance.zones.power_title'),
       ref: props.ftp ? t('performance.zones.power_ref', { watts: props.ftp }) : '',
       channel: z?.power ?? null,
@@ -45,6 +45,15 @@ const channels = computed(() => {
 // (pct > 0) ; la légende, elle, liste toutes les zones.
 function segments(channel: ZoneChannel | null) {
   return channel ? channel.zones.filter((z) => z.pct > 0) : []
+}
+
+// Infobulle d'une zone (barre et légende) : libellé + plage absolue à tenir pour y être
+// (« Z2 Endurance (138–153 bpm) »), puis part du temps. Les bornes viennent du serveur,
+// calculées avec le seuil courant.
+function zoneTitle(z: ZoneBucket, unit: string): string {
+  const range = zoneRange(z, unit)
+  const head = range ? `${zoneLabel(z.zone)} (${range})` : zoneLabel(z.zone)
+  return `${head} — ${z.pct}% · ${fmtSeconds(z.seconds)}`
 }
 
 // Réel vs idéal : ~80 / ~5 / ~15 (beaucoup de facile, peu de zone grise, un peu
@@ -91,7 +100,7 @@ function verdictColor(v: string): string {
                   v-for="s in segments(c.channel)" :key="s.zone"
                   class="zone-seg"
                   :style="{ width: `${s.pct}%`, backgroundColor: intensityZoneColor(s.zone) }"
-                  :title="`${zoneLabel(s.zone)} — ${s.pct}% · ${fmtSeconds(s.seconds)}`"
+                  :title="zoneTitle(s, c.unit)"
                 >
                   <span v-if="s.pct >= 8" class="zone-seg-label">{{ Math.round(s.pct) }}%</span>
                 </div>
@@ -100,6 +109,7 @@ function verdictColor(v: string): string {
                 <span
                   v-for="z in c.channel.zones" :key="z.zone"
                   class="zone-legend" :class="{ 'zone-legend-muted': z.pct === 0 }"
+                  :title="zoneTitle(z, c.unit)"
                 >
                   <span class="zone-dot" :style="{ backgroundColor: intensityZoneColor(z.zone) }"></span>
                   <span class="fw-semibold">{{ zoneLabel(z.zone) }}</span>
@@ -171,6 +181,7 @@ function verdictColor(v: string): string {
   justify-content: center;
   min-width: 2px;
   transition: filter 0.12s ease;
+  cursor: help;
 }
 .zone-seg:hover {
   filter: brightness(1.08);
@@ -187,6 +198,8 @@ function verdictColor(v: string): string {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.8rem;
+  /* Le survol révèle la plage (bpm / W) de la zone : curseur d'aide comme indice. */
+  cursor: help;
 }
 .zone-legend-muted {
   opacity: 0.45;

@@ -14,7 +14,10 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { formatPace, paceMinPerKm, formatChrono } from '../activityHelpers'
-import SegmentHistoryChart from './SegmentHistoryChart.vue'
+import SegmentEfforts from './SegmentEfforts.vue'
+import ReverseBadge from './ReverseBadge.vue'
+import type { Segment, SegmentEffort } from '../segmentTypes'
+import { csrfToken } from '../csrf'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -33,43 +36,6 @@ const props = defineProps({
 
 const emit = defineEmits(['hover', 'select'])
 
-interface Effort {
-  source: string
-  external_id: string
-  name: string
-  started_at: string | null
-  duration_s: number
-  reverse: boolean
-  // Passage de la sortie affichée elle-même : elle repasse par le segment (aller-retour).
-  own: boolean
-}
-
-interface Segment {
-  start_idx: number
-  end_idx: number
-  distance_m: number
-  elevation_gain_m: number | null
-  count: number
-  reverse_count: number
-  // `reverse` : sens de CETTE sortie par rapport au sens de référence du segment
-  // nommé (faux tant que le segment n'a pas de nom — sans nom, pas de référence).
-  // `podium` : 1/2/3 (or, argent, bronze) parmi les passages comparables, null hors
-  // podium. `record` en est la marche du haut.
-  current: {
-    duration_s: number, rank: number, total: number, reverse: boolean,
-    podium: number | null, record: boolean,
-  }
-  best: Effort | null
-  efforts: Effort[]
-  // Nom donné par l'utilisateur, s'il a déjà baptisé ce chemin (depuis n'importe
-  // quelle sortie qui le traverse) — cf. NamedSegment côté serveur.
-  named_segment_id: number | null
-  name: string | null
-  // Repli d'affichage quand `name` est absent : la localité la plus proche du milieu
-  // du segment (côté serveur). Nul si aucune localité n'est assez proche.
-  place_name?: string | null
-}
-
 const loading = ref(false)
 const error = ref<string | null>(null)
 const segments = ref<Segment[]>([])
@@ -81,7 +47,15 @@ const segmentsUrl = computed(() => props.source === 'imported'
   : `/strava/activities/${props.activityId}/segments`)
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
-const localePrefix = lang ? `/${lang}` : ''
+
+// Date du meilleur passage, affichée sous le chrono de référence. Le reste de
+// l'historique (tableau + graphique) est rendu par `SegmentEfforts`.
+function effortDate(effort: SegmentEffort): string {
+  if (!effort.started_at) return '–'
+  return new Date(effort.started_at).toLocaleDateString(lang || undefined, {
+    day: '2-digit', month: '2-digit', year: '2-digit',
+  })
+}
 
 async function fetchSegments() {
   loading.value = true
@@ -117,10 +91,6 @@ const savingName = ref(false)
 const nameInput = ref<HTMLInputElement | null>(null)
 // Les `li` de la liste, pour ramener à l'écran celle qu'on vient d'ouvrir.
 const rowEls: HTMLElement[] = []
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 // Le champ n'existe qu'une fois la ligne passée en édition : on attend le rendu pour
 // lui donner le focus. `select()` présélectionne le nom existant — renommer, c'est le
@@ -216,13 +186,6 @@ function request(url: string, method: string, body?: Record<string, unknown>) {
 // Chronos de segment en « m:ss » (partagé avec le graphique d'historique).
 const chrono = formatChrono
 
-// Écart au temps du jour, signé (négatif = ce passage-là était plus rapide).
-function delta(seconds: number, reference: number): string {
-  const d = Math.round(seconds - reference)
-  if (d === 0) return '='
-  return `${d > 0 ? '+' : '−'}${chrono(Math.abs(d))}`
-}
-
 function km(metres: number): string {
   return `${(metres / 1000).toFixed(metres < 10000 ? 2 : 1)} km`
 }
@@ -233,18 +196,6 @@ function speed(segment: Segment, seconds: number): string {
   const mps = segment.distance_m / seconds
   if (props.isRun) return `${formatPace(paceMinPerKm(mps))} /km`
   return `${(mps * 3.6).toFixed(1)} km/h`
-}
-
-function activityUrl(effort: Effort): string {
-  const path = effort.source === 'imported' ? 'imported_activities' : 'activities'
-  return `${localePrefix}/${path}/${effort.external_id}`
-}
-
-function effortDate(effort: Effort): string {
-  if (!effort.started_at) return '–'
-  return new Date(effort.started_at).toLocaleDateString(lang || undefined, {
-    day: '2-digit', month: '2-digit', year: '2-digit',
-  })
 }
 
 function hover(segment: Segment | null) {
@@ -388,9 +339,7 @@ function scrollRowIntoView(index: number) {
                 {{ km(segment.distance_m) }}
                 <span v-if="segment.elevation_gain_m"> · D+{{ segment.elevation_gain_m }} m</span>
                 <!-- Sens de référence = celui enregistré au baptême du segment. -->
-                <span v-if="segment.current.reverse" class="badge text-bg-light border ms-1">
-                  {{ t('strava.segments.reverse') }}
-                </span>
+                <ReverseBadge v-if="segment.current.reverse" />
               </div>
             </div>
 
@@ -439,56 +388,15 @@ function scrollRowIntoView(index: number) {
           <!-- L'historique est dans la ligne : on stoppe le clic pour qu'ouvrir un
                passage ne désépingle pas le segment. -->
           <div v-if="expanded === i" class="segment-history mt-3" @click.stop>
-            <!-- Progression : un point par passage, date en x, chrono en y, un sens
-                 par série (le sens inverse n'est pas comparable au sens direct). -->
-            <SegmentHistoryChart
-              class="mb-3"
+            <SegmentEfforts
               :efforts="segment.efforts"
               :current-duration-s="segment.current.duration_s"
               :current-reverse="segment.current.reverse"
               :current-date="activityDate"
+              :count="segment.count"
+              :distance-m="segment.distance_m"
+              :is-run="isRun"
             />
-            <div class="table-responsive">
-              <table class="table table-sm align-middle mb-1">
-                <thead>
-                  <tr class="text-muted small">
-                    <th scope="col">{{ t('strava.segments.date') }}</th>
-                    <th scope="col">{{ t('strava.segments.time') }}</th>
-                    <th scope="col">{{ t('strava.segments.delta') }}</th>
-                    <th scope="col"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr class="table-active">
-                    <td>
-                      {{ t('strava.segments.this_activity') }}
-                      <span v-if="segment.current.reverse" class="badge text-bg-light border ms-1">{{ t('strava.segments.reverse') }}</span>
-                    </td>
-                    <td class="fw-semibold">{{ chrono(segment.current.duration_s) }}</td>
-                    <td class="text-muted">=</td>
-                    <td class="text-muted small">{{ speed(segment, segment.current.duration_s) }}</td>
-                  </tr>
-                  <tr v-for="effort in segment.efforts" :key="`${effort.source}-${effort.external_id}-${effort.started_at}-${effort.duration_s}`">
-                    <td>{{ effortDate(effort) }}</td>
-                    <td>
-                      {{ chrono(effort.duration_s) }}
-                      <span v-if="effort.reverse" class="badge text-bg-light border ms-1">{{ t('strava.segments.reverse') }}</span>
-                    </td>
-                    <td :class="effort.duration_s < segment.current.duration_s ? 'text-success' : 'text-danger'">
-                      {{ effort.reverse === segment.current.reverse ? delta(effort.duration_s, segment.current.duration_s) : '–' }}
-                    </td>
-                    <td class="small">
-                      <a :href="activityUrl(effort)" class="link-secondary text-decoration-none">
-                        {{ effort.name }}
-                      </a>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <p v-if="segment.efforts.length < segment.count - 1" class="text-muted small mb-0">
-              {{ t('strava.segments.truncated', { count: segment.efforts.length }) }}
-            </p>
           </div>
         </li>
       </ul>

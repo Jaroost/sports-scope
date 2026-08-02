@@ -9,11 +9,12 @@ import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType } from '../poiCategories'
 import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, shareVersionParam } from '../routeHelpers'
-import type { Coord, LngLat, VoiceHint, TurnAnomaly } from '../routeHelpers'
+import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
-import { turnAnomalyDiameterForSport, snapWarnDistanceForSport } from '../userPreferences'
-import { BROUTER_URL, profilesForSport } from '../brouter'
-import { fetchSegmentAlternatives, equivalentGeometry } from '../routeAlternatives'
+import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
+import { profilesForSport } from '../brouter'
+import { routeLegs, LegRoutingError } from '../brouterLegs'
+import { fetchSegmentAlternatives, fetchBlockedAlternatives, equivalentGeometry, usableWidenLevels, widenRadiusForStep, BLOCK_RADIUS_M } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
 import { parseGpxWaypoints } from '../gpxImport'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
@@ -23,6 +24,7 @@ import RouteBuilderMap from './RouteBuilderMap.vue'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import RouteAlternativesDialog from './RouteAlternativesDialog.vue'
 import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
+import { csrfToken } from '../csrf'
 
 const props = defineProps({
   routeId: { type: [String, Number], default: null },
@@ -213,12 +215,12 @@ const exportChartRef = useTemplateRef('exportChartRef')
 const exportChartMounted = ref(false)
 
 let recomputeToken = 0
+// Le routage part maintenant en plusieurs requêtes parallèles (une par tronçon, cf.
+// brouterLegs) : un recalcul obsolète doit pouvoir les annuler toutes d'un coup, sinon
+// un drag continu les empilerait jusqu'à saturer le pool de connexions du navigateur.
+let recomputeAbort: AbortController | null = null
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
-
-function csrfToken() {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 function isEditMode() {
   return routeStore.currentId.value != null
@@ -353,6 +355,9 @@ function onChangeProfile(profile: string) {
 
 async function recomputeRoute() {
   const token = ++recomputeToken
+  recomputeAbort?.abort()
+  const abort = new AbortController()
+  recomputeAbort = abort
   selectionStore.clear()
   // Le tracé change : les avertissements portaient sur le précédent, et un éventuel
   // « enregistrer quand même » ne vaut plus. Ils seront recalculés à la prochaine
@@ -379,45 +384,24 @@ async function recomputeRoute() {
   routeStore.error.value = null
 
   try {
+    // Routage tronçon par tronçon (une requête à 2 points par paire de waypoints) plutôt
+    // qu'une requête unique à N waypoints : sur une requête multi-waypoints, BRouter
+    // élimine les demi-tours aux points de passage et supprime donc les waypoints posés
+    // dans une impasse — jusqu'à ne plus rien renvoyer du tout sur une boucle. Détail et
+    // mesures dans brouterLegs.ts.
     const wps = routeStore.waypoints.value
-    const lonlats = wps.map((w) => `${w.lng},${w.lat}`).join('|')
-    // Un waypoint « libre » n'affecte que son tronçon entrant : on trace une ligne droite
-    // (beeline BRouter) depuis le point précédent jusqu'à lui. Le tronçon sortant (libre →
-    // point suivant) reste routé/accroché à la route, sauf si le point suivant est lui aussi
-    // libre. `straight` indexe des tronçons : le tronçon i relie waypoint[i] → waypoint[i+1],
-    // donc le tronçon i est droit ssi waypoint[i+1] est libre.
-    const straight = new Set<number>()
-    wps.forEach((w, i) => {
-      if (i > 0 && w.free) straight.add(i - 1)
-    })
-    const straightParam = straight.size ? `&straight=${[...straight].sort((a, b) => a - b).join(',')}` : ''
-    // timode=2 makes BRouter emit turn-by-turn voicehints in the GeoJSON properties.
-    const profile = routeStore.profile.value
-    const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${straightParam}`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
-    const data = await res.json()
+    const routed = await routeLegs(wps, routeStore.profile.value, abort.signal)
     if (token !== recomputeToken) return
-    const feature = data?.features?.[0]
-    const coords = feature?.geometry?.coordinates
-    if (!Array.isArray(coords) || coords.length < 2) throw new Error('Routing impossible (no route)')
-    const trackLen = parseFloat(feature.properties?.['track-length'] || '0')
-    routeStore.distanceM.value = Number.isFinite(trackLen) && trackLen > 0 ? trackLen : 0
-    let geom = coords.map((c: number[]) => [c[0], c[1], c.length > 2 ? c[2] : null]) as Coord[]
-    // Voicehints BRouter : [indexInTrack, command, exitNumber, distanceToNext, angle].
-    // On les ancre sur la coordonnée brute (avant densification, qui décalerait les
-    // index) ; la navigation les reprojettera sur la géométrie sauvegardée.
-    const rawHints = Array.isArray(feature.properties?.voicehints) ? feature.properties.voicehints : []
-    routeStore.voiceHints.value = rawHints
-      .map((h: number[]) => {
-        const c = coords[h[0]]
-        return c ? { lng: c[0], lat: c[1], cmd: h[1], angle: h[4] ?? 0, exit_number: h[2] ?? 0 } : null
-      })
-      .filter(Boolean) as VoiceHint[]
+    if (routed.geometry.length < 2) throw new Error('Routing impossible (no route)')
+    routeStore.distanceM.value = routed.distanceM
+    // Les voicehints sont déjà ancrés sur leur coordonnée (et non sur un index de tracé),
+    // ce qui les rend insensibles à la concaténation des tronçons comme à la densification.
+    routeStore.voiceHints.value = routed.voiceHints
     // Les tronçons droits (points libres) ne contiennent que leurs extrémités : on les
     // densifie pour qu'open-meteo échantillonne le relief le long de la ligne.
-    if (straight.size) geom = densifyGeometry(geom)
-    routeStore.geometry.value = geom
+    routeStore.geometry.value = routed.hasStraight
+      ? densifyGeometry(routed.geometry)
+      : routed.geometry
 
 
     // Recalcule d'abord les index géométriques des waypoints : le rendu du tracé
@@ -447,8 +431,17 @@ async function recomputeRoute() {
       await fetchElevation(token)
     }
   } catch (e: any) {
+    // Recalcul supplanté par un plus récent : on a nous-mêmes annulé ses requêtes,
+    // ce n'est pas une erreur à montrer.
+    if (e?.name === 'AbortError') return
     if (token === recomputeToken) {
-      routeStore.error.value = `${t('routes.error_routing')}: ${e.message}`
+      // Le découpage en tronçons rend l'échec localisable : on nomme les deux points
+      // entre lesquels le routage a échoué (numérotés comme sur la carte, à partir de 1)
+      // au lieu du « erreur de routage » global et muet d'avant.
+      routeStore.error.value =
+        e instanceof LegRoutingError
+          ? `${t('routes.error_routing_leg', { from: e.legIndex + 1, to: e.legIndex + 2 })}: ${e.message}`
+          : `${t('routes.error_routing')}: ${e.message}`
       // Le tracé garde l'ancienne géométrie alors que les waypoints, eux, ont déjà changé :
       // on réaligne les index dessus, sinon l'insertion de point resterait bloquée.
       mapRef.value?.recomputeWaypointGeomIndices()
@@ -1017,6 +1010,23 @@ function closeActionsDropdown() {
   if (actionsToggleEl.value) Dropdown.getOrCreateInstance(actionsToggleEl.value).hide()
 }
 
+// Le menu s'ouvre sous son bouton, qui est lui-même sous la navbar ET sous le bandeau du
+// créateur : une hauteur plafonnée à « fenêtre moins navbar » le fait donc déborder par le
+// bas de la hauteur du bandeau. Comme .route-builder-page est en overflow: hidden et que la
+// page ne défile pas, ce débordement est rogné : le défilement interne du menu n'atteignait
+// jamais ses dernières entrées (« Profil »). On mesure donc l'espace réellement disponible
+// sous le bouton à chaque ouverture.
+function sizeActionsMenu() {
+  const toggle = actionsToggleEl.value
+  const menu = toggle?.parentElement?.querySelector('.route-actions-menu') as HTMLElement | null
+  if (!toggle || !menu) return
+  // 8px : le décalage que Bootstrap applique au menu, plus une marge de respiration.
+  const avail = window.innerHeight - toggle.getBoundingClientRect().bottom - 8
+  // Plancher : sur une fenêtre très basse, mieux vaut un menu qui déborde un peu (et se
+  // fait rogner) qu'un menu haut de deux lignes, illisible.
+  menu.style.maxHeight = `${Math.max(180, Math.round(avail))}px`
+}
+
 const menuGroups = computed<MenuGroup[]>(() => {
   const groups: MenuGroup[] = []
 
@@ -1152,23 +1162,71 @@ interface AlternativeView extends RouteAlternative {
   deltaDistanceM: number
   deltaGainM: number
 }
-const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828']
+// 6 teintes : la passe automatique en remplit rarement plus de 3 ou 4, mais « chercher
+// plus large » en ajoute, et une variante trouvée ne doit pas être évincée de l'écran.
+const ALT_COLORS = ['#f77f00', '#7209b7', '#0096c7', '#d62828', '#2a9d8f', '#ff006e']
 
 const alternatives = ref<AlternativeView[]>([])
 const alternativesLoading = ref(false)
+// Passe d'élargissement : distincte du chargement initial, pour garder à l'écran les
+// variantes déjà trouvées pendant qu'on en cherche d'autres.
+const alternativesWidening = ref(false)
+// Retour du bouton « chercher plus large » quand le palier n'a rien apporté de neuf.
+const alternativesWidenNote = ref<string | null>(null)
 const alternativesError = ref<string | null>(null)
 // Géométrie du tronçon actuel, tracée en référence dans la dialogue des variantes.
 const altCurrentCoords = ref<Coord[]>([])
+// Sport / profil de routage utilisés pour CE tronçon : initialisés sur ceux de
+// l'itinéraire, mais modifiables dans la dialogue (p. ex. chercher un raccourci en
+// sentier sur un parcours vélo) sans toucher aux réglages de l'itinéraire.
+const altSport = ref<Sport>(routeStore.sport.value)
+const altProfile = ref<string>(routeStore.profile.value)
 // Bornes géométrie de la sélection au moment de la proposition (figées : la sélection
 // est effacée à l'application, mais on en a besoin pour le splice).
 let altBounds: { lo: number; hi: number } | null = null
 let altToken = 0
+// Vivier des variantes retenues, toutes passes confondues : « chercher plus large »
+// s'ajoute à l'existant au lieu de le remplacer. `alternatives` n'en est que le dessus
+// du panier, classé et plafonné au nombre de couleurs.
+let altFound: RouteAlternative[] = []
+let altEndpoints: { p0: LngLat; p1: LngLat } | null = null
+let altCurrentDist = 0
+let altCurrentGain = 0
+// Paliers d'élargissement déjà consommés, et ce qu'il reste de praticable sur ce
+// tronçon (un rayon trop grand pour lui ne peut plus rien rapporter — cf.
+// usableWidenLevels).
+const altWidenStep = ref(0)
+const altWidenLevels = computed(() => usableWidenLevels(altCurrentCoords.value))
+const canWidenAlternatives = computed(() => altWidenStep.value < altWidenLevels.value)
+const nextWidenRadiusM = computed(() => widenRadiusForStep(altWidenStep.value))
 
 // La dialogue s'ouvre dès qu'une proposition est en cours (chargement, erreur ou
 // variantes trouvées) et se referme via cancelAlternatives.
 const showAlternativesDialog = computed(() => alternativesLoading.value || alternativesError.value != null || alternatives.value.length > 0)
 
-async function proposeAlternatives() {
+// Entrée depuis la toolbar : (re)part des réglages de l'itinéraire.
+function proposeAlternatives() {
+  altSport.value = routeStore.sport.value
+  altProfile.value = routeStore.profile.value
+  searchAlternatives()
+}
+
+// Changement de sport dans la dialogue : le profil retombe sur le défaut du sport
+// (préférence compte ou défaut catalogue), comme routeStore.setSport.
+function onAlternativesSport(sport: Sport) {
+  if (sport === altSport.value) return
+  altSport.value = sport
+  altProfile.value = routeProfileForSport(sport)
+  searchAlternatives()
+}
+
+function onAlternativesProfile(profile: string) {
+  if (profile === altProfile.value) return
+  altProfile.value = profile
+  searchAlternatives()
+}
+
+async function searchAlternatives() {
   if (routeStore.readOnly.value) return
   const range = selectionStore.selectionRange.value
   const geom = routeStore.geometry.value
@@ -1182,7 +1240,10 @@ async function proposeAlternatives() {
   altBounds = { lo: loI, hi: hiI }
   alternatives.value = []
   alternativesError.value = null
+  alternativesWidenNote.value = null
   alternativesLoading.value = true
+  altFound = []
+  altWidenStep.value = 0
 
   // Tronçon actuel (entre les extrémités) : sert de référence pour les écarts, pour
   // écarter les variantes identiques au tracé déjà en place, et de tracé de référence
@@ -1190,28 +1251,83 @@ async function proposeAlternatives() {
   const currentCoords = geom.slice(loI, hiI + 1)
   altCurrentCoords.value = currentCoords
   const currentDists = buildDistancesM(currentCoords)
-  const currentDist = currentDists[currentDists.length - 1] ?? 0
-  const currentGL = computeGainLoss(currentCoords)
+  altCurrentDist = currentDists[currentDists.length - 1] ?? 0
+  altCurrentGain = computeGainLoss(currentCoords).gain
+
+  const p0: LngLat = [geom[loI][0], geom[loI][1]]
+  const p1: LngLat = [geom[hiI][0], geom[hiI][1]]
+  altEndpoints = { p0, p1 }
 
   try {
-    const p0: LngLat = [geom[loI][0], geom[loI][1]]
-    const p1: LngLat = [geom[hiI][0], geom[hiI][1]]
-    const alts = await fetchSegmentAlternatives(p0, p1, routeStore.profile.value)
+    // Les deux passes en parallèle : les alternativeidx de BRouter (variantes proches de
+    // l'optimum) et le blocage de morceaux du tronçon (vraies bifurcations, souvent bien
+    // plus coûteuses — cf. fetchBlockedAlternatives).
+    const [byIdx, byBlock] = await Promise.all([
+      fetchSegmentAlternatives(p0, p1, altProfile.value),
+      fetchBlockedAlternatives(p0, p1, altProfile.value, currentCoords, BLOCK_RADIUS_M),
+    ])
     if (token !== altToken) return
-    // Écarte les variantes identiques au tronçon actuel : rien à proposer d'utile.
-    const distinct = alts.filter((a) => !equivalentGeometry(a, { coords: currentCoords, distanceM: currentDist }))
-    if (!distinct.length) { alternativesError.value = t('routes.alternatives_none'); return }
-    alternatives.value = distinct.slice(0, ALT_COLORS.length).map((a, i) => ({
-      ...a,
-      color: ALT_COLORS[i % ALT_COLORS.length],
-      deltaDistanceM: a.distanceM - currentDist,
-      deltaGainM: a.gainM - currentGL.gain,
-    }))
+    mergeAlternatives([...byIdx, ...byBlock])
+    if (!altFound.length) alternativesError.value = t('routes.alternatives_none')
   } catch (e: any) {
     if (token === altToken) alternativesError.value = `${t('routes.alternatives_error')}: ${e.message}`
   } finally {
     if (token === altToken) alternativesLoading.value = false
   }
+}
+
+// Relance une passe de blocage avec un rayon plus grand : le disque interdit couvrant
+// plus de terrain, BRouter doit contourner plus loin — c'est ce qui fait apparaître les
+// variantes qui repartent en arrière ou vont chercher un autre versant.
+async function widenAlternatives() {
+  if (!canWidenAlternatives.value || !altEndpoints || alternativesLoading.value || alternativesWidening.value) return
+  const radius = nextWidenRadiusM.value
+
+  const token = altToken
+  altWidenStep.value++
+  alternativesWidenNote.value = null
+  alternativesWidening.value = true
+  try {
+    const more = await fetchBlockedAlternatives(
+      altEndpoints.p0, altEndpoints.p1, altProfile.value, altCurrentCoords.value, radius,
+    )
+    if (token !== altToken) return
+    const before = altFound.length
+    mergeAlternatives(more)
+    // Une passe qui n'apporte rien ne doit pas laisser croire à un bug : on le dit. Si
+    // rien n'a jamais été trouvé, le message plein écran suffit ; sinon on l'affiche à
+    // côté du bouton, sans toucher aux variantes déjà à l'écran.
+    if (altFound.length === before) {
+      if (altFound.length) alternativesWidenNote.value = t('routes.alternatives_widen_none')
+      else alternativesError.value = t('routes.alternatives_none')
+    }
+  } catch (e: any) {
+    if (token === altToken) alternativesError.value = `${t('routes.alternatives_error')}: ${e.message}`
+  } finally {
+    if (token === altToken) alternativesWidening.value = false
+  }
+}
+
+// Ajoute des candidates au vivier : on écarte celles équivalentes au tronçon actuel ou à
+// une variante déjà retenue, puis on republie la liste classée par écart de distance
+// croissant (les détours les plus modestes en premier).
+function mergeAlternatives(candidates: RouteAlternative[]) {
+  const current = { coords: altCurrentCoords.value, distanceM: altCurrentDist }
+  for (const c of candidates) {
+    if (equivalentGeometry(c, current)) continue
+    if (altFound.some((f) => equivalentGeometry(f, c))) continue
+    altFound.push(c)
+  }
+  const ranked = [...altFound].sort(
+    (a, b) => Math.abs(a.distanceM - altCurrentDist) - Math.abs(b.distanceM - altCurrentDist),
+  )
+  alternatives.value = ranked.slice(0, ALT_COLORS.length).map((a, i) => ({
+    ...a,
+    color: ALT_COLORS[i % ALT_COLORS.length],
+    deltaDistanceM: a.distanceM - altCurrentDist,
+    deltaGainM: a.gainM - altCurrentGain,
+  }))
+  if (alternatives.value.length) alternativesError.value = null
 }
 
 // La dialogue émet `select` avec l'index de la variante choisie.
@@ -1230,9 +1346,14 @@ function cancelAlternatives() {
   altToken++
   alternatives.value = []
   alternativesError.value = null
+  alternativesWidenNote.value = null
   alternativesLoading.value = false
+  alternativesWidening.value = false
   altCurrentCoords.value = []
   altBounds = null
+  altFound = []
+  altEndpoints = null
+  altWidenStep.value = 0
 }
 
 // La sélection disparaît (effacée, ou tracé recalculé) → on ferme la dialogue.
@@ -1546,6 +1667,9 @@ async function exportImage() {
     // Élargit le tracé proportionnellement à la résolution (sinon quasi invisible sur une
     // grande image), puis attend le re-rendu avant la capture.
     mapRef.value?.setRouteLineScale(s)
+    // Sur une image figée, le flux animé du sens de parcours ne dit plus rien : on repasse
+    // aux flèches (et la carte cesse de se repeindre, donc la capture est déterministe).
+    mapRef.value?.setDirectionStatic(true)
     await new Promise<void>((resolve) => mapInst.once('idle', resolve))
     // Ratio réel des pixels du canvas (CSS → buffer) : sert à projeter les cols exactement
     // là où ils sont rendus, quel que soit le pixelRatio effectif de MapLibre.
@@ -1598,6 +1722,7 @@ async function exportImage() {
     container.style.cssText = savedContainerCss
     document.documentElement.style.overflow = savedHtmlOverflow
     mapRef.value?.setRouteLineScale(1)
+    mapRef.value?.setDirectionStatic(false)
     mapInst.setPixelRatio(savedPixelRatio)
     mapInst.resize()
     // Démonte le chart d'export (Vue détruit l'instance Chart.js via onBeforeUnmount).
@@ -1816,6 +1941,7 @@ function onWindowResize() {
   const mobile = computeIsMobile()
   if (mobile !== isMobile.value) isMobile.value = mobile
   updateNavbarHeight()
+  sizeActionsMenu()  // menu ouvert pendant un redimensionnement de la fenêtre
   setTimeout(() => mapRef.value?.resize(), 100)
 }
 
@@ -1873,6 +1999,9 @@ onMounted(async () => {
   }
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('beforeunload', onBeforeUnload)
+  // Hauteur du menu d'actions : mesurée juste avant chaque ouverture, la navbar comme le
+  // bandeau pouvant avoir changé de hauteur entre-temps.
+  actionsToggleEl.value?.addEventListener('show.bs.dropdown', sizeActionsMenu)
   // En mode PWA standalone, le visual viewport peut changer sans déclencher
   // window.resize (ex. clavier virtuel). On s'y abonne pour garder --rb-available-h
   // à jour et éviter que le bouton de profil disparaisse sous la barre maison.
@@ -1950,6 +2079,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   navbarResizeObserver?.disconnect(); navbarResizeObserver = null
   document.getElementById('navbar-route-save-btn')?.removeEventListener('click', save)
+  actionsToggleEl.value?.removeEventListener('show.bs.dropdown', sizeActionsMenu)
   if (savedTimer) clearTimeout(savedTimer)
   if (shareCopiedTimer) clearTimeout(shareCopiedTimer)
   document.body.style.removeProperty('--rb-navbar-h')
@@ -2394,9 +2524,20 @@ onBeforeUnmount(() => {
         :alternatives="alternatives"
         :current-coords="altCurrentCoords"
         :map-style-id="state.mapStyleId"
+        :sport="altSport"
+        :profile="altProfile"
         :loading="alternativesLoading"
+        :widening="alternativesWidening"
+        :can-widen="canWidenAlternatives"
+        :widen-radius-m="nextWidenRadiusM"
+        :widen-step="altWidenStep"
+        :widen-levels="altWidenLevels"
+        :widen-note="alternativesWidenNote"
         :error="alternativesError"
         @select="onSelectAlternative"
+        @update:sport="onAlternativesSport"
+        @update:profile="onAlternativesProfile"
+        @widen="widenAlternatives"
         @close="cancelAlternatives"
       />
     </Transition>
@@ -2597,10 +2738,13 @@ onBeforeUnmount(() => {
 /* Le menu d'actions loge les contrôles de type d'itinéraire : il lui faut de la
    largeur, sinon les libellés de sport et de profil sont à l'étroit. Il loge aussi
    les bascules de POI (une entrée par catégorie) : sur un écran bas, il dépasserait
-   la fenêtre — d'où la hauteur plafonnée et le défilement interne. */
+   la fenêtre — d'où la hauteur plafonnée et le défilement interne.
+   Le plafond exact est posé en JS à l'ouverture (sizeActionsMenu), à partir de la
+   position réelle du bouton ; la valeur ci-dessous n'est qu'un repli, volontairement
+   prudent — la place perdue sous le bandeau du créateur y est déduite en dur. */
 .route-actions-menu {
   min-width: 16rem;
-  max-height: calc(100dvh - var(--rb-navbar-h, 4rem) - 1rem);
+  max-height: calc(100dvh - var(--rb-navbar-h, 4rem) - 4rem);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

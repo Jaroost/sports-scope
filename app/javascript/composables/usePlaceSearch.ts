@@ -17,6 +17,28 @@ export interface PlaceResult {
   address?: { country_code?: string }
 }
 
+// Libellé court d'un résultat : Nominatim renvoie une adresse complète
+// (« Gruyères, District de la Gruyère, Fribourg, Suisse »), on n'en garde que la tête pour
+// remplir le champ de recherche ou nommer une destination.
+export function placeShortName(p: PlaceResult): string {
+  return p.display_name.split(',')[0]
+}
+
+// Recadre la carte sur un résultat : sur son cadre englobant quand Nominatim en fournit un
+// (ville, massif, lac), sinon vol vers le point. Le zoom est plafonné pour qu'un hameau ne
+// se retrouve pas cadré à la rue près. Partagé par le créateur d'itinéraire et la
+// navigation : sélectionner un lieu ne fait jamais que déplacer la vue.
+export function flyToPlace(map: any, p: PlaceResult): void {
+  if (!map) return
+  if (p.boundingbox?.length === 4) {
+    const [minLat, maxLat, minLng, maxLng] = p.boundingbox.map(parseFloat)
+    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 800, maxZoom: 14 })
+  } else {
+    const lat = parseFloat(p.lat), lng = parseFloat(p.lon)
+    if (!Number.isNaN(lat) && !Number.isNaN(lng)) map.flyTo({ center: [lng, lat], zoom: 13, duration: 800 })
+  }
+}
+
 export function usePlaceSearch() {
   // Liste ordonnée des pays privilégiés, configurée dans le profil
   // (search.country_codes). L'ordre = la priorité d'affichage ; on la passe aussi

@@ -12,27 +12,40 @@ module PeakPowerCurve
   # Returns `{ "5" => avg_watts, … }`. Skipped durations (longer than the
   # activity, or no power data) simply don't appear in the result.
   def compute_from(streams)
+    mean_max(streams, 'watts')
+  end
+
+  # Courbe mean-max générique : pour chaque durée, la meilleure moyenne du flux
+  # `key` tenue sur une fenêtre de cette longueur. `watts` en donne la courbe de
+  # puissance ; `heartrate` la même chose pour la FC (cf. `LthrEstimator`).
+  # Renvoie `{ "1200" => valeur, … }` — une durée absente = plus longue que la
+  # sortie, ou aucune donnée exploitable.
+  #
+  # On intègre la grandeur dans le temps (E[i] = Σ v·Δt) puis on balaie en deux
+  # pointeurs : une cadence d'échantillonnage irrégulière ou une pause ne fausse
+  # donc pas la moyenne, contrairement à une moyenne d'échantillons.
+  def mean_max(streams, key, durations = DURATIONS)
     return {} unless streams.is_a?(Hash)
 
     times = stream_values(streams, 'time')
-    watts = stream_values(streams, 'watts')
-    return {} unless times.is_a?(Array) && watts.is_a?(Array)
+    values = stream_values(streams, key)
+    return {} unless times.is_a?(Array) && values.is_a?(Array)
 
-    n = [times.length, watts.length].min
+    n = [times.length, values.length].min
     return {} if n < 2
 
-    # Cumulative energy (J): E[i] = Σ watts[k] * (time[k+1] - time[k])
+    # Cumulative integral: E[i] = Σ values[k] * (time[k+1] - time[k])
     energy = Array.new(n, 0.0)
     (1...n).each do |i|
       dt = times[i].to_f - times[i - 1].to_f
-      w  = watts[i - 1]
-      wv = w.is_a?(Numeric) && w.finite? ? w.to_f : 0.0
-      energy[i] = energy[i - 1] + wv * [dt, 0].max
+      v  = values[i - 1]
+      vv = v.is_a?(Numeric) && v.finite? ? v.to_f : 0.0
+      energy[i] = energy[i - 1] + vv * [dt, 0].max
     end
 
     total_span = times[n - 1].to_f - times[0].to_f
     out = {}
-    DURATIONS.each do |d|
+    durations.each do |d|
       break if d > total_span
 
       best = nil

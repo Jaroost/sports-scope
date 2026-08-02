@@ -36,6 +36,7 @@ class StravaController < ApplicationController
     page = total_pages if total_pages.positive? && page > total_pages
 
     records = scope.order(started_at: :desc).offset((page - 1) * per_page).limit(per_page)
+    totals = activities_totals(scope)
     # TSS par sortie (charge d'entraînement) calculé en une passe, mêmes seuils que
     # la charge d'entraînement (FTP variable, LTHR).
     tss_map = TrainingLoad.tss_by_activity(current_user)
@@ -43,6 +44,9 @@ class StravaController < ApplicationController
     render json: {
       total: current_user.strava_activities.count,
       filtered_total: filtered_total,
+      # Cumuls de la sélection courante — toutes pages confondues, pas seulement la
+      # page affichée.
+      totals: totals,
       page: page,
       per_page: per_page,
       total_pages: total_pages,
@@ -137,7 +141,12 @@ class StravaController < ApplicationController
     render json: {
       current: current,
       bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['strava', id]),
-      podium: PeakPowerCurve.podium_for(current_user, current, exclude: ['strava', id])
+      podium: PeakPowerCurve.podium_for(current_user, current, exclude: ['strava', id]),
+      # Seuils (FTP / LTHR) que CETTE sortie prouve, + ceux de l'athlète pour comparer.
+      thresholds: ActivityThresholds.for_activity(
+        current_user, peak_powers: current, streams: streams,
+        activity_type: activity&.activity_type
+      )
     }
   rescue StravaStreamsFetcher::ApiError => e
     status = e.status == 404 ? :not_found : :bad_gateway
@@ -192,6 +201,18 @@ class StravaController < ApplicationController
   rescue StravaStreamsFetcher::ApiError => e
     status = e.status == 404 ? :not_found : :bad_gateway
     render json: { error: e.message }, status: status
+  end
+
+  # GET /strava/activities/:id/segments/range?start_idx=&end_idx=
+  # `segment` est nul quand le tronçon est trop court ou n'a jamais été refait — ce
+  # n'est pas une erreur, le front l'affiche comme tel.
+  def segment_range
+    activity = current_user.strava_activities.find_by(strava_id: params[:id])
+    return head :not_found unless activity
+    return head :unprocessable_entity if activity.track_cells.blank?
+
+    render json: { segment: SegmentMatcher.compare(current_user, activity,
+                                                   params[:start_idx].to_i, params[:end_idx].to_i) }
   end
 
   # POST /strava/backfill — récupère en masse les streams manquants. Réutilise un
@@ -287,6 +308,20 @@ class StravaController < ApplicationController
       scope = scope.where(strava_activities: { started_at: ..to.end_of_day })
     end
     scope
+  end
+
+  # Cumuls (distance, temps de déplacement, dénivelé positif) de toutes les
+  # activités du filtre, en une seule agrégation SQL sur le même scope que le
+  # comptage. Les colonnes sont nullables (activité sans GPS, sans altimètre) —
+  # COALESCE pour renvoyer 0 plutôt que null ; le `||` couvre le cas d'un scope vidé
+  # sans requête (`none`), où `pick` ne renvoie aucune ligne.
+  def activities_totals(scope)
+    sums = scope.pick(
+      Arel.sql('COALESCE(SUM(strava_activities.distance_m), 0)'),
+      Arel.sql('COALESCE(SUM(strava_activities.moving_time_s), 0)'),
+      Arel.sql('COALESCE(SUM(strava_activities.total_elevation_gain), 0)')
+    ) || [0, 0, 0]
+    { distance_m: sums[0].to_f, moving_time_s: sums[1].to_i, elevation_gain_m: sums[2].to_f }
   end
 
   # Filtre sur une catégorie de sport (« cycling », « running », …) plutôt que sur

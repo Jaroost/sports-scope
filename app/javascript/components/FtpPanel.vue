@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, computed, watch, watchEffect, nextTick } from 'vue'
 import { t } from '../i18n'
+import { csrfToken } from '../csrf'
 
 // ── Types du payload /api/performance/ftp ───────────────────────────────────
 // Effort ayant déterminé une estimation : une FTP agrège plusieurs sorties (le
@@ -54,10 +55,6 @@ const editing = ref(false)
 // v-model sur <input type="number"> peut y déposer un number ; on tolère les deux.
 const ftpInput = ref<string | number>('')
 const weightInput = ref<string | number>('')
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 async function fetchData() {
   loading.value = true

@@ -1,0 +1,76 @@
+<%# Page de téléchargement de l'app compagnon Android. Rendue côté serveur, sans îlot
+    Vue : elle n'a aucun état, et c'est souvent la première page ouverte sur un
+    téléphone neuf — moins il y a de JS à charger avant le bouton, mieux c'est. %>
+<% content_for :title, t("companion.title") %>
+<% content_for :head do %>
+  <%# Un APK n'a rien à faire dans un index de recherche : le fichier est réservé aux
+      comptes connectés, et une page indexée n'apporterait que des 404 déguisés. %>
+  <meta name="robots" content="noindex, nofollow">
+<% end %>
+
+<div class="companion-download mx-auto" style="max-width: 42rem;">
+  <div class="d-flex align-items-baseline gap-2 mb-3">
+    <h1 class="h3 mb-0 flex-grow-1"><%= t("companion.title") %></h1>
+    <span class="text-body-secondary text-nowrap flex-shrink-0">
+      <i class="fa-brands fa-android me-1" aria-hidden="true"></i>Android
+    </span>
+  </div>
+
+  <p class="text-body-secondary"><%= t("companion.intro") %></p>
+
+  <%# Le tableau de bord se règle ici, pas dans l'appli : composer une grille
+      demande un écran et un clavier, et on le fait une fois pour toutes. %>
+  <%= link_to companion_dashboard_path, class: "btn btn-outline-primary w-100 mb-4" do %>
+    <i class="fa-solid fa-table-cells-large me-2" aria-hidden="true"></i><%= t("companion.settings.open") %>
+  <% end %>
+
+  <% if @release %>
+    <div class="card mb-4">
+      <div class="card-body">
+        <div class="d-flex flex-wrap align-items-baseline gap-2 mb-3">
+          <span class="h5 mb-0"><%= t("companion.version", version: @release.version_name) %></span>
+          <span class="badge text-bg-secondary">build <%= @release.version_code %></span>
+          <span class="text-body-secondary ms-auto">
+            <%# `strftime` et pas `l(..., format: :long)` : le dépôt n'embarque pas
+                rails-i18n et le français n'a pas de section `date:` — la page
+                plantait donc en français, et seulement en français. %>
+            <%= number_to_human_size(@release.size) %><%
+              %><% if @release.released_at %> · <%= @release.released_at.to_date.strftime("%d.%m.%Y") %><% end %>
+          </span>
+        </div>
+
+        <%= link_to companion_download_path, class: "btn btn-primary btn-lg w-100", data: { turbo: false } do %>
+          <i class="fa-solid fa-download me-2" aria-hidden="true"></i><%= t("companion.download") %>
+        <% end %>
+
+        <% if @release.sha256.present? %>
+          <%# L'empreinte permet de vérifier que le fichier arrivé sur le téléphone est
+              bien celui publié — le seul contrôle disponible hors Play Store. %>
+          <p class="small text-body-secondary mt-3 mb-0">
+            <%= t("companion.checksum") %>
+            <code class="user-select-all text-break"><%= @release.sha256 %></code>
+          </p>
+        <% end %>
+      </div>
+    </div>
+
+    <h2 class="h5"><%= t("companion.install_title") %></h2>
+    <ol class="text-body-secondary">
+      <li><%= t("companion.install_step_download") %></li>
+      <li><%= t("companion.install_step_allow") %></li>
+      <li><%= t("companion.install_step_protect") %></li>
+    </ol>
+
+    <div class="alert alert-info d-flex align-items-start gap-2" role="note">
+      <i class="fa-solid fa-circle-info mt-1" aria-hidden="true"></i>
+      <span><%= t("companion.install_note") %></span>
+    </div>
+  <% else %>
+    <%# Cas normal tant que rien n'a été poussé dans le volume : on le dit, plutôt
+        qu'un bouton qui mènerait à une erreur. %>
+    <div class="alert alert-warning d-flex align-items-center gap-2" role="status">
+      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+      <span><%= t("companion.unavailable") %></span>
+    </div>
+  <% end %>
+</div>

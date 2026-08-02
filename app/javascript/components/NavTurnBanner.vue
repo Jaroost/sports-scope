@@ -8,7 +8,6 @@ const props = defineProps<{
   turnHint: TurnHint
   followTurns?: TurnHint[]
   urgentM: number
-  radarBannerVisible: boolean
   speedKmh: number
   muted?: boolean
 }>()
@@ -25,7 +24,6 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
       'nav-turn--urgent': isUrgent(),
       'nav-turn--far': turnHint.state === 'far',
       'nav-turn--now': turnHint.state === 'now',
-      'nav-turn--radar': radarBannerVisible,
     }"
   >
     <div class="nav-turn-main">
@@ -77,7 +75,11 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
    commandes (z-index 9). pointer-events: none laisse les taps/swipes traverser le
    bandeau (veille / révélation des boutons) ; seul le mute capte les siens. */
 .nav-turn {
-  position: absolute; top: 0.75rem; left: 0.75rem; right: 0.75rem;
+  /* --app-inset-top : hauteur de la zone matériellement obstruée en haut de
+     l'écran (encoche, caméra), poussée par l'application mobile qui affiche
+     cette page en plein écran. Absente d'un navigateur ordinaire, où elle vaut
+     0. Sans elle, le bandeau se retrouve pile sous la caméra, illisible. */
+  position: absolute; top: calc(0.75rem + var(--app-inset-top, 0px)); left: 0.75rem; right: 0.75rem;
   z-index: 7;
   display: flex; flex-direction: column; align-items: stretch; gap: 0.6rem;
   background: #7c3aed; color: #fff; padding: 1.1rem 1.5rem;
@@ -104,8 +106,6 @@ const isUrgent = () => props.turnHint.state === 'near' && props.turnHint.distM <
   width: 1.5rem; height: 1.5rem; border-radius: 50%;
   background: rgba(255,255,255,0.25); font-size: 1rem; font-weight: 700;
 }
-/* Bandeau radar visible (pleine largeur en tout-haut) : on descend le virage dessous. */
-.nav-turn--radar { top: 4.5rem; }
 /* Distance (en avant) + temps estimé (en dessous, plus discret) du prochain virage. */
 .nav-turn-info { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
 .nav-turn-dist { font-size: 2.1rem; font-weight: 700; }

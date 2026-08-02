@@ -6,8 +6,9 @@ import { t } from '../i18n'
 import {
   formatHMS, formatKm, formatPace, formatPowerDuration,
   type ClimbSegment, type Efficiency, type SegmentStats, type SplitRow, type LapRow,
-  type IntervalSegment,
+  type IntervalSegment, type CurvePoint, type CurveSeries,
 } from '../activityHelpers'
+import PowerCurveChart from './PowerCurveChart.vue'
 
 interface ClimbWithVam extends ClimbSegment {
   duration: number | null
@@ -43,8 +44,18 @@ const props = defineProps({
   // Intervalles détectés automatiquement (efforts durs soutenus).
   intervals: { type: Array as PropType<IntervalSegment[]>, default: () => [] },
   peakPowers: { type: Array as PropType<PeakPower[]>, default: () => [] },
+  // Même courbe que `peakPowers` mais sur une grille de durées dense — sert au
+  // graphique. Vide (ou absent) ⇒ on retombe sur les 11 durées de `peakPowers`.
+  powerCurve: { type: Array as PropType<PeakPower[]>, default: () => [] },
   // { current: {dur: w}, bests: {dur: { avg_watts, source, external_id, started_at }} } | null
   peakPowerRanks: { type: Object as PropType<Record<string, any> | null>, default: null },
+  // Seuils estimés SUR CETTE SORTIE + ceux de l'athlète, pour comparer :
+  // { ftp: { watts, method, durations, … } | null, lthr: { bpm, method, max_hr, … } | null,
+  //   reference: { ftp, lthr, lthr_source } } | null
+  thresholds: { type: Object as PropType<Record<string, any> | null>, default: null },
+  // Puissance moyenne de la sortie (W) — sert au W/kg « vécu », à côté du W/kg de
+  // la FTP estimée. null quand la sortie n'a pas de capteur de puissance.
+  avgWatts: { type: Number, default: null },
   // Classement de la sortie (or/argent/bronze) sur distance/dénivelé/durée :
   // { sport, year, metrics: { key: { unit, value, overall:{rank,count}, year:{rank,count,year} } } } | null
   bestEfforts: { type: Object as PropType<Record<string, any> | null>, default: null },
@@ -107,6 +118,8 @@ const hasContent = computed(() =>
   || props.climbsWithVam.length > 0
   || props.intervals.length > 0
   || props.peakPowers.length > 0
+  || activityCurve.value.length >= 2
+  || hasThresholds.value
   || hasEfforts.value,
 )
 
@@ -224,6 +237,127 @@ const PEAK_MEDAL_CLASS: Record<number, string> = {
 function peakPowerBestFor(pp) {
   return props.peakPowerRanks?.bests?.[String(pp.duration)] || null
 }
+
+// ─── Seuils estimés sur cette sortie (FTP / LTHR) ────────────────────────────
+// Ce que CETTE sortie prouve, mis en regard des seuils de l'athlète (ceux qui
+// servent au TSS et aux zones). Une sortie tranquille donne des valeurs basses :
+// c'est attendu, le sous-titre le dit — rien n'est mis à jour automatiquement.
+const ftpEstimate = computed(() => props.thresholds?.ftp || null)
+const lthrEstimate = computed(() => props.thresholds?.lthr || null)
+const thresholdRef = computed(() => props.thresholds?.reference || {})
+const hasThresholds = computed(() => !!(ftpEstimate.value || lthrEstimate.value))
+
+// Libellé de la méthode retenue (« 95 % du meilleur 20 min », « modèle CP »…).
+// Le modèle CP précise les durées effectivement ajustées.
+function methodLabel(est: Record<string, any> | null): string {
+  if (!est?.method) return ''
+  const base = t(`strava.stats.threshold_method_${est.method}`)
+  const durations = Array.isArray(est.durations) ? est.durations : []
+  if (est.method !== 'cp_model' || durations.length === 0) return base
+  return `${base} (${durations.map((d: number) => formatPowerDuration(d)).join(' · ')})`
+}
+
+// Écart à la référence de l'athlète, arrondi. null quand l'un des deux manque.
+function deltaTo(value: number | null | undefined, reference: number | null | undefined): number | null {
+  if (!Number.isFinite(value as number) || !Number.isFinite(reference as number)) return null
+  return Math.round((value as number) - (reference as number))
+}
+const ftpDelta = computed(() => deltaTo(ftpEstimate.value?.watts, thresholdRef.value.ftp))
+const lthrDelta = computed(() => deltaTo(lthrEstimate.value?.bpm, thresholdRef.value.lthr))
+
+// Signe explicite : « +12 » / « −8 » (un 0 reste « 0 », pas « +0 »).
+function signed(delta: number): string {
+  if (delta > 0) return `+${delta}`
+  if (delta < 0) return `−${Math.abs(delta)}`
+  return '0'
+}
+function deltaClass(delta: number | null): string {
+  if (delta == null || delta === 0) return 'text-muted'
+  return delta > 0 ? 'text-success' : 'text-muted'
+}
+
+// W/kg « vécu » de la sortie : puissance moyenne ÷ poids de l'athlète. Complète
+// le W/kg de la FTP estimée (qui, lui, est un potentiel au seuil).
+const avgWPerKg = computed<number | null>(() => {
+  const weight = Number(thresholdRef.value.weight_kg)
+  const watts = props.avgWatts
+  if (!Number.isFinite(weight) || weight <= 0 || !Number.isFinite(watts as number) || (watts as number) <= 0) return null
+  return (watts as number) / weight
+})
+function formatWPerKg(value: number | null | undefined): string {
+  return Number.isFinite(value as number) ? `${(value as number).toFixed(1)} W/kg` : '–'
+}
+
+// ─── Courbes de puissance (le graphique au-dessus du tableau) ───────────────
+// 1. La sortie : grille dense si le parent l'a calculée, sinon les 11 durées.
+const activityCurve = computed<CurvePoint[]>(() => {
+  const src = props.powerCurve.length >= 2 ? props.powerCurve : props.peakPowers
+  return src.map((pp) => ({ duration: pp.duration, watts: pp.avgPower }))
+})
+
+// 2. Le record de tous les temps, durée par durée. `bests` exclut volontairement
+// la sortie courante (il sert à décerner les médailles du tableau) : on la remet
+// dans la course ici, sinon la « meilleure de tous les temps » ignorerait la
+// sortie qu'on est en train de regarder quand c'est elle qui détient le record.
+const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
+const localePrefix = lang ? `/${lang}` : ''
+
+const allTimeCurve = computed<CurvePoint[]>(() => {
+  const ranks = props.peakPowerRanks
+  if (!ranks) return []
+  const bests = ranks.bests || {}
+  const current = ranks.current || {}
+  const durations = new Set<string>([...Object.keys(bests), ...Object.keys(current)])
+  const out: CurvePoint[] = []
+  durations.forEach((key) => {
+    const duration = Number(key)
+    if (!Number.isFinite(duration)) return
+    const best = bests[key]
+    const bestWatts = Number(best?.avg_watts)
+    const mine = Number(current[key])
+    const hasBest = Number.isFinite(bestWatts) && bestWatts > 0
+    const hasMine = Number.isFinite(mine) && mine > 0
+    if (!hasBest && !hasMine) return
+    // À égalité on crédite la sortie courante (elle est « déjà » le record).
+    if (hasMine && (!hasBest || mine >= bestWatts)) {
+      out.push({ duration, watts: mine, isCurrent: true })
+    } else {
+      out.push({
+        duration,
+        watts: bestWatts,
+        startedAt: best.started_at || null,
+        href: best.external_id
+          ? `${localePrefix}${best.source === 'imported' ? '/imported_activities' : '/activities'}/${best.external_id}`
+          : null,
+      })
+    }
+  })
+  return out.sort((a, b) => a.duration - b.duration)
+})
+
+// Les deux courbes vivent dans le MÊME graphique, sur le même axe de watts :
+// c'est l'écart entre la sortie et le record qui est intéressant à lire.
+const powerCurveSeries = computed<CurveSeries[]>(() => {
+  const out: CurveSeries[] = []
+  if (allTimeCurve.value.length >= 2) {
+    out.push({
+      label: t('strava.stats.power_curve_all_time'),
+      color: '#0d6efd',
+      points: allTimeCurve.value,
+      showPoints: true,
+      dashed: true,
+      fill: true,
+    })
+  }
+  if (activityCurve.value.length >= 2) {
+    out.push({
+      label: t('strava.stats.power_curve_activity'),
+      color: '#fc4c02',
+      points: activityCurve.value,
+    })
+  }
+  return out
+})
 
 function selectClimb(c) { emit('select-segment', c.startIdx, c.endIdx) }
 function selectPeak(pp) { emit('select-segment', pp.startIdx, pp.endIdx) }
@@ -904,6 +1038,64 @@ watch(
         </div>
       </div>
 
+      <!-- Seuils estimés SUR CETTE SORTIE : ce qu'elle prouve à elle seule, en
+           regard des seuils de l'athlète. Rien n'est mis à jour automatiquement. -->
+      <div v-if="hasThresholds" class="stats-section mt-3">
+        <h4 class="h6 mb-1 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-gauge-high text-warning" aria-hidden="true"></i>
+          <span>{{ t('strava.stats.thresholds_title') }}</span>
+        </h4>
+        <p class="text-muted small mb-2">{{ t('strava.stats.thresholds_hint') }}</p>
+        <div class="threshold-grid">
+          <div v-if="ftpEstimate" class="threshold-card">
+            <span class="threshold-label">{{ t('strava.stats.threshold_ftp') }}</span>
+            <strong class="threshold-value">
+              {{ ftpEstimate.watts }}<span class="threshold-unit">W</span>
+              <span v-if="ftpEstimate.w_per_kg" class="threshold-sub">
+                · {{ formatWPerKg(ftpEstimate.w_per_kg) }}
+              </span>
+            </strong>
+            <span class="threshold-method">{{ methodLabel(ftpEstimate) }}</span>
+            <span v-if="ftpDelta != null" class="threshold-delta" :class="deltaClass(ftpDelta)">
+              {{ signed(ftpDelta) }} W {{ t('strava.stats.threshold_vs_reference', { value: `${thresholdRef.ftp} W` }) }}
+            </span>
+          </div>
+
+          <div v-if="lthrEstimate" class="threshold-card">
+            <span class="threshold-label">{{ t('strava.stats.threshold_lthr') }}</span>
+            <strong class="threshold-value">
+              {{ lthrEstimate.bpm }}<span class="threshold-unit">bpm</span>
+              <span v-if="lthrEstimate.max_hr" class="threshold-sub">
+                · {{ t('strava.stats.threshold_max_hr', { value: lthrEstimate.max_hr }) }}
+              </span>
+            </strong>
+            <span class="threshold-method">{{ methodLabel(lthrEstimate) }}</span>
+            <span v-if="lthrDelta != null" class="threshold-delta" :class="deltaClass(lthrDelta)">
+              {{ signed(lthrDelta) }} bpm {{ t('strava.stats.threshold_vs_reference', { value: `${thresholdRef.lthr} bpm` }) }}
+            </span>
+          </div>
+
+          <div v-if="avgWPerKg != null" class="threshold-card">
+            <span class="threshold-label">{{ t('strava.stats.threshold_w_per_kg') }}</span>
+            <strong class="threshold-value">{{ formatWPerKg(avgWPerKg) }}</strong>
+            <span class="threshold-method">
+              {{ t('strava.stats.threshold_w_per_kg_hint', { watts: Math.round(avgWatts), weight: thresholdRef.weight_kg }) }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Courbes de puissance : celle de la sortie et le record de tous les temps,
+           superposées sur les mêmes axes. Le tableau détaillé suit juste en dessous. -->
+      <div v-if="activityCurve.length >= 2" class="stats-section mt-3">
+        <h4 class="h6 mb-1 d-flex align-items-center gap-2">
+          <i class="fa-solid fa-chart-line text-warning" aria-hidden="true"></i>
+          <span>{{ t('strava.stats.power_curve_title') }}</span>
+        </h4>
+        <p class="text-muted small mb-2">{{ t('strava.stats.power_curve_hint') }}</p>
+        <PowerCurveChart :series="powerCurveSeries" />
+      </div>
+
       <!-- Peak average power per duration (shortest → longest). -->
       <div v-if="peakPowers.length > 0" class="stats-section mt-3">
         <h4 class="h6 mb-2 d-flex align-items-center gap-2">
@@ -1003,6 +1195,37 @@ watch(
 .climb-cat-badge > span { color: #fff; }
 
 .stats-section + .stats-section { border-top: 1px dashed rgba(0, 0, 0, 0.08); padding-top: 0.75rem; }
+
+/* Seuils de la sortie : une carte par estimation (FTP, seuil FC, W/kg). */
+.threshold-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.5rem;
+}
+.threshold-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--bs-body-bg);
+}
+.threshold-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--bs-secondary-color, #6c757d);
+}
+.threshold-value {
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.threshold-unit { font-size: 0.75rem; font-weight: 600; margin-left: 0.15rem; color: var(--bs-secondary-color, #6c757d); }
+.threshold-sub { font-size: 0.8rem; font-weight: 500; color: var(--bs-secondary-color, #6c757d); }
+.threshold-method { font-size: 0.75rem; color: var(--bs-secondary-color, #6c757d); }
+.threshold-delta { font-size: 0.75rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Meilleurs efforts : médaille + rang + taille du groupe sur une ligne. */
 .effort-label { font-weight: 600; }

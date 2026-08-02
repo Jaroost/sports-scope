@@ -185,6 +185,95 @@ export const STREAM_CHIP_ORDER: string[] = ['grade_smooth', 'watts', 'velocity_s
 // on the Ruby side so server-stored values align with on-screen rows).
 export const PEAK_POWER_DURATIONS: number[] = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600, 5400]
 
+// Grille dense (quasi log) pour tracer la *courbe* de puissance de la sortie —
+// le tableau, lui, garde les durées standard ci-dessus. Même fenêtre 5 s → 1 h 30
+// que `PEAK_POWER_DURATIONS`, simplement échantillonnée plus finement : les deux
+// courbes du graphique couvrent ainsi exactement le même domaine. Le pas resserré
+// aux courtes durées suit la forme de la courbe (elle chute vite sous la minute) ;
+// posée sur un axe de catégories, une grille log donne un axe log gratuitement.
+export const POWER_CURVE_DURATIONS: number[] = [
+  5, 8, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 300, 420, 600, 780, 900,
+  1200, 1500, 1800, 2400, 3000, 3600, 4500, 5400,
+]
+
+export interface PeakPowerPoint {
+  duration: number
+  avgPower: number
+  startIdx: number
+  endIdx: number
+}
+
+// Un point d'une courbe de puissance telle que la trace `PowerCurveChart`.
+// `href` / `startedAt` ne sont portés que par la courbe « tous les temps »,
+// dont chaque point vient d'une activité identifiée.
+export interface CurvePoint {
+  duration: number
+  watts: number
+  href?: string | null
+  startedAt?: string | null
+  isCurrent?: boolean
+}
+
+// Une série du graphique de courbes de puissance. Les séries partagent l'axe des
+// durées (union de leurs points) et l'axe des watts — jamais deux échelles.
+export interface CurveSeries {
+  label: string
+  color: string
+  points: CurvePoint[]
+  // Marqueurs visibles (série courte) plutôt qu'une ligne lisse (série dense).
+  showPoints?: boolean
+  dashed?: boolean
+  fill?: boolean
+}
+
+// Meilleure puissance moyenne pour chaque durée demandée (courbe de puissance).
+// Intègre l'énergie cumulée puis balaie en deux pointeurs, si bien qu'un
+// échantillonnage irrégulier ou une pause ne fausse pas la moyenne :
+// avg = (E[j] - E[i]) / (t[j] - t[i]). `durations` doit être trié croissant —
+// on s'arrête à la première durée plus longue que l'activité.
+export function peakPowerCurve(
+  streams: { time?: { data?: number[] }; watts?: { data?: (number | null)[] } } | null | undefined,
+  durations: number[] = PEAK_POWER_DURATIONS,
+): PeakPowerPoint[] {
+  const times = streams?.time?.data
+  const watts = streams?.watts?.data
+  if (!Array.isArray(times) || !Array.isArray(watts) || times.length < 2) return []
+  const n = Math.min(times.length, watts.length)
+  if (n < 2) return []
+  const E = new Float64Array(n)
+  for (let i = 1; i < n; i++) {
+    const dt = times[i] - times[i - 1]
+    const w = watts[i - 1]
+    const wv = (typeof w === 'number' && Number.isFinite(w)) ? w : 0
+    E[i] = E[i - 1] + wv * Math.max(0, dt)
+  }
+  const totalSpan = times[n - 1] - times[0]
+  const out: PeakPowerPoint[] = []
+  for (const D of durations) {
+    if (D > totalSpan) break
+    let best: number | null = null
+    let bestStart = 0
+    let bestEnd = 0
+    let j = 0
+    for (let i = 0; i < n; i++) {
+      while (j < n && times[j] - times[i] < D) j++
+      if (j >= n) break
+      const dt = times[j] - times[i]
+      if (dt <= 0) continue
+      const avg = (E[j] - E[i]) / dt
+      if (best == null || avg > best) {
+        best = avg
+        bestStart = i
+        bestEnd = j
+      }
+    }
+    if (best != null && Number.isFinite(best) && best > 0) {
+      out.push({ duration: D, avgPower: best, startIdx: bestStart, endIdx: bestEnd })
+    }
+  }
+  return out
+}
+
 // ─── Puissance normalisée (NP) sur une tranche ───────────────────────────────
 // Même formule que le serveur (TrainingLoad.normalized_power) : moyenne mobile
 // 30 échantillons de la puissance, élevée à la 4, moyennée, puis racine 4e.
@@ -303,25 +392,160 @@ export function aerobicDecoupling(
 // average to suppress sensor/quantisation noise before accumulating. Works for
 // both FIT barometric data (floating point, baro/GPS noise) and BRouter SRTM
 // integer data. Returns { gain, loss } in metres.
-export function computeElevGain(alts: (number | null)[], halfWin = 2): { gain: number; loss: number } {
+//
+// Le lissage seul ne suffit pas sur un altimètre barométrique de téléphone. Deux
+// artefacts, mesurés en comparant une même sortie enregistrée en parallèle par un
+// compteur (Strava, 1911 m) et par le téléphone (2365 m sur 146 km) :
+//
+//   • La marche de calibration. Les premières secondes sont en altitude GPS, puis
+//     le baromètre prend le relais : 923,8 m → 1039,2 m *en une seconde*. Encaissé
+//     tel quel, ce saut vaut 115 m de D+ fictif. Même mécanisme quand
+//     l'enregistrement se coupe puis reprend : les deux tronçons se recollent sur
+//     une discontinuité. D'où `maxVerticalSpeed` — au-delà, la variation n'est pas
+//     un relief mais un décrochage, et le reste de la série est simplement décalé
+//     pour la gommer (le D+ ne dépend que des écarts, pas de l'altitude absolue).
+//   • La dérive à l'arrêt. Le compteur purge ses points de pause ; un `.fit` brut,
+//     non. Sur la sortie mesurée : 58 min immobiles sur 754 arrêts, pendant
+//     lesquelles la pression bouge (vent, soleil sur l'appareil) et chaque
+//     oscillation vers le haut compte — 253 m de D+ gagnés sans avancer. D'où
+//     `skipStationary`, qui suit l'altitude sans l'accumuler tant que la distance
+//     n'avance pas.
+//
+// Les deux options ont besoin des flux voisins (`time`, `distance`) et sont donc
+// inertes quand on n'appelle la fonction qu'avec des altitudes.
+export interface ElevGainOptions {
+  halfWin?: number
+  /** Secondes écoulées de chaque échantillon — affine les deux seuils ci-dessous. */
+  time?: (number | null)[]
+  /** Distance cumulée en mètres — requise par `skipStationary`. */
+  distance?: (number | null)[]
+  /** Plafond de vitesse verticale en m/s. Au-delà : discontinuité, pas du relief. */
+  maxVerticalSpeed?: number
+  /** N'accumule pas tant que la distance n'avance pas (voir STATIONARY_SPEED_MS). */
+  skipStationary?: boolean
+}
+
+// En dessous de 1,8 km/h on ne roule pas, on ne marche même pas : l'appareil est
+// posé. Exprimé en vitesse et non en mètres pour rester juste quand les
+// échantillons sont espacés (enregistrement coupé, capteur à 5 s).
+const STATIONARY_SPEED_MS = 0.5
+
+// 5 m/s de montée ou de descente, soit 18 km/h à la verticale. Une descente de
+// col à 60 km/h dans du -20 % plafonne à 3,3 m/s : la marge laisse passer tout
+// relief réel, et coupe les marches de calibration (115 m en 1 s) comme les
+// recollements de tronçons.
+const MAX_VERTICAL_SPEED_MS = 5
+
+export function computeElevGain(
+  alts: (number | null)[],
+  optsOrHalfWin: number | ElevGainOptions = {}
+): { gain: number; loss: number } {
+  const opts: ElevGainOptions = typeof optsOrHalfWin === 'number' ? { halfWin: optsOrHalfWin } : optsOrHalfWin
+  const { halfWin = 2, time, distance, maxVerticalSpeed, skipStationary } = opts
+
   const n = alts.length
   if (n < 2) return { gain: 0, loss: 0 }
-  let up = 0, down = 0, prev: number | null = null
+
+  const series = maxVerticalSpeed != null ? removeAltitudeSteps(alts, time, maxVerticalSpeed) : alts
+  const canSkip = skipStationary === true && Array.isArray(distance) && distance.length === n
+
+  let up = 0, down = 0
+  let prev: number | null = null
+  let prevIdx = -1
   for (let i = 0; i < n; i++) {
     let sum = 0, cnt = 0
     for (let j = Math.max(0, i - halfWin); j <= Math.min(n - 1, i + halfWin); j++) {
-      if (alts[j] != null) { sum += alts[j] as number; cnt++ }
+      if (series[j] != null) { sum += series[j] as number; cnt++ }
     }
     const smooth = cnt > 0 ? sum / cnt : null
     if (smooth == null) continue
-    if (prev != null) {
+    if (prev != null && !(canSkip && isStationary(distance!, time, prevIdx, i))) {
       const d = smooth - prev
       if (d > 0) up += d
       else down -= d
     }
+    // `prev` avance même quand on n'accumule pas : on suit la dérive de l'appareil
+    // sans la compter, plutôt que de la reporter d'un bloc à la reprise.
     prev = smooth
+    prevIdx = i
   }
   return { gain: up, loss: down }
+}
+
+// Décale la série à chaque discontinuité pour supprimer la marche, en laissant
+// intactes les variations qui l'entourent. Les trous (`null`) sont enjambés :
+// c'est justement là que les marches se produisent.
+function removeAltitudeSteps(
+  alts: (number | null)[],
+  time: (number | null)[] | undefined,
+  maxVerticalSpeed: number
+): (number | null)[] {
+  const out: (number | null)[] = new Array(alts.length).fill(null)
+  let shift = 0
+  let prevVal: number | null = null
+  let prevIdx = -1
+  for (let i = 0; i < alts.length; i++) {
+    const v = alts[i]
+    if (v == null) continue
+    if (prevVal != null) {
+      const d = v - prevVal
+      if (Math.abs(d) > maxVerticalSpeed * elapsedBetween(time, prevIdx, i)) shift += d
+    }
+    out[i] = v - shift
+    prevVal = v
+    prevIdx = i
+  }
+  return out
+}
+
+// Secondes entre deux échantillons — le flux `time` s'il est exploitable, sinon
+// l'écart d'indices (les flux Strava et `.fit` sont à 1 Hz). Jamais moins de 1 s,
+// pour que les seuils exprimés en vitesse restent finis.
+function elapsedBetween(time: (number | null)[] | undefined, from: number, to: number): number {
+  const a = time?.[from]
+  const b = time?.[to]
+  if (typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b)) {
+    return Math.max(1, b - a)
+  }
+  return Math.max(1, to - from)
+}
+
+function isStationary(
+  distance: (number | null)[],
+  time: (number | null)[] | undefined,
+  from: number,
+  to: number
+): boolean {
+  const a = distance[from]
+  const b = distance[to]
+  if (typeof a !== 'number' || typeof b !== 'number') return false
+  // Un compteur qui recule est une anomalie, pas un arrêt : on préfère compter le
+  // dénivelé que le perdre.
+  if (b < a) return false
+  return b - a < STATIONARY_SPEED_MS * elapsedBetween(time, from, to)
+}
+
+// Réglage à appliquer dès qu'on recalcule un D+ sur des flux d'activité. Taillé
+// pour le `.fit` brut d'un téléphone, mais inoffensif sur un flux Strava : celui-ci
+// arrive déjà purgé de ses points de pause et sans discontinuité (mesuré sur la
+// sortie de comparaison : 45 échantillons immobiles, aucun saut > 5 m). Le passer
+// partout garde le total de l'entête et celui d'une sélection sur la même règle.
+//
+// `from`/`to` bornent la tranche quand l'appelant n'accumule que sur une sélection :
+// les tableaux passés doivent rester alignés sur les altitudes reçues.
+export function elevGainOptions(
+  streams: { time?: { data: any[] }, distance?: { data: any[] } } | null | undefined,
+  from = 0,
+  to?: number
+): ElevGainOptions {
+  const slice = (a: any[] | undefined) =>
+    Array.isArray(a) ? (to == null ? a.slice(from) : a.slice(from, to)) : undefined
+  return {
+    time: slice(streams?.time?.data),
+    distance: slice(streams?.distance?.data),
+    maxVerticalSpeed: MAX_VERTICAL_SPEED_MS,
+    skipStationary: true,
+  }
 }
 
 // ─── Pauses ───────────────────────────────────────────────────────────────
@@ -573,12 +797,6 @@ export function formatPowerDuration(sec: number): string {
   const h = Math.floor(sec / 3600)
   const m = Math.round((sec % 3600) / 60)
   return m === 0 ? `${h} h` : `${h} h ${m}`
-}
-
-export function escapeHtml(s: unknown): string {
-  return String(s).replace(/[&<>"']/g, (c) => (
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]
-  ))
 }
 
 // Strava photos come with multiple sized URLs keyed by their max edge length
@@ -878,7 +1096,7 @@ export function segmentStats(
   let avgGrade: number | null = null
   let vam: number | null = null
   if (Array.isArray(alt) && alt.length > e) {
-    const g = computeElevGain(alt.slice(s, e + 1))
+    const g = computeElevGain(alt.slice(s, e + 1), elevGainOptions({ time: { data: time as any[] }, distance: { data: dist as any[] } }, s, e + 1))
     gain = g.gain
     loss = g.loss
     const a0 = alt[s]

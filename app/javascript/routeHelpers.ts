@@ -502,18 +502,6 @@ export function generateCircle(center: LngLat, radiusM: number, steps = 64): Lng
   return pts
 }
 
-// Construit l'URL Google Maps Street View d'un point. Quand `heading` est fourni (cap en
-// degrés, 0 = nord), le panorama est orienté dans cette direction — typiquement le cap
-// depuis le tracé vers un POI, pour regarder le POI plutôt que la route. Utilise l'API
-// Google Maps URLs (action `pano`), qui « snappe » au panorama le plus proche du `viewpoint`
-// et, contrairement au format `cbll`, honore l'orientation de la caméra.
-export function streetViewUrl(lat: number, lng: number, heading?: number): string {
-  const base = `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${lat},${lng}`
-  if (heading == null || Number.isNaN(heading)) return base
-  const h = ((Math.round(heading) % 360) + 360) % 360
-  return `${base}&heading=${h}`
-}
-
 // Cap (degrés, 0 = nord) depuis le point du tracé le plus proche de `[lng, lat]` vers ce
 // point : la direction dans laquelle regarder pour voir le POI depuis la route. Renvoie
 // undefined si la géométrie est vide (aucune référence) — l'appelant ouvre alors Street
@@ -547,6 +535,17 @@ export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
   return (Math.atan2(y, x) * 180) / Math.PI
 }
 
+// Écart signé entre deux caps, replié dans (−180, 180] : positif = `to` est à droite de
+// `from`. Sert partout où l'on compare deux directions — angle d'un virage, point du tracé
+// devant ou derrière le coureur, cap rendu vs cap réel. Sans ce repliement, un passage par
+// le nord (359° → 1°) donnerait un écart de −358° au lieu de +2°.
+export function bearingDelta(from: number, to: number): number {
+  let d = to - from
+  while (d > 180) d -= 360
+  while (d < -180) d += 360
+  return d
+}
+
 // Construit une polyligne d'AFFICHAGE alignée index-pour-index sur `geom` : identique au
 // tracé réel, SAUF là où l'itinéraire se superpose à lui-même (portion empruntée ≥ 2 fois),
 // où les sommets sont décalés perpendiculairement à droite du sens de parcours. Comme aller
@@ -557,12 +556,15 @@ export function bearingBetween(a: Coord | LngLat, b: Coord | LngLat): number {
 // Renvoie, alignés index-pour-index sur `geom` :
 //  - `line`   : la polyligne d'affichage (décalée sur les recouvrements) ;
 //  - `wscale` : un facteur de largeur ∈ [1−narrowFrac, 1], abaissé sur les recouvrements
-//               pour amincir le tracé là où il se dédouble (deux voies serrées plus lisibles).
+//               pour amincir le tracé là où il se dédouble (deux voies serrées plus lisibles) ;
+//  - `off`    : le décalage effectivement appliqué à chaque sommet, en mètres (0 hors
+//               recouvrement, rampes comprises). Permet de savoir OÙ l'affichage s'écarte du
+//               tracé réel — l'éditeur s'en sert pour n'y dessiner sa ligne de repère que là.
 export function buildOffsetDisplayLine(
   geom: Array<Coord | LngLat>,
   cumDistM: number[],
   opts: { offsetM?: number; proximityM?: number; minSeparationM?: number; rampM?: number; narrowFrac?: number } = {},
-): { line: LngLat[]; wscale: number[] } {
+): { line: LngLat[]; wscale: number[]; off: number[] } {
   const offsetM = opts.offsetM ?? 3          // décalage latéral appliqué aux portions superposées (aller et retour s'écartent du double : ~6 m)
   const proximityM = opts.proximityM ?? 12   // en deçà, deux points sont « au même endroit »
   const minSeparationM = opts.minSeparationM ?? 50  // écart le long du parcours au-delà duquel un rapprochement est un vrai recouvrement (et non de simples voisins)
@@ -570,7 +572,7 @@ export function buildOffsetDisplayLine(
   const narrowFrac = opts.narrowFrac ?? 0.3  // amincissement max du tracé sur les recouvrements (30 %)
   const n = geom.length
   const pts: LngLat[] = geom.map((c) => [c[0], c[1]])
-  if (n < 3) return { line: pts, wscale: new Array(n).fill(1) }
+  if (n < 3) return { line: pts, wscale: new Array(n).fill(1), off: new Array(n).fill(0) }
 
   // 1) Détection du recouvrement via grille de hachage spatiale (≈ O(n)). On indexe chaque
   // sommet dans une cellule de ~proximityM, puis on ne compare qu'aux 8 cellules voisines.
@@ -634,7 +636,7 @@ export function buildOffsetDisplayLine(
   // Largeur : on amincit proportionnellement au décalage déjà lissé (off/offsetM ∈ [0,1]),
   // donc le tracé maigrit exactement là où il se dédouble, avec les mêmes rampes douces.
   const wscale = off.map((o) => 1 - narrowFrac * (o / offsetM))
-  return { line: out, wscale }
+  return { line: out, wscale, off }
 }
 
 // Closest point on the segment [a, b] to `p`, using an equirectangular
@@ -725,6 +727,100 @@ export function lngLatAtDistanceM(geometry: Array<Coord | LngLat>, cumDistM: num
   return [a[0] + s * (b[0] - a[0]), a[1] + s * (b[1] - a[1])]
 }
 
+// Tronçon de polyligne compris entre deux distances cumulées, avec ses `wscale`
+// alignés index pour index. Les deux extrémités sont interpolées (et non ramenées au
+// sommet le plus proche) pour que le morceau commence et finisse exactement où on le
+// demande — sert à surligner le bout de tracé autour d'un virage. Les extrémités
+// reprennent l'échelle de largeur de leur tronçon d'origine. Pure.
+export function sliceLineBetween(
+  line: Array<Coord | LngLat>,
+  cumDistM: number[],
+  wscale: number[],
+  fromM: number,
+  toM: number,
+): { line: LngLat[]; wscale: number[] } {
+  const empty = { line: [] as LngLat[], wscale: [] as number[] }
+  const n = Math.min(line.length, cumDistM.length)
+  if (n < 2) return empty
+  const total = cumDistM[n - 1]
+  const a = Math.max(0, Math.min(total, fromM))
+  const b = Math.max(0, Math.min(total, toM))
+  if (b <= a) return empty
+  // Échelle du sommet qui ferme le tronçon contenant `d` (même convention que
+  // lngLatAtDistanceM, qui interpole dans [lo-1, lo]).
+  const scaleAt = (d: number) => {
+    let lo = 0
+    let hi = n - 1
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if (cumDistM[mid] < d) lo = mid + 1
+      else hi = mid
+    }
+    return wscale[lo] ?? 1
+  }
+  const out: LngLat[] = [lngLatAtDistanceM(line, cumDistM, a)]
+  const w: number[] = [scaleAt(a)]
+  for (let i = 0; i < n; i++) {
+    if (cumDistM[i] <= a) continue
+    if (cumDistM[i] >= b) break
+    out.push([line[i][0], line[i][1]])
+    w.push(wscale[i] ?? 1)
+  }
+  out.push(lngLatAtDistanceM(line, cumDistM, b))
+  w.push(scaleAt(b))
+  return { line: out, wscale: w }
+}
+
+// Sommet où se termine la manœuvre entamée au sommet `idx` : on avance tant que le tracé
+// TOURNE encore, et on s'arrête dès qu'il redevient droit sur `straightM` mètres. Sert à
+// surligner un rond-point en entier (l'anneau ne fait pas 40 m : sans ça, on voit le
+// virage mais pas par quelle sortie on ressort). Les hints BRouter n'ancrent qu'un point
+// à l'entrée de l'anneau — la sortie ne peut donc venir que de la géométrie.
+//
+// `leadM` tolère une ancre posée un sommet trop tôt (un bout droit avant la courbe) ;
+// si rien ne tourne dans cette avance, la manœuvre est ponctuelle et on rend `idx`.
+export function maneuverEndIdx(
+  geometry: Array<Coord | LngLat>,
+  cumDistM: number[],
+  idx: number,
+  opts: { straightM?: number; straightDeg?: number; leadM?: number; maxM?: number } = {},
+): number {
+  const straightM = opts.straightM ?? 25    // longueur sur laquelle on juge « c'est droit »
+  const straightDeg = opts.straightDeg ?? 15 // écart de cap toléré sur cette longueur
+  const leadM = opts.leadM ?? 30            // avance tolérée avant le début de la courbe
+  const maxM = opts.maxM ?? 400             // garde-fou (très grand rond-point ≈ 300 m d'anneau)
+  const n = Math.min(geometry.length, cumDistM.length)
+  if (idx < 0 || idx >= n - 1) return Math.max(0, Math.min(idx, n - 1))
+  // Cap local en un sommet : direction sur les ~10 m qui suivent, pour lisser le bruit
+  // d'une géométrie dense. `null` = plus assez de tracé devant.
+  const headingAt = (j: number): number | null => {
+    let k = j
+    while (k < n - 1 && cumDistM[k] - cumDistM[j] < 10) k++
+    return k > j ? bearingBetween(geometry[j], geometry[k]) : null
+  }
+  const straightFrom = (j: number): boolean | null => {
+    let k = j
+    while (k < n - 1 && cumDistM[k] - cumDistM[j] < straightM) k++
+    const h0 = headingAt(j)
+    const h1 = headingAt(k)
+    if (h0 == null || h1 == null) return null
+    return Math.abs(bearingDelta(h0, h1)) <= straightDeg
+  }
+  // 1) début réel de la courbe
+  let start = idx
+  while (start < n - 1 && cumDistM[start] - cumDistM[idx] <= leadM && straightFrom(start) === true) start++
+  if (start >= n - 1 || cumDistM[start] - cumDistM[idx] > leadM) return idx
+  // 2) fin de la courbe : premier sommet d'où le tracé repart droit
+  let j = start
+  while (j < n - 1 && cumDistM[j] - cumDistM[idx] <= maxM) {
+    const s = straightFrom(j)
+    if (s === null) return n - 1   // le tracé se termine dans la courbe
+    if (s) return j
+    j++
+  }
+  return j
+}
+
 // Index of the geometry vertex closest to `pos`, plus the lateral distance (m).
 // The distance is measured to the nearest point on the polyline (the two segments
 // adjacent to the nearest vertex), not to the vertex itself — so a position
@@ -746,9 +842,35 @@ export function nearestGeomIndex(
     lo = Math.max(0, hintIdx - window)
     hi = Math.min(geometry.length, hintIdx + window)
   }
+  // Sur un aller-retour, la voie du retour REPASSE PAR LES SOMMETS DE L'ALLER : autour du
+  // demi-tour, geometry[i-k] et geometry[i+k] sont la même coordonnée, donc à distance
+  // rigoureusement égale du coureur. Un simple `d < bestDist` retient alors le premier
+  // rencontré, c'est-à-dire l'indice le plus BAS — l'aller. Au retour, la flèche redescend
+  // donc le tracé de l'aller et la progression recule.
+  // On départage à distance (quasi) égale sur la CONTINUITÉ DU SUIVI : l'indice le plus
+  // proche du précédent, et à égalité celui qui va de l'avant. Sur le trajet aller ce
+  // départage ne change rien (le sommet courant est plus proche du curseur que son miroir,
+  // donc aucun saut sur la voie du retour) ; il ne tranche qu'au sommet du demi-tour, où
+  // les deux candidats sont à égale distance du curseur — et où le coureur repart.
+  // Sans indice précédent (recherche globale), aucune direction de marche n'est connue :
+  // on garde le comportement historique.
+  const TIE_M = 0.5
+  const closerToHint = (i: number, cur: number): boolean => {
+    const di = Math.abs(i - hintIdx)
+    const dc = Math.abs(cur - hintIdx)
+    return di < dc || (di === dc && i > cur)
+  }
   for (let i = lo; i < hi; i++) {
     const d = haversine(pos, geometry[i])
-    if (d < bestDist) { bestDist = d; bestIdx = i }
+    if (d < bestDist - TIE_M) { bestDist = d; bestIdx = i; continue }
+    if (hintIdx < 0 || d > bestDist + TIE_M) {
+      if (d < bestDist) { bestDist = d; bestIdx = i }
+      continue
+    }
+    if (closerToHint(i, bestIdx)) {
+      bestIdx = i
+      if (d < bestDist) bestDist = d
+    }
   }
   let distM = bestDist
   if (bestIdx > 0) distM = Math.min(distM, pointToSegmentM(pos, geometry[bestIdx - 1], geometry[bestIdx]))
@@ -920,7 +1042,8 @@ const ROUNDABOUT_CMDS = new Set([13, 14])
 // ultérieur (une route qui se recoupe repasse à la même coordonnée plus loin, à
 // ~0 m elle aussi : prendre le minimum global choisirait un passage au hasard).
 // Repli : si aucun sommet n'est assez proche (densification, hint légèrement hors
-// tracé), on prend le plus proche au-delà de `fromIdx`.
+// tracé), on prend le plus proche au-delà de `fromIdx`. Renvoie -1 quand même ce repli
+// reste au-delà de MAX_ANCHOR_M : le hint n'est alors pas sur ce tracé.
 function firstPassFrom(pos: LngLat, geometry: Coord[], fromIdx: number, proximityM = 20): number {
   let clusterIdx = -1
   let clusterDist = Infinity
@@ -951,7 +1074,45 @@ function firstPassFrom(pos: LngLat, geometry: Coord[], fromIdx: number, proximit
     const d = haversine(pos, geometry[i])
     if (d < bestDist) { bestDist = d; bestIdx = i }
   }
-  return bestIdx
+  return bestDist <= MAX_ANCHOR_M ? bestIdx : -1
+}
+
+// Écart maximal (m) toléré entre un hint et le sommet auquel on l'ancre. Un hint du tracé
+// tombe sur son sommet au mètre près ; au-delà de ce seuil il n'appartient pas à ce tracé
+// (portion remplacée par un détour, tracé recalculé depuis l'enregistrement du hint). On
+// l'ignore alors SANS avancer le curseur : le poser au petit bonheur ajouterait un virage
+// fantôme, et décaler le curseur décrocherait tous les hints suivants.
+const MAX_ANCHOR_M = 100
+
+// Rang, le long de `geometry`, de chaque hint de `hints` (-1 s'il n'appartient pas au
+// tracé, cf. MAX_ANCHOR_M). Appariement MONOTONE — voir turnsFromVoiceHints pour le
+// pourquoi. Sert aussi à l'épissage d'un détour (navReroute.spliceDetour), qui doit savoir
+// dans quelle portion du tracé tombe chaque hint.
+export function hintAnchorIndices(
+  hints: VoiceHint[],
+  geometry: Coord[],
+  cumDistM: number[],
+): number[] {
+  // Recul autorisé sous le curseur, exprimé EN MÈTRES LE LONG DU TRACÉ et non en nombre
+  // de sommets. Le recul sert à absorber le léger dépassement du curseur quand deux hints
+  // se suivent de près (amas d'un rond-point) ; il ne doit jamais atteindre le passage
+  // précédent sur un tracé qui se recoupe. Un compte de sommets confond ces deux échelles :
+  // la densification espace les sommets de 100 m, si bien que 10 sommets valaient tantôt
+  // quelques mètres, tantôt près d'un kilomètre. Sur un aller-retour, le curseur posé au
+  // demi-tour reculait alors jusqu'au passage de l'aller et y ré-ancrait le virage du
+  // retour : deux virages annoncés au même endroit, et celui du retour jamais donné.
+  const BACK_TOL_M = 50
+  const out: number[] = []
+  let cursor = 0
+  for (const h of hints) {
+    const floorM = (cumDistM[cursor] ?? 0) - BACK_TOL_M
+    let from = cursor
+    while (from > 0 && (cumDistM[from - 1] ?? 0) >= floorM) from--
+    const idx = firstPassFrom([h.lng, h.lat], geometry, from)
+    if (idx >= 0) cursor = idx
+    out.push(idx)
+  }
+  return out
 }
 
 // Map stored BRouter voice hints onto the current geometry, producing the same
@@ -974,21 +1135,16 @@ export function turnsFromVoiceHints(
   geometry: Coord[],
   cumDistM: number[],
 ): TurnPoint[] {
-  // Recul autorisé (en sommets) sous le curseur : assez pour absorber la jitter de
-  // densification, mais bien inférieur à l'écart d'index entre deux passages d'une
-  // même jonction, pour ne jamais re-cibler un passage déjà franchi.
-  const BACK_TOL = 10
+  const anchors = hintAnchorIndices(hints, geometry, cumDistM)
   const out: TurnPoint[] = []
-  let cursor = 0
-  for (const h of hints) {
-    const idx = firstPassFrom([h.lng, h.lat], geometry, Math.max(0, cursor - BACK_TOL))
-    cursor = idx
-    if (VOICE_HINT_SKIP.has(h.cmd)) continue
+  hints.forEach((h, i) => {
+    const idx = anchors[i]
+    if (idx < 0 || VOICE_HINT_SKIP.has(h.cmd)) return
     const { kind, direction } = maneuverFromCmd(h.cmd, h.angle)
     const exit = h.exit_number ?? 0
     const exitNumber = ROUNDABOUT_CMDS.has(h.cmd) && exit > 0 ? exit : undefined
     out.push({ idx, distM: cumDistM[idx] || 0, angle: h.angle, direction, kind, exitNumber })
-  }
+  })
   return out.sort((a, b) => a.distM - b.distM)
 }
 
@@ -1013,9 +1169,7 @@ export function detectTurns(
     if (a === i || b === i) continue
     const inB = bearingBetween(geometry[a], geometry[i])
     const outB = bearingBetween(geometry[i], geometry[b])
-    let diff = outB - inB
-    while (diff > 180) diff -= 360
-    while (diff < -180) diff += 360
+    const diff = bearingDelta(inB, outB)
     if (Math.abs(diff) >= minAngleDeg) {
       raw.push({ idx: i, distM: cumDistM[i], angle: diff, direction: diff > 0 ? 'right' : 'left', kind: kindFromAngle(Math.abs(diff)) })
     }

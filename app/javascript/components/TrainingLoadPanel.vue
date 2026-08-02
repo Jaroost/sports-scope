@@ -11,6 +11,7 @@ import { usePlannedLoads } from '../composables/usePlannedRides'
 import ZoneDistribution from './ZoneDistribution.vue'
 import WeekPlanner from './WeekPlanner.vue'
 import MetricChart from './MetricChart.vue'
+import { csrfToken } from '../csrf'
 
 const props = defineProps({
   admin: { type: Boolean, default: false },
@@ -22,11 +23,15 @@ const props = defineProps({
 
 // Résumé remonté au parent pour les badges de sous-onglets : la reco du jour (badge
 // « Forme & fatigue ») et le verdict de polarisation des zones (badge « Zones »).
-const emit = defineEmits<{ summary: [payload: { recoAction: string | null; zonesVerdict: string | null }] }>()
+const emit = defineEmits<{
+  summary: [payload: { recoAction: string | null; zonesVerdict: string | null }]
+  // Demande de changement de sous-onglet (le parent possède la navigation) : le seuil
+  // FC se modifie dans « Seuils », pas ici.
+  goto: [sub: 'ftp']
+}>()
 
 const loading = ref(true)
 const error = ref<string | null>(null)
-const saving = ref(false)
 const data = ref<LoadSummary | null>(null)
 
 // Fenêtre d'affichage (jours). Infinity = tout.
@@ -37,14 +42,6 @@ const RANGES: { key: string; days: number }[] = [
   { key: 'range_12m', days: 365 },
   { key: 'range_all', days: Number.POSITIVE_INFINITY },
 ]
-
-// LTHR (édition manuelle)
-const editingLthr = ref(false)
-const lthrInput = ref<string | number>('')
-
-function csrfToken(): string {
-  return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
-}
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
@@ -93,7 +90,7 @@ const ZONE_ORDER = ['fresh', 'neutral', 'productive', 'overreaching', 'very_fres
 // Les seuils athlète sont dérivés de la charge déjà chargée (pas de seconde requête),
 // et servent à estimer le TSS des itinéraires prévus → segment orange de la barre.
 const athlete = computed(() => athleteFromSummary(data.value))
-const { plannedLoads } = usePlannedLoads(athlete)
+const { plannedLoads, plannedDistances } = usePlannedLoads(athlete)
 
 // Bilan des sorties RÉELLES par jour (ISO → { tss, count, at }), pour le planificateur :
 //   • tss   : charge encaissée ce jour-là (RÉEL de la série, pas l'estimé) ;
@@ -121,7 +118,7 @@ const {
   current, goal, targetEvent, eventInfo, feasibility, projection,
   editingEvent, evDate, evDistance, evIntensity, todayISO,
   openEventEditor, saveEvent, removeEvent, recommendation, weekPlan, nextWeekPlan,
-} = useTrainingPlan(data, plannedLoads)
+} = useTrainingPlan(data, plannedLoads, plannedDistances)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
 
 // Remonte le résumé au parent dès que la reco ou les zones changent. Verdict des zones :
@@ -164,34 +161,18 @@ const tsbTrend = computed(() => computeTrend('tsb', 2, 'up'))   // fraîcheur : 
 // ── LTHR ─────────────────────────────────────────────────────────────────────
 const lthr = computed(() => data.value?.thresholds?.lthr ?? null)
 const lthrSource = computed(() => data.value?.thresholds?.lthr_source ?? null)
+// Comment l'estimation a été obtenue : `lthr_20min` / `lthr_60min` = un vrai effort
+// mesuré sur la courbe cardio d'une sortie ; `hr_max_proxy` = le repli grossier, pour
+// qui n'a aucune sortie vélo avec streams. La distinction change ce qu'on affiche.
+const lthrMethod = computed(() => data.value?.thresholds?.lthr_method ?? null)
+const lthrStale = computed(() => data.value?.thresholds?.lthr_stale === true)
 
-function startEditLthr() {
-  lthrInput.value = data.value?.thresholds?.lthr_source === 'manual' && lthr.value != null ? lthr.value : ''
-  editingLthr.value = true
-}
-
-async function saveLthr() {
-  saving.value = true
-  try {
-    const res = await fetch('/api/athlete', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
-      credentials: 'same-origin',
-      body: JSON.stringify({ athlete: { lthr_manual: String(lthrInput.value ?? '').trim() } }),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    editingLthr.value = false
-    await fetchData()
-  } catch (e) {
-    error.value = (e as Error).message
-  } finally {
-    saving.value = false
-  }
-}
-
-async function resetLthr() {
-  lthrInput.value = ''
-  await saveLthr()
+// La saisie du seuil vit dans `LthrPanel` (sous-onglet Seuils), avec son historique et
+// son estimation : ici on ne fait que rappeler la valeur qui sert de dénominateur au
+// TSS, et y renvoyer. Deux éditeurs pour un même chiffre, c'est deux endroits où
+// vérifier ce qu'on vient de saisir.
+function goToThresholds() {
+  emit('goto', 'ftp')
 }
 
 // ── Maintenance admin : backfill unifié des métriques dérivées ───────────────
@@ -592,10 +573,21 @@ watch(rangeDays, () => { hoverIndex.value = null })
               <span class="fw-semibold">
                 <i class="fa-solid fa-square me-1" :style="{ color: WEEK_SEGMENT_COLOR.done }" aria-hidden="true"></i>
                 {{ t('performance.load.week.progress', { done: weekPlan.done, target: weekPlan.target }) }}
+                <!-- Total km : ce que la semaine représente sur le terrain, à côté de ce
+                     qu'elle coûte en TSS. Même code couleur (vert fait / orange prévu). -->
+                <span class="week-km ms-2" :style="{ color: WEEK_SEGMENT_COLOR.done }" :title="t('performance.load.week.km_done_hint')">
+                  <i class="fa-solid fa-road me-1" aria-hidden="true"></i>{{ t('performance.load.week.km_done', { km: weekPlan.doneKm }) }}
+                </span>
                 <span v-if="weekPlan.planned > 0" class="fw-normal ms-2">
                   <i class="fa-solid fa-square me-1" :style="{ color: WEEK_SEGMENT_COLOR.planned }" aria-hidden="true"></i>
                   {{ t('performance.load.week.planned', { tss: weekPlan.planned }) }}
                 </span>
+                <span
+                  v-if="weekPlan.plannedKm > 0"
+                  class="week-km fw-normal ms-2"
+                  :style="{ color: WEEK_SEGMENT_COLOR.planned }"
+                  :title="t('performance.load.week.km_planned_hint')"
+                >{{ t('performance.load.week.km_planned', { km: weekPlan.plannedKm }) }}</span>
               </span>
               <span v-if="weekPlan.remaining > 0" class="text-muted">
                 {{ t('performance.load.week.remaining_to_plan', { tss: weekPlan.remaining, days: weekPlan.daysLeft, duration: fmtDuration(weekPlan.minutesLeft) }) }}
@@ -624,26 +616,15 @@ watch(rangeDays, () => { hoverIndex.value = null })
               {{ t('performance.load.coverage', { total: data.coverage.total, power: data.coverage.power, hr: data.coverage.hr, estimated: data.coverage.estimated }) }}
             </div>
             <div class="col-12 col-md-5 text-md-end">
-              <template v-if="!editingLthr">
-                <span class="text-muted me-2">{{ t('performance.load.lthr_title') }} :</span>
-                <strong v-if="lthr">{{ t('performance.load.lthr_value', { bpm: lthr }) }}</strong>
-                <span v-else class="text-muted">—</span>
-                <span v-if="lthr && lthrSource" class="badge ms-1" :class="lthrSource === 'manual' ? 'text-bg-primary' : 'text-bg-secondary'">
-                  {{ lthrSource === 'manual' ? t('performance.ftp.source_manual') : t('performance.ftp.source_auto') }}
-                </span>
-                <button type="button" class="btn btn-sm btn-link p-0 ms-2" @click="startEditLthr">
-                  <i class="fa-solid fa-pen" aria-hidden="true"></i>
-                </button>
-              </template>
-              <div v-else class="d-inline-flex align-items-center gap-2">
-                <div class="input-group input-group-sm" style="width:9rem">
-                  <input v-model="lthrInput" type="number" min="100" max="220" class="form-control" :placeholder="t('performance.ftp.auto_placeholder')" />
-                  <span class="input-group-text">bpm</span>
-                </div>
-                <button type="button" class="btn btn-sm btn-primary" :disabled="saving" @click="saveLthr">{{ t('performance.ftp.save') }}</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="saving" @click="resetLthr">{{ t('performance.ftp.use_auto') }}</button>
-                <button type="button" class="btn btn-sm btn-link text-muted" :disabled="saving" @click="editingLthr = false">{{ t('performance.ftp.cancel') }}</button>
-              </div>
+              <span class="text-muted me-2">{{ t('performance.load.lthr_title') }} :</span>
+              <strong v-if="lthr">{{ t('performance.load.lthr_value', { bpm: lthr }) }}</strong>
+              <span v-else class="text-muted">—</span>
+              <span v-if="lthr && lthrSource" class="badge ms-1" :class="lthrSource === 'manual' ? 'text-bg-primary' : 'text-bg-secondary'">
+                {{ lthrSource === 'manual' ? t('performance.ftp.source_manual') : t('performance.ftp.source_auto') }}
+              </span>
+              <button type="button" class="btn btn-sm btn-link p-0 ms-2" :title="t('performance.load.lthr_goto')" @click="goToThresholds">
+                <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i>
+              </button>
             </div>
           </div>
 
@@ -667,8 +648,15 @@ watch(rangeDays, () => { hoverIndex.value = null })
               <p class="mb-1 text-body">{{ t('performance.load.lthr_method_what') }}</p>
               <p class="mb-1">{{ t('performance.load.lthr_method_manual') }}</p>
               <p class="mb-1">{{ t('performance.load.lthr_method_auto') }}</p>
-              <p class="mb-0 text-body-tertiary">
+              <p class="mb-1">{{ t('performance.load.lthr_method_proxy') }}</p>
+              <!-- L'avertissement ne s'adresse qu'à ceux qui tombent réellement sur le
+                   proxy : montré à tout le monde, il faisait douter d'une estimation
+                   qui, elle, repose sur un effort mesuré. -->
+              <p v-if="lthrMethod === 'hr_max_proxy'" class="mb-0 text-body-tertiary">
                 <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ t('performance.load.lthr_method_auto_warning') }}
+              </p>
+              <p v-else-if="lthrStale" class="mb-0 text-body-tertiary">
+                <i class="fa-solid fa-clock-rotate-left me-1" aria-hidden="true"></i>{{ t('performance.load.lthr_stale_hint') }}
               </p>
             </div>
           </details>
@@ -808,6 +796,11 @@ watch(rangeDays, () => { hoverIndex.value = null })
 }
 .week-progress {
   height: 0.75rem;
+}
+/* Total km : le chiffre ne doit jamais se couper en deux lignes. */
+.week-km {
+  white-space: nowrap;
+  cursor: help;
 }
 /* Repère « objectif » : trait vertical qui déborde légèrement la barre, coiffé d'un
    petit fanion, posé à la position de la cible quand on planifie au-delà. */

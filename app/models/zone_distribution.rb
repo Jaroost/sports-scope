@@ -99,15 +99,29 @@ module ZoneDistribution
   end
 
   # Met en forme un accumulateur `{ zone => secondes }` pour le front : liste ordonnée
-  # `[{ zone:, seconds:, pct: }]` sur toutes les zones (0 inclus), + total. nil si vide.
-  def present(zone_seconds, zones)
+  # `[{ zone:, seconds:, pct:, lo:, hi: }]` sur toutes les zones (0 inclus), + total.
+  # nil si vide. `threshold` (LTHR / FTP) sert à exprimer les bornes de chaque zone en
+  # valeurs absolues (bpm / W) pour le survol : `lo` nil sur la première zone (ouverte
+  # vers le bas), `hi` nil sur la dernière (ouverte vers +∞), les deux nil sans seuil.
+  def present(zone_seconds, zones, threshold = nil)
     total = zone_seconds.values.sum
     return nil if total <= 0
 
-    list = zones.map do |z|
+    list = zones.each_with_index.map do |z, i|
       secs = (zone_seconds[z[:key]] || 0.0)
       { zone: z[:key], seconds: secs.round, pct: (secs / total * 100).round(1) }
+        .merge(bounds(z, zones[i + 1], threshold))
     end
     { total_seconds: total.round, zones: list }
+  end
+
+  # Bornes absolues d'une zone : sa fraction basse et celle de la zone suivante,
+  # multipliées par le seuil. Arrondies au même entier des deux côtés d'une frontière
+  # pour que les plages affichées s'enchaînent sans trou ni recouvrement.
+  def bounds(zone, next_zone, threshold)
+    return { lo: nil, hi: nil } unless threshold&.positive?
+
+    { lo: zone[:lo].positive? ? (zone[:lo] * threshold).round : nil,
+      hi: next_zone ? (next_zone[:lo] * threshold).round : nil }
   end
 end

@@ -6,7 +6,7 @@
 // petit conseil déduit du profil d'intensité de la séance.
 import { ref, computed, watch } from 'vue'
 import { t } from '../i18n'
-import { intensityZoneColor, fmtSeconds, type ZoneChannel } from '../composables/useTrainingPlan'
+import { intensityZoneColor, fmtSeconds, zoneRange, type ZoneBucket, type ZoneChannel } from '../composables/useTrainingPlan'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -66,14 +66,14 @@ const channels = computed(() => {
   const d = data.value
   return [
     {
-      key: 'hr', icon: 'fa-heart-pulse', iconClass: 'text-danger',
+      key: 'hr', icon: 'fa-heart-pulse', iconClass: 'text-danger', unit: 'bpm',
       title: t('strava.zones.hr_title'),
       ref: d?.lthr ? t('strava.zones.hr_ref', { bpm: d.lthr }) : '',
       channel: d?.hr ?? null,
       empty: d?.lthr ? t('strava.zones.no_hr') : t('strava.zones.set_lthr_hint'),
     },
     {
-      key: 'power', icon: 'fa-bolt', iconClass: 'text-warning',
+      key: 'power', icon: 'fa-bolt', iconClass: 'text-warning', unit: 'W',
       title: t('strava.zones.power_title'),
       ref: d?.ftp ? t('strava.zones.power_ref', { watts: d.ftp }) : '',
       channel: d?.power ?? null,
@@ -85,6 +85,15 @@ const channels = computed(() => {
 // Segments réellement présents (pct > 0) ; la légende, elle, liste toutes les zones.
 function segments(channel: ZoneChannel | null) {
   return channel ? channel.zones.filter((z) => z.pct > 0) : []
+}
+
+// Infobulle d'une zone (barre et légende), identique à la page performance : libellé +
+// plage absolue à tenir pour y être, puis part du temps. Les bornes viennent du serveur,
+// calculées avec les mêmes seuils que le classement (LTHR courante, FTP de la sortie).
+function zoneTitle(z: ZoneBucket, unit: string): string {
+  const range = zoneRange(z, unit)
+  const head = range ? `${zoneLabel(z.zone)} (${range})` : zoneLabel(z.zone)
+  return `${head} — ${z.pct}% · ${fmtSeconds(z.seconds)}`
 }
 
 // ── Conseil de séance ────────────────────────────────────────────────────────
@@ -181,7 +190,7 @@ const advice = computed(() => {
                   v-for="s in segments(c.channel)" :key="s.zone"
                   class="zone-seg"
                   :style="{ width: `${s.pct}%`, backgroundColor: intensityZoneColor(s.zone) }"
-                  :title="`${zoneLabel(s.zone)} — ${s.pct}% · ${fmtSeconds(s.seconds)}`"
+                  :title="zoneTitle(s, c.unit)"
                 >
                   <span v-if="s.pct >= 8" class="zone-seg-label">{{ Math.round(s.pct) }}%</span>
                 </div>
@@ -190,6 +199,7 @@ const advice = computed(() => {
                 <span
                   v-for="z in c.channel.zones" :key="z.zone"
                   class="zone-legend" :class="{ 'zone-legend-muted': z.pct === 0 }"
+                  :title="zoneTitle(z, c.unit)"
                 >
                   <span class="zone-dot" :style="{ backgroundColor: intensityZoneColor(z.zone) }"></span>
                   <span class="fw-semibold">{{ zoneLabel(z.zone) }}</span>
@@ -221,6 +231,7 @@ const advice = computed(() => {
   justify-content: center;
   min-width: 2px;
   transition: filter 0.12s ease;
+  cursor: help;
 }
 .zone-seg:hover {
   filter: brightness(1.08);
@@ -237,6 +248,8 @@ const advice = computed(() => {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.8rem;
+  /* Le survol révèle la plage (bpm / W) de la zone : curseur d'aide comme indice. */
+  cursor: help;
 }
 .zone-legend-muted {
   opacity: 0.45;

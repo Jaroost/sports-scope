@@ -62,7 +62,12 @@ class ImportedActivitiesController < ApplicationController
     render json: {
       current: activity.peak_powers,
       bests: PeakPowerCurve.bests_for_user(current_user, exclude: ['imported', activity.id]),
-      podium: PeakPowerCurve.podium_for(current_user, activity.peak_powers, exclude: ['imported', activity.id])
+      podium: PeakPowerCurve.podium_for(current_user, activity.peak_powers, exclude: ['imported', activity.id]),
+      # Seuils (FTP / LTHR) que CETTE sortie prouve, + ceux de l'athlète pour comparer.
+      thresholds: ActivityThresholds.for_activity(
+        current_user, peak_powers: activity.peak_powers, streams: activity.streams,
+        activity_type: activity.activity_type
+      )
     }
   end
 
@@ -98,6 +103,18 @@ class ImportedActivitiesController < ApplicationController
     # calcule à la première consultation (aucun appel externe, tout est en base).
     activity.recompute_derivations! if activity.track_cells.blank? && activity.streams.is_a?(Hash)
     render json: { segments: SegmentMatcher.for(current_user, activity) }
+  end
+
+  # GET /api/imported_activities/:id/segments/range?start_idx=&end_idx=
+  # Pendant de `#segments` pour un tronçon choisi à la main. `segment` nul = tronçon
+  # trop court ou jamais refait.
+  def segment_range
+    activity = current_user.imported_activities.find_by(id: params[:id])
+    return head :not_found unless activity
+    return head :unprocessable_entity if activity.track_cells.blank?
+
+    render json: { segment: SegmentMatcher.compare(current_user, activity,
+                                                   params[:start_idx].to_i, params[:end_idx].to_i) }
   end
 
   # DELETE /api/imported_activities/:id

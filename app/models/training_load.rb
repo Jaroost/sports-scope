@@ -64,8 +64,11 @@ module TrainingLoad
   # cache (12 h) resserviraient sans les nouveaux champs. v2 = ajout de `weight_kg`
   # aux seuils (estimation du TSS d'un itinéraire, cf. routeLoad.ts) ;
   # v3 = ajout de `typical_speed_samples` ; v4 = ajout de `started_at` par activité
-  # (le front en fait l'heure de la dernière sortie du jour pour dater le « réalisé »).
-  CACHE_VERSION = 'v4'
+  # (le front en fait l'heure de la dernière sortie du jour pour dater le « réalisé ») ;
+  # v5 = ajout de `distance_m` par activité et par jour (total km de la semaine) ;
+  # v6 = ajout de `lo`/`hi` (bornes bpm/W) à chaque zone d'intensité ;
+  # v7 = LTHR estimé sur les courbes cardio persistées (+ `lthr_method`, `lthr_stale`).
+  CACHE_VERSION = 'v7'
 
   # ── Payload complet consommé par le front ───────────────────────────────────
   # Mis en cache : recalcul lourd (union des 2 tables + EWMA quotidiennes). La clé
@@ -102,7 +105,10 @@ module TrainingLoad
         activity_type: row['activity_type'],
         # Heure de départ (ISO) : le front compare la plus tardive du jour à la date de
         # création d'un plan pour décider s'il a réellement été réalisé (cf. WeekPlanner).
-        started_at: iso_time(row['started_at'])
+        started_at: iso_time(row['started_at']),
+        # Distance (m) : cumulée par jour (cf. attach_activities) pour le total km
+        # hebdomadaire. 0 quand la sortie n'en porte pas (home-trainer, natation…).
+        distance_m: numeric(row['distance_m'])&.round || 0
       }
     end
     return empty_summary if daily.empty?
@@ -127,6 +133,11 @@ module TrainingLoad
         lthr: lthr_info[:value],
         lthr_source: lthr_info[:source],
         lthr_auto: lthr_info[:auto],
+        # Comment l'estimation a été obtenue (`lthr_20min`, `lthr_60min`,
+        # `hr_max_proxy`) : c'est ce qui distingue une mesure d'un ordre de grandeur,
+        # et le front n'avertit que dans le second cas.
+        lthr_method: lthr_info[:method],
+        lthr_stale: lthr_info[:stale],
         typical_speed_kmh: typical_cycling_speed(rows),
         # Nombre de sorties derrière la médiane : le front en fait un indice de
         # fiabilité avant de proposer cette vitesse.
@@ -291,8 +302,10 @@ module TrainingLoad
     hr_zone_secs = ZoneDistribution.bucketize(hr_hist, lthr, ZoneDistribution::HR_ZONES, ZoneDistribution::HR_BUCKET)
     {
       window_days: ZONE_WINDOW_DAYS,
-      hr: ZoneDistribution.present(hr_zone_secs, ZoneDistribution::HR_ZONES),
-      power: ZoneDistribution.present(power_zone_secs, ZoneDistribution::POWER_ZONES)
+      hr: ZoneDistribution.present(hr_zone_secs, ZoneDistribution::HR_ZONES, lthr),
+      # Bornes en watts exprimées avec la FTP COURANTE (celle affichée en référence) :
+      # le classement, lui, a utilisé la FTP de la date de chaque sortie.
+      power: ZoneDistribution.present(power_zone_secs, ZoneDistribution::POWER_ZONES, ftp_at.call(Time.zone.today))
     }
   end
 
@@ -335,8 +348,8 @@ module TrainingLoad
     ) : {}
 
     {
-      hr: ZoneDistribution.present(hr_secs, ZoneDistribution::HR_ZONES),
-      power: ZoneDistribution.present(power_secs, ZoneDistribution::POWER_ZONES),
+      hr: ZoneDistribution.present(hr_secs, ZoneDistribution::HR_ZONES, lthr_value),
+      power: ZoneDistribution.present(power_secs, ZoneDistribution::POWER_ZONES, ftp),
       lthr: lthr_value,
       ftp: ftp
     }
@@ -355,11 +368,14 @@ module TrainingLoad
 
   # Attache à chaque point de série les activités du jour (triées par TSS décroissant),
   # pour permettre au front d'ouvrir la séance principale au clic. Jours de repos → [].
+  # La distance du jour est la somme de celles des activités : le front en cumule les
+  # jours de la semaine pour afficher le total km à côté du total TSS.
   def attach_activities(series, daily_activities)
     by_iso = daily_activities.transform_keys(&:iso8601)
     series.each do |point|
       acts = by_iso[point[:date]] || []
       point[:activities] = acts.sort_by { |a| -a[:tss] }
+      point[:distance_m] = acts.sum { |a| a[:distance_m].to_i }
     end
     series
   end
@@ -393,13 +409,39 @@ module TrainingLoad
     end
   end
 
-  # LTHR effectif (bpm) : valeur manuelle si renseignée, sinon estimation auto
-  # ≈ 90 % de la FC max observée. Renvoie la source + l'auto (pour l'UI).
+  # LTHR effectif (bpm) : valeur manuelle si renseignée, sinon estimation.
+  #
+  # Trois rangs, du plus fiable au moins fiable, et `method` dit lequel a servi :
+  #   1. `manual` — une valeur de test, saisie dans les préférences ;
+  #   2. `lthr_20min` / `lthr_60min` — `LthrEstimator`, sur les courbes cardio
+  #      persistées des sorties vélo (une vraie mesure d'effort soutenu) ;
+  #   3. `hr_max_proxy` — le vieux repli grossier ci-dessous, pour qui n'a pas de
+  #      courbe cardio à vélo : coureur à pied, ou sorties Strava dont les streams
+  #      n'ont jamais été récupérés.
+  #
+  # `auto` reste le bpm brut de l'estimation (le front l'affiche tel quel).
   def lthr(user, rows)
-    manual = FtpEstimator.numeric(FtpEstimator.athlete(user)['lthr_manual'])&.round
-    auto = auto_lthr(rows)
+    # Sans l'historique : c'est la valeur du jour qui sert au TSS, et la série
+    # mensuelle a son propre appel depuis la page Performances.
+    summary = LthrEstimator.summary(user, with_history: false)
+    manual = summary[:manual][:bpm]
+    estimated = summary.dig(:auto, :bpm)
+    auto = estimated || auto_lthr(rows)
     value = manual&.positive? ? manual : auto
-    { value: value, auto: auto, source: (manual&.positive? ? 'manual' : (auto ? 'auto' : nil)) }
+
+    {
+      value: value,
+      auto: auto,
+      source: (manual&.positive? ? 'manual' : (auto ? 'auto' : nil)),
+      method: if manual&.positive?
+                nil
+              else
+                estimated ? summary.dig(:auto, :method) : (auto ? 'hr_max_proxy' : nil)
+              end,
+      # Seulement quand l'estimation a dû sortir de la fenêtre glissante : un seuil
+      # de l'hiver dernier reste utilisable, mais le front doit pouvoir le dire.
+      stale: estimated ? summary.dig(:current, :stale) : false
+    }
   end
 
   # Vitesses moyennes (m/s) des sorties vélo, telles qu'enregistrées. Attention :
@@ -445,10 +487,16 @@ module TrainingLoad
     (durations.max / 60.0).round
   end
 
+  # Dernier repli, quand `LthrEstimator` n'a rien : aucune sortie **vélo** ne porte
+  # de courbe cardio persistée — coureur à pied, ou activités Strava dont les
+  # streams n'ont jamais été récupérés (la courbe se calcule à partir d'eux).
+  #
+  # Deux approximations empilées, d'où son rang : `average_heartrate` sous-estime la
+  # FC max, on l'approxime par le plus haut des FC moyennes /0,92, puis
+  # LTHR ≈ 0,9 × FC max. Grossier mais borné — et surtout disponible sans streams,
+  # ce qui reste sa seule raison d'exister.
   def auto_lthr(rows)
     max_hr = rows.filter_map { |r| numeric(r['average_heartrate']) }.max
-    # `average_heartrate` sous-estime la FC max ; on approxime la FC max par le plus
-    # haut des FC moyennes /0.92, puis LTHR ≈ 0,9 × FC max. Grossier mais borné.
     return nil unless max_hr&.positive?
 
     (max_hr / 0.92 * 0.9).round
@@ -456,7 +504,8 @@ module TrainingLoad
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
   def load_rows(user)
-    columns = %w[name started_at moving_time_s average_heartrate activity_type normalized_power average_speed]
+    columns = %w[name started_at moving_time_s average_heartrate activity_type normalized_power average_speed
+                 distance_m]
     union = UserActivities.union_sql(user_id: user.id, columns: columns)
     UserActivities.select_all("SELECT * FROM (#{union}) rows", 'TrainingLoad#load_rows')
   end

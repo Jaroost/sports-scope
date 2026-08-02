@@ -20,6 +20,17 @@ const STATUS_ENDPOINT = '/strava/backfill'
 const REFRESH_ENDPOINT = '/strava/refresh'
 const POLL_MS = 3000
 
+// Réponse de POST /strava/refresh : le statut du backfill (comme GET /strava/backfill)
+// plus le nombre d'activités que la synchro vient d'ajouter.
+interface BackfillStatus {
+  run: BackfillRun | null
+  pending?: number
+  cached_at?: string | null
+}
+interface RefreshPayload extends BackfillStatus {
+  created?: number
+}
+
 const run = ref<BackfillRun | null>(null)
 const pending = ref(0)
 // Fraîcheur du miroir local : heure de la dernière synchro, affichée à côté du
@@ -52,7 +63,7 @@ function scheduleNext() {
   if (isActive.value) timer = setTimeout(fetchStatus, POLL_MS)
 }
 
-function applyPayload(payload: { run: BackfillRun | null; pending?: number; cached_at?: string | null }) {
+function applyPayload(payload: BackfillStatus) {
   run.value = payload.run || null
   pending.value = payload.run ? payload.run.pending : (payload.pending ?? 0)
   cachedAt.value = payload.cached_at ?? null
@@ -88,12 +99,20 @@ async function refreshAll() {
       credentials: 'same-origin',
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    applyPayload(await res.json())
+    const payload = (await res.json()) as RefreshPayload
+    applyPayload(payload)
     error.value = null
+    // Les widgets du tableau de bord sont des îlots séparés qui ne réagissent pas à
+    // cette synchro : si elle a ramené de nouvelles activités, seul un rechargement
+    // les fait apparaître. Le bouton reste désactivé, la page part.
+    if ((payload.created ?? 0) > 0) {
+      window.location.reload()
+      return
+    }
     scheduleNext()
+    refreshing.value = false
   } catch (e) {
     error.value = (e as Error).message
-  } finally {
     refreshing.value = false
   }
 }

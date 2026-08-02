@@ -64,6 +64,104 @@ export interface Catalog {
   max_grid_side: number
 }
 
+// ── Choisir un composant ────────────────────────────────────────────────────
+//
+// Le catalogue dit « ce genre accepte ces modes » ; la dialogue de choix, elle,
+// montre **une vignette par façon de dessiner** — c'est le mode qui décide du
+// dessin, pas le genre. D'où ce dépliage : une entrée par couple genre × mode,
+// dans l'ordre du catalogue (le premier mode d'un genre est son mode par défaut,
+// celui sur lequel l'appli retombe).
+export interface BlockChoice {
+  kind: string
+  mode?: string
+}
+
+export function blockChoices(catalog: Catalog): BlockChoice[] {
+  return Object.entries(catalog.blocks).flatMap(([kind, modes]) =>
+    // La case vide n'a aucun mode : une entrée quand même, sinon le seul moyen
+    // de dire « je ne mets rien ici » disparaîtrait de la dialogue.
+    modes.length === 0 ? [{ kind }] : modes.map((mode) => ({ kind, mode })),
+  )
+}
+
+// Le composant que fabrique un choix, **avec les seules clés que son genre
+// réclame**.
+//
+// C'est ici que se joue la règle de l'éditeur : on ne compose pas ce que
+// l'assainisseur jettera. Garder `metric` sur un bloc devenu `zones` laisserait
+// une clé morte dans le document, que le serveur retirerait — donc une
+// différence entre ce qu'on voit et ce qui part.
+export function blockFor(
+  choice: BlockChoice,
+  params: { metric?: string; source?: string },
+): Block {
+  const block: Block = { kind: choice.kind }
+  if (choice.mode) block.mode = choice.mode
+  if (choice.kind === 'metric') block.metric = params.metric
+  if (choice.kind === 'zones') block.source = params.source
+  return block
+}
+
+// Ce choix est-il celui du composant en cours d'édition ? Sert au liseré de la
+// vignette. Le paramètre (mesure, source) n'entre pas dans la comparaison : il
+// se règle dans la dialogue, à part, et vaut pour toutes les vignettes du genre.
+export function isChoiceOf(block: Block | null, choice: BlockChoice): boolean {
+  if (!block) return false
+  return block.kind === choice.kind && (block.mode || undefined) === choice.mode
+}
+
+// ── De quoi dessiner un aperçu ──────────────────────────────────────────────
+//
+// Ce que la vignette écrit dans la case : une valeur plausible, l'unité, et la
+// zone quand la mesure en porte une (c'est elle qui colore l'aplat).
+//
+// **Les unités ne sont pas traduites, et c'est voulu** : ce sont celles que le
+// téléphone écrira, or l'appli est en français et ne connaît que le métrique
+// (`MetricId`, dépôt voisin). Une unité traduite ferait un aperçu que l'écran ne
+// dessinera jamais.
+export interface MetricSample {
+  value: string
+  unit: string
+  // La clé de zone (`z1`…`z7`), pour les seules mesures qui en portent une :
+  // l'appli peint alors l'aplat de la zone du moment sous le chiffre.
+  zone?: string
+  // L'icône du mode compact, transposée de `MetricId.icon` en FontAwesome.
+  icon: string
+}
+
+const METRIC_SAMPLES: Record<string, MetricSample> = {
+  duration: { value: '1:12:34', unit: 'durée', icon: 'fa-regular fa-clock' },
+  moving_time: { value: '1:08:20', unit: 'en mouvement', icon: 'fa-solid fa-person-biking' },
+  distance: { value: '38,42 km', unit: 'distance', icon: 'fa-solid fa-ruler-horizontal' },
+  speed: { value: '32', unit: 'km/h', icon: 'fa-solid fa-gauge-high' },
+  speed_avg: { value: '27', unit: 'km/h moy', icon: 'fa-solid fa-gauge-high' },
+  speed_max: { value: '61', unit: 'km/h max', icon: 'fa-solid fa-gauge-high' },
+  heart_rate: { value: '154', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
+  hr_zone: { value: 'Z3', unit: 'zone bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
+  hr_avg: { value: '141', unit: 'bpm moy', icon: 'fa-regular fa-heart' },
+  hr_max: { value: '178', unit: 'bpm max', icon: 'fa-regular fa-heart' },
+  power: { value: '248', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
+  power_zone: { value: 'Z3', unit: 'zone W', zone: 'z3', icon: 'fa-solid fa-bolt' },
+  power_avg: { value: '212', unit: 'W moy', icon: 'fa-solid fa-bolt' },
+  power_np: { value: '236', unit: 'W NP', icon: 'fa-solid fa-bolt' },
+  power_max: { value: '744', unit: 'W max', icon: 'fa-solid fa-bolt' },
+  cadence: { value: '88', unit: 'tr/min', icon: 'fa-solid fa-rotate' },
+  cadence_avg: { value: '84', unit: 'tr/min moy', icon: 'fa-solid fa-rotate' },
+  ascent: { value: '640', unit: 'm D+', icon: 'fa-solid fa-arrow-trend-up' },
+  altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain' },
+  calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire' },
+  gears: { value: '50×15', unit: 'braquet', icon: 'fa-solid fa-gear' },
+  route_remaining: { value: '21,4 km', unit: 'restant', icon: 'fa-regular fa-flag' },
+  route_remaining_gain: { value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up' },
+}
+
+// Le tiret et pas un chiffre inventé quand la mesure est inconnue de cette
+// version : c'est **exactement** ce que le téléphone affichera d'une mesure
+// qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
+export function metricSample(metric: string | undefined): MetricSample {
+  return METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
+}
+
 // Les cases occupées par une cellule, en coordonnées « ligne:colonne ».
 function covered(cell: Cell): string[] {
   const keys: string[] = []

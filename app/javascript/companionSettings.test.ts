@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { occupancy, maxSpan, fitCells, type Cell } from './companionSettings'
+import {
+  occupancy, maxSpan, fitCells, blockChoices, blockFor, isChoiceOf, metricSample,
+  type Catalog, type Cell,
+} from './companionSettings'
 
 // Le calcul de place dans une grille de tableau de bord.
 //
@@ -56,6 +59,88 @@ describe('maxSpan', () => {
     const neighbour = cell(0, 1)
 
     expect(maxSpan(target, [target, neighbour], 1, 2, 'col')).toBe(1)
+  })
+})
+
+// Le choix d'un composant, tel que la dialogue à vignettes le compose.
+
+const catalog: Catalog = {
+  page_kinds: ['map', 'grid', 'list'],
+  blocks: { metric: ['big', 'compact'], zones: ['bar'], empty: [] },
+  zone_sources: ['hr', 'power'],
+  metrics: ['speed', 'power'],
+  sensors: ['gps'],
+  max_band_metrics: 4,
+  max_grid_side: 6,
+}
+
+describe('blockChoices', () => {
+  it('déplie une vignette par mode, dans l\'ordre du catalogue', () => {
+    // C'est le mode qui décide du dessin : une vignette par genre ne montrerait
+    // qu'un mode sur quatre, et le choix se ferait à nouveau en aveugle.
+    expect(blockChoices(catalog)).toEqual([
+      { kind: 'metric', mode: 'big' },
+      { kind: 'metric', mode: 'compact' },
+      { kind: 'zones', mode: 'bar' },
+      { kind: 'empty' },
+    ])
+  })
+
+  it('garde une vignette au genre sans mode', () => {
+    // La case vide n'en a aucun. Sans cette entrée, le seul moyen de dire « je
+    // ne mets rien ici » disparaîtrait de la dialogue.
+    expect(blockChoices({ ...catalog, blocks: { empty: [] } })).toEqual([{ kind: 'empty' }])
+  })
+})
+
+describe('blockFor', () => {
+  it('ne garde que les clés que le genre réclame', () => {
+    // Une clé morte — `metric` sur un bloc `zones` — serait retirée par
+    // l'assainisseur : ce qu'on voit et ce qui part diffèreraient.
+    const zones = blockFor({ kind: 'zones', mode: 'bar' }, { metric: 'speed', source: 'power' })
+
+    expect(zones).toEqual({ kind: 'zones', mode: 'bar', source: 'power' })
+
+    const metric = blockFor({ kind: 'metric', mode: 'big' }, { metric: 'speed', source: 'power' })
+
+    expect(metric).toEqual({ kind: 'metric', mode: 'big', metric: 'speed' })
+  })
+
+  it('n\'écrit pas de mode pour un genre qui n\'en a pas', () => {
+    expect(blockFor({ kind: 'empty' }, {})).toEqual({ kind: 'empty' })
+  })
+})
+
+describe('isChoiceOf', () => {
+  it('ignore le paramètre du genre', () => {
+    // La mesure se règle à part, en tête du groupe : deux vignettes du même mode
+    // ne diffèrent jamais que par elle, et le liseré doit rester sur celle du
+    // mode courant quoi qu'on choisisse au-dessus.
+    const block = { kind: 'metric', mode: 'big', metric: 'power' }
+
+    expect(isChoiceOf(block, { kind: 'metric', mode: 'big' })).toBe(true)
+    expect(isChoiceOf(block, { kind: 'metric', mode: 'compact' })).toBe(false)
+  })
+
+  it('ne désigne rien quand on ajoute un composant', () => {
+    expect(isChoiceOf(null, { kind: 'metric', mode: 'big' })).toBe(false)
+  })
+})
+
+describe('metricSample', () => {
+  it('rend le tiret d\'une mesure inconnue de cette version', () => {
+    // Et pas un chiffre inventé : c'est exactement ce que le téléphone affichera
+    // d'une mesure qu'il ne sait pas lire — jamais un zéro, qui se lirait comme
+    // une mesure.
+    expect(metricSample('cadence_std').value).toBe('—')
+    expect(metricSample(undefined).value).toBe('—')
+  })
+
+  it('ne donne de zone qu\'aux mesures qui en portent une', () => {
+    // C'est elle qui colore l'aplat : une zone sur la cadence peindrait un
+    // aperçu que l'appli ne dessinera jamais.
+    expect(metricSample('power').zone).toBe('z3')
+    expect(metricSample('cadence').zone).toBeUndefined()
   })
 })
 

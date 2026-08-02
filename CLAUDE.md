@@ -292,6 +292,37 @@ cellule à la place réellement libre (`maxSpan`) au lieu de laisser l'assainiss
 retirer le recouvrement après coup — sinon la cellule voisine disparaîtrait à
 l'enregistrement.
 
+### Choisir un composant : des vignettes, pas des listes
+
+Le contenu d'une page se choisit dans une dialogue (`CompanionBlockPicker`) où
+**chaque façon de dessiner a sa vignette** (`CompanionBlockPreview`), et les composants
+déjà posés sont dessinés là où ils sont — dans les cases de la grille comme dans les
+lignes d'une page qui défile. Trois listes déroulantes (genre, mesure, mode)
+demandaient de se figurer ce que « Jauge », « Aplat de zone » ou « Barre seule »
+veulent dire, et la réponse n'arrivait qu'en pleine sortie, sur le seul écran qu'on ne
+peut plus modifier.
+
+Une vignette par couple **genre × mode** et non par genre : c'est le mode qui décide du
+dessin. Le paramètre que le genre réclame — la mesure, la source — se règle en tête de
+son groupe et redessine ses vignettes aussitôt : on choisit *sa* mesure dessinée. Un
+tap pose le composant et referme.
+
+Trois choses à ne pas défaire :
+
+- **La vignette est un fac-similé, pas un rendu partagé.** Le tableau de bord est écrit
+  en Flutter (`lib/ride/blocks/` du dépôt voisin), il n'y a rien à réutiliser ici : le
+  fond des cartes, la palette des zones et les libellés en dur y sont **recopiés à la
+  main**, et doivent suivre quand le dépôt voisin les change.
+- **Elle ne promet que ce que l'appli dessinera.** Une jauge n'existe que pour une
+  mesure qui a des zones — sans plage, `MetricView` retombe sur le chiffre plein cadre,
+  et la vignette fait de même. Les unités, elles, **ne sont pas traduites** : ce sont
+  celles que le téléphone écrira, or l'appli est en français et ne connaît que le
+  métrique.
+- **La grille de l'éditeur garde les proportions de l'écran du téléphone** (largeur
+  bornée, hauteur fixe, lignes en `1fr`). Étalée sur la largeur de la page, une grille
+  de 2 × 2 donnait des cases en bandeau là où le cycliste en aura des carrés debout : on
+  composait pour une mise en page qui n'existe nulle part.
+
 ### Le piège du PATCH
 
 `sanitize` rend les profils par défaut quand il ne trouve rien d'exploitable. C'est

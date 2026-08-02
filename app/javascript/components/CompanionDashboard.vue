@@ -2,7 +2,8 @@
 import { computed, reactive, ref } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
-import CompanionBlockEditor from './CompanionBlockEditor.vue'
+import CompanionBlockPicker from './CompanionBlockPicker.vue'
+import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
   fitCells, maxSpan, occupancy,
   type Band, type Block, type Catalog, type Cell, type CompanionDocument,
@@ -27,6 +28,13 @@ import {
 // Pas de glisser-déposer : on compose ça une fois pour toutes, souvent sur un
 // portable, parfois sur une tablette. Des boutons ↑ ↓ et une grille qu'on tape
 // marchent au doigt comme à la souris, et coûtent le dixième du code.
+//
+// **Ce qu'on pose, on le voit** : le contenu des pages passe par une dialogue de
+// choix à vignettes (`CompanionBlockPicker`), et chaque composant déjà posé est
+// dessiné là où il est (`CompanionBlockPreview`) plutôt que nommé. Trois listes
+// déroulantes demandaient de se figurer ce que « Jauge » ou « Aplat de zone »
+// veulent dire, et la réponse n'arrivait qu'en pleine sortie — sur le seul écran
+// qu'on ne peut plus modifier.
 
 const props = defineProps<{ document: CompanionDocument; catalog: Catalog }>()
 
@@ -34,6 +42,28 @@ const presets = reactive<Preset[]>(structuredClone(props.document.presets))
 const current = ref(0)
 const openPage = ref<number | null>(null)
 const selected = ref<Cell | null>(null)
+
+// Où ira le composant que la dialogue va rendre. Quatre destinations et pas une
+// seule : poser dans une case vide n'est pas remplacer une cellule, et ajouter à
+// la fin d'une page qui défile n'est pas y modifier une ligne. Les distinguer
+// ici évite un « si la cellule existe alors… » réparti sur quatre appelants.
+type PickerTarget =
+  | { at: 'cell'; cell: Cell }
+  | { at: 'slot'; page: Page; row: number; col: number }
+  | { at: 'block'; page: Page; index: number }
+  | { at: 'append'; page: Page }
+
+const picker = ref<PickerTarget | null>(null)
+
+// Le composant que la dialogue doit montrer comme courant : celui qu'on
+// modifie, ou rien du tout quand on en ajoute un.
+const pickerBlock = computed<Block | null>(() => {
+  const target = picker.value
+  if (!target) return null
+  if (target.at === 'cell') return target.cell.block
+  if (target.at === 'block') return target.page.blocks?.[target.index] || null
+  return null
+})
 
 const saving = ref(false)
 const saved = ref(false)
@@ -163,17 +193,41 @@ function tapSlot(page: Page, row: number, col: number, cell: Cell | null) {
     selected.value = selected.value === cell ? null : cell
     return
   }
-  page.cells = [...(page.cells || []), {
-    row, col, row_span: 1, col_span: 1,
-    block: { kind: 'metric', metric: 'speed', mode: 'big' },
-  }]
+  // Une case vide ouvre la dialogue plutôt que de poser une mesure par défaut :
+  // celle-ci demandait de deviner ce qu'on voulait, puis de la corriger dans un
+  // panneau plus bas — deux gestes pour un choix qu'on n'avait pas fait.
+  picker.value = { at: 'slot', page, row, col }
+}
 
-  // On relit la cellule dans le tableau plutôt que de garder l'objet qu'on vient
-  // d'écrire : `presets` est réactif, donc ce qui en ressort est un proxy et non
-  // l'original. Les comparer par identité — ce que font le liseré de sélection et
-  // la suppression — échouerait silencieusement, et la cellule qu'on vient de
-  // poser deviendrait impossible à modifier.
-  selected.value = page.cells[page.cells.length - 1]
+// Le composant sorti de la dialogue, posé là où on l'a demandée.
+function applyPick(block: Block) {
+  const target = picker.value
+  picker.value = null
+  if (!target) return
+
+  switch (target.at) {
+    case 'cell':
+      target.cell.block = block
+      break
+    case 'slot': {
+      const cells = [...(target.page.cells || []),
+        { row: target.row, col: target.col, row_span: 1, col_span: 1, block }]
+      target.page.cells = cells
+      // On relit la cellule dans le tableau plutôt que de garder l'objet qu'on
+      // vient d'écrire : `presets` est réactif, donc ce qui en ressort est un
+      // proxy et non l'original. Les comparer par identité — ce que font le
+      // liseré de sélection et la suppression — échouerait silencieusement, et
+      // la cellule qu'on vient de poser deviendrait impossible à modifier.
+      selected.value = target.page.cells![target.page.cells!.length - 1]
+      break
+    }
+    case 'block':
+      if (target.page.blocks) target.page.blocks[target.index] = block
+      break
+    case 'append':
+      target.page.blocks = [...(target.page.blocks || []), block]
+      break
+  }
 }
 
 function removeCell(page: Page) {
@@ -208,16 +262,22 @@ function styleFor(cell: Cell | null, row: number, col: number) {
   }
 }
 
+// Le nom de ce qui est posé : le genre, son paramètre, son mode. La vignette
+// dit déjà à quoi ça ressemble — ce libellé sert à le **nommer**, ce qu'un
+// dessin ne fait pas : c'est lui qu'on relit pour vérifier qu'on a bien mis la
+// puissance normalisée et non la puissance moyenne.
 function labelFor(block: Block): string {
-  if (block.kind === 'metric') return t(`companion.settings.metrics.${block.metric}`)
-  if (block.kind === 'zones') return t(`companion.settings.sources.${block.source}`)
-  return t(`companion.settings.blocks.${block.kind}`)
+  const parts = [t(`companion.settings.blocks.${block.kind}`)]
+  if (block.kind === 'metric') parts.push(t(`companion.settings.metrics.${block.metric}`))
+  if (block.kind === 'zones') parts.push(t(`companion.settings.sources.${block.source}`))
+  if (block.mode) parts.push(t(`companion.settings.modes.${block.mode}`))
+  return parts.join(' · ')
 }
 
 // ── la page qui défile ──────────────────────────────────────────────────────
 
 function addBlock(page: Page) {
-  page.blocks = [...(page.blocks || []), { kind: 'recording', mode: 'full' }]
+  picker.value = { at: 'append', page }
 }
 
 function moveBlock(page: Page, index: number, delta: number) {
@@ -391,20 +451,26 @@ async function save() {
 
               <div class="companion-grid mb-2"
                    :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
-                             gridTemplateRows: `repeat(${page.rows}, 3.5rem)` }">
+                             gridTemplateRows: `repeat(${page.rows}, 1fr)` }">
                 <button v-for="slot in slots(page)" :key="slot.key" type="button"
                         class="companion-cell"
                         :class="{ filled: !!slot.cell, selected: slot.cell === selected }"
                         :style="styleFor(slot.cell, slot.row, slot.col)"
+                        :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
                         @click="tapSlot(page, slot.row, slot.col, slot.cell)">
-                  <span v-if="slot.cell" class="small">{{ labelFor(slot.cell.block) }}</span>
+                  <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block" />
                   <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
                 </button>
               </div>
 
               <div v-if="selected" class="border rounded p-2 bg-body-tertiary">
-                <CompanionBlockEditor :block="selected.block" :catalog="catalog"
-                                      @update="selected.block = $event" />
+                <div class="d-flex align-items-center gap-2">
+                  <span class="flex-grow-1 text-truncate small">{{ labelFor(selected.block) }}</span>
+                  <button class="btn btn-sm btn-outline-secondary" type="button"
+                          @click="picker = { at: 'cell', cell: selected }">
+                    {{ t('companion.settings.change_block') }}
+                  </button>
+                </div>
                 <div class="d-flex align-items-end gap-3 mt-2">
                   <label class="small mb-0">{{ t('companion.settings.row_span') }}
                     <input class="form-control form-control-sm d-inline-block ms-1"
@@ -426,15 +492,20 @@ async function save() {
               </div>
             </template>
 
-            <!-- Une page qui défile -->
+            <!-- Une page qui défile : les composants dans l'ordre où elle les
+                 empile, chacun dessiné tel qu'il paraîtra. -->
             <template v-else>
               <div v-for="(block, i) in page.blocks" :key="i"
-                   class="d-flex align-items-start gap-2 mb-2">
-                <div class="flex-grow-1">
-                  <CompanionBlockEditor :block="block" :catalog="catalog"
-                                        @update="page.blocks![i] = $event" />
+                   class="d-flex align-items-center gap-2 mb-2">
+                <div class="companion-block-preview flex-shrink-0">
+                  <CompanionBlockPreview :block="block" />
                 </div>
-                <div class="d-flex flex-column pt-4">
+                <span class="flex-grow-1 text-truncate small">{{ labelFor(block) }}</span>
+                <button class="btn btn-sm btn-outline-secondary" type="button"
+                        @click="picker = { at: 'block', page, index: i }">
+                  {{ t('companion.settings.change_block') }}
+                </button>
+                <div class="d-flex flex-column">
                   <button class="btn btn-sm btn-link p-0" type="button"
                           :disabled="i === 0" @click="moveBlock(page, i, -1)">
                     <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
@@ -445,7 +516,7 @@ async function save() {
                     <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
                   </button>
                 </div>
-                <button class="btn btn-sm btn-link text-danger mt-4 p-0" type="button"
+                <button class="btn btn-sm btn-link text-danger p-0" type="button"
                         @click="page.blocks!.splice(i, 1)">
                   <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
                 </button>
@@ -562,18 +633,34 @@ async function save() {
     </div>
 
     <p class="text-body-secondary small mt-2">{{ t('companion.settings.save_help') }}</p>
+
+    <!-- Montée par `v-if` : la dialogue pose son écouteur clavier au montage, et
+         une dialogue toujours montée mangerait la touche Échap de l'éditeur. -->
+    <CompanionBlockPicker v-if="picker" :block="pickerBlock" :catalog="catalog"
+                          @choose="applyPick" @close="picker = null" />
   </div>
 </template>
 
 <style scoped>
+/* Aux proportions de l'écran du téléphone, et non à la largeur de la page :
+   étalée sur 60 rem, une grille de 2 × 2 donnait des cases en bandeau là où le
+   cycliste en aura des carrés debout — on composait donc pour une mise en page
+   qui n'existe nulle part. La hauteur est fixe et les lignes se partagent la
+   place (`1fr`) : ajouter une ligne resserre les cases, exactement comme sur
+   l'écran, plutôt que d'allonger un écran qui ne s'allonge pas. */
 .companion-grid {
   display: grid;
   gap: 0.25rem;
+  width: 100%;
+  max-width: 16rem;
+  height: 27rem;
 }
 
-/* Les cases reprennent grossièrement le tableau de bord : fond sombre, texte
-   clair. Ce n'est pas un aperçu fidèle — les modes ne s'y dessinent pas — mais la
-   disposition, elle, est exacte, et c'est ce qu'on vient composer. */
+/* Les cases posées portent la vignette du composant : la disposition est exacte,
+   et le dessin l'est autant que la page HTML peut l'être (cf.
+   `CompanionBlockPreview`). Rien n'est écrit dessus — le nom est sur la ligne du
+   panneau d'édition, et deux textes superposés à cette taille ne se liraient ni
+   l'un ni l'autre. */
 .companion-cell {
   display: flex;
   align-items: center;
@@ -581,15 +668,31 @@ async function save() {
   border: 1px dashed var(--bs-border-color);
   border-radius: 0.5rem;
   background: transparent;
-  padding: 0.25rem;
+  padding: 0;
   text-align: center;
   overflow: hidden;
 }
 
 .companion-cell.filled {
   border-style: solid;
-  background: #1f2226;
-  color: #fff;
+}
+
+/* La vignette se met à l'échelle par sa `font-size` : dans une case de grille,
+   la taille de la dialogue de choix déborderait de partout. */
+.companion-cell :deep(.cbp) {
+  font-size: 0.5rem;
+  border-radius: 0.5rem;
+  width: 100%;
+}
+
+/* Sur une page qui défile, le composant occupe toute la largeur de l'écran du
+   téléphone : la vignette garde donc ses proportions, en plus petit. */
+.companion-block-preview {
+  width: 7.5rem;
+  height: 4.5rem;
+}
+.companion-block-preview :deep(.cbp) {
+  font-size: 0.42rem;
 }
 
 .companion-cell.selected {

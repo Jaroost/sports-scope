@@ -15,7 +15,13 @@ import vm from 'node:vm'
 
 interface FetchListener { (event: FakeEvent): void }
 interface FakeEvent {
-  request: { method: string; url: string; mode?: string; destination?: string }
+  request: {
+    method: string
+    url: string
+    mode?: string
+    destination?: string
+    formData?: () => Promise<FormData>
+  }
   respondWith: (value: unknown) => void
 }
 
@@ -39,10 +45,19 @@ function loadServiceWorker(): FetchListener {
   }
 
   new vm.Script(code).runInContext(vm.createContext({
-    self, caches, fetch: async () => ({ ok: false, clone: () => ({}) }), Response, URL, console,
+    self, caches, fetch: async () => ({ ok: false, clone: () => ({}) }),
+    Response, URL, Uint8Array, console,
   }))
 
   return listeners.fetch
+}
+
+// En-tête `.fit` minimal : 12 octets dont « .FIT » en 8..11.
+function fitBytes(): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(new ArrayBuffer(12))
+  bytes[0] = 12
+  for (let i = 0; i < 4; i++) bytes[8 + i] = '.FIT'.charCodeAt(i)
+  return bytes
 }
 
 describe('service worker — aiguillage des requêtes', () => {
@@ -104,5 +119,58 @@ describe('service worker — aiguillage des requêtes', () => {
       url: 'https://tiles.example.com/12/34/56.png',
       destination: 'image',
     })).toBe(false)
+  })
+})
+
+// Web Share Target : où atterrit le fichier qu'Android vient de partager. Le champ
+// du formulaire ne peut pas en décider — le paramètre `gpx` accepte
+// `application/octet-stream`, sous lequel beaucoup d'applications partagent un `.fit`.
+// C'est le contenu qui tranche, et c'est ce que ces tests verrouillent.
+describe('service worker — aiguillage du partage', () => {
+  let onFetch: FetchListener
+
+  beforeEach(() => {
+    onFetch = loadServiceWorker()
+  })
+
+  async function shareTarget(field: string, file: File): Promise<string> {
+    const form = new FormData()
+    form.set(field, file)
+    let response: Promise<Response> | undefined
+    onFetch({
+      request: {
+        method: 'POST',
+        url: 'https://sports.logicraft.ch/routes/share-target',
+        formData: async () => form,
+      },
+      respondWith: (value) => { response = value as Promise<Response> },
+    })
+    expect(response).toBeDefined()
+    return (await response!).headers.get('location') ?? ''
+  }
+
+  it('envoie un .fit vers la page d\'atterrissage', async () => {
+    const file = new File([fitBytes()], 'sortie.fit', { type: 'application/vnd.ant.fit' })
+    expect(await shareTarget('fit', file)).toContain('/import/fit?fromShare=1')
+  })
+
+  // Le cas qui motive tout : un `.fit` entré par le champ `gpx`, en octet-stream.
+  // Sans reniflage il partirait dans le créateur d'itinéraire, qui n'y verrait qu'un
+  // XML illisible et ouvrirait une carte vide sans un mot.
+  it('reconnaît un .fit arrivé par le champ gpx en octet-stream', async () => {
+    const file = new File([fitBytes()], 'sortie.fit', { type: 'application/octet-stream' })
+    expect(await shareTarget('gpx', file)).toContain('/import/fit?fromShare=1')
+  })
+
+  it('laisse le GPX aller au créateur d\'itinéraire', async () => {
+    const file = new File(['<gpx version="1.1"></gpx>'], 'trace.gpx', { type: 'application/gpx+xml' })
+    expect(await shareTarget('gpx', file)).toContain('/routes/new?fromShare=1')
+  })
+
+  // Un fichier trop court pour porter un en-tête ne doit pas faire échouer le partage :
+  // on retombe sur le créateur, qui sait déjà s'ouvrir vierge.
+  it('retombe sur le créateur quand le fichier est inexploitable', async () => {
+    const file = new File([Uint8Array.from([1, 2, 3]).buffer], 'vide.bin', { type: 'application/octet-stream' })
+    expect(await shareTarget('gpx', file)).toContain('/routes/new?fromShare=1')
   })
 })

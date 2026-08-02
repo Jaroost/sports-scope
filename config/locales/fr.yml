@@ -858,6 +858,30 @@ fr:
     empty: "Aucune activité importée pour l'instant."
     delete: "Supprimer l'activité importée"
     delete_confirm: "Supprimer cette activité importée ?"
+    # Page d'atterrissage d'un .fit partagé à l'app ou ouvert avec elle.
+    landing:
+      title: "Fichier .fit reçu"
+      reading: "Lecture du fichier…"
+      saving: "Enregistrement…"
+      no_file: "Aucun fichier reçu. Partage un .fit à Sports Scope, ou choisis-en un ici."
+      pick_file: "Choisir un fichier .fit"
+      untitled: "Sans titre"
+      kind_activity: "Sortie enregistrée"
+      kind_course: "Parcours planifié"
+      date: "Date"
+      distance: "Distance"
+      duration: "Durée"
+      elevation: "Dénivelé +"
+      points: "Points GPS"
+      prompt: "Que veux-tu en faire ?"
+      action_ride: "L'ajouter à mes sorties"
+      action_ride_hint: "Cardio, puissance, tours et courbes rejoignent le journal."
+      action_ride_unavailable: "Ce fichier est un parcours : il ne contient aucune sortie à enregistrer."
+      action_route: "En faire un itinéraire"
+      action_route_hint: "La trace est reprise dans le créateur, calée sur les routes."
+      action_route_unavailable: "Ce fichier ne contient aucune position GPS."
+      error_invalid: "Fichier .fit illisible."
+      error_no_points: "Ce fichier ne contient aucune position GPS : il n'y a pas d'itinéraire à en tirer."
   # Noms de pays affichés côté serveur (page de partage : pays traversés). Couvre
   # les pays de la couverture OSM par défaut et leurs voisins ; un code absent
   # s'affiche tel quel, en majuscules (cf. RouteSummaryHelper#summary_country_name).

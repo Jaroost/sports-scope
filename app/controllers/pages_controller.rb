@@ -27,17 +27,36 @@ class PagesController < ApplicationController
     @route_id = params[:id]
   end
 
+  # Atterrissage d'un `.fit` ouvert avec l'application (File Handling API) ou partagé
+  # sans que le service worker ait intercepté le POST. La page lit le fichier côté
+  # client et propose les deux issues — le journaliser, ou en faire un itinéraire.
+  def import_fit
+    require_login!
+  end
+
   # Filet de sécurité du Web Share Target quand le service worker n'a pas intercepté
-  # le POST (cf. config/routes.rb). On lit le .gpx partagé et on rend le créateur,
-  # qui charge directement le tracé via les props sharedGpx / sharedGpxName.
+  # le POST (cf. config/routes.rb). On lit le fichier partagé et on rend la page qui
+  # sait le consommer, laquelle le reçoit en prop base64.
   def share_target
     require_login!
     return if performed? # require_login! a pu rediriger (non connecté)
 
-    file = params[:gpx]
+    # Le champ du formulaire ne décide de rien : le paramètre `gpx` du manifest accepte
+    # `application/octet-stream`, sous lequel Android partage très souvent un `.fit`.
+    # C'est le contenu qui tranche — même règle que dans le service worker.
+    file = params[:fit] || params[:gpx]
     if file.respond_to?(:read)
-      @shared_gpx = file.read
-      @shared_gpx_name = File.basename(file.original_filename.to_s, ".*") if file.respond_to?(:original_filename)
+      data = file.read
+      name = File.basename(file.original_filename.to_s, ".*") if file.respond_to?(:original_filename)
+
+      if fit_payload?(data)
+        @shared_fit = data
+        @shared_fit_name = name
+        render :import_fit and return
+      end
+
+      @shared_gpx = data
+      @shared_gpx_name = name
     end
     render :route_builder
   end
@@ -81,5 +100,15 @@ class PagesController < ApplicationController
       redirect_to root_path, alert: t("routes.error_shared_not_found") and return
     end
     @share_token = token
+  end
+
+  private
+
+  # Le « .FIT » de l'en-tête (octets 8 à 11), seul marqueur fiable du format — jumeau
+  # de `isFitFile` (app/javascript/fitImport.ts) et de `looksLikeFit`
+  # (public/service-worker.js). Les trois doivent rester d'accord : ils décident du
+  # même aiguillage sur les trois voies d'entrée d'un fichier partagé.
+  def fit_payload?(data)
+    data.is_a?(String) && data.bytesize >= 12 && data.byteslice(8, 4) == ".FIT"
   end
 end

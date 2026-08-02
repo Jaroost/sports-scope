@@ -1,0 +1,17 @@
+<% content_for :title, t("fit.landing.title") %>
+<%
+  # .fit reçu par le filet de sécurité serveur du Web Share Target (cf.
+  # PagesController#share_target) : transmis en base64 — caractères [A-Za-z0-9+/=]
+  # sûrs dans l'attribut single-quote ci-dessous.
+  #
+  # C'est la voie de repli, pas la voie normale : le service worker intercepte
+  # d'ordinaire le POST et met le fichier en cache, que la page récupère par un GET.
+  # Cette prop double donc le poids du binaire dans le HTML — acceptable pour un
+  # cas de repli, à ne pas généraliser.
+  props = {}
+  if @shared_fit.present?
+    props[:sharedFit] = Base64.strict_encode64(@shared_fit)
+    props[:sharedFitName] = @shared_fit_name
+  end
+%>
+<div data-vue-component="ImportFitLanding" data-vue-props='<%= props.to_json %>'></div>

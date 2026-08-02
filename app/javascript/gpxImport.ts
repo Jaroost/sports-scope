@@ -3,6 +3,8 @@
 // Mutualisé entre :
 //  - RoutesList.vue        (bouton « importer un GPX »)
 //  - RouteBuilder.vue      (ouverture d'un .gpx via le gestionnaire de fichiers PWA)
+// L'échantillonnage lui-même vit dans `trackSampling.ts`, partagé avec l'import
+// `.fit` : même trace, même itinéraire, quel que soit le format d'origine.
 //
 // Deux cas :
 //  1. GPX exporté par Sports Scope (porte l'extension <ss:wp>) → on rejoue les
@@ -11,11 +13,12 @@
 //     raisonnable de waypoints, en épinglant les extrémités d'origine.
 // Dans les deux cas, le créateur relance BRouter pour le calage routier + altitude.
 
-export type ImportWaypoint = { lng: number; lat: number; free?: boolean; uturn_ok?: boolean }
+import { TRACK_IMPORT_MAX_WAYPOINTS, isValidLngLat, sampleTrackWaypoints } from './trackSampling'
+import type { ImportWaypoint } from './trackSampling'
 
-// Plafond des waypoints transmis au créateur en échantillonnant une trace étrangère.
-// 25 laisse de la marge pour en insérer d'autres au glisser une fois l'itinéraire chargé.
-export const GPX_IMPORT_MAX_WAYPOINTS = 25
+export type { ImportWaypoint }
+
+export const GPX_IMPORT_MAX_WAYPOINTS = TRACK_IMPORT_MAX_WAYPOINTS
 // Un GPX Sports Scope porte déjà des waypoints délibérés (pas une trace dense) :
 // on les garde tous jusqu'au plafond MAX_WAYPOINTS=500 du contrôleur.
 export const GPX_IMPORT_MAX_NATIVE_WAYPOINTS = 500
@@ -42,7 +45,7 @@ function parseSportsScopeWaypoints(doc: Document): ImportWaypoint[] {
   for (let i = 0; i < nodes.length && out.length < GPX_IMPORT_MAX_NATIVE_WAYPOINTS; i++) {
     const lat = parseFloat(nodes[i].getAttribute('lat') || '')
     const lng = parseFloat(nodes[i].getAttribute('lon') || '')
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) continue
+    if (!isValidLngLat(lng, lat)) continue
     const wp: ImportWaypoint = { lng, lat }
     if (nodes[i].getAttribute('free') === 'true') wp.free = true
     if (nodes[i].getAttribute('uturn_ok') === 'true') wp.uturn_ok = true
@@ -60,23 +63,13 @@ function parseGpxPoints(doc: Document): [number, number][] {
     for (let i = 0; i < nodes.length; i++) {
       const lat = parseFloat(nodes[i].getAttribute('lat') || '')
       const lng = parseFloat(nodes[i].getAttribute('lon') || '')
-      if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-        out.push([lng, lat])
-      }
+      if (isValidLngLat(lng, lat)) out.push([lng, lat])
     }
     return out
   }
   return collect('trkpt').length ? collect('trkpt')
     : collect('rtept').length ? collect('rtept')
     : collect('wpt')
-}
-
-function downsample(arr: [number, number][], maxPoints: number): [number, number][] {
-  if (arr.length <= maxPoints) return arr.slice()
-  const step = arr.length / maxPoints
-  const out: [number, number][] = []
-  for (let i = 0; i < maxPoints; i++) out.push(arr[Math.floor(i * step)])
-  return out
 }
 
 // Parse le texte d'un fichier GPX en waypoints exploitables par le créateur.
@@ -94,11 +87,5 @@ export function parseGpxWaypoints(text: string): ImportWaypoint[] {
   const points = parseGpxPoints(doc)
   if (!points.length) throw new GpxImportError('no_points')
 
-  const sampled = downsample(points, GPX_IMPORT_MAX_WAYPOINTS)
-  // Épingle les extrémités d'origine pour qu'elles survivent à l'échantillonnage.
-  if (sampled.length >= 2) {
-    sampled[0] = points[0]
-    sampled[sampled.length - 1] = points[points.length - 1]
-  }
-  return sampled.map((p) => ({ lng: p[0], lat: p[1] }))
+  return sampleTrackWaypoints(points)
 }

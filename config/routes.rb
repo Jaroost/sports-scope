@@ -10,6 +10,13 @@ Rails.application.routes.draw do
     # charger un itinéraire à la volée. Publique (aucun login requis).
     get "/navigate", to: "pages#free_navigation", as: :free_navigate
     get "/routes/new", to: "pages#route_builder", as: :new_route
+    # Atterrissage d'un `.fit` partagé à l'app ou ouvert avec elle. Le format est
+    # ambigu — une sortie enregistrée et un parcours planifié partagent le même
+    # conteneur — donc la page lit le fichier, montre ce qu'il contient et laisse
+    # choisir : le journaliser, ou en faire un itinéraire. C'est l'action déclarée
+    # dans `file_handlers` (manifest), sans préfixe de langue : le scope la rend
+    # facultative.
+    get "/import/fit", to: "pages#import_fit", as: :import_fit
     get "/routes/:id/edit", to: "pages#route_builder", as: :edit_route, constraints: { id: /\d+/ }
     # Navigation is addressed by share_token (not id) so the link is shareable
     # and unguessable; the page and its API are public.
@@ -34,9 +41,15 @@ Rails.application.routes.draw do
   # Web Share Target (Android) : le service worker intercepte normalement ce POST
   # côté client (cf. public/service-worker.js) et n'atteint jamais le serveur. Cette
   # route est un filet de sécurité quand le SW n'intercepte pas (SW obsolète, lancement
-  # à froid avant prise de contrôle, navigateur non compatible) : le serveur lit le .gpx
-  # partagé et rend le créateur avec le tracé chargé. Hors scope de langue : l'action
-  # déclarée dans le manifest est /routes/share-target, sans préfixe de locale.
+  # à froid avant prise de contrôle, navigateur non compatible) : le serveur lit le
+  # fichier partagé et rend, selon son contenu, le créateur d'itinéraire (.gpx) ou la
+  # page d'atterrissage (.fit). Hors scope de langue : l'action déclarée dans le
+  # manifest est /routes/share-target, sans préfixe de locale.
+  #
+  # Le chemin garde son préfixe /routes/ bien qu'il reçoive désormais les deux formats :
+  # il est enregistré auprès d'Android à l'installation de la PWA, et le renommer
+  # laisserait les installations existantes poster dans le vide jusqu'à leur prochaine
+  # relecture du manifest.
   post "/routes/share-target", to: "pages#share_target"
 
   # User preferences profile (JSON consumed by Vue)

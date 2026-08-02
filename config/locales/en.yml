@@ -858,6 +858,30 @@ en:
     empty: "No imported activities yet."
     delete: "Delete imported activity"
     delete_confirm: "Delete this imported activity?"
+    # Landing page for a .fit shared to the app or opened with it.
+    landing:
+      title: "Received a .fit file"
+      reading: "Reading file…"
+      saving: "Saving…"
+      no_file: "No file received. Share a .fit with Sports Scope, or pick one here."
+      pick_file: "Choose a .fit file"
+      untitled: "Untitled"
+      kind_activity: "Recorded ride"
+      kind_course: "Planned course"
+      date: "Date"
+      distance: "Distance"
+      duration: "Duration"
+      elevation: "Elevation gain"
+      points: "GPS points"
+      prompt: "What would you like to do with it?"
+      action_ride: "Add it to my rides"
+      action_ride_hint: "Heart rate, power, laps and charts join your log."
+      action_ride_unavailable: "This file is a course: there is no ride to log."
+      action_route: "Turn it into a route"
+      action_route_hint: "The track opens in the builder, snapped to roads."
+      action_route_unavailable: "This file contains no GPS positions."
+      error_invalid: "Unreadable .fit file."
+      error_no_points: "This file contains no GPS positions, so there is no route to build from it."
   # Country names rendered server-side (share page: countries crossed). Covers the
   # default OSM coverage and its neighbours; an unlisted code shows as-is, uppercased
   # (see RouteSummaryHelper#summary_country_name).

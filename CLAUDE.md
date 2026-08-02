@@ -210,3 +210,42 @@ bin/brakeman    # sécurité Rails
 
 Pas de RuboCop : la gem a été retirée du projet (elle faisait planter les conteneurs de
 debug RubyMine). Ne pas la réintroduire ni recréer de `.rubocop.yml`.
+
+## Diffusion de l'app compagnon Android
+
+L'APK de l'app compagnon (dépôt voisin `~/dev/sports-scope-companion`) est distribué
+par le site, hors Play Store. Trois actions dans `CompanionController`, dont le
+partage des rôles est le point à comprendre :
+
+| Route | Accès | Pourquoi |
+|---|---|---|
+| `/companion` | connectés | l'app ne sert à rien sans compte (itinéraires, seuils, POI passent tous par la session) |
+| `/companion/download` | connectés | c'est le fichier lui-même ; un APK en accès libre finit indexé |
+| `/api/companion_version` | **public** | l'app n'a aucun cookie côté Dart et ne lit ici qu'un numéro de version |
+
+Cet endpoint public **coupe explicitement la session**
+(`request.session_options[:skip]`) : `set_locale` écrit dans la session à chaque
+requête, ce qui poserait un `Set-Cookie` sur une réponse marquée `cache-control:
+public` — un cache partagé garderait alors le cookie d'un visiteur pour le suivant.
+
+Le binaire **n'est ni dans l'image ni dans `public/`** :
+
+- l'image se build depuis ce dépôt et l'APK sort de l'autre — ce serait ~19 Mo par
+  couche et un redéploiement du site pour livrer une version de l'app ;
+- `public/` reçoit un an d'expiration (`config.public_file_server.headers`), le même
+  piège que corrige déjà `service_worker_cache.rb`.
+
+Il vit donc dans le volume `companion_apk` (monté sur `/app/storage/companion`), avec
+un `manifest.json` que lit `CompanionRelease`. On publie sans redéployer :
+
+```bash
+script/push-apk.sh   # lit l'APK du dépôt voisin, vérifie signature et paquet, dépose
+```
+
+Le script lit `versionCode`/`versionName` **dans l'APK** et pas dans le `pubspec` du
+dépôt voisin : c'est le fichier publié qui fait foi, et le versionCode est ce qui
+déclenche la mise à jour côté app.
+
+⚠️ `WellKnownController` (assetlinks) ne publie **qu'un seul** paquet, celui du TWA.
+Activer l'App Link vérifié de l'app compagnon (`ch.logicraft.sports.companion`)
+demande de le faire porter deux couples paquet/empreintes.

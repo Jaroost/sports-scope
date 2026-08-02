@@ -36,7 +36,18 @@ Rails.application.routes.draw do
     delete "/profile/strava/activities", to: "profiles#delete_strava_activities", as: :delete_strava_activities
     # Suivi du cirage de chaîne (par vélo)
     get "/chains", to: "pages#chains", as: :chains
+    # Diffusion de l'app compagnon Android : la page et le fichier demandent une
+    # session (l'app ne sert à rien sans compte). L'endpoint de version, lui, est
+    # public et déclaré hors du scope de langue, plus bas.
+    get "/companion", to: "companion#show", as: :companion
+    get "/companion/download", to: "companion#download", as: :companion_download
   end
+
+  # Contrôle de mise à jour de l'app compagnon. Sans préfixe de langue : l'application
+  # interroge une URL fixe, et ne lit qu'un numéro de version — aucune donnée
+  # d'utilisateur, donc rien à protéger par une session qu'elle n'a de toute façon pas
+  # côté Dart (cf. CompanionController).
+  get "/api/companion_version", to: "companion#version"
 
   # Web Share Target (Android) : le service worker intercepte normalement ce POST
   # côté client (cf. public/service-worker.js) et n'atteint jamais le serveur. Cette

@@ -94,6 +94,11 @@
                     <% end %>
                   </li>
                   <li>
+                    <%= link_to companion_path, class: "dropdown-item" do %>
+                      <i class="fa-brands fa-android me-2" aria-hidden="true"></i><%= t("companion.title") %>
+                    <% end %>
+                  </li>
+                  <li>
                     <%= button_to logout_path, method: :delete, class: "dropdown-item", data: { turbo: false } do %>
                       <i class="fa-solid fa-right-from-bracket me-2" aria-hidden="true"></i><%= t("nav.logout") %>
                     <% end %>

@@ -17,6 +17,7 @@ import TodayPlanWidget from './components/TodayPlanWidget.vue'
 import RefreshAll from './components/RefreshAll.vue'
 import ResumeNavigation from './components/ResumeNavigation.vue'
 import SharedRoutePreviewMap from './components/SharedRoutePreviewMap.vue'
+import CompanionDashboard from './components/CompanionDashboard.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
@@ -37,6 +38,7 @@ const registry: Record<string, Component> = {
   RefreshAll,
   ResumeNavigation,
   SharedRoutePreviewMap,
+  CompanionDashboard,
 }
 
 export function mountVueIslands(): void {

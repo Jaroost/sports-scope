@@ -18,6 +18,12 @@
 
   <p class="text-body-secondary"><%= t("companion.intro") %></p>
 
+  <%# Le tableau de bord se règle ici, pas dans l'appli : composer une grille
+      demande un écran et un clavier, et on le fait une fois pour toutes. %>
+  <%= link_to companion_dashboard_path, class: "btn btn-outline-primary w-100 mb-4" do %>
+    <i class="fa-solid fa-table-cells-large me-2" aria-hidden="true"></i><%= t("companion.settings.open") %>
+  <% end %>
+
   <% if @release %>
     <div class="card mb-4">
       <div class="card-body">

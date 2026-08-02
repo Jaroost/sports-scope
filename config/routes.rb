@@ -41,6 +41,10 @@ Rails.application.routes.draw do
     # public et déclaré hors du scope de langue, plus bas.
     get "/companion", to: "companion#show", as: :companion
     get "/companion/download", to: "companion#download", as: :companion_download
+
+    # L'éditeur des profils de sortie. Dans le scope de langue, contrairement à
+    # l'API : c'est une page, elle a des libellés (cf. CompanionSettingsController).
+    get "/companion/dashboard", to: "companion_settings#edit", as: :companion_dashboard
   end
 
   # Contrôle de mise à jour de l'app compagnon. Sans préfixe de langue : l'application
@@ -107,6 +111,7 @@ Rails.application.routes.draw do
   # Authentifié, contrairement à /api/companion_version — ce sont des données de
   # compte (cf. CompanionSettingsController).
   get "/api/companion_settings", to: "companion_settings#show", as: :api_companion_settings
+  patch "/api/companion_settings", to: "companion_settings#update"
 
   # Seuils physiologiques de l'athlète (FTP manuelle, poids — JSON pour Vue)
   patch "/api/athlete", to: "profiles#update_athlete"

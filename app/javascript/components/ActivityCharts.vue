@@ -16,6 +16,7 @@ import {
   detectPauses,
   detectRecordingGaps,
   computeElevGain,
+  elevGainOptions,
   GRADE_BUCKETS,
   bucketGrade,
   gradeForIndex,
@@ -278,7 +279,10 @@ const rangeElevation = computed(() => {
   }
 
   // With a selection: compute both from the smoothed stream slice.
-  const { gain: up, loss: down } = computeElevGain(alt.slice(start, end + 1))
+  const { gain: up, loss: down } = computeElevGain(
+    alt.slice(start, end + 1),
+    elevGainOptions(props.streams as any, start, end + 1),
+  )
   return { up, down }
 })
 

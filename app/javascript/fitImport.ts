@@ -19,7 +19,7 @@
 // d'où l'aiguillage proposé et non imposé : `fitFileKind` ne fait que désigner le
 // choix par défaut.
 
-import { computeElevGain } from './activityHelpers'
+import { computeElevGain, elevGainOptions } from './activityHelpers'
 import { fillHoles } from './fitStreams'
 import { isValidLngLat, sampleTrackWaypoints } from './trackSampling'
 import type { ImportWaypoint } from './trackSampling'
@@ -127,9 +127,15 @@ export function fitSummary(data: any, filename?: string | null) {
     }
   }
 
-  const altitudes = records
-    .map((r: any) => numericOrNull(r?.altitude ?? r?.enhanced_altitude))
-    .filter((v: number | null) => v != null)
+  // Alignés sur `records` — trous compris : `computeElevGain` a besoin des indices
+  // pour rapprocher chaque altitude de sa distance et de son horodatage.
+  const altitudes = records.map((r: any) => numericOrNull(r?.altitude ?? r?.enhanced_altitude))
+  const gainFromStream = altitudes.some((v: number | null) => v != null)
+    ? Math.round(computeElevGain(altitudes, elevGainOptions({
+        time: { data: records.map((r: any) => numericOrNull(r?.elapsed_time)) },
+        distance: { data: records.map((r: any) => numericOrNull(r?.distance)) },
+      })).gain)
+    : null
 
   return {
     kind: fitFileKind(data),
@@ -138,9 +144,7 @@ export function fitSummary(data: any, filename?: string | null) {
     startedAt,
     distanceM,
     elapsedS: integerOrNull(session.total_elapsed_time ?? session.total_timer_time),
-    elevationGainM: altitudes.length
-      ? Math.round(computeElevGain(altitudes).gain)
-      : (numericOrNull(session.total_ascent) ?? (numericOrNull(course.total_ascent))),
+    elevationGainM: gainFromStream ?? numericOrNull(session.total_ascent) ?? numericOrNull(course.total_ascent),
     pointCount: points.length,
     hasHeartrate: records.some((r: any) => r?.heart_rate != null),
     hasPower: records.some((r: any) => r?.power != null),
@@ -245,8 +249,15 @@ export function buildImportedActivityPayload(data: any, filename?: string | null
     distance_m: numericOrNull(session.total_distance) ?? (distance.length ? distance[distance.length - 1] : null),
     moving_time_s: integerOrNull(session.total_moving_time ?? session.total_timer_time),
     elapsed_time_s: integerOrNull(session.total_elapsed_time ?? session.total_timer_time),
+    // Le D+ que l'appareil a lui-même calculé (`session.total_ascent`) ne sert qu'en
+    // l'absence de flux d'altitude, jamais en premier choix. Il est tentant de le
+    // croire mieux placé que nous — il voit la pression brute et son propre état de
+    // pause — mais rien ne garantit qu'il l'exploite : sur le `.fit` de comparaison
+    // (`manufacturer: "development"`), l'enregistreur annonce 2576 m là où le
+    // compteur du guidon en relève 1911 et où la relecture du flux en rend 2008.
+    // Tant qu'on ne sait pas *comment* l'appareil a compté, la trace reste l'arbitre.
     total_elevation_gain: altitude.some((v) => v != null)
-      ? computeElevGain(altitude).gain
+      ? computeElevGain(altitude, elevGainOptions(streams)).gain
       : numericOrNull(session.total_ascent),
     average_speed: numericOrNull(session.avg_speed ?? session.enhanced_avg_speed),
     max_speed: numericOrNull(session.max_speed ?? session.enhanced_max_speed),

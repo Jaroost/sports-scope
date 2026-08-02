@@ -5,7 +5,7 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  fitCells, maxSpan, occupancy,
+  fitCells, gridSideOf, maxSpan, occupancy,
   type Band, type Block, type Catalog, type Cell, type CompanionDocument,
   type Page, type Preset,
 } from '../companionSettings'
@@ -162,11 +162,31 @@ function togglePage(index: number) {
 
 // ── la grille ───────────────────────────────────────────────────────────────
 
-function resize(page: Page, axis: 'rows' | 'cols', value: number) {
-  const side = Math.min(Math.max(value, 1), props.catalog.max_grid_side)
+// Le nombre de lignes / colonnes, validé **quand on quitte le champ** et non à
+// chaque frappe.
+//
+// À la frappe, c'était intenable au doigt : pour remplacer 6 par 2 on efface
+// d'abord, or un champ vide vaut 0, ramené à 1 — ce qui **jetait au passage
+// toutes les cellules des lignes 2 à 6** (`fitCells` perd une origine hors
+// grille, à dessein). Vue réécrivait ensuite « 1 » dans le champ, si bien que le
+// « 2 » tapé ensuite donnait « 12 », borné à 6 : la grille refusait de rétrécir
+// et le contenu était déjà perdu. Sur ordinateur ça passait inaperçu — on
+// sélectionne le chiffre et on tape par-dessus, ce qui ne fait qu'une seule
+// saisie valide.
+function commitSide(page: Page, axis: 'rows' | 'cols', input: HTMLInputElement) {
+  const side = Math.min(gridSideOf(input.value), props.catalog.max_grid_side)
   page[axis] = side
   page.cells = fitCells(page.cells || [], page.rows || 1, page.cols || 1)
   if (selected.value && !page.cells.includes(selected.value)) selected.value = null
+  repaint(input, side)
+}
+
+// Le champ peut afficher autre chose que ce qu'on a gardé — « 12 » ramené à 6, un
+// champ vide ramené à sa valeur. Vue ne repeint pas un `:value` dont l'expression
+// n'a pas changé, d'où cette remise à la main : sans elle, le champ montrerait un
+// nombre que le document ne contient pas.
+function repaint(input: HTMLInputElement, value: number) {
+  input.value = String(value)
 }
 
 // Ce qu'on dessine : une entrée par case de la grille, en sautant celles qu'une
@@ -246,11 +266,15 @@ function spanLimit(page: Page, axis: 'row' | 'col'): number {
 // pas de taper 6 dans un champ qui n'en accepte que 2, et la cellule voisine
 // disparaîtrait alors à l'enregistrement — exactement ce qu'on cherche à rendre
 // impossible.
-function setSpan(page: Page, axis: 'row' | 'col', value: number) {
+//
+// Validée à la sortie du champ, pour la même raison que [commitSide] : à la frappe,
+// effacer pour retaper renvoyait un 1 qui se collait au chiffre suivant.
+function commitSpan(page: Page, axis: 'row' | 'col', input: HTMLInputElement) {
   if (!selected.value) return
-  const span = Math.min(Math.max(value || 1, 1), spanLimit(page, axis))
+  const span = Math.min(gridSideOf(input.value), spanLimit(page, axis))
   if (axis === 'row') selected.value.row_span = span
   else selected.value.col_span = span
+  repaint(input, span)
 }
 
 function styleFor(cell: Cell | null, row: number, col: number) {
@@ -433,17 +457,20 @@ async function save() {
             <!-- Une grille -->
             <template v-if="page.kind === 'grid'">
               <div class="d-flex align-items-center gap-3 mb-2">
+                <!-- `change` et non `input` : la saisie n'est validée qu'une fois
+                     le champ quitté (ou Entrée), sinon effacer pour retaper
+                     rétrécit la grille à une ligne au passage. -->
                 <label class="small mb-0">{{ t('companion.settings.rows') }}
                   <input class="form-control form-control-sm d-inline-block ms-1"
                          style="width: 5rem" type="number" min="1"
                          :max="catalog.max_grid_side" :value="page.rows"
-                         @input="resize(page, 'rows', Number(($event.target as HTMLInputElement).value))">
+                         @change="commitSide(page, 'rows', $event.target as HTMLInputElement)">
                 </label>
                 <label class="small mb-0">{{ t('companion.settings.cols') }}
                   <input class="form-control form-control-sm d-inline-block ms-1"
                          style="width: 5rem" type="number" min="1"
                          :max="catalog.max_grid_side" :value="page.cols"
-                         @input="resize(page, 'cols', Number(($event.target as HTMLInputElement).value))">
+                         @change="commitSide(page, 'cols', $event.target as HTMLInputElement)">
                 </label>
               </div>
 
@@ -452,9 +479,13 @@ async function save() {
               <div class="companion-grid mb-2"
                    :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
                              gridTemplateRows: `repeat(${page.rows}, 1fr)` }">
+                <!-- `selected` teste `!!slot.cell` d'abord : sans lui, une case
+                     vide (`null`) est « égale » à l'absence de sélection (`null`
+                     aussi), et **toutes** les cases libres s'allument dès qu'on
+                     ne sélectionne rien. -->
                 <button v-for="slot in slots(page)" :key="slot.key" type="button"
                         class="companion-cell"
-                        :class="{ filled: !!slot.cell, selected: slot.cell === selected }"
+                        :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected }"
                         :style="styleFor(slot.cell, slot.row, slot.col)"
                         :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
                         @click="tapSlot(page, slot.row, slot.col, slot.cell)">
@@ -476,13 +507,13 @@ async function save() {
                     <input class="form-control form-control-sm d-inline-block ms-1"
                            style="width: 4.5rem" type="number" min="1"
                            :max="spanLimit(page, 'row')" :value="selected.row_span"
-                           @input="setSpan(page, 'row', Number(($event.target as HTMLInputElement).value))">
+                           @change="commitSpan(page, 'row', $event.target as HTMLInputElement)">
                   </label>
                   <label class="small mb-0">{{ t('companion.settings.col_span') }}
                     <input class="form-control form-control-sm d-inline-block ms-1"
                            style="width: 4.5rem" type="number" min="1"
                            :max="spanLimit(page, 'col')" :value="selected.col_span"
-                           @input="setSpan(page, 'col', Number(($event.target as HTMLInputElement).value))">
+                           @change="commitSpan(page, 'col', $event.target as HTMLInputElement)">
                   </label>
                   <button class="btn btn-sm btn-outline-danger ms-auto" type="button"
                           @click="removeCell(page)">

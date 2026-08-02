@@ -162,6 +162,18 @@ export function metricSample(metric: string | undefined): MetricSample {
   return METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
 }
 
+// Ce qu'on garde d'un champ « lignes », « colonnes » ou « sur X lignes » : un
+// entier d'au moins 1. Le plafond, lui, dépend de l'appelant (le catalogue pour
+// une grille, la place libre pour une étendue).
+//
+// **Un champ vide vaut 1 et jamais 0** : `Number('')` rend 0, et une grille de
+// zéro ligne perdrait toutes ses cellules d'un coup (`fitCells` ne garde pas une
+// origine hors grille). C'est ce qui arrivait au doigt, où l'on efface avant de
+// retaper.
+export function gridSideOf(raw: string): number {
+  return Math.max(Math.round(Number(raw)) || 1, 1)
+}
+
 // Les cases occupées par une cellule, en coordonnées « ligne:colonne ».
 function covered(cell: Cell): string[] {
   const keys: string[] = []

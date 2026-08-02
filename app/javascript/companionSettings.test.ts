@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  occupancy, maxSpan, fitCells, blockChoices, blockFor, isChoiceOf, metricSample,
+  occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, isChoiceOf, metricSample,
   type Catalog, type Cell,
 } from './companionSettings'
 
@@ -141,6 +141,26 @@ describe('metricSample', () => {
     // aperçu que l'appli ne dessinera jamais.
     expect(metricSample('power').zone).toBe('z3')
     expect(metricSample('cadence').zone).toBeUndefined()
+  })
+})
+
+describe('gridSideOf', () => {
+  it('rend 1 pour un champ vide, jamais 0', () => {
+    // C'est le bogue du doigt : pour remplacer 6 par 2 on efface d'abord, et un
+    // 0 commis au passage rétrécissait la grille à rien — donc perdait toutes
+    // les cellules, `fitCells` ne gardant pas une origine hors grille.
+    expect(gridSideOf('')).toBe(1)
+    expect(gridSideOf('0')).toBe(1)
+    expect(gridSideOf('abc')).toBe(1)
+    expect(gridSideOf('-3')).toBe(1)
+  })
+
+  it('garde un entier', () => {
+    expect(gridSideOf('3')).toBe(3)
+    // Le plafond est à l'appelant : le catalogue pour une grille, la place
+    // libre pour une étendue.
+    expect(gridSideOf('12')).toBe(12)
+    expect(gridSideOf('2.6')).toBe(3)
   })
 })
 

@@ -103,6 +103,11 @@ Rails.application.routes.draw do
   # Seuils + zones du cycliste, pour l'application mobile (cf. RiderProfilesController)
   get "/api/rider_profile", to: "rider_profiles#show", as: :api_rider_profile
 
+  # Profils de sortie de l'appli compagnon : tableau de bord, capteurs, radar.
+  # Authentifié, contrairement à /api/companion_version — ce sont des données de
+  # compte (cf. CompanionSettingsController).
+  get "/api/companion_settings", to: "companion_settings#show", as: :api_companion_settings
+
   # Seuils physiologiques de l'athlète (FTP manuelle, poids — JSON pour Vue)
   patch "/api/athlete", to: "profiles#update_athlete"
 

@@ -17,7 +17,11 @@
   <%# Le document ET le catalogue passent en props. Le catalogue vient du serveur
       et non d'une copie côté front : un composant que l'éditeur proposerait sans
       que l'assainisseur le connaisse disparaîtrait à l'enregistrement, sous les
-      yeux de l'utilisateur et sans un mot. %>
+      yeux de l'utilisateur et sans un mot.
+
+      Le `viewport` est la grille du téléphone, telle que l'appli l'a mesurée —
+      `null` tant qu'elle ne l'a pas dit. L'éditeur dimensionne alors ses aperçus
+      sur un téléphone ordinaire, et l'annonce. %>
   <div data-vue-component="CompanionDashboard"
-       data-vue-props="<%= { document: @document, catalog: @catalog }.to_json %>"></div>
+       data-vue-props="<%= { document: @document, catalog: @catalog, viewport: @viewport }.to_json %>"></div>
 </div>

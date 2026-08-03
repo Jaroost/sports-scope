@@ -222,7 +222,7 @@ partage des rôles est le point à comprendre :
 | `/companion` | connectés | l'app ne sert à rien sans compte (itinéraires, seuils, POI passent tous par la session) |
 | `/companion/download` | connectés | c'est le fichier lui-même ; un APK en accès libre finit indexé |
 | `/api/companion_version` | **public** | l'app n'a aucun cookie côté Dart et ne lit ici qu'un numéro de version |
-| `/api/companion_settings` | connectés | les profils de sortie ; données de compte, donc authentifié (voir plus bas) |
+| `/api/companion_settings` | connectés | les profils de sortie ; données de compte, donc authentifié (voir plus bas). Le `?grid=328x598` qu'y ajoute l'appli est la taille de sa grille — retenue au passage |
 | `/companion/dashboard` | connectés | l'éditeur de ces profils |
 
 Cet endpoint public **coupe explicitement la session**
@@ -321,7 +321,64 @@ Trois choses à ne pas défaire :
 - **La grille de l'éditeur garde les proportions de l'écran du téléphone** (largeur
   bornée, hauteur fixe, lignes en `1fr`). Étalée sur la largeur de la page, une grille
   de 2 × 2 donnait des cases en bandeau là où le cycliste en aura des carrés debout : on
-  composait pour une mise en page qui n'existe nulle part.
+  composait pour une mise en page qui n'existe nulle part. Les proportions sont
+  exactement celles de `PHONE_GRID` (`companionSettings.ts`) : un seul facteur
+  d'échelle vaut alors pour toutes les grilles, ce dont dépend `--cbp-em`.
+
+### Le mode est un plafond, pas un ordre
+
+Un profil décrit sa grille en lignes et en colonnes, jamais en pixels — c'est le
+téléphone qui sait ce que ça fait (328 × 598 px logiques sur un écran ordinaire,
+donc 48 × 93 par case en 6 × 6). Les composants écrits à taille fixe réclamaient
+leur hauteur quelle que soit la case et **débordaient sur la voisine**, en
+roulant.
+
+`lib/dashboard/block_density.dart` (dépôt voisin) tire donc de la taille de la
+case ce qu'on peut encore y dessiner : un composant montre toujours **moins** que
+ce que son mode demande quand la place manque, jamais plus. La légende des zones
+cède la place à sa barre, les moyennes passent en liste, l'icône puis l'unité
+disparaissent, le bouton d'enregistrement se réduit à son icône. Le format JSON
+ne change pas d'un octet.
+
+Deux façons de se dégrader, et le partage n'est pas arbitraire : ce qui se lit
+**en diagonale** (une légende, une icône) perd des éléments — réduit à 40 %, un
+tableau de sept lignes ne se lit plus ; ce qui se lit **en entier** (une phrase
+d'état vide, qui dit *pourquoi* il n'y a rien) rapetisse au lieu d'être tronqué.
+
+Côté site, `companionSettings.ts` **recopie ces seuils à la main**, comme il
+recopie déjà la palette des zones : sans eux l'éditeur montrerait une légende
+complète là où le téléphone n'affichera qu'une barre. Les deux jeux de tests
+(`test/block_density_test.dart` et `companionSettings.test.ts`) portent les mêmes
+attentes exprès — **quand un seuil bouge d'un côté, l'autre tombe.**
+
+`test/dashboard_overflow_test.dart` monte les pires grilles composables : un
+débordement y fait échouer le test, `flutter_test` remontant le « RenderFlex
+overflowed » comme une erreur.
+
+### C'est le téléphone qui dit sa taille
+
+Les seuils sont en pixels, l'éditeur compose en lignes et en colonnes : il lui
+faut donc savoir ce que ça fait sur l'écran. Il le **demandait** — un téléphone
+de référence de 328 × 598 — jusqu'à ce que l'appli l'annonce.
+
+Ce qui remonte est la grille et **non l'écran** : le rectangle que reçoit
+vraiment `DashboardPage._grid`, barre système, en-tête et bandeau déjà retirés.
+Le recalculer côté site depuis une taille d'écran dupliquerait cette mise en page
+en un second endroit, qui dériverait au premier réglage changé — et une mesure
+fausse vaut moins qu'une mesure absente, parce que le site la croirait.
+
+Le chemin : `DashboardPage` mesure (`onGridMeasured`) → `CompanionSettingsStore`
+la garde avec les profils → elle part en query sur la requête que l'appli faisait
+déjà (`GET /api/companion_settings?grid=328x598`) → `users.companion_viewport`.
+Un GET qui écrit, oui : imposer une seconde requête coûterait un WebView hors
+écran de plus — une seconde d'attente à l'accueil — pour une information que le
+site ne lit qu'en ouvrant l'éditeur.
+
+`null` tant que rien n'a été mesuré, et c'est **exactement la distinction dont
+l'éditeur a besoin** : il annonce alors un téléphone ordinaire (« ces cases
+feraient… ») au lieu de prétendre connaître celui de l'utilisateur (« ces cases
+feront… »). La valeur de repli est écrite des deux côtés — `CompanionViewport::
+DEFAULT` et `PHONE_GRID` — et un test la compare.
 
 ### Le piège du PATCH
 

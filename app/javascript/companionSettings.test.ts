@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, isChoiceOf, metricSample,
+  averagesCardsFit, densityFor, legendFits, phoneCell, PHONE_GRID, recordingIsCompact,
+  zoneCount,
   type Catalog, type Cell,
 } from './companionSettings'
 
@@ -182,5 +184,113 @@ describe('fitCells', () => {
 
     expect(kept).toHaveLength(1)
     expect(kept[0].row).toBe(0)
+  })
+})
+
+// ── Ce que le téléphone laissera dessiner ───────────────────────────────────
+//
+// Ces attentes sont **les mêmes que celles de `test/block_density_test.dart`**
+// dans le dépôt voisin, et c'est tout leur intérêt : l'éditeur ne doit rien
+// montrer que l'appli retirerait. Quand un seuil bouge là-bas, ces tests
+// tombent ici.
+
+describe('phoneCell', () => {
+  it('partage la place à parts égales, gouttières comprises', () => {
+    // 3 colonnes, 2 gouttières de 8, sur les 328 px que la grille occupe.
+    expect(phoneCell(3, 3).width).toBeCloseTo((328 - 16) / 3, 3)
+  })
+
+  it('rend à une fusion la gouttière qu\'elle enjambe', () => {
+    // Sans quoi deux cases côte à côte et une case de deux colonnes ne
+    // couvriraient pas la même largeur — même règle que `gridRectFor`.
+    const single = phoneCell(3, 3).width
+    expect(phoneCell(3, 3, 1, 2).width).toBeCloseTo(single * 2 + 8, 3)
+  })
+})
+
+describe('densityFor', () => {
+  it('suit la grille comme le fait l\'appli', () => {
+    expect(densityFor(phoneCell(2, 2))).toBe('comfortable')
+    expect(densityFor(phoneCell(3, 3))).toBe('normal')
+    expect(densityFor(phoneCell(4, 3))).toBe('tight')
+    expect(densityFor(phoneCell(6, 6))).toBe('minimal')
+  })
+
+  it('tient compte de la largeur, même dans une case haute', () => {
+    // Quatre colonnes sur deux lignes : 79 px de large pour 295 de haut. C'est
+    // large comme un pouce.
+    expect(densityFor(phoneCell(2, 4))).toBe('minimal')
+  })
+
+  it('sans case, tout se dessine', () => {
+    // La dialogue de choix et les pages qui défilent : la hauteur y est libre.
+    expect(densityFor(undefined)).toBe('comfortable')
+  })
+})
+
+describe('legendFits', () => {
+  it('retire la légende là où l\'appli la retirera', () => {
+    expect(legendFits(phoneCell(3, 3), { zones: 5, withBar: true })).toBe(false)
+    expect(legendFits(phoneCell(1, 1), { zones: 5, withBar: true })).toBe(true)
+  })
+
+  it('compte les sept paliers de la puissance, pas cinq', () => {
+    // Les deux listes viennent du site et n'ont pas la même longueur : une
+    // vignette qui en dessinerait cinq des deux côtés promettrait une légende
+    // que le téléphone retirerait.
+    expect(zoneCount('power')).toBe(7)
+    expect(zoneCount('hr')).toBe(5)
+
+    const cell = phoneCell(2, 1)
+    expect(legendFits(cell, { zones: 5, withBar: true })).toBe(true)
+    expect(legendFits(cell, { zones: 7, withBar: true })).toBe(false)
+  })
+
+  it('refuse une case haute mais étroite', () => {
+    // Une ligne de légende porte une pastille, une clé, une durée et un
+    // pourcentage : c'est en largeur qu'elle sortait de sa case.
+    expect(legendFits(phoneCell(1, 2), { zones: 5, withBar: true })).toBe(false)
+  })
+})
+
+describe('les autres replis', () => {
+  it('ramène les moyennes en liste dans une case de grille', () => {
+    expect(averagesCardsFit(undefined)).toBe(true)
+    expect(averagesCardsFit(phoneCell(1, 1))).toBe(true)
+    expect(averagesCardsFit(phoneCell(2, 2))).toBe(false)
+  })
+
+  it('réduit le bouton d\'enregistrement à son icône quand le libellé ne tient plus', () => {
+    expect(recordingIsCompact(phoneCell(1, 1))).toBe(false)
+    expect(recordingIsCompact(phoneCell(3, 2))).toBe(true)
+  })
+})
+
+describe('la grille du vrai téléphone', () => {
+  it('remplace celle du téléphone type quand l\'appli l\'a annoncée', () => {
+    // Un écran plus grand : les mêmes 3 × 3 y laissent plus de place, donc plus
+    // de détail. Ce que l'éditeur montrait jusque-là était une supposition.
+    const wide = { width: 400, height: 780 }
+
+    expect(densityFor(phoneCell(3, 3))).toBe('normal')
+    expect(densityFor(phoneCell(3, 3, 1, 1, wide))).toBe('comfortable')
+  })
+
+  it('un petit écran retire ce que le téléphone type gardait', () => {
+    // Et dans l'autre sens : composer sur la supposition ferait promettre une
+    // légende que cet écran-là ne portera pas.
+    const small = { width: 300, height: 480 }
+
+    expect(legendFits(phoneCell(2, 1), { zones: 5, withBar: true })).toBe(true)
+    expect(
+      legendFits(phoneCell(2, 1, 1, 1, small), { zones: 5, withBar: true }),
+    ).toBe(false)
+  })
+
+  it('le repli est le téléphone ordinaire, pas une taille inventée', () => {
+    // Recopié dans `CompanionViewport::DEFAULT` côté serveur : les deux doivent
+    // dire la même chose, sans quoi l'avertissement et l'aperçu diffèreraient.
+    expect(PHONE_GRID).toEqual({ width: 328, height: 598 })
+    expect(phoneCell(2, 2)).toEqual(phoneCell(2, 2, 1, 1, PHONE_GRID))
   })
 })

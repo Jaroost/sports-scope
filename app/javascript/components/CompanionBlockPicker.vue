@@ -19,7 +19,10 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
-import { blockChoices, blockFor, isChoiceOf, type Block, type Catalog } from '../companionSettings'
+import {
+  blockChoices, blockFor, isChoiceOf,
+  type Block, type Catalog, type CellSize,
+} from '../companionSettings'
 
 const props = defineProps<{
   // Le composant en cours de modification, `null` quand on en ajoute un : c'est
@@ -27,6 +30,11 @@ const props = defineProps<{
   // paramètres.
   block: Block | null
   catalog: Catalog
+  // La place qu'aura le composant une fois posé, quand la destination est une
+  // case de grille. Les vignettes montrent alors ce que **cette case-là**
+  // dessinera — une légende de zones qu'elle ne portera pas ne s'y propose pas
+  // en grand. Absente pour une page qui défile, où la hauteur est libre.
+  cell?: CellSize
 }>()
 
 const emit = defineEmits<{ close: []; choose: [block: Block] }>()
@@ -113,7 +121,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               @click="choose(choice.kind, choice.mode)"
             >
               <div class="cbpk-preview">
-                <CompanionBlockPreview :block="preview(choice.kind, choice.mode)" />
+                <CompanionBlockPreview :block="preview(choice.kind, choice.mode)" :cell="cell" />
               </div>
               <span class="cbpk-tile-label">
                 {{ choice.mode

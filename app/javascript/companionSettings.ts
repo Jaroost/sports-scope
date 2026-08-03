@@ -110,6 +110,166 @@ export function isChoiceOf(block: Block | null, choice: BlockChoice): boolean {
   return block.kind === choice.kind && (block.mode || undefined) === choice.mode
 }
 
+// ── Ce que le téléphone laissera dessiner ───────────────────────────────────
+//
+// Un profil décrit sa grille en lignes et en colonnes, jamais en pixels : c'est
+// le téléphone qui sait ce que ça fait. Les composants s'y dégradent — une
+// légende de zones cède la place à sa barre, une unité disparaît, les moyennes
+// passent en liste — parce qu'autrement ils débordaient sur la case voisine.
+//
+// Ce bloc est la **recopie à la main** de `lib/dashboard/block_density.dart` du
+// dépôt voisin, comme le sont déjà la palette des zones et le fond des cartes
+// dans `CompanionBlockPreview`. Sans lui, l'éditeur montrerait une légende
+// complète là où le téléphone n'affichera qu'une barre : on composerait à
+// nouveau quelque chose qu'on ne verra jamais. **Quand les seuils bougent
+// là-bas, ils bougent ici.**
+//
+// La géométrie de repli : un téléphone ordinaire (360 × 800 px logiques), une
+// fois retirés la barre système, le bandeau du bas, l'en-tête de la page et les
+// marges. **Recopiée dans `CompanionViewport::DEFAULT`.**
+//
+// Elle ne sert que tant que l'appli n'a rien dit. Dès qu'elle a posé une page de
+// grille, elle renvoie ce qu'elle a **mesuré** (`/api/companion_settings?grid=`),
+// le site le retient, et l'éditeur travaille sur le vrai téléphone — un
+// avertissement vrai plutôt que plausible.
+export const PHONE_GRID = { width: 328, height: 598 }
+
+// La gouttière entre deux cases, en dur des deux côtés (`gridRectFor`). Elle ne
+// dépend pas de l'écran : c'est une valeur de dessin, pas une mesure.
+export const GRID_GAP = 8
+
+export interface Viewport {
+  width: number
+  height: number
+}
+
+export type BlockDensity = 'comfortable' | 'normal' | 'tight' | 'minimal'
+
+export interface CellSize {
+  width: number
+  height: number
+}
+
+export interface BlockMetrics {
+  padding: number
+  gap: number
+  titleSize: number
+  lineSize: number
+  showTitle: boolean
+  showUnit: boolean
+  showIcon: boolean
+}
+
+export const BLOCK_METRICS: Record<BlockDensity, BlockMetrics> = {
+  comfortable: { padding: 16, gap: 12, titleSize: 13, lineSize: 16, showTitle: true, showUnit: true, showIcon: true },
+  normal: { padding: 12, gap: 8, titleSize: 12, lineSize: 15, showTitle: true, showUnit: true, showIcon: true },
+  tight: { padding: 8, gap: 6, titleSize: 11, lineSize: 13, showTitle: true, showUnit: true, showIcon: false },
+  minimal: { padding: 6, gap: 4, titleSize: 11, lineSize: 12, showTitle: false, showUnit: false, showIcon: false },
+}
+
+const MINIMAL_HEIGHT = 96
+const TIGHT_HEIGHT = 148
+const NORMAL_HEIGHT = 232
+const MINIMAL_WIDTH = 88
+
+// Ce qu'il faut de largeur à une ligne de légende : la pastille, la clé de zone,
+// la durée et le pourcentage. En dessous, elle déborde **sur le côté** — l'autre
+// façon de sortir de sa case, celle qu'on oublie parce qu'une grille se pense en
+// hauteur.
+const LEGEND_WIDTH = 150
+
+// La place qu'une cellule prendra sur le téléphone. Même calcul que `gridRectFor`
+// côté appli, fusions comprises : la gouttière intérieure d'une cellule fusionnée
+// lui revient.
+//
+// [grid] est la grille de *ce* téléphone quand il l'a dite, celle du téléphone
+// ordinaire sinon. Passée en argument et non lue d'une variable de module : les
+// aperçus se dessinent avant que les props n'arrivent, et un état global qui
+// change sous les pieds d'un `computed` est le meilleur moyen d'afficher une
+// densité et d'en calculer une autre.
+export function phoneCell(
+  rows: number,
+  cols: number,
+  rowSpan = 1,
+  colSpan = 1,
+  grid: Viewport = PHONE_GRID,
+): CellSize {
+  const cellWidth = (grid.width - GRID_GAP * (cols - 1)) / cols
+  const cellHeight = (grid.height - GRID_GAP * (rows - 1)) / rows
+
+  return {
+    width: cellWidth * colSpan + GRID_GAP * (colSpan - 1),
+    height: cellHeight * rowSpan + GRID_GAP * (rowSpan - 1),
+  }
+}
+
+// **Une case absente vaut `comfortable`** : c'est une page qui défile, ou la
+// dialogue de choix, où le composant prend la hauteur qu'il lui faut et où rien
+// ne peut déborder.
+export function densityFor(cell?: CellSize): BlockDensity {
+  if (!cell) return 'comfortable'
+  if (cell.height < MINIMAL_HEIGHT || cell.width < MINIMAL_WIDTH) return 'minimal'
+  if (cell.height < TIGHT_HEIGHT) return 'tight'
+  if (cell.height < NORMAL_HEIGHT) return 'normal'
+  return 'comfortable'
+}
+
+// Combien de zones le téléphone dessinera. Le site connaît les seuils du
+// cycliste, mais l'aperçu doit valoir pour le profil qu'il aura le jour de la
+// sortie : on prend donc la liste la plus longue de chaque source — sept paliers
+// en puissance, cinq en cardio — pour ne jamais promettre une légende que le
+// téléphone retirerait.
+export function zoneCount(source?: string): number {
+  return source === 'power' ? 7 : 5
+}
+
+// La légende tient-elle ? **Tout ou rien** : une légende amputée de ses deux
+// dernières zones se lit comme une légende complète — on croirait n'avoir jamais
+// touché la Z5, ce qui est l'inverse de la vérité.
+export function legendFits(
+  cell: CellSize | undefined,
+  { zones, withBar }: { zones: number; withBar: boolean },
+): boolean {
+  if (!cell) return true
+
+  const m = BLOCK_METRICS[densityFor(cell)]
+  if (cell.width - m.padding * 2 < LEGEND_WIDTH) return false
+
+  let room = cell.height - m.padding * 2
+  if (m.showTitle) room -= Math.round(m.titleSize * 1.35) + m.gap
+  if (withBar) room -= barHeightFor(cell) + m.gap
+
+  return room >= zones * (Math.round(m.lineSize * 1.35) + 14)
+}
+
+function barHeightFor(cell: CellSize): number {
+  return { comfortable: 22, normal: 18, tight: 14, minimal: 10 }[densityFor(cell)]
+}
+
+// Les trois cartes des moyennes demandent une pleine hauteur — et une pleine
+// largeur : la rangée du haut coupe la case en deux, où « Normalisée 236 W » se
+// replie sur trois lignes et fait grandir la carte bien au-delà. Sinon, le
+// téléphone les rend en liste.
+export function averagesCardsFit(cell?: CellSize): boolean {
+  if (!cell) return true
+  if (cell.width < 280) return false
+
+  const m = BLOCK_METRICS[densityFor(cell)]
+  const card =
+    m.padding * 2 + Math.round(m.titleSize * 1.35) + m.gap + 3 * (Math.round(m.lineSize * 1.35) + 4)
+
+  return cell.height >= card * 2 + m.gap
+}
+
+// « Démarrer l'enregistrement » ne tient pas sur la ligne d'un bouton étroit, et
+// le libellé ne se tronque pas : un bouton qui déclenche un enregistrement dit
+// ce qu'il fait, ou ne dit rien — c'est alors l'icône seule.
+export function recordingIsCompact(cell?: CellSize): boolean {
+  if (!cell) return false
+  const density = densityFor(cell)
+  return cell.width < 200 || density === 'tight' || density === 'minimal'
+}
+
 // ── De quoi dessiner un aperçu ──────────────────────────────────────────────
 //
 // Ce que la vignette écrit dans la case : une valeur plausible, l'unité, et la

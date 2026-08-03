@@ -17,10 +17,37 @@
 // Tout est en `em` : le composant se met à l'échelle par la `font-size` que lui
 // pose l'appelant, la même vignette servant dans une case de grille de 3,5 rem
 // et dans la dialogue de choix.
+//
+// **Elle montre aussi ce que la case retire.** Un composant posé dans une petite
+// case ne dessine pas tout ce que son mode suppose : la légende des zones cède
+// la place à sa barre, l'unité et l'icône disparaissent, les moyennes passent en
+// liste (`block_density.dart`, dépôt voisin). Sans ça, l'éditeur montrerait une
+// légende complète là où le téléphone n'affichera qu'une barre — et on
+// découvrirait la différence en roulant, sur le seul écran qu'on ne peut plus
+// modifier.
 import { computed } from 'vue'
-import { metricSample, type Block } from '../companionSettings'
+import {
+  averagesCardsFit,
+  BLOCK_METRICS,
+  densityFor,
+  legendFits,
+  metricSample,
+  recordingIsCompact,
+  zoneCount,
+  type Block,
+  type CellSize,
+} from '../companionSettings'
 
-const props = defineProps<{ block: Block }>()
+const props = defineProps<{
+  block: Block
+  // La place que la cellule aura **sur le téléphone**, en pixels logiques.
+  // Absente dans la dialogue de choix et sur une page qui défile : la hauteur y
+  // est libre, rien ne peut déborder, tout se dessine.
+  cell?: CellSize
+}>()
+
+const density = computed(() => densityFor(props.cell))
+const metrics = computed(() => BLOCK_METRICS[density.value])
 
 // La palette de `ui/zone_colors.dart` — saturée et non teintée, c'est ce qui la
 // rend lisible en plein soleil sur le fond sombre.
@@ -40,12 +67,27 @@ const DARK_INK = new Set(['z3', 'z4'])
 
 // Le temps par zone d'une sortie ordinaire. Les parts sont arrondies pour que la
 // barre et la légende racontent la même chose.
+//
+// Sept paliers en puissance, cinq en cardio : ce ne sont pas les mêmes listes,
+// elles viennent du site, et c'est le nombre de lignes qui décide si la légende
+// tient dans la case. Une vignette qui en dessinerait cinq des deux côtés
+// promettrait une légende que le téléphone retirerait.
 const ZONE_SHARES = [
   { key: 'z1', share: 0.08, time: '05:48' },
   { key: 'z2', share: 0.32, time: '23:12' },
   { key: 'z3', share: 0.34, time: '24:39' },
   { key: 'z4', share: 0.18, time: '13:03' },
   { key: 'z5', share: 0.08, time: '05:48' },
+]
+
+const POWER_SHARES = [
+  { key: 'z1', share: 0.12, time: '08:42' },
+  { key: 'z2', share: 0.29, time: '21:01' },
+  { key: 'z3', share: 0.27, time: '19:34' },
+  { key: 'z4', share: 0.16, time: '11:36' },
+  { key: 'z5', share: 0.09, time: '06:31' },
+  { key: 'z6', share: 0.05, time: '03:37' },
+  { key: 'z7', share: 0.02, time: '01:27' },
 ]
 
 const sample = computed(() => metricSample(props.block.metric))
@@ -84,6 +126,44 @@ const zonesIcon = computed(() =>
 
 // La zone du moment, dont la ligne passe sur l'aplat de sa couleur.
 const CURRENT_ZONE = 'z3'
+
+const zoneShares = computed(() =>
+  props.block.source === 'power' ? POWER_SHARES : ZONE_SHARES,
+)
+
+// Ce que la case laisse de la répartition. La légende part la première : une
+// proportion se lit dans une longueur partagée, donc la barre survit à des
+// tailles où le tableau ne se lirait plus. Et si c'est la légende seule qu'on
+// avait demandée, on rend la barre plutôt qu'une carte vide — le doublon se
+// voit et se corrige, la case vide se lit comme une panne.
+const zonesLegend = computed(
+  () =>
+    props.block.mode !== 'bar_only' &&
+    legendFits(props.cell, {
+      zones: zoneCount(props.block.source),
+      withBar: props.block.mode !== 'legend',
+    }),
+)
+const zonesBar = computed(() => props.block.mode !== 'legend' || !zonesLegend.value)
+
+// Les moyennes : trois cartes quand la place y est, une liste sinon.
+const averagesCards = computed(
+  () => props.block.mode !== 'list' && averagesCardsFit(props.cell),
+)
+
+const recordingCompact = computed(
+  () => props.block.mode === 'compact' || recordingIsCompact(props.cell),
+)
+
+// La jauge n'existe que pour une mesure qui a des zones — sans plage, l'appli
+// retombe sur le chiffre plein cadre. Et dans une case minuscule, sept paliers
+// ne se distinguent plus les uns des autres : même repli.
+const metricGauge = computed(
+  () =>
+    props.block.mode === 'gauge' &&
+    !!metricZone.value &&
+    density.value !== 'minimal',
+)
 </script>
 
 <template>
@@ -95,28 +175,30 @@ const CURRENT_ZONE = 'z3'
            l'appli retombe sur le chiffre plein cadre plutôt que d'inventer un
            maximum. Une vignette qui montrerait des paliers sur la cadence
            promettrait un dessin que le téléphone ne fera jamais. -->
-      <div v-if="block.mode === 'gauge' && metricZone" class="cbp-card cbp-center">
+      <div v-if="metricGauge" class="cbp-card cbp-center">
         <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
         <div class="cbp-gauge">
           <span
-            v-for="(cell, i) in gaugeCells"
+            v-for="(gaugeCell, i) in gaugeCells"
             :key="i"
             class="cbp-gauge-cell"
-            :style="{ background: cell.lit ? cell.color : 'rgba(255,255,255,0.12)' }"
+            :style="{ background: gaugeCell.lit ? gaugeCell.color : 'rgba(255,255,255,0.12)' }"
           ></span>
         </div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
+        <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
       </div>
 
-      <!-- Compact : icône, valeur, unité — la mise en forme de `MetricTile`. -->
+      <!-- Compact : icône, valeur, unité — la mise en forme de `MetricTile`.
+           L'icône part avant l'unité : elle ne fait que redire ce que l'unité
+           dit déjà. -->
       <div
         v-else-if="block.mode === 'compact'"
         class="cbp-card cbp-center"
         :style="{ background: metricBackground || undefined, color: metricInk }"
       >
-        <i class="cbp-icon" :class="sample.icon" aria-hidden="true"></i>
+        <i v-if="metrics.showIcon" class="cbp-icon" :class="sample.icon" aria-hidden="true"></i>
         <div class="cbp-mid">{{ sample.value }}</div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
+        <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
       </div>
 
       <!-- Plein cadre, et aplat de zone : le même dessin côté appli. -->
@@ -126,25 +208,25 @@ const CURRENT_ZONE = 'z3'
         :style="{ background: metricBackground || undefined, color: metricInk }"
       >
         <div class="cbp-big">{{ sample.value }}</div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
+        <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
       </div>
     </template>
 
     <!-- Temps par zone --------------------------------------------------- -->
     <div v-else-if="block.kind === 'zones'" class="cbp-card">
-      <div class="cbp-title">{{ zonesTitle }}</div>
-      <div v-if="block.mode !== 'legend'" class="cbp-bar">
+      <div v-if="metrics.showTitle" class="cbp-title">{{ zonesTitle }}</div>
+      <div v-if="zonesBar" class="cbp-bar">
         <span
-          v-for="share in ZONE_SHARES"
+          v-for="share in zoneShares"
           :key="share.key"
           :style="{ flex: share.share, background: ZONE_COLORS[share.key] }"
         ></span>
       </div>
       <!-- Toutes les zones sont listées, y compris celles à zéro : une zone
            absente se lirait comme une zone qui n'existe pas. -->
-      <div v-if="block.mode !== 'bar_only'" class="cbp-legend">
+      <div v-if="zonesLegend" class="cbp-legend">
         <div
-          v-for="share in ZONE_SHARES"
+          v-for="share in zoneShares"
           :key="share.key"
           class="cbp-legend-row"
           :class="{ 'cbp-legend-row--current': share.key === CURRENT_ZONE }"
@@ -168,8 +250,8 @@ const CURRENT_ZONE = 'z3'
 
     <!-- Moyennes --------------------------------------------------------- -->
     <template v-else-if="block.kind === 'averages'">
-      <div v-if="block.mode === 'list'" class="cbp-card">
-        <div class="cbp-title">Moyennes</div>
+      <div v-if="!averagesCards" class="cbp-card">
+        <div v-if="metrics.showTitle" class="cbp-title">Moyennes</div>
         <div class="cbp-line">141 bpm moyen</div>
         <div class="cbp-line">212 W moyen</div>
         <div class="cbp-line">Cadence 84 tr/min moyenne</div>
@@ -197,7 +279,7 @@ const CURRENT_ZONE = 'z3'
     <!-- Enregistrement --------------------------------------------------- -->
     <template v-else-if="block.kind === 'recording'">
       <!-- Compact : l'icône seule, pour une cellule de grille. -->
-      <div v-if="block.mode === 'compact'" class="cbp-card cbp-center">
+      <div v-if="recordingCompact" class="cbp-card cbp-center">
         <span class="cbp-rec-compact"><span class="cbp-rec-dot"></span></span>
       </div>
       <!-- Complet : le bouton large, à portée de pouce sur une route bosselée. -->
@@ -211,7 +293,7 @@ const CURRENT_ZONE = 'z3'
 
     <!-- État de navigation ------------------------------------------------ -->
     <div v-else-if="block.kind === 'nav_state'" class="cbp-card">
-      <div class="cbp-title">Navigation</div>
+      <div v-if="metrics.showTitle" class="cbp-title">Navigation</div>
       <div class="cbp-line">21,4 km restants</div>
       <template v-if="block.mode !== 'compact'">
         <div class="cbp-line">Restant : 21,4 km · 380 m D+</div>
@@ -230,7 +312,10 @@ const CURRENT_ZONE = 'z3'
         </div>
       </div>
       <div v-else class="cbp-card cbp-center">
-        <div class="cbp-radar-head">
+        <!-- L'icône part la première dans une petite case : elle redit ce que la
+             couleur dit déjà, alors que le nombre de mètres ne se déduit de
+             rien. -->
+        <div v-if="metrics.showIcon" class="cbp-radar-head">
           <i class="fa-solid fa-car" aria-hidden="true"></i>
           <span class="cbp-radar-count">×2</span>
         </div>

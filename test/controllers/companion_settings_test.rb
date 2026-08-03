@@ -42,6 +42,59 @@ class CompanionSettingsApiTest < ActionDispatch::IntegrationTest
     assert_equal "application/json", response.media_type
   end
 
+  # ── la taille annoncée par le téléphone ─────────────────────────────────────
+  #
+  # L'éditeur compose en lignes et en colonnes ; ce qui décide de ce qu'un
+  # composant peut y dessiner, ce sont des pixels. Le site les ignorait, et
+  # supposait donc un téléphone de référence — un avertissement plausible plutôt
+  # que vrai. L'appli l'annonce maintenant sur la requête qu'elle faisait de
+  # toute façon.
+
+  test "la grille annoncée par l'appli est retenue" do
+    user = sign_in
+    get "/api/companion_settings", params: { grid: "384x712" },
+        headers: { "Accept" => "application/json" }
+
+    assert_response :success
+    assert_equal({ "width" => 384, "height" => 712 }, user.reload.companion_viewport)
+  end
+
+  test "une requête sans taille ne touche pas à celle qu'on avait" do
+    # Le cas d'une version de l'appli plus ancienne que le site : elle ne dit
+    # rien, et ce qu'un autre téléphone a annoncé ne doit pas s'effacer pour
+    # autant.
+    user = sign_in
+    user.update_column(:companion_viewport, { "width" => 328, "height" => 598 })
+
+    get "/api/companion_settings", headers: { "Accept" => "application/json" }
+
+    assert_response :success
+    assert_equal({ "width" => 328, "height" => 598 }, user.reload.companion_viewport)
+  end
+
+  test "une taille invraisemblable est ignorée plutôt qu'écrite" do
+    # Ce n'est pas l'appli qui l'enverrait : c'est n'importe quel appelant
+    # authentifié. Une mesure fausse vaut moins qu'une mesure absente, parce que
+    # l'éditeur la croirait.
+    user = sign_in
+
+    [ "0x0", "12x9999", "grand", "328", "328x598x7" ].each do |raw|
+      get "/api/companion_settings", params: { grid: raw },
+          headers: { "Accept" => "application/json" }
+
+      assert_response :success
+      assert_nil user.reload.companion_viewport, "« #{raw} » n'aurait pas dû être retenu"
+    end
+  end
+
+  test "un anonyme n'écrit rien" do
+    # L'endpoint est authentifié : il n'y a personne à qui attribuer la mesure.
+    get "/api/companion_settings", params: { grid: "384x712" },
+        headers: { "Accept" => "application/json" }
+
+    assert_response :unauthorized
+  end
+
   test "un compte neuf reçoit les trois profils par défaut" do
     sign_in
     get "/api/companion_settings", headers: { "Accept" => "application/json" }

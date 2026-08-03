@@ -5,9 +5,10 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  fitCells, gridSideOf, maxSpan, occupancy,
-  type Band, type Block, type Catalog, type Cell, type CompanionDocument,
-  type Page, type Preset,
+  BLOCK_METRICS, densityFor, fitCells, gridSideOf, maxSpan, occupancy, phoneCell,
+  PHONE_GRID,
+  type Band, type Block, type Catalog, type Cell, type CellSize,
+  type CompanionDocument, type Page, type Preset, type Viewport,
 } from '../companionSettings'
 
 // L'éditeur des profils de sortie de l'app compagnon.
@@ -36,7 +37,18 @@ import {
 // veulent dire, et la réponse n'arrivait qu'en pleine sortie — sur le seul écran
 // qu'on ne peut plus modifier.
 
-const props = defineProps<{ document: CompanionDocument; catalog: Catalog }>()
+const props = defineProps<{
+  document: CompanionDocument
+  catalog: Catalog
+  // La grille du téléphone, telle que l'appli l'a mesurée en posant une page —
+  // `null` tant qu'elle n'a rien dit, ce qui est le cas avant le premier
+  // lancement. On dimensionne alors sur un téléphone ordinaire, et on l'annonce
+  // plutôt que de laisser croire qu'on parle du sien.
+  viewport?: Viewport | null
+}>()
+
+const grid = computed<Viewport>(() => props.viewport || PHONE_GRID)
+const measured = computed(() => !!props.viewport)
 
 const presets = reactive<Preset[]>(structuredClone(props.document.presets))
 const current = ref(0)
@@ -48,12 +60,27 @@ const selected = ref<Cell | null>(null)
 // la fin d'une page qui défile n'est pas y modifier une ligne. Les distinguer
 // ici évite un « si la cellule existe alors… » réparti sur quatre appelants.
 type PickerTarget =
-  | { at: 'cell'; cell: Cell }
+  | { at: 'cell'; page: Page; cell: Cell }
   | { at: 'slot'; page: Page; row: number; col: number }
   | { at: 'block'; page: Page; index: number }
   | { at: 'append'; page: Page }
 
 const picker = ref<PickerTarget | null>(null)
+
+// La place qu'aura le composant qu'on est en train de choisir, pour que les
+// vignettes de la dialogue montrent ce que **cette case-là** dessinera : une
+// légende de zones proposée pour une case qui ne la portera pas est un choix
+// qu'on regrette en roulant. Rien pour une page qui défile : la hauteur y est
+// libre, tout se dessine.
+const pickerCell = computed<CellSize | undefined>(() => {
+  const target = picker.value
+  if (!target) return undefined
+  if (target.at === 'cell') return sizeFor(target.page, target.cell)
+  if (target.at === 'slot') {
+    return phoneCell(target.page.rows || 1, target.page.cols || 1, 1, 1, grid.value)
+  }
+  return undefined
+})
 
 // Le composant que la dialogue doit montrer comme courant : celui qu'on
 // modifie, ou rien du tout quand on en ajoute un.
@@ -277,13 +304,48 @@ function commitSpan(page: Page, axis: 'row' | 'col', input: HTMLInputElement) {
   repaint(input, span)
 }
 
-function styleFor(cell: Cell | null, row: number, col: number) {
+function styleFor(page: Page, cell: Cell | null, row: number, col: number) {
   const rowSpan = cell?.row_span || 1
   const colSpan = cell?.col_span || 1
+  const size = phoneCell(page.rows || 1, page.cols || 1, rowSpan, colSpan, grid.value)
+
   return {
     gridRow: `${row + 1} / span ${rowSpan}`,
     gridColumn: `${col + 1} / span ${colSpan}`,
+    // La vignette est dessinée à l'échelle du téléphone : `1cqw` vaut 1 % de la
+    // largeur de la case **dans l'éditeur**, si bien que rapporter la taille de
+    // ligne du téléphone à la largeur qu'aura la case sur son écran rend la même
+    // proportion des deux côtés — quelle que soit la place que la page web
+    // laisse à la grille.
+    '--cbp-em': `${(BLOCK_METRICS[densityFor(size)].lineSize / 1.15 / size.width) * 100}`,
   }
+}
+
+// La place qu'aura une case sur le téléphone, pour la vignette qui s'y dessine.
+function sizeFor(page: Page, cell: Cell): CellSize {
+  return phoneCell(
+    page.rows || 1, page.cols || 1, cell.row_span, cell.col_span, grid.value,
+  )
+}
+
+// Ce que les cases de cette grille laisseront dessiner, et de quelle taille elles
+// seront. Sert à prévenir **avant** de composer : rien n'interdit une grille de
+// 6 × 6, mais il faut savoir que les composants n'y montreront plus qu'un
+// chiffre.
+function gridWarning(page: Page): string | null {
+  const size = phoneCell(page.rows || 1, page.cols || 1, 1, 1, grid.value)
+  const density = densityFor(size)
+  if (density !== 'tight' && density !== 'minimal') return null
+
+  // Deux phrases et pas une avec un mot variable : « sur votre téléphone » est
+  // une mesure, « sur un téléphone ordinaire » est une supposition. Les
+  // confondre ferait prendre la seconde pour la première, et c'est justement la
+  // différence qu'on vient d'aller chercher.
+  const scope = measured.value ? 'measured' : 'assumed'
+  return t(`companion.settings.grid_density.${scope}.${density}`, {
+    width: Math.round(size.width),
+    height: Math.round(size.height),
+  })
 }
 
 // Le nom de ce qui est posé : le genre, son paramètre, son mode. La vignette
@@ -474,11 +536,20 @@ async function save() {
                 </label>
               </div>
 
-              <p class="text-body-secondary small">{{ t('companion.settings.grid_help') }}</p>
+              <p class="text-body-secondary small mb-1">{{ t('companion.settings.grid_help') }}</p>
+
+              <!-- Ce que ces cases feront sur un téléphone. Un avertissement et
+                   non un plafond : rien n'interdit une grille de 6 × 6, mais on
+                   ne doit pas découvrir en roulant que les composants n'y
+                   montrent plus qu'un chiffre. -->
+              <p v-if="gridWarning(page)" class="text-body-secondary small">
+                <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ gridWarning(page) }}
+              </p>
 
               <div class="companion-grid mb-2"
                    :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
-                             gridTemplateRows: `repeat(${page.rows}, 1fr)` }">
+                             gridTemplateRows: `repeat(${page.rows}, 1fr)`,
+                             aspectRatio: `${grid.width} / ${grid.height}` }">
                 <!-- `selected` teste `!!slot.cell` d'abord : sans lui, une case
                      vide (`null`) est « égale » à l'absence de sélection (`null`
                      aussi), et **toutes** les cases libres s'allument dès qu'on
@@ -486,19 +557,30 @@ async function save() {
                 <button v-for="slot in slots(page)" :key="slot.key" type="button"
                         class="companion-cell"
                         :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected }"
-                        :style="styleFor(slot.cell, slot.row, slot.col)"
+                        :style="styleFor(page, slot.cell, slot.row, slot.col)"
                         :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
                         @click="tapSlot(page, slot.row, slot.col, slot.cell)">
-                  <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block" />
+                  <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block"
+                                         :cell="sizeFor(page, slot.cell)" />
                   <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
                 </button>
               </div>
+
+              <!-- À quelle échelle on vient de composer. La phrase change selon
+                   que l'appli a annoncé sa grille ou non : une mesure et une
+                   supposition ne se lisent pas pareil, et c'est toute la
+                   différence que cette annonce apporte. -->
+              <p class="text-body-secondary small">
+                {{ measured
+                  ? t('companion.settings.scale_measured', { width: grid.width, height: grid.height })
+                  : t('companion.settings.scale_assumed', { width: grid.width, height: grid.height }) }}
+              </p>
 
               <div v-if="selected" class="border rounded p-2 bg-body-tertiary">
                 <div class="d-flex align-items-center gap-2">
                   <span class="flex-grow-1 text-truncate small">{{ labelFor(selected.block) }}</span>
                   <button class="btn btn-sm btn-outline-secondary" type="button"
-                          @click="picker = { at: 'cell', cell: selected }">
+                          @click="picker = { at: 'cell', page, cell: selected }">
                     {{ t('companion.settings.change_block') }}
                   </button>
                 </div>
@@ -668,6 +750,7 @@ async function save() {
     <!-- Montée par `v-if` : la dialogue pose son écouteur clavier au montage, et
          une dialogue toujours montée mangerait la touche Échap de l'éditeur. -->
     <CompanionBlockPicker v-if="picker" :block="pickerBlock" :catalog="catalog"
+                          :cell="pickerCell"
                           @choose="applyPick" @close="picker = null" />
   </div>
 </template>
@@ -681,10 +764,18 @@ async function save() {
    l'écran, plutôt que d'allonger un écran qui ne s'allonge pas. */
 .companion-grid {
   display: grid;
-  gap: 0.25rem;
+  /* Les proportions exactes de `PHONE_GRID` (328 × 598 px logiques, gouttières
+     de 8) réduites au quart : c'est ce qui permet à `--cbp-em` d'être un simple
+     rapport de largeurs — un seul facteur d'échelle vaut alors pour toutes les
+     grilles, quel que soit le nombre de lignes et de colonnes. */
+  gap: 0.4rem;
   width: 100%;
   max-width: 16rem;
-  height: 27rem;
+  /* La hauteur se déduit des proportions du téléphone, posées par `aspectRatio` :
+     celles de l'appareil quand il les a annoncées, celles d'un téléphone
+     ordinaire sinon. Une hauteur en dur redeviendrait fausse au premier écran
+     qui n'a pas ce format. */
+  aspect-ratio: 328 / 598;
 }
 
 /* Les cases posées portent la vignette du composant : la disposition est exacte,
@@ -702,6 +793,10 @@ async function save() {
   padding: 0;
   text-align: center;
   overflow: hidden;
+  /* La case devient l'unité de mesure de sa vignette : `1cqw` vaut 1 % de sa
+     largeur, ce dont `--cbp-em` a besoin pour rendre les proportions du
+     téléphone quelle que soit la largeur laissée à la grille. */
+  container-type: inline-size;
 }
 
 .companion-cell.filled {
@@ -709,9 +804,17 @@ async function save() {
 }
 
 /* La vignette se met à l'échelle par sa `font-size` : dans une case de grille,
-   la taille de la dialogue de choix déborderait de partout. */
+   la taille de la dialogue de choix déborderait de partout.
+
+   `--cbp-em` est posé par `styleFor` : c'est la taille de ligne du téléphone
+   rapportée à la largeur qu'aura la case sur son écran. Une case de six colonnes
+   dessine donc son chiffre aussi petit qu'il le sera vraiment, au lieu de le
+   montrer à la taille d'une case de deux. Le repli du milieu couvre un
+   navigateur sans requêtes de conteneur : la vignette y reste lisible, à
+   l'échelle d'avant. */
 .companion-cell :deep(.cbp) {
   font-size: 0.5rem;
+  font-size: calc(var(--cbp-em, 5) * 1cqw);
   border-radius: 0.5rem;
   width: 100%;
 }

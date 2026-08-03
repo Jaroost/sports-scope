@@ -1549,6 +1549,15 @@ en:
       rows: "Rows"
       cols: "Columns"
       grid_help: "Tap an empty cell to choose what goes in it, a filled one to select it. Spans never exceed the free space: what you compose here is exactly what the app will show."
+      grid_density:
+        assumed:
+          tight: "On an ordinary phone these cells would be %{width} × %{height} px: components will show less detail — zone breakdowns drop their legend, averages fall back to a list."
+          minimal: "On an ordinary phone these cells would be %{width} × %{height} px: only a number fits, with no title and no unit. The previews below show it."
+        measured:
+          tight: "On your phone these cells will be %{width} × %{height} px: components will show less detail — zone breakdowns drop their legend, averages fall back to a list."
+          minimal: "On your phone these cells will be %{width} × %{height} px: only a number fits, with no title and no unit. The previews below show it."
+      scale_measured: "Previews are drawn to your phone's scale: the app reported a %{width} × %{height} px grid."
+      scale_assumed: "Previews are drawn to an ordinary phone's scale (%{width} × %{height} px): the app has not reported yours yet. It will on its next launch, once a data page has been shown."
       row_span: "Row span"
       col_span: "Column span"
       remove_cell: "Remove"

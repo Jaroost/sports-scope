@@ -19,6 +19,7 @@ class CompanionSettingsController < ApplicationController
   # document sur disque, donc il n'y a aucune rafale à absorber. Un cache poserait en
   # revanche la question du profil qu'on vient de modifier et qui ne redescend pas.
   def show
+    record_viewport
     render json: CompanionSettings.for(current_user)
   end
 
@@ -50,9 +51,29 @@ class CompanionSettingsController < ApplicationController
   def edit
     @document = CompanionSettings.for(current_user)
     @catalog = CompanionSettings.catalog
+    @viewport = current_user.companion_viewport
   end
 
   private
+
+  # La taille de grille que l'appli vient d'annoncer, s'il y en a une.
+  #
+  # Sur un GET, oui : c'est la requête que l'appli fait de toute façon une fois
+  # par lancement, et lui en imposer une seconde pour dire sa taille coûterait un
+  # WebView hors écran de plus — une seconde d'attente à l'accueil, pour une
+  # information que le site ne lit qu'en ouvrant l'éditeur. L'effet de bord se
+  # limite à retenir la géométrie de l'appelant, comme un « vu pour la dernière
+  # fois le ».
+  #
+  # On n'écrit que si ça change : la valeur ne bouge qu'au changement de
+  # téléphone, et un `UPDATE` par lancement pour réécrire les mêmes deux nombres
+  # ne sert personne.
+  def record_viewport
+    viewport = CompanionViewport.parse(params[:grid])
+    return if viewport.nil? || viewport == current_user.companion_viewport
+
+    current_user.update_column(:companion_viewport, viewport)
+  end
 
   # Le corps brut plutôt que `params` : le document est profondément imbriqué et
   # de forme libre (des grilles dans des pages dans des profils), et le faire

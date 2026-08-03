@@ -1549,6 +1549,15 @@ fr:
       rows: "Lignes"
       cols: "Colonnes"
       grid_help: "Tapez une case vide pour choisir ce qu'on y pose, une case remplie pour la sélectionner. Les étendues ne dépassent jamais la place libre : ce qui se compose ici est exactement ce que l'appli affichera."
+      grid_density:
+        assumed:
+          tight: "Sur un téléphone ordinaire, ces cases feraient %{width} × %{height} px : les composants y montreront moins de détail — les répartitions par zone perdent leur légende, les moyennes passent en liste."
+          minimal: "Sur un téléphone ordinaire, ces cases feraient %{width} × %{height} px : il n'y tiendra qu'un chiffre, sans titre ni unité. Les aperçus ci-dessous le montrent."
+        measured:
+          tight: "Sur votre téléphone, ces cases feront %{width} × %{height} px : les composants y montreront moins de détail — les répartitions par zone perdent leur légende, les moyennes passent en liste."
+          minimal: "Sur votre téléphone, ces cases feront %{width} × %{height} px : il n'y tiendra qu'un chiffre, sans titre ni unité. Les aperçus ci-dessous le montrent."
+      scale_measured: "Aperçus à l'échelle de votre téléphone : l'application a annoncé une grille de %{width} × %{height} px."
+      scale_assumed: "Aperçus à l'échelle d'un téléphone ordinaire (%{width} × %{height} px) : l'application n'a pas encore annoncé la taille du vôtre. Elle le fera au prochain lancement, une fois une page de mesures affichée."
       row_span: "Sur X lignes"
       col_span: "Sur X colonnes"
       remove_cell: "Retirer"

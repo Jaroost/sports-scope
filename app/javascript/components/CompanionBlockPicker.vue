@@ -16,12 +16,28 @@
 // Un tap pose le composant et referme. Pas de bouton « Choisir » à la suite :
 // le paramètre est déjà réglé au-dessus, et un aller-retour de plus pour poser
 // une case sur une grille de six se paierait à chaque case.
+//
+// **La vignette a la taille de la case**, et pas celle de la tuile qui la porte.
+// Une case de six colonnes fait 48 × 93 px sur le téléphone : dessinée dans un
+// carré de 11 rem, elle montrait un chiffre confortable là où il n'y aura la
+// place que d'un chiffre serré, et la seule chose qu'on venait vérifier — est-ce
+// que ça tient ? — était justement ce qu'elle ne montrait pas. Le rapport de la
+// case et le facteur d'échelle sont donc les mêmes que dans la grille de
+// l'éditeur (`styleFor`), à un budget de tuile près.
+//
+// **Et quand deux modes donnent le même écran, la tuile le dit.** Dans cette
+// même case de six colonnes, « Chiffre plein cadre », « Jauge » et « Aplat de
+// zone » dessinent le même chiffre : le téléphone n'a la place de rien d'autre.
+// Trois vignettes identiques sans un mot se lisent comme un bogue de l'éditeur —
+// on repart en cherchant laquelle était la bonne, alors qu'aucune ne l'est plus
+// que les autres. C'est `blockShape` qui le dit, la forme comparée étant celle
+// que la vignette dessine (cf. `companionSettings`).
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  blockChoices, blockFor, isChoiceOf,
-  type Block, type Catalog, type CellSize,
+  BLOCK_METRICS, blockChoices, blockFor, blockShape, densityFor, isChoiceOf, sameDrawing,
+  type Block, type BlockChoice, type BlockShape, type Catalog, type CellSize,
 } from '../companionSettings'
 
 const props = defineProps<{
@@ -42,22 +58,107 @@ const emit = defineEmits<{ close: []; choose: [block: Block] }>()
 const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
 
+// Le nom d'une vignette : celui du mode, ou celui du genre quand il n'en a pas.
+function labelOf(choice: BlockChoice): string {
+  return choice.mode
+    ? t(`companion.settings.modes.${choice.mode}`)
+    : t(`companion.settings.blocks.${choice.kind}`)
+}
+
+interface Tile {
+  key: string
+  block: Block
+  label: string
+  // Le mode déjà proposé plus haut qui dessine exactement la même chose dans
+  // cette case-là. Le premier de la liste ne renvoie donc jamais à un autre :
+  // c'est celui du catalogue, et le catalogue met le mode par défaut en tête.
+  sameAs?: string
+}
+
 // Les vignettes, regroupées par genre — l'ordre est celui du catalogue, donc
 // celui du serveur, qui est aussi l'ordre d'affichage des libellés.
 const groups = computed(() => {
   const choices = blockChoices(props.catalog)
-  return Object.keys(props.catalog.blocks).map((kind) => ({
-    kind,
-    choices: choices.filter((choice) => choice.kind === kind),
-  }))
+
+  return Object.keys(props.catalog.blocks).map((kind) => {
+    const drawn: { shape: BlockShape; label: string }[] = []
+
+    const tiles = choices
+      .filter((choice) => choice.kind === kind)
+      .map((choice) => {
+        const block = blockFor(choice, { metric: metric.value, source: source.value })
+        const shape = blockShape(block, props.cell)
+        const twin = drawn.find((seen) => sameDrawing(seen.shape, shape))
+        const label = labelOf(choice)
+
+        drawn.push({ shape, label })
+        return { key: `${choice.kind}:${choice.mode || ''}`, block, label, sameAs: twin?.label }
+      }) as Tile[]
+
+    return { kind, tiles }
+  })
 })
 
-function preview(kind: string, mode?: string): Block {
-  return blockFor({ kind, mode }, { metric: metric.value, source: source.value })
-}
+// Ce que la case fait comme place dans la tuile.
+//
+// La vignette garde **le rapport de la case et sa taille l'une par rapport à
+// l'autre** : une case de six colonnes se dessine dans un timbre, une case de
+// deux remplit la tuile. C'est ce qu'on venait voir — la même vignette étalée sur
+// toute la tuile disait de tout composant qu'il y a la place.
+//
+// L'échelle n'est pourtant pas celle de la tuile mais celle du texte : on rend
+// une ligne à `TILE_FONT` px quelle que soit la case, et la boîte suit. Mettre
+// chaque case à la taille de la tuile aurait **inversé le repère** — la grande
+// case, réduite pour tenir, aurait montré un texte plus petit que la petite case
+// agrandie, et on aurait lu l'inverse de la vérité. Le rapport à la tuile ne
+// revient qu'en plafond, pour les grilles si grossières qu'une case ne tiendrait
+// plus dedans (une page d'une seule case fait tout l'écran).
+//
+// Sans case — une page qui défile — la vignette reste à la taille de la tuile :
+// la hauteur y est libre sur le téléphone aussi, rien ne s'y retire.
+// La place qu'une tuile laisse à sa vignette : sa colonne (11 rem au moins) moins
+// ses marges intérieures, et la hauteur de `.cbpk-preview`. Une case plus large
+// que ça — une bande de six colonnes — est réduite pour tenir.
+const TILE_WIDTH = 160
+const TILE_HEIGHT = 176
+const TILE_FONT = 12
 
-function choose(kind: string, mode?: string) {
-  emit('choose', preview(kind, mode))
+const tileStyle = computed(() => {
+  const cell = props.cell
+  if (!cell) return undefined
+
+  // `lineSize` est ce qu'une ligne mesure sur le téléphone, et la vignette écrit
+  // ses lignes en 1,15 em — le même rapport que `--cbp-em` dans la grille de
+  // l'éditeur, en pixels plutôt qu'en `cqw` parce qu'ici la place est connue.
+  const { lineSize } = BLOCK_METRICS[densityFor(cell)]
+  const scale = Math.min(
+    (TILE_FONT * 1.15) / lineSize,
+    TILE_WIDTH / cell.width,
+    TILE_HEIGHT / cell.height,
+  )
+
+  return {
+    width: `${Math.round(cell.width * scale)}px`,
+    height: `${Math.round(cell.height * scale)}px`,
+    fontSize: `${((lineSize / 1.15) * scale).toFixed(2)}px`,
+  }
+})
+
+// La taille de la case, dite en toutes lettres : c'est elle qui explique tout ce
+// qui suit — pourquoi la vignette est si petite, pourquoi deux modes se
+// ressemblent. Une phrase neutre, parce que la dialogue ne sait pas d'où vient la
+// grille : c'est la page qui distingue le téléphone mesuré du téléphone supposé.
+const cellNote = computed(() => {
+  const cell = props.cell
+  if (!cell) return null
+  return t('companion.settings.pick_block_cell', {
+    width: Math.round(cell.width),
+    height: Math.round(cell.height),
+  })
+})
+
+function choose(block: Block) {
+  emit('choose', block)
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -84,7 +185,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       </div>
 
       <div class="cbpk-body">
-        <p class="text-body-secondary small">{{ t('companion.settings.pick_block_help') }}</p>
+        <p class="text-body-secondary small mb-2">{{ t('companion.settings.pick_block_help') }}</p>
+        <p v-if="cellNote" class="text-body-secondary small">{{ cellNote }}</p>
 
         <section v-for="group in groups" :key="group.kind" class="cbpk-group">
           <div class="cbpk-group-head">
@@ -113,20 +215,24 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
           <div class="cbpk-tiles">
             <button
-              v-for="choice in group.choices"
-              :key="`${choice.kind}:${choice.mode || ''}`"
+              v-for="tile in group.tiles"
+              :key="tile.key"
               type="button"
               class="cbpk-tile"
-              :class="{ 'cbpk-tile--current': isChoiceOf(block, choice) }"
-              @click="choose(choice.kind, choice.mode)"
+              :class="{ 'cbpk-tile--current': isChoiceOf(block, tile.block) }"
+              @click="choose(tile.block)"
             >
+              <!-- La boîte extérieure garde la place d'une tuile pleine, celle de
+                   dedans a le rapport de la case : les tuiles restent alignées
+                   quand les vignettes, elles, n'ont plus la même forme. -->
               <div class="cbpk-preview">
-                <CompanionBlockPreview :block="preview(choice.kind, choice.mode)" :cell="cell" />
+                <div class="cbpk-cell" :style="tileStyle">
+                  <CompanionBlockPreview :block="tile.block" :cell="cell" />
+                </div>
               </div>
-              <span class="cbpk-tile-label">
-                {{ choice.mode
-                  ? t(`companion.settings.modes.${choice.mode}`)
-                  : t(`companion.settings.blocks.${choice.kind}`) }}
+              <span class="cbpk-tile-label">{{ tile.label }}</span>
+              <span v-if="tile.sameAs" class="cbpk-tile-same">
+                {{ t('companion.settings.same_drawing', { mode: tile.sameAs }) }}
               </span>
             </button>
           </div>
@@ -245,12 +351,40 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 /* Assez haut pour que le plus grand des composants — la barre des zones **et**
    sa légende de cinq lignes — tienne en entier : une vignette qui coupe sa
    dernière ligne se lit comme un bogue d'affichage, pas comme un composant plus
-   grand que sa case. */
+   grand que sa case.
+
+   C'est aussi le budget dans lequel `tileStyle` fait tenir la case : les deux
+   valeurs sont les mêmes des deux côtés (`TILE_WIDTH`, `TILE_HEIGHT`). */
 .cbpk-preview {
   height: 11rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+
+/* La vignette elle-même. Sans case (une page qui défile) elle prend toute la
+   tuile : `tileStyle` ne pose alors ni taille ni échelle, et c'est la
+   `font-size` de repli qui vaut — celle d'avant, où la hauteur était libre. */
+.cbpk-cell {
+  width: 100%;
+  height: 100%;
+  font-size: 0.75rem;
+}
+.cbpk-cell :deep(.cbp) {
+  font-size: inherit;
+}
+
 .cbpk-tile-label {
   font-size: 0.85rem;
+}
+
+/* « Même dessin que “Chiffre plein cadre” » : dit sous la vignette et non à sa
+   place. La tuile reste cliquable — c'est bien ce mode-là qu'on enregistre, et
+   il redeviendra différent le jour où la case grandira. */
+.cbpk-tile-same {
+  font-size: 0.72rem;
+  color: var(--bs-secondary-color);
+  line-height: 1.25;
 }
 
 @media (max-width: 640px) {

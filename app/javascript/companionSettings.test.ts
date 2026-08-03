@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
-  occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, isChoiceOf, metricSample,
+  occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, blockShape, isChoiceOf, metricSample,
   averagesCardsFit, budgetContextFits, canHideBehindMenu, densityFor, legendFits, phoneCell, PHONE_GRID,
-  recordingIsCompact, zoneCount,
-  type Catalog, type Cell, type Page,
+  recordingIsCompact, sameDrawing, zoneCount,
+  type Block, type Catalog, type Cell, type Page,
 } from './companionSettings'
 
 // Le calcul de place dans une grille de tableau de bord.
@@ -339,6 +339,78 @@ describe('les autres replis', () => {
     // pourtant les pastilles tiennent — c'est la largeur qui leur manquait ailleurs.
     expect(densityFor(phoneCell(6, 1))).toBe('minimal')
     expect(budgetContextFits(phoneCell(6, 1))).toBe(true)
+  })
+})
+
+// Ce que la dialogue de choix compare pour dire « à cette taille, ces deux modes
+// donnent le même écran ». Le fait lui-même n'est pas nouveau — c'est ce que
+// l'appli dessine depuis toujours — mais il était muet : trois vignettes
+// identiques se lisaient comme un bogue de l'éditeur.
+describe('sameDrawing', () => {
+  function same(a: Block, b: Block, cell?: ReturnType<typeof phoneCell>): boolean {
+    return sameDrawing(blockShape(a, cell), blockShape(b, cell))
+  }
+
+  it('confond les modes d\'une mesure dans une case de six colonnes', () => {
+    // 48 × 93 px : ni jauge, ni unité, ni icône. Il ne reste qu'un chiffre, et
+    // c'est le même pour trois des quatre modes.
+    const tiny = phoneCell(6, 6)
+    expect(densityFor(tiny)).toBe('minimal')
+
+    const big: Block = { kind: 'metric', mode: 'big', metric: 'heart_rate' }
+    const gauge: Block = { kind: 'metric', mode: 'gauge', metric: 'heart_rate' }
+    const zone: Block = { kind: 'metric', mode: 'zone', metric: 'heart_rate' }
+    const compact: Block = { kind: 'metric', mode: 'compact', metric: 'heart_rate' }
+
+    expect(same(big, gauge, tiny)).toBe(true)
+    expect(same(big, zone, tiny)).toBe(true)
+    // Le compact, lui, garde son chiffre plus petit : la case ne le ramène pas
+    // au plein cadre.
+    expect(same(big, compact, tiny)).toBe(false)
+  })
+
+  it('les distingue à nouveau dès que la case porte la jauge', () => {
+    const roomy = phoneCell(2, 1)
+
+    expect(
+      same(
+        { kind: 'metric', mode: 'big', metric: 'heart_rate' },
+        { kind: 'metric', mode: 'gauge', metric: 'heart_rate' },
+        roomy,
+      ),
+    ).toBe(false)
+  })
+
+  it('la jauge d\'une mesure sans zone n\'a jamais été un dessin à part', () => {
+    // Sans plage, l'appli retombe sur le chiffre plein cadre : la vignette le
+    // montrait déjà, elle le dit maintenant.
+    expect(
+      same(
+        { kind: 'metric', mode: 'big', metric: 'cadence' },
+        { kind: 'metric', mode: 'gauge', metric: 'cadence' },
+        phoneCell(1, 1),
+      ),
+    ).toBe(true)
+  })
+
+  it('confond les trois répartitions quand la légende ne tient plus', () => {
+    const tiny = phoneCell(6, 6)
+    const bar: Block = { kind: 'zones', mode: 'bar', source: 'hr' }
+    const barOnly: Block = { kind: 'zones', mode: 'bar_only', source: 'hr' }
+    const legend: Block = { kind: 'zones', mode: 'legend', source: 'hr' }
+
+    expect(same(bar, barOnly, tiny)).toBe(true)
+    expect(same(bar, legend, tiny)).toBe(true)
+
+    // Pleine page, les trois redeviennent trois dessins.
+    expect(same(bar, barOnly)).toBe(false)
+    expect(same(bar, legend)).toBe(false)
+    expect(same(barOnly, legend)).toBe(false)
+  })
+
+  it('ne rapproche jamais deux genres différents', () => {
+    const tiny = phoneCell(6, 6)
+    expect(same({ kind: 'empty' }, { kind: 'recording', mode: 'compact' }, tiny)).toBe(false)
   })
 })
 

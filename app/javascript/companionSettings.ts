@@ -281,10 +281,10 @@ function barHeightFor(cell: CellSize): number {
   return { comfortable: 22, normal: 18, tight: 14, minimal: 10 }[densityFor(cell)]
 }
 
-// Les trois cartes des moyennes demandent une pleine hauteur — et une pleine
-// largeur : la rangée du haut coupe la case en deux, où « Normalisée 236 W » se
-// replie sur trois lignes et fait grandir la carte bien au-delà. Sinon, le
-// téléphone les rend en liste.
+// Les quatre cartes des moyennes demandent une pleine hauteur — deux rangées de
+// trois lignes — et une pleine largeur : chaque rangée coupe la case en deux, et
+// une demi-case étroite ne laisse ni à « Cadence (tr/min) » ni à « Moyen 84 » de
+// quoi s'écrire. Sinon, le téléphone les rend en liste.
 export function averagesCardsFit(cell?: CellSize): boolean {
   if (!cell) return true
   if (cell.width < 280) return false
@@ -389,6 +389,22 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   route_remaining_gain: { value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up' },
 }
 
+// Les quatre mesures du bloc « Moyennes », et leurs trois chiffres — les mêmes
+// que le dépôt voisin dessine (`AveragesCard`), dans le même ordre : cardio et
+// puissance sur la première rangée, cadence et vitesse sur la seconde.
+//
+// Le minimum de la puissance et celui de la cadence sont à zéro, et ce n'est pas
+// un chiffre choisi au hasard : ils portent sur **la même population que la
+// moyenne**, zéros compris, donc la première roue libre les y met pour le reste
+// de la sortie. La vignette le montre plutôt que de laisser la surprise pour la
+// route.
+export const AVERAGES_SAMPLE = [
+  { name: 'Cardio', unit: 'bpm', avg: '141', min: '96', max: '178' },
+  { name: 'Puissance', unit: 'W', avg: '212', min: '0', max: '744' },
+  { name: 'Cadence', unit: 'tr/min', avg: '84', min: '0', max: '112' },
+  { name: 'Vitesse', unit: 'km/h', avg: '27,4', min: '0,0', max: '61,2' },
+]
+
 // Le budget de charge d'une sortie ordinaire, pour la vignette. Les chiffres sont
 // plausibles et faux, comme ceux des mesures — mais leurs **proportions** comptent,
 // puisque c'est ce que la barre dessine : une sortie en cours qui a déjà dépassé la
@@ -409,6 +425,107 @@ export const BUDGET_SAMPLE = {
 // qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
 export function metricSample(metric: string | undefined): MetricSample {
   return METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
+}
+
+// ── Ce que la case laisse dessiner de ce composant ──────────────────────────
+//
+// Toutes les branches que prend l'aperçu, rassemblées : le mode demandé, ce que
+// la place en laisse. C'étaient dix `computed` dans la vignette, ce qui suffisait
+// tant qu'elle était seule à s'en servir.
+//
+// La dialogue de choix en a besoin pour autre chose : **dire quand deux modes
+// donnent le même écran**. Dans une case de six colonnes, « Chiffre plein
+// cadre », « Jauge » et « Aplat de zone » dessinent tous les trois le même
+// chiffre — le téléphone n'a la place de rien d'autre, et l'aperçu a raison de
+// le montrer. Mais trois vignettes identiques sans un mot se lisent comme un
+// bogue de l'éditeur, et on repart en cherchant laquelle était la bonne.
+//
+// Comparer les formes le dit **sans redire** les règles de repli : deux
+// composants qui prennent les mêmes branches dessinent la même chose, par
+// construction. Une règle qui bouge ne peut donc pas mentir ici.
+//
+// Les vignettes comparées sont celles d'un même genre, où la mesure et la source
+// sont les mêmes — c'est le mode seul qui varie. La forme porte quand même le
+// genre, pour qu'une comparaison de travers ne rapproche jamais deux dessins qui
+// n'ont rien à voir.
+export interface BlockShape {
+  kind: string
+  density: BlockDensity
+  showTitle: boolean
+  showUnit: boolean
+  showIcon: boolean
+  metricGauge: boolean
+  metricCompact: boolean
+  metricZone: string | null
+  zonesBar: boolean
+  zonesLegend: boolean
+  averagesCards: boolean
+  recordingCompact: boolean
+  navFull: boolean
+  radarGauge: boolean
+  radarVertical: boolean
+  budgetWeek: boolean
+  budgetContext: boolean
+}
+
+export function blockShape(block: Block, cell?: CellSize): BlockShape {
+  const density = densityFor(cell)
+  const m = BLOCK_METRICS[density]
+  const zone = block.kind === 'metric' ? metricSample(block.metric).zone : undefined
+
+  // La légende part la première : une proportion se lit dans une longueur
+  // partagée, donc la barre survit à des tailles où le tableau ne se lirait
+  // plus. Et si c'est la légende seule qu'on avait demandée, on rend la barre
+  // plutôt qu'une carte vide — le doublon se voit et se corrige, la case vide se
+  // lit comme une panne.
+  const zonesLegend =
+    block.kind === 'zones' &&
+    block.mode !== 'bar_only' &&
+    legendFits(cell, {
+      zones: zoneCount(block.source),
+      withBar: block.mode !== 'legend',
+    })
+
+  return {
+    kind: block.kind,
+    density,
+    showTitle: m.showTitle,
+    showUnit: m.showUnit,
+    showIcon: m.showIcon,
+    // La jauge n'existe que pour une mesure qui a des zones — sans plage, l'appli
+    // retombe sur le chiffre plein cadre. Et dans une case minuscule, sept
+    // paliers ne se distinguent plus les uns des autres : même repli.
+    metricGauge:
+      block.kind === 'metric' &&
+      block.mode === 'gauge' &&
+      !!zone &&
+      density !== 'minimal',
+    metricCompact: block.kind === 'metric' && block.mode === 'compact',
+    // C'est elle qui colore l'aplat, du mode `zone` comme du mode `big` : côté
+    // appli, `MetricView` peint le fond dès que la mesure porte une zone.
+    metricZone: zone || null,
+    zonesBar: block.kind === 'zones' && (block.mode !== 'legend' || !zonesLegend),
+    zonesLegend,
+    averagesCards:
+      block.kind === 'averages' && block.mode !== 'list' && averagesCardsFit(cell),
+    recordingCompact:
+      block.kind === 'recording' &&
+      (block.mode === 'compact' || recordingIsCompact(cell)),
+    navFull: block.kind === 'nav_state' && block.mode !== 'compact',
+    // Les deux sens de la jauge radar : le dessin est le même, tourné d'un quart
+    // de tour.
+    radarGauge:
+      block.kind === 'radar' && (block.mode === 'gauge' || block.mode === 'gauge_vertical'),
+    radarVertical: block.kind === 'radar' && block.mode === 'gauge_vertical',
+    budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
+    budgetContext: block.kind === 'training_budget' && budgetContextFits(cell),
+  }
+}
+
+// Deux formes, le même écran. La comparaison est textuelle et c'est sans risque :
+// les deux objets sortent de la même fonction, donc dans le même ordre de clés.
+export function sameDrawing(a: BlockShape, b: BlockShape): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 // Ce qu'on garde d'un champ « lignes », « colonnes » ou « sur X lignes » : un

@@ -294,7 +294,8 @@ Trois choses à ne pas défaire :
 - **La carte ne s'y range jamais.** Le WebView est peint au fond de la pile pour
   toute la sortie, ce n'est pas une page qu'on ouvre et qu'on referme. Et
   `RidePreset.mapPageIndex` indexe **le défilement** et non `pages` : c'est ce que
-  manipulent le `PageView`, les pastilles du bandeau et le retour automatique.
+  manipulent le `PageView`, le numéro de page annoncé (`RidePageFlash`) et le
+  retour automatique.
 
 La page ouverte vit **dans la pile de la coquille**, pas dans une route poussée :
 le bandeau, les jauges du radar, le cadre d'alerte et les mètres de l'encoche
@@ -346,6 +347,24 @@ dessin. Le paramètre que le genre réclame — la mesure, la source — se règ
 son groupe et redessine ses vignettes aussitôt : on choisit *sa* mesure dessinée. Un
 tap pose le composant et referme.
 
+La vignette d'une case de grille est **à la taille de cette case**, pas à celle de la
+tuile qui la porte : une case de six colonnes fait 48 × 93 px sur le téléphone, et
+étalée sur 11 rem elle promettait la place d'un chiffre confortable là où il n'y en a
+pas. C'est le texte qui fixe l'échelle (`TILE_FONT`) et la boîte qui suit, si bien
+qu'une petite case se dessine dans un timbre. Mettre chaque case à la taille de la
+tuile aurait **inversé le repère** — la grande case, réduite pour tenir, aurait montré
+un texte plus petit que la petite case agrandie. Le rapport à la tuile ne revient qu'en
+plafond, pour les grilles si grossières qu'une case n'y tiendrait plus.
+
+Et **quand deux modes donnent le même écran, la tuile le dit** : dans une case de six
+colonnes, « Chiffre plein cadre », « Jauge » et « Aplat de zone » dessinent le même
+chiffre, le téléphone n'ayant la place de rien d'autre. Trois vignettes identiques sans
+un mot se lisent comme un bogue de l'éditeur. C'est `blockShape` / `sameDrawing`
+(`companionSettings.ts`) qui les compare — **les branches que prend la vignette, et
+rien d'autre** : deux composants qui prennent les mêmes branches dessinent la même
+chose, par construction, donc une règle de repli qui bouge ne peut pas rendre ce
+message faux.
+
 Trois choses à ne pas défaire :
 
 - **La vignette est un fac-similé, pas un rendu partagé.** Le tableau de bord est écrit
@@ -361,8 +380,8 @@ Trois choses à ne pas défaire :
   bornée, hauteur fixe, lignes en `1fr`). Étalée sur la largeur de la page, une grille
   de 2 × 2 donnait des cases en bandeau là où le cycliste en aura des carrés debout : on
   composait pour une mise en page qui n'existe nulle part. Les proportions sont
-  exactement celles de `PHONE_GRID` (`companionSettings.ts`) : un seul facteur
-  d'échelle vaut alors pour toutes les grilles, ce dont dépend `--cbp-em`.
+  exactement celles de `PHONE_GRID` (`companionSettings.ts`) : un seul facteur d'échelle
+  vaut alors pour toutes les grilles, ce dont dépend `--cbp-em`.
 
 ### Le mode est un plafond, pas un ordre
 

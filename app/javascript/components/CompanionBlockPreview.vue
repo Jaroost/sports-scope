@@ -27,15 +27,11 @@
 // modifier.
 import { computed } from 'vue'
 import {
-  averagesCardsFit,
+  AVERAGES_SAMPLE,
   BLOCK_METRICS,
   BUDGET_SAMPLE,
-  budgetContextFits,
-  densityFor,
-  legendFits,
+  blockShape,
   metricSample,
-  recordingIsCompact,
-  zoneCount,
   type Block,
   type CellSize,
 } from '../companionSettings'
@@ -49,8 +45,11 @@ const props = defineProps<{
   cell?: CellSize
 }>()
 
-const density = computed(() => densityFor(props.cell))
-const metrics = computed(() => BLOCK_METRICS[density.value])
+// Ce que cette case-là laisse dessiner : les branches sont calculées une fois,
+// dans `companionSettings`, parce que la dialogue de choix s'en sert aussi — elle
+// y compare deux modes pour dire s'ils donnent le même écran.
+const shape = computed(() => blockShape(props.block, props.cell))
+const metrics = computed(() => BLOCK_METRICS[shape.value.density])
 
 // La palette de `ui/zone_colors.dart` — saturée et non teintée, c'est ce qui la
 // rend lisible en plein soleil sur le fond sombre.
@@ -98,7 +97,7 @@ const sample = computed(() => metricSample(props.block.metric))
 // L'aplat de zone du mode `big` comme du mode `zone` : côté appli, `MetricView`
 // peint le fond dès que la mesure porte une zone, quel que soit celui des deux.
 // Les deux vignettes se ressemblent donc — et l'aperçu ne ment pas là-dessus.
-const metricZone = computed(() => sample.value.zone)
+const metricZone = computed(() => shape.value.metricZone)
 const metricBackground = computed(() =>
   metricZone.value ? ZONE_COLORS[metricZone.value] : null,
 )
@@ -134,36 +133,13 @@ const zoneShares = computed(() =>
   props.block.source === 'power' ? POWER_SHARES : ZONE_SHARES,
 )
 
-// Ce que la case laisse de la répartition. La légende part la première : une
-// proportion se lit dans une longueur partagée, donc la barre survit à des
-// tailles où le tableau ne se lirait plus. Et si c'est la légende seule qu'on
-// avait demandée, on rend la barre plutôt qu'une carte vide — le doublon se
-// voit et se corrige, la case vide se lit comme une panne.
-const zonesLegend = computed(
-  () =>
-    props.block.mode !== 'bar_only' &&
-    legendFits(props.cell, {
-      zones: zoneCount(props.block.source),
-      withBar: props.block.mode !== 'legend',
-    }),
-)
-const zonesBar = computed(() => props.block.mode !== 'legend' || !zonesLegend.value)
-
-// Les moyennes : trois cartes quand la place y est, une liste sinon.
-const averagesCards = computed(
-  () => props.block.mode !== 'list' && averagesCardsFit(props.cell),
-)
-
-const recordingCompact = computed(
-  () => props.block.mode === 'compact' || recordingIsCompact(props.cell),
-)
-
-// Les deux sens de la jauge radar. Le dessin est le même, tourné d'un quart de
-// tour : ce que la cellule laisse comme place décide, pas le capteur.
-const radarGauge = computed(
-  () => props.block.mode === 'gauge' || props.block.mode === 'gauge_vertical',
-)
-const radarVertical = computed(() => props.block.mode === 'gauge_vertical')
+// Les quatre cartes, deux par deux — c'est la mise en page du dépôt voisin
+// (`AveragesCard._row`), et ce sont ses deux rangées que mesure
+// `averagesCardsFit`.
+const averagesRows = computed(() => [
+  AVERAGES_SAMPLE.slice(0, 2),
+  AVERAGES_SAMPLE.slice(2, 4),
+])
 
 // Deux véhicules, dont un dans le seuil de proximité. Leur position est une part
 // de la portée, comme côté appli (`RadarView.positions`) : le plus proche est le
@@ -173,23 +149,13 @@ const RADAR_MARKS = [
   { at: 72, close: true },
 ]
 
-// La jauge n'existe que pour une mesure qui a des zones — sans plage, l'appli
-// retombe sur le chiffre plein cadre. Et dans une case minuscule, sept paliers
-// ne se distinguent plus les uns des autres : même repli.
-const metricGauge = computed(
-  () =>
-    props.block.mode === 'gauge' &&
-    !!metricZone.value &&
-    density.value !== 'minimal',
-)
-
 // ── Budget de charge ────────────────────────────────────────────────────────
 //
 // Contrairement aux couleurs des zones d'intensité, celles de la fraîcheur (TSB) et
 // du risque (ACWR) **viennent d'ici** : ce sont celles de la page Performances, et
 // c'est le dépôt voisin qui les recopie. Le sens n'est pas inversé pour autant — le
 // vert dit « c'est le bon endroit », l'orange « attention », le rouge « stop ».
-const budgetWeek = computed(() => props.block.mode === 'week')
+const budgetWeek = computed(() => shape.value.budgetWeek)
 
 // La barre du jour se mesure en TSS, de zéro au plafond de fatigue : c'est ce qui
 // donne son sens à la cible, posée quelque part avant la fin. En mode semaine,
@@ -232,7 +198,7 @@ const budgetAside = computed(() =>
   budgetWeek.value ? `reste ${BUDGET_SAMPLE.week.remaining}` : `max ${BUDGET_SAMPLE.day.max}`,
 )
 
-const budgetContext = computed(() => budgetContextFits(props.cell))
+const budgetContext = computed(() => shape.value.budgetContext)
 
 const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du jour'))
 </script>
@@ -246,7 +212,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
            l'appli retombe sur le chiffre plein cadre plutôt que d'inventer un
            maximum. Une vignette qui montrerait des paliers sur la cadence
            promettrait un dessin que le téléphone ne fera jamais. -->
-      <div v-if="metricGauge" class="cbp-card cbp-center">
+      <div v-if="shape.metricGauge" class="cbp-card cbp-center">
         <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
         <div class="cbp-gauge">
           <span
@@ -263,7 +229,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
            L'icône part avant l'unité : elle ne fait que redire ce que l'unité
            dit déjà. -->
       <div
-        v-else-if="block.mode === 'compact'"
+        v-else-if="shape.metricCompact"
         class="cbp-card cbp-center"
         :style="{ background: metricBackground || undefined, color: metricInk }"
       >
@@ -286,7 +252,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
     <!-- Temps par zone --------------------------------------------------- -->
     <div v-else-if="block.kind === 'zones'" class="cbp-card">
       <div v-if="metrics.showTitle" class="cbp-title">{{ zonesTitle }}</div>
-      <div v-if="zonesBar" class="cbp-bar">
+      <div v-if="shape.zonesBar" class="cbp-bar">
         <span
           v-for="share in zoneShares"
           :key="share.key"
@@ -295,7 +261,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
       </div>
       <!-- Toutes les zones sont listées, y compris celles à zéro : une zone
            absente se lirait comme une zone qui n'existe pas. -->
-      <div v-if="zonesLegend" class="cbp-legend">
+      <div v-if="shape.zonesLegend" class="cbp-legend">
         <div
           v-for="share in zoneShares"
           :key="share.key"
@@ -321,28 +287,20 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
 
     <!-- Moyennes --------------------------------------------------------- -->
     <template v-else-if="block.kind === 'averages'">
-      <div v-if="!averagesCards" class="cbp-card">
+      <div v-if="!shape.averagesCards" class="cbp-card">
         <div v-if="metrics.showTitle" class="cbp-title">Moyennes</div>
-        <div class="cbp-line">141 bpm moyen</div>
-        <div class="cbp-line">212 W moyen</div>
-        <div class="cbp-line">Cadence 84 tr/min moyenne</div>
+        <div v-for="stat in AVERAGES_SAMPLE" :key="stat.name" class="cbp-line">
+          {{ stat.name }} {{ stat.avg }} {{ stat.unit }} ({{ stat.min }} – {{ stat.max }})
+        </div>
       </div>
       <div v-else class="cbp-stack">
-        <div class="cbp-row">
-          <div class="cbp-card cbp-half">
-            <div class="cbp-title">Cardio</div>
-            <div class="cbp-line">141 bpm moyen</div>
-            <div class="cbp-line">Max 178 bpm</div>
+        <div v-for="pair in averagesRows" :key="pair[0].name" class="cbp-row">
+          <div v-for="stat in pair" :key="stat.name" class="cbp-card cbp-half">
+            <div class="cbp-title">{{ stat.name }} ({{ stat.unit }})</div>
+            <div class="cbp-stat"><span>Moyen</span><b>{{ stat.avg }}</b></div>
+            <div class="cbp-stat"><span>Min</span><b>{{ stat.min }}</b></div>
+            <div class="cbp-stat"><span>Max</span><b>{{ stat.max }}</b></div>
           </div>
-          <div class="cbp-card cbp-half">
-            <div class="cbp-title">Puissance</div>
-            <div class="cbp-line">212 W moyen</div>
-            <div class="cbp-line">Normalisée 236 W</div>
-          </div>
-        </div>
-        <div class="cbp-card">
-          <div class="cbp-title">Sortie</div>
-          <div class="cbp-line">Dénivelé positif 640 m</div>
         </div>
       </div>
     </template>
@@ -350,7 +308,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
     <!-- Enregistrement --------------------------------------------------- -->
     <template v-else-if="block.kind === 'recording'">
       <!-- Compact : l'icône seule, pour une cellule de grille. -->
-      <div v-if="recordingCompact" class="cbp-card cbp-center">
+      <div v-if="shape.recordingCompact" class="cbp-card cbp-center">
         <span class="cbp-rec-compact"><span class="cbp-rec-dot"></span></span>
       </div>
       <!-- Complet : le bouton large, à portée de pouce sur une route bosselée. -->
@@ -366,7 +324,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
     <div v-else-if="block.kind === 'nav_state'" class="cbp-card">
       <div v-if="metrics.showTitle" class="cbp-title">Navigation</div>
       <div class="cbp-line">21,4 km restants</div>
-      <template v-if="block.mode !== 'compact'">
+      <template v-if="shape.navFull">
         <div class="cbp-line">Restant : 21,4 km · 380 m D+</div>
         <div class="cbp-line">Virage proche à 120 m (droite)</div>
       </template>
@@ -380,13 +338,13 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
            droite** couchée : c'est la rotation de la jauge du bord gauche
            (`RotatedBox(quarterTurns: 1)`, dépôt voisin), et les pointes suivent
            — vers la gauche debout, vers le haut couchée. -->
-      <div v-if="radarGauge" class="cbp-card cbp-center">
+      <div v-if="shape.radarGauge" class="cbp-card cbp-center">
         <div class="cbp-radar-gauge"
-             :class="radarVertical ? 'cbp-radar-gauge--v' : 'cbp-radar-gauge--h'">
+             :class="shape.radarVertical ? 'cbp-radar-gauge--v' : 'cbp-radar-gauge--h'">
           <span class="cbp-radar-axis"></span>
           <span v-for="mark in RADAR_MARKS" :key="mark.at" class="cbp-radar-mark"
                 :class="{ 'cbp-radar-mark--close': mark.close }"
-                :style="radarVertical ? { bottom: `${mark.at}%` } : { left: `${mark.at}%` }"></span>
+                :style="shape.radarVertical ? { bottom: `${mark.at}%` } : { left: `${mark.at}%` }"></span>
         </div>
       </div>
       <div v-else class="cbp-card cbp-center">
@@ -519,6 +477,29 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Les deux colonnes d'une carte de moyennes : ce qu'on mesure à gauche, ce que
+   ça vaut à droite. Le libellé cède la place le premier — c'est « Moyen » qu'on
+   devine d'un mot tronqué, jamais un chiffre. */
+.cbp-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  font-size: 1.15em;
+  margin-top: 0.3em;
+}
+.cbp-stat span {
+  color: rgba(255, 255, 255, 0.7);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cbp-stat b {
+  font-weight: 400;
+  white-space: nowrap;
 }
 
 /* Le chiffre aussi grand que la case le permet — c'est ce qu'on lit à 30 km/h

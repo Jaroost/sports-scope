@@ -435,6 +435,17 @@ const TURN_FLOW_DASHES: number[][] = [
 ]
 const TURN_FLOW_STEP_MS = 55
 const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+// Déplacement de la carte à deux doigts, au doigt seulement (pointeur grossier). En
+// roulant, on vise ses boutons d'un pouce qui bouge : un appui qui dérive de quelques
+// pixels partait en déplacement de carte, ce qui décrochait le suivi (onManualMove) et
+// faisait apparaître « recentrer » — la carte s'en allait au moment précis où on essayait
+// d'appuyer ailleurs. Deux doigts, c'est un geste qu'on ne fait pas par accident.
+// `cooperativeGestures` de MapLibre fait exactement ça (touchPan passe à minTouches=2) ;
+// il exige AUSSI Ctrl/⌘ pour zoomer à la molette, d'où la condition : à la souris le
+// problème n'existe pas, et un zoom molette qui ne répond plus serait une régression.
+// Le pinch (deux doigts) et le glissement d'un marqueur en mode édition (gestionnaires
+// propres au marqueur) ne sont pas concernés.
+const TWO_FINGER_PAN = window.matchMedia?.('(pointer: coarse)').matches ?? false
 let turnFlowRaf: number | null = null
 let turnFlowStep = -1
 // Clé d'idempotence du surlignage du virage courant (cf. refreshTurnHighlight). Déclarée
@@ -1373,6 +1384,16 @@ async function initMap() {
     // la tolérance pour fiabiliser tous les taps (fermeture du tiroir, veille, pose de
     // points en édition / cible).
     clickTolerance: 10,
+    // Carte déplaçable à deux doigts seulement au tactile (cf. TWO_FINGER_PAN). Le
+    // message affiché quand un doigt seul essaie de la déplacer est celui de MapLibre,
+    // traduit ici (il n'a pas de version française) et restylé en pastille discrète
+    // (cf. <style>) : en pleine sortie, le voile sombre par défaut cacherait la carte.
+    cooperativeGestures: TWO_FINGER_PAN,
+    locale: {
+      'CooperativeGesturesHandler.MobileHelpText': t('routes.nav_two_finger_pan'),
+      'CooperativeGesturesHandler.WindowsHelpText': t('routes.nav_ctrl_scroll_zoom'),
+      'CooperativeGesturesHandler.MacHelpText': t('routes.nav_cmd_scroll_zoom'),
+    },
   })
   map.on('styleimagemissing', (e: any) => {
     map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
@@ -3128,6 +3149,25 @@ function onScreenOffTap() {
    surplomber, le bouton « recentrer » descend au ras du coin bas-gauche. */
 .nav-page--nobar { --nav-bar-clearance: 0.9rem; }
 .nav-map { position: absolute; inset: 0; }
+/* Carte à deux doigts (cf. TWO_FINGER_PAN) : MapLibre rend alors le glissement à un doigt
+   au navigateur (touch-action: pan-x pan-y), ce qui rouvre la porte au « tirer pour
+   rafraîchir » de Chrome — un rechargement de page en pleine navigation. La page ne défile
+   jamais (nav-page: overflow hidden), donc rien à céder : on remet touch-action: none. */
+.nav-map :deep(.maplibregl-cooperative-gestures),
+.nav-map :deep(.maplibregl-cooperative-gestures .maplibregl-canvas) { touch-action: none; }
+/* Message « déplacez la carte à deux doigts » : par défaut MapLibre noircit toute la carte
+   (voile 40 %, z-index 99999 — .nav-map n'étant pas un contexte d'empilement, il passerait
+   même devant le tiroir de commandes). Réduit à une pastille posée en haut, sous les
+   overlays : elle dit pourquoi la carte n'a pas bougé sans masquer la route. */
+.nav-map :deep(.maplibregl-cooperative-gesture-screen) {
+  background: none; align-items: flex-start; padding-top: 7rem; z-index: 4;
+}
+.nav-map :deep(.maplibregl-cooperative-gesture-screen .maplibregl-mobile-message),
+.nav-map :deep(.maplibregl-cooperative-gesture-screen .maplibregl-desktop-message) {
+  background: rgba(0, 0, 0, 0.72); border-radius: 999px; padding: 0.45rem 0.9rem;
+  font-size: 0.95rem; font-weight: 500; text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
 /* Pendant un col, la carte se rétrécit pour laisser le bas de l'écran à la carte du
    col (bottom: 6.25rem, hauteur ≈ 16rem) : la flèche reste dans la carte visible. */
 .nav-map--climbing { bottom: calc(22.75rem + var(--nav-bottom-inset)); }

@@ -42,7 +42,10 @@ module CompanionSettings
     "averages" => %w[cards list],
     "recording" => %w[full compact],
     "nav_state" => %w[full compact],
-    "radar" => %w[distance gauge],
+    # La jauge existe dans les deux sens : couchée elle prend une cellule large,
+    # debout elle prend une colonne — c'est la case dont on dispose qui décide,
+    # pas le radar. Le dessin est le même, tourné d'un quart de tour.
+    "radar" => %w[distance gauge gauge_vertical],
     "empty" => []
   }.freeze
 
@@ -314,6 +317,16 @@ module CompanionSettings
     {
       "close_m" => positive(raw["close_m"], 40),
       "range_m" => positive(raw["range_m"], 140),
+      # L'habillage plein écran — les jauges des gouttières, le cadre qui
+      # s'embrase, les mètres dans la bande de l'encoche. Coupé, le capteur
+      # continue de tourner : les alertes sonores restent, et le radar ne se
+      # voit plus que là où on l'a posé (composant `radar`). C'est le réglage de
+      # qui veut ses mètres dans une case et un écran par ailleurs intact.
+      #
+      # Absent vaut **activé**, comme pour les capteurs : un profil venu d'une
+      # version antérieure du contrat ne doit pas perdre son alerte en silence,
+      # et c'est justement celle qu'on lit du coin de l'œil.
+      "overlay" => raw["overlay"] != false,
       "sounds" => raw["sounds"] != false,
       "wake_screen" => raw["wake_screen"] != false,
       "wake_hold_s" => positive(raw["wake_hold_s"], 5)

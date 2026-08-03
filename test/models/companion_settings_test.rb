@@ -291,6 +291,27 @@ class CompanionSettingsTest < ActiveSupport::TestCase
     assert_equal false, result["radar"]["sounds"]
   end
 
+  test "l'habillage radar n'est coupé que s'il est explicitement coupé" do
+    # Même règle que les capteurs : un profil venu d'une version antérieure du
+    # contrat ne connaît pas la clé, et perdrait sinon en silence l'alerte qu'on
+    # lit du coin de l'œil.
+    assert_equal true, only([ preset("radar" => { "close_m" => 25 }) ])["radar"]["overlay"]
+    assert_equal false, only([ preset("radar" => { "overlay" => false }) ])["radar"]["overlay"]
+  end
+
+  test "la jauge radar se pose dans les deux sens" do
+    # Le mode décide du dessin, et un mode inconnu du contrat retomberait sur
+    # « Distance » — c'est-à-dire un composant qu'on n'a pas choisi.
+    page = { "kind" => "list", "title" => "Radar", "blocks" => [
+      { "kind" => "radar", "mode" => "gauge_vertical" },
+      { "kind" => "radar", "mode" => "gauge" },
+      { "kind" => "radar", "mode" => "renversée" }
+    ] }
+    blocks = only([ preset("pages" => [ page ]) ])["pages"].first["blocks"]
+
+    assert_equal %w[gauge_vertical gauge distance], blocks.map { |block| block["mode"] }
+  end
+
   # ── outils ──────────────────────────────────────────────────────────────────
 
   def grid_page(rows:, cols:, cells:)

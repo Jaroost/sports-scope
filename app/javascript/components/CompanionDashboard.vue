@@ -289,19 +289,27 @@ function spanLimit(page: Page, axis: 'row' | 'col'): number {
   return maxSpan(selected.value, page.cells || [], page.rows || 1, page.cols || 1, axis)
 }
 
-// Bornée **à la saisie** et pas seulement par l'attribut `max` : celui-ci n'empêche
-// pas de taper 6 dans un champ qui n'en accepte que 2, et la cellule voisine
-// disparaîtrait alors à l'enregistrement — exactement ce qu'on cherche à rendre
-// impossible.
+function spanOf(cell: Cell, axis: 'row' | 'col'): number {
+  return axis === 'row' ? cell.row_span : cell.col_span
+}
+
+// L'étendue se règle d'un pas à la fois, et non en tapant un nombre.
 //
-// Validée à la sortie du champ, pour la même raison que [commitSide] : à la frappe,
-// effacer pour retaper renvoyait un 1 qui se collait au chiffre suivant.
-function commitSpan(page: Page, axis: 'row' | 'col', input: HTMLInputElement) {
-  if (!selected.value) return
-  const span = Math.min(gridSideOf(input.value), spanLimit(page, axis))
-  if (axis === 'row') selected.value.row_span = span
-  else selected.value.col_span = span
-  repaint(input, span)
+// Un champ demandait de connaître d'avance la place libre — taper 3 là où il n'y
+// a que 2 donnait 2 sans qu'on sache pourquoi — et souffrait du travers de
+// [commitSide] au doigt : effacer pour retaper renvoyait un 1 qui se collait au
+// chiffre suivant. Un pas ne peut pas sortir de l'intervalle, et le bouton
+// s'éteint quand il n'y a plus de place : **la limite se voit au lieu de se
+// deviner**, ce qui est la même règle que partout ici — on ne compose pas ce que
+// l'assainisseur jettera.
+function stepSpan(page: Page, axis: 'row' | 'col', delta: number) {
+  const cell = selected.value
+  if (!cell) return
+
+  const span = spanOf(cell, axis) + delta
+  if (span < 1 || span > spanLimit(page, axis)) return
+  if (axis === 'row') cell.row_span = span
+  else cell.col_span = span
 }
 
 function styleFor(page: Page, cell: Cell | null, row: number, col: number) {
@@ -584,19 +592,32 @@ async function save() {
                     {{ t('companion.settings.change_block') }}
                   </button>
                 </div>
-                <div class="d-flex align-items-end gap-3 mt-2">
-                  <label class="small mb-0">{{ t('companion.settings.row_span') }}
-                    <input class="form-control form-control-sm d-inline-block ms-1"
-                           style="width: 4.5rem" type="number" min="1"
-                           :max="spanLimit(page, 'row')" :value="selected.row_span"
-                           @change="commitSpan(page, 'row', $event.target as HTMLInputElement)">
-                  </label>
-                  <label class="small mb-0">{{ t('companion.settings.col_span') }}
-                    <input class="form-control form-control-sm d-inline-block ms-1"
-                           style="width: 4.5rem" type="number" min="1"
-                           :max="spanLimit(page, 'col')" :value="selected.col_span"
-                           @change="commitSpan(page, 'col', $event.target as HTMLInputElement)">
-                  </label>
+                <!-- L'étendue au pas : le « + » s'éteint dès que la voisine ou le
+                     bord de la grille est atteint, si bien que la place libre se
+                     voit sans avoir à la calculer. -->
+                <div class="d-flex align-items-end gap-3 mt-2 flex-wrap">
+                  <div v-for="axis in (['row', 'col'] as const)" :key="axis">
+                    <div class="small mb-1">{{ t(`companion.settings.${axis}_span`) }}</div>
+                    <div class="input-group input-group-sm companion-span">
+                      <button class="btn btn-outline-secondary" type="button"
+                              :disabled="spanOf(selected, axis) <= 1"
+                              :aria-label="t('companion.settings.span_decrease',
+                                             { axis: t(`companion.settings.${axis}_span`) })"
+                              @click="stepSpan(page, axis, -1)">
+                        <i class="fa-solid fa-minus" aria-hidden="true"></i>
+                      </button>
+                      <span class="input-group-text flex-grow-1 justify-content-center">
+                        {{ spanOf(selected, axis) }}
+                      </span>
+                      <button class="btn btn-outline-secondary" type="button"
+                              :disabled="spanOf(selected, axis) >= spanLimit(page, axis)"
+                              :aria-label="t('companion.settings.span_increase',
+                                             { axis: t(`companion.settings.${axis}_span`) })"
+                              @click="stepSpan(page, axis, 1)">
+                        <i class="fa-solid fa-plus" aria-hidden="true"></i>
+                      </button>
+                    </div>
+                  </div>
                   <button class="btn btn-sm btn-outline-danger ms-auto" type="button"
                           @click="removeCell(page)">
                     {{ t('companion.settings.remove_cell') }}
@@ -696,6 +717,7 @@ async function save() {
 
         <!-- Le radar -->
         <h2 class="h6">{{ t('companion.settings.radar_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.radar_overlay_help') }}</p>
         <div class="row g-2 align-items-end">
           <div class="col-6 col-md-3">
             <label class="form-label small mb-1">{{ t('companion.settings.close_m') }}</label>
@@ -708,6 +730,20 @@ async function save() {
             <input class="form-control form-control-sm" type="number" min="1"
                    :value="radarValue('range_m', 140)"
                    @input="setRadar('range_m', Number(($event.target as HTMLInputElement).value))">
+          </div>
+          <!-- L'habillage plein écran. Coupé, le capteur continue de tourner :
+               les tonalités restent, le réveil d'écran aussi, et le radar ne se
+               voit plus que là où on l'a posé — d'où la mention du composant, le
+               seul moyen d'en garder quelque chose à l'œil. -->
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="radar-overlay"
+                     :checked="preset.radar?.overlay !== false"
+                     @change="setRadar('overlay', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="radar-overlay">
+                {{ t('companion.settings.radar_overlay') }}
+              </label>
+            </div>
           </div>
           <div class="col-6 col-md-3">
             <div class="form-check form-switch">
@@ -827,6 +863,13 @@ async function save() {
 }
 .companion-block-preview :deep(.cbp) {
   font-size: 0.42rem;
+}
+
+/* Assez large pour deux chiffres entre ses boutons, et pas plus : les deux
+   étendues tiennent alors sur la même ligne que le bouton de retrait, y compris
+   sur un portable. */
+.companion-span {
+  width: 8rem;
 }
 
 .companion-cell.selected {

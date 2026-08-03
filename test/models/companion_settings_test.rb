@@ -116,6 +116,82 @@ class CompanionSettingsTest < ActiveSupport::TestCase
     assert_equal "Effort", result["pages"].first["title"]
   end
 
+  # ── derrière le menu ────────────────────────────────────────────────────────
+  #
+  # Une page marquée `menu` ne passe plus sous les yeux à chaque glissé : on va
+  # la chercher dans le menu d'actions de l'appli. C'est ce qui rend composable
+  # une page qu'on ne lit **pas** en roulant — un bilan, des répartitions — sans
+  # la mettre à un glissé de la carte.
+
+  test "une page absente de la clé menu reste dans le défilement" do
+    # Le sens qui compte : un document plus ancien que la clé garde ses pages là
+    # où elles étaient, et une appli plus ancienne l'ignore et les montre toutes.
+    # L'erreur va donc toujours vers « visible », jamais vers « introuvable ».
+    result = only([ preset("pages" => [ list_page ]) ])
+
+    assert_nil result["pages"].first["menu"]
+  end
+
+  test "le rangement derrière le menu traverse l'assainisseur" do
+    result = only([ preset("pages" => [
+      list_page,
+      list_page("menu" => true),
+      grid_page(rows: 1, cols: 1, cells: [ cell(0, 0, "speed") ]).merge("menu" => true)
+    ]) ])
+
+    assert_equal [ nil, true, true ], result["pages"].map { |page| page["menu"] }
+  end
+
+  test "une carte seule ne peut pas porter le menu" do
+    # Le piège de cette règle : le défilement n'est pas vide, mais la carte ne
+    # dessine aucun en-tête — donc aucun menu. Le bilan serait là, assaini, et
+    # atteignable par aucun geste. Il reprend donc sa place.
+    result = only([ preset("pages" => [ { "kind" => "map" },
+                                        list_page("menu" => true) ]) ])
+
+    assert_equal [ nil, nil ], result["pages"].map { |page| page["menu"] }
+  end
+
+  test "une page de données de plus suffit à porter le menu" do
+    result = only([ preset("pages" => [ { "kind" => "map" },
+                                        list_page,
+                                        list_page("menu" => true) ]) ])
+
+    assert_equal [ nil, nil, true ], result["pages"].map { |page| page["menu"] }
+  end
+
+  test "une valeur autre que true ne range rien" do
+    # `menu` est un drapeau, pas un champ libre : ce qui n'est pas exactement
+    # vrai laisse la page où elle est, plutôt que de la faire disparaître du
+    # défilement sur une chaîne « false » venue d'un formulaire.
+    result = only([ preset("pages" => [ list_page("menu" => "oui"),
+                                        list_page("menu" => false) ]) ])
+
+    assert_equal [ nil, nil ], result["pages"].map { |page| page["menu"] }
+  end
+
+  test "tout ranger derrière le menu rend la première page au défilement" do
+    # Sinon il ne resterait rien à faire défiler, donc aucune page où le menu
+    # s'ouvre, donc plus rien du tout — l'écran noir que tout le reste de cet
+    # assainisseur s'emploie à éviter. Même règle côté Dart (`ridePages`).
+    result = only([ preset("pages" => [ list_page("title" => "Bilan", "menu" => true),
+                                        list_page("title" => "Répartitions", "menu" => true) ]) ])
+
+    assert_equal [ nil, true ], result["pages"].map { |page| page["menu"] }
+    assert_equal "Bilan", result["pages"].first["title"]
+  end
+
+  test "la carte ne se range jamais derrière le menu" do
+    # Le WebView est peint au fond de la pile pour toute la sortie : ce n'est pas
+    # une page qu'on ouvre et qu'on referme. La page d'effort à côté d'elle porte
+    # le menu, donc la troisième peut rester rangée.
+    result = only([ preset("pages" => [ { "kind" => "map", "menu" => true },
+                                        list_page,
+                                        list_page("menu" => true) ]) ])
+
+    assert_equal [ nil, nil, true ], result["pages"].map { |page| page["menu"] }
+  end
+
   # ── la grille ───────────────────────────────────────────────────────────────
 
   test "une grille trop grande est ramenée à six côtés" do
@@ -228,6 +304,46 @@ class CompanionSettingsTest < ActiveSupport::TestCase
     assert_equal 1, result["pages"].first["blocks"].size
   end
 
+  # ── le budget de charge ─────────────────────────────────────────────────────
+  #
+  # Le seul composant dont la donnée ne vient pas des capteurs : elle est calculée
+  # par la page de navigation et poussée par le pont. Le contrat n'en porte donc
+  # rien de plus qu'un mode — ce que le composant montre est décidé au guidon.
+
+  test "le budget de charge se pose dans ses deux modes" do
+    result = only([ preset("pages" => [
+      { "kind" => "list", "blocks" => [
+        { "kind" => "training_budget", "mode" => "day" },
+        { "kind" => "training_budget", "mode" => "week" }
+      ] }
+    ]) ])
+
+    assert_equal %w[day week], result["pages"].first["blocks"].map { |block| block["mode"] }
+  end
+
+  test "un mode de budget inconnu retombe sur la journée" do
+    # C'est le mode qui répond à « je continue ou je rentre ? », la question qu'on
+    # se pose au guidon — la semaine se regarde à l'arrêt.
+    result = only([ preset("pages" => [
+      { "kind" => "list", "blocks" => [ { "kind" => "training_budget", "mode" => "mois" } ] }
+    ]) ])
+
+    assert_equal "day", result["pages"].first["blocks"].first["mode"]
+  end
+
+  test "le budget de charge ne traîne aucune clé de mesure" do
+    # L'assainisseur reconstruit à partir des seules clés qu'il connaît : une
+    # `metric` recopiée ici serait une clé morte que le décodeur Dart ignorerait,
+    # donc un écart entre ce que l'éditeur montre et ce qui part.
+    result = only([ preset("pages" => [
+      { "kind" => "list",
+        "blocks" => [ { "kind" => "training_budget", "mode" => "day", "metric" => "power" } ] }
+    ]) ])
+
+    assert_equal({ "kind" => "training_budget", "mode" => "day" },
+                 result["pages"].first["blocks"].first)
+  end
+
   # ── le bandeau ──────────────────────────────────────────────────────────────
 
   test "un jeu de plus de quatre mesures est tronqué" do
@@ -313,6 +429,11 @@ class CompanionSettingsTest < ActiveSupport::TestCase
   end
 
   # ── outils ──────────────────────────────────────────────────────────────────
+
+  def list_page(extra = {})
+    { "kind" => "list", "title" => "Effort",
+      "blocks" => [ { "kind" => "recording" } ] }.merge(extra)
+  end
 
   def grid_page(rows:, cols:, cells:)
     { "kind" => "grid", "title" => "Chiffres", "rows" => rows, "cols" => cols,

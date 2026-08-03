@@ -33,6 +33,9 @@ export interface Page {
   cols?: number
   cells?: Cell[]
   blocks?: Block[]
+  // Rangée derrière le menu d'actions plutôt que dans le défilement. Absent vaut
+  // « dans le défilement » — voir `canHideBehindMenu`.
+  menu?: boolean
 }
 
 export interface Band {
@@ -62,6 +65,38 @@ export interface Catalog {
   sensors: string[]
   max_band_metrics: number
   max_grid_side: number
+}
+
+// ── Derrière le menu, ou dans le défilement ─────────────────────────────────
+//
+// Une page marquée `menu` ne passe plus sous les yeux à chaque glissé : on va la
+// chercher dans le menu d'actions, comme on va chercher « changer d'itinéraire ».
+// C'est ce qui rend composable une page qu'on ne lit pas en roulant — un bilan,
+// des répartitions — sans encombrer le défilement de qui roule.
+//
+// Deux règles, recopiées de l'assainisseur (`sanitize_pages`) pour la même raison
+// que `maxSpan` : borner ici, c'est empêcher de composer ce que l'enregistrement
+// défera sous les yeux de l'utilisateur.
+
+// Cette page peut-elle changer de côté ?
+//
+// La carte, jamais : c'est le WebView peint au fond de la pile pour toute la
+// sortie, pas une page qu'on ouvre et qu'on referme.
+//
+// Et il doit rester au défilement une page **qui ne soit pas la carte** : c'est
+// l'en-tête d'une page de données qui porte le menu, la carte n'en dessine pas.
+// Sans elle, ce qu'on aurait rangé ne serait atteignable par aucun geste — le
+// serveur le repêcherait (`keep_one_swipeable`), mais l'éditeur aurait entre-temps
+// montré une composition qui n'existe pas.
+export function canHideBehindMenu(page: Page, pages: Page[]): boolean {
+  if (page.kind === 'map') return false
+  // La ramener dans le défilement est toujours permis : c'est le sens qui ne
+  // peut rien vider.
+  if (page.menu) return true
+
+  return pages.some(
+    (other) => other !== page && !other.menu && other.kind !== 'map',
+  )
 }
 
 // ── Choisir un composant ────────────────────────────────────────────────────
@@ -261,6 +296,45 @@ export function averagesCardsFit(cell?: CellSize): boolean {
   return cell.height >= card * 2 + m.gap
 }
 
+// Ce qu'il faut de largeur aux deux pastilles du budget de charge (fraîcheur,
+// risque) posées côte à côte : une icône, un chiffre, et la gouttière entre elles.
+// En dessous, elles se marchent dessus — la case reste alors au chiffre et à sa
+// barre, qui portent l'essentiel.
+const BUDGET_CHIPS_WIDTH = 120
+
+// La troisième ligne du budget de charge : les pastilles fraîcheur / risque en mode
+// « aujourd'hui », le reste à placer en mode « la semaine ».
+//
+// Elle se lit **en diagonale** — c'est le contexte du chiffre principal, pas le
+// chiffre — donc elle part la première quand la case se resserre, comme la légende
+// des zones. Ce qui reste (« 62 / 85 » et sa barre) répond encore à la question
+// qu'on se pose au guidon ; une pastille de couleur toute seule, non.
+export function budgetContextFits(cell?: CellSize): boolean {
+  if (!cell) return true
+
+  const m = BLOCK_METRICS[densityFor(cell)]
+  if (cell.width - m.padding * 2 < BUDGET_CHIPS_WIDTH) return false
+
+  let room = cell.height - m.padding * 2
+  if (m.showTitle) room -= Math.round(m.titleSize * 1.35) + m.gap
+  room -= budgetFigureHeight(m) + m.gap
+  room -= barHeightFor(cell) + m.gap
+
+  return room >= Math.round(m.lineSize * 1.35) + 4
+}
+
+// La hauteur du « 62 / 85 » : le chiffre du budget, plus gros qu'une ligne
+// ordinaire sans aller jusqu'au plein cadre — il se lit d'un coup d'œil, mais il en
+// faut deux (le fait et la cible) et une barre en dessous.
+//
+// Les deux arrondis se suivent dans cet ordre-là parce que le dépôt voisin les fait
+// dans cet ordre-là (`budgetFigureSize` puis `budgetFigureHeight`) : arrondir une
+// seule fois donne les mêmes quatre valeurs aujourd'hui, et divergerait au premier
+// seuil qu'on touche.
+export function budgetFigureHeight(m: BlockMetrics): number {
+  return Math.round(Math.round(m.lineSize * 1.6) * 1.35)
+}
+
 // « Démarrer l'enregistrement » ne tient pas sur la ligne d'un bouton étroit, et
 // le libellé ne se tronque pas : un bouton qui déclenche un enregistrement dit
 // ce qu'il fait, ou ne dit rien — c'est alors l'icône seule.
@@ -313,6 +387,21 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   gears: { value: '50×15', unit: 'braquet', icon: 'fa-solid fa-gear' },
   route_remaining: { value: '21,4 km', unit: 'restant', icon: 'fa-regular fa-flag' },
   route_remaining_gain: { value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up' },
+}
+
+// Le budget de charge d'une sortie ordinaire, pour la vignette. Les chiffres sont
+// plausibles et faux, comme ceux des mesures — mais leurs **proportions** comptent,
+// puisque c'est ce que la barre dessine : une sortie en cours qui a déjà dépassé la
+// moitié de la cible du jour, une semaine aux trois quarts faite.
+//
+// `ride` n'est pas dans le document que le site envoie : c'est le TSS que le
+// téléphone calcule en roulant et ajoute par-dessus ce qui est déjà enregistré. La
+// vignette le montre parce que c'est le segment qui bouge — celui qu'on regarde.
+export const BUDGET_SAMPLE = {
+  day: { done: 24, ride: 38, target: 85, max: 120 },
+  week: { done: 418, planned: 62, target: 620, remaining: 140 },
+  form: { tsb: -12, zone: 'productive' },
+  risk: { acwr: 1.18, zone: 'optimal' },
 }
 
 // Le tiret et pas un chiffre inventé quand la mesure est inconnue de cette

@@ -1,5 +1,11 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import type { AthleteState } from '../routeLoad'
+import {
+  userPreferences,
+  persistTrainingPlan,
+  TRAINING_GOALS,
+  type TrainingGoal,
+} from '../userPreferences'
 
 // ─── Plan d'entraînement : « sortie objectif » + « que faire aujourd'hui » ─────
 // Logique partagée entre le panneau complet de la page performance
@@ -138,9 +144,21 @@ export function fmtSeconds(seconds: number): string {
 }
 
 // ── Objectif générique → plancher de fatigue (TSB) ───────────────────────────
-export const GOALS = ['improve_fast', 'improve_slow', 'maintain', 'peak'] as const
-export type Goal = typeof GOALS[number]
+//
+// L'objectif vit sur le compte (`preferences.training`), plus dans le navigateur : le
+// plancher qu'il fixe pilote aussi le budget que l'app compagnon affiche au guidon, et
+// elle lit le site depuis le WebView de l'appareil. Deux stockages locaux donneraient
+// deux plafonds pour un seul athlète.
+export const GOALS = TRAINING_GOALS
+export type Goal = TrainingGoal
 const GOAL_FLOOR: Record<Goal, number> = { improve_fast: -30, improve_slow: -20, maintain: -8, peak: 5 }
+
+// Pendant une prépa datée, ce n'est plus l'objectif générique qui fixe le plancher :
+// en construction on s'autorise plus de fatigue qu'en temps ordinaire, et à l'affûtage
+// on cherche au contraire à en sortir — c'est le plancher de `peak` qui vaut alors.
+const EVENT_BUILD_FLOOR = -25
+
+// Les clés d'avant. Elles ne servent plus qu'une fois — voir `adoptLegacy`.
 const GOAL_STORAGE_KEY = 'sportsScope.trainingGoal'
 
 // Style (icône + couleur) de chaque action recommandée.
@@ -154,6 +172,61 @@ export const ACTION_STYLE: Record<string, { icon: string; color: string }> = {
 // ── Sortie objectif datée ────────────────────────────────────────────────────
 export interface TargetEvent { date: string; distanceKm: number; intensity: 'easy' | 'tempo' | 'race' }
 const EVENT_STORAGE_KEY = 'sportsScope.targetEvent'
+
+// ── Reprise du navigateur ────────────────────────────────────────────────────
+//
+// L'objectif et la sortie visée ont vécu dans le `localStorage` : un compte qui en
+// avait un ne doit pas le perdre en passant au réglage de compte. On l'adopte donc une
+// fois, puis on efface les clés — l'opération n'est ainsi pas répétable, et le
+// navigateur suivant n'a plus rien à dire.
+//
+// **Le compte gagne dès qu'il a été réglé.** On ne reprend que ce qui est encore sur
+// ses valeurs d'usine, sans quoi un vieux navigateur ouvert des mois plus tard
+// écraserait l'objectif choisi depuis. Le cas limite assumé : avoir explicitement
+// choisi « progresser doucement » sur le compte pendant qu'un ancien navigateur portait
+// autre chose — il est alors repris une fois, ce qui se corrige d'un clic.
+function legacyPlan(): { goal?: Goal; event?: TargetEvent | null } {
+  if (typeof localStorage === 'undefined') return {}
+  const plan: { goal?: Goal; event?: TargetEvent | null } = {}
+  try {
+    const goal = localStorage.getItem(GOAL_STORAGE_KEY) as Goal | null
+    if (goal && GOALS.includes(goal)) plan.goal = goal
+    localStorage.removeItem(GOAL_STORAGE_KEY)
+
+    const raw = localStorage.getItem(EVENT_STORAGE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed?.date && parsed?.distanceKm && parsed?.intensity) plan.event = parsed as TargetEvent
+    }
+    localStorage.removeItem(EVENT_STORAGE_KEY)
+  } catch { /* stockage refusé (navigation privée) : rien à reprendre */ }
+  return plan
+}
+
+// L'objectif du compte, la reprise appliquée. Les deux réglages sont repris ensemble :
+// pendant une prépa datée, c'est l'affûtage qui pilote la charge et l'objectif générique
+// ne sert plus — n'en reprendre qu'un donnerait un plan que ni l'un ni l'autre ne décrit.
+function initialPlan(): { goal: Goal; event: TargetEvent | null; adopted: boolean } {
+  const stored = userPreferences().training
+  const account = {
+    goal: stored.goal,
+    event: stored.event
+      ? { date: stored.event.date, distanceKm: stored.event.distance_km, intensity: stored.event.intensity }
+      : null,
+  }
+  const untouched = account.goal === 'improve_slow' && account.event === null
+  // Appelé dans tous les cas : même quand le compte gagne, les clés d'avant doivent
+  // disparaître, sinon ce navigateur reste porteur d'un objectif périmé qu'on
+  // retrouverait un jour dans un journal ou dans un rapport de bug.
+  const legacy = legacyPlan()
+  if (!untouched) return { ...account, adopted: false }
+
+  return {
+    goal: legacy.goal ?? account.goal,
+    event: legacy.event ?? account.event,
+    adopted: legacy.goal !== undefined || legacy.event != null,
+  }
+}
 const EVENT_INTENSITY: Record<string, { if: number; sf: number }> = {
   easy: { if: 0.65, sf: 1.0 }, tempo: { if: 0.80, sf: 1.12 }, race: { if: 0.88, sf: 1.22 },
 }
@@ -161,6 +234,26 @@ export const PHASE_COLOR: Record<string, string> = { build: '#0d6efd', taper: '#
 export const FEAS_COLOR: Record<string, string> = { ok: '#198754', demanding: '#fd7e14', hard: '#dc3545' }
 
 export type Reco = { action: string; tss: number; minutes: number; effort: string; distanceKm: number | null; reason: string; tsb: number; days?: number }
+
+// ── Le budget de charge poussé à l'app compagnon ─────────────────────────────
+//
+// Ce que le cycliste lit au guidon : ce qu'il reste à faire aujourd'hui, jusqu'où il
+// peut aller sans se cramer, et où en est la semaine. Volontairement plat et sans
+// unité implicite (tout est du TSS) : c'est un contrat inter-dépôt, lu par
+// `TrainingBudget` côté Dart.
+//
+// `date` n'est pas décoratif : l'appli garde le dernier budget reçu sur disque pour
+// les départs hors ligne, et un budget de la semaine dernière doit se reconnaître
+// comme tel plutôt que de s'afficher comme celui du jour.
+export interface TrainingBudget {
+  date: string
+  // `done` ne compte QUE les sorties déjà enregistrées : la sortie en cours n'est
+  // téléversée nulle part, c'est le téléphone qui l'ajoute.
+  day: { done: number; target: number; max: number }
+  week: { target: number; done: number; planned: number; remaining: number }
+  form: { ctl: number; atl: number; tsb: number; zone: string }
+  risk: { acwr: number | null; zone: string | null }
+}
 
 // ── Cible de volume hebdomadaire ─────────────────────────────────────────────
 // La CTL est une EWMA du TSS quotidien : à l'équilibre, TSS/jour = CTL, donc
@@ -254,10 +347,11 @@ export function useTrainingPlan(
 ) {
   const current = computed<Current | null>(() => data.value?.current ?? null)
 
-  // ── Objectif générique (persisté) ──────────────────────────────────────────
-  const storedGoal = (typeof localStorage !== 'undefined' && localStorage.getItem(GOAL_STORAGE_KEY)) as Goal | null
-  const goal = ref<Goal>(storedGoal && GOALS.includes(storedGoal) ? storedGoal : 'improve_slow')
-  watch(goal, (g) => { try { localStorage.setItem(GOAL_STORAGE_KEY, g) } catch { /* ignore */ } })
+  // ── Objectif générique (persisté sur le compte) ────────────────────────────
+  // Les deux réglages partent du même instantané : la reprise du navigateur les lit
+  // ensemble, et deux appels en donneraient deux versions (le premier efface les clés).
+  const initial = initialPlan()
+  const goal = ref<Goal>(initial.goal)
 
   // Convertit un TSS en durée approx. (min, arrondie au 1/4 h) pour une intensité donnée :
   // TSS = heures × IF² × 100 ⟹ heures = TSS / (IF² × 100). Rend la reco parlante.
@@ -319,18 +413,29 @@ export function useTrainingPlan(
     }
   }
 
-  // ── Sortie objectif datée (persistée) ──────────────────────────────────────
-  function loadStoredEvent(): TargetEvent | null {
-    try {
-      const raw = localStorage.getItem(EVENT_STORAGE_KEY)
-      if (raw) { const e = JSON.parse(raw); if (e?.date && e?.intensity) return e as TargetEvent }
-    } catch { /* ignore */ }
-    return null
+  // ── Sortie objectif datée (persistée sur le compte) ────────────────────────
+  const targetEvent = ref<TargetEvent | null>(initial.event)
+
+  // Un seul enregistrement pour les deux : le serveur assainit `training` d'un bloc, et
+  // deux PATCH partant du même cache se recouvriraient.
+  function persist() {
+    persistTrainingPlan({
+      goal: goal.value,
+      event: targetEvent.value
+        ? {
+            date: targetEvent.value.date,
+            distance_km: targetEvent.value.distanceKm,
+            intensity: targetEvent.value.intensity,
+          }
+        : null,
+    })
   }
-  const targetEvent = ref<TargetEvent | null>(loadStoredEvent())
-  watch(targetEvent, (e) => {
-    try { e ? localStorage.setItem(EVENT_STORAGE_KEY, JSON.stringify(e)) : localStorage.removeItem(EVENT_STORAGE_KEY) } catch { /* ignore */ }
-  }, { deep: true })
+  watch([goal, targetEvent], persist, { deep: true })
+
+  // La reprise du navigateur, elle, s'écrit sans attendre qu'on touche à quoi que ce
+  // soit — c'est ce qui la rend définitive. Seulement quand il y a eu reprise : un PATCH
+  // à chaque ouverture de la page Performances réécrirait les mêmes deux valeurs.
+  if (initial.adopted) persist()
 
   // Éditeur d'événement
   const editingEvent = ref(false)
@@ -579,7 +684,7 @@ export function useTrainingPlan(
     if (ev.phase === 'event_day') return { action: 'event', tss: 0, minutes: 0, effort: '', distanceKm: null, reason: 'reason_event_day', tsb: Math.round(c.tsb), days: 0 }
     // En construction, la cible de la semaine vient déjà du schéma d'affûtage : la reco
     // du jour en prend sa part, avec un plancher de fatigue plus permissif.
-    if (ev.phase === 'build') return dayReco(c, -25, todayNeed(c), { rest: 'reason_build_rest', normal: 'reason_build', capped: 'reason_capped' }, ev.days)
+    if (ev.phase === 'build') return dayReco(c, EVENT_BUILD_FLOOR, todayNeed(c), { rest: 'reason_build_rest', normal: 'reason_build', capped: 'reason_capped' }, ev.days)
     // taper / final : on suit le schéma d'affûtage
     const tssVal = Math.round(plannedTss(ev.days, c.ctl))
     const reason = ev.phase === 'final' ? 'reason_final' : 'reason_taper'
@@ -595,7 +700,57 @@ export function useTrainingPlan(
     return dayReco(c, GOAL_FLOOR[goal.value], todayNeed(c), { rest: 'reason_rest', normal: 'reason_week', capped: 'reason_capped' })
   })
 
+  // ── Le budget de charge, tel que l'app compagnon l'affiche au guidon ────────
+  //
+  // Même dérivation que les deux blocs de la page, et c'est tout l'intérêt : le
+  // cycliste ne doit pas lire un plafond sur son téléphone et un autre sur le site.
+  // C'est aussi la raison pour laquelle ce calcul reste ici, en TypeScript, plutôt
+  // que d'être refait côté serveur pour l'appli — la logique de planification (cible
+  // hebdo, affûtage, plancher de fatigue) est un morceau qu'on ne veut pas voir
+  // exister en deux exemplaires. La page le calcule et le pousse par le pont
+  // (`pushTrainingBudget`, companionBridge.ts).
+  //
+  // Le plancher retenu est **celui qu'a utilisé la reco du jour**, sans quoi le
+  // plafond décrirait un autre plan que le chiffre affiché juste à côté.
+  const dayFloor = computed<number>(() => {
+    const ev = eventInfo.value
+    if (!ev || ev.phase === 'past') return GOAL_FLOOR[goal.value]
+    return ev.phase === 'build' ? EVENT_BUILD_FLOOR : GOAL_FLOOR.peak
+  })
+
+  const budget = computed<TrainingBudget | null>(() => {
+    const c = current.value
+    const week = weekPlan.value
+    if (!c || !week) return null
+
+    // Ce qui est DÉJÀ enregistré aujourd'hui — donc sans la sortie en cours, que
+    // personne n'a encore téléversée. C'est le téléphone qui ajoute par-dessus le TSS
+    // qu'il calcule en roulant : lui seul sait où en est l'effort.
+    const todayPoint = data.value?.series?.find((p) => p.date === isoLocal(new Date()))
+
+    return {
+      date: isoLocal(new Date()),
+      day: {
+        done: Math.round(todayPoint?.tss ?? 0),
+        target: recommendation.value?.tss ?? 0,
+        // Le plafond ne descend pas sous la cible : `dayReco` borne déjà la reco par
+        // le cap, donc les deux ne peuvent se croiser que par arrondi — et une jauge
+        // dont la cible dépasse le maximum ne se dessine pas.
+        max: Math.max(0, Math.round(fatigueCap(c, dayFloor.value)), recommendation.value?.tss ?? 0),
+      },
+      week: {
+        target: week.target,
+        done: week.done,
+        planned: week.planned,
+        remaining: week.remaining,
+      },
+      form: { ctl: Math.round(c.ctl), atl: Math.round(c.atl), tsb: Math.round(c.tsb), zone: c.form_zone },
+      risk: { acwr: c.acwr, zone: c.acwr_zone },
+    }
+  })
+
   return {
+    budget,
     current,
     // objectif générique
     goal,

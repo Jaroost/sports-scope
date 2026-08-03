@@ -1542,6 +1542,10 @@ en:
       duplicate: "Duplicate"
       pages: "Pages"
       pages_help: "In the order you swipe through them. The map is optional and goes wherever you want — an indoor profile does without it, and the app then opens no web page at all."
+      behind_menu: "Menu"
+      hide_behind_menu: "Move behind the menu"
+      show_in_swipe: "Put back in the swipe"
+      pages_split: "%{swipe} in the swipe, %{menu} behind the app's ⋮ menu. A page kept there no longer passes under your eyes while riding: you go and get it, which suits whatever is read at a stop — a summary, a breakdown. An alert closes it and hands back the map."
       page_title: "Page title"
       page_effort: "Effort"
       page_numbers: "Figures"
@@ -1599,6 +1603,7 @@ en:
         recording: "Recording"
         nav_state: "Navigation state"
         radar: "Radar"
+        training_budget: "Training budget"
         empty: "Empty cell"
       modes:
         big: "Full-frame figure"
@@ -1613,6 +1618,8 @@ en:
         full: "Full"
         distance: "Distance"
         gauge_vertical: "Vertical gauge"
+        day: "Today"
+        week: "This week"
       sources:
         hr: "Heart rate"
         power: "Power"

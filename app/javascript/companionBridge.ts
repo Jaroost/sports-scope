@@ -1,6 +1,14 @@
+import { ref, computed, watch, type Ref } from 'vue'
 import { companionStore, type CompanionGears } from './stores/companionStore'
 import type { CompanionNavState } from './navHelpers'
 import { csrfToken } from './csrf'
+import {
+  useTrainingPlan,
+  athleteFromSummary,
+  type LoadSummary,
+  type TrainingBudget,
+} from './composables/useTrainingPlan'
+import { usePlannedRides, usePlannedLoads } from './composables/usePlannedRides'
 
 // Réception des capteurs de l'application mobile (sports-scope-companion).
 //
@@ -176,6 +184,7 @@ export function installCompanionBridge(): void {
   channel()?.postMessage(JSON.stringify({ type: 'ready' }))
 
   void pushRiderProfile()
+  void pushTrainingBudget()
 }
 
 // Envoie à l'appli les seuils et zones du cycliste (FTP, LTHR, bornes en watts et
@@ -203,4 +212,71 @@ export async function pushRiderProfile(): Promise<void> {
   } catch {
     // Hors ligne, ou service worker sans copie en cache : on s'en passe.
   }
+}
+
+// Envoie à l'appli le budget de charge du jour : ce qu'il reste à faire, le plafond
+// que la fatigue autorise, l'état de la semaine et le risque (ACWR).
+//
+// Même raison que `pushRiderProfile` de le faire ici : la session vit dans le pot de
+// cookies du WebView, l'appli n'a aucun identifiant à présenter. Mais aussi une raison
+// qui lui est propre — **le calcul reste du côté qui le fait déjà**. La cible hebdo,
+// l'affûtage et le plancher de fatigue sont un morceau de logique qu'on ne veut pas
+// voir vivre en deux exemplaires (ici et en Ruby, puis en Dart) : le premier réglage
+// qui bouge d'un côté ferait diverger le chiffre du guidon de celui de la page
+// Performances, et c'est précisément le chiffre sur lequel on décide de rentrer.
+//
+// Le coût est une requête sur une analyse déjà en cache côté serveur, une fois par
+// chargement de page dans l'appli. Silencieux comme le profil : sans budget, le
+// composant affiche son état vide, la sortie n'en dépend pas.
+export async function pushTrainingBudget(): Promise<void> {
+  const target = channel()
+  if (!target) return
+
+  try {
+    const res = await fetch('/api/performance/training_load', {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    // 401 sur une navigation partagée ouverte en anonyme : cas normal, pas une panne.
+    if (!res.ok) return
+
+    const budget = await computeTrainingBudget(await res.json())
+    // Un compte sans une seule sortie n'a ni forme ni cible : il n'y a rien à dire, et
+    // un budget à zéro se lirait comme « repos complet », ce qui est un conseil.
+    if (!budget) return
+
+    target.postMessage(JSON.stringify({ type: 'training_budget', budget }))
+  } catch {
+    // Hors ligne : l'appli garde le dernier budget reçu, daté, et sait le dire.
+  }
+}
+
+// Le budget, dérivé de la charge par le composable de la page Performances.
+//
+// Instancié hors composant, ce qui est permis : `useTrainingPlan` ne fait aucun fetch
+// et n'a pas de cycle de vie. On attend en revanche les itinéraires prévus — sans eux,
+// une sortie déjà planifiée aujourd'hui ne compterait pas dans la cible du jour, et le
+// guidon annoncerait un objectif que le site n'affiche pas.
+async function computeTrainingBudget(payload: LoadSummary): Promise<TrainingBudget | null> {
+  const data = ref<LoadSummary | null>(payload)
+  const athlete = computed(() => athleteFromSummary(data.value))
+  const { loaded } = usePlannedRides()
+  const { plannedLoads, plannedDistances } = usePlannedLoads(athlete)
+
+  await whenTrue(loaded)
+
+  return useTrainingPlan(data, plannedLoads, plannedDistances).budget.value
+}
+
+// Attend qu'un drapeau passe à vrai. `usePlannedRides` lance sa requête au premier
+// appel et n'en expose que l'aboutissement.
+function whenTrue(flag: Ref<boolean>): Promise<void> {
+  if (flag.value) return Promise.resolve()
+  return new Promise((resolve) => {
+    const stop = watch(flag, (value) => {
+      if (!value) return
+      stop()
+      resolve()
+    })
+  })
 }

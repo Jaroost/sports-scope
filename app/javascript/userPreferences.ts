@@ -57,7 +57,31 @@ export interface SportPreferences {
   }
 }
 
+// Objectif d'entraînement et sortie visée. Miroir de User::DEFAULT_PREFERENCES["training"],
+// et liste blanche partagée avec ProfilesController::ALLOWED_TRAINING_GOALS.
+//
+// Réglages de compte et non de navigateur (ils ont vécu dans le localStorage) : c'est
+// ce couple qui fixe le plancher de fatigue, donc le plafond de charge que l'app
+// compagnon affiche au guidon. Deux stockages locaux donneraient deux plafonds.
+export interface TargetEventPref {
+  date: string
+  distance_km: number
+  intensity: EventIntensity
+}
+
+export const TRAINING_GOALS = ['improve_fast', 'improve_slow', 'maintain', 'peak'] as const
+export const EVENT_INTENSITIES = ['easy', 'tempo', 'race'] as const
+
+export type TrainingGoal = typeof TRAINING_GOALS[number]
+export type EventIntensity = typeof EVENT_INTENSITIES[number]
+
+export interface TrainingPreferences {
+  goal: TrainingGoal
+  event: TargetEventPref | null
+}
+
 export interface UserPreferences {
+  training: TrainingPreferences
   points_of_interest: {
     show_cemeteries: boolean
     show_bakeries: boolean
@@ -124,6 +148,7 @@ function sportDefaults(
 }
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
+  training: { goal: 'improve_slow', event: null },
   points_of_interest: {
     show_cemeteries: true,
     show_bakeries: true,
@@ -199,7 +224,11 @@ export function sportPreferences(sport: Sport = currentSport()): SportPreference
 // Présence de la balise = utilisateur connecté (cf. layouts/application.html.erb).
 // Les visiteurs déconnectés tombent sur les valeurs par défaut, sans profil à mettre
 // à jour côté serveur.
+// Le test du `document` n'est pas de la superstition : les composables qui appellent
+// les miroirs ci-dessous tournent aussi hors DOM (tests unitaires en environnement
+// node), et un réglage best-effort ne doit pas faire échouer son appelant.
 export function isLoggedIn(): boolean {
+  if (typeof document === 'undefined') return false
   return !!document.querySelector('meta[name="user-preferences"]')
 }
 
@@ -267,6 +296,21 @@ export function persistSportSpeed(sport: Sport, speed: number): Promise<void> {
   })
 }
 
+// Objectif d'entraînement / sortie visée, enregistrés sur le profil depuis la page
+// Performances et le widget d'accueil.
+//
+// Best-effort comme les miroirs de réglages de vue, et pour la même raison : le
+// composable a déjà mis à jour son état, l'écran montre le nouvel objectif, et une
+// coupure réseau ne doit pas ramener l'utilisateur en arrière au milieu d'un réglage.
+// Ce qu'on perd alors est un choix d'un clic, que le prochain rechargement propose à
+// nouveau — pas une donnée qu'on ne peut pas reconstituer.
+export function persistTrainingPlan(training: TrainingPreferences): void {
+  if (!isLoggedIn()) return
+  const prefs = userPreferences()
+  prefs.training = { goal: training.goal, event: training.event }
+  patchPreferencesQuietly(prefs)
+}
+
 // PATCH de l'objet complet de préférences — l'endpoint attend tout l'objet et
 // assainit le reste. Rejette sur échec : à l'appelant de décider quoi en faire.
 function patchPreferences(prefs: UserPreferences): Promise<void> {
@@ -300,6 +344,7 @@ function parse(): UserPreferences {
     const incoming = JSON.parse(raw) as Partial<UserPreferences>
     const d = DEFAULT_PREFERENCES
     return {
+      training: parseTraining(incoming.training),
       points_of_interest: { ...d.points_of_interest, ...incoming.points_of_interest },
       search: {
         country_codes: Array.isArray(incoming.search?.country_codes)
@@ -317,6 +362,27 @@ function parse(): UserPreferences {
     }
   } catch {
     return DEFAULT_PREFERENCES
+  }
+}
+
+// L'objectif d'un compte, tel que le serveur l'a assaini. Un événement incomplet vaut
+// « pas d'objectif daté » (même arbitrage que ProfilesController#sanitize_target_event) :
+// l'affûtage se compte en jours et le TSS visé se déduit de la distance, donc un
+// événement à moitié rempli ferait dériver la charge au lieu de la piloter.
+function parseTraining(incoming?: Partial<TrainingPreferences>): TrainingPreferences {
+  const goal = incoming?.goal
+  const event = incoming?.event
+  const distance = Number(event?.distance_km)
+  return {
+    goal: TRAINING_GOALS.includes(goal!) ? goal! : DEFAULT_PREFERENCES.training.goal,
+    event:
+      event && typeof event.date === 'string' && Number.isFinite(distance) && distance > 0
+        ? {
+            date: event.date,
+            distance_km: distance,
+            intensity: EVENT_INTENSITIES.includes(event.intensity) ? event.intensity : 'tempo',
+          }
+        : null,
   }
 }
 

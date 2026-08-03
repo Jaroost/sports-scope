@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen, companionLinkTarget, companionNav } from './companionBridge'
+import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen, companionLinkTarget, companionNav, pushTrainingBudget } from './companionBridge'
+import { isoLocal } from './composables/useTrainingPlan'
 import { navStateFor } from './navHelpers'
 import type { TurnHint } from './navHelpers'
 import { companionStore } from './stores/companionStore'
@@ -228,6 +229,103 @@ describe('companionBridge', () => {
 
       expect(await companionLinkTarget('https://sports.logicraft.ch/routes/abc/navigate'))
         .toBe('https://sports.logicraft.ch/routes/abc/navigate?handoff=jeton-2')
+    })
+  })
+
+  // Le budget de charge (ce qu'il reste à faire aujourd'hui, le plafond de fatigue,
+  // l'état de la semaine, le risque). Calculé ici et non côté serveur : la logique de
+  // planification vit dans useTrainingPlan, et on ne veut pas d'un second exemplaire
+  // qui dériverait du premier. Ces tests vérifient le CHEMIN — le calcul lui-même est
+  // couvert par useTrainingPlan.test.ts.
+  describe('pushTrainingBudget', () => {
+    const realFetch = globalThis.fetch
+
+    afterEach(() => {
+      globalThis.fetch = realFetch
+    })
+
+    // Charge d'un athlète à CTL/ATL constants, sur 30 jours jusqu'à aujourd'hui.
+    function loadSummary(): unknown {
+      const series = []
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date()
+        d.setDate(d.getDate() - i)
+        series.push({ date: isoLocal(d), tss: 0, ctl: 50, atl: 50, tsb: 0, acwr: 1 })
+      }
+      const last = series[series.length - 1]
+      return {
+        current: { ...last, form_zone: 'neutral', acwr_zone: 'optimal' },
+        series,
+        zones: null,
+        coverage: { power: 0, hr: 0, estimated: 0, total: 0 },
+        thresholds: {},
+      }
+    }
+
+    // Le budget passe par deux requêtes : la charge, et les itinéraires prévus (sans
+    // eux, une sortie déjà planifiée aujourd'hui ne compterait pas dans la cible).
+    function stubApi(load: { ok: boolean; body?: unknown }): void {
+      globalThis.fetch = (async (url: string) => {
+        if (String(url).includes('planned_rides')) {
+          return { ok: true, json: async () => ({ planned_rides: [] }) }
+        }
+        return { ok: load.ok, json: async () => load.body }
+      }) as unknown as typeof fetch
+    }
+
+    it('envoie le budget du jour et de la semaine', async () => {
+      const sent = fakeChannel()
+      stubApi({ ok: true, body: loadSummary() })
+
+      await pushTrainingBudget()
+
+      expect(sent).toHaveLength(1)
+      const message = JSON.parse(sent[0])
+      expect(message.type).toBe('training_budget')
+      expect(message.budget.date).toBe(isoLocal(new Date()))
+      expect(message.budget.day.max).toBeGreaterThan(message.budget.day.target)
+      expect(message.budget.form).toEqual({ ctl: 50, atl: 50, tsb: 0, zone: 'neutral' })
+      expect(message.budget.risk).toEqual({ acwr: 1, zone: 'optimal' })
+    })
+
+    it('ne dit rien pour un compte sans une seule sortie', async () => {
+      // Un budget tout à zéro se lirait « repos complet », ce qui est un conseil —
+      // et personne ne l'a donné.
+      const sent = fakeChannel()
+      stubApi({ ok: true, body: { current: null, series: [], zones: null, coverage: {}, thresholds: {} } })
+
+      await pushTrainingBudget()
+
+      expect(sent).toHaveLength(0)
+    })
+
+    it('ne dit rien quand le serveur refuse', async () => {
+      const sent = fakeChannel()
+      stubApi({ ok: false })
+
+      await pushTrainingBudget()
+
+      expect(sent).toHaveLength(0)
+    })
+
+    it('ne dit rien hors ligne', async () => {
+      // L'appli garde alors le dernier budget reçu, daté : c'est elle qui décide s'il
+      // est encore d'actualité.
+      const sent = fakeChannel()
+      globalThis.fetch = (async () => { throw new Error('offline') }) as unknown as typeof fetch
+
+      await pushTrainingBudget()
+
+      expect(sent).toHaveLength(0)
+    })
+
+    it('ne fait rien dans un navigateur ordinaire', async () => {
+      let called = false
+      globalThis.fetch = (async () => { called = true; throw new Error('ne devrait pas être appelé') }) as unknown as typeof fetch
+
+      await pushTrainingBudget()
+
+      expect(called).toBe(false)
     })
   })
 })

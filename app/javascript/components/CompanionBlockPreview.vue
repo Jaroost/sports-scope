@@ -29,6 +29,8 @@ import { computed } from 'vue'
 import {
   averagesCardsFit,
   BLOCK_METRICS,
+  BUDGET_SAMPLE,
+  budgetContextFits,
   densityFor,
   legendFits,
   metricSample,
@@ -37,6 +39,7 @@ import {
   type Block,
   type CellSize,
 } from '../companionSettings'
+import { zoneColor, acwrColor } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
   block: Block
@@ -179,6 +182,59 @@ const metricGauge = computed(
     !!metricZone.value &&
     density.value !== 'minimal',
 )
+
+// ── Budget de charge ────────────────────────────────────────────────────────
+//
+// Contrairement aux couleurs des zones d'intensité, celles de la fraîcheur (TSB) et
+// du risque (ACWR) **viennent d'ici** : ce sont celles de la page Performances, et
+// c'est le dépôt voisin qui les recopie. Le sens n'est pas inversé pour autant — le
+// vert dit « c'est le bon endroit », l'orange « attention », le rouge « stop ».
+const budgetWeek = computed(() => props.block.mode === 'week')
+
+// La barre du jour se mesure en TSS, de zéro au plafond de fatigue : c'est ce qui
+// donne son sens à la cible, posée quelque part avant la fin. En mode semaine,
+// l'échelle est le plus grand du prévu et de la cible — sinon un dépassement
+// sortirait de la case sans qu'on le voie.
+const budgetSegments = computed(() => {
+  const { day, week } = BUDGET_SAMPLE
+  if (budgetWeek.value) {
+    const scale = Math.max(week.target, week.done + week.planned)
+    return {
+      scale,
+      done: week.done,
+      live: week.planned,
+      mark: week.target,
+      liveColor: '#fd7e14',
+    }
+  }
+  const scale = Math.max(day.max, day.done + day.ride)
+  return {
+    scale,
+    done: day.done,
+    live: day.ride,
+    mark: day.target,
+    // Au-delà de la cible, la sortie en cours n'est plus « en route vers » mais
+    // « au-delà de » : la barre change de couleur là où le conseil change de sens.
+    liveColor: day.done + day.ride > day.target ? '#fd7e14' : '#198754',
+  }
+})
+
+const budgetFigure = computed(() => {
+  const { day, week } = BUDGET_SAMPLE
+  return budgetWeek.value
+    ? `${week.done} / ${week.target}`
+    : `${day.done + day.ride} / ${day.target}`
+})
+
+// Le second chiffre de la ligne : le plafond de fatigue du jour, ou ce qu'il reste à
+// placer dans la semaine. Il tient sur la même ligne que le principal, à droite.
+const budgetAside = computed(() =>
+  budgetWeek.value ? `reste ${BUDGET_SAMPLE.week.remaining}` : `max ${BUDGET_SAMPLE.day.max}`,
+)
+
+const budgetContext = computed(() => budgetContextFits(props.cell))
+
+const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du jour'))
 </script>
 
 <template>
@@ -344,6 +400,49 @@ const metricGauge = computed(
         <div class="cbp-radar-distance">48 m</div>
       </div>
     </template>
+
+    <!-- Budget de charge -------------------------------------------------- -->
+    <div v-else-if="block.kind === 'training_budget'" class="cbp-card">
+      <div v-if="metrics.showTitle" class="cbp-title">{{ budgetTitle }}</div>
+      <div class="cbp-budget-figures">
+        <span class="cbp-budget-figure">{{ budgetFigure }}</span>
+        <span v-if="metrics.showUnit" class="cbp-budget-aside">{{ budgetAside }}</span>
+      </div>
+      <!-- Le repère de la cible sur la barre : c'est lui qui distingue « il en
+           reste » de « c'est fait », et il ne disparaît à aucune densité — sans
+           lui, la barre ne dit plus que « du TSS », ce qu'on savait déjà. -->
+      <div class="cbp-budget-bar">
+        <span
+          class="cbp-budget-seg"
+          :style="{ width: `${(budgetSegments.done / budgetSegments.scale) * 100}%`, background: 'rgba(25,135,84,0.55)' }"
+        ></span>
+        <span
+          class="cbp-budget-seg"
+          :style="{ width: `${(budgetSegments.live / budgetSegments.scale) * 100}%`, background: budgetSegments.liveColor }"
+        ></span>
+        <span
+          class="cbp-budget-mark"
+          :style="{ left: `${(budgetSegments.mark / budgetSegments.scale) * 100}%` }"
+        ></span>
+      </div>
+      <div v-if="budgetContext" class="cbp-budget-context">
+        <template v-if="budgetWeek">
+          <span class="cbp-budget-chip">{{ BUDGET_SAMPLE.week.planned }} prévus</span>
+        </template>
+        <template v-else>
+          <span class="cbp-budget-chip">
+            <i v-if="metrics.showIcon" class="fa-solid fa-battery-half" aria-hidden="true"></i>
+            <span class="cbp-dot" :style="{ background: zoneColor(BUDGET_SAMPLE.form.zone) }"></span>
+            {{ BUDGET_SAMPLE.form.tsb }}
+          </span>
+          <span class="cbp-budget-chip">
+            <i v-if="metrics.showIcon" class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+            <span class="cbp-dot" :style="{ background: acwrColor(BUDGET_SAMPLE.risk.zone) }"></span>
+            {{ BUDGET_SAMPLE.risk.acwr.toFixed(2).replace('.', ',') }}
+          </span>
+        </template>
+      </div>
+    </div>
 
     <!-- Case vide : un choix de composition, et il se voit comme tel. ------ -->
     <div v-else class="cbp-empty"></div>
@@ -629,5 +728,68 @@ const metricGauge = computed(
   flex: 1;
   border: 1px dashed rgba(255, 255, 255, 0.25);
   border-radius: 1em;
+}
+
+/* Budget de charge : le chiffre, sa barre, son contexte. Le chiffre est plus gros
+   qu'une ligne ordinaire sans aller au plein cadre — il en faut deux (le fait et la
+   cible), et une barre en dessous. Même rapport que `budgetFigureHeight`. */
+.cbp-budget-figures {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  margin-top: 0.3em;
+}
+.cbp-budget-figure {
+  font-size: 1.6em;
+  line-height: 1.35;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.cbp-budget-aside {
+  margin-left: auto;
+  font-size: 0.9em;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.cbp-budget-bar {
+  position: relative;
+  display: flex;
+  height: 0.8em;
+  margin-top: 0.4em;
+  border-radius: 0.4em;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.12);
+}
+.cbp-budget-seg {
+  height: 100%;
+}
+/* Le repère de la cible, posé PAR-DESSUS les segments : il doit se voir aussi bien
+   quand on est encore loin que quand on l'a dépassé. */
+.cbp-budget-mark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+}
+
+.cbp-budget-context {
+  display: flex;
+  gap: 0.5em;
+  margin-top: 0.45em;
+  font-size: 0.95em;
+}
+.cbp-budget-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.cbp-budget-chip i {
+  opacity: 0.7;
 }
 </style>

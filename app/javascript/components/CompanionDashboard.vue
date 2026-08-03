@@ -5,8 +5,8 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  BLOCK_METRICS, densityFor, fitCells, gridSideOf, maxSpan, occupancy, phoneCell,
-  PHONE_GRID,
+  BLOCK_METRICS, canHideBehindMenu, densityFor, fitCells, gridSideOf, maxSpan,
+  occupancy, phoneCell, PHONE_GRID,
   type Band, type Block, type Catalog, type Cell, type CellSize,
   type CompanionDocument, type Page, type Preset, type Viewport,
 } from '../companionSettings'
@@ -186,6 +186,25 @@ function togglePage(index: number) {
   openPage.value = openPage.value === index ? null : index
   selected.value = null
 }
+
+// Ranger une page derrière le menu, ou la rendre au défilement.
+//
+// Le bouton s'éteint quand le déplacement n'est pas permis (`canHideBehindMenu`)
+// plutôt que d'être corrigé à l'enregistrement : c'est la même règle que partout
+// ici — la limite se voit au lieu de se deviner.
+function toggleMenuPage(page: Page) {
+  if (!canHideBehindMenu(page, preset.value.pages)) return
+  // La clé est effacée et non mise à `false` : le document ne porte que ce qui
+  // s'écarte du défaut, comme les capteurs coupés.
+  if (page.menu) delete page.menu
+  else page.menu = true
+}
+
+// Combien de pages restent à faire défiler. Sert à dire, sous la liste, ce que le
+// cycliste trouvera au glissé et ce qu'il devra aller chercher.
+const swipeCount = computed(
+  () => preset.value.pages.filter((page) => !page.menu).length,
+)
 
 // ── la grille ───────────────────────────────────────────────────────────────
 
@@ -501,6 +520,12 @@ async function save() {
         <div v-for="(page, index) in preset.pages" :key="index" class="border rounded mb-2">
           <div class="d-flex align-items-center gap-2 p-2">
             <span class="badge text-bg-secondary">{{ t(`companion.settings.page_kinds.${page.kind}`) }}</span>
+            <!-- Là où elle se trouve, et pas seulement le fait qu'elle soit
+                 rangée : « Menu » à côté du genre est le seul endroit où l'on
+                 relit la composition du défilement sans ouvrir chaque page. -->
+            <span v-if="page.menu" class="badge text-bg-light border">
+              <i class="fa-solid fa-ellipsis-vertical me-1" aria-hidden="true"></i>{{ t('companion.settings.behind_menu') }}
+            </span>
             <span class="flex-grow-1 text-truncate">{{ page.title || t('companion.settings.page_kinds.map') }}</span>
             <button class="btn btn-sm btn-link p-1" type="button"
                     :disabled="index === 0" @click="movePage(index, -1)">
@@ -509,6 +534,20 @@ async function save() {
             <button class="btn btn-sm btn-link p-1" type="button"
                     :disabled="index === preset.pages.length - 1" @click="movePage(index, 1)">
               <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+            </button>
+            <!-- Le bouton s'éteint sur la dernière page du défilement : tout
+                 ranger derrière le menu ne laisserait aucune page où l'ouvrir. -->
+            <button v-if="page.kind !== 'map'" class="btn btn-sm btn-link p-1"
+                    type="button" :disabled="!canHideBehindMenu(page, preset.pages)"
+                    :title="page.menu
+                      ? t('companion.settings.show_in_swipe')
+                      : t('companion.settings.hide_behind_menu')"
+                    :aria-label="page.menu
+                      ? t('companion.settings.show_in_swipe')
+                      : t('companion.settings.hide_behind_menu')"
+                    @click="toggleMenuPage(page)">
+              <i :class="page.menu ? 'fa-solid fa-eye' : 'fa-solid fa-ellipsis-vertical'"
+                 aria-hidden="true"></i>
             </button>
             <button v-if="page.kind !== 'map'" class="btn btn-sm btn-outline-secondary"
                     type="button" @click="togglePage(index)">
@@ -663,13 +702,23 @@ async function save() {
           </div>
         </div>
 
-        <div class="d-flex gap-2 mb-4">
+        <div class="d-flex gap-2 mb-2">
           <button v-for="kind in catalog.page_kinds" :key="kind"
                   class="btn btn-sm btn-outline-secondary" type="button"
                   :disabled="kind === 'map' && hasMap" @click="addPage(kind)">
             <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t(`companion.settings.page_kinds.${kind}`) }}
           </button>
         </div>
+
+        <!-- Le partage, en toutes lettres. La liste ci-dessus est dans l'ordre du
+             document ; ce que le cycliste vivra, c'est un défilement d'un côté et
+             un menu de l'autre, et ce compte est le seul endroit où les deux se
+             lisent d'un coup. -->
+        <p class="text-body-secondary small mb-4">
+          {{ t('companion.settings.pages_split', {
+            swipe: swipeCount, menu: preset.pages.length - swipeCount,
+          }) }}
+        </p>
 
         <!-- Le bandeau -->
         <h2 class="h6">{{ t('companion.settings.bands') }}</h2>

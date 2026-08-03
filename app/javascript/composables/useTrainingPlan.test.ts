@@ -224,6 +224,92 @@ describe('useTrainingPlan — semaine suivante', () => {
   })
 })
 
+// Le budget poussé à l'app compagnon (cf. pushTrainingBudget). Il n'a pas de calcul à
+// lui : tout l'enjeu est qu'il dise EXACTEMENT ce que la page affiche, sans quoi le
+// cycliste lirait un plafond au guidon et un autre sur le site.
+//
+// Repères de la série de test : CTL = ATL = 50, TSB = 0, objectif par défaut
+// (« progresser doucement », plancher −20). Il en découle une cible hebdo de 478 TSS
+// (7 × 50 + 3 / K_CTL) et un plafond de fatigue de 232 TSS.
+describe('useTrainingPlan — budget de l’app compagnon', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(TODAY)
+  })
+  afterEach(() => { vi.useRealTimers() })
+
+  // Charge dont on force l'état du jour (fatigue, risque), la série restant identique.
+  function withCurrent(over: Partial<Current>, days?: Record<string, { tss: number }>) {
+    const base = summary(days)
+    return useTrainingPlan(ref({ ...base, current: { ...base.current, ...over } }))
+  }
+
+  it('ne rend rien sans charge', () => {
+    const { budget } = useTrainingPlan(ref(null))
+    expect(budget.value).toBeNull()
+  })
+
+  it('date le budget du jour et compte ce qui est déjà enregistré', () => {
+    const { budget } = setup({ [MON]: { tss: 60 }, [WED]: { tss: 45 } })
+
+    expect(budget.value!.date).toBe(WED)
+    expect(budget.value!.day.done).toBe(45)
+  })
+
+  it('reprend la cible de la reco du jour et plafonne à ce que la fatigue autorise', () => {
+    const { budget, recommendation } = setup()
+
+    // 478 de cible hebdo répartis sur les 5 jours restants → ~96 TSS aujourd'hui.
+    expect(budget.value!.day.target).toBe(96)
+    expect(budget.value!.day.target).toBe(recommendation.value!.tss)
+    expect(budget.value!.day.max).toBe(232)
+  })
+
+  it('ne propose plus rien quand la fatigue a mangé le plafond', () => {
+    const { budget } = withCurrent({ tsb: -35, atl: 85 })
+
+    expect(budget.value!.day.target).toBe(0)
+    // Le plafond calculé est négatif (on est DÉJÀ sous le plancher) : il se lit zéro,
+    // pas « moins quarante-quatre ».
+    expect(budget.value!.day.max).toBe(0)
+  })
+
+  it('ne laisse jamais la cible dépasser le plafond', () => {
+    // Fraîcheur négative sans être à l'arrêt : le plafond descend sous la part
+    // quotidienne de la cible, et c'est lui qui doit gagner.
+    const { budget } = withCurrent({ tsb: -18, atl: 68 })
+    const { day } = budget.value!
+
+    expect(day.max).toBeLessThan(96)
+    expect(day.target).toBeLessThanOrEqual(day.max)
+  })
+
+  it('recopie la semaine du planificateur, sans la recalculer', () => {
+    const { budget, weekPlan } = setup({ [MON]: { tss: 60 } }, { [FRI]: 80 })
+
+    expect(budget.value!.week).toEqual({
+      target: weekPlan.value!.target,
+      done: weekPlan.value!.done,
+      planned: weekPlan.value!.planned,
+      remaining: weekPlan.value!.remaining,
+    })
+  })
+
+  it('porte la fatigue et le risque tels que le serveur les a classés', () => {
+    const { budget } = withCurrent({ tsb: -12, ctl: 62, atl: 74, acwr: 1.18, form_zone: 'productive', acwr_zone: 'optimal' })
+
+    expect(budget.value!.form).toEqual({ ctl: 62, atl: 74, tsb: -12, zone: 'productive' })
+    expect(budget.value!.risk).toEqual({ acwr: 1.18, zone: 'optimal' })
+  })
+
+  it('laisse passer un risque inconnu plutôt que d’inventer une zone', () => {
+    // ACWR nul avant 28 jours d'historique : l'appli affichera un tiret.
+    const { budget } = withCurrent({ acwr: null, acwr_zone: null })
+
+    expect(budget.value!.risk).toEqual({ acwr: null, zone: null })
+  })
+})
+
 describe('useTrainingPlan — helpers purs', () => {
   it('mondayOf ramène au lundi, y compris depuis un dimanche', () => {
     expect(isoLocal(mondayOf(new Date(2026, 6, 15)))).toBe(MON) // mercredi

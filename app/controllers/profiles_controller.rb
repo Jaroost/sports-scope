@@ -38,6 +38,13 @@ class ProfilesController < ApplicationController
   WEIGHT_RANGE = (30.0..250.0)     # kg
   LTHR_MANUAL_RANGE = (100..220)   # bpm plausibles pour un seuil FC saisi à la main
 
+  # Objectif d'entraînement et sortie visée (cf. User::DEFAULT_PREFERENCES["training"]).
+  # Miroir de `GOALS` / `EVENT_INTENSITY` dans useTrainingPlan.ts : c'est ce couple qui
+  # fixe le plancher de fatigue, donc le plafond de charge du jour.
+  ALLOWED_TRAINING_GOALS = %w[improve_fast improve_slow maintain peak].freeze
+  ALLOWED_EVENT_INTENSITIES = %w[easy tempo race].freeze
+  EVENT_DISTANCE_RANGE = (1..1000) # km — d'un critérium à une longue distance
+
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
   ALLOWED_OVERLAYS = %w[paths veloland mountainbikeland wanderland wanderwege].freeze
   ALLOWED_SPORTS = User::SPORTS
@@ -140,7 +147,58 @@ class ProfilesController < ApplicationController
       # sanitize_athlete retombe alors sur les valeurs déjà stockées pour ne pas les
       # effacer. Ils se modifient via PATCH /api/athlete (update_athlete).
       "athlete" => sanitize_athlete(incoming[:athlete], current_user),
+      # Même contrat de préservation que les seuils athlète : le formulaire de profil
+      # ne connaît pas l'objectif d'entraînement (il se règle sur la page Performances
+      # et sur le widget d'accueil), et un enregistrement de profil ne doit pas le
+      # ramener à « progresser doucement » dans le dos de l'utilisateur.
+      "training" => sanitize_training(incoming[:training], current_user),
     }
+  end
+
+  # Assainit l'objectif d'entraînement. Comme pour les seuils athlète, une clé absente
+  # du payload retombe sur la valeur déjà stockée.
+  #
+  # `event` est le seul réglage à trois champs solidaires : une sortie objectif sans
+  # date ni distance ne veut rien dire (l'affûtage se compte en jours, et le TSS visé
+  # se déduit de la distance). Un événement incomplet vaut donc « pas d'objectif
+  # daté » — le repli sur l'objectif générique, qui reste vrai — plutôt qu'un
+  # événement à moitié rempli qui ferait dériver l'affûtage.
+  def sanitize_training(raw, user)
+    raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
+    raw = (raw || {}).with_indifferent_access
+    existing = user.preferences.is_a?(Hash) ? (user.preferences["training"] || {}) : {}
+
+    goal = raw.key?(:goal) ? raw[:goal] : existing["goal"]
+    event = raw.key?(:event) ? sanitize_target_event(raw[:event]) : sanitize_target_event(existing["event"])
+
+    {
+      "goal" => allowed(goal, ALLOWED_TRAINING_GOALS, "improve_slow"),
+      "event" => event,
+    }
+  end
+
+  def sanitize_target_event(raw)
+    raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
+    return nil unless raw.is_a?(Hash)
+
+    raw = raw.with_indifferent_access
+    date = iso_date(raw[:date])
+    distance = clamp_int_or_nil(raw[:distance_km], EVENT_DISTANCE_RANGE)
+    return nil if date.nil? || distance.nil?
+
+    {
+      "date" => date,
+      "distance_km" => distance,
+      "intensity" => allowed(raw[:intensity], ALLOWED_EVENT_INTENSITIES, "tempo"),
+    }
+  end
+
+  # Date ISO renormalisée, nil si elle n'en est pas une. Passer par `Date` plutôt que
+  # par une expression régulière : « 2026-02-31 » a la bonne forme et n'existe pas.
+  def iso_date(value)
+    Date.iso8601(value.to_s).iso8601
+  rescue ArgumentError, TypeError
+    nil
   end
 
   # Assainit les seuils athlète. Toute clé absente du payload retombe sur la valeur

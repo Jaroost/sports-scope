@@ -189,6 +189,25 @@ class User < ApplicationRecord
       "lthr_manual" => nil,
       "lthr_manual_at" => nil,
     },
+    # Ce que l'athlète cherche à faire de sa charge — l'objectif générique, et la
+    # sortie qu'il prépare. C'est ce couple qui fixe le plancher de fatigue toléré,
+    # donc la charge que la reco du jour s'autorise (cf. useTrainingPlan.ts).
+    #
+    # Ces deux réglages ont d'abord vécu dans le `localStorage` du navigateur, ce qui
+    # allait tant qu'ils ne servaient qu'à la page qui les avait écrits. Ils ne
+    # tiennent plus : l'application compagnon affiche le même budget au guidon, et
+    # elle lit le site depuis le WebView de l'appareil — un autre stockage local, donc
+    # un autre objectif, donc un autre plafond que celui de la page Performances. Un
+    # réglage de compte est du reste ce qu'il aurait toujours dû être : on ne change
+    # pas d'objectif d'entraînement en changeant de navigateur.
+    #
+    # `event` est nul tant qu'aucune sortie n'est visée ; renseigné, c'est
+    # `{ "date" => "2026-09-12", "distance_km" => 120, "intensity" => "tempo" }`,
+    # et c'est alors l'affûtage qui pilote la charge à la place de l'objectif.
+    "training" => {
+      "goal" => "improve_slow",
+      "event" => nil,
+    },
   }.freeze
 
   # Menus de navigation configurables, dans leur ordre par défaut. Source de vérité des

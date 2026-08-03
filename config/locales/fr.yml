@@ -1542,6 +1542,10 @@ fr:
       duplicate: "Dupliquer"
       pages: "Pages"
       pages_help: "Dans l'ordre où on les fait défiler. La carte est facultative et se place où l'on veut — un profil de home-trainer s'en passe, et l'appli n'ouvre alors aucune page web."
+      behind_menu: "Menu"
+      hide_behind_menu: "Ranger derrière le menu"
+      show_in_swipe: "Remettre dans le défilement"
+      pages_split: "%{swipe} au glissé, %{menu} derrière le menu ⋮ de l'appli. Une page rangée là ne passe plus sous les yeux en roulant : on va la chercher, ce qui convient à ce qui se lit à l'arrêt — un bilan, des répartitions. Une alerte en cours de route la referme et rend la carte."
       page_title: "Titre de la page"
       page_effort: "Effort"
       page_numbers: "Chiffres"
@@ -1599,6 +1603,7 @@ fr:
         recording: "Enregistrement"
         nav_state: "État de navigation"
         radar: "Radar"
+        training_budget: "Budget de charge"
         empty: "Case vide"
       modes:
         big: "Chiffre plein cadre"
@@ -1613,6 +1618,8 @@ fr:
         full: "Complet"
         distance: "Distance"
         gauge_vertical: "Jauge verticale"
+        day: "Aujourd'hui"
+        week: "La semaine"
       sources:
         hr: "Cardio"
         power: "Puissance"

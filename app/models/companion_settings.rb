@@ -46,6 +46,15 @@ module CompanionSettings
     # debout elle prend une colonne — c'est la case dont on dispose qui décide,
     # pas le radar. Le dessin est le même, tourné d'un quart de tour.
     "radar" => %w[distance gauge gauge_vertical],
+    # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
+    # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
+    # ou je rentre ? », `week` situe la sortie dans la semaine.
+    #
+    # Seul composant dont la donnée ne vient PAS des capteurs : elle est calculée par la
+    # page de navigation et poussée par le pont (cf. companionBridge.ts), puis gardée sur
+    # le téléphone. D'où son état vide, qu'aucun autre composant n'a — un profil de
+    # home-trainer sans WebView n'en recevra jamais, et il doit le dire.
+    "training_budget" => %w[day week],
     "empty" => []
   }.freeze
 
@@ -187,11 +196,14 @@ module CompanionSettings
 
   # Au plus une carte, où qu'elle soit : deux cartes voudraient dire deux
   # identités pour un seul WebView, alors que l'instance MapLibre est unique.
+  #
+  # Et **de quoi joindre ce qui est rangé derrière le menu** : voir
+  # `keep_one_swipeable`.
   def sanitize_pages(raw)
     return [] unless raw.is_a?(Array)
 
     map_seen = false
-    raw.filter_map do |page|
+    pages = raw.filter_map do |page|
       next nil unless page.is_a?(Hash)
 
       case page["kind"]
@@ -199,11 +211,53 @@ module CompanionSettings
         next nil if map_seen
 
         map_seen = true
+        # Sans `menu`, et pas par oubli : la carte est le WebView peint au fond
+        # de la pile pour toute la sortie, pas une page qu'on ouvre et qu'on
+        # referme. La ranger derrière le menu ne voudrait rien dire.
         { "kind" => "map" }
       when "grid" then sanitize_grid(page)
       when "list" then sanitize_list(page)
       end
     end
+
+    keep_one_swipeable(pages)
+  end
+
+  # Une page rangée derrière le menu d'actions plutôt que dans le défilement.
+  #
+  # C'est ce qui permet une page qu'on ne lit **pas** en roulant — un bilan, des
+  # répartitions — sans la mettre à un glissé de la carte, où elle passerait sous
+  # les yeux à chaque changement de page. On va la chercher, comme on va chercher
+  # « changer d'itinéraire ».
+  #
+  # **Absent vaut « dans le défilement »**, dans les deux sens : un document plus
+  # ancien que l'appli garde toutes ses pages là où elles étaient, et une appli
+  # plus ancienne que le site ignore la clé et les montre toutes. L'erreur va donc
+  # toujours vers « visible », jamais vers « introuvable ».
+  def menu_flag(page)
+    true if page["menu"] == true
+  end
+
+  # Une page rangée derrière le menu doit rester joignable.
+  #
+  # Il y faut une page du défilement **qui ne soit pas la carte** : c'est
+  # l'en-tête d'une page de données qui porte le menu, et la carte n'en dessine
+  # pas — tout ce qu'on y poserait volerait des pixels à ce qu'on y cherche. Deux
+  # façons de se retrouver sans rien, donc, et la seconde est la sournoise :
+  #
+  #  • tout ranger derrière le menu — il ne resterait rien à faire défiler ;
+  #  • ne laisser que la carte — le défilement existe, mais aucune de ses pages
+  #    n'a de menu, et ce qu'on avait rangé n'est atteignable par aucun geste.
+  #
+  # Dans les deux cas, la première page rangée reprend sa place. Même règle côté
+  # Dart (`RidePreset.ridePages`), et un test de chaque côté.
+  def keep_one_swipeable(pages)
+    return pages if pages.any? { |page| !page["menu"] && page["kind"] != "map" }
+
+    index = pages.index { |page| page["menu"] }
+    return pages if index.nil?
+
+    pages.each_with_index.map { |page, i| i == index ? page.except("menu") : page }
   end
 
   def sanitize_grid(page)
@@ -217,7 +271,8 @@ module CompanionSettings
     return nil if cells.empty?
 
     { "kind" => "grid", "title" => page["title"].to_s.presence || "Mesures",
-      "rows" => rows, "cols" => cols, "cells" => cells }
+      "rows" => rows, "cols" => cols, "cells" => cells,
+      "menu" => menu_flag(page) }.compact
   end
 
   # Les cellules qui tiennent dans la grille et ne se recouvrent pas.
@@ -262,7 +317,7 @@ module CompanionSettings
     return nil if blocks.empty?
 
     { "kind" => "list", "title" => page["title"].to_s.presence || "Sortie",
-      "blocks" => blocks }
+      "blocks" => blocks, "menu" => menu_flag(page) }.compact
   end
 
   # Un mode inconnu retombe sur le mode par défaut du composant (le premier de sa

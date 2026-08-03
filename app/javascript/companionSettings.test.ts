@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, isChoiceOf, metricSample,
-  averagesCardsFit, densityFor, legendFits, phoneCell, PHONE_GRID, recordingIsCompact,
-  zoneCount,
-  type Catalog, type Cell,
+  averagesCardsFit, budgetContextFits, canHideBehindMenu, densityFor, legendFits, phoneCell, PHONE_GRID,
+  recordingIsCompact, zoneCount,
+  type Catalog, type Cell, type Page,
 } from './companionSettings'
 
 // Le calcul de place dans une grille de tableau de bord.
@@ -253,6 +253,64 @@ describe('legendFits', () => {
   })
 })
 
+describe('canHideBehindMenu', () => {
+  // Une page rangée derrière le menu ne passe plus sous les yeux à chaque
+  // glissé : on va la chercher. Le bouton de l'éditeur s'éteint là où le
+  // déplacement n'est pas permis, plutôt que d'être corrigé à l'enregistrement —
+  // même règle que `maxSpan`, la limite se voit au lieu de se deviner.
+  const list = (extra: Partial<Page> = {}): Page => ({
+    kind: 'list', title: 'Effort', blocks: [{ kind: 'recording' }], ...extra,
+  })
+
+  it('range une page tant qu\'une autre reste au défilement', () => {
+    const target = list()
+    const pages = [target, list()]
+
+    expect(canHideBehindMenu(target, pages)).toBe(true)
+  })
+
+  it('refuse de ranger la dernière page du défilement', () => {
+    // Il ne resterait rien à faire défiler, donc aucune page où le menu s'ouvre,
+    // donc plus rien du tout. Le serveur la repêcherait (`keep_one_swipeable`),
+    // et l'éditeur montrerait entre-temps une composition qui n'existe pas.
+    const target = list()
+    const pages = [target, list({ menu: true })]
+
+    expect(canHideBehindMenu(target, pages)).toBe(false)
+  })
+
+  it('la carte ne peut pas porter le menu à elle seule', () => {
+    // Le piège de cette règle. La carte est bien une page du défilement, mais
+    // elle ne dessine aucun en-tête — donc aucun menu : le bilan qu'on aurait
+    // rangé ne serait atteignable par aucun geste.
+    const target = list()
+    const pages: Page[] = [{ kind: 'map' }, target]
+
+    expect(canHideBehindMenu(target, pages)).toBe(false)
+  })
+
+  it('une page de données de plus suffit à porter le menu', () => {
+    const target = list()
+    const pages: Page[] = [{ kind: 'map' }, target, list({ title: 'Chiffres' })]
+
+    expect(canHideBehindMenu(target, pages)).toBe(true)
+  })
+
+  it('ne range jamais la carte, même bien entourée', () => {
+    const map: Page = { kind: 'map' }
+
+    expect(canHideBehindMenu(map, [map, list(), list()])).toBe(false)
+  })
+
+  it('ramener au défilement est toujours permis', () => {
+    // C'est le sens qui ne peut rien vider : refuser ici enfermerait une page
+    // derrière le menu sans moyen de l'en sortir.
+    const target = list({ menu: true })
+
+    expect(canHideBehindMenu(target, [target])).toBe(true)
+  })
+})
+
 describe('les autres replis', () => {
   it('ramène les moyennes en liste dans une case de grille', () => {
     expect(averagesCardsFit(undefined)).toBe(true)
@@ -263,6 +321,24 @@ describe('les autres replis', () => {
   it('réduit le bouton d\'enregistrement à son icône quand le libellé ne tient plus', () => {
     expect(recordingIsCompact(phoneCell(1, 1))).toBe(false)
     expect(recordingIsCompact(phoneCell(3, 2))).toBe(true)
+  })
+
+  it('retire le contexte du budget avant son chiffre', () => {
+    // La fraîcheur et le risque se lisent en diagonale : ils partent les premiers,
+    // comme la légende des zones. Ce qui reste — « 62 / 85 » et sa barre — répond
+    // encore à la question qu'on se pose au guidon.
+    expect(budgetContextFits(undefined)).toBe(true)
+    expect(budgetContextFits(phoneCell(1, 1))).toBe(true)
+    expect(budgetContextFits(phoneCell(2, 2))).toBe(true)
+    // Trois colonnes : deux pastilles côte à côte se marcheraient dessus.
+    expect(budgetContextFits(phoneCell(3, 3))).toBe(false)
+  })
+
+  it('garde le contexte du budget dans une case large et plate', () => {
+    // Une ligne de grille entière : la densité y est minimale (93 px de haut), et
+    // pourtant les pastilles tiennent — c'est la largeur qui leur manquait ailleurs.
+    expect(densityFor(phoneCell(6, 1))).toBe('minimal')
+    expect(budgetContextFits(phoneCell(6, 1))).toBe(true)
   })
 })
 

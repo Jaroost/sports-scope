@@ -265,6 +265,45 @@ des jointures pour reconstituer à chaque fois la même chose.
 sont celles de `lib/dashboard/` côté Dart. Y toucher demande de modifier les deux
 dépôts.
 
+### Une page derrière le menu, ou dans le défilement
+
+Une page porte un booléen `menu`. Absent, elle reste dans le défilement ; vrai, elle
+sort du `PageView` et se retrouve **dans le menu ⋮ de l'appli**, d'où elle s'ouvre
+par-dessus tout le reste.
+
+C'est ce qui rend composable une page qu'on ne lit **pas** en roulant — un bilan,
+des répartitions, ce qu'on consulte à l'arrêt — sans la mettre à un glissé de la
+carte, où elle passerait sous les yeux à chaque changement de page.
+
+Trois choses à ne pas défaire :
+
+- **Absent vaut « dans le défilement », des deux côtés.** Un document plus ancien
+  que l'appli garde ses pages là où elles étaient ; une appli plus ancienne que le
+  document ignore la clé et les montre toutes. L'erreur va donc toujours vers
+  « visible », jamais vers « introuvable » — le seul sens acceptable pour une page
+  qu'on a composée exprès.
+- **Il faut au défilement une page qui ne soit pas la carte.** C'est l'en-tête
+  d'une page de données qui porte le menu ; la carte n'en dessine pas. Deux
+  façons de se retrouver sans rien, donc — tout ranger derrière le menu, ou ne
+  laisser que la carte — et la seconde est la sournoise : le défilement existe,
+  mais ce qu'on a rangé n'est atteignable par aucun geste. Dans les deux cas la
+  première page rangée reprend sa place (`keep_one_swipeable` côté site,
+  `RidePreset.ridePages` côté Dart, un test de chaque côté). L'éditeur éteint le
+  bouton avant d'en arriver là (`canHideBehindMenu`), comme il borne déjà les
+  étendues de cellules.
+- **La carte ne s'y range jamais.** Le WebView est peint au fond de la pile pour
+  toute la sortie, ce n'est pas une page qu'on ouvre et qu'on referme. Et
+  `RidePreset.mapPageIndex` indexe **le défilement** et non `pages` : c'est ce que
+  manipulent le `PageView`, les pastilles du bandeau et le retour automatique.
+
+La page ouverte vit **dans la pile de la coquille**, pas dans une route poussée :
+le bandeau, les jauges du radar, le cadre d'alerte et les mètres de l'encoche
+appartiennent à `RideShellPage`, et une route par-dessus les emporterait tous — on
+consulte un bilan *pendant* une sortie, une voiture qui remonte doit s'y voir comme
+ailleurs. Une alerte referme d'ailleurs la page (`_setMenuPage(null)` dans
+`_decideReturn`) **avant** que la politique ne décide : elle juge sur `currentPage`,
+et un bilan ouvert par-dessus la carte se serait lu « il y est déjà, rien à faire ».
+
 ### Pourquoi un assainisseur ici alors que l'appli en a déjà un
 
 L'application ne fait jamais confiance à ce document : elle ignore les clés
@@ -379,6 +418,34 @@ l'éditeur a besoin** : il annonce alors un téléphone ordinaire (« ces cases
 feraient… ») au lieu de prétendre connaître celui de l'utilisateur (« ces cases
 feront… »). La valeur de repli est écrite des deux côtés — `CompanionViewport::
 DEFAULT` et `PHONE_GRID` — et un test la compare.
+
+### Le budget de charge : le seul composant que le site calcule
+
+Le composant `training_budget` ne lit aucun capteur. Il répond à la question à
+laquelle aucun capteur ne répond — *je continue ou je rentre ?* — et pour ça il
+faut la charge des six dernières semaines, l'objectif d'entraînement et la cible
+de la semaine. Deux modes : `day` (fait + sortie en cours / cible, plafond de
+fatigue, fraîcheur, risque) et `week` (cible, fait, prévu, reste).
+
+Le calcul **reste dans `useTrainingPlan.ts`**, celui qui alimente déjà la page
+Performances, et la page de navigation le pousse par le pont
+(`pushTrainingBudget`, `companionBridge.ts`, message `training_budget`) —
+exactement comme elle pousse déjà `/api/rider_profile`. Le refaire en Ruby pour
+servir l'appli donnerait deux plafonds pour un athlète, et le second à se tromper
+serait celui qu'on lit en roulant.
+
+Le TSS de la sortie **en cours** n'y est pas : elle n'est téléversée nulle part,
+c'est le téléphone qui l'ajoute (`rideTss`, dépôt voisin), avec la même cascade
+que `TrainingLoad.activity_tss` — puissance, puis cardio, puis l'intensité par
+défaut du vélo.
+
+Ce qui rend tout ça possible : **l'objectif d'entraînement est un réglage de
+compte** (`preferences.training`), plus une clé de `localStorage`. C'est lui qui
+fixe le plancher de fatigue, donc le plafond ; deux stockages locaux donneraient
+deux plafonds, et celui de l'appli — qui lit le site depuis le WebView de
+l'appareil — n'aurait jamais vu l'objectif choisi sur l'ordinateur. La reprise de
+l'ancienne clé se fait une fois, au premier chargement, et seulement si le compte
+est encore sur ses valeurs d'usine (`legacyPlan` / `initialPlan`).
 
 ### Le piège du PATCH
 

@@ -69,8 +69,12 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
       </button>
       <span class="visually-hidden">{{ turnHint.direction === 'right' ? t('routes.turn_right') : t('routes.turn_left') }}</span>
     </div>
+    <!-- Ce que la veille n'a PAS coupé. Écran noir, la question qui vient est « est-ce que
+         je suis encore guidé ? » — et la seule chose qui puisse y répondre pendant les
+         kilomètres sans virage, c'est cette ligne. -->
     <div class="nav-screen-off-hint">
-      <i class="fa-solid fa-eye me-2" aria-hidden="true"></i>{{ t('routes.tap_to_resume') }}
+      <span><i class="fa-solid fa-eye me-2" aria-hidden="true"></i>{{ t('routes.tap_to_resume') }}</span>
+      <span class="nav-screen-off-note">{{ t('routes.sleep_still_on') }}</span>
     </div>
   </div>
 </template>
@@ -86,9 +90,13 @@ const isUrgent = () => props.turnHint?.state === 'near' && props.turnHint.distM 
 }
 .nav-screen-off-hint {
   position: absolute; bottom: 2.5rem;
+  display: flex; flex-direction: column; align-items: center; gap: 0.2rem;
   color: rgba(255, 255, 255, 0.35);
-  font-size: 0.85rem;
+  font-size: 0.85rem; text-align: center;
 }
+/* Encore plus discret que « appuyer pour reprendre » : c'est un rappel, pas une consigne —
+   et le voile doit rester noir pour la batterie comme pour la vision de nuit. */
+.nav-screen-off-note { font-size: 0.75rem; color: rgba(255, 255, 255, 0.22); }
 .nav-turn-sleep {
   display: flex; flex-direction: column; align-items: center; gap: 1.25rem;
   background: #7c3aed; color: #fff;

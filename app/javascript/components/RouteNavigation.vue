@@ -30,6 +30,7 @@ import NavTurnBanner from './NavTurnBanner.vue'
 import NavPoiBanner from './NavPoiBanner.vue'
 import NavPoiBrowser from './NavPoiBrowser.vue'
 import NavScreenOff from './NavScreenOff.vue'
+import NavSleepHold from './NavSleepHold.vue'
 import NavClimbCard from './NavClimbCard.vue'
 import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
@@ -51,6 +52,7 @@ import {
 } from '../composables/useNavCamera'
 import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
+import { useSleepHold } from '../composables/useSleepHold'
 import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX } from '../navConstants'
 import { useOfflineMaps } from '../composables/useOfflineMaps'
 import { usePoiBrowse } from '../composables/usePoiBrowse'
@@ -58,7 +60,7 @@ import { useNavToast } from '../composables/useNavToast'
 import { useNavDebug } from '../composables/useNavDebug'
 import { useRouteEditing } from '../composables/useRouteEditing'
 import { useDestinationNav } from '../composables/useDestinationNav'
-import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
+import { buildCoordPopupContent, attachTwoFingerTap } from '../mapCoordPopup'
 import { popupHeaderHtml, popupActionHtml, escapeHtml } from '../placePopup'
 import { saveNavSession, loadNavSession, clearNavSession } from '../navSession'
 import { loadProgress, saveProgress, clearProgress, clearAllProgress } from '../navProgress'
@@ -289,14 +291,60 @@ function revealControls() {
   showControls()
 }
 
+// ─── Mise en veille par appui long ────────────────────────────────────────────
+// Endormir demande de maintenir le doigt (anneau qui se remplit) ; réveiller reste un tap.
+// Voir useSleepHold pour le pourquoi de l'asymétrie. Les modes qui donnent déjà un rôle au
+// doigt sur la carte gardent la main : édition (pose d'ancrage), cible (point d'étape),
+// tiroir ouvert (le tap le referme) — et la veille elle-même, où seul le réveil existe.
+const {
+  press: sleepPress,
+  hint: sleepHint,
+  onHoldDown: onSleepDown,
+  onHoldMove: onSleepMove,
+  onHoldUp: onSleepUp,
+  cancelHold: cancelSleepHold,
+  showHint: showSleepHint,
+  attach: attachSleepHold,
+} = useSleepHold({
+  canHold: () => !screenOff.value && !editMode.value && !placeNavActive.value
+    && !poiBrowseActive.value && !controlsVisible.value,
+  onComplete: () => {
+    // Le doigt est encore posé : le clic de compatibilité qui suivra le relâchement
+    // tomberait sur la carte (bulle, point d'étape, rappel du geste). Même garde que
+    // l'appui long de la bulle coordonnées.
+    suppressNextMapClick = true
+    setTimeout(() => { suppressNextMapClick = false }, 500)
+    toggleScreenOffManual()
+  },
+})
+
+// Tap là où, avant, l'écran s'endormait : on rappelle le geste plutôt que de ne rien
+// faire. C'est le seul instant où l'on sait que quelqu'un cherchait la veille.
+function onSleepZoneTap() {
+  if (screenOff.value) { toggleScreenOffManual(); return }
+  showSleepHint()
+}
+
 // ─── Zone de veille (bandeau haut) ────────────────────────────────────────────
 // Le tiroir de commandes vit maintenant en bas : la bande haute n'est plus qu'une zone
-// de tap, dédiée à la veille (endort hors veille, réveille en veille, comme un tap
-// n'importe où sur le voile). Aucun swipe à y écouter. Voir useRevealGesture.
+// de tap dédiée à la veille — elle réveille d'un tap, et endort à l'appui long comme la
+// carte (les mêmes gestionnaires y sont branchés). Aucun swipe à y écouter. Voir
+// useRevealGesture.
 const { onRevealDown, onRevealMove, onRevealUp, cancel: cancelReveal } = useRevealGesture({
-  onTap: () => toggleScreenOffManual(),
+  onTap: () => onSleepZoneTap(),
   canTap: () => true,
 })
+
+// La bande haute écoute les deux gestes sur les mêmes pointeurs. Le relâchement d'un appui
+// qui a abouti n'y est pas un tap : sans ce filtre, il réveillerait aussitôt l'écran que
+// l'appui vient d'éteindre (voir useSleepHold.onHoldUp).
+function onSleepZoneDown(e: PointerEvent) { onRevealDown(e); onSleepDown(e) }
+function onSleepZoneMove(e: PointerEvent) { onRevealMove(e); onSleepMove(e) }
+function onSleepZoneUp(e: PointerEvent) {
+  if (onSleepUp(e)) { cancelReveal(); return }
+  onRevealUp(e)
+}
+function onSleepZoneCancel() { cancelReveal(); cancelSleepHold() }
 
 // ─── Geste de révélation du tiroir (swipe vers le haut depuis le bord bas) ─────
 // Swipe vers le haut → rappelle le tiroir de commandes, y compris en veille, par-dessus
@@ -452,11 +500,15 @@ let turnFlowStep = -1
 // ici, avec l'état de la carte : applyRouteLinePaint tourne dès le setup (watch immédiat)
 // et la lit — une déclaration plus bas dans le script la mettrait en zone morte.
 let hiKey = ''
-// Tooltip d'un point quelconque de la carte (clic droit / appui long) : coordonnées
-// copiables, Google Maps, Street View. Voir mapCoordPopup. suppressNextMapClick neutralise
-// le clic synthétique de relâchement d'un appui long (sinon il basculerait la veille).
+// Tooltip d'un point quelconque de la carte (clic droit / tap à deux doigts) : coordonnées
+// copiables, Google Maps, Street View. Voir mapCoordPopup. L'appui long, qui l'ouvrait au
+// doigt, sert désormais à la veille — d'où le tap à deux doigts, dans la même famille de
+// gestes que le déplacement et le zoom (cf. TWO_FINGER_PAN). suppressNextMapClick
+// neutralise le clic synthétique que laisse un geste abouti (appui long ou tap à deux
+// doigts) : sans lui, il irait rappeler le geste de veille ou poser un point.
 let coordPopup: any = null
-let detachCoordLongPress: (() => void) | null = null
+let detachCoordTap: (() => void) | null = null
+let detachSleepHold: (() => void) | null = null
 let suppressNextMapClick = false
 
 // Route data (non-reactive: large arrays, only read inside callbacks)
@@ -851,7 +903,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('online', refreshBaseMap)
   window.removeEventListener('offline', refreshBaseMap)
   window.removeEventListener('resize', refreshContainerH)
-  if (detachCoordLongPress) { detachCoordLongPress(); detachCoordLongPress = null }
+  if (detachCoordTap) { detachCoordTap(); detachCoordTap = null }
+  if (detachSleepHold) { detachSleepHold(); detachSleepHold = null }
   closeCoordPopup()
   closeTurnPopup()
   destroyEditOverlays()
@@ -1441,49 +1494,59 @@ async function initMap() {
     hideControls()
   }, true)
 
-  // Tap simple sur la carte → mode veille (la boucle rAF s'arrête, le wake lock est libéré).
-  // L'overlay noir capte le tap de réveil ; pas de conflit car il est au z-index 20.
+  // Tap simple sur la carte : il n'endort plus rien (c'est l'appui long, cf. useSleepHold).
+  // Il reste le geste qui referme ce qui est ouvert et qui sert aux modes édition / cible ;
+  // quand il ne tombe sur rien, on rappelle le geste de veille — sinon la page paraîtrait
+  // ne plus répondre à qui pressait la carte par habitude.
   map.on('click', (e: any) => {
-    // Clic synthétique de relâchement d'un appui long : déjà traité (tooltip coordonnées).
+    // Clic synthétique de relâchement d'un geste déjà traité (veille, tap à deux doigts).
     if (suppressNextMapClick) { suppressNextMapClick = false; return }
     // Tooltip « point quelconque » ouverte : un tap ne fait que la refermer.
     if (coordPopup) { closeCoordPopup(); return }
     // Le tiroir de commandes ouvert absorbe le tap en amont (cf. le gestionnaire en
     // capture sur le conteneur de carte, plus bas) : on n'arrive jamais ici tiroir ouvert.
     // Mode édition : un tap pose un nouveau point d'ancrage (ou referme la tooltip d'un
-    // point ouverte) au lieu de mettre en veille.
+    // point ouverte).
     if (editMode.value) {
       if (hasEditPopup()) { closeEditPopup(); return }
       addEditWaypoint(e.lngLat.lng, e.lngLat.lat)
       return
     }
-    // Mode « cible » : le tap pose un point d'étape au lieu de mettre en veille (voir
-    // useDestinationNav.handleMapTap, qui dit s'il l'a consommé).
+    // Mode « cible » : le tap pose un point d'étape (voir useDestinationNav.handleMapTap,
+    // qui dit s'il l'a consommé).
     if (handlePlaceNavTap(e.point, [e.lngLat.lng, e.lngLat.lat])) return
-    // Un popup POI ouvert : le tap carte ne fait que le fermer (pas de mise en veille).
+    // Un popup POI ouvert : le tap carte ne fait que le fermer.
     if (pois.hasOpenPopup()) { pois.closePlacePopup(); return }
     // Idem pour la tooltip d'un virage.
     if (turnPopup) { closeTurnPopup(); return }
-    // Tap sur une pastille de virage : tooltip « franchi / pas encore », pas de veille.
-    // Placé juste avant la veille pour ne rien voler aux modes qui précèdent (édition,
-    // cible, POI), qui ont tous leur propre usage du tap.
+    // Tap sur une pastille de virage : tooltip « franchi / pas encore ».
     if (handleTurnTap(e.point)) return
-    if (!screenOff.value) toggleScreenOffManual()
+    // Le tap n'a rien trouvé à faire : c'est là que l'écran s'endormait. On dit comment.
+    onSleepZoneTap()
   })
   // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View.
   map.on('contextmenu', (e: any) => {
     e.preventDefault?.()
     showCoordPopup(e.lngLat.lng, e.lngLat.lat)
   })
-  // Appui long (mobile) : même tooltip. On neutralise le clic synthétique de relâchement
-  // (suppressNextMapClick) pour qu'il ne bascule pas la veille. Voir attachLongPress.
-  detachCoordLongPress = attachLongPress(map.getCanvas(), (clientX, clientY) => {
+  // Tap à deux doigts (mobile) : même tooltip, l'appui long étant passé à la veille. On
+  // neutralise le clic synthétique de relâchement (suppressNextMapClick). Voir
+  // attachTwoFingerTap.
+  detachCoordTap = attachTwoFingerTap(map.getCanvas(), (clientX, clientY) => {
     const rect = map.getContainer().getBoundingClientRect()
     const ll = map.unproject([clientX - rect.left, clientY - rect.top])
     showCoordPopup(ll.lng, ll.lat)
     suppressNextMapClick = true
     setTimeout(() => { suppressNextMapClick = false }, 500)
   })
+  // Appui long (un doigt) sur la carte : mise en veille, avec l'anneau de progression.
+  // Branché sur le canvas et non sur le conteneur : les bulles et les marqueurs vivent dans
+  // le conteneur, or un appui sur une bulle qu'on est en train de lire n'est pas une veille.
+  detachSleepHold = attachSleepHold(map.getCanvas())
+  // Tap à deux doigts de MapLibre = dézoom (TapZoomHandler, cf. attachTwoFingerTap) : il
+  // ferait fuir la carte au moment où l'on renseigne un point. On le désactive au doigt
+  // seulement — au clic, le double-clic pour zoomer reste normal, et rien ne le concurrence.
+  if (TWO_FINGER_PAN) map.doubleClickZoom.disable()
 
   await new Promise<void>((resolve) => {
     map.on('load', () => {
@@ -2463,13 +2526,13 @@ function updatePoiProximity(here: LngLat) {
 // Le suivi caméra est débrayé le temps du coup d'œil, comme pendant le parcours des POI :
 // le bouton « Recentrer » ramène sur le coureur.
 //
-// Deux cas retombent sur l'ancien comportement (bascule de veille) : en veille, où le tap
-// sert à réveiller l'écran ; et sans POI géolocalisé sous la main (notification factice du
-// mode débug) ou sans position connue, où il n'y a rien à cadrer.
+// Deux cas retombent sur la sémantique du tap carte : en veille, où il réveille l'écran ;
+// et sans POI géolocalisé sous la main (notification factice du mode débug) ou sans
+// position connue, où il n'y a rien à cadrer — il rappelle alors le geste de veille.
 function focusPoiHint() {
   const here = anchorPos ?? lastPos
   if (screenOff.value || !poiHintPlace || !here || !map || !maplibre) {
-    toggleScreenOffManual()
+    onSleepZoneTap()
     return
   }
   // Referme le tiroir de commandes s'il est ouvert : il mange la moitié basse de la carte,
@@ -2741,19 +2804,24 @@ function onScreenOffTap() {
       <i class="fa-solid fa-triangle-exclamation me-2" aria-hidden="true"></i>{{ error }}
     </div>
 
-    <!-- Zone de veille : fine bande transparente en haut, où un tap bascule la veille
-         dans les deux sens. Active dès que le tiroir est replié (quand il est ouvert,
-         l'utilisateur règle quelque chose : un tap au bord haut ne doit pas endormir
-         l'écran) ; en veille elle passe au-dessus du voile noir pour réveiller. -->
+    <!-- Zone de veille : fine bande transparente en haut. Un appui long y endort (comme
+         sur la carte, qu'elle recouvre), un tap y réveille — et hors veille, rappelle le
+         geste. Active dès que le tiroir est replié (quand il est ouvert, l'utilisateur
+         règle quelque chose : un appui au bord haut ne doit pas endormir l'écran) ; en
+         veille elle passe au-dessus du voile noir pour réveiller. -->
     <div
       v-if="!controlsVisible"
       class="nav-reveal-zone"
       :class="{ 'nav-reveal-zone--sleep': screenOff }"
-      @pointerdown="onRevealDown"
-      @pointermove="onRevealMove"
-      @pointerup="onRevealUp"
-      @pointercancel="cancelReveal"
+      @pointerdown="onSleepZoneDown"
+      @pointermove="onSleepZoneMove"
+      @pointerup="onSleepZoneUp"
+      @pointercancel="onSleepZoneCancel"
     ></div>
+
+    <!-- Anneau de progression de l'appui long (sous le doigt) et explication de ce que la
+         veille coupe — et de ce qu'elle ne coupe pas. Voir useSleepHold / NavSleepHold. -->
+    <NavSleepHold :press="sleepPress" :hint="sleepHint" />
 
     <!-- Panneau de commandes : feuille qui glisse depuis le BAS au swipe vers le haut.
          Regroupe TOUS les boutons (retour, profil, style de carte, son, caméra,
@@ -3016,12 +3084,14 @@ function onScreenOffTap() {
     </button>
 
     <!-- Climb card: full graded elevation profile with a position cursor.
-         Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. -->
+         Reste visible (au-dessus du voile noir) en mode veille ; un tap réveille. Hors
+         veille il ne l'endort plus (c'est l'appui long) : la carte du col est faite pour
+         être lue, et on la touche en la lisant. -->
     <NavClimbCard
       v-if="showClimbCard && bottomOverlaysVisible && climbInfo && !offRoute && !approachingTurn && !editMode && !poiBrowseActive"
       :climb-info="climbInfo"
       :screen-off="screenOff"
-      @resume="toggleScreenOffManual"
+      @resume="onSleepZoneTap"
     />
 
     <!-- Notification de proximité d'un point d'intérêt : bandeau compact en bas, juste

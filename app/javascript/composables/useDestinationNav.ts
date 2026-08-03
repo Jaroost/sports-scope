@@ -348,8 +348,8 @@ export function useDestinationNav(opts: UseDestinationNavOptions) {
     removeDestPointAt(destPoints.value.length - 1)
   }
 
-  // Tap sur la carte en mode « cible » : le tap pose un point d'étape au lieu de mettre en
-  // veille. Tooltip d'un point ouverte → un tap ailleurs la referme d'abord. Tap SUR le
+  // Tap sur la carte en mode « cible » : le tap pose un point d'étape (au lieu de son rôle
+  // ordinaire). Tooltip d'un point ouverte → un tap ailleurs la referme d'abord. Tap SUR le
   // trajet d'aperçu → insertion au bon rang ; sinon ajout en fin de séquence. Renvoie vrai
   // si le tap a été consommé (le composant n'a alors plus rien à en faire).
   function handleMapTap(point: any, lngLat: LngLat): boolean {

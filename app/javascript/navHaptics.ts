@@ -46,3 +46,11 @@ export function vibratePoi(): void {
 export function vibrateArrival(): void {
   vibrate([150, 100, 150, 100, 350])
 }
+
+// Buzz unique très court : l'appui long vient d'aboutir, l'écran passe en veille. Ce n'est
+// pas une alerte mais un accusé de réception — le doigt est encore sur l'écran et tout
+// devient noir, il faut dire que c'est bien ce geste-là qui a agi. Volontairement plus bref
+// que tous les motifs ci-dessus, qu'on doit pouvoir reconnaître sans regarder.
+export function vibrateSleep(): void {
+  vibrate(45)
+}

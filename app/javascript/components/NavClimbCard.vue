@@ -8,8 +8,9 @@ defineEmits<{ (e: 'resume'): void }>()
 
 <template>
   <!-- Climb card: full graded elevation profile with a position cursor.
-       Reste visible (au-dessus du voile noir) en mode veille. Un tap bascule entre
-       navigation et veille (réveille en veille, met en veille en navigation). -->
+       Reste visible (au-dessus du voile noir) en mode veille. Un tap réveille l'écran ;
+       hors veille il ne l'endort pas (c'est l'appui long, cf. useSleepHold) mais rappelle
+       le geste — la page décide, la carte du col ne fait qu'émettre. -->
   <div
     class="nav-climb nav-climb--clickable shadow"
     :class="{ 'nav-climb--sleep': screenOff }"
@@ -73,7 +74,7 @@ defineEmits<{ (e: 'resume'): void }>()
      du col. Même choix que NavStatsBar.vue. */
   z-index: 6; background: #fff; border-radius: 0.75rem; padding: 0.6rem 0.85rem;
 }
-/* Tap = bascule de la veille (dans les deux sens), d'où le curseur main. */
+/* Tap = réveil (et rappel du geste de veille hors veille), d'où le curseur main. */
 .nav-climb--clickable { cursor: pointer; }
 /* Mode veille : la carte du col passe au-dessus du voile noir (z 20). On garde sa
    position par défaut pour laisser l'indice « tap pour reprendre » visible dessous. */

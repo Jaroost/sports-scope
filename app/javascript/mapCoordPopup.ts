@@ -159,3 +159,65 @@ export function attachLongPress(
     target.removeEventListener('touchcancel', clear)
   }
 }
+
+// Tap à deux doigts (mobile) : deux doigts posés puis relevés sans bouger. Même rôle que
+// l'appui long ci-dessus — ouvrir la bulle d'un point quelconque — pour les cartes où
+// l'appui long sert à autre chose (en navigation, il met en veille). Le geste s'inscrit
+// dans la famille que la navigation impose déjà à deux doigts : glisser déplace, écarter
+// zoome, taper renseigne.
+//
+// Passif lui aussi : le pinch de MapLibre a besoin de ses touchmove, et un tap immobile ne
+// le déclenche pas. Le tap à deux doigts de MapLibre, lui, dézoome (TapZoomHandler) — c'est
+// à l'appelant de le désactiver, sinon le point se renseigne et la carte s'éloigne.
+export function attachTwoFingerTap(
+  target: HTMLElement,
+  handler: (clientX: number, clientY: number) => void,
+  maxMs = 450,
+  moveTolPx = 18,
+): () => void {
+  type Pt = { x: number; y: number }
+  let armed = false
+  let startedAt = 0
+  let start: Pt[] = []
+  let last: Pt[] = []
+  const points = (e: TouchEvent): Pt[] =>
+    Array.from(e.touches).map((t) => ({ x: t.clientX, y: t.clientY }))
+
+  const onStart = (e: TouchEvent) => {
+    // Un troisième doigt (ou un seul) : ce n'est pas ce geste-ci.
+    if (e.touches.length !== 2) { armed = false; return }
+    armed = true
+    startedAt = Date.now()
+    start = last = points(e)
+  }
+  const onMove = (e: TouchEvent) => {
+    if (!armed) return
+    if (e.touches.length !== 2) { armed = false; return }
+    last = points(e)
+    // Un doigt qui dérive = déplacement de carte ou pinch : on rend la main.
+    for (let i = 0; i < 2; i++) {
+      const dx = last[i].x - start[i].x, dy = last[i].y - start[i].y
+      if (dx * dx + dy * dy > moveTolPx * moveTolPx) { armed = false; return }
+    }
+  }
+  // Premier doigt relevé : c'est la fin du tap (touches.length retombe à 1).
+  const onEnd = () => {
+    if (!armed) return
+    armed = false
+    if (Date.now() - startedAt > maxMs) return
+    handler((last[0].x + last[1].x) / 2, (last[0].y + last[1].y) / 2)
+  }
+  const onCancel = () => { armed = false }
+
+  target.addEventListener('touchstart', onStart, { passive: true })
+  target.addEventListener('touchmove', onMove, { passive: true })
+  target.addEventListener('touchend', onEnd, { passive: true })
+  target.addEventListener('touchcancel', onCancel, { passive: true })
+  return () => {
+    armed = false
+    target.removeEventListener('touchstart', onStart)
+    target.removeEventListener('touchmove', onMove)
+    target.removeEventListener('touchend', onEnd)
+    target.removeEventListener('touchcancel', onCancel)
+  }
+}

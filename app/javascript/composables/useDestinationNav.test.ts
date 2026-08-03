@@ -180,7 +180,7 @@ describe('useDestinationNav', () => {
     expect(nav.previewDistM.value).toBeNull()
   })
 
-  it('ignore le tap hors mode cible (il met l’écran en veille)', () => {
+  it('ignore le tap hors mode cible (la page en fait autre chose)', () => {
     const { nav } = setup()
     expect(nav.handleMapTap(...tap([6.03, 46.5]))).toBe(false)
     expect(nav.destPoints.value).toEqual([])

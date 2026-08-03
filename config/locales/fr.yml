@@ -1639,6 +1639,7 @@ fr:
         cadence: "Vitesse et cadence"
         gears: "Vitesses Di2"
       metrics:
+        grade: "Pente"
         duration: "Durée"
         moving_time: "Temps en mouvement"
         distance: "Distance"

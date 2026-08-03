@@ -1639,6 +1639,7 @@ en:
         cadence: "Speed and cadence"
         gears: "Di2 gears"
       metrics:
+        grade: "Grade"
         duration: "Duration"
         moving_time: "Moving time"
         distance: "Distance"

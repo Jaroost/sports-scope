@@ -69,7 +69,7 @@ module CompanionSettings
     heart_rate hr_zone hr_avg hr_max
     power power_zone power_avg power_np power_max
     cadence cadence_avg
-    ascent altitude calories gears
+    ascent altitude grade calories gears
     route_remaining route_remaining_gain
   ].freeze
 

@@ -465,17 +465,22 @@ module CompanionSettings
           ]
         },
         {
-          "kind" => "grid", "title" => "Chiffres", "rows" => 3, "cols" => 3,
+          "kind" => "grid", "title" => "Chiffres", "rows" => 4, "cols" => 3,
           "cells" => [
             { "row" => 0, "col" => 0, "block" => metric("speed", "big") },
             { "row" => 0, "col" => 1, "block" => metric("distance", "compact") },
             { "row" => 0, "col" => 2, "block" => metric("ascent", "compact") },
-            # La ligne du milieu fusionnée : la barre des zones garde toute son
-            # information sans sa légende, qui ne tiendrait pas dans une cellule.
-            { "row" => 1, "col" => 0, "col_span" => 3,
+            # La pente sur toute la largeur, et en gros : c'est en montant qu'on
+            # la lit, à 8 km/h, le regard sur la route. Sous le D+ qui la cumule,
+            # parce que c'en est l'instant — la ligne du dessus dit le chemin
+            # parcouru, celle-ci dit le mètre sous les roues.
+            { "row" => 1, "col" => 0, "col_span" => 3, "block" => metric("grade", "big") },
+            # La ligne fusionnée : la barre des zones garde toute son information
+            # sans sa légende, qui ne tiendrait pas dans une cellule.
+            { "row" => 2, "col" => 0, "col_span" => 3,
               "block" => { "kind" => "zones", "source" => "power", "mode" => "bar_only" } },
-            { "row" => 2, "col" => 0, "block" => metric("power", "zone") },
-            { "row" => 2, "col" => 1, "col_span" => 2, "block" => metric("heart_rate", "gauge") }
+            { "row" => 3, "col" => 0, "block" => metric("power", "zone") },
+            { "row" => 3, "col" => 1, "col_span" => 2, "block" => metric("heart_rate", "gauge") }
           ]
         }
       ],

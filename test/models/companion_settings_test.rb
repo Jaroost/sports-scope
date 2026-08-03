@@ -53,7 +53,7 @@ class CompanionSettingsTest < ActiveSupport::TestCase
                  after["presets"].map { |p| p["key"] }
 
     grid = after["presets"].first["pages"].find { |page| page["kind"] == "grid" }
-    assert_equal 6, grid["cells"].size, "la grille de Route perd des cellules"
+    assert_equal 7, grid["cells"].size, "la grille de Route perd des cellules"
   end
 
   # ── les clés ────────────────────────────────────────────────────────────────

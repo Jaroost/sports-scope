@@ -1548,6 +1548,8 @@ en:
       open: "Configure the dashboard"
       intro: "A ride profile describes what the phone shows while riding: its pages, their contents, the values in the bottom band and the sensors it uses. You pick one at the start of a ride, in the app. Road, MTB and indoor trainer need neither the same figures nor a map."
       name: "Profile name"
+      description: "Description"
+      description_placeholder: "What helps pick this one, shown in the app before you start"
       add_preset: "Add a profile"
       new_preset: "New profile"
       duplicate: "Duplicate"

@@ -475,22 +475,23 @@ async function save() {
 
     <div v-if="preset" class="card mb-3">
       <div class="card-body">
-        <div class="row g-2 align-items-end mb-3">
-          <div class="col">
-            <label class="form-label small mb-1">{{ t('companion.settings.name') }}</label>
-            <input v-model="preset.name" class="form-control" type="text">
-          </div>
-          <div class="col-auto">
-            <button class="btn btn-outline-secondary" type="button" @click="duplicatePreset">
-              <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>{{ t('companion.settings.duplicate') }}
-            </button>
-          </div>
-          <div class="col-auto">
-            <button class="btn btn-outline-danger" type="button"
-                    :disabled="presets.length <= 1" @click="removePreset">
-              <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-            </button>
-          </div>
+        <div class="mb-2">
+          <label class="form-label small mb-1">{{ t('companion.settings.name') }}</label>
+          <input v-model="preset.name" class="form-control" type="text">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small mb-1">{{ t('companion.settings.description') }}</label>
+          <input v-model="preset.description" class="form-control" type="text" maxlength="140"
+                 :placeholder="t('companion.settings.description_placeholder')">
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          <button class="btn btn-outline-secondary" type="button" @click="duplicatePreset">
+            <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>{{ t('companion.settings.duplicate') }}
+          </button>
+          <button class="btn btn-outline-danger" type="button"
+                  :disabled="presets.length <= 1" @click="removePreset">
+            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+          </button>
         </div>
 
         <!-- Les pages -->

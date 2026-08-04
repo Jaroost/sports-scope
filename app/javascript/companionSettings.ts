@@ -45,6 +45,7 @@ export interface Band {
 export interface Preset {
   key?: string
   name: string
+  description?: string
   pages: Page[]
   bands: Band[]
   sensors?: Record<string, boolean>

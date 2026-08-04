@@ -89,6 +89,10 @@ module CompanionSettings
   # lisible. Même borne que `GridPageSpec.maxSide` côté Dart.
   MAX_GRID_SIDE = 6
 
+  # La description tient dans le sous-titre d'un `ListTile`, au moment où l'on
+  # choisit son profil avant de partir — pas dans un paragraphe.
+  MAX_DESCRIPTION_LENGTH = 140
+
   # Ce que l'éditeur reçoit en props. Sérialisé tel quel dans la page.
   def catalog
     {
@@ -168,6 +172,12 @@ module CompanionSettings
     {
       "key" => key,
       "name" => name.presence || key,
+      # Libre et facultative : ce que l'utilisateur écrit pour se souvenir, au
+      # départ, pourquoi ce profil-là plutôt qu'un autre — l'appli l'affiche dans
+      # son sélecteur. Tronquée plutôt que rejetée, pour la même raison qu'un mode
+      # inconnu retombe sur le défaut : composer une longue description ne doit
+      # pas faire perdre le profil, juste sa fin.
+      "description" => raw["description"].to_s.strip[0, MAX_DESCRIPTION_LENGTH].presence,
       # Un profil vidé de toutes ses pages retombe sur la page Effort : on ne
       # laisse jamais partir un tableau de bord sans contenu, l'appli monterait
       # une coquille vide qu'on ne diagnostique pas au guidon.
@@ -459,6 +469,7 @@ module CompanionSettings
     {
       "key" => "road",
       "name" => "Route",
+      "description" => "Carte, effort et chiffres — la sortie complète.",
       "pages" => [
         { "kind" => "map" },
         {
@@ -504,6 +515,7 @@ module CompanionSettings
     {
       "key" => "mtb",
       "name" => "VTT",
+      "description" => "Carte et effort seulement, radar rapproché.",
       "pages" => [
         { "kind" => "map" },
         {
@@ -534,6 +546,7 @@ module CompanionSettings
     {
       "key" => "trainer",
       "name" => "Home-trainer",
+      "description" => "Sans carte ni GPS — pour rouler à l'intérieur.",
       "pages" => [
         {
           "kind" => "grid", "title" => "Séance", "rows" => 2, "cols" => 2,

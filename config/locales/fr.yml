@@ -1548,6 +1548,8 @@ fr:
       open: "Configurer le tableau de bord"
       intro: "Un profil de sortie décrit ce que le téléphone affiche en roulant : ses pages, leur contenu, les valeurs du bandeau du bas et les capteurs utilisés. Le cycliste en choisit un au départ, dans l'appli. Route, VTT et home-trainer n'ont ni les mêmes mesures utiles, ni le même besoin de carte."
       name: "Nom du profil"
+      description: "Description"
+      description_placeholder: "Ce qui aide à choisir, affiché dans l'appli au départ"
       add_preset: "Ajouter un profil"
       new_preset: "Nouveau profil"
       duplicate: "Dupliquer"

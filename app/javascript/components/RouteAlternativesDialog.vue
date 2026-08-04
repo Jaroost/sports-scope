@@ -735,8 +735,27 @@ onBeforeUnmount(() => {
     margin: 0.5rem 0 0;
   }
   .raltd-profile-select { flex: 1; max-width: none; }
-  .raltd-legend { padding: 0.6rem 0.8rem 0.75rem; }
+  /* Toute la zone (indice, pastilles, bouton « chercher plus large ») défile
+     ensemble plutôt que de grandir librement avec le nombre d'alternatives :
+     ça écraserait la carte. Le bouton est déjà le dernier enfant du DOM, il
+     se retrouve donc naturellement en bas de la zone défilante. */
+  .raltd-legend {
+    padding: 0.6rem 0.8rem 0.75rem;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    max-height: 20vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .raltd-hint { margin-bottom: 0.4rem; }
+  /* Une alternative par ligne, pleine largeur : plus lisible qu'une grille de
+     pastilles compactes une fois la zone réduite à 20vh. */
+  .raltd-chips { flex-direction: column; flex-wrap: nowrap; }
+  .raltd-chip { width: 100%; }
+  .raltd-widen-note,
+  .raltd-widen { width: 100%; }
+  .raltd-widen { white-space: normal; }
 }
 </style>
 

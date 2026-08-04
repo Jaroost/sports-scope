@@ -24,20 +24,12 @@
 // que ça tient ? — était justement ce qu'elle ne montrait pas. Le rapport de la
 // case et le facteur d'échelle sont donc les mêmes que dans la grille de
 // l'éditeur (`styleFor`), à un budget de tuile près.
-//
-// **Et quand deux modes donnent le même écran, la tuile le dit.** Dans cette
-// même case de six colonnes, « Chiffre plein cadre », « Jauge » et « Aplat de
-// zone » dessinent le même chiffre : le téléphone n'a la place de rien d'autre.
-// Trois vignettes identiques sans un mot se lisent comme un bogue de l'éditeur —
-// on repart en cherchant laquelle était la bonne, alors qu'aucune ne l'est plus
-// que les autres. C'est `blockShape` qui le dit, la forme comparée étant celle
-// que la vignette dessine (cf. `companionSettings`).
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  BLOCK_METRICS, blockChoices, blockFor, blockShape, densityFor, isChoiceOf, sameDrawing,
-  type Block, type BlockChoice, type BlockShape, type Catalog, type CellSize,
+  blockChoices, blockFor, isChoiceOf, NATURAL_LINE_SIZE, previewScale,
+  type Block, type BlockChoice, type Catalog, type CellSize,
 } from '../companionSettings'
 
 const props = defineProps<{
@@ -69,10 +61,6 @@ interface Tile {
   key: string
   block: Block
   label: string
-  // Le mode déjà proposé plus haut qui dessine exactement la même chose dans
-  // cette case-là. Le premier de la liste ne renvoie donc jamais à un autre :
-  // c'est celui du catalogue, et le catalogue met le mode par défaut en tête.
-  sameAs?: string
 }
 
 // Les vignettes, regroupées par genre — l'ordre est celui du catalogue, donc
@@ -81,19 +69,13 @@ const groups = computed(() => {
   const choices = blockChoices(props.catalog)
 
   return Object.keys(props.catalog.blocks).map((kind) => {
-    const drawn: { shape: BlockShape; label: string }[] = []
-
     const tiles = choices
       .filter((choice) => choice.kind === kind)
-      .map((choice) => {
-        const block = blockFor(choice, { metric: metric.value, source: source.value })
-        const shape = blockShape(block, props.cell)
-        const twin = drawn.find((seen) => sameDrawing(seen.shape, shape))
-        const label = labelOf(choice)
-
-        drawn.push({ shape, label })
-        return { key: `${choice.kind}:${choice.mode || ''}`, block, label, sameAs: twin?.label }
-      }) as Tile[]
+      .map((choice) => ({
+        key: `${choice.kind}:${choice.mode || ''}`,
+        block: blockFor(choice, { metric: metric.value, source: source.value }),
+        label: labelOf(choice),
+      })) as Tile[]
 
     return { kind, tiles }
   })
@@ -127,10 +109,11 @@ const tileStyle = computed(() => {
   const cell = props.cell
   if (!cell) return undefined
 
-  // `lineSize` est ce qu'une ligne mesure sur le téléphone, et la vignette écrit
+  // `lineSize` est ce qu'une ligne mesure sur le téléphone, réduite par
+  // `previewScale` comme le fait `ScaleToFit` côté appli, et la vignette écrit
   // ses lignes en 1,15 em — le même rapport que `--cbp-em` dans la grille de
   // l'éditeur, en pixels plutôt qu'en `cqw` parce qu'ici la place est connue.
-  const { lineSize } = BLOCK_METRICS[densityFor(cell)]
+  const lineSize = NATURAL_LINE_SIZE * previewScale(cell)
   const scale = Math.min(
     (TILE_FONT * 1.15) / lineSize,
     TILE_WIDTH / cell.width,
@@ -227,13 +210,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                    quand les vignettes, elles, n'ont plus la même forme. -->
               <div class="cbpk-preview">
                 <div class="cbpk-cell" :style="tileStyle">
-                  <CompanionBlockPreview :block="tile.block" :cell="cell" />
+                  <CompanionBlockPreview :block="tile.block" />
                 </div>
               </div>
               <span class="cbpk-tile-label">{{ tile.label }}</span>
-              <span v-if="tile.sameAs" class="cbpk-tile-same">
-                {{ t('companion.settings.same_drawing', { mode: tile.sameAs }) }}
-              </span>
             </button>
           </div>
         </section>
@@ -376,15 +356,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 .cbpk-tile-label {
   font-size: 0.85rem;
-}
-
-/* « Même dessin que “Chiffre plein cadre” » : dit sous la vignette et non à sa
-   place. La tuile reste cliquable — c'est bien ce mode-là qu'on enregistre, et
-   il redeviendra différent le jour où la case grandira. */
-.cbpk-tile-same {
-  font-size: 0.72rem;
-  color: var(--bs-secondary-color);
-  line-height: 1.25;
 }
 
 @media (max-width: 640px) {

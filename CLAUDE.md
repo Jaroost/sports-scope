@@ -360,15 +360,6 @@ tuile aurait **inversé le repère** — la grande case, réduite pour tenir, au
 un texte plus petit que la petite case agrandie. Le rapport à la tuile ne revient qu'en
 plafond, pour les grilles si grossières qu'une case n'y tiendrait plus.
 
-Et **quand deux modes donnent le même écran, la tuile le dit** : dans une case de six
-colonnes, « Chiffre plein cadre », « Jauge » et « Aplat de zone » dessinent le même
-chiffre, le téléphone n'ayant la place de rien d'autre. Trois vignettes identiques sans
-un mot se lisent comme un bogue de l'éditeur. C'est `blockShape` / `sameDrawing`
-(`companionSettings.ts`) qui les compare — **les branches que prend la vignette, et
-rien d'autre** : deux composants qui prennent les mêmes branches dessinent la même
-chose, par construction, donc une règle de repli qui bouge ne peut pas rendre ce
-message faux.
-
 Trois choses à ne pas défaire :
 
 - **La vignette est un fac-similé, pas un rendu partagé.** Le tableau de bord est écrit
@@ -387,7 +378,7 @@ Trois choses à ne pas défaire :
   exactement celles de `PHONE_GRID` (`companionSettings.ts`) : un seul facteur d'échelle
   vaut alors pour toutes les grilles, ce dont dépend `--cbp-em`.
 
-### Le mode est un plafond, pas un ordre
+### Le mode est un ordre, pas un plafond
 
 Un profil décrit sa grille en lignes et en colonnes, jamais en pixels — c'est le
 téléphone qui sait ce que ça fait (328 × 598 px logiques sur un écran ordinaire,
@@ -395,33 +386,41 @@ donc 48 × 93 par case en 6 × 6). Les composants écrits à taille fixe réclam
 leur hauteur quelle que soit la case et **débordaient sur la voisine**, en
 roulant.
 
-`lib/dashboard/block_density.dart` (dépôt voisin) tire donc de la taille de la
-case ce qu'on peut encore y dessiner : un composant montre toujours **moins** que
-ce que son mode demande quand la place manque, jamais plus. La légende des zones
-cède la place à sa barre, les moyennes passent en liste, l'icône puis l'unité
-disparaissent, le bouton d'enregistrement se réduit à son icône. Le format JSON
-ne change pas d'un octet.
+Une première réponse retirait des éléments selon la taille — la légende cède la
+place à sa barre, l'icône puis l'unité disparaissent — mais ça voulait dire
+composer un mode sur le site sans savoir si le téléphone le dessinerait vraiment :
+« Aplat de zone » choisi dans l'éditeur pouvait perdre son icône, sans un mot,
+sur une case trop petite. Le mode qu'on choisit doit être celui qu'on obtient.
 
-Deux façons de se dégrader, et le partage n'est pas arbitraire : ce qui se lit
-**en diagonale** (une légende, une icône) perd des éléments — réduit à 40 %, un
-tableau de sept lignes ne se lit plus ; ce qui se lit **en entier** (une phrase
-d'état vide, qui dit *pourquoi* il n'y a rien) rapetisse au lieu d'être tronqué.
+`BlockSurface` (`lib/ride/blocks/block_card.dart`, dépôt voisin) construit donc
+**tout ce que le mode demande**, à une taille naturelle et fixe, puis
+`ScaleToFit` réduit la carte entière — jamais un élément retiré, jamais un
+agrandissement au-delà de la taille naturelle (une case généreuse resterait sinon
+incohérente avec ses voisines). C'est le mécanisme qui existait déjà pour le
+grand chiffre et la jauge radar (`FittedBox`), généralisé à toute carte : plus
+aucun composant ne choisit quoi montrer selon la case, il choisit seulement à
+quelle échelle.
 
-Côté site, `companionSettings.ts` **recopie ces seuils à la main**, comme il
-recopie déjà la palette des zones : sans eux l'éditeur montrerait une légende
-complète là où le téléphone n'affichera qu'une barre. Les deux jeux de tests
-(`test/block_density_test.dart` et `companionSettings.test.ts`) portent les mêmes
-attentes exprès — **quand un seuil bouge d'un côté, l'autre tombe.**
+Côté site, `companionSettings.ts` n'a donc plus de table de seuils à garder
+synchronisée avec le dépôt voisin — `blockShape` ne dépend plus que du mode.
+`previewScale` en est le pendant visuel : un rapport continu entre la case
+réelle et une taille de référence, plafonné à 1, qui pose la `font-size` de
+l'aperçu (`--cbp-em`, `tileStyle`) exactement comme `ScaleToFit` calculerait la
+sienne. Une seule référence pour tous les genres, là où l'appli en détaille une
+par genre : moins précis, mais assumé — l'aperçu est un fac-similé, pas un rendu
+partagé, et l'approximation ne peut plus faire promettre un élément que le
+téléphone retirerait, puisque plus rien n'est retiré.
 
-`test/dashboard_overflow_test.dart` monte les pires grilles composables : un
-débordement y fait échouer le test, `flutter_test` remontant le « RenderFlex
-overflowed » comme une erreur.
+`test/dashboard_overflow_test.dart` (dépôt voisin) monte les pires grilles
+composables : un débordement y fait échouer le test, `flutter_test` remontant le
+« RenderFlex overflowed » comme une erreur — ce que `ScaleToFit` doit justement
+empêcher, quelle que soit la case.
 
 ### C'est le téléphone qui dit sa taille
 
-Les seuils sont en pixels, l'éditeur compose en lignes et en colonnes : il lui
-faut donc savoir ce que ça fait sur l'écran. Il le **demandait** — un téléphone
-de référence de 328 × 598 — jusqu'à ce que l'appli l'annonce.
+`previewScale` compare des pixels, l'éditeur compose en lignes et en colonnes :
+il lui faut donc savoir ce que ça fait sur l'écran. Il le **demandait** — un
+téléphone de référence de 328 × 598 — jusqu'à ce que l'appli l'annonce.
 
 Ce qui remonte est la grille et **non l'écran** : le rectangle que reçoit
 vraiment `DashboardPage._grid`, barre système, en-tête et bandeau déjà retirés.
@@ -437,10 +436,10 @@ Un GET qui écrit, oui : imposer une seconde requête coûterait un WebView hors
 site ne lit qu'en ouvrant l'éditeur.
 
 `null` tant que rien n'a été mesuré, et c'est **exactement la distinction dont
-l'éditeur a besoin** : il annonce alors un téléphone ordinaire (« ces cases
-feraient… ») au lieu de prétendre connaître celui de l'utilisateur (« ces cases
-feront… »). La valeur de repli est écrite des deux côtés — `CompanionViewport::
-DEFAULT` et `PHONE_GRID` — et un test la compare.
+l'éditeur a besoin** : la phrase sous la grille dit alors « à l'échelle d'un
+téléphone ordinaire » (`scale_assumed`) plutôt que de prétendre connaître celui
+de l'utilisateur (`scale_measured`). La valeur de repli est écrite des deux
+côtés — `CompanionViewport::DEFAULT` et `PHONE_GRID` — et un test la compare.
 
 ### Le budget de charge : le seul composant que le site calcule
 

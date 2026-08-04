@@ -1,9 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, blockShape, isChoiceOf, metricSample,
-  averagesCardsFit, budgetContextFits, canHideBehindMenu, densityFor, legendFits, phoneCell, PHONE_GRID,
-  recordingIsCompact, changeRouteIsCompact, clearRouteIsCompact, sameDrawing, zoneCount,
-  type Block, type Catalog, type Cell, type Page,
+  occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, isChoiceOf, metricSample,
+  canHideBehindMenu, phoneCell, PHONE_GRID,
+  type Catalog, type Cell, type Page,
 } from './companionSettings'
 
 // Le calcul de place dans une grille de tableau de bord.
@@ -187,13 +186,6 @@ describe('fitCells', () => {
   })
 })
 
-// ── Ce que le téléphone laissera dessiner ───────────────────────────────────
-//
-// Ces attentes sont **les mêmes que celles de `test/block_density_test.dart`**
-// dans le dépôt voisin, et c'est tout leur intérêt : l'éditeur ne doit rien
-// montrer que l'appli retirerait. Quand un seuil bouge là-bas, ces tests
-// tombent ici.
-
 describe('phoneCell', () => {
   it('partage la place à parts égales, gouttières comprises', () => {
     // 3 colonnes, 2 gouttières de 8, sur les 328 px que la grille occupe.
@@ -205,51 +197,6 @@ describe('phoneCell', () => {
     // couvriraient pas la même largeur — même règle que `gridRectFor`.
     const single = phoneCell(3, 3).width
     expect(phoneCell(3, 3, 1, 2).width).toBeCloseTo(single * 2 + 8, 3)
-  })
-})
-
-describe('densityFor', () => {
-  it('suit la grille comme le fait l\'appli', () => {
-    expect(densityFor(phoneCell(2, 2))).toBe('comfortable')
-    expect(densityFor(phoneCell(3, 3))).toBe('normal')
-    expect(densityFor(phoneCell(4, 3))).toBe('tight')
-    expect(densityFor(phoneCell(6, 6))).toBe('minimal')
-  })
-
-  it('tient compte de la largeur, même dans une case haute', () => {
-    // Quatre colonnes sur deux lignes : 79 px de large pour 295 de haut. C'est
-    // large comme un pouce.
-    expect(densityFor(phoneCell(2, 4))).toBe('minimal')
-  })
-
-  it('sans case, tout se dessine', () => {
-    // La dialogue de choix et les pages qui défilent : la hauteur y est libre.
-    expect(densityFor(undefined)).toBe('comfortable')
-  })
-})
-
-describe('legendFits', () => {
-  it('retire la légende là où l\'appli la retirera', () => {
-    expect(legendFits(phoneCell(3, 3), { zones: 5, withBar: true })).toBe(false)
-    expect(legendFits(phoneCell(1, 1), { zones: 5, withBar: true })).toBe(true)
-  })
-
-  it('compte les sept paliers de la puissance, pas cinq', () => {
-    // Les deux listes viennent du site et n'ont pas la même longueur : une
-    // vignette qui en dessinerait cinq des deux côtés promettrait une légende
-    // que le téléphone retirerait.
-    expect(zoneCount('power')).toBe(7)
-    expect(zoneCount('hr')).toBe(5)
-
-    const cell = phoneCell(2, 1)
-    expect(legendFits(cell, { zones: 5, withBar: true })).toBe(true)
-    expect(legendFits(cell, { zones: 7, withBar: true })).toBe(false)
-  })
-
-  it('refuse une case haute mais étroite', () => {
-    // Une ligne de légende porte une pastille, une clé, une durée et un
-    // pourcentage : c'est en largeur qu'elle sortait de sa case.
-    expect(legendFits(phoneCell(1, 2), { zones: 5, withBar: true })).toBe(false)
   })
 })
 
@@ -311,141 +258,10 @@ describe('canHideBehindMenu', () => {
   })
 })
 
-describe('les autres replis', () => {
-  it('ramène les moyennes en liste dans une case de grille', () => {
-    expect(averagesCardsFit(undefined)).toBe(true)
-    expect(averagesCardsFit(phoneCell(1, 1))).toBe(true)
-    expect(averagesCardsFit(phoneCell(2, 2))).toBe(false)
-  })
-
-  it('réduit le bouton d\'enregistrement à son icône quand le libellé ne tient plus', () => {
-    expect(recordingIsCompact(phoneCell(1, 1))).toBe(false)
-    expect(recordingIsCompact(phoneCell(3, 2))).toBe(true)
-  })
-
-  it('réduit les boutons d\'itinéraire à leur icône au même seuil', () => {
-    // Ce ne sont, eux aussi, que des boutons — même repli que l'enregistrement.
-    expect(changeRouteIsCompact(phoneCell(1, 1))).toBe(false)
-    expect(changeRouteIsCompact(phoneCell(3, 2))).toBe(true)
-    expect(clearRouteIsCompact(phoneCell(1, 1))).toBe(false)
-    expect(clearRouteIsCompact(phoneCell(3, 2))).toBe(true)
-  })
-
-  it('retire le contexte du budget avant son chiffre', () => {
-    // La fraîcheur et le risque se lisent en diagonale : ils partent les premiers,
-    // comme la légende des zones. Ce qui reste — « 62 / 85 » et sa barre — répond
-    // encore à la question qu'on se pose au guidon.
-    expect(budgetContextFits(undefined)).toBe(true)
-    expect(budgetContextFits(phoneCell(1, 1))).toBe(true)
-    expect(budgetContextFits(phoneCell(2, 2))).toBe(true)
-    // Trois colonnes : deux pastilles côte à côte se marcheraient dessus.
-    expect(budgetContextFits(phoneCell(3, 3))).toBe(false)
-  })
-
-  it('garde le contexte du budget dans une case large et plate', () => {
-    // Une ligne de grille entière : la densité y est minimale (93 px de haut), et
-    // pourtant les pastilles tiennent — c'est la largeur qui leur manquait ailleurs.
-    expect(densityFor(phoneCell(6, 1))).toBe('minimal')
-    expect(budgetContextFits(phoneCell(6, 1))).toBe(true)
-  })
-})
-
-// Ce que la dialogue de choix compare pour dire « à cette taille, ces deux modes
-// donnent le même écran ». Le fait lui-même n'est pas nouveau — c'est ce que
-// l'appli dessine depuis toujours — mais il était muet : trois vignettes
-// identiques se lisaient comme un bogue de l'éditeur.
-describe('sameDrawing', () => {
-  function same(a: Block, b: Block, cell?: ReturnType<typeof phoneCell>): boolean {
-    return sameDrawing(blockShape(a, cell), blockShape(b, cell))
-  }
-
-  it('confond les modes d\'une mesure dans une case de six colonnes', () => {
-    // 48 × 93 px : ni jauge, ni unité, ni icône. Il ne reste qu'un chiffre, et
-    // c'est le même pour trois des quatre modes.
-    const tiny = phoneCell(6, 6)
-    expect(densityFor(tiny)).toBe('minimal')
-
-    const big: Block = { kind: 'metric', mode: 'big', metric: 'heart_rate' }
-    const gauge: Block = { kind: 'metric', mode: 'gauge', metric: 'heart_rate' }
-    const zone: Block = { kind: 'metric', mode: 'zone', metric: 'heart_rate' }
-    const compact: Block = { kind: 'metric', mode: 'compact', metric: 'heart_rate' }
-
-    expect(same(big, gauge, tiny)).toBe(true)
-    expect(same(big, zone, tiny)).toBe(true)
-    // Le compact, lui, garde son chiffre plus petit : la case ne le ramène pas
-    // au plein cadre.
-    expect(same(big, compact, tiny)).toBe(false)
-  })
-
-  it('les distingue à nouveau dès que la case porte la jauge', () => {
-    const roomy = phoneCell(2, 1)
-
-    expect(
-      same(
-        { kind: 'metric', mode: 'big', metric: 'heart_rate' },
-        { kind: 'metric', mode: 'gauge', metric: 'heart_rate' },
-        roomy,
-      ),
-    ).toBe(false)
-  })
-
-  it('la jauge d\'une mesure sans zone n\'a jamais été un dessin à part', () => {
-    // Sans plage, l'appli retombe sur le chiffre plein cadre : la vignette le
-    // montrait déjà, elle le dit maintenant.
-    expect(
-      same(
-        { kind: 'metric', mode: 'big', metric: 'cadence' },
-        { kind: 'metric', mode: 'gauge', metric: 'cadence' },
-        phoneCell(1, 1),
-      ),
-    ).toBe(true)
-  })
-
-  it('confond les trois répartitions quand la légende ne tient plus', () => {
-    const tiny = phoneCell(6, 6)
-    const bar: Block = { kind: 'zones', mode: 'bar', source: 'hr' }
-    const barOnly: Block = { kind: 'zones', mode: 'bar_only', source: 'hr' }
-    const legend: Block = { kind: 'zones', mode: 'legend', source: 'hr' }
-
-    expect(same(bar, barOnly, tiny)).toBe(true)
-    expect(same(bar, legend, tiny)).toBe(true)
-
-    // Pleine page, les trois redeviennent trois dessins.
-    expect(same(bar, barOnly)).toBe(false)
-    expect(same(bar, legend)).toBe(false)
-    expect(same(barOnly, legend)).toBe(false)
-  })
-
-  it('ne rapproche jamais deux genres différents', () => {
-    const tiny = phoneCell(6, 6)
-    expect(same({ kind: 'empty' }, { kind: 'recording', mode: 'compact' }, tiny)).toBe(false)
-  })
-})
-
 describe('la grille du vrai téléphone', () => {
-  it('remplace celle du téléphone type quand l\'appli l\'a annoncée', () => {
-    // Un écran plus grand : les mêmes 3 × 3 y laissent plus de place, donc plus
-    // de détail. Ce que l'éditeur montrait jusque-là était une supposition.
-    const wide = { width: 400, height: 780 }
-
-    expect(densityFor(phoneCell(3, 3))).toBe('normal')
-    expect(densityFor(phoneCell(3, 3, 1, 1, wide))).toBe('comfortable')
-  })
-
-  it('un petit écran retire ce que le téléphone type gardait', () => {
-    // Et dans l'autre sens : composer sur la supposition ferait promettre une
-    // légende que cet écran-là ne portera pas.
-    const small = { width: 300, height: 480 }
-
-    expect(legendFits(phoneCell(2, 1), { zones: 5, withBar: true })).toBe(true)
-    expect(
-      legendFits(phoneCell(2, 1, 1, 1, small), { zones: 5, withBar: true }),
-    ).toBe(false)
-  })
-
   it('le repli est le téléphone ordinaire, pas une taille inventée', () => {
     // Recopié dans `CompanionViewport::DEFAULT` côté serveur : les deux doivent
-    // dire la même chose, sans quoi l'avertissement et l'aperçu diffèreraient.
+    // dire la même chose, sans quoi l'aperçu s'y tromperait.
     expect(PHONE_GRID).toEqual({ width: 328, height: 598 })
     expect(phoneCell(2, 2)).toEqual(phoneCell(2, 2, 1, 1, PHONE_GRID))
   })

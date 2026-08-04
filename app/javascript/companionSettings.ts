@@ -145,19 +145,21 @@ export function isChoiceOf(block: Block | null, choice: BlockChoice): boolean {
   return block.kind === choice.kind && (block.mode || undefined) === choice.mode
 }
 
-// ── Ce que le téléphone laissera dessiner ───────────────────────────────────
+// ── Ce que le téléphone dessinera, et à quelle échelle ──────────────────────
 //
 // Un profil décrit sa grille en lignes et en colonnes, jamais en pixels : c'est
-// le téléphone qui sait ce que ça fait. Les composants s'y dégradent — une
-// légende de zones cède la place à sa barre, une unité disparaît, les moyennes
-// passent en liste — parce qu'autrement ils débordaient sur la case voisine.
+// le téléphone qui sait ce que ça fait. **Le mode choisi est un ordre, pas un
+// plafond** : icône, unité, légende des zones, contexte du budget de charge sont
+// toujours dessinés, quelle que soit la case — c'est `ScaleToFit` (dépôt voisin,
+// `block_card.dart`) qui réduit la carte entière pour qu'elle y tienne, plutôt
+// que de retirer un de ses éléments.
 //
-// Ce bloc est la **recopie à la main** de `lib/dashboard/block_density.dart` du
-// dépôt voisin, comme le sont déjà la palette des zones et le fond des cartes
-// dans `CompanionBlockPreview`. Sans lui, l'éditeur montrerait une légende
-// complète là où le téléphone n'affichera qu'une barre : on composerait à
-// nouveau quelque chose qu'on ne verra jamais. **Quand les seuils bougent
-// là-bas, ils bougent ici.**
+// Ici, `previewScale` en est le pendant : au lieu d'un plafond en quatre paliers
+// (`BLOCK_METRICS`, aujourd'hui disparu), une échelle continue, calculée comme
+// `ScaleToFit` calcule la sienne — le rapport entre la case réelle et une taille
+// de référence, jamais agrandi au-delà de 1. Plus de table de seuils à garder
+// synchronisée entre les deux dépôts : l'aperçu mesure sa propre case, comme le
+// téléphone mesure la sienne.
 //
 // La géométrie de repli : un téléphone ordinaire (360 × 800 px logiques), une
 // fois retirés la barre système, le bandeau du bas, l'en-tête de la page et les
@@ -165,8 +167,7 @@ export function isChoiceOf(block: Block | null, choice: BlockChoice): boolean {
 //
 // Elle ne sert que tant que l'appli n'a rien dit. Dès qu'elle a posé une page de
 // grille, elle renvoie ce qu'elle a **mesuré** (`/api/companion_settings?grid=`),
-// le site le retient, et l'éditeur travaille sur le vrai téléphone — un
-// avertissement vrai plutôt que plausible.
+// le site le retient, et l'éditeur travaille sur le vrai téléphone.
 export const PHONE_GRID = { width: 328, height: 598 }
 
 // La gouttière entre deux cases, en dur des deux côtés (`gridRectFor`). Elle ne
@@ -178,40 +179,10 @@ export interface Viewport {
   height: number
 }
 
-export type BlockDensity = 'comfortable' | 'normal' | 'tight' | 'minimal'
-
 export interface CellSize {
   width: number
   height: number
 }
-
-export interface BlockMetrics {
-  padding: number
-  gap: number
-  titleSize: number
-  lineSize: number
-  showTitle: boolean
-  showUnit: boolean
-  showIcon: boolean
-}
-
-export const BLOCK_METRICS: Record<BlockDensity, BlockMetrics> = {
-  comfortable: { padding: 16, gap: 12, titleSize: 13, lineSize: 16, showTitle: true, showUnit: true, showIcon: true },
-  normal: { padding: 12, gap: 8, titleSize: 12, lineSize: 15, showTitle: true, showUnit: true, showIcon: true },
-  tight: { padding: 8, gap: 6, titleSize: 11, lineSize: 13, showTitle: true, showUnit: true, showIcon: false },
-  minimal: { padding: 6, gap: 4, titleSize: 11, lineSize: 12, showTitle: false, showUnit: false, showIcon: false },
-}
-
-const MINIMAL_HEIGHT = 96
-const TIGHT_HEIGHT = 148
-const NORMAL_HEIGHT = 232
-const MINIMAL_WIDTH = 88
-
-// Ce qu'il faut de largeur à une ligne de légende : la pastille, la clé de zone,
-// la durée et le pourcentage. En dessous, elle déborde **sur le côté** — l'autre
-// façon de sortir de sa case, celle qu'on oublie parce qu'une grille se pense en
-// hauteur.
-const LEGEND_WIDTH = 150
 
 // La place qu'une cellule prendra sur le téléphone. Même calcul que `gridRectFor`
 // côté appli, fusions comprises : la gouttière intérieure d'une cellule fusionnée
@@ -221,7 +192,7 @@ const LEGEND_WIDTH = 150
 // ordinaire sinon. Passée en argument et non lue d'une variable de module : les
 // aperçus se dessinent avant que les props n'arrivent, et un état global qui
 // change sous les pieds d'un `computed` est le meilleur moyen d'afficher une
-// densité et d'en calculer une autre.
+// échelle et d'en calculer une autre.
 export function phoneCell(
   rows: number,
   cols: number,
@@ -238,122 +209,38 @@ export function phoneCell(
   }
 }
 
-// **Une case absente vaut `comfortable`** : c'est une page qui défile, ou la
-// dialogue de choix, où le composant prend la hauteur qu'il lui faut et où rien
-// ne peut déborder.
-export function densityFor(cell?: CellSize): BlockDensity {
-  if (!cell) return 'comfortable'
-  if (cell.height < MINIMAL_HEIGHT || cell.width < MINIMAL_WIDTH) return 'minimal'
-  if (cell.height < TIGHT_HEIGHT) return 'tight'
-  if (cell.height < NORMAL_HEIGHT) return 'normal'
-  return 'comfortable'
+// La ligne de texte, en pixels du téléphone, à laquelle un composant se dessine
+// **avant** mise à l'échelle — la même valeur que `BlockMetrics.natural.lineSize`
+// du dépôt voisin.
+export const NATURAL_LINE_SIZE = 16
+
+// La case à laquelle un composant tient à sa taille naturelle, sans être réduit.
+// Une seule référence pour tous les genres : l'aperçu est un fac-similé et non un
+// rendu partagé (cf. `CompanionBlockPreview`), donc une approximation commune
+// suffit là où le dépôt voisin détaille une taille par genre.
+const NATURAL_CELL_WIDTH = 220
+const NATURAL_CELL_HEIGHT = 180
+
+// Le rapport entre la case réelle et la taille naturelle d'un composant : ce que
+// `ScaleToFit` calcule côté appli, en continu et non par palier. **Jamais
+// au-delà de 1** — une case généreuse ne grossit pas le contenu, pour ne pas
+// afficher un chiffre disproportionné à côté de cases voisines restées à leur
+// taille normale.
+//
+// **Une case absente vaut 1** : c'est une page qui défile, ou la dialogue de
+// choix, où le composant prend la hauteur qu'il lui faut et où rien ne peut
+// déborder.
+export function previewScale(cell?: CellSize): number {
+  if (!cell) return 1
+  return Math.min(cell.width / NATURAL_CELL_WIDTH, cell.height / NATURAL_CELL_HEIGHT, 1)
 }
 
 // Combien de zones le téléphone dessinera. Le site connaît les seuils du
 // cycliste, mais l'aperçu doit valoir pour le profil qu'il aura le jour de la
 // sortie : on prend donc la liste la plus longue de chaque source — sept paliers
-// en puissance, cinq en cardio — pour ne jamais promettre une légende que le
-// téléphone retirerait.
+// en puissance, cinq en cardio.
 export function zoneCount(source?: string): number {
   return source === 'power' ? 7 : 5
-}
-
-// La légende tient-elle ? **Tout ou rien** : une légende amputée de ses deux
-// dernières zones se lit comme une légende complète — on croirait n'avoir jamais
-// touché la Z5, ce qui est l'inverse de la vérité.
-export function legendFits(
-  cell: CellSize | undefined,
-  { zones, withBar }: { zones: number; withBar: boolean },
-): boolean {
-  if (!cell) return true
-
-  const m = BLOCK_METRICS[densityFor(cell)]
-  if (cell.width - m.padding * 2 < LEGEND_WIDTH) return false
-
-  let room = cell.height - m.padding * 2
-  if (m.showTitle) room -= Math.round(m.titleSize * 1.35) + m.gap
-  if (withBar) room -= barHeightFor(cell) + m.gap
-
-  return room >= zones * (Math.round(m.lineSize * 1.35) + 14)
-}
-
-function barHeightFor(cell: CellSize): number {
-  return { comfortable: 22, normal: 18, tight: 14, minimal: 10 }[densityFor(cell)]
-}
-
-// Les quatre cartes des moyennes demandent une pleine hauteur — deux rangées de
-// trois lignes — et une pleine largeur : chaque rangée coupe la case en deux, et
-// une demi-case étroite ne laisse ni à « Cadence (tr/min) » ni à « Moyen 84 » de
-// quoi s'écrire. Sinon, le téléphone les rend en liste.
-export function averagesCardsFit(cell?: CellSize): boolean {
-  if (!cell) return true
-  if (cell.width < 280) return false
-
-  const m = BLOCK_METRICS[densityFor(cell)]
-  const card =
-    m.padding * 2 + Math.round(m.titleSize * 1.35) + m.gap + 3 * (Math.round(m.lineSize * 1.35) + 4)
-
-  return cell.height >= card * 2 + m.gap
-}
-
-// Ce qu'il faut de largeur aux deux pastilles du budget de charge (fraîcheur,
-// risque) posées côte à côte : une icône, un chiffre, et la gouttière entre elles.
-// En dessous, elles se marchent dessus — la case reste alors au chiffre et à sa
-// barre, qui portent l'essentiel.
-const BUDGET_CHIPS_WIDTH = 120
-
-// La troisième ligne du budget de charge : les pastilles fraîcheur / risque en mode
-// « aujourd'hui », le reste à placer en mode « la semaine ».
-//
-// Elle se lit **en diagonale** — c'est le contexte du chiffre principal, pas le
-// chiffre — donc elle part la première quand la case se resserre, comme la légende
-// des zones. Ce qui reste (« 62 / 85 » et sa barre) répond encore à la question
-// qu'on se pose au guidon ; une pastille de couleur toute seule, non.
-export function budgetContextFits(cell?: CellSize): boolean {
-  if (!cell) return true
-
-  const m = BLOCK_METRICS[densityFor(cell)]
-  if (cell.width - m.padding * 2 < BUDGET_CHIPS_WIDTH) return false
-
-  let room = cell.height - m.padding * 2
-  if (m.showTitle) room -= Math.round(m.titleSize * 1.35) + m.gap
-  room -= budgetFigureHeight(m) + m.gap
-  room -= barHeightFor(cell) + m.gap
-
-  return room >= Math.round(m.lineSize * 1.35) + 4
-}
-
-// La hauteur du « 62 / 85 » : le chiffre du budget, plus gros qu'une ligne
-// ordinaire sans aller jusqu'au plein cadre — il se lit d'un coup d'œil, mais il en
-// faut deux (le fait et la cible) et une barre en dessous.
-//
-// Les deux arrondis se suivent dans cet ordre-là parce que le dépôt voisin les fait
-// dans cet ordre-là (`budgetFigureSize` puis `budgetFigureHeight`) : arrondir une
-// seule fois donne les mêmes quatre valeurs aujourd'hui, et divergerait au premier
-// seuil qu'on touche.
-export function budgetFigureHeight(m: BlockMetrics): number {
-  return Math.round(Math.round(m.lineSize * 1.6) * 1.35)
-}
-
-// « Démarrer l'enregistrement » ne tient pas sur la ligne d'un bouton étroit, et
-// le libellé ne se tronque pas : un bouton qui déclenche un enregistrement dit
-// ce qu'il fait, ou ne dit rien — c'est alors l'icône seule.
-export function recordingIsCompact(cell?: CellSize): boolean {
-  if (!cell) return false
-  const density = densityFor(cell)
-  return cell.width < 200 || density === 'tight' || density === 'minimal'
-}
-
-// Même seuil que `recordingIsCompact`, pour la même raison : « Changer
-// d'itinéraire » et « Retirer l'itinéraire » ne sont, eux aussi, que des
-// boutons — un libellé qui ne tient pas devient l'icône seule plutôt que de
-// se tronquer.
-export function changeRouteIsCompact(cell?: CellSize): boolean {
-  return recordingIsCompact(cell)
-}
-
-export function clearRouteIsCompact(cell?: CellSize): boolean {
-  return recordingIsCompact(cell)
 }
 
 // ── De quoi dessiner un aperçu ──────────────────────────────────────────────
@@ -440,33 +327,15 @@ export function metricSample(metric: string | undefined): MetricSample {
   return METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
 }
 
-// ── Ce que la case laisse dessiner de ce composant ──────────────────────────
+// ── Ce que ce composant dessine ──────────────────────────────────────────────
 //
-// Toutes les branches que prend l'aperçu, rassemblées : le mode demandé, ce que
-// la place en laisse. C'étaient dix `computed` dans la vignette, ce qui suffisait
-// tant qu'elle était seule à s'en servir.
-//
-// La dialogue de choix en a besoin pour autre chose : **dire quand deux modes
-// donnent le même écran**. Dans une case de six colonnes, « Chiffre plein
-// cadre », « Jauge » et « Aplat de zone » dessinent tous les trois le même
-// chiffre — le téléphone n'a la place de rien d'autre, et l'aperçu a raison de
-// le montrer. Mais trois vignettes identiques sans un mot se lisent comme un
-// bogue de l'éditeur, et on repart en cherchant laquelle était la bonne.
-//
-// Comparer les formes le dit **sans redire** les règles de repli : deux
-// composants qui prennent les mêmes branches dessinent la même chose, par
-// construction. Une règle qui bouge ne peut donc pas mentir ici.
-//
-// Les vignettes comparées sont celles d'un même genre, où la mesure et la source
-// sont les mêmes — c'est le mode seul qui varie. La forme porte quand même le
-// genre, pour qu'une comparaison de travers ne rapproche jamais deux dessins qui
-// n'ont rien à voir.
+// Toutes les branches que prend l'aperçu, rassemblées : purement celles du mode
+// demandé — la case ne décide plus de rien ici, elle ne fait plus que mettre le
+// résultat à l'échelle (`previewScale`). C'étaient dix `computed` dans la
+// vignette, ce qui suffisait tant qu'elle était seule à s'en servir ; la
+// dialogue de choix s'en sert aussi maintenant.
 export interface BlockShape {
   kind: string
-  density: BlockDensity
-  showTitle: boolean
-  showUnit: boolean
-  showIcon: boolean
   metricGauge: boolean
   metricCompact: boolean
   metricZone: string | null
@@ -481,65 +350,31 @@ export interface BlockShape {
   radarGauge: boolean
   radarVertical: boolean
   budgetWeek: boolean
-  budgetContext: boolean
 }
 
-export function blockShape(block: Block, cell?: CellSize): BlockShape {
-  const density = densityFor(cell)
-  const m = BLOCK_METRICS[density]
+export function blockShape(block: Block): BlockShape {
   const zone = block.kind === 'metric' ? metricSample(block.metric).zone : undefined
-
-  // La légende part la première : une proportion se lit dans une longueur
-  // partagée, donc la barre survit à des tailles où le tableau ne se lirait
-  // plus. Et si c'est la légende seule qu'on avait demandée, on rend la barre
-  // plutôt qu'une carte vide — le doublon se voit et se corrige, la case vide se
-  // lit comme une panne.
-  const zonesLegend =
-    block.kind === 'zones' &&
-    block.mode !== 'bar_only' &&
-    legendFits(cell, {
-      zones: zoneCount(block.source),
-      withBar: block.mode !== 'legend',
-    })
 
   return {
     kind: block.kind,
-    density,
-    showTitle: m.showTitle,
-    showUnit: m.showUnit,
-    showIcon: m.showIcon,
     // La jauge n'existe que pour une mesure qui a des zones — sans plage, l'appli
-    // retombe sur le chiffre plein cadre. Et dans une case minuscule, sept
-    // paliers ne se distinguent plus les uns des autres : même repli.
-    metricGauge:
-      block.kind === 'metric' &&
-      block.mode === 'gauge' &&
-      !!zone &&
-      density !== 'minimal',
+    // retombe sur le chiffre plein cadre plutôt que d'inventer un maximum.
+    metricGauge: block.kind === 'metric' && block.mode === 'gauge' && !!zone,
     metricCompact: block.kind === 'metric' && block.mode === 'compact',
     // C'est elle qui colore l'aplat, du mode `zone` comme du mode `big` : côté
     // appli, `MetricView` peint le fond dès que la mesure porte une zone.
     metricZone: zone || null,
     // Distingue le dessin de `zone` de celui de `big` : même aplat de couleur,
-    // mais l'icône de la mesure (cœur / éclair) se pose devant le chiffre —
-    // sans ce champ, `sameDrawing` les confondrait alors qu'ils ne se
-    // dessinent plus pareil. **Sauf sans icône** (`!m.showIcon`, une case
-    // trop petite pour la montrer) : là les deux modes redeviennent
-    // rigoureusement le même dessin, comme avant ce champ.
-    metricZoneMode: block.kind === 'metric' && block.mode === 'zone' && m.showIcon,
-    zonesBar: block.kind === 'zones' && (block.mode !== 'legend' || !zonesLegend),
-    zonesLegend,
-    averagesCards:
-      block.kind === 'averages' && block.mode !== 'list' && averagesCardsFit(cell),
-    recordingCompact:
-      block.kind === 'recording' &&
-      (block.mode === 'compact' || recordingIsCompact(cell)),
-    changeRouteCompact:
-      block.kind === 'change_route' &&
-      (block.mode === 'compact' || changeRouteIsCompact(cell)),
-    clearRouteCompact:
-      block.kind === 'clear_route' &&
-      (block.mode === 'compact' || clearRouteIsCompact(cell)),
+    // mais l'icône de la mesure (cœur / éclair) se pose devant le chiffre.
+    metricZoneMode: block.kind === 'metric' && block.mode === 'zone',
+    // Le mode dit exactement ce qu'on dessine : `bar` les deux, `bar_only` la
+    // barre seule, `legend` la légende seule.
+    zonesBar: block.kind === 'zones' && block.mode !== 'legend',
+    zonesLegend: block.kind === 'zones' && block.mode !== 'bar_only',
+    averagesCards: block.kind === 'averages' && block.mode !== 'list',
+    recordingCompact: block.kind === 'recording' && block.mode === 'compact',
+    changeRouteCompact: block.kind === 'change_route' && block.mode === 'compact',
+    clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
     // Les deux sens de la jauge radar : le dessin est le même, tourné d'un quart
     // de tour.
@@ -547,14 +382,7 @@ export function blockShape(block: Block, cell?: CellSize): BlockShape {
       block.kind === 'radar' && (block.mode === 'gauge' || block.mode === 'gauge_vertical'),
     radarVertical: block.kind === 'radar' && block.mode === 'gauge_vertical',
     budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
-    budgetContext: block.kind === 'training_budget' && budgetContextFits(cell),
   }
-}
-
-// Deux formes, le même écran. La comparaison est textuelle et c'est sans risque :
-// les deux objets sortent de la même fonction, donc dans le même ordre de clés.
-export function sameDrawing(a: BlockShape, b: BlockShape): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 // Ce qu'on garde d'un champ « lignes », « colonnes » ou « sur X lignes » : un

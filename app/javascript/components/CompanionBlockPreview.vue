@@ -15,41 +15,31 @@
 // Les chiffres, eux, sont plausibles et faux — un aperçu n'a pas de capteur.
 //
 // Tout est en `em` : le composant se met à l'échelle par la `font-size` que lui
-// pose l'appelant, la même vignette servant dans une case de grille de 3,5 rem
-// et dans la dialogue de choix.
+// pose l'appelant (`previewScale`, `companionSettings.ts`), la même vignette
+// servant dans une case de grille de 3,5 rem et dans la dialogue de choix.
 //
-// **Elle montre aussi ce que la case retire.** Un composant posé dans une petite
-// case ne dessine pas tout ce que son mode suppose : la légende des zones cède
-// la place à sa barre, l'unité et l'icône disparaissent, les moyennes passent en
-// liste (`block_density.dart`, dépôt voisin). Sans ça, l'éditeur montrerait une
-// légende complète là où le téléphone n'affichera qu'une barre — et on
-// découvrirait la différence en roulant, sur le seul écran qu'on ne peut plus
-// modifier.
+// **Elle dessine toujours tout ce que le mode suppose.** Le mode choisi est un
+// ordre et non un plafond : la légende des zones, l'unité, l'icône restent
+// dessinées quelle que soit la case — c'est l'appelant qui réduit l'ensemble
+// pour qu'il tienne (`--cbp-em`/`tileStyle`), pas ce composant qui retire un de
+// ses éléments.
 import { computed } from 'vue'
 import {
   AVERAGES_SAMPLE,
-  BLOCK_METRICS,
   BUDGET_SAMPLE,
   blockShape,
   metricSample,
   type Block,
-  type CellSize,
 } from '../companionSettings'
 import { zoneColor, acwrColor } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
   block: Block
-  // La place que la cellule aura **sur le téléphone**, en pixels logiques.
-  // Absente dans la dialogue de choix et sur une page qui défile : la hauteur y
-  // est libre, rien ne peut déborder, tout se dessine.
-  cell?: CellSize
 }>()
 
-// Ce que cette case-là laisse dessiner : les branches sont calculées une fois,
-// dans `companionSettings`, parce que la dialogue de choix s'en sert aussi — elle
-// y compare deux modes pour dire s'ils donnent le même écran.
-const shape = computed(() => blockShape(props.block, props.cell))
-const metrics = computed(() => BLOCK_METRICS[shape.value.density])
+// Ce que ce mode dessine : les branches sont calculées une fois, dans
+// `companionSettings`, parce que la dialogue de choix s'en sert aussi.
+const shape = computed(() => blockShape(props.block))
 
 // La palette de `ui/zone_colors.dart` — saturée et non teintée, c'est ce qui la
 // rend lisible en plein soleil sur le fond sombre.
@@ -134,8 +124,7 @@ const zoneShares = computed(() =>
 )
 
 // Les quatre cartes, deux par deux — c'est la mise en page du dépôt voisin
-// (`AveragesCard._row`), et ce sont ses deux rangées que mesure
-// `averagesCardsFit`.
+// (`AveragesCard._row`).
 const averagesRows = computed(() => [
   AVERAGES_SAMPLE.slice(0, 2),
   AVERAGES_SAMPLE.slice(2, 4),
@@ -198,8 +187,6 @@ const budgetAside = computed(() =>
   budgetWeek.value ? `reste ${BUDGET_SAMPLE.week.remaining}` : `max ${BUDGET_SAMPLE.day.max}`,
 )
 
-const budgetContext = computed(() => shape.value.budgetContext)
-
 const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du jour'))
 </script>
 
@@ -222,7 +209,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
             :style="{ background: gaugeCell.lit ? gaugeCell.color : 'rgba(255,255,255,0.12)' }"
           ></span>
         </div>
-        <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
+        <div class="cbp-unit">{{ sample.unit }}</div>
       </div>
 
       <!-- Compact : icône, valeur, unité — la mise en forme de `MetricTile`.
@@ -233,9 +220,9 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
         class="cbp-card cbp-center"
         :style="{ background: metricBackground || undefined, color: metricInk }"
       >
-        <i v-if="metrics.showIcon" class="cbp-icon" :class="sample.icon" aria-hidden="true"></i>
+        <i class="cbp-icon" :class="sample.icon" aria-hidden="true"></i>
         <div class="cbp-mid">{{ sample.value }}</div>
-        <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
+        <div class="cbp-unit">{{ sample.unit }}</div>
       </div>
 
       <!-- Aplat de zone : le même aplat que le plein cadre, mais l'icône de la
@@ -248,10 +235,10 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
         :style="{ background: metricBackground || undefined, color: metricInk }"
       >
         <div class="cbp-big cbp-big--zone">
-          <i v-if="metrics.showIcon" class="cbp-zone-icon" :class="sample.icon" aria-hidden="true"></i>
+          <i class="cbp-zone-icon" :class="sample.icon" aria-hidden="true"></i>
           <span>{{ sample.value }}</span>
         </div>
-        <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
+        <div class="cbp-unit">{{ sample.unit }}</div>
       </div>
 
       <!-- Plein cadre : le chiffre seul, sans icône. -->
@@ -261,13 +248,13 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
         :style="{ background: metricBackground || undefined, color: metricInk }"
       >
         <div class="cbp-big">{{ sample.value }}</div>
-        <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
+        <div class="cbp-unit">{{ sample.unit }}</div>
       </div>
     </template>
 
     <!-- Temps par zone --------------------------------------------------- -->
     <div v-else-if="block.kind === 'zones'" class="cbp-card">
-      <div v-if="metrics.showTitle" class="cbp-title">{{ zonesTitle }}</div>
+      <div class="cbp-title">{{ zonesTitle }}</div>
       <div v-if="shape.zonesBar" class="cbp-bar">
         <span
           v-for="share in zoneShares"
@@ -304,7 +291,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
     <!-- Moyennes --------------------------------------------------------- -->
     <template v-else-if="block.kind === 'averages'">
       <div v-if="!shape.averagesCards" class="cbp-card">
-        <div v-if="metrics.showTitle" class="cbp-title">Moyennes</div>
+        <div class="cbp-title">Moyennes</div>
         <div v-for="stat in AVERAGES_SAMPLE" :key="stat.name" class="cbp-line">
           {{ stat.name }} {{ stat.avg }} {{ stat.unit }} ({{ stat.min }} – {{ stat.max }})
         </div>
@@ -373,7 +360,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
 
     <!-- État de navigation ------------------------------------------------ -->
     <div v-else-if="block.kind === 'nav_state'" class="cbp-card">
-      <div v-if="metrics.showTitle" class="cbp-title">Navigation</div>
+      <div class="cbp-title">Navigation</div>
       <div class="cbp-line">21,4 km restants</div>
       <template v-if="shape.navFull">
         <div class="cbp-line">Restant : 21,4 km · 380 m D+</div>
@@ -402,7 +389,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
         <!-- L'icône part la première dans une petite case : elle redit ce que la
              couleur dit déjà, alors que le nombre de mètres ne se déduit de
              rien. -->
-        <div v-if="metrics.showIcon" class="cbp-radar-head">
+        <div class="cbp-radar-head">
           <i class="fa-solid fa-car" aria-hidden="true"></i>
           <span class="cbp-radar-count">×2</span>
         </div>
@@ -412,14 +399,14 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
 
     <!-- Budget de charge -------------------------------------------------- -->
     <div v-else-if="block.kind === 'training_budget'" class="cbp-card">
-      <div v-if="metrics.showTitle" class="cbp-title">{{ budgetTitle }}</div>
+      <div class="cbp-title">{{ budgetTitle }}</div>
       <div class="cbp-budget-figures">
         <span class="cbp-budget-figure">{{ budgetFigure }}</span>
-        <span v-if="metrics.showUnit" class="cbp-budget-aside">{{ budgetAside }}</span>
+        <span class="cbp-budget-aside">{{ budgetAside }}</span>
       </div>
       <!-- Le repère de la cible sur la barre : c'est lui qui distingue « il en
-           reste » de « c'est fait », et il ne disparaît à aucune densité — sans
-           lui, la barre ne dit plus que « du TSS », ce qu'on savait déjà. -->
+           reste » de « c'est fait » — sans lui, la barre ne dit plus que « du
+           TSS », ce qu'on savait déjà. -->
       <div class="cbp-budget-bar">
         <span
           class="cbp-budget-seg"
@@ -434,18 +421,18 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
           :style="{ left: `${(budgetSegments.mark / budgetSegments.scale) * 100}%` }"
         ></span>
       </div>
-      <div v-if="budgetContext" class="cbp-budget-context">
+      <div class="cbp-budget-context">
         <template v-if="budgetWeek">
           <span class="cbp-budget-chip">{{ BUDGET_SAMPLE.week.planned }} prévus</span>
         </template>
         <template v-else>
           <span class="cbp-budget-chip">
-            <i v-if="metrics.showIcon" class="fa-solid fa-battery-half" aria-hidden="true"></i>
+            <i class="fa-solid fa-battery-half" aria-hidden="true"></i>
             <span class="cbp-dot" :style="{ background: zoneColor(BUDGET_SAMPLE.form.zone) }"></span>
             {{ BUDGET_SAMPLE.form.tsb }}
           </span>
           <span class="cbp-budget-chip">
-            <i v-if="metrics.showIcon" class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
             <span class="cbp-dot" :style="{ background: acwrColor(BUDGET_SAMPLE.risk.zone) }"></span>
             {{ BUDGET_SAMPLE.risk.acwr.toFixed(2).replace('.', ',') }}
           </span>

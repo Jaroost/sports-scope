@@ -1561,13 +1561,6 @@ en:
       rows: "Rows"
       cols: "Columns"
       grid_help: "Tap an empty cell to choose what goes in it, a filled one to select it. Spans never exceed the free space: what you compose here is exactly what the app will show."
-      grid_density:
-        assumed:
-          tight: "On an ordinary phone these cells would be %{width} × %{height} px: components will show less detail — zone breakdowns drop their legend, averages fall back to a list."
-          minimal: "On an ordinary phone these cells would be %{width} × %{height} px: only a number fits, with no title and no unit. The previews below show it."
-        measured:
-          tight: "On your phone these cells will be %{width} × %{height} px: components will show less detail — zone breakdowns drop their legend, averages fall back to a list."
-          minimal: "On your phone these cells will be %{width} × %{height} px: only a number fits, with no title and no unit. The previews below show it."
       scale_measured: "Previews are drawn to your phone's scale: the app reported a %{width} × %{height} px grid."
       scale_assumed: "Previews are drawn to an ordinary phone's scale (%{width} × %{height} px): the app has not reported yours yet. It will on its next launch, once a data page has been shown."
       row_span: "Rows spanned"
@@ -1579,8 +1572,7 @@ en:
       change_block: "Change"
       pick_block: "Choose a component"
       pick_block_help: "Each tile shows what the phone will draw. The display mode is the choice: the same content does not fit a quarter of the screen and a two-cell strip the same way. Pick the metric or the source above its tiles — they redraw at once."
-      pick_block_cell: "Tiles are drawn at the size of the cell: %{width} × %{height} px. The smaller the cell, the less fits in it — and two modes end up drawing the same thing."
-      same_drawing: "Same drawing as “%{mode}” in this cell"
+      pick_block_cell: "Tiles are drawn at the size of the cell: %{width} × %{height} px. The smaller the cell, the smaller the component is scaled down."
       cancel: "Cancel"
       block: "Component"
       metric: "Metric"

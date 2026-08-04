@@ -5,8 +5,8 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  BLOCK_METRICS, canHideBehindMenu, densityFor, fitCells, gridSideOf, maxSpan,
-  occupancy, phoneCell, PHONE_GRID,
+  canHideBehindMenu, fitCells, gridSideOf, maxSpan, NATURAL_LINE_SIZE,
+  occupancy, phoneCell, previewScale, PHONE_GRID,
   type Band, type Block, type Catalog, type Cell, type CellSize,
   type CompanionDocument, type Page, type Preset, type Viewport,
 } from '../companionSettings'
@@ -341,10 +341,10 @@ function styleFor(page: Page, cell: Cell | null, row: number, col: number) {
     gridColumn: `${col + 1} / span ${colSpan}`,
     // La vignette est dessinée à l'échelle du téléphone : `1cqw` vaut 1 % de la
     // largeur de la case **dans l'éditeur**, si bien que rapporter la taille de
-    // ligne du téléphone à la largeur qu'aura la case sur son écran rend la même
-    // proportion des deux côtés — quelle que soit la place que la page web
-    // laisse à la grille.
-    '--cbp-em': `${(BLOCK_METRICS[densityFor(size)].lineSize / 1.15 / size.width) * 100}`,
+    // ligne du téléphone (réduite comme `ScaleToFit` la réduirait) à la largeur
+    // qu'aura la case sur son écran rend la même proportion des deux côtés —
+    // quelle que soit la place que la page web laisse à la grille.
+    '--cbp-em': `${(NATURAL_LINE_SIZE * previewScale(size) / 1.15 / size.width) * 100}`,
   }
 }
 
@@ -353,26 +353,6 @@ function sizeFor(page: Page, cell: Cell): CellSize {
   return phoneCell(
     page.rows || 1, page.cols || 1, cell.row_span, cell.col_span, grid.value,
   )
-}
-
-// Ce que les cases de cette grille laisseront dessiner, et de quelle taille elles
-// seront. Sert à prévenir **avant** de composer : rien n'interdit une grille de
-// 6 × 6, mais il faut savoir que les composants n'y montreront plus qu'un
-// chiffre.
-function gridWarning(page: Page): string | null {
-  const size = phoneCell(page.rows || 1, page.cols || 1, 1, 1, grid.value)
-  const density = densityFor(size)
-  if (density !== 'tight' && density !== 'minimal') return null
-
-  // Deux phrases et pas une avec un mot variable : « sur votre téléphone » est
-  // une mesure, « sur un téléphone ordinaire » est une supposition. Les
-  // confondre ferait prendre la seconde pour la première, et c'est justement la
-  // différence qu'on vient d'aller chercher.
-  const scope = measured.value ? 'measured' : 'assumed'
-  return t(`companion.settings.grid_density.${scope}.${density}`, {
-    width: Math.round(size.width),
-    height: Math.round(size.height),
-  })
 }
 
 // Le nom de ce qui est posé : le genre, son paramètre, son mode. La vignette
@@ -585,14 +565,6 @@ async function save() {
 
               <p class="text-body-secondary small mb-1">{{ t('companion.settings.grid_help') }}</p>
 
-              <!-- Ce que ces cases feront sur un téléphone. Un avertissement et
-                   non un plafond : rien n'interdit une grille de 6 × 6, mais on
-                   ne doit pas découvrir en roulant que les composants n'y
-                   montrent plus qu'un chiffre. -->
-              <p v-if="gridWarning(page)" class="text-body-secondary small">
-                <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ gridWarning(page) }}
-              </p>
-
               <div class="companion-grid mb-2"
                    :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
                              gridTemplateRows: `repeat(${page.rows}, 1fr)`,
@@ -607,8 +579,7 @@ async function save() {
                         :style="styleFor(page, slot.cell, slot.row, slot.col)"
                         :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
                         @click="tapSlot(page, slot.row, slot.col, slot.cell)">
-                  <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block"
-                                         :cell="sizeFor(page, slot.cell)" />
+                  <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block" />
                   <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
                 </button>
               </div>

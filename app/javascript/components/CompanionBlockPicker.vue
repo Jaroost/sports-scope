@@ -101,9 +101,9 @@ const groups = computed(() => {
 // La place qu'une tuile laisse à sa vignette : sa colonne (11 rem au moins) moins
 // ses marges intérieures, et la hauteur de `.cbpk-preview`. Une case plus large
 // que ça — une bande de six colonnes — est réduite pour tenir.
-const TILE_WIDTH = 160
-const TILE_HEIGHT = 176
-const TILE_FONT = 12
+const TILE_WIDTH = 250
+const TILE_HEIGHT = 260
+const TILE_FONT = 26
 
 const tileStyle = computed(() => {
   const cell = props.cell
@@ -242,7 +242,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .cbpk-dialog {
   background: var(--bs-body-bg, #fff);
   border-radius: 0.75rem;
-  width: min(920px, 96vw);
+  width: min(1100px, 96vw);
   max-height: 92vh;
   display: flex;
   flex-direction: column;
@@ -307,7 +307,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
    différentes se liraient comme deux importances différentes. */
 .cbpk-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
   gap: 0.6rem;
 }
 .cbpk-tile {
@@ -336,7 +336,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
    C'est aussi le budget dans lequel `tileStyle` fait tenir la case : les deux
    valeurs sont les mêmes des deux côtés (`TILE_WIDTH`, `TILE_HEIGHT`). */
 .cbpk-preview {
-  height: 11rem;
+  height: 16.5rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -348,14 +348,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .cbpk-cell {
   width: 100%;
   height: 100%;
-  font-size: 0.75rem;
+  font-size: 1.15rem;
 }
 .cbpk-cell :deep(.cbp) {
   font-size: inherit;
 }
 
 .cbpk-tile-label {
-  font-size: 0.85rem;
+  font-size: 0.95rem;
 }
 
 @media (max-width: 640px) {

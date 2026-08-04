@@ -147,9 +147,9 @@ const RADAR_MARKS = [
 const budgetWeek = computed(() => shape.value.budgetWeek)
 
 // La barre du jour se mesure en TSS, de zéro au plafond de fatigue : c'est ce qui
-// donne son sens à la cible, posée quelque part avant la fin. En mode semaine,
-// l'échelle est le plus grand du prévu et de la cible — sinon un dépassement
-// sortirait de la case sans qu'on le voie.
+// donne son sens à la zone grise (« le restant »). En mode semaine, l'échelle est
+// le plus grand du prévu et de la cible — sinon un dépassement sortirait de la
+// case sans qu'on le voie.
 const budgetSegments = computed(() => {
   const { day, week } = BUDGET_SAMPLE
   if (budgetWeek.value) {
@@ -158,21 +158,49 @@ const budgetSegments = computed(() => {
       scale,
       done: week.done,
       live: week.planned,
-      mark: week.target,
       liveColor: '#fd7e14',
+      mark: week.target as number | null,
+      cap: null as number | null,
     }
   }
-  const scale = Math.max(day.max, day.done + day.ride)
+  const total = day.done + day.ride
+  const cap = day.max
+  const scale = Math.max(cap, total, 1)
   return {
     scale,
     done: day.done,
     live: day.ride,
-    mark: day.target,
-    // Au-delà de la cible, la sortie en cours n'est plus « en route vers » mais
-    // « au-delà de » : la barre change de couleur là où le conseil change de sens.
-    liveColor: day.done + day.ride > day.target ? '#fd7e14' : '#198754',
+    // Toujours orange : c'est « une activité est en cours », pas un verdict sur
+    // son ampleur — le dépassement se lit sur le curseur et le rouge.
+    liveColor: '#fd7e14',
+    mark: null as number | null,
+    cap,
   }
 })
+
+const budgetDoneFraction = computed(() =>
+  Math.min(budgetSegments.value.done / budgetSegments.value.scale, 1),
+)
+const budgetLiveFraction = computed(() =>
+  Math.min(budgetSegments.value.live / budgetSegments.value.scale, 1 - budgetDoneFraction.value),
+)
+const budgetCapFraction = computed(() =>
+  budgetSegments.value.cap != null
+    ? Math.min(budgetSegments.value.cap / budgetSegments.value.scale, 1)
+    : null,
+)
+const budgetMarkFraction = computed(() =>
+  budgetSegments.value.mark != null
+    ? Math.min(budgetSegments.value.mark / budgetSegments.value.scale, 1)
+    : null,
+)
+// Au-delà du plafond, plus de zone grise : la queue de la barre passe au rouge,
+// avec un curseur qui marque où était le plafond.
+const budgetExceeded = computed(
+  () =>
+    budgetSegments.value.cap != null &&
+    budgetSegments.value.done + budgetSegments.value.live > budgetSegments.value.cap,
+)
 
 const budgetFigure = computed(() => {
   const { day, week } = BUDGET_SAMPLE
@@ -187,7 +215,7 @@ const budgetAside = computed(() =>
   budgetWeek.value ? `reste ${BUDGET_SAMPLE.week.remaining}` : `max ${BUDGET_SAMPLE.day.max}`,
 )
 
-const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du jour'))
+const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'hui'))
 </script>
 
 <template>
@@ -399,26 +427,48 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
 
     <!-- Budget de charge -------------------------------------------------- -->
     <div v-else-if="block.kind === 'training_budget'" class="cbp-card">
-      <div class="cbp-title">{{ budgetTitle }}</div>
+      <div class="cbp-title cbp-budget-title">
+        <i
+          v-if="!budgetWeek"
+          class="fa-solid fa-weight-hanging cbp-budget-title-icon"
+          aria-hidden="true"
+        ></i>
+        <span class="cbp-budget-title-text">{{ budgetTitle }}</span>
+      </div>
       <div class="cbp-budget-figures">
         <span class="cbp-budget-figure">{{ budgetFigure }}</span>
         <span class="cbp-budget-aside">{{ budgetAside }}</span>
       </div>
-      <!-- Le repère de la cible sur la barre : c'est lui qui distingue « il en
-           reste » de « c'est fait » — sans lui, la barre ne dit plus que « du
-           TSS », ce qu'on savait déjà. -->
+      <!-- Trois zones en mode jour : le fait, la sortie en cours (orange), le
+           restant avant le plafond (le fond de la barre sert déjà de zone
+           grise). Le repère de la cible en mode semaine, ou le franchissement
+           du plafond en mode jour, se lisent au même endroit — jamais les deux
+           à la fois. -->
       <div class="cbp-budget-bar">
         <span
           class="cbp-budget-seg"
-          :style="{ width: `${(budgetSegments.done / budgetSegments.scale) * 100}%`, background: 'rgba(25,135,84,0.55)' }"
+          :style="{ width: `${budgetDoneFraction * 100}%`, background: 'rgba(25,135,84,0.55)' }"
         ></span>
         <span
           class="cbp-budget-seg"
-          :style="{ width: `${(budgetSegments.live / budgetSegments.scale) * 100}%`, background: budgetSegments.liveColor }"
+          :style="{ width: `${budgetLiveFraction * 100}%`, background: budgetSegments.liveColor }"
+        ></span>
+        <!-- Le dépassement du plafond : la queue de la barre repeinte en rouge,
+             quelle que soit la couleur en dessous. -->
+        <span
+          v-if="budgetExceeded"
+          class="cbp-budget-over"
+          :style="{ left: `${budgetCapFraction! * 100}%` }"
         ></span>
         <span
+          v-if="budgetMarkFraction !== null"
           class="cbp-budget-mark"
-          :style="{ left: `${(budgetSegments.mark / budgetSegments.scale) * 100}%` }"
+          :style="{ left: `${budgetMarkFraction * 100}%` }"
+        ></span>
+        <span
+          v-if="budgetExceeded"
+          class="cbp-budget-mark"
+          :style="{ left: `${budgetCapFraction! * 100}%` }"
         ></span>
       </div>
       <div class="cbp-budget-context">
@@ -766,6 +816,24 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
 /* Budget de charge : le chiffre, sa barre, son contexte. Le chiffre est plus gros
    qu'une ligne ordinaire sans aller au plein cadre — il en faut deux (le fait et la
    cible), et une barre en dessous. Même rapport que `budgetFigureHeight`. */
+.cbp-budget-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  white-space: normal;
+}
+.cbp-budget-title-icon {
+  flex: none;
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+.cbp-budget-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .cbp-budget-figures {
   display: flex;
   align-items: baseline;
@@ -788,17 +856,30 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
 .cbp-budget-bar {
   position: relative;
   display: flex;
+  width: 95%;
   height: 0.8em;
   margin-top: 0.4em;
   border-radius: 0.4em;
   overflow: hidden;
+  /* Sert de zone grise (« le restant ») en mode jour tant que le plafond n'est
+     pas franchi : ce qui n'est ni fait ni en cours. */
   background: rgba(255, 255, 255, 0.12);
 }
 .cbp-budget-seg {
   height: 100%;
 }
-/* Le repère de la cible, posé PAR-DESSUS les segments : il doit se voir aussi bien
-   quand on est encore loin que quand on l'a dépassé. */
+/* Le dépassement du plafond : la queue de la barre repeinte en rouge, quelle que
+   soit la couleur en dessous — fait ou en cours. */
+.cbp-budget-over {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  background: #dc3545;
+}
+/* Le repère — la cible en mode semaine, le plafond franchi en mode jour — posé
+   PAR-DESSUS les segments : il doit se voir aussi bien quand on est encore loin
+   que quand on l'a dépassé. */
 .cbp-budget-mark {
   position: absolute;
   top: 0;

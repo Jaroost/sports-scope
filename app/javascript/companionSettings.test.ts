@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, blockShape, isChoiceOf, metricSample,
   averagesCardsFit, budgetContextFits, canHideBehindMenu, densityFor, legendFits, phoneCell, PHONE_GRID,
-  recordingIsCompact, sameDrawing, zoneCount,
+  recordingIsCompact, changeRouteIsCompact, clearRouteIsCompact, sameDrawing, zoneCount,
   type Block, type Catalog, type Cell, type Page,
 } from './companionSettings'
 
@@ -321,6 +321,14 @@ describe('les autres replis', () => {
   it('réduit le bouton d\'enregistrement à son icône quand le libellé ne tient plus', () => {
     expect(recordingIsCompact(phoneCell(1, 1))).toBe(false)
     expect(recordingIsCompact(phoneCell(3, 2))).toBe(true)
+  })
+
+  it('réduit les boutons d\'itinéraire à leur icône au même seuil', () => {
+    // Ce ne sont, eux aussi, que des boutons — même repli que l'enregistrement.
+    expect(changeRouteIsCompact(phoneCell(1, 1))).toBe(false)
+    expect(changeRouteIsCompact(phoneCell(3, 2))).toBe(true)
+    expect(clearRouteIsCompact(phoneCell(1, 1))).toBe(false)
+    expect(clearRouteIsCompact(phoneCell(3, 2))).toBe(true)
   })
 
   it('retire le contexte du budget avant son chiffre', () => {

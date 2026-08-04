@@ -304,6 +304,34 @@ class CompanionSettingsTest < ActiveSupport::TestCase
     assert_equal 1, result["pages"].first["blocks"].size
   end
 
+  # ── changer / retirer l'itinéraire ──────────────────────────────────────────
+  #
+  # Deux commandes, pas des mesures : rien à sanitizer au-delà du mode, comme
+  # pour l'enregistrement.
+
+  test "changer et retirer l'itinéraire se posent dans leurs deux modes" do
+    result = only([ preset("pages" => [
+      { "kind" => "list", "blocks" => [
+        { "kind" => "change_route", "mode" => "compact" },
+        { "kind" => "clear_route", "mode" => "compact" }
+      ] }
+    ]) ])
+
+    assert_equal [ %w[change_route compact], %w[clear_route compact] ],
+                 result["pages"].first["blocks"].map { |block| [ block["kind"], block["mode"] ] }
+  end
+
+  test "un mode inconnu pour ces deux commandes retombe sur le mode complet" do
+    result = only([ preset("pages" => [
+      { "kind" => "list", "blocks" => [
+        { "kind" => "change_route", "mode" => "clignotant" },
+        { "kind" => "clear_route", "mode" => "clignotant" }
+      ] }
+    ]) ])
+
+    assert_equal %w[full full], result["pages"].first["blocks"].map { |block| block["mode"] }
+  end
+
   # ── le budget de charge ─────────────────────────────────────────────────────
   #
   # Le seul composant dont la donnée ne vient pas des capteurs : elle est calculée

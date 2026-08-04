@@ -1610,6 +1610,8 @@ fr:
         zones: "Temps par zone"
         averages: "Moyennes"
         recording: "Enregistrement"
+        change_route: "Changer d'itinéraire"
+        clear_route: "Retirer l'itinéraire"
         nav_state: "État de navigation"
         radar: "Radar"
         training_budget: "Budget de charge"

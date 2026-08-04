@@ -309,13 +309,48 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
     <template v-else-if="block.kind === 'recording'">
       <!-- Compact : l'icône seule, pour une cellule de grille. -->
       <div v-if="shape.recordingCompact" class="cbp-card cbp-center">
-        <span class="cbp-rec-compact"><span class="cbp-rec-dot"></span></span>
+        <span class="cbp-action-compact"><span class="cbp-rec-dot"></span></span>
       </div>
       <!-- Complet : le bouton large, à portée de pouce sur une route bosselée. -->
       <div v-else class="cbp-center cbp-plain">
-        <span class="cbp-rec-button">
+        <span class="cbp-action-button">
           <span class="cbp-rec-dot"></span>
           Démarrer l'enregistrement
+        </span>
+      </div>
+    </template>
+
+    <!-- Changer d'itinéraire ----------------------------------------------
+         Même geste que « Choisir un autre itinéraire » dans le menu ⋮ de
+         l'appli, posé directement sur une page plutôt que rangé dedans. -->
+    <template v-else-if="block.kind === 'change_route'">
+      <div v-if="shape.changeRouteCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact">
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button">
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
+          Changer d'itinéraire
+        </span>
+      </div>
+    </template>
+
+    <!-- Retirer l'itinéraire ------------------------------------------------
+         Retire le tracé suivi sans quitter la sortie ; la carte et la
+         position restent. Même geste que « Retirer l'itinéraire » dans le
+         menu ⋮. -->
+    <template v-else-if="block.kind === 'clear_route'">
+      <div v-if="shape.clearRouteCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact">
+          <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button">
+          <i class="fa-solid fa-eraser" aria-hidden="true"></i>
+          Retirer l'itinéraire
         </span>
       </div>
     </template>
@@ -587,9 +622,10 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
   font-variant-numeric: tabular-nums;
 }
 
-/* Le vert-bleu du thème (`ColorScheme.fromSeed(Colors.teal)`), et la pastille
-   rouge de l'enregistrement. */
-.cbp-rec-button {
+/* Le vert-bleu du thème (`ColorScheme.fromSeed(Colors.teal)`) : commun à tous
+   les boutons d'action du tableau de bord (enregistrement, itinéraire), pas
+   seulement à l'enregistrement qui l'a introduit. */
+.cbp-action-button {
   display: inline-flex;
   align-items: center;
   gap: 0.5em;
@@ -602,7 +638,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
   max-width: 100%;
   overflow: hidden;
 }
-.cbp-rec-compact {
+.cbp-action-compact {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -610,6 +646,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
   height: 2.6em;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.24);
+  color: #fff;
 }
 .cbp-rec-dot {
   width: 0.9em;

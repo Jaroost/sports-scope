@@ -8,6 +8,10 @@
 - **Gestionnaire de paquets JS** : pnpm 9
 - **Environnement de développement** : Docker (le projet tourne dans des containers)
 
+## Tests
+
+Ne pas écrire de tests (Ruby, TS, ou côté dépôt voisin `sports-scope-companion`) sauf demande explicite de l'utilisateur.
+
 ## Démarrage
 
 Le projet tourne dans Docker — on ne peut pas lancer `rails` ou `bundle` directement depuis le terminal hôte (ruby du système trop vieux). Utiliser les containers Docker pour exécuter des commandes Rails.

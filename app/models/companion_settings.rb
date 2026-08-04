@@ -41,6 +41,12 @@ module CompanionSettings
     "zones" => %w[bar bar_only legend],
     "averages" => %w[cards list],
     "recording" => %w[full compact],
+    # Deux commandes sur l'itinéraire suivi, posables sur une page plutôt que
+    # rangées dans le menu ⋮ : le même geste que « Choisir un autre itinéraire »
+    # et « Retirer l'itinéraire », à portée de pouce. Rien à sanitizer au-delà du
+    # mode : ce sont des boutons, pas des mesures.
+    "change_route" => %w[full compact],
+    "clear_route" => %w[full compact],
     "nav_state" => %w[full compact],
     # La jauge existe dans les deux sens : couchée elle prend une cellule large,
     # debout elle prend une colonne — c'est la case dont on dispose qui décide,

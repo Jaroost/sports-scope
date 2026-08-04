@@ -344,6 +344,18 @@ export function recordingIsCompact(cell?: CellSize): boolean {
   return cell.width < 200 || density === 'tight' || density === 'minimal'
 }
 
+// Même seuil que `recordingIsCompact`, pour la même raison : « Changer
+// d'itinéraire » et « Retirer l'itinéraire » ne sont, eux aussi, que des
+// boutons — un libellé qui ne tient pas devient l'icône seule plutôt que de
+// se tronquer.
+export function changeRouteIsCompact(cell?: CellSize): boolean {
+  return recordingIsCompact(cell)
+}
+
+export function clearRouteIsCompact(cell?: CellSize): boolean {
+  return recordingIsCompact(cell)
+}
+
 // ── De quoi dessiner un aperçu ──────────────────────────────────────────────
 //
 // Ce que la vignette écrit dans la case : une valeur plausible, l'unité, et la
@@ -462,6 +474,8 @@ export interface BlockShape {
   zonesLegend: boolean
   averagesCards: boolean
   recordingCompact: boolean
+  changeRouteCompact: boolean
+  clearRouteCompact: boolean
   navFull: boolean
   radarGauge: boolean
   radarVertical: boolean
@@ -512,6 +526,12 @@ export function blockShape(block: Block, cell?: CellSize): BlockShape {
     recordingCompact:
       block.kind === 'recording' &&
       (block.mode === 'compact' || recordingIsCompact(cell)),
+    changeRouteCompact:
+      block.kind === 'change_route' &&
+      (block.mode === 'compact' || changeRouteIsCompact(cell)),
+    clearRouteCompact:
+      block.kind === 'clear_route' &&
+      (block.mode === 'compact' || clearRouteIsCompact(cell)),
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
     // Les deux sens de la jauge radar : le dessin est le même, tourné d'un quart
     // de tour.

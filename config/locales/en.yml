@@ -1610,6 +1610,8 @@ en:
         zones: "Time in zone"
         averages: "Averages"
         recording: "Recording"
+        change_route: "Change route"
+        clear_route: "Clear route"
         nav_state: "Navigation state"
         radar: "Radar"
         training_budget: "Training budget"

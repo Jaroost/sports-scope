@@ -89,15 +89,18 @@ export function companionNav(state: CompanionNavState): void {
   target.postMessage(JSON.stringify(state))
 }
 
+// Une page web ne peut pas savoir si l'appli est installée : au mieux on sait
+// qu'elle *pourrait* l'être. On se limite donc à Android, et on ne propose rien
+// quand on tourne déjà dans l'appli, où le lien n'aurait aucun sens.
+export function shouldOfferCompanionApp(): boolean {
+  if (inCompanionApp()) return false
+  return /Android/i.test(navigator.userAgent)
+}
+
 // Affiche les liens « ouvrir dans l'application » (`sportsscope://`), masqués par
 // défaut dans le HTML.
-//
-// Une page web ne peut pas savoir si l'appli est installée : au mieux on sait
-// qu'elle *pourrait* l'être. On se limite donc à Android, et on ne montre rien
-// quand on tourne déjà dans l'appli, où le lien n'aurait aucun sens.
 export function revealCompanionLinks(): void {
-  if (inCompanionApp()) return
-  if (!/Android/i.test(navigator.userAgent)) return
+  if (!shouldOfferCompanionApp()) return
 
   document.querySelectorAll('[data-companion-link]').forEach((el) => {
     el.classList.remove('d-none')

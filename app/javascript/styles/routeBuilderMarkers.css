@@ -125,6 +125,15 @@
   border: 2px solid #fff;
   box-shadow: 0 2px 6px rgba(0,0,0,0.35);
 }
+/* Amas : le chiffre défile en continu parmi ceux qu'il représente (cf. tickClusterCycle).
+   Seul CE texte fond ; le disque (fond, bordure, ombre) reste plein en permanence — le
+   point ne doit jamais sembler disparaître, juste changer de numéro. */
+.wp-marker-num-text {
+  transition: opacity 0.18s ease;
+}
+.wp-marker-num-text--fade {
+  opacity: 0;
+}
 .wp-marker--free .wp-marker-num {
   background: #a855f7;
 }
@@ -140,7 +149,7 @@
   cursor: zoom-in;
 }
 .wp-marker[data-merged]::after {
-  content: '+' attr(data-merged);
+  content: attr(data-merged);
   position: absolute;
   top: -4px;
   right: -7px;
@@ -269,6 +278,30 @@
 .wp-tooltip-action--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
 .wp-tooltip-coords-row { display: flex; gap: 0.25rem; }
 .wp-tooltip-coords-row .wp-tooltip-action { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; padding-right: 0.45rem; }
+/* Popup de choix d'insertion (tracé qui repasse plusieurs fois au même endroit) : bouton
+   d'insertion principal + bouton œil pour prévisualiser le tronçon sur la carte, dans la
+   même rangée — même gabarit que .wp-tooltip-coords-row. */
+.insert-choice-row { display: flex; align-items: center; gap: 0.25rem; }
+.insert-choice-row .insert-choice-btn { width: auto; flex: 1 1 0; min-width: 0; }
+.insert-choice-eye {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(0,0,0,0.07);
+  color: #6b7280;
+  font-size: 0.78rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.insert-choice-eye:hover { background: rgba(0,0,0,0.14); color: #111827; }
+.insert-choice-eye--active { background: #00b4d8; color: #fff; }
+.insert-choice-eye--active:hover { background: #00a0c2; color: #fff; }
 .wp-tooltip-coords { display: flex; align-items: baseline; gap: 0.3rem; min-width: 0; font-variant-numeric: tabular-nums; letter-spacing: 0.01em; }
 .wp-tooltip-coord-label { font-size: 0.66rem; font-weight: 600; text-transform: uppercase; color: #6c757d; flex-shrink: 0; }
 .wp-tooltip-coords--copied { color: #16a34a; }

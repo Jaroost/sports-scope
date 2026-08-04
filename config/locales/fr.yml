@@ -1296,6 +1296,7 @@ fr:
     route_point: "Point du trajet"
     insert_choice_title: "Le tracé passe ici plusieurs fois — où insérer ?"
     insert_as_point: "Insérer comme point %{n}"
+    insert_choice_preview: "Mettre en évidence ce tronçon sur la carte"
     map_point: "Point sur la carte"
     add_to_route: "Ajouter à l'itinéraire"
     street_view: "Street View"

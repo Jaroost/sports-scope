@@ -174,6 +174,10 @@ let coordPopup: any = null
 // Popup de désambiguïsation d'insertion : quand le point cliqué correspond à plusieurs
 // passes du tracé (même endroit parcouru plusieurs fois), on demande sur laquelle insérer.
 let insertChoicePopup: any = null
+// Index (dans `cands`) de la passe actuellement mise en évidence par le bouton œil de la
+// popup de choix, ou null. Sert à basculer (ré-appuyer sur le même œil l'éteint) et à
+// nettoyer la mise en évidence à la fermeture de la popup.
+let insertPreviewIdx: number | null = null
 let detachLongPress: (() => void) | null = null
 let waypointGeomIndices: number[] = []
 let selectedWpIdx = -1
@@ -518,6 +522,7 @@ async function initMap() {
       void savedPoisStore.load().then(() => installSavedPoiMarkers())
       // Repères de l'itinéraire (déjà chargés si l'on rouvre un itinéraire existant).
       installRouteMarkers()
+      startClusterCycle()
       resolve()
     })
   })
@@ -1726,43 +1731,80 @@ function insertWaypointAtHover(hit: { lng: number; lat: number; edgeIdx: number 
 // rang — une passe couvre plusieurs arêtes — en gardant l'arête la plus proche du clic, et
 // on renvoie une entrée par passe : point projeté + rang d'insertion. Plusieurs entrées =
 // ambiguïté à trancher par l'utilisateur.
-function insertionCandidatesAt(point: { x: number; y: number }): Array<{ lng: number; lat: number; insertAt: number }> {
+function insertionCandidatesAt(
+  point: { x: number; y: number },
+): Array<{ lng: number; lat: number; insertAt: number; geomLo: number; geomHi: number }> {
   if (!mapInstance || routeStore.geometry.value.length < 2) return []
   const px = routeStore.geometry.value.map((pt) => mapInstance.project([pt[0], pt[1]]))
   recomputeWaypointGeomIndices()
   const passes = insertionPasses(px, point, waypointGeomIndices, routeStore.waypoints.value.length)
   // Retour en coordonnées géographiques : le point projeté vit sur l'arête, entre ses deux
-  // sommets écran (une déprojection par passe, pas une par arête candidate).
+  // sommets écran (une déprojection par passe, pas une par arête candidate). `geomLo`/`geomHi`
+  // bornent le tronçon de géométrie qui recevrait le point (cf. waypointPosForEdge) — c'est ce
+  // que le bouton œil de la popup de choix met en évidence.
   return passes.map(({ edgeIdx, t, insertAt }) => {
     const a = px[edgeIdx], b = px[edgeIdx + 1]
     const ll = mapInstance.unproject([a.x + t * (b.x - a.x), a.y + t * (b.y - a.y)])
-    return { lng: ll.lng, lat: ll.lat, insertAt }
+    const geomLo = waypointGeomIndices[insertAt - 1] ?? edgeIdx
+    const geomHi = waypointGeomIndices[insertAt] ?? edgeIdx + 1
+    return { lng: ll.lng, lat: ll.lat, insertAt, geomLo, geomHi }
   })
 }
 
 function closeInsertChoicePopup() {
   if (insertChoicePopup) { insertChoicePopup.remove(); insertChoicePopup = null }
+  clearInsertPreview()
+}
+
+// Efface la mise en évidence posée par le bouton œil de la popup de choix, s'il y en a une.
+function clearInsertPreview() {
+  if (insertPreviewIdx === null) return
+  insertPreviewIdx = null
+  selectionStore.selectionRange.value = null
+  selectionStore.selectionPinned.value = false
+  updateSelectionLayer()
+}
+
+// Met en évidence (ou éteint si déjà active) la voie du tronçon `geomLo`..`geomHi` — celui
+// qui recevrait le point si on choisissait cette passe. Réutilise la sélection du graphe
+// (même mécanisme que le survol d'un col) : `updateSelectionLayer` surligne sur la ligne
+// d'AFFICHAGE dédoublée, donc la bonne voie parmi celles qui se superposent ici.
+function toggleInsertPreview(i: number, cand: { geomLo: number; geomHi: number }) {
+  if (insertPreviewIdx === i) { clearInsertPreview(); return }
+  const startKm = selectionStore.cumDistKm[cand.geomLo]
+  const endKm = selectionStore.cumDistKm[cand.geomHi]
+  if (startKm == null || endKm == null) return
+  insertPreviewIdx = i
+  selectionStore.selectionRange.value = { startKm, endKm }
+  selectionStore.selectionPinned.value = true
+  updateSelectionLayer()
 }
 
 // Popup de choix quand plusieurs passes se superposent sous le clic : un bouton par passe,
-// libellé par le numéro du point qui serait créé. Le clic sur un bouton insère ce point.
-function showInsertChoicePopup(cands: Array<{ lng: number; lat: number; insertAt: number }>) {
+// libellé par le numéro du point qui serait créé, et un bouton œil pour mettre en évidence
+// sur la carte le tronçon correspondant (utile pour distinguer des voies confondues au clic).
+function showInsertChoicePopup(cands: Array<{ lng: number; lat: number; insertAt: number; geomLo: number; geomHi: number }>) {
   if (!_maplibregl || !mapInstance || !cands.length) return
   closeInsertChoicePopup()
   const anchor = cands[0]
   const wrap = document.createElement('div')
   wrap.className = 'place-popup insert-choice-popup'
-  const buttons = cands.map((c, i) =>
-    `<button type="button" class="wp-tooltip-action insert-choice-btn" data-i="${i}">
-       <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-       <span>${t('routes.insert_as_point', { n: c.insertAt + 1 })}</span>
-     </button>`).join('')
+  const rows = cands.map((c, i) =>
+    `<div class="insert-choice-row">
+       <button type="button" class="wp-tooltip-action insert-choice-btn" data-i="${i}">
+         <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+         <span>${t('routes.insert_as_point', { n: c.insertAt + 1 })}</span>
+       </button>
+       <button type="button" class="insert-choice-eye" data-i="${i}" aria-label="${t('routes.insert_choice_preview')}" title="${t('routes.insert_choice_preview')}">
+         <i class="fa-regular fa-eye" aria-hidden="true"></i>
+       </button>
+     </div>`).join('')
   wrap.innerHTML = `
     <div class="place-popup-header">
       <span class="place-popup-name">${t('routes.insert_choice_title')}</span>
       <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
     </div>
-    ${buttons}
+    ${rows}
   `
   insertChoicePopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: false, className: 'place-popup-container' })
     .setLngLat([anchor.lng, anchor.lat])
@@ -1775,6 +1817,17 @@ function showInsertChoicePopup(cands: Array<{ lng: number; lat: number; insertAt
       const c = cands[Number((ev.currentTarget as HTMLElement).dataset.i)]
       if (c) insertWaypointAt(c.insertAt, c.lng, c.lat)
       closeInsertChoicePopup()
+    })
+  })
+  const eyeButtons = wrap.querySelectorAll('.insert-choice-eye')
+  eyeButtons.forEach((btn) => {
+    btn.addEventListener('click', (ev: any) => {
+      ev.stopPropagation()
+      const i = Number((ev.currentTarget as HTMLElement).dataset.i)
+      const c = cands[i]
+      if (!c) return
+      toggleInsertPreview(i, c)
+      eyeButtons.forEach((b, bi) => b.classList.toggle('insert-choice-eye--active', bi === insertPreviewIdx))
     })
   })
 }
@@ -1940,8 +1993,56 @@ function regroupWaypointMarkers() {
     if (!m) return
     const el = m.getElement() as HTMLElement
     el.classList.toggle('wp-marker--merged', mergedInto[i] >= 0)
-    if (hides[i] > 0) el.dataset.merged = String(hides[i])
+    // Nombre total de points de l'amas (lui compris), pas seulement ceux qu'il cache — un
+    // badge « +2 » sur trois points superposés se lisait comme deux points en plus du numéro
+    // déjà visible, pas comme la taille de l'amas.
+    if (hides[i] > 0) el.dataset.merged = String(hides[i] + 1)
     else delete el.dataset.merged
+  })
+}
+
+// ─── Défilement des numéros d'un amas ──────────────────────────────────────────
+// Le badge dit combien de points l'amas cache, mais pas LESQUELS : on fait défiler en
+// continu le numéro affiché sur le marqueur parmi tous ceux de l'amas, pour qu'on puisse
+// les repérer d'un coup d'œil sans avoir à zoomer. Le clic garde son rôle habituel
+// (zoomer jusqu'à séparation, cf. activateWaypoint) — le défilement est purement passif.
+const CLUSTER_CYCLE_MS = 1400
+let clusterCycleTimer: ReturnType<typeof setInterval> | null = null
+// Rang courant (dans l'amas trié par index) affiché par chaque marqueur représentant un
+// amas — clé : index du marqueur, valeur : rang. Vidée à chaque reconstruction des
+// marqueurs pour ne jamais pointer sur un amas dont la composition a changé entretemps.
+let clusterCyclePos = new Map<number, number>()
+
+function startClusterCycle() {
+  if (clusterCycleTimer !== null || REDUCED_MOTION) return
+  clusterCycleTimer = setInterval(tickClusterCycle, CLUSTER_CYCLE_MS)
+}
+
+function stopClusterCycle() {
+  if (clusterCycleTimer === null) return
+  clearInterval(clusterCycleTimer)
+  clusterCycleTimer = null
+}
+
+function tickClusterCycle() {
+  waypointMarkers.forEach((m, i) => {
+    if (!m) return
+    const el = m.getElement() as HTMLElement
+    if (!el.dataset.merged) return  // pas (ou plus) la tête d'un amas
+    const members = clusterMembers(i).sort((a, b) => a - b)
+    if (members.length < 2) return
+    const pos = ((clusterCyclePos.get(i) ?? members.indexOf(i)) + 1) % members.length
+    clusterCyclePos.set(i, pos)
+    // On ne fait fondre que le CHIFFRE (span interne) : le disque reste plein en
+    // permanence, seul son contenu change — sans quoi le point semblait disparaître à
+    // chaque bascule plutôt que simplement changer de numéro.
+    const textEl = el.querySelector('.wp-marker-num-text') as HTMLElement | null
+    if (!textEl) return
+    textEl.classList.add('wp-marker-num-text--fade')
+    setTimeout(() => {
+      textEl.textContent = String(members[pos] + 1)
+      textEl.classList.remove('wp-marker-num-text--fade')
+    }, 180)
   })
 }
 
@@ -2009,6 +2110,7 @@ async function copyCoords(btn: HTMLElement, text: string) {
 function refreshWaypointMarkers() {
   if (!_maplibregl || !mapInstance) return
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
+  clusterCyclePos.clear()
   selectedWpIdx = -1
   if (!props.state.showWaypoints) return
   // Lecture seule (vue partagée) : on affiche les mêmes marqueurs numérotés et leur
@@ -2090,7 +2192,7 @@ function refreshWaypointMarkers() {
         </button>`}
         <div class="wp-tooltip-arrow"></div>
       </div>
-      <span class="wp-marker-num">${idx + 1}</span>
+      <span class="wp-marker-num"><span class="wp-marker-num-text">${idx + 1}</span></span>
     `
     const marker = new _maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat(waypointDisplayPos(idx, w)).addTo(mapInstance)
     if (!ro) attachWaypointDrag(el, marker, idx)
@@ -2538,6 +2640,7 @@ watch(savedPoisStore.show, () => installSavedPoiMarkers(), { deep: true })
 
 onBeforeUnmount(() => {
   stopRouteFlow()
+  stopClusterCycle()
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
   divergentMarkers.forEach((m) => m.remove()); divergentMarkers.length = 0
   climbGroup.clear()

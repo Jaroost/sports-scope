@@ -113,6 +113,11 @@ Rails.application.routes.draw do
   get "/api/companion_settings", to: "companion_settings#show", as: :api_companion_settings
   patch "/api/companion_settings", to: "companion_settings#update"
 
+  # Budget de charge (TSS jour/semaine) calculé côté navigateur par
+  # useTrainingPlan.ts, persisté pour être inclus dans /api/companion_settings
+  # (cf. TrainingBudgetsController).
+  patch "/api/training_budget", to: "training_budgets#update"
+
   # Seuils physiologiques de l'athlète (FTP manuelle, poids — JSON pour Vue)
   patch "/api/athlete", to: "profiles#update_athlete"
 

@@ -3,9 +3,11 @@ import type { AthleteState } from '../routeLoad'
 import {
   userPreferences,
   persistTrainingPlan,
+  isLoggedIn,
   TRAINING_GOALS,
   type TrainingGoal,
 } from '../userPreferences'
+import { csrfToken } from '../csrf'
 
 // ─── Plan d'entraînement : « sortie objectif » + « que faire aujourd'hui » ─────
 // Logique partagée entre le panneau complet de la page performance
@@ -245,6 +247,13 @@ export type Reco = { action: string; tss: number; minutes: number; effort: strin
 // `date` n'est pas décoratif : l'appli garde le dernier budget reçu sur disque pour
 // les départs hors ligne, et un budget de la semaine dernière doit se reconnaître
 // comme tel plutôt que de s'afficher comme celui du jour.
+// Le plan jour par jour de la semaine en cours (lundi → dimanche). `done` est le TSS
+// déjà encaissé pour un jour passé ou en cours, `null` pour un jour qui n'est pas
+// encore arrivé. `target` suit les mêmes priorités que la reco du jour et la cible
+// hebdo (sortie déjà planifiée > reco du jour > affûtage > part quotidienne de la
+// cible), `null` pour un jour passé dont on n'a reconstitué ni plan ni réalisé.
+export interface DayBudget { date: string; target: number | null; done: number | null }
+
 export interface TrainingBudget {
   date: string
   // `done` ne compte QUE les sorties déjà enregistrées : la sortie en cours n'est
@@ -253,6 +262,7 @@ export interface TrainingBudget {
   week: { target: number; done: number; planned: number; remaining: number }
   form: { ctl: number; atl: number; tsb: number; zone: string }
   risk: { acwr: number | null; zone: string | null }
+  days: DayBudget[]
 }
 
 // ── Cible de volume hebdomadaire ─────────────────────────────────────────────
@@ -718,6 +728,49 @@ export function useTrainingPlan(
     return ev.phase === 'build' ? EVENT_BUILD_FLOOR : GOAL_FLOOR.peak
   })
 
+  // Le plan jour par jour de la semaine en cours, pour le détail que `budget` seul
+  // (jour + agrégat semaine) ne montre pas. Calculé APRÈS `recommendation` et
+  // `weekPlan`, dont il reprend les chiffres plutôt que de les refaire : le jour
+  // courant vise la même reco que le bloc « aujourd'hui », les jours à venir la même
+  // part quotidienne que la barre de semaine.
+  function buildWeekDays(c: Current, week: WeekPlan): DayBudget[] {
+    const series = data.value?.series ?? []
+    const today = new Date()
+    const monday = mondayOf(today)
+    const todayLocalISO = isoLocal(today)
+    const ev = eventInfo.value
+    const onEvent = !!ev && ev.phase !== 'past'
+
+    const days: DayBudget[] = []
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(monday)
+      day.setDate(day.getDate() + i)
+      const iso = isoLocal(day)
+
+      const point = series.find((p) => p.date === iso)
+      const done = iso <= todayLocalISO ? Math.round(point?.tss ?? 0) : null
+
+      let target: number | null
+      const plannedToday = plannedLoads?.value.get(iso) ?? 0
+      if (plannedToday > 0) {
+        target = Math.round(plannedToday)
+      } else if (iso === todayLocalISO) {
+        target = recommendation.value ? Math.round(recommendation.value.tss) : null
+      } else if (onEvent && ev) {
+        target = Math.round(plannedTss(ev.days - daysUntil(iso), c.ctl))
+      } else if (iso > todayLocalISO) {
+        target = Math.round(week.dailyNeed)
+      } else {
+        // Jour passé sans plan connu et sans TSS réalisé au-delà de `done` : on ne
+        // reconstitue pas une cible qu'on n'a jamais calculée à l'époque.
+        target = null
+      }
+
+      days.push({ date: iso, target, done })
+    }
+    return days
+  }
+
   const budget = computed<TrainingBudget | null>(() => {
     const c = current.value
     const week = weekPlan.value
@@ -746,8 +799,37 @@ export function useTrainingPlan(
       },
       form: { ctl: Math.round(c.ctl), atl: Math.round(c.atl), tsb: Math.round(c.tsb), zone: c.form_zone },
       risk: { acwr: c.acwr, zone: c.acwr_zone },
+      days: buildWeekDays(c, week),
     }
   })
+
+  // ── Persistance du budget pour l'appli compagnon ────────────────────────────
+  //
+  // Best-effort, même contrat que `persist()` ci-dessus. La différence est la
+  // raison d'être : `/api/companion_settings` est interrogé à CHAQUE lancement de
+  // l'appli, contrairement au pont WebView (`pushTrainingBudget`,
+  // companionBridge.ts) qui ne pousse que pendant une navigation dans l'appli.
+  // Garder ce dernier budget calculé en base, c'est ce qui permet à l'appli d'en
+  // avoir un frais même si elle n'ouvre jamais de page du site.
+  //
+  // Dédoublonné sur le JSON envoyé : `budget` se recalcule à chaque changement de
+  // `data`/`plannedLoads`, pas seulement quand le résultat change réellement.
+  let lastBudgetJson = ''
+  function persistBudget() {
+    if (!isLoggedIn()) return
+    const value = budget.value
+    if (!value) return
+    const json = JSON.stringify(value)
+    if (json === lastBudgetJson) return
+    lastBudgetJson = json
+    fetch('/api/training_budget', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+      body: JSON.stringify({ budget: value }),
+    }).catch(() => { /* hors ligne : le prochain recalcul retentera */ })
+  }
+  watch(budget, persistBudget, { immediate: true })
 
   return {
     budget,

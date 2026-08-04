@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_03_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_04_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -274,6 +274,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_120000) do
     t.datetime "strava_expires_at"
     t.string "strava_refresh_token"
     t.string "strava_uid"
+    t.jsonb "training_budget"
     t.datetime "updated_at", null: false
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["keycloak_uid"], name: "index_users_on_keycloak_uid", unique: true

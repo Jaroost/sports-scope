@@ -20,7 +20,9 @@ class CompanionSettingsController < ApplicationController
   # revanche la question du profil qu'on vient de modifier et qui ne redescend pas.
   def show
     record_viewport
-    render json: CompanionSettings.for(current_user)
+    render json: CompanionSettings.for(current_user).merge(
+      "training_budget" => current_user.training_budget
+    )
   end
 
   # PATCH /api/companion_settings

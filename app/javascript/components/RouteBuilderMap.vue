@@ -1996,8 +1996,17 @@ function regroupWaypointMarkers() {
     // Nombre total de points de l'amas (lui compris), pas seulement ceux qu'il cache — un
     // badge « +2 » sur trois points superposés se lisait comme deux points en plus du numéro
     // déjà visible, pas comme la taille de l'amas.
-    if (hides[i] > 0) el.dataset.merged = String(hides[i] + 1)
-    else delete el.dataset.merged
+    if (hides[i] > 0) {
+      el.dataset.merged = String(hides[i] + 1)
+    } else {
+      delete el.dataset.merged
+      // Un marqueur qui vient de perdre la tête de son amas (zoom, déplacement) garde sinon
+      // le dernier chiffre affiché par le défilement (tickClusterCycle) au lieu du sien —
+      // deux points fraîchement séparés pouvaient alors afficher le même numéro.
+      clusterCyclePos.delete(i)
+      const textEl = el.querySelector('.wp-marker-num-text') as HTMLElement | null
+      if (textEl) textEl.textContent = String(i + 1)
+    }
   })
 }
 

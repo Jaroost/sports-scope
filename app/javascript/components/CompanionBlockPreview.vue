@@ -238,7 +238,23 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
         <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
       </div>
 
-      <!-- Plein cadre, et aplat de zone : le même dessin côté appli. -->
+      <!-- Aplat de zone : le même aplat que le plein cadre, mais l'icône de la
+           mesure se pose devant le chiffre — cœur ou éclair, à même hauteur
+           que lui et non au-dessus : cardio et puissance dessinent sinon
+           exactement la même case. -->
+      <div
+        v-else-if="shape.metricZoneMode"
+        class="cbp-card cbp-center"
+        :style="{ background: metricBackground || undefined, color: metricInk }"
+      >
+        <div class="cbp-big cbp-big--zone">
+          <i v-if="metrics.showIcon" class="cbp-zone-icon" :class="sample.icon" aria-hidden="true"></i>
+          <span>{{ sample.value }}</span>
+        </div>
+        <div v-if="metrics.showUnit" class="cbp-unit">{{ sample.unit }}</div>
+      </div>
+
+      <!-- Plein cadre : le chiffre seul, sans icône. -->
       <div
         v-else
         class="cbp-card cbp-center"
@@ -547,6 +563,18 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Budget du
 }
 .cbp-big--gauge {
   font-size: 2.6em;
+}
+/* L'icône devant le chiffre, à même ligne : c'est elle qui distingue la case
+   cardio de la case puissance, deux aplats de zone identiques sinon. */
+.cbp-big--zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15em;
+}
+.cbp-zone-icon {
+  font-size: 0.5em;
+  opacity: 0.7;
 }
 .cbp-mid {
   font-size: 1.9em;

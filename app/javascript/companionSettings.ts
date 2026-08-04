@@ -470,6 +470,7 @@ export interface BlockShape {
   metricGauge: boolean
   metricCompact: boolean
   metricZone: string | null
+  metricZoneMode: boolean
   zonesBar: boolean
   zonesLegend: boolean
   averagesCards: boolean
@@ -519,6 +520,13 @@ export function blockShape(block: Block, cell?: CellSize): BlockShape {
     // C'est elle qui colore l'aplat, du mode `zone` comme du mode `big` : côté
     // appli, `MetricView` peint le fond dès que la mesure porte une zone.
     metricZone: zone || null,
+    // Distingue le dessin de `zone` de celui de `big` : même aplat de couleur,
+    // mais l'icône de la mesure (cœur / éclair) se pose devant le chiffre —
+    // sans ce champ, `sameDrawing` les confondrait alors qu'ils ne se
+    // dessinent plus pareil. **Sauf sans icône** (`!m.showIcon`, une case
+    // trop petite pour la montrer) : là les deux modes redeviennent
+    // rigoureusement le même dessin, comme avant ce champ.
+    metricZoneMode: block.kind === 'metric' && block.mode === 'zone' && m.showIcon,
     zonesBar: block.kind === 'zones' && (block.mode !== 'legend' || !zonesLegend),
     zonesLegend,
     averagesCards:

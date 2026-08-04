@@ -22,7 +22,7 @@ const openWax = ref<number | null>(null)
 const waxDate = ref(todayStr())
 const waxAll = ref(true)
 const openMount = ref<number | null>(null)
-const mountDate = ref(todayStr())
+const mountDate = ref(nowStr())
 const editSeuil = ref<number | null>(null)
 const seuilValue = ref(300)
 
@@ -30,6 +30,13 @@ function todayStr() {
   const d = new Date()
   const off = d.getTimezoneOffset()
   return new Date(d.getTime() - off * 60000).toISOString().slice(0, 10)
+}
+
+// Format attendu par un <input type="datetime-local"> : "YYYY-MM-DDTHH:mm" en heure locale.
+function nowStr() {
+  const d = new Date()
+  const off = d.getTimezoneOffset()
+  return new Date(d.getTime() - off * 60000).toISOString().slice(0, 16)
 }
 
 // `refresh` déclenche côté serveur un sync Strava avant de recalculer les km :
@@ -115,7 +122,7 @@ function submitWax(chain: any) {
 // ── Montage (rotation) ──────────────────────────────────────────────────────────
 function startMount(chain: any) {
   openMount.value = chain.id
-  mountDate.value = todayStr()
+  mountDate.value = nowStr()
 }
 function submitMount(bike: any, chain: any) {
   const date = mountDate.value
@@ -190,7 +197,7 @@ function openMountNext(bike: any) {
   if (!chain || !mountModalEl.value) return
   mountNextBike.value = bike
   mountNextChain.value = chain
-  mountDate.value = todayStr()
+  mountDate.value = nowStr()
   markCurrentRewax.value = true
   if (!mountModal) {
     // Le widget vit dans une colonne centrée du tableau de bord : on déplace la modale
@@ -489,7 +496,7 @@ onBeforeUnmount(() => {
 
             <!-- Formulaire montage -->
             <div v-if="openMount === chain.id" class="d-flex align-items-center gap-2 flex-wrap mt-2">
-              <input v-model="mountDate" type="date" class="form-control form-control-sm" style="width: auto" />
+              <input v-model="mountDate" type="datetime-local" class="form-control form-control-sm" style="width: auto" />
               <button type="button" class="btn btn-sm btn-success" @click="submitMount(bike, chain)">
                 <i class="fa-solid fa-check" aria-hidden="true"></i>
               </button>
@@ -542,7 +549,7 @@ onBeforeUnmount(() => {
               {{ t('chains.mount_next_body', { chain: mountNextChain?.name, bike: mountNextBike?.name }) }}
             </p>
             <label for="mount-next-date" class="form-label">{{ t('chains.mount_date') }}</label>
-            <input id="mount-next-date" v-model="mountDate" type="date" class="form-control" />
+            <input id="mount-next-date" v-model="mountDate" type="datetime-local" class="form-control" />
 
             <div class="form-check form-switch mt-3">
               <input

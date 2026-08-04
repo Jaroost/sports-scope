@@ -403,7 +403,7 @@ fr:
     mount_next_title: "Monter la chaîne suivante"
     mount_next_body: "Monter %{chain} sur %{bike} à la place de la chaîne actuelle."
     mount_confirm: "Monter"
-    mount_date: "Date de montage"
+    mount_date: "Date et heure de montage"
     mark_current_rewax: "Marquer %{chain} comme à recirer"
     cancel: "Annuler"
     close: "Fermer"

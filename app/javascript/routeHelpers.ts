@@ -547,35 +547,46 @@ export function bearingDelta(from: number, to: number): number {
 }
 
 // Construit une polyligne d'AFFICHAGE alignée index-pour-index sur `geom` : identique au
-// tracé réel, SAUF là où l'itinéraire se superpose à lui-même (portion empruntée ≥ 2 fois),
-// où les sommets sont décalés perpendiculairement à droite du sens de parcours. Comme aller
-// et retour vont en sens opposés, ils se séparent en deux « voies ». Le décalage est lissé
-// (fenêtre glissante) pour éviter un saut à l'entrée/sortie des zones de recouvrement.
+// tracé réel, SAUF là où l'itinéraire repasse par un même lieu (portion empruntée ≥ 2 fois),
+// où les sommets sont décalés perpendiculairement à droite du sens de parcours local. Le
+// premier passage à un endroit reste sur le tracé réel (voie 0, sans décalage) ; chaque
+// passage suivant décale d'un cran de plus vers la droite (voie 1, 2…), jusqu'à `maxLanes`
+// voies distinctes — au-delà, les passages surnuméraires restent sur la dernière voie. Ça
+// fonctionne aussi bien pour un aller-retour (deux passages en sens opposés, donc décalés de
+// part et d'autre car chacun se pousse « à droite » de SA propre direction) que pour des
+// tours répétés dans le même sens (plusieurs voies parallèles empilées du même côté). Le
+// décalage est lissé (fenêtre glissante) pour éviter un saut à l'entrée/sortie des zones de
+// recouvrement.
 //
 // `geom` reste la vérité géométrique (snapping, distances…) ; seul l'affichage est décalé.
 // Renvoie, alignés index-pour-index sur `geom` :
 //  - `line`   : la polyligne d'affichage (décalée sur les recouvrements) ;
-//  - `wscale` : un facteur de largeur ∈ [1−narrowFrac, 1], abaissé sur les recouvrements
-//               pour amincir le tracé là où il se dédouble (deux voies serrées plus lisibles) ;
+//  - `wscale` : un facteur de largeur ∈ [~narrowFrac restant, 1], abaissé sur les
+//               recouvrements pour amincir le tracé là où il se dédouble (voies serrées plus
+//               lisibles), proportionnellement au nombre de voies déjà empilées ;
 //  - `off`    : le décalage effectivement appliqué à chaque sommet, en mètres (0 hors
 //               recouvrement, rampes comprises). Permet de savoir OÙ l'affichage s'écarte du
 //               tracé réel — l'éditeur s'en sert pour n'y dessiner sa ligne de repère que là.
 export function buildOffsetDisplayLine(
   geom: Array<Coord | LngLat>,
   cumDistM: number[],
-  opts: { offsetM?: number; proximityM?: number; minSeparationM?: number; rampM?: number; narrowFrac?: number } = {},
+  opts: { offsetM?: number; proximityM?: number; minSeparationM?: number; rampM?: number; narrowFrac?: number; maxLanes?: number } = {},
 ): { line: LngLat[]; wscale: number[]; off: number[] } {
-  const offsetM = opts.offsetM ?? 3          // décalage latéral appliqué aux portions superposées (aller et retour s'écartent du double : ~6 m)
+  const offsetM = opts.offsetM ?? 3          // décalage latéral par voie supplémentaire
   const proximityM = opts.proximityM ?? 12   // en deçà, deux points sont « au même endroit »
-  const minSeparationM = opts.minSeparationM ?? 50  // écart le long du parcours au-delà duquel un rapprochement est un vrai recouvrement (et non de simples voisins)
+  const minSeparationM = opts.minSeparationM ?? 50  // écart le long du parcours au-delà duquel un rapprochement est un vrai recouvrement (et non de simples voisins), et qui sépare deux passages distincts au même endroit
   const rampM = opts.rampM ?? 18             // longueur de transition pour lisser le décalage
-  const narrowFrac = opts.narrowFrac ?? 0.3  // amincissement max du tracé sur les recouvrements (30 %)
+  const narrowFrac = opts.narrowFrac ?? 0.3  // amincissement max du tracé sur la dernière voie
+  const maxLanes = opts.maxLanes ?? 4        // nombre max de voies distinctes (au-delà, les passages surnuméraires restent sur la dernière)
   const n = geom.length
   const pts: LngLat[] = geom.map((c) => [c[0], c[1]])
   if (n < 3) return { line: pts, wscale: new Array(n).fill(1), off: new Array(n).fill(0) }
 
-  // 1) Détection du recouvrement via grille de hachage spatiale (≈ O(n)). On indexe chaque
-  // sommet dans une cellule de ~proximityM, puis on ne compare qu'aux 8 cellules voisines.
+  // 1) Détection du recouvrement + regroupement par lieu, via union-find sur une grille de
+  // hachage spatiale (≈ O(n)). On indexe chaque sommet dans une cellule de ~proximityM, puis
+  // on ne compare qu'aux 8 cellules voisines, et on fusionne les sommets suffisamment
+  // proches ET suffisamment éloignés l'un de l'autre le long du parcours (donc pas de simples
+  // voisins d'un même passage).
   const latRef = geom[0][1]
   const mPerDegLat = 111320
   const mPerDegLng = 111320 * Math.cos((latRef * Math.PI) / 180) || 1
@@ -591,25 +602,59 @@ export function buildOffsetDisplayLine(
     if (bucket) bucket.push(i)
     else grid.set(k, [i])
   }
-  const overlapping = new Array<boolean>(n).fill(false)
+  const parent = new Int32Array(n)
+  for (let i = 0; i < n; i++) parent[i] = i
+  const find = (x: number): number => {
+    while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x] }
+    return x
+  }
   for (let i = 0; i < n; i++) {
     const [gx, gy] = cellOf(i)
-    for (let dx = -1; dx <= 1 && !overlapping[i]; dx++) {
-      for (let dy = -1; dy <= 1 && !overlapping[i]; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
         const bucket = grid.get(cellKey(gx + dx, gy + dy))
         if (!bucket) continue
         for (const j of bucket) {
-          if (j === i) continue
+          if (j <= i) continue  // paire déjà vue dans l'autre sens
           if (Math.abs(cumDistM[i] - cumDistM[j]) < minSeparationM) continue  // simples voisins le long du tracé
-          if (haversine(geom[i], geom[j]) <= proximityM) { overlapping[i] = true; break }
+          if (haversine(geom[i], geom[j]) > proximityM) continue
+          const ri = find(i), rj = find(j)
+          if (ri !== rj) parent[ri] = rj
         }
       }
     }
   }
 
-  // 2) Lissage : moyenne glissante (en distance) de la cible binaire 0/offsetM → rampes douces
-  // à l'entrée/sortie au lieu de marches d'escalier. Deux pointeurs monotones → O(n).
-  const target = overlapping.map((o) => (o ? offsetM : 0))
+  // 2) Rang de chaque sommet = numéro de son passage à cet endroit (0 = premier passage,
+  // laissé sur le tracé réel ; 1, 2, 3… décalent d'autant de voies vers la droite, jusqu'à
+  // `maxLanes − 1`). Dans chaque groupe (même lieu), les sommets sont déjà triés par
+  // `cumDistM` croissant (parcourus dans cet ordre) ; on les découpe en passages successifs
+  // à chaque écart ≥ `minSeparationM`, la même distinction que le filtre d'union ci-dessus.
+  const groups = new Map<number, number[]>()
+  for (let i = 0; i < n; i++) {
+    const r = find(i)
+    const g = groups.get(r)
+    if (g) g.push(i)
+    else groups.set(r, [i])
+  }
+  const rank = new Array<number>(n).fill(0)
+  for (const members of groups.values()) {
+    if (members.length < 2) continue
+    let passIdx = 0
+    let passStart = 0
+    for (let k = 1; k <= members.length; k++) {
+      if (k < members.length && cumDistM[members[k]] - cumDistM[members[k - 1]] < minSeparationM) continue
+      const r = Math.min(passIdx, maxLanes - 1)
+      for (let m = passStart; m < k; m++) rank[members[m]] = r
+      passIdx++
+      passStart = k
+    }
+  }
+
+  // 3) Lissage : moyenne glissante (en distance) du rang cible (× offsetM) → rampes douces
+  // à l'entrée/sortie de chaque voie au lieu de marches d'escalier. Deux pointeurs
+  // monotones → O(n).
+  const target = rank.map((r) => r * offsetM)
   const off = new Array<number>(n)
   let lo = 0, hi = 0, sum = 0
   for (let i = 0; i < n; i++) {
@@ -618,7 +663,7 @@ export function buildOffsetDisplayLine(
     off[i] = sum / Math.max(1, hi - lo)
   }
 
-  // 3) Application : on pousse chaque sommet de off[i] mètres à droite de la tangente locale
+  // 4) Application : on pousse chaque sommet de off[i] mètres à droite de la tangente locale
   // (tangente = cap du sommet précédent au suivant ; bord = cap du segment adjacent).
   const out: LngLat[] = new Array(n)
   for (let i = 0; i < n; i++) {
@@ -633,9 +678,10 @@ export function buildOffsetDisplayLine(
     out[i] = [pts[i][0] + dLng, pts[i][1] + dLat]
   }
 
-  // Largeur : on amincit proportionnellement au décalage déjà lissé (off/offsetM ∈ [0,1]),
-  // donc le tracé maigrit exactement là où il se dédouble, avec les mêmes rampes douces.
-  const wscale = off.map((o) => 1 - narrowFrac * (o / offsetM))
+  // Largeur : on amincit proportionnellement au nombre de voies déjà empilées à cet endroit
+  // (off/offsetM = rang lissé), donc le tracé maigrit d'autant plus qu'il se dédouble, avec
+  // les mêmes rampes douces. Plancher pour ne jamais s'annuler sur la dernière voie.
+  const wscale = off.map((o) => Math.max(0.15, 1 - narrowFrac * (o / offsetM)))
   return { line: out, wscale, off }
 }
 

@@ -18,7 +18,11 @@ import {
 // helpers que le créateur d'itinéraire — donc les seuils de col et la fenêtre de
 // lissage de pente du profil utilisateur — pour que l'analyse et la création
 // d'itinéraire restent cohérentes.
-import { simplifyIndices, nudgeIndicesOffTurns, buildGradedSegments, detectClimbs, GRADE_BUCKETS } from '../routeHelpers'
+import {
+  simplifyIndices, nudgeIndicesOffTurns, buildGradedSegments, detectClimbs, GRADE_BUCKETS,
+  buildOffsetDisplayLine, haversine,
+} from '../routeHelpers'
+import type { LngLat } from '../routeHelpers'
 import { sportPreferences, routeProfileForSport, turnAnomalyDiameterForSport } from '../userPreferences'
 import { repairAgainstTrack } from '../routeRepair'
 import { buildTooltipHtml } from '../activityTooltip'
@@ -231,14 +235,24 @@ function installRouteLayers() {
   // restent alignées par index.
   const { coords, altitudes, distances } = displayRoute.value
   if (!coords.length) return
+  // Ligne d'AFFICHAGE dédoublée sur les portions parcourues plusieurs fois (aller-retour) —
+  // même algorithme que le créateur d'itinéraire (buildOffsetDisplayLine). Sans elle le
+  // second passage écrase le premier à l'écran, et en mode pente une descente masquerait
+  // entièrement la montée correspondante. `coords` reste la géométrie réelle pour tout le
+  // reste (survol, sélection, marqueurs) ; seul l'affichage se décale.
+  const cumDistM = [0]
+  for (let i = 1; i < coords.length; i++) cumDistM.push(cumDistM[i - 1] + haversine(coords[i - 1] as LngLat, coords[i] as LngLat))
+  const dispCoords: LngLat[] = coords.length >= 3 ? buildOffsetDisplayLine(coords as LngLat[], cumDistM).line : (coords as LngLat[])
   // Pente lissée depuis l'altitude (fenêtre du profil), comme le créateur d'itinéraire —
   // le stream `grade_smooth` de Strava (lissage maison) n'est volontairement pas utilisé.
-  const segments = buildGradedSegments(coords as [number, number][], altitudes, distances)
+  // `dispCoords` porte l'affichage décalé, mais reste aligné index pour index sur
+  // `altitudes`/`distances` (issus de la géométrie réelle).
+  const segments = buildGradedSegments(dispCoords, altitudes, distances)
   const hasGrades = segments.length > 0 && altitudes?.length && distances?.length
 
   mapInstance.addSource('route', {
     type: 'geojson',
-    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: coords } },
+    data: { type: 'Feature', geometry: { type: 'LineString', coordinates: dispCoords } },
   })
 
   if (hasGrades) {
@@ -277,6 +291,35 @@ function installRouteLayers() {
     })
   }
 
+  // Sens de parcours : flux animé (traitillé blanc qui défile) par défaut, flèches statiques
+  // en relais si `prefers-reduced-motion` est actif — comme le créateur d'itinéraire.
+  const flowVisibility = REDUCED_MOTION ? 'none' : 'visible'
+  flowStep = -1
+  mapInstance.addLayer({
+    id: FLOW_HALO_LAYER,
+    type: 'line',
+    source: 'route',
+    layout: { 'line-join': 'round', 'line-cap': 'butt', visibility: flowVisibility },
+    paint: {
+      'line-color': 'rgba(0,0,0,0.45)',
+      'line-width': Math.max(1.5, ROUTE_LINE_WIDTH * 0.45) * FLOW_HALO_RATIO,
+      'line-opacity': ROUTE_OPACITY,
+      'line-dasharray': FLOW_DASHES[0].map((d) => d / FLOW_HALO_RATIO),
+    },
+  })
+  mapInstance.addLayer({
+    id: FLOW_LAYER,
+    type: 'line',
+    source: 'route',
+    layout: { 'line-join': 'round', 'line-cap': 'butt', visibility: flowVisibility },
+    paint: {
+      'line-color': '#ffffff',
+      'line-width': Math.max(1.5, ROUTE_LINE_WIDTH * 0.45),
+      'line-opacity': ROUTE_OPACITY,
+      'line-dasharray': FLOW_DASHES[0],
+    },
+  })
+
   mapInstance.addImage('route-arrow', buildArrowImage(28), { pixelRatio: 2 })
   mapInstance.addLayer({
     id: 'route-direction',
@@ -290,8 +333,10 @@ function installRouteLayers() {
       'icon-rotation-alignment': 'map',
       'icon-allow-overlap': true,
       'icon-ignore-placement': true,
+      visibility: REDUCED_MOTION ? 'visible' : 'none',
     },
   })
+  startRouteFlow()
 
   mapInstance.addSource('selected-route', {
     type: 'geojson',
@@ -457,6 +502,44 @@ function buildArrowImage(size = 28): ImageData {
   ctx.lineWidth = size * 0.12
   draw()
   return ctx.getImageData(0, 0, size, size)
+}
+
+// ─── Sens de parcours (flux animé) ────────────────────────────────────────
+// Même repère que le créateur d'itinéraire : un traitillé blanc qui défile dans le sens
+// du tracé, avec halo sombre pour rester lisible sur toutes les couleurs de pente. Les
+// flèches statiques ci-dessus prennent le relais si `prefers-reduced-motion` est actif.
+const FLOW_LAYER = 'route-flow'
+const FLOW_HALO_LAYER = 'route-flow-halo'
+const FLOW_HALO_RATIO = 2
+const REDUCED_MOTION = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+const FLOW_DASHES: number[][] = [
+  [0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0],
+  [0, 0.5, 3, 3.5], [0, 1, 3, 3], [0, 1.5, 3, 2.5], [0, 2, 3, 2], [0, 2.5, 3, 1.5], [0, 3, 3, 1], [0, 3.5, 3, 0.5],
+]
+const FLOW_STEP_MS = 55
+let flowRaf: number | null = null
+let flowStep = -1
+
+function startRouteFlow() {
+  if (flowRaf !== null || REDUCED_MOTION || !mapInstance) return
+  const tick = (ts: number) => {
+    flowRaf = requestAnimationFrame(tick)
+    if (!mapInstance?.getLayer(FLOW_LAYER)) return
+    const step = Math.floor(ts / FLOW_STEP_MS) % FLOW_DASHES.length
+    if (step === flowStep) return
+    flowStep = step
+    mapInstance.setPaintProperty(FLOW_LAYER, 'line-dasharray', FLOW_DASHES[step])
+    if (mapInstance.getLayer(FLOW_HALO_LAYER)) {
+      mapInstance.setPaintProperty(FLOW_HALO_LAYER, 'line-dasharray', FLOW_DASHES[step].map((d) => d / FLOW_HALO_RATIO))
+    }
+  }
+  flowRaf = requestAnimationFrame(tick)
+}
+
+function stopRouteFlow() {
+  if (flowRaf === null) return
+  cancelAnimationFrame(flowRaf)
+  flowRaf = null
 }
 
 function createFlagElement(kind) {
@@ -783,7 +866,7 @@ function redrawRouteWithStreams() {
   const map = mapInstance
   if (!map || !_maplibregl) return
   const reinstall = () => {
-    const layers = ['route-direction', 'route-line', 'route-border', 'selected-route-line']
+    const layers = ['route-direction', FLOW_LAYER, FLOW_HALO_LAYER, 'route-line', 'route-border', 'selected-route-line']
     layers.forEach((id) => { if (map.getLayer(id)) map.removeLayer(id) })
     const sources = ['route', 'route-graded', 'selected-route']
     sources.forEach((id) => { if (map.getSource(id)) map.removeSource(id) })
@@ -940,6 +1023,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  stopRouteFlow()
   if (mapResizeObserver) { mapResizeObserver.disconnect(); mapResizeObserver = null }
   if (cardResizeObserver) { cardResizeObserver.disconnect(); cardResizeObserver = null }
   document.documentElement.style.removeProperty('--sticky-map-h')

@@ -409,10 +409,11 @@ describe('maneuverEndIdx', () => {
   })
 })
 
-// Dédoublement des portions parcourues deux fois : c'est ce décalage qui rend l'aller et le
-// retour lisibles séparément sur la carte (couleurs de pente notamment). `off` dit OÙ
-// l'affichage s'écarte du tracé — l'éditeur d'itinéraire s'en sert pour n'y dessiner sa
-// ligne de repère que là.
+// Dédoublement des portions parcourues plusieurs fois : c'est ce décalage qui rend chaque
+// passage lisible séparément sur la carte (couleurs de pente notamment). Le premier passage
+// reste sur le tracé réel (voie 0) ; chaque passage suivant décale d'une voie de plus vers
+// la droite de sa propre direction. `off` dit OÙ l'affichage s'écarte du tracé — l'éditeur
+// d'itinéraire s'en sert pour n'y dessiner sa ligne de repère que là.
 
 describe('buildOffsetDisplayLine', () => {
   // Aller-retour plein est sur 300 m : un sommet tous les 10 m à l'aller, puis les mêmes
@@ -429,18 +430,19 @@ describe('buildOffsetDisplayLine', () => {
     expect(off.length).toBe(outAndBack.length)
   })
 
-  it('écarte l’aller et le retour de part et d’autre du tracé', () => {
+  it('laisse le premier passage sur le tracé réel et décale le second', () => {
     const { line, off } = buildOffsetDisplayLine(outAndBack, cum)
     // Sommet 5 (50 m à l'aller) et son jumeau au retour : même position réelle…
     const back = outAndBack.length - 1 - 5
     expect(outAndBack[back]).toEqual(outAndBack[5])
-    expect(off[5]).toBeGreaterThan(0)
+    // …le premier passage (l'aller) reste la voie 0, sans décalage…
+    expect(off[5]).toBe(0)
+    expect(line[5]).toEqual(outAndBack[5])
+    // …le second (le retour) est la voie 1, décalée à droite de SA direction de parcours
+    // (donc à l'opposé de ce qu'aurait été le décalage de l'aller).
     expect(off[back]).toBeGreaterThan(0)
-    // …mais dessinés de part et d'autre, puisqu'ils sont parcourus en sens opposés.
-    const dOut = line[5][1] - outAndBack[5][1]
     const dBack = line[back][1] - outAndBack[back][1]
-    expect(Math.sign(dOut)).toBe(-Math.sign(dBack))
-    expect(Math.abs(dOut)).toBeGreaterThan(0)
+    expect(dBack).not.toBe(0)
   })
 
   it('laisse le demi-tour sur le tracé réel', () => {

@@ -25,6 +25,7 @@
   >
     <i class="fa-brands fa-strava" aria-hidden="true"></i>
     <span><%= t("dashboard.tab_strava") %></span>
+    <span class="badge rounded-pill text-bg-secondary"><%= current_user.strava_activities.count %></span>
   </button>
   <button
     type="button"
@@ -37,6 +38,7 @@
   >
     <i class="fa-solid fa-file-import" aria-hidden="true"></i>
     <span><%= t("dashboard.tab_imported") %></span>
+    <span class="badge rounded-pill text-bg-secondary"><%= current_user.imported_activities.count %></span>
   </button>
 </div>
 

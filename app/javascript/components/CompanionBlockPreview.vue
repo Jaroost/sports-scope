@@ -815,7 +815,12 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 
 /* Budget de charge : le chiffre, sa barre, son contexte. Le chiffre est plus gros
    qu'une ligne ordinaire sans aller au plein cadre — il en faut deux (le fait et la
-   cible), et une barre en dessous. Même rapport que `budgetFigureHeight`. */
+   cible), et une barre en dessous. Même rapport que `budgetFigureHeight`.
+
+   Les `margin-top` resserrés (0,15 / 0,2 / 0,22 em) recopient `_sectionGap` du
+   dépôt voisin (`training_budget_block.dart`) : moins de hauteur empilée, c'est
+   moins souvent la hauteur qui dicte l'échelle de `ScaleToFit` dans une case
+   large et basse. */
 .cbp-budget-title {
   display: flex;
   align-items: center;
@@ -838,7 +843,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
   display: flex;
   align-items: baseline;
   gap: 0.5em;
-  margin-top: 0.3em;
+  margin-top: 0.15em;
 }
 .cbp-budget-figure {
   font-size: 1.6em;
@@ -858,7 +863,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
   display: flex;
   width: 95%;
   height: 0.8em;
-  margin-top: 0.4em;
+  margin-top: 0.2em;
   border-radius: 0.4em;
   overflow: hidden;
   /* Sert de zone grise (« le restant ») en mode jour tant que le plafond n'est
@@ -892,7 +897,7 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 .cbp-budget-context {
   display: flex;
   gap: 0.5em;
-  margin-top: 0.45em;
+  margin-top: 0.22em;
   font-size: 0.95em;
 }
 .cbp-budget-chip {

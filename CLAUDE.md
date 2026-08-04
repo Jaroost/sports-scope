@@ -10,7 +10,7 @@
 
 ## Tests
 
-Ne pas écrire de tests (Ruby, TS, ou côté dépôt voisin `sports-scope-companion`) sauf demande explicite de l'utilisateur.
+Ne pas écrire de tests (Ruby, TS, ou côté dépôt voisin `sports-scope-companion`), même temporaires ou jetables pour sonder un comportement, et ne pas lancer la suite de tests existante — sauf demande explicite de l'utilisateur dans les deux cas.
 
 ## Démarrage
 

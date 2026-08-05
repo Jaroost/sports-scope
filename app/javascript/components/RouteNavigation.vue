@@ -3117,19 +3117,22 @@ function onScreenOffTap() {
     </button>
 
     <!-- Bouton flottant « enregistrer le zoom » : même gabarit que « recentrer », côté
-         opposé (droite). Ne s'affiche que quand la séance s'est écartée du zoom de
-         référence (profil, ou fallback localStorage sans compte — cf. useNavCamera),
-         reste un instant après le clic pour confirmer l'enregistrement. Masqué en mode
-         édition, dont la barre d'outils occupe déjà ce coin de l'écran. -->
+         opposé (droite). Libellé court (icône + « Zoom », sens complet dans l'aria-label)
+         pour ne pas déborder sur « Recentrer » en portrait étroit. Ne s'affiche que quand
+         la séance s'est écartée du zoom de référence (profil, ou fallback localStorage
+         sans compte — cf. useNavCamera), reste un instant après le clic pour confirmer
+         l'enregistrement. Masqué en mode édition, dont la barre d'outils occupe déjà ce
+         coin de l'écran. -->
     <button
       v-if="(hasUnsavedZoom || zoomSaved) && !editMode"
       type="button"
       class="btn btn-warning shadow nav-savezoom"
       :class="{ 'nav-savezoom--done': zoomSaved }"
+      :aria-label="zoomSaved ? t('routes.camera_zoom_saved') : t('routes.camera_save_zoom')"
       @click="saveZoomToProfile"
     >
       <i class="fa-solid" :class="zoomSaved ? 'fa-check' : 'fa-floppy-disk'" aria-hidden="true"></i>
-      {{ zoomSaved ? t('routes.camera_zoom_saved') : t('routes.camera_save_zoom') }}
+      {{ t('routes.camera_zoom') }}
     </button>
 
     <!-- Climb card: full graded elevation profile with a position cursor.

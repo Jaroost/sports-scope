@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, toRaw } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
@@ -137,7 +137,7 @@ function addPreset() {
 function duplicatePreset() {
   // Sans clé : le serveur en fabriquera une, suffixée pour ne pas écraser
   // l'original. La recopier ici ferait perdre l'un des deux profils.
-  const copy = structuredClone({ ...preset.value, key: undefined }) as Preset
+  const copy = structuredClone({ ...toRaw(preset.value), key: undefined }) as Preset
   copy.name = `${preset.value.name} (2)`
   presets.splice(current.value + 1, 0, copy)
   select(current.value + 1)

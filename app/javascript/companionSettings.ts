@@ -288,6 +288,7 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   gears: { value: '50×15', unit: 'braquet', icon: 'fa-solid fa-gear' },
   route_remaining: { value: '21,4 km', unit: 'restant', icon: 'fa-regular fa-flag' },
   route_remaining_gain: { value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up' },
+  route_eta: { value: '48:12', unit: 'temps restant', icon: 'fa-regular fa-clock' },
 }
 
 // Les quatre mesures du bloc « Moyennes », et leurs trois chiffres — les mêmes

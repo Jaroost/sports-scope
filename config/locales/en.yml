@@ -1670,3 +1670,4 @@ en:
         gears: "Gear"
         route_remaining: "Distance remaining"
         route_remaining_gain: "Climbing remaining"
+        route_eta: "Time remaining"

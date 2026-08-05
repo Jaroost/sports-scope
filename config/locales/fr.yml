@@ -1670,3 +1670,4 @@ fr:
         gears: "Braquet"
         route_remaining: "Distance restante"
         route_remaining_gain: "D+ restant"
+        route_eta: "Temps restant"

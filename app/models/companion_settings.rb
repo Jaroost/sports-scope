@@ -76,7 +76,7 @@ module CompanionSettings
     power power_zone power_avg power_np power_max
     cadence cadence_avg
     ascent altitude grade calories gears
-    route_remaining route_remaining_gain
+    route_remaining route_remaining_gain route_eta
   ].freeze
 
   SENSORS = %w[gps barometer light compass radar power heart_rate cadence gears].freeze

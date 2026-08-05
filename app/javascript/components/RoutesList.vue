@@ -284,7 +284,7 @@ async function downloadOfflineInApp(route) {
 const navigateModal = ref(null)
 
 async function navigateInApp(route) {
-  await navigateModal.value?.open(route.share_token)
+  await navigateModal.value?.open(route.share_token, route.activity)
 }
 
 // ─── Fond de carte du lien partagé ────────────────────────────────────────────

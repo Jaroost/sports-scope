@@ -148,6 +148,43 @@ function removePreset() {
   select(Math.max(0, current.value - 1))
 }
 
+// ── les types d'itinéraire ──────────────────────────────────────────────────
+
+function presetHasActivity(activity: string): boolean {
+  return (preset.value.activities || []).includes(activity)
+}
+
+function toggleActivity(activity: string, on: boolean) {
+  const activities = new Set(preset.value.activities || [])
+  if (on) {
+    activities.add(activity)
+  } else {
+    activities.delete(activity)
+    // Un type retiré ne peut pas rester le défaut de ce profil.
+    preset.value.default_for = (preset.value.default_for || []).filter((a) => a !== activity)
+  }
+  preset.value.activities = activities.size > 0 ? [...activities] : undefined
+}
+
+function isDefaultForActivity(activity: string): boolean {
+  return (preset.value.default_for || []).includes(activity)
+}
+
+// Un type n'a qu'un seul profil par défaut : on retire la revendication des
+// autres profils avant de la poser ici, pour que la limite se voie plutôt que
+// de se découvrir à l'enregistrement — même règle que partout dans cet éditeur.
+function toggleDefaultForActivity(activity: string) {
+  if (isDefaultForActivity(activity)) {
+    preset.value.default_for = (preset.value.default_for || []).filter((a) => a !== activity)
+    return
+  }
+  presets.forEach((p) => {
+    if (p === preset.value || !p.default_for?.includes(activity)) return
+    p.default_for = p.default_for.filter((a) => a !== activity)
+  })
+  preset.value.default_for = [...(preset.value.default_for || []), activity]
+}
+
 // ── les pages ───────────────────────────────────────────────────────────────
 
 function addPage(kind: string) {
@@ -484,6 +521,36 @@ async function save() {
           <input v-model="preset.description" class="form-control" type="text" maxlength="140"
                  :placeholder="t('companion.settings.description_placeholder')">
         </div>
+        <div class="mb-3">
+          <label class="form-label small mb-1">{{ t('companion.settings.activities_title') }}</label>
+          <p class="text-body-secondary small mb-2">{{ t('companion.settings.activities_help') }}</p>
+          <div class="d-flex flex-column gap-1">
+            <div v-for="activity in catalog.activities" :key="activity"
+                 class="d-flex align-items-center gap-2">
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="checkbox" :id="`activity-${activity}`"
+                       :checked="presetHasActivity(activity)"
+                       @change="toggleActivity(activity, ($event.target as HTMLInputElement).checked)">
+                <label class="form-check-label small" :for="`activity-${activity}`">
+                  {{ t(`routes.wt_sport_${activity}`) }}
+                </label>
+              </div>
+              <!-- L'étoile n'apparaît qu'une fois le type lié : marquer un
+                   défaut pour un type que ce profil ne propose même pas ne
+                   voudrait rien dire. -->
+              <button v-if="presetHasActivity(activity)" type="button"
+                      class="btn btn-sm btn-link p-0"
+                      :class="isDefaultForActivity(activity) ? 'text-warning' : 'text-body-secondary'"
+                      :title="t('companion.settings.default_for', { sport: t(`routes.wt_sport_${activity}`) })"
+                      :aria-label="t('companion.settings.default_for', { sport: t(`routes.wt_sport_${activity}`) })"
+                      @click="toggleDefaultForActivity(activity)">
+                <i :class="isDefaultForActivity(activity) ? 'fa-solid fa-star' : 'fa-regular fa-star'"
+                   aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div class="d-flex gap-2 mb-3">
           <button class="btn btn-outline-secondary" type="button" @click="duplicatePreset">
             <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>{{ t('companion.settings.duplicate') }}

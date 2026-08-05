@@ -81,6 +81,11 @@ module CompanionSettings
 
   SENSORS = %w[gps barometer light compass radar power heart_rate cadence gears].freeze
 
+  # Les types d'itinéraire auxquels un profil peut être lié — mêmes valeurs que
+  # `Route::ACTIVITIES`, réutilisées et non redupliquées : un itinéraire vélo doit
+  # rester un itinéraire vélo des deux côtés.
+  ACTIVITIES = Route::ACTIVITIES
+
   # Quatre cases au bandeau : au-delà, les chiffres deviennent trop petits pour
   # être lus d'un coup d'œil en roulant, ce qui est son seul usage.
   MAX_BAND_METRICS = 4
@@ -101,6 +106,7 @@ module CompanionSettings
       "zone_sources" => ZONE_SOURCES,
       "metrics" => METRICS,
       "sensors" => SENSORS,
+      "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
       "max_grid_side" => MAX_GRID_SIDE
     }
@@ -154,20 +160,25 @@ module CompanionSettings
     presets = [] unless presets.is_a?(Array)
 
     seen = []
-    cleaned = presets.filter_map.with_index { |raw, i| sanitize_preset(raw, i, seen) }
+    # Un type d'itinéraire n'a qu'un seul profil par défaut : la première
+    # revendication rencontrée (l'ordre du document, celui que l'éditeur affiche)
+    # gagne — même arbitrage que `unique_key` pour les clés en double.
+    default_seen = []
+    cleaned = presets.filter_map.with_index { |raw, i| sanitize_preset(raw, i, seen, default_seen) }
 
     return defaults if cleaned.empty?
 
     { "v" => VERSION, "presets" => cleaned }
   end
 
-  def sanitize_preset(raw, index, seen)
+  def sanitize_preset(raw, index, seen, default_seen)
     return nil unless raw.is_a?(Hash)
 
     name = raw["name"].to_s.strip
     key = unique_key(raw["key"], name, index, seen)
     pages = sanitize_pages(raw["pages"])
     bands = sanitize_bands(raw["bands"])
+    activities = sanitize_activities(raw["activities"])
 
     {
       "key" => key,
@@ -178,6 +189,11 @@ module CompanionSettings
       # inconnu retombe sur le défaut : composer une longue description ne doit
       # pas faire perdre le profil, juste sa fin.
       "description" => raw["description"].to_s.strip[0, MAX_DESCRIPTION_LENGTH].presence,
+      # Les types d'itinéraire pour lesquels ce profil est proposé. Absent vaut
+      # « aucun type particulier » : un profil qui n'a jamais touché à ce réglage
+      # continue de se proposer partout, comme avant que la fonctionnalité existe.
+      "activities" => activities.presence,
+      "default_for" => sanitize_default_for(raw["default_for"], activities, default_seen).presence,
       # Un profil vidé de toutes ses pages retombe sur la page Effort : on ne
       # laisse jamais partir un tableau de bord sans contenu, l'appli monterait
       # une coquille vide qu'on ne diagnostique pas au guidon.
@@ -188,6 +204,23 @@ module CompanionSettings
       "lighting" => sanitize_lighting(raw["lighting"]),
       "screen" => sanitize_screen(raw["screen"])
     }.compact
+  end
+
+  # Les types d'itinéraire liés à un profil — seulement ceux du catalogue,
+  # dédupliqués.
+  def sanitize_activities(raw)
+    raw_array(raw).select { |activity| ACTIVITIES.include?(activity) }.uniq
+  end
+
+  # Le sous-ensemble des types liés pour lesquels ce profil est le défaut. Un
+  # type déjà revendiqué par un profil précédent (`default_seen`) est écarté ici
+  # plutôt que de faire perdre la revendication au premier profil qui l'a posée —
+  # la même règle que `unique_key` : composer en double ne doit jamais faire
+  # disparaître ce qui existait déjà.
+  def sanitize_default_for(raw, activities, default_seen)
+    claimed = raw_array(raw).uniq.select { |activity| activities.include?(activity) && !default_seen.include?(activity) }
+    default_seen.concat(claimed)
+    claimed
   end
 
   # Une clé utilisable et unique. Fabriquée au besoin — voir l'entête de
@@ -470,6 +503,8 @@ module CompanionSettings
       "key" => "road",
       "name" => "Route",
       "description" => "Carte, effort et chiffres — la sortie complète.",
+      "activities" => %w[cycling],
+      "default_for" => %w[cycling],
       "pages" => [
         { "kind" => "map" },
         {
@@ -516,6 +551,8 @@ module CompanionSettings
       "key" => "mtb",
       "name" => "VTT",
       "description" => "Carte et effort seulement, radar rapproché.",
+      "activities" => %w[mtb],
+      "default_for" => %w[mtb],
       "pages" => [
         { "kind" => "map" },
         {

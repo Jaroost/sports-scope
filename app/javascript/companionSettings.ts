@@ -46,6 +46,14 @@ export interface Preset {
   key?: string
   name: string
   description?: string
+  // Les types d'itinéraire pour lesquels ce profil est proposé. Absent vaut
+  // « tous » : un profil qui n'a jamais touché à ce réglage continue de se
+  // proposer partout, comme avant que la fonctionnalité existe.
+  activities?: string[]
+  // Le sous-ensemble d'`activities` pour lequel c'est le profil par défaut.
+  // Un type ne peut être le défaut que d'un seul profil à la fois — voir
+  // `setDefaultForActivity` dans CompanionDashboard.vue.
+  default_for?: string[]
   pages: Page[]
   bands: Band[]
   sensors?: Record<string, boolean>
@@ -64,6 +72,7 @@ export interface Catalog {
   zone_sources: string[]
   metrics: string[]
   sensors: string[]
+  activities: string[]
   max_band_metrics: number
   max_grid_side: number
 }
@@ -98,6 +107,23 @@ export function canHideBehindMenu(page: Page, pages: Page[]): boolean {
   return pages.some(
     (other) => other !== page && !other.menu && other.kind !== 'map',
   )
+}
+
+// ── Le profil par défaut d'un type d'itinéraire ─────────────────────────────
+//
+// Utilisé par CompanionNavigateModal pour présélectionner le bon profil quand
+// on lance une navigation depuis un itinéraire dont on connaît le type — sinon
+// le premier profil de la liste, comme l'appli retombe sur `presets.first`
+// quand aucune clé n'est choisie (`CompanionSettings.select`, dépôt voisin).
+export function defaultPresetKey(
+  presets: { key?: string; default_for?: string[] }[],
+  activity?: string | null,
+): string | undefined {
+  if (activity) {
+    const match = presets.find((p) => p.default_for?.includes(activity))
+    if (match?.key) return match.key
+  }
+  return presets[0]?.key
 }
 
 // ── Choisir un composant ────────────────────────────────────────────────────

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { t } from '../i18n'
 import { companionLinkTarget } from '../companionBridge'
+import { defaultPresetKey } from '../companionSettings'
 
 // Modale de choix (profil de sortie + enregistrement automatique) avant
 // d'ouvrir l'appli companion sur un tracé — partagée entre la page de partage
@@ -16,6 +17,7 @@ import { companionLinkTarget } from '../companionBridge'
 interface PresetOption {
   key: string
   name: string
+  default_for?: string[]
 }
 
 const show = ref(false)
@@ -32,7 +34,11 @@ async function openPlain(): Promise<void> {
   window.location.href = await companionLinkTarget(plainHref())
 }
 
-async function open(token: string): Promise<void> {
+// [activity] est le type de l'itinéraire qu'on s'apprête à suivre
+// (cycling/mtb/hiking), quand l'appelant le connaît : il sert uniquement à
+// présélectionner le profil que l'utilisateur a marqué par défaut pour ce
+// type (`defaultPresetKey`) — le choix reste modifiable dans la modale.
+async function open(token: string, activity?: string | null): Promise<void> {
   shareToken.value = token
 
   try {
@@ -41,7 +47,7 @@ async function open(token: string): Promise<void> {
       credentials: 'same-origin',
     })
     if (!res.ok) throw new Error('unavailable')
-    const data = (await res.json()) as { presets?: { key?: string; name?: string }[] }
+    const data = (await res.json()) as { presets?: { key?: string; name?: string; default_for?: string[] }[] }
     presets.value = (data.presets ?? []).filter(
       (p): p is PresetOption => typeof p.key === 'string' && p.key !== '' && typeof p.name === 'string',
     )
@@ -55,7 +61,7 @@ async function open(token: string): Promise<void> {
     return
   }
 
-  selectedKey.value = presets.value[0].key
+  selectedKey.value = defaultPresetKey(presets.value, activity) ?? presets.value[0].key
   record.value = false
   show.value = true
 }

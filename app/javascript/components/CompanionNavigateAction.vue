@@ -18,6 +18,7 @@ import CompanionNavigateModal from './CompanionNavigateModal.vue'
 const props = defineProps<{
   shareToken: string
   signedIn: boolean
+  activity?: string
 }>()
 
 const visible = ref(false)
@@ -36,7 +37,7 @@ async function open(): Promise<void> {
 
   loading.value = true
   try {
-    await modal.value?.open(props.shareToken)
+    await modal.value?.open(props.shareToken, props.activity)
   } finally {
     loading.value = false
   }

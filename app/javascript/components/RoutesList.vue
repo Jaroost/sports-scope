@@ -13,6 +13,7 @@ import { useStickyListHeader } from '../composables/useStickyListHeader'
 import { MAP_STYLES } from '../mapStyles'
 import NewRouteModal from './NewRouteModal.vue'
 import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
+import CompanionNavigateModal from './CompanionNavigateModal.vue'
 import RoutesOverviewMap from './RoutesOverviewMap.vue'
 import { csrfToken } from '../csrf'
 import { shouldOfferCompanionApp, companionLinkTarget } from '../companionBridge'
@@ -275,6 +276,15 @@ const canOfferCompanionDownload = shouldOfferCompanionApp()
 async function downloadOfflineInApp(route) {
   const href = `sportsscope://navigate/${route.share_token}?download=1&record=0`
   window.location.href = await companionLinkTarget(href)
+}
+
+// Même modale que sur la page de partage (CompanionNavigateModal, choix du
+// profil de sortie et de l'enregistrement automatique) : une seule instance
+// partagée par toutes les lignes, ouverte sur le tracé cliqué.
+const navigateModal = ref(null)
+
+async function navigateInApp(route) {
+  await navigateModal.value?.open(route.share_token)
 }
 
 // ─── Fond de carte du lien partagé ────────────────────────────────────────────
@@ -1205,6 +1215,12 @@ onMounted(() => {
                     <li v-if="canOfferCompanionDownload"><hr class="dropdown-divider"></li>
                     <li v-if="canOfferCompanionDownload"><h6 class="dropdown-header">{{ t('routes.group_app') }}</h6></li>
                     <li v-if="canOfferCompanionDownload">
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="navigateInApp(r)">
+                        <i class="fa-solid fa-location-arrow" aria-hidden="true"></i>
+                        <span>{{ t('routes.navigate_app') }}</span>
+                      </button>
+                    </li>
+                    <li v-if="canOfferCompanionDownload">
                       <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="downloadOfflineInApp(r)">
                         <i class="fa-solid fa-mobile-screen" aria-hidden="true"></i>
                         <span>{{ t('routes.download_offline_app') }}</span>
@@ -1297,6 +1313,8 @@ onMounted(() => {
       @saved="onShareMapStyleSaved"
       @error="error = $event"
     />
+
+    <CompanionNavigateModal ref="navigateModal" />
   </div>
 </template>
 

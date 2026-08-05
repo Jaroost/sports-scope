@@ -1106,6 +1106,7 @@ en:
     more_actions: "More actions"
     group_share: "Share"
     group_app: "App"
+    navigate_app: "Navigate in the app"
     download_offline_app: "Download offline (app)"
     group_export: "Export"
     group_pois: "Points of interest"

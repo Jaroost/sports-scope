@@ -155,6 +155,49 @@ export async function companionLinkTarget(href: string): Promise<string> {
   return url.toString()
 }
 
+// ─── Cartes hors-ligne : commandes venues de l'appli ──────────────────────────
+//
+// Le panneau qui pilote normalement le téléchargement (NavControlsPanel, dans
+// RouteNavigation.vue) est masqué dans l'appli mobile (`appOwnsChrome` :
+// useControlsHide y est `enabled: false`) — elle a son propre tiroir de commandes
+// natif, sous le WebView. On ne réécrit pas le téléchargement côté Dart pour
+// autant : RouteNavigation.vue s'enregistre ici tant qu'un trajet est affiché, et
+// l'appli se contente d'appeler les trois gestes que son propre menu propose déjà
+// (démarrer, annuler, supprimer) et d'écouter l'état pour afficher une entrée de
+// menu à jour.
+export interface OfflineMapsBridgeState {
+  supported: boolean
+  ready: boolean
+  stale: boolean
+  downloading: boolean
+  pct: number
+  mb: number
+  tiles: number
+  errored: boolean
+}
+
+interface OfflineMapsBridgeHandlers {
+  start(): void
+  cancel(): void
+  remove(): void
+}
+
+let offlineHandlers: OfflineMapsBridgeHandlers | null = null
+
+// Appelé par RouteNavigation.vue au montage et au démontage (`null` alors) : un
+// geste de l'appli qui arriverait après que la page de navigation a disparu (choix
+// d'un itinéraire, autre page) ne doit rien faire, plutôt qu'agir sur un trajet
+// qu'on ne regarde plus.
+export function registerOfflineMapsHandlers(handlers: OfflineMapsBridgeHandlers | null): void {
+  offlineHandlers = handlers
+}
+
+// Publie l'état des cartes hors-ligne du trajet affiché. Silencieux hors appli,
+// comme companionNav.
+export function pushOfflineMapsState(state: OfflineMapsBridgeState): void {
+  channel()?.postMessage(JSON.stringify({ type: 'offline', ...state }))
+}
+
 export function installCompanionBridge(): void {
   // Pont (ré)installé = page (re)chargée : le prochain état de navigation doit
   // partir, même s'il est identique à celui d'avant le rechargement. L'appli n'a
@@ -162,7 +205,14 @@ export function installCompanionBridge(): void {
   lastNavJson = ''
   lastNavAt = 0
 
-  const target = window as unknown as { sportsScopeCompanion?: { push(payload: CompanionPayload): void } }
+  const target = window as unknown as {
+    sportsScopeCompanion?: {
+      push(payload: CompanionPayload): void
+      offlineStart(): void
+      offlineCancel(): void
+      offlineRemove(): void
+    }
+  }
 
   target.sportsScopeCompanion = {
     push(payload: CompanionPayload) {
@@ -179,6 +229,11 @@ export function installCompanionBridge(): void {
         // mieux vaut des valeurs figées qu'une carte morte.
       }
     },
+    // `?.` : aucun trajet affiché (page de navigation démontée, ou pas encore
+    // montée) veut dire aucun geste possible — pas une erreur.
+    offlineStart() { offlineHandlers?.start() },
+    offlineCancel() { offlineHandlers?.cancel() },
+    offlineRemove() { offlineHandlers?.remove() },
   }
 
   // On annonce que le pont est prêt : l'appli répond par un état complet, sans

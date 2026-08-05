@@ -36,7 +36,10 @@ import NavStatsBar from './NavStatsBar.vue'
 import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
-import { companionScreen, companionNav, inCompanionApp } from '../companionBridge'
+import {
+  companionScreen, companionNav, inCompanionApp,
+  registerOfflineMapsHandlers, pushOfflineMapsState,
+} from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
@@ -160,6 +163,34 @@ const {
   pois: offlinePois,
   onBaseStyleReload: () => afterStyleLoad(),
 })
+
+// Le panneau qui pilote normalement le téléchargement (NavOfflineButton, dans
+// NavControlsPanel) est masqué dans l'appli mobile — voir companionBridge.ts pour
+// le pourquoi. On s'enregistre tant que cette page est montée : l'appli obtient
+// les mêmes trois gestes que le panneau web (démarrer, annuler, supprimer) sans
+// qu'on réécrive le téléchargement côté Dart, et l'état poussé lui permet
+// d'afficher une entrée de menu à jour (prêt, en cours, périmé, en échec).
+registerOfflineMapsHandlers({
+  start: () => { void startOfflineDownload() },
+  cancel: cancelOfflineDownload,
+  remove: () => { void removeOfflineMap() },
+})
+onBeforeUnmount(() => registerOfflineMapsHandlers(null))
+
+watch(
+  () => ({
+    supported: offlineIsSup && !!routeToken.value,
+    ready: offlineReady.value,
+    stale: offlineStale.value,
+    downloading: offlineDownloading.value,
+    pct: offlinePct.value,
+    mb: offlineEst.value.mb,
+    tiles: offlineEst.value.tiles,
+    errored: offlineErrored.value,
+  }),
+  (state) => pushOfflineMapsState(state),
+  { immediate: true, deep: true },
+)
 
 // Réglages caméra (zoom), ajustables en séance et reportés sur le profil.
 // La caméra reste toujours à plat (pitch 0) pour économiser la batterie. La boucle

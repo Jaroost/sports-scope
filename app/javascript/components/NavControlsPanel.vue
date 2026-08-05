@@ -24,6 +24,7 @@ const props = defineProps<{
   routeProfile: string
   camZoom: number
   zoomSaved: boolean
+  hasUnsavedZoom: boolean
   camZoomMin: number
   camZoomMax: number
   poiCats: PoiCategory[]
@@ -403,7 +404,7 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
             <span class="nav-cam-val">{{ camZoom.toFixed(1) }}</span>
           </label>
           <button
-            v-if="loggedIn"
+            v-if="hasUnsavedZoom || zoomSaved"
             type="button"
             class="nav-cam-savezoom"
             :class="{ 'nav-cam-savezoom--done': zoomSaved }"

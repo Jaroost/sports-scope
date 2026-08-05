@@ -167,7 +167,7 @@ const {
 // modification prenne effet à la frame suivante. onZoomInput détache la caméra du suivi
 // via onManualZoom. Voir useNavCamera.
 const {
-  camZoom, zoomSaved,
+  camZoom, zoomSaved, hasUnsavedZoom, savedZoom,
   onZoomInput, saveZoomToProfile,
 } = useNavCamera({ getMap: () => map, onManualZoom })
 // Curseur zoom pris en main : on détache la caméra du suivi (état local au composant).
@@ -2711,8 +2711,9 @@ function recenter() {
   cameraUnlocked.value = false
   // Rétablit le zoom PAR DÉFAUT du profil (et non le zoom courant de la séance) :
   // la boucle réapplique camZoom à chaque frame, donc le remettre ici suffit à
-  // figer la vue au zoom du compte.
-  camZoom.value = navPrefs.zoom
+  // figer la vue au zoom du compte (ou, sans compte, au dernier zoom enregistré en
+  // localStorage — cf. savedZoom dans useNavCamera).
+  camZoom.value = savedZoom.value
   if (!lastPos) return
   // Pause the loop so it doesn't jump-cancel the glide back; re-center, re-orient,
   // restore the 3D tilt AND the profile zoom, then hand the camera back to the loop
@@ -2722,7 +2723,7 @@ function recenter() {
   // Recentrer sur l'ancre affichée (snappée sur le tracé si on est dessus) pour que
   // caméra et flèche coïncident — la boucle recentre déjà sur la position affichée.
   const opts = followOptions(anchorPos ?? lastPos)
-  opts.zoom = navPrefs.zoom   // followOptions n'ajoute le zoom qu'au tout premier cadrage
+  opts.zoom = savedZoom.value   // followOptions n'ajoute le zoom qu'au tout premier cadrage
   map.easeTo(opts)
   map.once('moveend', startAnimation)
 }
@@ -2854,6 +2855,7 @@ function onScreenOffTap() {
       :climb-card-visible="hasRoute ? showClimbCard : undefined"
       v-model:cam-zoom="camZoom"
       :zoom-saved="zoomSaved"
+      :has-unsaved-zoom="hasUnsavedZoom"
       :cam-zoom-min="CAM_ZOOM_MIN"
       :cam-zoom-max="CAM_ZOOM_MAX"
       :poi-cats="POI_CATS"
@@ -3081,6 +3083,22 @@ function onScreenOffTap() {
       @click="recenter"
     >
       <i class="fa-solid fa-location-arrow me-1" aria-hidden="true"></i>{{ t('routes.recenter') }}
+    </button>
+
+    <!-- Bouton flottant « enregistrer le zoom » : même gabarit que « recentrer », côté
+         opposé (droite). Ne s'affiche que quand la séance s'est écartée du zoom de
+         référence (profil, ou fallback localStorage sans compte — cf. useNavCamera),
+         reste un instant après le clic pour confirmer l'enregistrement. Masqué en mode
+         édition, dont la barre d'outils occupe déjà ce coin de l'écran. -->
+    <button
+      v-if="(hasUnsavedZoom || zoomSaved) && !editMode"
+      type="button"
+      class="btn btn-warning shadow nav-savezoom"
+      :class="{ 'nav-savezoom--done': zoomSaved }"
+      @click="saveZoomToProfile"
+    >
+      <i class="fa-solid" :class="zoomSaved ? 'fa-check' : 'fa-floppy-disk'" aria-hidden="true"></i>
+      {{ zoomSaved ? t('routes.camera_zoom_saved') : t('routes.camera_save_zoom') }}
     </button>
 
     <!-- Climb card: full graded elevation profile with a position cursor.
@@ -3391,6 +3409,16 @@ function onScreenOffTap() {
   border-radius: 999px; font-weight: 700;
   font-size: 1.35rem; padding: 0.85rem 1.8rem;
 }
+
+/* Bouton enregistrer le zoom : symétrique de « recentrer », posé à droite avec le
+   même gabarit (gouttière, taille, z-index). */
+.nav-savezoom {
+  position: absolute; bottom: calc(var(--nav-bar-clearance) + var(--nav-bottom-inset)); right: 0.75rem; z-index: 22;
+  transition: bottom 0.28s ease;
+  border-radius: 999px; font-weight: 700;
+  font-size: 1.35rem; padding: 0.85rem 1.8rem;
+}
+.nav-savezoom--done { background: #198754; border-color: #198754; color: #fff; }
 
 /* Bouton de reroutage : centré AU-DESSUS de la grande flèche hors-tracé (flèche
    centrée à 50 %, ~20 vmin de demi-hauteur). On ancre le bas du bloc juste au-dessus

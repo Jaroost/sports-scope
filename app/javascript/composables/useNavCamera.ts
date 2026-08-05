@@ -1,5 +1,5 @@
-import { ref } from 'vue'
-import { userPreferences, persistNavCamera } from '../userPreferences'
+import { computed, ref } from 'vue'
+import { userPreferences, persistNavCamera, isLoggedIn } from '../userPreferences'
 
 // Réglages caméra de la navigation (zoom), ajustables en séance via le panneau de
 // commandes et reportés sur le profil. Partagé entre navigation libre et navigation
@@ -13,9 +13,35 @@ import { userPreferences, persistNavCamera } from '../userPreferences'
 // réglage d'inclinaison ni de relief 3D. Le zoom n'est reporté sur le profil que
 // manuellement via saveZoomToProfile, pour ne pas écraser le réglage par défaut par
 // un zoom ponctuel de la séance.
+//
+// Naviguer depuis un lien de partage ne suppose pas de compte (cf. companion). Sans
+// profil serveur à reporter, saveZoomToProfile retombe sur un enregistrement en
+// localStorage, propre à cet appareil.
 
 export const CAM_ZOOM_MIN = 14
 export const CAM_ZOOM_MAX = 20
+
+const ZOOM_STORAGE_KEY = 'sportsScope.navZoom'
+
+function loadStoredZoom(fallback: number): number {
+  try {
+    const raw = localStorage.getItem(ZOOM_STORAGE_KEY)
+    if (raw == null) return fallback
+    const n = Number(raw)
+    return Number.isFinite(n) ? n : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function storeZoom(zoom: number): void {
+  try {
+    localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom))
+  } catch {
+    // Quota dépassé ou navigation privée : la séance courante garde son zoom,
+    // seule la mémorisation pour la prochaine fois est perdue.
+  }
+}
 
 export function useNavCamera(deps: {
   getMap: () => any
@@ -26,9 +52,18 @@ export function useNavCamera(deps: {
   const { getMap, onManualZoom } = deps
   const navPrefs = userPreferences().navigation
 
-  const camZoom = ref(navPrefs.zoom)
+  // Zoom de référence auquel comparer la séance : celui du profil pour un compte
+  // connecté, sinon le dernier zoom enregistré sur cet appareil (fallback
+  // localStorage). saveZoomToProfile met à jour cette référence pour que le bouton
+  // disparaisse dès l'enregistrement.
+  const savedZoom = ref(isLoggedIn() ? navPrefs.zoom : loadStoredZoom(navPrefs.zoom))
+  const camZoom = ref(savedZoom.value)
   // Confirmation éphémère affichée sur le bouton « enregistrer le zoom ».
   const zoomSaved = ref(false)
+
+  // Le bouton « enregistrer » ne s'affiche que si la séance s'est écartée du zoom
+  // de référence — inutile de le proposer quand il n'y a rien à enregistrer.
+  const hasUnsavedZoom = computed(() => camZoom.value !== savedZoom.value)
 
   function onZoomInput() {
     const map = getMap()
@@ -38,15 +73,21 @@ export function useNavCamera(deps: {
   }
 
   // Reporte le zoom courant de la navigation sur le profil (bouton dédié du panneau
-  // caméra). Le zoom ne s'enregistre plus automatiquement au pinch ou au curseur.
+  // caméra), ou en localStorage sans compte. Le zoom ne s'enregistre plus
+  // automatiquement au pinch ou au curseur.
   function saveZoomToProfile() {
-    persistNavCamera(camZoom.value)
+    savedZoom.value = camZoom.value
+    if (isLoggedIn()) {
+      persistNavCamera(camZoom.value)
+    } else {
+      storeZoom(camZoom.value)
+    }
     zoomSaved.value = true
     window.setTimeout(() => { zoomSaved.value = false }, 1800)
   }
 
   return {
-    camZoom, zoomSaved,
+    camZoom, zoomSaved, hasUnsavedZoom, savedZoom,
     onZoomInput, saveZoomToProfile,
   }
 }

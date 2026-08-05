@@ -15,6 +15,7 @@ import NewRouteModal from './NewRouteModal.vue'
 import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
 import RoutesOverviewMap from './RoutesOverviewMap.vue'
 import { csrfToken } from '../csrf'
+import { shouldOfferCompanionApp, companionLinkTarget } from '../companionBridge'
 
 // canDense : réservé aux admins (can :manage, :all). Débloque l'export d'un GPX
 // densifié (1 point / 5 m) — utile pour les simulateurs de position GPS, à éviter
@@ -261,6 +262,20 @@ function gradeColor(cat: number) {
 // Share feedback: holds the id of the route whose link was just copied, so the
 // button can flash a checkmark for a couple of seconds.
 const sharedId = ref(null)
+
+// N'apparaît que sur Android hors de l'appli (même garde que
+// CompanionNavigateAction.vue sur la page de partage) : ailleurs le lien
+// sportsscope:// n'ouvrirait rien.
+const canOfferCompanionDownload = shouldOfferCompanionApp()
+
+// Ouvre l'appli companion directement sur ce tracé et lui fait lancer le
+// téléchargement hors-ligne (l'appli le sait via `?download=1`, voir
+// NavigationTarget côté Dart) — sans proposer d'enregistrer une sortie
+// (`record=0`) puisqu'on ne fait que préparer la carte à l'avance.
+async function downloadOfflineInApp(route) {
+  const href = `sportsscope://navigate/${route.share_token}?download=1&record=0`
+  window.location.href = await companionLinkTarget(href)
+}
 
 // ─── Fond de carte du lien partagé ────────────────────────────────────────────
 // Même réglage que dans le créateur (cf. ShareMapStyleDialog) : se régler d'ici évite
@@ -1185,6 +1200,14 @@ onMounted(() => {
                         <span v-if="r.share_map_style" class="ms-auto ps-2 small text-muted">
                           {{ t(`strava.map_style_${r.share_map_style}`) }}
                         </span>
+                      </button>
+                    </li>
+                    <li v-if="canOfferCompanionDownload"><hr class="dropdown-divider"></li>
+                    <li v-if="canOfferCompanionDownload"><h6 class="dropdown-header">{{ t('routes.group_app') }}</h6></li>
+                    <li v-if="canOfferCompanionDownload">
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="downloadOfflineInApp(r)">
+                        <i class="fa-solid fa-mobile-screen" aria-hidden="true"></i>
+                        <span>{{ t('routes.download_offline_app') }}</span>
                       </button>
                     </li>
                     <li><hr class="dropdown-divider"></li>

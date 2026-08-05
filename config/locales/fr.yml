@@ -1105,6 +1105,8 @@ fr:
       no_preview: "Aucun aperçu du tracé disponible."
     more_actions: "Plus d'actions"
     group_share: "Partager"
+    group_app: "Application"
+    download_offline_app: "Télécharger hors-ligne (application)"
     group_export: "Exporter"
     group_pois: "Points d'intérêt"
     group_edit: "Modifier"

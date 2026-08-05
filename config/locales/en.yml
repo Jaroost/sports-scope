@@ -1105,6 +1105,8 @@ en:
       no_preview: "No route preview available."
     more_actions: "More actions"
     group_share: "Share"
+    group_app: "App"
+    download_offline_app: "Download offline (app)"
     group_export: "Export"
     group_pois: "Points of interest"
     group_edit: "Edit"

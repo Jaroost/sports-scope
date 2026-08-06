@@ -26,7 +26,7 @@ import {
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 import { csrfToken } from '../csrf'
-import { POWER_ZONES, zoneKeyForValue, intensityZoneColor } from '../composables/useTrainingPlan'
+import { POWER_ZONES, HR_ZONES, zoneKeyForValue, intensityZoneColor } from '../composables/useTrainingPlan'
 
 const props = defineProps({
   // Nécessaires pour interroger /zones (seuil FTP + présence de zones puissance pour
@@ -90,40 +90,45 @@ const hiddenDatasets = ref(new Map()) // groupId → Set<datasetIdx>
 // menu déroulant ouvert par un bouton « réglages », pour ne pas manger la moitié de l'écran.
 const mobileControlsOpen = ref(false)
 
-// ─── Pastille « colorier par zone de puissance » ──────────────────────────
+// ─── Pastilles « colorier par zone » (puissance / fréquence cardiaque) ────────
 // Même endpoint /zones que l'onglet Zones (ActivityZones.vue) et la carte
 // (ActivityMapCard) — fetché indépendamment ici, avec le même compromis assumé de
 // doublon de requête : ce panneau est visible dès l'onglet Analyse, avant que l'onglet
 // Zones (chargé paresseusement) n'ait pu le faire.
-interface PowerZonesPayload {
+interface ActivityZonesPayload {
   power: unknown | null
+  hr: unknown | null
   ftp: number | null
+  lthr: number | null
 }
-const powerZonesData = ref<PowerZonesPayload | null>(null)
-const powerZonesUrl = computed(() => (props.source === 'imported'
+const zonesData = ref<ActivityZonesPayload | null>(null)
+const zonesUrl = computed(() => (props.source === 'imported'
   ? `/api/imported_activities/${props.activityId}/zones`
   : `/strava/activities/${props.activityId}/zones`))
-const hasPowerZones = computed(() => !!powerZonesData.value?.power && !!powerZonesData.value?.ftp)
+const hasPowerZones = computed(() => !!zonesData.value?.power && !!zonesData.value?.ftp)
+const hasHrZones = computed(() => !!zonesData.value?.hr && !!zonesData.value?.lthr)
 
-async function fetchPowerZones() {
+async function fetchZones() {
   if (props.activityId == null) return
   try {
-    const res = await fetch(powerZonesUrl.value, {
+    const res = await fetch(zonesUrl.value, {
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
     })
     if (!res.ok) return
-    powerZonesData.value = await res.json()
+    zonesData.value = await res.json()
   } catch {
-    // Best-effort — sans ces données, la pastille reste juste masquée.
+    // Best-effort — sans ces données, les pastilles restent juste masquées.
   }
 }
 
+// Coloration de la courbe elle-même, le long du parcours.
 const showPowerZoneColor = ref(false)
-// Deuxième pastille, indépendante de la précédente : bandes horizontales des zones de
-// puissance en fond de graphique (repère fixe sur l'axe Y), plutôt qu'une coloration de
-// la courbe elle-même le long du parcours.
+const showHrZoneColor = ref(false)
+// Bandes horizontales en fond de graphique (repère fixe sur l'axe Y), indépendantes
+// des deux précédentes.
 const showPowerZoneBands = ref(false)
+const showHrZoneBands = ref(false)
 
 const availableLayout = computed(() => (props.streams ? chartLayout.value : []))
 
@@ -716,41 +721,45 @@ const lapMarkPlugin = {
   },
 }
 
-// Bandes horizontales des zones de puissance (pastille « zones horizontales »), en fond
-// du graphique — un repère fixe sur l'axe Y (les bornes de zone, en watts), à la
-// différence de la pastille « zones de puissance » qui teinte la courbe elle-même le
-// long du parcours. Lues sur `chart.$powerZoneBands` (posé au rendu, cf. renderCharts),
-// nulles quand le graphique ne porte pas la puissance ou que la pastille est éteinte.
-const POWER_ZONE_LABEL_MIN_PX = 14
-const powerZoneBandsPlugin = {
-  id: 'activityPowerZoneBands',
+// Bandes horizontales des zones (pastille « zones horizontales », puissance ou fréquence
+// cardiaque), en fond du graphique — un repère fixe sur l'axe Y (les bornes de zone, en
+// watts ou bpm), à la différence de la pastille « zones de … » qui teinte la courbe
+// elle-même le long du parcours. Lues sur `chart.$zoneBands` (posé au rendu, cf.
+// renderCharts) : un tableau, pas un objet unique, pour qu'un graphique combinant
+// puissance ET fréquence cardiaque (l'utilisateur peut fusionner deux courbes dans le
+// même groupe) affiche les deux jeux de bandes, chacun sur son propre axe Y.
+const ZONE_BAND_LABEL_MIN_PX = 14
+const zoneBandsPlugin = {
+  id: 'activityZoneBands',
   beforeDatasetsDraw(chart) {
-    const bands = chart.$powerZoneBands
-    if (!bands || !bands.ftp) return
-    const yScale = chart.scales[bands.yAxisID]
-    if (!yScale) return
+    const bandSets = chart.$zoneBands
+    if (!bandSets || bandSets.length === 0) return
     const { ctx, chartArea } = chart
     ctx.save()
     ctx.beginPath()
     ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
     ctx.clip()
-    for (let i = 0; i < POWER_ZONES.length; i++) {
-      const lo = POWER_ZONES[i].lo * bands.ftp
-      const hiFrac = POWER_ZONES[i + 1]?.lo
-      const hi = hiFrac != null ? hiFrac * bands.ftp : yScale.max
-      const yLo = yScale.getPixelForValue(lo)
-      const yHi = yScale.getPixelForValue(hi)
-      const top = Math.max(chartArea.top, Math.min(yLo, yHi))
-      const bottom = Math.min(chartArea.bottom, Math.max(yLo, yHi))
-      if (bottom <= top) continue
-      ctx.fillStyle = intensityZoneColor(POWER_ZONES[i].key) + '26'
-      ctx.fillRect(chartArea.left, top, chartArea.right - chartArea.left, bottom - top)
-      if (bottom - top >= POWER_ZONE_LABEL_MIN_PX) {
-        ctx.font = '600 9px system-ui, -apple-system, sans-serif'
-        ctx.textAlign = 'left'
-        ctx.textBaseline = 'middle'
-        ctx.fillStyle = intensityZoneColor(POWER_ZONES[i].key)
-        ctx.fillText(POWER_ZONES[i].key.toUpperCase(), chartArea.left + 4, (top + bottom) / 2)
+    for (const bands of bandSets) {
+      const yScale = chart.scales[bands.yAxisID]
+      if (!yScale || !bands.threshold) continue
+      for (let i = 0; i < bands.zones.length; i++) {
+        const lo = bands.zones[i].lo * bands.threshold
+        const hiFrac = bands.zones[i + 1]?.lo
+        const hi = hiFrac != null ? hiFrac * bands.threshold : yScale.max
+        const yLo = yScale.getPixelForValue(lo)
+        const yHi = yScale.getPixelForValue(hi)
+        const top = Math.max(chartArea.top, Math.min(yLo, yHi))
+        const bottom = Math.min(chartArea.bottom, Math.max(yLo, yHi))
+        if (bottom <= top) continue
+        ctx.fillStyle = intensityZoneColor(bands.zones[i].key) + '26'
+        ctx.fillRect(chartArea.left, top, chartArea.right - chartArea.left, bottom - top)
+        if (bottom - top >= ZONE_BAND_LABEL_MIN_PX) {
+          ctx.font = '600 9px system-ui, -apple-system, sans-serif'
+          ctx.textAlign = 'left'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = intensityZoneColor(bands.zones[i].key)
+          ctx.fillText(bands.zones[i].key.toUpperCase(), chartArea.left + 4, (top + bottom) / 2)
+        }
       }
     }
     ctx.restore()
@@ -866,7 +875,7 @@ async function renderCharts() {
   if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
-  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, powerZoneBandsPlugin, pauseBandPlugin, lapMarkPlugin)
+  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, zoneBandsPlugin, pauseBandPlugin, lapMarkPlugin)
 
   destroyCharts()
 
@@ -920,14 +929,15 @@ async function renderCharts() {
       const yRaw = props.streams[streamKey].data
       const len = Math.min(xRaw.length, yRaw.length)
 
-      // Coloration par pente du profil d'altitude, ou par zone d'intensité de la courbe de
-      // puissance (« couleur des tracés » / pastille « zones de puissance ») — une couleur
-      // par échantillon dans les deux cas. Lue par gradeFillPlugin (remplissage) et par
-      // `segment.borderColor` (couleur de la ligne), toutes deux indexées sur les points
-      // du dataset — d'où un seul jeu de variables (rawColors/gradeColors) pour les deux.
+      // Coloration par pente du profil d'altitude, par zone de puissance ou par zone de
+      // fréquence cardiaque (« couleur des tracés » / pastilles « zones de … ») — une
+      // couleur par échantillon dans les trois cas. Lue par gradeFillPlugin (remplissage)
+      // et par `segment.borderColor` (couleur de la ligne), toutes deux indexées sur les
+      // points du dataset — d'où un seul jeu de variables (rawColors/gradeColors).
       const gradeAltitude = props.showGrade && streamKey === 'altitude'
       const powerZoned = showPowerZoneColor.value && streamKey === 'watts' && hasPowerZones.value
-      const zoneColored = gradeAltitude || powerZoned
+      const hrZoned = showHrZoneColor.value && streamKey === 'heartrate' && hasHrZones.value
+      const zoneColored = gradeAltitude || powerZoned || hrZoned
       let rawColors = null
       if (gradeAltitude) {
         const gradeData = props.streams.grade_smooth?.data
@@ -939,10 +949,17 @@ async function renderCharts() {
           rawColors[i] = GRADE_BUCKETS[bucketGrade(g)].color
         }
       } else if (powerZoned) {
-        const ftp = powerZonesData.value?.ftp
+        const ftp = zonesData.value?.ftp
         rawColors = new Array(len)
         for (let i = 0; i < len; i++) {
           const zone = zoneKeyForValue(yRaw[i], ftp, POWER_ZONES)
+          rawColors[i] = zone ? intensityZoneColor(zone) : def.color
+        }
+      } else if (hrZoned) {
+        const lthr = zonesData.value?.lthr
+        rawColors = new Array(len)
+        for (let i = 0; i < len; i++) {
+          const zone = zoneKeyForValue(yRaw[i], lthr, HR_ZONES)
           rawColors[i] = zone ? intensityZoneColor(zone) : def.color
         }
       }
@@ -1053,10 +1070,16 @@ async function renderCharts() {
     ;(chart as any).$pauseSpans = pauseSpans
     ;(chart as any).$lapMarks = lapMarks
 
+    const zoneBands = []
     const wattsIdx = group.streams.indexOf('watts')
-    ;(chart as any).$powerZoneBands = (showPowerZoneBands.value && wattsIdx !== -1 && hasPowerZones.value)
-      ? { yAxisID: `y-${wattsIdx}`, ftp: powerZonesData.value?.ftp }
-      : null
+    if (showPowerZoneBands.value && wattsIdx !== -1 && hasPowerZones.value) {
+      zoneBands.push({ yAxisID: `y-${wattsIdx}`, threshold: zonesData.value?.ftp, zones: POWER_ZONES })
+    }
+    const hrIdx = group.streams.indexOf('heartrate')
+    if (showHrZoneBands.value && hrIdx !== -1 && hasHrZones.value) {
+      zoneBands.push({ yAxisID: `y-${hrIdx}`, threshold: zonesData.value?.lthr, zones: HR_ZONES })
+    }
+    ;(chart as any).$zoneBands = zoneBands
 
     ;(chart as any).$onSelect = (v0: number, v1: number) => {
       const r0 = chartXToRaw(Math.min(v0, v1))
@@ -1745,14 +1768,14 @@ watch(() => props.showGrade, () => {
   if (props.streams) renderCharts()
 })
 
-// Pastille « zones de puissance » : même reconstruction de datasets que showGrade.
-watch(showPowerZoneColor, () => {
+// Pastilles « zones de … » : même reconstruction de datasets que showGrade.
+watch([showPowerZoneColor, showHrZoneColor], () => {
   if (props.streams) renderCharts()
 })
 
-// Pastille « zones horizontales » : re-pose juste $powerZoneBands sur chaque chart, pas
+// Pastilles « zones horizontales » : re-posent juste $zoneBands sur chaque chart, pas
 // besoin de reconstruire les datasets (aucune couleur de courbe n'en dépend).
-watch(showPowerZoneBands, () => {
+watch([showPowerZoneBands, showHrZoneBands], () => {
   if (props.streams) renderCharts()
 })
 
@@ -1761,15 +1784,6 @@ watch(chartLayout, async () => {
   await nextTick()
   renderCharts()
 }, { deep: true })
-
-// When the user re-shows the charts after collapsing, the canvases were torn
-// down by v-if, so we re-render once Vue mounts the new canvases.
-watch(() => props.collapsed, async (collapsed) => {
-  if (collapsed) return
-  if (!props.streams) return
-  await nextTick()
-  renderCharts()
-})
 
 watch(() => props.zoomRange, applyZoomToCharts)
 
@@ -1785,7 +1799,7 @@ watch(() => props.laps, (val) => {
 // First mount: pull the saved presets, restore the user's last-used one,
 // reconcile the layout against the streams actually available, and render.
 onMounted(async () => {
-  fetchPowerZones() // best-effort, indépendant du reste — pilote juste la pastille
+  fetchZones() // best-effort, indépendant du reste — pilote juste les pastilles
   await fetchSavedLayouts()
   if (lastUsedId.value != null) applyPresetById(lastUsedId.value)
   syncLayoutWithStreams()
@@ -1961,7 +1975,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="btn btn-sm btn-outline-secondary"
-            :title="collapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
+            :title="collapsed ? t('strava.layout.show_stats') : t('strava.layout.hide_stats')"
             :aria-pressed="collapsed"
             @click="toggleCardCollapsed"
           >
@@ -1969,7 +1983,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <div v-if="availableLayout.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
+      <div v-if="!collapsed && availableLayout.length > 0" class="range-chips d-flex flex-wrap gap-2 align-items-center mt-2">
         <span v-if="rangeDuration() != null" class="range-chip">
           <i class="fa-regular fa-clock" aria-hidden="true"></i>
           <strong>{{ formatHMS(rangeDuration()) }}</strong>
@@ -2072,7 +2086,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-    <div v-if="!collapsed" class="card-body">
+    <div class="card-body">
       <div v-if="streamsLoading" class="text-muted d-flex align-items-center gap-2">
         <span class="spinner-border spinner-border-sm text-warning" aria-hidden="true"></span>
         <span>{{ t('strava.loading_streams') }}</span>
@@ -2211,6 +2225,30 @@ onBeforeUnmount(() => {
                 >
                   <i class="fa-solid fa-grip-lines" aria-hidden="true"></i>
                   <span class="zone-pill-label-full">{{ t('strava.power_zone_bands_label') }}</span>
+                  <span class="zone-pill-label-short">{{ t('strava.zone_short_label') }}</span>
+                </button>
+              </div>
+              <div v-if="group.streams.includes('heartrate') && hasHrZones" class="zone-toggle-row">
+                <button
+                  type="button"
+                  class="zone-toggle-pill zone-toggle-pill-hr"
+                  :class="{ active: showHrZoneColor }"
+                  :title="showHrZoneColor ? t('strava.hide_hr_zone_colors') : t('strava.show_hr_zone_colors')"
+                  @click="showHrZoneColor = !showHrZoneColor"
+                >
+                  <i class="fa-solid fa-heart-pulse" aria-hidden="true"></i>
+                  <span class="zone-pill-label-full">{{ t('strava.hr_zone_color_label') }}</span>
+                  <span class="zone-pill-label-short">{{ t('strava.zone_short_label') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="zone-toggle-pill zone-toggle-pill-hr"
+                  :class="{ active: showHrZoneBands }"
+                  :title="showHrZoneBands ? t('strava.hide_hr_zone_bands') : t('strava.show_hr_zone_bands')"
+                  @click="showHrZoneBands = !showHrZoneBands"
+                >
+                  <i class="fa-solid fa-grip-lines" aria-hidden="true"></i>
+                  <span class="zone-pill-label-full">{{ t('strava.hr_zone_bands_label') }}</span>
                   <span class="zone-pill-label-short">{{ t('strava.zone_short_label') }}</span>
                 </button>
               </div>
@@ -2460,6 +2498,14 @@ onBeforeUnmount(() => {
   color: #b85c00;
 }
 .zone-toggle-pill.active i { color: #fd7e14; }
+/* Variante fréquence cardiaque (mêmes pastilles, teinte rouge de la courbe FC plutôt
+   que l'orange de la puissance). */
+.zone-toggle-pill-hr.active {
+  background: rgba(220, 53, 69, 0.12);
+  border-color: rgba(220, 53, 69, 0.4);
+  color: #a3202c;
+}
+.zone-toggle-pill-hr.active i { color: #dc3545; }
 /* Libellé complet sur grand écran ; réduit à « Zone » sur téléphone (icône + zone
    côte à côte, cf. .chart-canvas-wrap { height: 170px } juste en dessous) pour que
    les deux pastilles tiennent côte à côte sans passer à la ligne. */

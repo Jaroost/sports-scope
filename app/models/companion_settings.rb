@@ -396,10 +396,13 @@ module CompanionSettings
 
   def sanitize_bands(raw)
     raw_array(raw).filter_map do |band|
+      # Une case invalide devient `nil` à sa place plutôt que d'être retirée :
+      # sinon tout ce qui suit glisserait, et une case vidée au milieu par
+      # l'éditeur se retrouverait toujours en bout de jeu.
       metrics = raw_array(band.is_a?(Hash) ? band["metrics"] : band)
-                .select { |metric| METRICS.include?(metric) }
                 .first(MAX_BAND_METRICS)
-      metrics.empty? ? nil : { "metrics" => metrics }
+                .map { |metric| metric if METRICS.include?(metric) }
+      metrics.all?(&:nil?) ? nil : { "metrics" => metrics }
     end
   end
 

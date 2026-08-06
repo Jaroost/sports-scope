@@ -50,6 +50,15 @@ const emit = defineEmits<{ close: []; choose: [block: Block] }>()
 const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
 
+// Le catalogue liste les mesures dans l'ordre du serveur ; la dialogue les
+// propose triées par libellé traduit, pour qu'on les retrouve sans connaître
+// cet ordre-là par cœur.
+const sortedMetrics = computed(() => (
+  [...props.catalog.metrics].sort((a, b) => (
+    t(`companion.settings.metrics.${a}`).localeCompare(t(`companion.settings.metrics.${b}`))
+  ))
+))
+
 // Le nom d'une vignette : celui du mode, ou celui du genre quand il n'en a pas.
 function labelOf(choice: BlockChoice): string {
   return choice.mode
@@ -180,7 +189,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <label v-if="group.kind === 'metric'" class="cbpk-param small">
               {{ t('companion.settings.metric') }}
               <select v-model="metric" class="form-select form-select-sm">
-                <option v-for="m in catalog.metrics" :key="m" :value="m">
+                <option v-for="m in sortedMetrics" :key="m" :value="m">
                   {{ t(`companion.settings.metrics.${m}`) }}
                 </option>
               </select>

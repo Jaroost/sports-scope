@@ -100,6 +100,15 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 const preset = computed(() => presets[current.value])
 const hasMap = computed(() => preset.value.pages.some((page) => page.kind === 'map'))
 
+// Le catalogue liste les mesures dans l'ordre du serveur ; le bandeau les
+// propose triées par libellé traduit, pour qu'on les retrouve sans connaître
+// cet ordre-là par cœur.
+const sortedMetrics = computed(() => (
+  [...props.catalog.metrics].sort((a, b) => (
+    t(`companion.settings.metrics.${a}`).localeCompare(t(`companion.settings.metrics.${b}`))
+  ))
+))
+
 // ── les profils ─────────────────────────────────────────────────────────────
 
 function select(index: number) {
@@ -425,10 +434,15 @@ function addBand() {
 }
 
 function setBandMetric(band: Band, index: number, value: string) {
-  // La chaîne vide vide la case : un jeu peut porter moins de quatre mesures, et
-  // c'est le seul moyen d'en retirer une du milieu.
-  if (value === '') band.metrics.splice(index, 1)
-  else band.metrics[index] = value
+  // Écrit en place plutôt que de retirer la case : un `splice` décalerait
+  // tout ce qui suit vers la gauche, et une case vidée au milieu se
+  // retrouverait toujours en bout de jeu. Seules les cases vides en fin de
+  // tableau sont coupées, pour ne pas faire grossir le document pour rien.
+  while (band.metrics.length <= index) band.metrics.push('')
+  band.metrics[index] = value
+  while (band.metrics.length && band.metrics[band.metrics.length - 1] === '') {
+    band.metrics.pop()
+  }
 }
 
 // ── les capteurs et les réglages ────────────────────────────────────────────
@@ -771,7 +785,7 @@ async function save() {
                       :value="band.metrics[slot - 1] || ''"
                       @change="setBandMetric(band, slot - 1, ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
-                <option v-for="metric in catalog.metrics" :key="metric" :value="metric">
+                <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
                   {{ t(`companion.settings.metrics.${metric}`) }}
                 </option>
               </select>

@@ -437,6 +437,23 @@ function chartStats(def) {
   return { count, mean, min: mn, max: mx }
 }
 
+// Zone d'intensité (FC/puissance) d'une valeur de stat — seulement pour les flux dont on
+// connaît le seuil (FTP / LTHR), même repère que la coloration de la courbe par zone.
+function statZone(streamKey, value) {
+  if (value == null || !Number.isFinite(value)) return null
+  if (streamKey === 'watts' && hasPowerZones.value) {
+    return zoneKeyForValue(value, zonesData.value?.ftp, POWER_ZONES)
+  }
+  if (streamKey === 'heartrate' && hasHrZones.value) {
+    return zoneKeyForValue(value, zonesData.value?.lthr, HR_ZONES)
+  }
+  return null
+}
+
+function zoneLabel(zone) {
+  return t(`performance.zones.label_${zone}`)
+}
+
 // ─── Chart.js plugin: drag-to-select + flag handles + selection highlight
 const HANDLE_TOL = 8
 // Tolérances tactiles (px) : zone d'accroche d'une poignée et seuil sous lequel un
@@ -2069,16 +2086,34 @@ onBeforeUnmount(() => {
                   <i class="fa-solid fa-arrow-down-short-wide chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.min') }}</span>
                   <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).min) }} {{ vdef(streamKey).unit }}</span>
+                  <span
+                    v-if="statZone(streamKey, chartStats(vdef(streamKey)).min)"
+                    class="chart-tooltip-zone"
+                    :style="{ background: intensityZoneColor(statZone(streamKey, chartStats(vdef(streamKey)).min)) }"
+                    :title="zoneLabel(statZone(streamKey, chartStats(vdef(streamKey)).min))"
+                  >{{ statZone(streamKey, chartStats(vdef(streamKey)).min).toUpperCase() }}</span>
                 </div>
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-equals chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.mean') }}</span>
                   <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).mean) }} {{ vdef(streamKey).unit }}</span>
+                  <span
+                    v-if="statZone(streamKey, chartStats(vdef(streamKey)).mean)"
+                    class="chart-tooltip-zone"
+                    :style="{ background: intensityZoneColor(statZone(streamKey, chartStats(vdef(streamKey)).mean)) }"
+                    :title="zoneLabel(statZone(streamKey, chartStats(vdef(streamKey)).mean))"
+                  >{{ statZone(streamKey, chartStats(vdef(streamKey)).mean).toUpperCase() }}</span>
                 </div>
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-arrow-up-wide-short chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.max') }}</span>
                   <span class="chart-tooltip-value">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).max) }} {{ vdef(streamKey).unit }}</span>
+                  <span
+                    v-if="statZone(streamKey, chartStats(vdef(streamKey)).max)"
+                    class="chart-tooltip-zone"
+                    :style="{ background: intensityZoneColor(statZone(streamKey, chartStats(vdef(streamKey)).max)) }"
+                    :title="zoneLabel(statZone(streamKey, chartStats(vdef(streamKey)).max))"
+                  >{{ statZone(streamKey, chartStats(vdef(streamKey)).max).toUpperCase() }}</span>
                 </div>
               </div>
             </span>
@@ -2738,6 +2773,15 @@ onBeforeUnmount(() => {
   margin-left: auto;
   font-weight: 600;
   padding-left: 0.55rem;
+}
+.chart-tooltip-zone {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #fff;
+  flex-shrink: 0;
 }
 .chart-tooltip-divider {
   margin: 0.35rem 0;

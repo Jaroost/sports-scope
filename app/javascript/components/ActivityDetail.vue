@@ -591,6 +591,8 @@ onMounted(async () => {
       <ActivityCharts
         v-if="effectiveTab === 'analysis'"
         class="mb-3"
+        :activity-id="props.activityId"
+        :source="props.source"
         :streams="streams"
         :activity="activity"
         :streams-loading="streamsLoading"

@@ -26,8 +26,13 @@ import {
 } from '../activityHelpers'
 import { buildTooltipHtml } from '../activityTooltip'
 import { csrfToken } from '../csrf'
+import { POWER_ZONES, zoneKeyForValue, intensityZoneColor } from '../composables/useTrainingPlan'
 
 const props = defineProps({
+  // Nécessaires pour interroger /zones (seuil FTP + présence de zones puissance pour
+  // CETTE activité) — la pastille de coloration du graphique de puissance en a besoin.
+  activityId: { type: [String, Number], default: null },
+  source: { type: String, default: 'strava' }, // 'strava' or 'imported'
   streams: { type: Object, default: null },
   activity: { type: Object, default: null },
   streamsLoading: { type: Boolean, default: false },
@@ -84,6 +89,41 @@ const hiddenDatasets = ref(new Map()) // groupId → Set<datasetIdx>
 // Sur mobile, les contrôles du header (zoom/sélection/preset/axe) sont repliés dans un
 // menu déroulant ouvert par un bouton « réglages », pour ne pas manger la moitié de l'écran.
 const mobileControlsOpen = ref(false)
+
+// ─── Pastille « colorier par zone de puissance » ──────────────────────────
+// Même endpoint /zones que l'onglet Zones (ActivityZones.vue) et la carte
+// (ActivityMapCard) — fetché indépendamment ici, avec le même compromis assumé de
+// doublon de requête : ce panneau est visible dès l'onglet Analyse, avant que l'onglet
+// Zones (chargé paresseusement) n'ait pu le faire.
+interface PowerZonesPayload {
+  power: unknown | null
+  ftp: number | null
+}
+const powerZonesData = ref<PowerZonesPayload | null>(null)
+const powerZonesUrl = computed(() => (props.source === 'imported'
+  ? `/api/imported_activities/${props.activityId}/zones`
+  : `/strava/activities/${props.activityId}/zones`))
+const hasPowerZones = computed(() => !!powerZonesData.value?.power && !!powerZonesData.value?.ftp)
+
+async function fetchPowerZones() {
+  if (props.activityId == null) return
+  try {
+    const res = await fetch(powerZonesUrl.value, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) return
+    powerZonesData.value = await res.json()
+  } catch {
+    // Best-effort — sans ces données, la pastille reste juste masquée.
+  }
+}
+
+const showPowerZoneColor = ref(false)
+// Deuxième pastille, indépendante de la précédente : bandes horizontales des zones de
+// puissance en fond de graphique (repère fixe sur l'axe Y), plutôt qu'une coloration de
+// la courbe elle-même le long du parcours.
+const showPowerZoneBands = ref(false)
 
 const availableLayout = computed(() => (props.streams ? chartLayout.value : []))
 
@@ -450,11 +490,12 @@ function detectChartHandle(chart, px) {
   return null
 }
 
-// Remplissage sous la courbe d'altitude teinté par bucket de pente, quand la « couleur
-// des tracés » est active. On peint, segment par segment, un quadrilatère depuis la ligne
-// jusqu'au bas du graphique, avec la couleur de pente pré-calculée à la construction du
-// dataset (`$gradeColors`, aligné sur les points sous-échantillonnés). Même rendu que le
-// profil d'altitude du créateur d'itinéraire (RouteBuilderChart.gradeFillPlugin).
+// Remplissage sous la courbe teinté par bucket de pente (altitude) ou par zone
+// d'intensité (puissance), quand la coloration correspondante est active. On peint,
+// segment par segment, un quadrilatère depuis la ligne jusqu'au bas du graphique, avec
+// la couleur pré-calculée à la construction du dataset (`$gradeColors`, aligné sur les
+// points sous-échantillonnés). Même rendu que le profil d'altitude du créateur
+// d'itinéraire (RouteBuilderChart.gradeFillPlugin).
 const gradeFillPlugin = {
   id: 'activityGradeFill',
   beforeDatasetsDraw(chart) {
@@ -675,6 +716,47 @@ const lapMarkPlugin = {
   },
 }
 
+// Bandes horizontales des zones de puissance (pastille « zones horizontales »), en fond
+// du graphique — un repère fixe sur l'axe Y (les bornes de zone, en watts), à la
+// différence de la pastille « zones de puissance » qui teinte la courbe elle-même le
+// long du parcours. Lues sur `chart.$powerZoneBands` (posé au rendu, cf. renderCharts),
+// nulles quand le graphique ne porte pas la puissance ou que la pastille est éteinte.
+const POWER_ZONE_LABEL_MIN_PX = 14
+const powerZoneBandsPlugin = {
+  id: 'activityPowerZoneBands',
+  beforeDatasetsDraw(chart) {
+    const bands = chart.$powerZoneBands
+    if (!bands || !bands.ftp) return
+    const yScale = chart.scales[bands.yAxisID]
+    if (!yScale) return
+    const { ctx, chartArea } = chart
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+    ctx.clip()
+    for (let i = 0; i < POWER_ZONES.length; i++) {
+      const lo = POWER_ZONES[i].lo * bands.ftp
+      const hiFrac = POWER_ZONES[i + 1]?.lo
+      const hi = hiFrac != null ? hiFrac * bands.ftp : yScale.max
+      const yLo = yScale.getPixelForValue(lo)
+      const yHi = yScale.getPixelForValue(hi)
+      const top = Math.max(chartArea.top, Math.min(yLo, yHi))
+      const bottom = Math.min(chartArea.bottom, Math.max(yLo, yHi))
+      if (bottom <= top) continue
+      ctx.fillStyle = intensityZoneColor(POWER_ZONES[i].key) + '26'
+      ctx.fillRect(chartArea.left, top, chartArea.right - chartArea.left, bottom - top)
+      if (bottom - top >= POWER_ZONE_LABEL_MIN_PX) {
+        ctx.font = '600 9px system-ui, -apple-system, sans-serif'
+        ctx.textAlign = 'left'
+        ctx.textBaseline = 'middle'
+        ctx.fillStyle = intensityZoneColor(POWER_ZONES[i].key)
+        ctx.fillText(POWER_ZONES[i].key.toUpperCase(), chartArea.left + 4, (top + bottom) / 2)
+      }
+    }
+    ctx.restore()
+  },
+}
+
 const dragSelectPlugin = {
   id: 'dragSelect',
   beforeEvent(chart, args) {
@@ -784,7 +866,7 @@ async function renderCharts() {
   if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
-  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, pauseBandPlugin, lapMarkPlugin)
+  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, powerZoneBandsPlugin, pauseBandPlugin, lapMarkPlugin)
 
   destroyCharts()
 
@@ -838,10 +920,14 @@ async function renderCharts() {
       const yRaw = props.streams[streamKey].data
       const len = Math.min(xRaw.length, yRaw.length)
 
-      // Coloration par pente du profil d'altitude (« couleur des tracés »), une couleur par
-      // échantillon. Lue par gradeFillPlugin (remplissage) et par `segment.borderColor`
-      // (couleur de la ligne), toutes deux indexées sur les points du dataset.
+      // Coloration par pente du profil d'altitude, ou par zone d'intensité de la courbe de
+      // puissance (« couleur des tracés » / pastille « zones de puissance ») — une couleur
+      // par échantillon dans les deux cas. Lue par gradeFillPlugin (remplissage) et par
+      // `segment.borderColor` (couleur de la ligne), toutes deux indexées sur les points
+      // du dataset — d'où un seul jeu de variables (rawColors/gradeColors) pour les deux.
       const gradeAltitude = props.showGrade && streamKey === 'altitude'
+      const powerZoned = showPowerZoneColor.value && streamKey === 'watts' && hasPowerZones.value
+      const zoneColored = gradeAltitude || powerZoned
       let rawColors = null
       if (gradeAltitude) {
         const gradeData = props.streams.grade_smooth?.data
@@ -851,6 +937,13 @@ async function renderCharts() {
         for (let i = 0; i < len; i++) {
           const g = gradeForIndex(Math.min(i, len - 1), gradeData, altData, distData)
           rawColors[i] = GRADE_BUCKETS[bucketGrade(g)].color
+        }
+      } else if (powerZoned) {
+        const ftp = powerZonesData.value?.ftp
+        rawColors = new Array(len)
+        for (let i = 0; i < len; i++) {
+          const zone = zoneKeyForValue(yRaw[i], ftp, POWER_ZONES)
+          rawColors[i] = zone ? intensityZoneColor(zone) : def.color
         }
       }
 
@@ -876,9 +969,9 @@ async function renderCharts() {
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.2,
-        // En mode pente, le remplissage vient de gradeFillPlugin — on coupe le fill uni.
-        fill: !gradeAltitude,
-        ...(gradeAltitude
+        // En mode pente/zone, le remplissage vient de gradeFillPlugin — on coupe le fill uni.
+        fill: !zoneColored,
+        ...(zoneColored
           ? { segment: { borderColor: (ctx) => gradeColors[ctx.p0DataIndex] || def.color } }
           : {}),
         yAxisID: `y-${idx}`,
@@ -959,6 +1052,11 @@ async function renderCharts() {
 
     ;(chart as any).$pauseSpans = pauseSpans
     ;(chart as any).$lapMarks = lapMarks
+
+    const wattsIdx = group.streams.indexOf('watts')
+    ;(chart as any).$powerZoneBands = (showPowerZoneBands.value && wattsIdx !== -1 && hasPowerZones.value)
+      ? { yAxisID: `y-${wattsIdx}`, ftp: powerZonesData.value?.ftp }
+      : null
 
     ;(chart as any).$onSelect = (v0: number, v1: number) => {
       const r0 = chartXToRaw(Math.min(v0, v1))
@@ -1647,6 +1745,17 @@ watch(() => props.showGrade, () => {
   if (props.streams) renderCharts()
 })
 
+// Pastille « zones de puissance » : même reconstruction de datasets que showGrade.
+watch(showPowerZoneColor, () => {
+  if (props.streams) renderCharts()
+})
+
+// Pastille « zones horizontales » : re-pose juste $powerZoneBands sur chaque chart, pas
+// besoin de reconstruire les datasets (aucune couleur de courbe n'en dépend).
+watch(showPowerZoneBands, () => {
+  if (props.streams) renderCharts()
+})
+
 watch(chartLayout, async () => {
   if (!props.streams) return
   await nextTick()
@@ -1676,6 +1785,7 @@ watch(() => props.laps, (val) => {
 // First mount: pull the saved presets, restore the user's last-used one,
 // reconcile the layout against the streams actually available, and render.
 onMounted(async () => {
+  fetchPowerZones() // best-effort, indépendant du reste — pilote juste la pastille
   await fetchSavedLayouts()
   if (lastUsedId.value != null) applyPresetById(lastUsedId.value)
   syncLayoutWithStreams()
@@ -2080,6 +2190,30 @@ onBeforeUnmount(() => {
                 <canvas :id="`chart-${group.id}`"></canvas>
                 <div class="chart-tooltip-slot" :data-group-id="group.id"></div>
               </div>
+              <div v-if="group.streams.includes('watts') && hasPowerZones" class="zone-toggle-row">
+                <button
+                  type="button"
+                  class="zone-toggle-pill"
+                  :class="{ active: showPowerZoneColor }"
+                  :title="showPowerZoneColor ? t('strava.hide_power_zone_colors') : t('strava.show_power_zone_colors')"
+                  @click="showPowerZoneColor = !showPowerZoneColor"
+                >
+                  <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+                  <span class="zone-pill-label-full">{{ t('strava.power_zone_color_label') }}</span>
+                  <span class="zone-pill-label-short">{{ t('strava.zone_short_label') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="zone-toggle-pill"
+                  :class="{ active: showPowerZoneBands }"
+                  :title="showPowerZoneBands ? t('strava.hide_power_zone_bands') : t('strava.show_power_zone_bands')"
+                  @click="showPowerZoneBands = !showPowerZoneBands"
+                >
+                  <i class="fa-solid fa-grip-lines" aria-hidden="true"></i>
+                  <span class="zone-pill-label-full">{{ t('strava.power_zone_bands_label') }}</span>
+                  <span class="zone-pill-label-short">{{ t('strava.zone_short_label') }}</span>
+                </button>
+              </div>
             </div>
           </div>
         </template>
@@ -2295,6 +2429,46 @@ onBeforeUnmount(() => {
   border-style: dashed;
 }
 .legend-pill-static:hover { background: rgba(0, 0, 0, 0.02); }
+/* Pastille « colorier par zone de puissance », sous le graphique de puissance. */
+.zone-toggle-row {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.zone-toggle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #495057;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  user-select: none;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.zone-toggle-pill:hover { background: rgba(0, 0, 0, 0.07); }
+.zone-toggle-pill.active {
+  background: rgba(253, 126, 20, 0.15);
+  border-color: rgba(253, 126, 20, 0.45);
+  color: #b85c00;
+}
+.zone-toggle-pill.active i { color: #fd7e14; }
+/* Libellé complet sur grand écran ; réduit à « Zone » sur téléphone (icône + zone
+   côte à côte, cf. .chart-canvas-wrap { height: 170px } juste en dessous) pour que
+   les deux pastilles tiennent côte à côte sans passer à la ligne. */
+.zone-pill-label-short { display: none; }
+@media (max-width: 767px) {
+  .zone-pill-label-full { display: none; }
+  .zone-pill-label-short { display: inline; }
+  .zone-toggle-pill { padding: 0.15rem 0.5rem; }
+}
 /* Unité rappelée dans la pastille de légende, à la place du titre d'axe Y. */
 .legend-unit {
   font-weight: 400;

@@ -253,20 +253,20 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
         <div class="cbp-unit">{{ sample.unit }}</div>
       </div>
 
-      <!-- Aplat de zone : le même aplat que le plein cadre, mais l'icône de la
-           mesure se pose devant le chiffre — cœur ou éclair, à même hauteur
-           que lui et non au-dessus : cardio et puissance dessinent sinon
-           exactement la même case. -->
+      <!-- Aplat de zone : le même aplat que le plein cadre, mais l'icône se
+           pose devant le **titre** (l'unité) et non devant le chiffre — cœur
+           ou éclair au même endroit que le nom qui confirme la mesure,
+           avant qu'on descende lire le chiffre lui-même. -->
       <div
         v-else-if="shape.metricZoneMode"
         class="cbp-card cbp-center"
         :style="{ background: metricBackground || undefined, color: metricInk }"
       >
-        <div class="cbp-big cbp-big--zone">
-          <i class="cbp-zone-icon" :class="sample.icon" aria-hidden="true"></i>
-          <span>{{ sample.value }}</span>
+        <div class="cbp-zone-title">
+          <i :class="sample.icon" aria-hidden="true"></i>
+          <span>{{ sample.unit }}</span>
         </div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
+        <div class="cbp-big cbp-big--zone">{{ sample.value }}</div>
       </div>
 
       <!-- Plein cadre : le chiffre seul, sans icône. -->
@@ -552,9 +552,12 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
   min-width: 0;
 }
 
+/* En capitales : `BlockCard`/`StatCard`/`ZoneBreakdown`/`TrainingBudgetCard`
+   uppercase tous leurs titres côté appli, la vignette suit. */
 .cbp-title {
   color: rgba(255, 255, 255, 0.7);
   font-size: 0.95em;
+  text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -601,17 +604,27 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 .cbp-big--gauge {
   font-size: 2.6em;
 }
-/* L'icône devant le chiffre, à même ligne : c'est elle qui distingue la case
-   cardio de la case puissance, deux aplats de zone identiques sinon. */
+/* Le chiffre de l'aplat de zone garde le rythme du plein cadre, juste sous
+   son titre plutôt que centré seul dans la case. */
 .cbp-big--zone {
+  margin-top: 0.1em;
+}
+/* Le titre de l'aplat de zone : l'icône devant l'unité en capitales, à même
+   ligne — c'est elle qui distingue la case cardio de la case puissance, deux
+   aplats de zone identiques sinon. Au-dessus du chiffre et non devant lui. */
+.cbp-zone-title {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.15em;
+  gap: 0.25em;
+  font-size: 1.15em;
+  font-weight: 700;
+  text-transform: uppercase;
+  opacity: 0.85;
+  white-space: nowrap;
 }
-.cbp-zone-icon {
-  font-size: 0.5em;
-  opacity: 0.7;
+.cbp-zone-title i {
+  font-size: 1.3em;
 }
 .cbp-mid {
   font-size: 1.9em;
@@ -622,10 +635,11 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
   font-size: 0.9em;
   opacity: 0.6;
   margin-top: 0.2em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 .cbp-icon {
-  font-size: 1.2em;
+  font-size: 1.7em;
   opacity: 0.7;
   margin-bottom: 0.3em;
 }

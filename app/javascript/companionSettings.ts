@@ -290,11 +290,11 @@ export interface MetricSample {
 }
 
 const METRIC_SAMPLES: Record<string, MetricSample> = {
-  duration: { value: '1:12:34', unit: 'durée', icon: 'fa-regular fa-clock' },
-  moving_time: { value: '1:08:20', unit: 'en mouvement', icon: 'fa-solid fa-person-biking' },
+  duration: { value: '01:12:34', unit: 'durée', icon: 'fa-regular fa-clock' },
+  moving_time: { value: '01:08:20', unit: 'en mouvement', icon: 'fa-solid fa-person-biking' },
   distance: { value: '38,42 km', unit: 'distance', icon: 'fa-solid fa-ruler-horizontal' },
   speed: { value: '32', unit: 'km/h', icon: 'fa-solid fa-gauge-high' },
-  speed_avg: { value: '27', unit: 'km/h moy', icon: 'fa-solid fa-gauge-high' },
+  speed_avg: { value: '27 km/h', unit: 'Vitesse moyenne', icon: 'fa-solid fa-gauge-high' },
   speed_max: { value: '61', unit: 'km/h max', icon: 'fa-solid fa-gauge-high' },
   heart_rate: { value: '154', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
   hr_zone: { value: 'Z3', unit: 'zone bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
@@ -307,14 +307,14 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   power_max: { value: '744', unit: 'W max', icon: 'fa-solid fa-bolt' },
   cadence: { value: '88', unit: 'tr/min', icon: 'fa-solid fa-rotate' },
   cadence_avg: { value: '84', unit: 'tr/min moy', icon: 'fa-solid fa-rotate' },
-  ascent: { value: '640', unit: 'm D+', icon: 'fa-solid fa-arrow-trend-up' },
+  ascent: { value: '640 m', unit: 'D+', icon: 'fa-solid fa-arrow-trend-up' },
   altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain' },
   grade: { value: '7', unit: '% pente', icon: 'fa-solid fa-arrow-up-right-dots' },
   calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire' },
   gears: { value: '50×15', unit: 'braquet', icon: 'fa-solid fa-gear' },
-  route_remaining: { value: '21,4 km', unit: 'restant', icon: 'fa-regular fa-flag' },
+  route_remaining: { value: '21,40 km', unit: 'Distance restante', icon: 'fa-regular fa-flag' },
   route_remaining_gain: { value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up' },
-  route_eta: { value: '48:12', unit: 'temps restant', icon: 'fa-regular fa-clock' },
+  route_eta: { value: '00:48:12', unit: 'temps restant', icon: 'fa-regular fa-clock' },
 }
 
 // Les quatre mesures du bloc « Moyennes », et leurs trois chiffres — les mêmes

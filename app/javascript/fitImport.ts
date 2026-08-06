@@ -20,7 +20,7 @@
 // choix par défaut.
 
 import { computeElevGain, elevGainOptions } from './activityHelpers'
-import { fillHoles } from './fitStreams'
+import { despikeLatLng, fillHoles } from './fitStreams'
 import { isValidLngLat, sampleTrackWaypoints } from './trackSampling'
 import type { ImportWaypoint } from './trackSampling'
 
@@ -199,7 +199,12 @@ export function buildImportedActivityPayload(data: any, filename?: string | null
   // le GPS a manqué la majorité des points ne vaut pas d'être dessinée.
   const llValid = latlng.filter((p) => p != null)
   if (llValid.length >= 2 && llValid.length >= latlng.length * 0.5) {
-    streams.latlng = { data: fillHoles(latlng) }
+    // `despikeLatLng` ne sert qu'à la trace dessinée (carte, tracé) : la distance
+    // et le D+ restent sur le compteur de l'appareil (`distance`, `session.total_*`
+    // plus bas), déjà filtré à l'enregistrement — voir `despikeLatLng` dans
+    // `fitStreams.ts`, dont le commentaire détaille pourquoi le recalculer ici
+    // depuis la position brute serait pire, pas mieux.
+    streams.latlng = { data: despikeLatLng(fillHoles(latlng), time) }
   }
   if (altitude.some((v) => v != null)) streams.altitude = { data: fillHoles(altitude) }
   if (velocity.some((v) => v != null)) streams.velocity_smooth = { data: velocity.map((v) => v ?? 0) }

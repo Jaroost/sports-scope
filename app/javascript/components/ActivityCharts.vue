@@ -2289,13 +2289,14 @@ onBeforeUnmount(() => {
 .chart-controls { display: contents; }
 .chart-controls-toggle { display: none; }
 
-@media (max-width: 767px) {
-  /* Le header (donc les statistiques) reste sticky pendant le défilement des
-     graphiques ; les contrôles étant repliés dans le menu, sa hauteur reste contenue. */
+/* Bouton réglages / menu contrôles : basé sur (max-height + coarse pointer) en plus
+   du (max-width) pour rester replié en paysage sur téléphone — la largeur y dépasse
+   767px, mais la hauteur reste celle, réduite, d'un téléphone (contrairement à une
+   tablette, qui garde un pointer coarse mais une hauteur bien supérieure même en
+   paysage). */
+@media (max-width: 767px), (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
   .chart-controls-toggle { display: inline-flex; }
   .chart-controls { display: none; }
-  /* Graphiques plus courts sur téléphone pour en voir davantage à l'écran. */
-  .chart-canvas-wrap { height: 170px; }
   .chart-controls.chart-controls-open {
     display: flex;
     flex-direction: column;
@@ -2320,6 +2321,13 @@ onBeforeUnmount(() => {
     flex-wrap: wrap;
   }
   .chart-controls.chart-controls-open .preset-select { max-width: none; flex: 1; }
+}
+
+@media (max-width: 767px) {
+  /* Le header (donc les statistiques) reste sticky pendant le défilement des
+     graphiques ; les contrôles étant repliés dans le menu, sa hauteur reste contenue. */
+  /* Graphiques plus courts sur téléphone pour en voir davantage à l'écran. */
+  .chart-canvas-wrap { height: 170px; }
 }
 
 .range-chips { font-size: 0.85rem; }

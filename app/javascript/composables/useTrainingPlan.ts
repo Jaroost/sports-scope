@@ -96,6 +96,38 @@ export function intensityZoneColor(zone: string): string {
   return INTENSITY_ZONE_COLORS[zone] ?? '#6c757d'
 }
 
+// Bornes des zones (fraction basse du seuil, borne haute = borne basse de la zone
+// suivante) — miroir client de HR_ZONES / POWER_ZONES (zone_distribution.rb), pour
+// classer un point du tracé sans aller-retour serveur (coloration de la carte).
+export interface ZoneBound { key: string; lo: number }
+export const HR_ZONES: ZoneBound[] = [
+  { key: 'z1', lo: 0.0 },
+  { key: 'z2', lo: 0.81 },
+  { key: 'z3', lo: 0.90 },
+  { key: 'z4', lo: 0.94 },
+  { key: 'z5', lo: 1.00 },
+]
+export const POWER_ZONES: ZoneBound[] = [
+  { key: 'z1', lo: 0.0 },
+  { key: 'z2', lo: 0.55 },
+  { key: 'z3', lo: 0.75 },
+  { key: 'z4', lo: 0.90 },
+  { key: 'z5', lo: 1.05 },
+  { key: 'z6', lo: 1.20 },
+  { key: 'z7', lo: 1.50 },
+]
+
+// Zone contenant `raw / threshold` : dernière zone dont la borne basse est ≤ à cette
+// fraction (même règle que ZoneDistribution.zone_key côté serveur).
+export function zoneKeyForValue(raw: number | null | undefined, threshold: number | null | undefined, zones: ZoneBound[]): string | null {
+  if (raw == null || !threshold || threshold <= 0) return null
+  const frac = raw / threshold
+  for (let i = zones.length - 1; i >= 0; i--) {
+    if (frac >= zones[i].lo) return zones[i].key
+  }
+  return zones[0].key
+}
+
 // Plage d'une zone en valeur absolue, pour le survol : « < 138 bpm », « 138–153 bpm »,
 // « ≥ 170 W ». Chaîne vide sans seuil (le serveur n'a alors envoyé aucune borne).
 export function zoneRange(z: ZoneBucket, unit: string): string {

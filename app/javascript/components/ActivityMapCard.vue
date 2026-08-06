@@ -3,8 +3,10 @@ import { reactive, ref, computed, onMounted, onBeforeUnmount, useTemplateRef, wa
 import { type PropType } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
-import { ActivityMapState } from '../pageState'
+import { ActivityMapState, type ActivityColorMode } from '../pageState'
+import { HR_ZONES, POWER_ZONES, intensityZoneColor, zoneKeyForValue, type ZoneBound } from '../composables/useTrainingPlan'
 import MapStyleDropdown from './MapStyleDropdown.vue'
+import ColorModeDropdown from './ColorModeDropdown.vue'
 import RouteFromActivityModal from './RouteFromActivityModal.vue'
 import {
   activityIcon,
@@ -29,6 +31,11 @@ import { buildTooltipHtml } from '../activityTooltip'
 
 const props = defineProps({
   activity: { type: Object as PropType<Record<string, any>>, required: true },
+  // Nécessaires pour interroger /zones (seuils LTHR/FTP + présence de zones FC/puissance
+  // pour CETTE activité) : la liste déroulante de coloration en a besoin dès l'affichage
+  // de la carte, indépendamment de l'onglet Zones qui, lui, charge paresseusement.
+  activityId: { type: [String, Number], default: null },
+  source: { type: String, default: 'strava' }, // 'strava' or 'imported'
   streams: { type: Object as PropType<Record<string, any> | null>, default: null },
   photos: { type: Array as PropType<PhotoLike[]>, default: () => [] },
   // Current cross-component selection — { startIdx, endIdx } | null.
@@ -133,13 +140,17 @@ const displayRoute = computed(() => {
   const coords = routeCoords.value
   const altitudes = props.streams?.altitude?.data
   const distances = props.streams?.distance?.data
-  if (coords.length < 3) return { coords, altitudes, distances }
+  const heartrates = props.streams?.heartrate?.data
+  const watts = props.streams?.watts?.data
+  if (coords.length < 3) return { coords, altitudes, distances, heartrates, watts }
   const idx = simplifyIndices(coords as [number, number][], DISPLAY_SIMPLIFY_TOLERANCE_M)
-  if (idx.length >= coords.length) return { coords, altitudes, distances }
+  if (idx.length >= coords.length) return { coords, altitudes, distances, heartrates, watts }
   return {
     coords: idx.map((i) => coords[i]),
     altitudes: Array.isArray(altitudes) ? idx.map((i) => altitudes[i]) : altitudes,
     distances: Array.isArray(distances) ? idx.map((i) => distances[i]) : distances,
+    heartrates: Array.isArray(heartrates) ? idx.map((i) => heartrates[i]) : heartrates,
+    watts: Array.isArray(watts) ? idx.map((i) => watts[i]) : watts,
   }
 })
 
@@ -186,6 +197,39 @@ const ROUTE_FROM_ACTIVITY_MAX_WAYPOINTS = 100
 
 const TERRAIN_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'
 
+// ─── Zones d'intensité (pour la liste déroulante de coloration) ──────────
+// Même endpoint que l'onglet Zones (ActivityZones.vue), mais fetché indépendamment ici :
+// la carte est visible dès l'affichage de la page — contrairement à l'onglet Zones, chargé
+// paresseusement — et a besoin de savoir si les options « zones FC » / « zones puissance »
+// ont un sens pour CETTE activité (LTHR/FTP résolus à sa date) avant même que l'onglet
+// Zones soit ouvert. D'où un petit doublon de requête si les deux sont consultés.
+interface ZonesPayload {
+  hr: unknown | null
+  power: unknown | null
+  lthr: number | null
+  ftp: number | null
+}
+const zonesData = ref<ZonesPayload | null>(null)
+const zonesUrl = computed(() => (props.source === 'imported'
+  ? `/api/imported_activities/${props.activityId}/zones`
+  : `/strava/activities/${props.activityId}/zones`))
+const hasHrZones = computed(() => !!zonesData.value?.hr)
+const hasPowerZones = computed(() => !!zonesData.value?.power)
+
+async function fetchZones() {
+  if (props.activityId == null) return
+  try {
+    const res = await fetch(zonesUrl.value, {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) return
+    zonesData.value = await res.json()
+  } catch {
+    // Best-effort — sans ces données, la liste déroulante propose juste moins d'options.
+  }
+}
+
 // ─── Index helpers ───────────────────────────────────────────────────────
 function latLngToIndex(lng, lat) {
   const arr = props.streams?.latlng?.data
@@ -212,7 +256,6 @@ function setMapStyle(id) {
 
 // ─── Map layers ──────────────────────────────────────────────────────────
 function gradePaintExpression() {
-  if (!state.showGrade) return ROUTE_COLOR
   return [
     'match', ['get', 'bucket'],
     0, GRADE_BUCKETS[0].color,
@@ -226,14 +269,85 @@ function gradePaintExpression() {
   ]
 }
 
+// Même principe pour une zone FC/puissance (propriété `zone`, une entrée `match` par
+// clé z1..z7) — la couleur vient de la même palette que l'onglet Zones et la page
+// performance (intensityZoneColor), pour rester cohérent partout dans l'app.
+function intensityPaintExpression(zones: ZoneBound[]) {
+  const expr: any[] = ['match', ['get', 'zone']]
+  for (const z of zones) expr.push(z.key, intensityZoneColor(z.key))
+  expr.push(ROUTE_COLOR)
+  return expr
+}
+
+// Lissage FC/puissance sur une fenêtre de distance, même principe que gradeForIndex
+// (routeHelpers.ts) : sans lui, le tracé se découperait en une multitude de
+// micro-segments à chaque sursaut du capteur au lieu de zones de couleur lisibles.
+const INTENSITY_SMOOTHING_M = 60
+function smoothedValueForIndex(i: number, values: (number | null)[] | undefined, distances: number[] | undefined): number | null {
+  if (!Array.isArray(values) || !Array.isArray(distances)) return null
+  const n = Math.min(values.length, distances.length)
+  if (i >= n) return null
+  const half = INTENSITY_SMOOTHING_M / 2
+  const center = distances[i]
+  let lo = i
+  while (lo > 0 && center - distances[lo] < half) lo--
+  let hi = i
+  while (hi < n - 1 && distances[hi] - center < half) hi++
+  let sum = 0
+  let count = 0
+  for (let j = lo; j <= hi; j++) {
+    const v = values[j]
+    if (v == null) continue
+    sum += v
+    count++
+  }
+  return count > 0 ? sum / count : null
+}
+
+// Même découpage que buildGradedSegments (routeHelpers.ts) mais sur une zone FC/puissance
+// au lieu d'un bucket de pente : un segment par plage de couleur constante.
+function buildZonedSegments(
+  coords: LngLat[],
+  values: (number | null)[] | undefined,
+  distances: number[] | undefined,
+  threshold: number | null | undefined,
+  zones: ZoneBound[],
+): any[] {
+  if (!coords || coords.length < 2 || !threshold) return []
+  const features: any[] = []
+  let current = [coords[0]]
+  let curZone = zoneKeyForValue(smoothedValueForIndex(0, values, distances), threshold, zones)
+  for (let i = 1; i < coords.length; i++) {
+    const z = zoneKeyForValue(smoothedValueForIndex(i, values, distances), threshold, zones)
+    current.push(coords[i])
+    if (z !== curZone && current.length >= 2) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: current.slice() },
+        properties: { zone: curZone },
+      })
+      current = [coords[i]]
+      curZone = z
+    }
+  }
+  if (current.length >= 2) {
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: current },
+      properties: { zone: curZone },
+    })
+  }
+  return features
+}
+
 // Adds the route geometry / arrows / selection overlay to the current style.
 // Safe to call after a setStyle() swap because all layers/sources belong to
 // the style and are wiped when the style changes.
 function installRouteLayers() {
   if (!mapInstance) return
-  // Géométrie simplifiée pour l'affichage (cf. displayRoute) — coords/altitude/distance
-  // restent alignées par index.
-  const { coords, altitudes, distances } = displayRoute.value
+  // Géométrie simplifiée pour l'affichage (cf. displayRoute) — coords/altitude/distance/
+  // heartrate/watts restent alignées par index.
+  const { coords, altitudes, distances, heartrates, watts } = displayRoute.value
   if (!coords.length) return
   // Ligne d'AFFICHAGE dédoublée sur les portions parcourues plusieurs fois (aller-retour) —
   // même algorithme que le créateur d'itinéraire (buildOffsetDisplayLine). Sans elle le
@@ -243,22 +357,45 @@ function installRouteLayers() {
   const cumDistM = [0]
   for (let i = 1; i < coords.length; i++) cumDistM.push(cumDistM[i - 1] + haversine(coords[i - 1] as LngLat, coords[i] as LngLat))
   const dispCoords: LngLat[] = coords.length >= 3 ? buildOffsetDisplayLine(coords as LngLat[], cumDistM).line : (coords as LngLat[])
-  // Pente lissée depuis l'altitude (fenêtre du profil), comme le créateur d'itinéraire —
-  // le stream `grade_smooth` de Strava (lissage maison) n'est volontairement pas utilisé.
-  // `dispCoords` porte l'affichage décalé, mais reste aligné index pour index sur
-  // `altitudes`/`distances` (issus de la géométrie réelle).
-  const segments = buildGradedSegments(dispCoords, altitudes, distances)
-  const hasGrades = segments.length > 0 && altitudes?.length && distances?.length
+
+  // Segments colorés selon le mode choisi dans la liste déroulante (pente, zone FC, zone
+  // puissance). `dispCoords` porte l'affichage décalé, mais reste aligné index pour index
+  // sur `altitudes`/`distances`/`heartrates`/`watts` (issus de la géométrie réelle) — cf.
+  // buildGradedSegments / buildZonedSegments.
+  let coloredSegments: any[] = []
+  let colorExpression: any = ROUTE_COLOR
+  if (state.colorMode === 'grade') {
+    // Pente lissée depuis l'altitude (fenêtre du profil), comme le créateur d'itinéraire —
+    // le stream `grade_smooth` de Strava (lissage maison) n'est volontairement pas utilisé.
+    const segments = buildGradedSegments(dispCoords, altitudes, distances)
+    if (segments.length > 0 && altitudes?.length && distances?.length) {
+      coloredSegments = segments
+      colorExpression = gradePaintExpression()
+    }
+  } else if (state.colorMode === 'hr') {
+    const segments = buildZonedSegments(dispCoords, heartrates, distances, zonesData.value?.lthr, HR_ZONES)
+    if (segments.length > 0) {
+      coloredSegments = segments
+      colorExpression = intensityPaintExpression(HR_ZONES)
+    }
+  } else if (state.colorMode === 'power') {
+    const segments = buildZonedSegments(dispCoords, watts, distances, zonesData.value?.ftp, POWER_ZONES)
+    if (segments.length > 0) {
+      coloredSegments = segments
+      colorExpression = intensityPaintExpression(POWER_ZONES)
+    }
+  }
+  const hasColoredSegments = coloredSegments.length > 0
 
   mapInstance.addSource('route', {
     type: 'geojson',
     data: { type: 'Feature', geometry: { type: 'LineString', coordinates: dispCoords } },
   })
 
-  if (hasGrades) {
+  if (hasColoredSegments) {
     mapInstance.addSource('route-graded', {
       type: 'geojson',
-      data: { type: 'FeatureCollection', features: segments },
+      data: { type: 'FeatureCollection', features: coloredSegments },
     })
     mapInstance.addLayer({
       id: 'route-border',
@@ -272,7 +409,7 @@ function installRouteLayers() {
       type: 'line',
       source: 'route-graded',
       layout: ROUTE_LINE_LAYOUT,
-      paint: { 'line-color': gradePaintExpression(), 'line-width': ROUTE_LINE_WIDTH, 'line-opacity': ROUTE_OPACITY },
+      paint: { 'line-color': colorExpression, 'line-width': ROUTE_LINE_WIDTH, 'line-opacity': ROUTE_OPACITY },
     })
   } else {
     mapInstance.addLayer({
@@ -786,12 +923,15 @@ function installMapHoverTooltip() {
   })
 }
 
-// ─── Grade + 3D + expand ─────────────────────────────────────────────────
-function toggleGrade() {
-  state.showGrade = !state.showGrade
-  if (mapInstance && mapInstance.getLayer('route-line')) {
-    mapInstance.setPaintProperty('route-line', 'line-color', gradePaintExpression())
-  }
+// ─── Coloration + 3D + expand ────────────────────────────────────────────
+// Contrairement à l'ancien toggle pente (setPaintProperty seul, la source portait déjà
+// le bucket de pente pour toutes les activités), les modes zone FC/puissance dépendent
+// d'un flux différent (heartrate/watts) — la source géométrique elle-même change selon
+// le mode. On reconstruit donc route/route-graded plutôt que de changer juste la couleur.
+function setColorMode(mode: ActivityColorMode) {
+  if (state.colorMode === mode) return
+  state.colorMode = mode
+  reinstallRouteColorLayers()
 }
 
 function toggleMap3D() {
@@ -856,6 +996,20 @@ async function renderMap() {
   })
 }
 
+// Retire puis reconstruit uniquement la géométrie du tracé (ligne + bordure + flux +
+// sélection) — pas les marqueurs. Partagé par redrawRouteWithStreams (arrivée des
+// streams) et setColorMode (changement de mode de coloration), qui n'ont besoin ni l'un
+// ni l'autre de rejouer les marqueurs de cols/photos ou les poignées A/B.
+function reinstallRouteColorLayers() {
+  if (!mapInstance) return
+  const layers = ['route-direction', FLOW_LAYER, FLOW_HALO_LAYER, 'route-line', 'route-border', 'selected-route-line']
+  layers.forEach((id) => { if (mapInstance.getLayer(id)) mapInstance.removeLayer(id) })
+  const sources = ['route', 'route-graded', 'selected-route']
+  sources.forEach((id) => { if (mapInstance.getSource(id)) mapInstance.removeSource(id) })
+  if (mapInstance.hasImage('route-arrow')) mapInstance.removeImage('route-arrow')
+  installRouteLayers()
+}
+
 // The map is drawn as soon as we have coords — which, for an activity with a
 // `summary_polyline`, happens before the detailed streams arrive. In that case
 // the first draw has no grade colouring, no drag handles and no climb markers.
@@ -866,12 +1020,7 @@ function redrawRouteWithStreams() {
   const map = mapInstance
   if (!map || !_maplibregl) return
   const reinstall = () => {
-    const layers = ['route-direction', FLOW_LAYER, FLOW_HALO_LAYER, 'route-line', 'route-border', 'selected-route-line']
-    layers.forEach((id) => { if (map.getLayer(id)) map.removeLayer(id) })
-    const sources = ['route', 'route-graded', 'selected-route']
-    sources.forEach((id) => { if (map.getSource(id)) map.removeSource(id) })
-    if (map.hasImage('route-arrow')) map.removeImage('route-arrow')
-    installRouteLayers()
+    reinstallRouteColorLayers()
     if (hasLatLngStream.value && !markerA) installMapHandles(_maplibregl)
     installClimbMarkers(_maplibregl)
   }
@@ -984,8 +1133,17 @@ watch(() => props.hoveredClimbStartIdx, (curr, prev) => {
 watch(state, () => state.save(), { deep: true })
 
 // Remonte l'état « couleur des tracés » au parent (initial + à chaque bascule) pour que
-// ActivityCharts colore le profil d'altitude par pente en même temps que la carte.
-watch(() => state.showGrade, (v) => emit('update:showGrade', v), { immediate: true })
+// ActivityCharts colore le profil d'altitude par pente en même temps que la carte. Le
+// graphique ne sait colorer que par pente : les modes zone FC/puissance équivalent pour
+// lui à « désactivé ».
+watch(() => state.colorMode, (v) => emit('update:showGrade', v === 'grade'), { immediate: true })
+
+// Les zones FC/puissance arrivent après coup (fetch indépendant, cf. fetchZones) : si le
+// mode choisi en dépend, on redessine dès qu'elles atterrissent (avant ça, la carte
+// retombe silencieusement sur la couleur de base, cf. hasColoredSegments).
+watch(zonesData, () => {
+  if (mapInstance && (state.colorMode === 'hr' || state.colorMode === 'power')) reinstallRouteColorLayers()
+})
 
 // La hauteur du conteneur peut changer sans que la fenêtre bouge (carte collée en
 // haut quand l'onglet Segments est actif, plein écran, redimensionnement d'un
@@ -1010,6 +1168,7 @@ watch(() => props.sticky, () => nextTick().then(publishStickyHeight))
 
 onMounted(() => {
   state.load()
+  fetchZones()
   if (hasRoute.value) renderMap()
   if (mapEl.value && typeof ResizeObserver !== 'undefined') {
     mapResizeObserver = new ResizeObserver(() => mapInstance?.resize())
@@ -1110,9 +1269,18 @@ onBeforeUnmount(() => {
         <div ref="mapEl" class="activity-map"></div>
         <div class="map-controls">
           <!-- Groupe 1 : style de fond -->
-          <MapStyleDropdown :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
+          <MapStyleDropdown class="map-dropdown-btn" :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
 
-          <!-- Groupe 2 : overlays et vue (toggles indépendants) -->
+          <!-- Groupe 2 : coloration du tracé -->
+          <ColorModeDropdown
+            class="map-dropdown-btn"
+            :model-value="state.colorMode"
+            :has-hr="hasHrZones"
+            :has-power="hasPowerZones"
+            @update:model-value="setColorMode"
+          />
+
+          <!-- Groupe 3 : overlays et vue (toggles indépendants) -->
           <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
             <button
               type="button"
@@ -1123,16 +1291,6 @@ onBeforeUnmount(() => {
               @click="toggleClimbs"
             >
               <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-            </button>
-            <button
-              type="button"
-              class="btn map-ctrl-btn"
-              :class="state.showGrade ? 'btn-warning text-dark active' : 'btn-light'"
-              :title="state.showGrade ? t('strava.hide_grade') : t('strava.show_grade')"
-              :aria-pressed="state.showGrade"
-              @click="toggleGrade"
-            >
-              <i class="fa-solid fa-palette" aria-hidden="true"></i>
             </button>
             <button
               type="button"
@@ -1290,6 +1448,19 @@ onBeforeUnmount(() => {
   pointer-events: none;
 }
 .map-controls > * { pointer-events: auto; }
+/* Fond de carte et coloration du tracé empilés l'un sous l'autre : sans largeur commune,
+   chaque bouton prend celle de son propre libellé (« Fond de carte » vs « Coloration du
+   tracé ») et l'empilement paraît désaligné. Cible le bouton à l'intérieur des deux
+   dropdowns (MapStyleDropdown / ColorModeDropdown) via :deep() — sans toucher aux autres
+   pages qui utilisent MapStyleDropdown avec leur propre mise en page. Seulement à partir
+   de `md` : en dessous, le libellé est masqué (d-none d-md-inline) et le bouton reste
+   carré comme les autres icônes du groupe 2. */
+@media (min-width: 768px) {
+  .map-controls :deep(.map-dropdown-btn > button) {
+    width: 12rem;
+    justify-content: space-between;
+  }
+}
 .map-ctrl-btn {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.08);

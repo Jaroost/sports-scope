@@ -87,8 +87,10 @@ const lightboxIndex = ref(null)
 const xAxis = ref('distance')
 const zoomRange = ref(null) // { xMin, xMax } | null
 const visibleStreams = ref([])
-// « Couleur des tracés » — possédée par ActivityMapCard (bouton palette de la carte),
-// remontée ici pour que ActivityCharts colore aussi le profil d'altitude par pente.
+// « Couleur des tracés » — possédée par ActivityMapCard (liste déroulante de coloration
+// de la carte), remontée ici pour que ActivityCharts colore aussi le profil d'altitude
+// par pente. Les modes zone FC/puissance de la carte n'ont pas d'équivalent ici : le
+// graphique reçoit alors `false`, comme si la coloration était désactivée.
 const showGrade = ref(true)
 // `*Collapsed` are persisted across reloads — the children mutate them via
 // v-model, we mirror to localStorage in the watchers below.
@@ -463,6 +465,8 @@ onMounted(async () => {
       <ActivityMapCard
         :sticky="effectiveTab === 'segments'"
         :activity="activity"
+        :activity-id="props.activityId"
+        :source="props.source"
         :streams="streams"
         :photos="photos"
         :selection="selection"

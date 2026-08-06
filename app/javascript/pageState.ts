@@ -14,6 +14,11 @@ import type { Sport } from './userPreferences'
 
 export type ColorMode = 'grade' | 'none'
 
+// Coloration du tracé dans l'analyse d'activité : pente, zones de fréquence cardiaque,
+// zones de puissance (les deux dernières seulement si l'activité en possède — cf.
+// ActivityMapCard), ou couleur de base du profil.
+export type ActivityColorMode = 'grade' | 'hr' | 'power' | 'none'
+
 // Couches que la vue partagée n'hérite pas des préférences du visiteur : « Routes et
 // chemins » recouvre la carte de sa propre trame, au détriment du tracé — or c'est
 // tout ce qu'un destinataire vient voir. Elle reste proposée dans le menu Affichage.
@@ -79,7 +84,7 @@ export class MapPageState {
 
 export class ActivityMapState extends MapPageState {
   showPhotos = true
-  showGrade = true
+  colorMode: ActivityColorMode = 'grade'
 
   constructor() {
     super('cyclosm')
@@ -90,7 +95,7 @@ export class ActivityMapState extends MapPageState {
   }
 
   override persistedFields(): string[] {
-    return [...super.persistedFields(), 'showPhotos', 'showGrade']
+    return [...super.persistedFields(), 'showPhotos', 'colorMode']
   }
 }
 

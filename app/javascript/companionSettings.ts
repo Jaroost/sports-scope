@@ -409,6 +409,8 @@ export interface BlockShape {
   navFull: boolean
   radarGauge: boolean
   radarVertical: boolean
+  radarCount: boolean
+  radarIcons: boolean
   budgetWeek: boolean
 }
 
@@ -441,6 +443,8 @@ export function blockShape(block: Block): BlockShape {
     radarGauge:
       block.kind === 'radar' && (block.mode === 'gauge' || block.mode === 'gauge_vertical'),
     radarVertical: block.kind === 'radar' && block.mode === 'gauge_vertical',
+    radarCount: block.kind === 'radar' && block.mode === 'count',
+    radarIcons: block.kind === 'radar' && block.mode === 'icons',
     budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
   }
 }

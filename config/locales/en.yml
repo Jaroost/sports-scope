@@ -1651,6 +1651,8 @@ en:
         list: "As a list"
         full: "Full"
         distance: "Distance"
+        count: "Count"
+        icons: "Icons"
         gauge_vertical: "Vertical gauge"
         day: "Today"
         week: "This week"

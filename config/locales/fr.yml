@@ -1651,6 +1651,8 @@ fr:
         list: "En liste"
         full: "Complet"
         distance: "Distance"
+        count: "Compte"
+        icons: "Icônes"
         gauge_vertical: "Jauge verticale"
         day: "Aujourd'hui"
         week: "La semaine"

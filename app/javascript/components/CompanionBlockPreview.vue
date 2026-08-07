@@ -413,6 +413,22 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
                 :style="shape.radarVertical ? { bottom: `${mark.at}%` } : { left: `${mark.at}%` }"></span>
         </div>
       </div>
+      <div v-else-if="shape.radarCount" class="cbp-card cbp-center">
+        <!-- Le nombre est ici la donnée du composant, pas un rappel de l'icône
+             (contrairement au mode « distance ») : même échelle que le chiffre
+             plein cadre qu'il remplace. -->
+        <div class="cbp-radar-head cbp-radar-head--count">
+          <i class="fa-solid fa-car" aria-hidden="true"></i>
+          <span>×2</span>
+        </div>
+      </div>
+      <div v-else-if="shape.radarIcons" class="cbp-card cbp-center">
+        <!-- Une icône par véhicule, sans chiffre — le compte se lit d'un coup
+             d'œil. -->
+        <div class="cbp-radar-icons">
+          <i v-for="n in 2" :key="n" class="fa-solid fa-car" aria-hidden="true"></i>
+        </div>
+      </div>
       <div v-else class="cbp-card cbp-center">
         <!-- L'icône part la première dans une petite case : elle redit ce que la
              couleur dit déjà, alors que le nombre de mètres ne se déduit de
@@ -750,6 +766,23 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
   font-size: 2.6em;
   font-weight: 700;
   line-height: 1.1;
+}
+/* Mode « compte » : l'icône et le nombre sont la seule donnée du composant, à
+   l'échelle du chiffre plein cadre qu'ils remplacent (contrairement au mode
+   « distance », où ils ne sont qu'un rappel au-dessus du chiffre). */
+.cbp-radar-head--count {
+  font-size: 2.6em;
+}
+/* Mode « icônes » : une voiture par véhicule suivi, sans chiffre — le compte se
+   lit d'un coup d'œil plutôt qu'en déchiffrant un nombre. */
+.cbp-radar-icons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.3em;
+  color: #ffa726;
+  font-size: 2em;
 }
 /* La jauge dans une cellule.
 

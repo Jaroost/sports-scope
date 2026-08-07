@@ -100,6 +100,24 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 const preset = computed(() => presets[current.value])
 const hasMap = computed(() => preset.value.pages.some((page) => page.kind === 'map'))
 
+// Les séries de tours déjà posées dans ce profil — pages `laps` et boutons
+// `mark_lap`, où qu'ils soient (liste, grille). Suggérées dans les deux
+// endroits où l'on tape une série (`lap_series` de la page, paramètre du
+// bouton dans `CompanionBlockPicker`) : c'est une clé de texte libre, et une
+// suggestion évite l'écart d'orthographe entre un bouton et sa page.
+const lapSeries = computed(() => {
+  const keys = new Set<string>()
+  const collect = (block?: Block) => {
+    if (block?.kind === 'mark_lap') keys.add(block.series || 'default')
+  }
+  preset.value.pages.forEach((page) => {
+    if (page.kind === 'laps') keys.add(page.series || 'default')
+    page.blocks?.forEach(collect)
+    page.cells?.forEach((cell) => collect(cell.block))
+  })
+  return [...keys]
+})
+
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec la dialogue de choix (`CompanionBlockPicker.vue`) — voir
 // `metricDropdownLabel` dans `companionSettings.ts`.
@@ -208,6 +226,15 @@ function addPage(kind: string) {
       kind: 'grid', title: t('companion.settings.page_numbers'), rows: 2, cols: 2,
       cells: [{ row: 0, col: 0, row_span: 1, col_span: 1,
                 block: { kind: 'metric', metric: 'speed', mode: 'big' } }],
+    })
+  } else if (kind === 'laps') {
+    // Pas de `mark_lap` par défaut : posé sur une page `laps`, il marquerait
+    // un tour de sa propre série, indépendante de celle de la page — un
+    // bouton mort. `lap_summary` est le pendant du `recording` par défaut
+    // d'une page « Effort » : ce qu'on veut voir en premier.
+    preset.value.pages.push({
+      kind: 'laps', title: t('companion.settings.page_laps'), series: 'default',
+      blocks: [{ kind: 'lap_summary', mode: 'cards' }],
     })
   } else {
     preset.value.pages.push({
@@ -630,6 +657,17 @@ async function save() {
             <input v-model="page.title" class="form-control form-control-sm mb-2"
                    :placeholder="t('companion.settings.page_title')">
 
+            <!-- Une page de tours : la série qu'elle affiche. Un bouton
+                 « Marquer un tour » posé ailleurs doit porter la même clé
+                 pour alimenter cette page-là — voir `lapSeries`. -->
+            <div v-if="page.kind === 'laps'" class="mb-2">
+              <label class="small mb-1 d-block">{{ t('companion.settings.lap_series') }}
+                <input v-model="page.series" type="text" list="companion-series-list"
+                       class="form-control form-control-sm">
+              </label>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.lap_series_help') }}</p>
+            </div>
+
             <!-- Une grille -->
             <template v-if="page.kind === 'grid'">
               <div class="d-flex align-items-center gap-3 mb-2">
@@ -893,8 +931,12 @@ async function save() {
     <!-- Montée par `v-if` : la dialogue pose son écouteur clavier au montage, et
          une dialogue toujours montée mangerait la touche Échap de l'éditeur. -->
     <CompanionBlockPicker v-if="picker" :block="pickerBlock" :catalog="catalog"
-                          :cell="pickerCell"
+                          :cell="pickerCell" :known-series="lapSeries"
                           @choose="applyPick" @close="picker = null" />
+
+    <datalist id="companion-series-list">
+      <option v-for="s in lapSeries" :key="s" :value="s" />
+    </datalist>
   </div>
 </template>
 

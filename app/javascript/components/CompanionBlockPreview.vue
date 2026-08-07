@@ -27,6 +27,7 @@ import { computed } from 'vue'
 import {
   AVERAGES_SAMPLE,
   BUDGET_SAMPLE,
+  LAP_SUMMARY_SAMPLE,
   blockShape,
   metricSample,
   type Block,
@@ -106,9 +107,16 @@ const gaugeCells = computed(() => {
   }))
 })
 
+// « Ce tour — » en préfixe côté `lap_zones`/`lap_averages` : même dessin que
+// `zones`/`averages`, seul ce qu'on mesure change — depuis l'ouverture du
+// tour choisi, pas depuis le départ de la sortie.
+const lapScope = computed(() => (props.block.kind.startsWith('lap_') ? 'Ce tour — ' : ''))
+
 const zonesTitle = computed(() =>
-  props.block.source === 'power' ? 'Temps par zone de puissance' : 'Temps par zone cardio',
+  lapScope.value + (props.block.source === 'power' ? 'Temps par zone de puissance' : 'Temps par zone cardio'),
 )
+
+const averagesTitle = computed(() => `${lapScope.value}Moyennes`)
 
 // L'icône de la ligne courante : cœur ou éclair. Les deux cartes se ressemblent
 // trait pour trait, c'est elle — autant que le titre — qui les distingue.
@@ -273,8 +281,9 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
       </div>
     </template>
 
-    <!-- Temps par zone --------------------------------------------------- -->
-    <div v-else-if="block.kind === 'zones'" class="cbp-card">
+    <!-- Temps par zone -- et son pendant « ce tour » (lap_zones), même dessin,
+         seul le titre distingue les deux. ----------------------------------- -->
+    <div v-else-if="block.kind === 'zones' || block.kind === 'lap_zones'" class="cbp-card">
       <div class="cbp-title">{{ zonesTitle }}</div>
       <div v-if="shape.zonesBar" class="cbp-bar">
         <span
@@ -309,10 +318,10 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
       </div>
     </div>
 
-    <!-- Moyennes --------------------------------------------------------- -->
-    <template v-else-if="block.kind === 'averages'">
+    <!-- Moyennes -- et son pendant « ce tour » (lap_averages). ------------ -->
+    <template v-else-if="block.kind === 'averages' || block.kind === 'lap_averages'">
       <div v-if="!shape.averagesCards" class="cbp-card">
-        <div class="cbp-title">Moyennes</div>
+        <div class="cbp-title">{{ averagesTitle }}</div>
         <div v-for="stat in AVERAGES_SAMPLE" :key="stat.name" class="cbp-line">
           {{ stat.name }} {{ stat.avg }} {{ stat.unit }} ({{ stat.min }} – {{ stat.max }})
         </div>
@@ -326,6 +335,40 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
             <div class="cbp-stat"><span>Max</span><b>{{ stat.max }}</b></div>
           </div>
         </div>
+      </div>
+    </template>
+
+    <!-- Bilan du tour : durée, distance, D+, calories, TSS — cinq lignes,
+         jamais quatre cartes moyenne/min/max comme « Moyennes » : ce n'est
+         pas la même forme, donc pas une variante de la branche au-dessus. -->
+    <div v-else-if="block.kind === 'lap_summary'" class="cbp-card">
+      <div class="cbp-title">Bilan du tour</div>
+      <template v-if="shape.lapSummaryCards">
+        <div v-for="row in LAP_SUMMARY_SAMPLE" :key="row.label" class="cbp-stat">
+          <span>{{ row.label }}</span><b>{{ row.value }}</b>
+        </div>
+      </template>
+      <template v-else>
+        <div v-for="row in LAP_SUMMARY_SAMPLE" :key="row.label" class="cbp-line">
+          {{ row.label }} {{ row.value }}
+        </div>
+      </template>
+    </div>
+
+    <!-- Marquer un tour -----------------------------------------------------
+         Clôt le tour courant d'une série et en ouvre un nouveau : un geste
+         sec, pas une bascule comme l'enregistrement. -->
+    <template v-else-if="block.kind === 'mark_lap'">
+      <div v-if="shape.markLapCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact">
+          <i class="fa-solid fa-flag" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button">
+          <i class="fa-solid fa-flag" aria-hidden="true"></i>
+          Marquer un tour
+        </span>
       </div>
     </template>
 

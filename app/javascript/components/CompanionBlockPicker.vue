@@ -43,12 +43,18 @@ const props = defineProps<{
   // dessinera — une légende de zones qu'elle ne portera pas ne s'y propose pas
   // en grand. Absente pour une page qui défile, où la hauteur est libre.
   cell?: CellSize
+  // Les séries de tours déjà posées ailleurs dans le profil (pages `laps`,
+  // autres boutons `mark_lap`) — suggérées, pas imposées : la clé reste un
+  // texte libre, mais un bouton et sa page de tours doivent porter la même
+  // clé pour se répondre, et une suggestion évite l'écart d'orthographe.
+  knownSeries?: string[]
 }>()
 
 const emit = defineEmits<{ close: []; choose: [block: Block] }>()
 
 const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
+const series = ref(props.block?.series || 'default')
 
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec le bandeau du bas (`CompanionDashboard.vue`) — voir
@@ -87,7 +93,7 @@ const groups = computed(() => {
       .filter((choice) => choice.kind === kind)
       .map((choice) => ({
         key: `${choice.kind}:${choice.mode || ''}`,
-        block: blockFor(choice, { metric: metric.value, source: source.value }),
+        block: blockFor(choice, { metric: metric.value, source: source.value, series: series.value }),
         label: labelOf(choice),
       })) as Tile[]
 
@@ -200,13 +206,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </select>
             </label>
 
-            <label v-else-if="group.kind === 'zones'" class="cbpk-param small">
+            <label v-else-if="group.kind === 'zones' || group.kind === 'lap_zones'" class="cbpk-param small">
               {{ t('companion.settings.source') }}
               <select v-model="source" class="form-select form-select-sm">
                 <option v-for="s in catalog.zone_sources" :key="s" :value="s">
                   {{ t(`companion.settings.sources.${s}`) }}
                 </option>
               </select>
+            </label>
+
+            <label v-else-if="group.kind === 'mark_lap'" class="cbpk-param small">
+              {{ t('companion.settings.lap_series') }}
+              <input
+                v-model="series"
+                type="text"
+                list="cbpk-series-list"
+                class="form-control form-control-sm"
+              >
             </label>
           </div>
 
@@ -231,6 +247,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             </button>
           </div>
         </section>
+
+        <datalist id="cbpk-series-list">
+          <option v-for="s in knownSeries" :key="s" :value="s" />
+        </datalist>
       </div>
 
       <div class="cbpk-footer">

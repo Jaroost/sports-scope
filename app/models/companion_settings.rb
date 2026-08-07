@@ -71,10 +71,10 @@ module CompanionSettings
   # Les mesures affichables. Exactement les clés de `MetricId` côté Dart, dans le
   # même ordre : c'est la liste que l'éditeur déroule.
   METRICS = %w[
-    duration moving_time distance speed speed_avg speed_max
+    duration moving_time pause_time distance speed speed_avg speed_max
     heart_rate hr_zone hr_avg hr_max
     power power_zone power_avg power_np power_max
-    cadence cadence_avg
+    cadence cadence_avg cadence_max
     ascent altitude grade calories gears
     chainring_position sprocket_position gear_ratio
     route_remaining route_remaining_gain route_eta

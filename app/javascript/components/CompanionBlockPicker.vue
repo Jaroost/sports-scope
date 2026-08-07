@@ -28,7 +28,7 @@ import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  blockChoices, blockFor, isChoiceOf, NATURAL_LINE_SIZE, previewScale,
+  blockChoices, blockFor, isChoiceOf, metricDropdownLabel, NATURAL_LINE_SIZE, previewScale,
   type Block, type BlockChoice, type Catalog, type CellSize,
 } from '../companionSettings'
 
@@ -50,27 +50,11 @@ const emit = defineEmits<{ close: []; choose: [block: Block] }>()
 const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
 
-// Les mesures qui viennent du dérailleur électronique : préfixées dans la
-// liste déroulante pour qu'elles se regroupent au même endroit une fois
-// triées par libellé, plutôt que dispersées selon leur nom (« Braquet »,
-// « Pignon », « Plateau », « Rapport »). Le préfixe n'est que pour cette
-// liste — le libellé traduit reste seul partout ailleurs (vignettes, résumé
-// de page, bandeau).
-const DI2_METRICS = new Set(['gears', 'chainring_position', 'sprocket_position', 'gear_ratio'])
-
-// Raccourcis propres à cette liste : le libellé complet (« Dénivelé positif »)
-// se lit dans une phrase ailleurs, mais prend toute la largeur d'une option de
-// select. Même logique que le préfixe Di2 — n'affecte que ce qui s'affiche
-// ici, pas le libellé traduit lui-même.
-const METRIC_LABEL_OVERRIDES: Record<string, string> = {
-  ascent: 'D+',
-  moving_time: 'Durée en mouvement',
-  route_eta: 'Durée restante',
-}
-
+// Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
+// partagé avec le bandeau du bas (`CompanionDashboard.vue`) — voir
+// `metricDropdownLabel` dans `companionSettings.ts`.
 function metricLabel(metric: string): string {
-  const label = METRIC_LABEL_OVERRIDES[metric] || t(`companion.settings.metrics.${metric}`)
-  return DI2_METRICS.has(metric) ? `Di2 - ${label}` : label
+  return metricDropdownLabel(metric, t)
 }
 
 // Le catalogue liste les mesures dans l'ordre du serveur ; la dialogue les

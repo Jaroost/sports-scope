@@ -5,7 +5,7 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  canHideBehindMenu, fitCells, gridSideOf, maxSpan, NATURAL_LINE_SIZE,
+  canHideBehindMenu, fitCells, gridSideOf, maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE,
   occupancy, phoneCell, previewScale, PHONE_GRID,
   type Band, type Block, type Catalog, type Cell, type CellSize,
   type CompanionDocument, type Page, type Preset, type Viewport,
@@ -100,13 +100,18 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 const preset = computed(() => presets[current.value])
 const hasMap = computed(() => preset.value.pages.some((page) => page.kind === 'map'))
 
+// Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
+// partagé avec la dialogue de choix (`CompanionBlockPicker.vue`) — voir
+// `metricDropdownLabel` dans `companionSettings.ts`.
+function metricLabel(metric: string): string {
+  return metricDropdownLabel(metric, t)
+}
+
 // Le catalogue liste les mesures dans l'ordre du serveur ; le bandeau les
-// propose triées par libellé traduit, pour qu'on les retrouve sans connaître
+// propose triées par libellé affiché, pour qu'on les retrouve sans connaître
 // cet ordre-là par cœur.
 const sortedMetrics = computed(() => (
-  [...props.catalog.metrics].sort((a, b) => (
-    t(`companion.settings.metrics.${a}`).localeCompare(t(`companion.settings.metrics.${b}`))
-  ))
+  [...props.catalog.metrics].sort((a, b) => metricLabel(a).localeCompare(metricLabel(b)))
 ))
 
 // ── les profils ─────────────────────────────────────────────────────────────
@@ -786,7 +791,7 @@ async function save() {
                       @change="setBandMetric(band, slot - 1, ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
                 <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                  {{ t(`companion.settings.metrics.${metric}`) }}
+                  {{ metricLabel(metric) }}
                 </option>
               </select>
             </div>

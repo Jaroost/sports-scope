@@ -290,8 +290,9 @@ export interface MetricSample {
 }
 
 const METRIC_SAMPLES: Record<string, MetricSample> = {
-  duration: { value: '01:12:34', unit: 'durée', icon: 'fa-regular fa-clock' },
-  moving_time: { value: '01:08:20', unit: 'en mouvement', icon: 'fa-solid fa-person-biking' },
+  duration: { value: '01:12', unit: 'durée', icon: 'fa-regular fa-clock' },
+  moving_time: { value: '01:08', unit: 'en mouvement', icon: 'fa-solid fa-person-biking' },
+  pause_time: { value: '00:04', unit: 'Durée pause', icon: 'fa-regular fa-circle-pause' },
   distance: { value: '38,42 km', unit: 'distance', icon: 'fa-solid fa-ruler-horizontal' },
   speed: { value: '32', unit: 'km/h', icon: 'fa-solid fa-gauge-high' },
   speed_avg: { value: '27 km/h', unit: 'Vitesse moyenne', icon: 'fa-solid fa-gauge-high' },
@@ -307,6 +308,7 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   power_max: { value: '744', unit: 'W max', icon: 'fa-solid fa-bolt' },
   cadence: { value: '88', unit: 'tr/min', icon: 'fa-solid fa-rotate' },
   cadence_avg: { value: '84', unit: 'tr/min moy', icon: 'fa-solid fa-rotate' },
+  cadence_max: { value: '112', unit: 'tr/min max', icon: 'fa-solid fa-rotate' },
   ascent: { value: '640 m', unit: 'D+', icon: 'fa-solid fa-arrow-trend-up' },
   altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain' },
   grade: { value: '7', unit: '% pente', icon: 'fa-solid fa-arrow-up-right-dots' },
@@ -317,7 +319,7 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   gear_ratio: { value: '3,3', unit: 'rapport', icon: 'fa-solid fa-arrows-left-right' },
   route_remaining: { value: '21,40 km', unit: 'Distance restante', icon: 'fa-regular fa-flag' },
   route_remaining_gain: { value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up' },
-  route_eta: { value: '00:48:12', unit: 'temps restant', icon: 'fa-regular fa-clock' },
+  route_eta: { value: '00:48', unit: 'temps restant', icon: 'fa-regular fa-clock' },
 }
 
 // Les quatre mesures du bloc « Moyennes », et leurs trois chiffres — les mêmes
@@ -356,6 +358,32 @@ export const BUDGET_SAMPLE = {
 // qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
 export function metricSample(metric: string | undefined): MetricSample {
   return METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
+}
+
+// ── Le libellé d'une mesure dans une liste déroulante ───────────────────────
+//
+// Deux listes la proposent — le choix d'un composant (CompanionBlockPicker) et
+// le bandeau du bas (CompanionDashboard) — et les deux doivent se lire pareil,
+// sinon la même mesure change de nom selon l'endroit où on la choisit.
+//
+// Le libellé traduit (`companion.settings.metrics.*`) reste seul partout
+// ailleurs — vignette, résumé de page : ces raccourcis n'existent que pour une
+// option de select, trop étroite pour une phrase complète.
+
+// Les mesures qui viennent du dérailleur électronique : préfixées pour se
+// regrouper au même endroit une fois triées par libellé, plutôt que
+// dispersées selon leur nom (« Braquet », « Pignon », « Plateau », « Rapport »).
+const DI2_METRICS = new Set(['gears', 'chainring_position', 'sprocket_position', 'gear_ratio'])
+
+const METRIC_LABEL_OVERRIDES: Record<string, string> = {
+  ascent: 'D+',
+  moving_time: 'Durée en mouvement',
+  route_eta: 'Durée restante',
+}
+
+export function metricDropdownLabel(metric: string, translate: (key: string) => string): string {
+  const label = METRIC_LABEL_OVERRIDES[metric] || translate(`companion.settings.metrics.${metric}`)
+  return DI2_METRICS.has(metric) ? `Di2 - ${label}` : label
 }
 
 // ── Ce que ce composant dessine ──────────────────────────────────────────────

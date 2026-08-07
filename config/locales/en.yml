@@ -1691,6 +1691,7 @@ en:
         ascent: "Elevation gain"
         altitude: "Altitude"
         calories: "Calories"
+        calories_per_hour: "Calories per hour"
         gears: "Gear"
         chainring_position: "Chainring"
         sprocket_position: "Sprocket"

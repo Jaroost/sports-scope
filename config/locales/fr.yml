@@ -1691,6 +1691,7 @@ fr:
         ascent: "Dénivelé positif"
         altitude: "Altitude"
         calories: "Calories"
+        calories_per_hour: "Calories par heure"
         gears: "Braquet"
         chainring_position: "Plateau"
         sprocket_position: "Pignon"

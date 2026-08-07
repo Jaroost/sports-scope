@@ -39,14 +39,36 @@ module CompanionSettings
   BLOCKS = {
     "metric" => %w[big compact gauge zone],
     "zones" => %w[bar bar_only legend],
+    # Les mêmes répartitions/moyennes, mais du tour choisi sur une page `laps`
+    # plutôt que de la sortie entière — mêmes modes, aucune table de plus à
+    # tenir à jour. `lap_summary` est nouveau (durée, distance, D+, calories,
+    # TSS *du tour*), `mark_lap` marque un tour d'une série (`series`, sur
+    # n'importe quelle page, pas seulement une page `laps`).
+    "lap_zones" => %w[bar bar_only legend],
+    "lap_averages" => %w[cards list],
+    "lap_summary" => %w[cards list],
+    # La liste déroulante qui choisit le tour que les trois composants
+    # au-dessus lisent. Plaçable comme eux plutôt qu'imposée en en-tête d'une
+    # page `laps` : une page qui la porte tient tout entière dans ce qu'elle
+    # déclare (`rows`/`cols`, ou sa liste), rien n'est caché à l'éditeur. Un
+    # seul mode — rien à faire varier, contrairement à `mark_lap` qui a une
+    # icône seule à proposer en cellule étroite.
+    "lap_selector" => [],
     "averages" => %w[cards list],
     "recording" => %w[full compact],
+    "mark_lap" => %w[full compact],
     # Deux commandes sur l'itinéraire suivi, posables sur une page plutôt que
     # rangées dans le menu ⋮ : le même geste que « Choisir un autre itinéraire »
     # et « Retirer l'itinéraire », à portée de pouce. Rien à sanitizer au-delà du
     # mode : ce sont des boutons, pas des mesures.
     "change_route" => %w[full compact],
     "clear_route" => %w[full compact],
+    # Les deux boutons ci-dessus, combinés en un seul : c'est l'état de la
+    # navigation qui décide côté appli lequel des deux gestes il pose — retirer
+    # s'il y a déjà un tracé suivi, en choisir un sinon. Gardé à côté des deux
+    # commandes séparées plutôt qu'à leur place : un profil déjà composé avec
+    # `change_route`/`clear_route` ne doit rien perdre à l'enregistrement.
+    "route" => %w[full compact],
     "nav_state" => %w[full compact],
     # La jauge est couchée, à l'échelle d'une cellule large : le sens debout a
     # été retiré côté appli (un seul dessin à garder cohérent avec les bords de
@@ -66,7 +88,7 @@ module CompanionSettings
 
   ZONE_SOURCES = %w[hr power].freeze
 
-  PAGE_KINDS = %w[map grid list].freeze
+  PAGE_KINDS = %w[map grid list laps].freeze
 
   # Les mesures affichables. Exactement les clés de `MetricId` côté Dart, dans le
   # même ordre : c'est la liste que l'éditeur déroule.
@@ -267,6 +289,7 @@ module CompanionSettings
         { "kind" => "map" }
       when "grid" then sanitize_grid(page)
       when "list" then sanitize_list(page)
+      when "laps" then sanitize_laps(page)
       end
     end
 
@@ -370,6 +393,57 @@ module CompanionSettings
       "blocks" => blocks, "menu" => menu_flag(page) }.compact
   end
 
+  # Une page de tours : liste déroulante d'un côté, composants du tour choisi
+  # de l'autre — en liste défilante ou en grille, comme une page de mesures
+  # (`sanitize_list` / `sanitize_grid`). Plus la `series`, qui dit quelle
+  # suite de tours cette page-là affiche.
+  #
+  # `layout` **tranche seul**, et seulement sur `"grid"` : un document plus
+  # ancien que ce chantier, ou qui omet la clé, doit retomber sur la liste
+  # défilante d'aujourd'hui — jamais sur une grille dont il n'a jamais décrit
+  # `rows`/`cols`. Même repli côté Dart (`LapPageLayout.parse`).
+  #
+  # Aucun filtre sur les blocs qu'elle peut contenir, dans les deux cas :
+  # `sanitize_list`/`sanitize_grid` n'en ont pas non plus, et c'est l'appli qui
+  # ignore silencieusement ce qui n'a pas de sens sur une page de tours (voir
+  # `LapListBody._block`, dépôt voisin) — ajouter la règle ici la ferait
+  # respecter *avant* que l'appli, plus stricte que le site, ne le soit jamais.
+  def sanitize_laps(page)
+    layout = page["layout"] == "grid" ? sanitize_lap_grid(page) : sanitize_lap_blocks(page)
+    return nil if layout.nil?
+
+    { "kind" => "laps", "title" => page["title"].to_s.presence || "Tours",
+      "series" => sanitize_series(page["series"]),
+      "menu" => menu_flag(page) }.merge(layout).compact
+  end
+
+  def sanitize_lap_blocks(page)
+    blocks = raw_array(page["blocks"]).filter_map { |block| sanitize_block(block) }
+    return nil if blocks.empty?
+
+    { "blocks" => blocks }
+  end
+
+  # Même géométrie que `sanitize_grid`, `place_cells` compris : une grille de
+  # tours ne défile pas plus qu'une grille de mesures, et n'a aucune raison
+  # d'obéir à une autre limite de côté.
+  def sanitize_lap_grid(page)
+    rows = clamp_side(page["rows"])
+    cols = clamp_side(page["cols"])
+    cells = place_cells(page["cells"], rows, cols)
+    return nil if cells.empty?
+
+    { "layout" => "grid", "rows" => rows, "cols" => cols, "cells" => cells }
+  end
+
+  # `'default'` sans configuration : c'est aussi la seule série que l'export
+  # `.fit` de l'appli sait porter (une seule hiérarchie de tours possible dans
+  # le format). Même repli que `LapListPageSpec.parse`/`MarkLapBlock.parse`
+  # côté Dart — il faut que les deux tombent sur exactement la même chaîne.
+  def sanitize_series(raw)
+    raw.is_a?(String) && raw.strip.present? ? raw.strip : "default"
+  end
+
   # Un mode inconnu retombe sur le mode par défaut du composant (le premier de sa
   # liste), jamais sur un refus : c'est déjà ce que fait l'appli, et l'éditeur ne
   # doit pas être plus sévère qu'elle.
@@ -388,8 +462,10 @@ module CompanionSettings
       return nil unless METRICS.include?(raw["metric"])
 
       block["metric"] = raw["metric"]
-    when "zones"
+    when "zones", "lap_zones"
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
+    when "mark_lap"
+      block["series"] = sanitize_series(raw["series"])
     end
 
     block

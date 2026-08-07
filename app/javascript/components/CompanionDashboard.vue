@@ -5,8 +5,8 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  canHideBehindMenu, fitCells, gridSideOf, maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE,
-  occupancy, phoneCell, previewScale, PHONE_GRID,
+  canHideBehindMenu, fitCells, gridSideOf, isGridLayout, maxSpan, metricDropdownLabel,
+  NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   type Band, type Block, type Catalog, type Cell, type CellSize,
   type CompanionDocument, type Page, type Preset, type Viewport,
 } from '../companionSettings'
@@ -99,6 +99,24 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const preset = computed(() => presets[current.value])
 const hasMap = computed(() => preset.value.pages.some((page) => page.kind === 'map'))
+
+// Les séries de tours déjà posées dans ce profil — pages `laps` et boutons
+// `mark_lap`, où qu'ils soient (liste, grille). Suggérées dans les deux
+// endroits où l'on tape une série (`lap_series` de la page, paramètre du
+// bouton dans `CompanionBlockPicker`) : c'est une clé de texte libre, et une
+// suggestion évite l'écart d'orthographe entre un bouton et sa page.
+const lapSeries = computed(() => {
+  const keys = new Set<string>()
+  const collect = (block?: Block) => {
+    if (block?.kind === 'mark_lap') keys.add(block.series || 'default')
+  }
+  preset.value.pages.forEach((page) => {
+    if (page.kind === 'laps') keys.add(page.series || 'default')
+    page.blocks?.forEach(collect)
+    page.cells?.forEach((cell) => collect(cell.block))
+  })
+  return [...keys]
+})
 
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec la dialogue de choix (`CompanionBlockPicker.vue`) — voir
@@ -209,6 +227,21 @@ function addPage(kind: string) {
       cells: [{ row: 0, col: 0, row_span: 1, col_span: 1,
                 block: { kind: 'metric', metric: 'speed', mode: 'big' } }],
     })
+  } else if (kind === 'laps') {
+    // `lap_selector` d'abord — sans lui, la page ne montre jamais que le tour
+    // le plus récent, sans rien à choisir. `lap_summary` ensuite, pendant du
+    // `recording` par défaut d'une page « Effort » : ce qu'on veut voir en
+    // premier une fois un tour choisi.
+    //
+    // Pas de `mark_lap` par défaut : sa série est un réglage à part de celle
+    // de la page (voir `lapSeriesMismatch`), et le deviner ici — recopier
+    // celle de la page — surprendrait plus qu'aider si le choix n'était pas
+    // le bon. Qui veut marquer un tour depuis cette page l'ajoute et règle sa
+    // série lui-même.
+    preset.value.pages.push({
+      kind: 'laps', title: t('companion.settings.page_laps'), series: 'default',
+      blocks: [{ kind: 'lap_selector' }, { kind: 'lap_summary', mode: 'cards' }],
+    })
   } else {
     preset.value.pages.push({
       kind: 'list', title: t('companion.settings.page_effort'),
@@ -216,6 +249,42 @@ function addPage(kind: string) {
     })
   }
   openPage.value = preset.value.pages.length - 1
+  selected.value = null
+}
+
+// Bascule une page `laps` entre liste défilante et grille — même choix
+// qu'entre une page `list` et une page `grid`, mais qui ne change pas le
+// `kind` : la série et la place dans le catalogue de pages restent, seule la
+// façon de composer le contenu change.
+//
+// Chaque branche **sème** un contenu par défaut si l'autre n'en a jamais eu
+// (`?.length` et non `!page.cells` : une page déjà composée dans un sens ne
+// perd pas ce qu'elle porte à l'aller-retour), sinon la première bascule vers
+// la grille tomberait sur une page vide, indiscernable d'une grille encore
+// non composée.
+function setLapLayout(page: Page, layout: 'list' | 'grid') {
+  if (layout === 'grid') {
+    page.layout = 'grid'
+    if (!page.cells?.length) {
+      const rows = page.rows || 2
+      const cols = page.cols || 2
+      page.rows = rows
+      page.cols = cols
+      // Le sélecteur sur toute la largeur de la première ligne, comme dans
+      // `addPage('laps')` : sans lui, une grille de tours fraîchement basculée
+      // ne montrerait jamais que le tour le plus récent.
+      page.cells = [
+        { row: 0, col: 0, row_span: 1, col_span: cols, block: { kind: 'lap_selector' } },
+        { row: 1, col: 0, row_span: 1, col_span: cols,
+          block: { kind: 'lap_summary', mode: 'cards' } },
+      ]
+    }
+  } else {
+    delete page.layout
+    if (!page.blocks?.length) {
+      page.blocks = [{ kind: 'lap_selector' }, { kind: 'lap_summary', mode: 'cards' }]
+    }
+  }
   selected.value = null
 }
 
@@ -414,8 +483,25 @@ function labelFor(block: Block): string {
   const parts = [t(`companion.settings.blocks.${block.kind}`)]
   if (block.kind === 'metric') parts.push(t(`companion.settings.metrics.${block.metric}`))
   if (block.kind === 'zones') parts.push(t(`companion.settings.sources.${block.source}`))
+  // La série est un texte libre, pas une clé du catalogue : elle se relit
+  // telle quelle. Sans elle, deux boutons « Marquer un tour » de séries
+  // différentes se ressembleraient à l'identique dans la liste des
+  // composants d'une page — et c'est justement la série qui décide où le tour
+  // marqué atterrit.
+  if (block.kind === 'mark_lap') parts.push(block.series || 'default')
   if (block.mode) parts.push(t(`companion.settings.modes.${block.mode}`))
   return parts.join(' · ')
+}
+
+// Un bouton « Marquer un tour » posé sur une page Tours dont la série ne
+// correspond pas à celle de la page : il marque bien un tour, mais pas dans
+// la liste que cette page affiche — deux réglages indépendants de l'éditeur
+// que rien ne relie côté appli (`LapListBody._block`, dépôt voisin). Averti
+// ici plutôt que découvert sur la route, où le bouton semblerait ne rien
+// faire.
+function lapSeriesMismatch(page: Page, block: Block): boolean {
+  return page.kind === 'laps' && block.kind === 'mark_lap' &&
+    (block.series || 'default') !== (page.series || 'default')
 }
 
 // ── la page qui défile ──────────────────────────────────────────────────────
@@ -630,8 +716,38 @@ async function save() {
             <input v-model="page.title" class="form-control form-control-sm mb-2"
                    :placeholder="t('companion.settings.page_title')">
 
+            <!-- Une page de tours : la série qu'elle affiche. Un bouton
+                 « Marquer un tour » posé ailleurs doit porter la même clé
+                 pour alimenter cette page-là — voir `lapSeries`. -->
+            <div v-if="page.kind === 'laps'" class="mb-2">
+              <label class="small mb-1 d-block">{{ t('companion.settings.lap_series') }}
+                <input v-model="page.series" type="text" list="companion-series-list"
+                       class="form-control form-control-sm">
+              </label>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.lap_series_help') }}</p>
+            </div>
+
+            <!-- Liste défilante ou grille : même choix qu'entre une page
+                 `list` et une page `grid`, mais qui reste une page `laps` —
+                 seule la disposition du contenu du tour choisi change. -->
+            <div v-if="page.kind === 'laps'" class="mb-3">
+              <label class="small mb-1 d-block">{{ t('companion.settings.lap_layout') }}</label>
+              <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn"
+                        :class="isGridLayout(page) ? 'btn-outline-secondary' : 'btn-secondary'"
+                        @click="setLapLayout(page, 'list')">
+                  {{ t('companion.settings.page_kinds.list') }}
+                </button>
+                <button type="button" class="btn"
+                        :class="isGridLayout(page) ? 'btn-secondary' : 'btn-outline-secondary'"
+                        @click="setLapLayout(page, 'grid')">
+                  {{ t('companion.settings.page_kinds.grid') }}
+                </button>
+              </div>
+            </div>
+
             <!-- Une grille -->
-            <template v-if="page.kind === 'grid'">
+            <template v-if="isGridLayout(page)">
               <div class="d-flex align-items-center gap-3 mb-2">
                 <!-- `change` et non `input` : la saisie n'est validée qu'une fois
                      le champ quitté (ou Entrée), sinon effacer pour retaper
@@ -684,6 +800,10 @@ async function save() {
               <div v-if="selected" class="border rounded p-2 bg-body-tertiary">
                 <div class="d-flex align-items-center gap-2">
                   <span class="flex-grow-1 text-truncate small">{{ labelFor(selected.block) }}</span>
+                  <i v-if="lapSeriesMismatch(page, selected.block)"
+                     class="fa-solid fa-triangle-exclamation text-warning"
+                     :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
+                     aria-hidden="true"></i>
                   <button class="btn btn-sm btn-outline-secondary" type="button"
                           @click="picker = { at: 'cell', page, cell: selected }">
                     {{ t('companion.settings.change_block') }}
@@ -732,6 +852,14 @@ async function save() {
                   <CompanionBlockPreview :block="block" />
                 </div>
                 <span class="flex-grow-1 text-truncate small">{{ labelFor(block) }}</span>
+                <!-- La série du bouton et celle de la page sont deux réglages
+                     indépendants (voir `LapListBody._block`, dépôt voisin) :
+                     un bouton qui ne porte pas la série affichée marque un
+                     tour ailleurs, sans que rien ne bouge sous les yeux. -->
+                <i v-if="lapSeriesMismatch(page, block)"
+                   class="fa-solid fa-triangle-exclamation text-warning"
+                   :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
+                   aria-hidden="true"></i>
                 <button class="btn btn-sm btn-outline-secondary" type="button"
                         @click="picker = { at: 'block', page, index: i }">
                   {{ t('companion.settings.change_block') }}
@@ -893,8 +1021,12 @@ async function save() {
     <!-- Montée par `v-if` : la dialogue pose son écouteur clavier au montage, et
          une dialogue toujours montée mangerait la touche Échap de l'éditeur. -->
     <CompanionBlockPicker v-if="picker" :block="pickerBlock" :catalog="catalog"
-                          :cell="pickerCell"
+                          :cell="pickerCell" :known-series="lapSeries"
                           @choose="applyPick" @close="picker = null" />
+
+    <datalist id="companion-series-list">
+      <option v-for="s in lapSeries" :key="s" :value="s" />
+    </datalist>
   </div>
 </template>
 

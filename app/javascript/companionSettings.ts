@@ -16,6 +16,10 @@ export interface Block {
   mode?: string
   metric?: string
   source?: string
+  // La série de tours qu'un bouton « Marquer un tour » (`mark_lap`) ouvre —
+  // absente vaut `'default'`, la seule série que l'export `.fit` de l'appli
+  // sait porter (une seule hiérarchie de tours possible dans le format).
+  series?: string
 }
 
 export interface Cell {
@@ -27,7 +31,7 @@ export interface Cell {
 }
 
 export interface Page {
-  kind: 'map' | 'grid' | 'list'
+  kind: 'map' | 'grid' | 'list' | 'laps'
   title?: string
   rows?: number
   cols?: number
@@ -36,6 +40,14 @@ export interface Page {
   // Rangée derrière le menu d'actions plutôt que dans le défilement. Absent vaut
   // « dans le défilement » — voir `canHideBehindMenu`.
   menu?: boolean
+  // Seulement pour `kind: 'laps'` : la série de tours que cette page affiche
+  // (liste déroulante + composants du tour choisi). Absente vaut `'default'`.
+  series?: string
+  // Seulement pour `kind: 'laps'` : liste défilante (absent, le cas
+  // d'avant ce réglage) ou grille qui tient tout entière (`'grid'`, avec
+  // `rows`/`cols`/`cells` comme une page `grid`). Une page `grid` n'a pas
+  // besoin de cette clé — son genre le dit déjà.
+  layout?: 'grid'
 }
 
 export interface Band {
@@ -109,6 +121,19 @@ export function canHideBehindMenu(page: Page, pages: Page[]): boolean {
   )
 }
 
+// Cette page se compose-t-elle en grille — `rows`/`cols`/`cells` — plutôt
+// qu'en liste défilante ?
+//
+// Une page `grid` l'est toujours ; une page `laps` seulement si elle porte
+// `layout: 'grid'` (absent vaut liste, le cas d'avant ce réglage — même repli
+// que `LapPageLayout.parse` côté Dart). Centralisé ici plutôt que répété à
+// chaque endroit de l'éditeur qui doit choisir entre l'éditeur de grille et
+// celui de liste : les deux ne doivent jamais se découvrir sur des critères
+// différents.
+export function isGridLayout(page: Page): boolean {
+  return page.kind === 'grid' || (page.kind === 'laps' && page.layout === 'grid')
+}
+
 // ── Le profil par défaut d'un type d'itinéraire ─────────────────────────────
 //
 // Utilisé par CompanionNavigateModal pour présélectionner le bon profil quand
@@ -155,12 +180,13 @@ export function blockChoices(catalog: Catalog): BlockChoice[] {
 // différence entre ce qu'on voit et ce qui part.
 export function blockFor(
   choice: BlockChoice,
-  params: { metric?: string; source?: string },
+  params: { metric?: string; source?: string; series?: string },
 ): Block {
   const block: Block = { kind: choice.kind }
   if (choice.mode) block.mode = choice.mode
   if (choice.kind === 'metric') block.metric = params.metric
-  if (choice.kind === 'zones') block.source = params.source
+  if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
+  if (choice.kind === 'mark_lap') block.series = params.series || 'default'
   return block
 }
 
@@ -355,6 +381,17 @@ export const BUDGET_SAMPLE = {
   risk: { acwr: 1.18, zone: 'optimal' },
 }
 
+// Le bilan d'un tour, pour la vignette : cinq lignes, exactement celles que
+// dessine `LapSummaryCard` (dépôt voisin) — durée, distance, D+, calories,
+// TSS *du tour*, jamais de la sortie entière.
+export const LAP_SUMMARY_SAMPLE = [
+  { label: 'Durée', value: '00:18' },
+  { label: 'Distance', value: '5,2 km' },
+  { label: 'D+', value: '142 m' },
+  { label: 'Calories', value: '210' },
+  { label: 'TSS', value: '24' },
+]
+
 // Le tiret et pas un chiffre inventé quand la mesure est inconnue de cette
 // version : c'est **exactement** ce que le téléphone affichera d'une mesure
 // qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
@@ -404,9 +441,12 @@ export interface BlockShape {
   zonesBar: boolean
   zonesLegend: boolean
   averagesCards: boolean
+  lapSummaryCards: boolean
+  markLapCompact: boolean
   recordingCompact: boolean
   changeRouteCompact: boolean
   clearRouteCompact: boolean
+  routeCompact: boolean
   navFull: boolean
   radarGauge: boolean
   radarCount: boolean
@@ -431,13 +471,20 @@ export function blockShape(block: Block): BlockShape {
     // mais l'icône de la mesure (cœur / éclair) se pose devant le chiffre.
     metricZoneMode: block.kind === 'metric' && block.mode === 'zone',
     // Le mode dit exactement ce qu'on dessine : `bar` les deux, `bar_only` la
-    // barre seule, `legend` la légende seule.
-    zonesBar: block.kind === 'zones' && block.mode !== 'legend',
-    zonesLegend: block.kind === 'zones' && block.mode !== 'bar_only',
-    averagesCards: block.kind === 'averages' && block.mode !== 'list',
+    // barre seule, `legend` la légende seule. `lap_zones`/`lap_averages`
+    // dessinent la même chose que `zones`/`averages` — seul le titre change
+    // (« ce tour » plutôt que « depuis le départ »), pas la forme.
+    zonesBar: (block.kind === 'zones' || block.kind === 'lap_zones') && block.mode !== 'legend',
+    zonesLegend: (block.kind === 'zones' || block.kind === 'lap_zones') && block.mode !== 'bar_only',
+    averagesCards: (block.kind === 'averages' || block.kind === 'lap_averages') && block.mode !== 'list',
+    // Le bilan d'un tour : cinq lignes (durée, distance, D+, calories, TSS),
+    // en carte ou en liste — une forme neuve, pas une variante de `averages`.
+    lapSummaryCards: block.kind === 'lap_summary' && block.mode !== 'list',
+    markLapCompact: block.kind === 'mark_lap' && block.mode === 'compact',
     recordingCompact: block.kind === 'recording' && block.mode === 'compact',
     changeRouteCompact: block.kind === 'change_route' && block.mode === 'compact',
     clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',
+    routeCompact: block.kind === 'route' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
     radarGauge: block.kind === 'radar' && block.mode === 'gauge',
     radarCount: block.kind === 'radar' && block.mode === 'count',

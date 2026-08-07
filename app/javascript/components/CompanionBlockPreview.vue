@@ -422,6 +422,26 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
       </div>
     </template>
 
+    <!-- Itinéraire ----------------------------------------------------------
+         Un seul bouton pour les deux gestes de « Changer d'itinéraire » et
+         « Retirer l'itinéraire » : c'est l'état de la navigation qui décide
+         lequel des deux il pose, côté appli (`RouteControl`, dépôt voisin).
+         L'aperçu ne connaît pas cet état à la composition — il montre donc
+         le geste qui pose un tracé, celui qu'on obtient hors navigation. -->
+    <template v-else-if="block.kind === 'route'">
+      <div v-if="shape.routeCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact">
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button">
+          <i class="fa-solid fa-route" aria-hidden="true"></i>
+          Choisir un itinéraire
+        </span>
+      </div>
+    </template>
+
     <!-- État de navigation ------------------------------------------------ -->
     <div v-else-if="block.kind === 'nav_state'" class="cbp-card">
       <div class="cbp-title">Navigation</div>
@@ -540,6 +560,15 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
       </div>
     </div>
 
+    <!-- Sélecteur de tour ---------------------------------------------------
+         La liste déroulante qui choisit le tour affiché par les autres
+         composants de la page — plaçable comme eux, voir `LapSelectorBlock`
+         côté appli. -->
+    <div v-else-if="block.kind === 'lap_selector'" class="cbp-card cbp-selector">
+      <span>Tour 3 (en cours)</span>
+      <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+    </div>
+
     <!-- Case vide : un choix de composition, et il se voit comme tel. ------ -->
     <div v-else class="cbp-empty"></div>
   </div>
@@ -641,6 +670,28 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 .cbp-stat b {
   font-weight: 400;
   white-space: nowrap;
+}
+
+/* Le sélecteur de tour : même fond que les autres cartes, le libellé cède la
+   place au chevron plutôt que de le pousser hors de la case. */
+.cbp-selector {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+  font-size: 1em;
+}
+.cbp-selector span {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cbp-selector i {
+  color: rgba(255, 255, 255, 0.7);
+  flex-shrink: 0;
 }
 
 /* Le chiffre aussi grand que la case le permet — c'est ce qu'on lit à 30 km/h

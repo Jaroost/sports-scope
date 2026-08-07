@@ -228,13 +228,19 @@ function addPage(kind: string) {
                 block: { kind: 'metric', metric: 'speed', mode: 'big' } }],
     })
   } else if (kind === 'laps') {
-    // Pas de `mark_lap` par défaut : posé sur une page `laps`, il marquerait
-    // un tour de sa propre série, indépendante de celle de la page — un
-    // bouton mort. `lap_summary` est le pendant du `recording` par défaut
-    // d'une page « Effort » : ce qu'on veut voir en premier.
+    // `lap_selector` d'abord — sans lui, la page ne montre jamais que le tour
+    // le plus récent, sans rien à choisir. `lap_summary` ensuite, pendant du
+    // `recording` par défaut d'une page « Effort » : ce qu'on veut voir en
+    // premier une fois un tour choisi.
+    //
+    // Pas de `mark_lap` par défaut : sa série est un réglage à part de celle
+    // de la page (voir `lapSeriesMismatch`), et le deviner ici — recopier
+    // celle de la page — surprendrait plus qu'aider si le choix n'était pas
+    // le bon. Qui veut marquer un tour depuis cette page l'ajoute et règle sa
+    // série lui-même.
     preset.value.pages.push({
       kind: 'laps', title: t('companion.settings.page_laps'), series: 'default',
-      blocks: [{ kind: 'lap_summary', mode: 'cards' }],
+      blocks: [{ kind: 'lap_selector' }, { kind: 'lap_summary', mode: 'cards' }],
     })
   } else {
     preset.value.pages.push({
@@ -260,14 +266,24 @@ function setLapLayout(page: Page, layout: 'list' | 'grid') {
   if (layout === 'grid') {
     page.layout = 'grid'
     if (!page.cells?.length) {
-      page.rows = page.rows || 2
-      page.cols = page.cols || 2
-      page.cells = [{ row: 0, col: 0, row_span: 1, col_span: 1,
-                       block: { kind: 'lap_summary', mode: 'cards' } }]
+      const rows = page.rows || 2
+      const cols = page.cols || 2
+      page.rows = rows
+      page.cols = cols
+      // Le sélecteur sur toute la largeur de la première ligne, comme dans
+      // `addPage('laps')` : sans lui, une grille de tours fraîchement basculée
+      // ne montrerait jamais que le tour le plus récent.
+      page.cells = [
+        { row: 0, col: 0, row_span: 1, col_span: cols, block: { kind: 'lap_selector' } },
+        { row: 1, col: 0, row_span: 1, col_span: cols,
+          block: { kind: 'lap_summary', mode: 'cards' } },
+      ]
     }
   } else {
     delete page.layout
-    if (!page.blocks?.length) page.blocks = [{ kind: 'lap_summary', mode: 'cards' }]
+    if (!page.blocks?.length) {
+      page.blocks = [{ kind: 'lap_selector' }, { kind: 'lap_summary', mode: 'cards' }]
+    }
   }
   selected.value = null
 }

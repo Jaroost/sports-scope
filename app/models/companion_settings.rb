@@ -47,6 +47,13 @@ module CompanionSettings
     "lap_zones" => %w[bar bar_only legend],
     "lap_averages" => %w[cards list],
     "lap_summary" => %w[cards list],
+    # La liste déroulante qui choisit le tour que les trois composants
+    # au-dessus lisent. Plaçable comme eux plutôt qu'imposée en en-tête d'une
+    # page `laps` : une page qui la porte tient tout entière dans ce qu'elle
+    # déclare (`rows`/`cols`, ou sa liste), rien n'est caché à l'éditeur. Un
+    # seul mode — rien à faire varier, contrairement à `mark_lap` qui a une
+    # icône seule à proposer en cellule étroite.
+    "lap_selector" => [],
     "averages" => %w[cards list],
     "recording" => %w[full compact],
     "mark_lap" => %w[full compact],
@@ -56,6 +63,12 @@ module CompanionSettings
     # mode : ce sont des boutons, pas des mesures.
     "change_route" => %w[full compact],
     "clear_route" => %w[full compact],
+    # Les deux boutons ci-dessus, combinés en un seul : c'est l'état de la
+    # navigation qui décide côté appli lequel des deux gestes il pose — retirer
+    # s'il y a déjà un tracé suivi, en choisir un sinon. Gardé à côté des deux
+    # commandes séparées plutôt qu'à leur place : un profil déjà composé avec
+    # `change_route`/`clear_route` ne doit rien perdre à l'enregistrement.
+    "route" => %w[full compact],
     "nav_state" => %w[full compact],
     # La jauge est couchée, à l'échelle d'une cellule large : le sens debout a
     # été retiré côté appli (un seul dessin à garder cohérent avec les bords de

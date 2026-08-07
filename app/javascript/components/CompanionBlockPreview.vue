@@ -130,13 +130,6 @@ const averagesRows = computed(() => [
   AVERAGES_SAMPLE.slice(2, 4),
 ])
 
-// Deux véhicules, dont un dans le seuil de proximité. Leur position est une part
-// de la portée, comme côté appli (`RadarView.positions`) : le plus proche est le
-// plus avancé sur l'axe.
-const RADAR_MARKS = [
-  { at: 34, close: false },
-  { at: 72, close: true },
-]
 
 // ── Budget de charge ────────────────────────────────────────────────────────
 //
@@ -398,18 +391,12 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 
     <!-- Radar ------------------------------------------------------------- -->
     <template v-else-if="block.kind === 'radar'">
-      <!-- La jauge de la gouttière, posée dans une cellule et couchée : mêmes
-           positions et mêmes couleurs que sur les bords de la carte, à un quart
-           de tour près. La proximité va **vers la droite** : c'est la rotation
-           de la jauge du bord gauche (`RotatedBox(quarterTurns: 1)`, dépôt
-           voisin), et les pointes suivent — vers le haut. -->
+      <!-- Un simple aplat de couleur, sans chiffre ni icône — ce qui se lit le
+           plus vite du coin de l'œil, pour la case la plus petite de la
+           grille. Rouge : mêmes couleurs que les autres modes du bloc,
+           « proche ». Ça n'est plus la jauge de gouttière couchée. -->
       <div v-if="shape.radarGauge" class="cbp-card cbp-center">
-        <div class="cbp-radar-gauge">
-          <span class="cbp-radar-axis"></span>
-          <span v-for="mark in RADAR_MARKS" :key="mark.at" class="cbp-radar-mark"
-                :class="{ 'cbp-radar-mark--close': mark.close }"
-                :style="{ left: `${mark.at}%` }"></span>
-        </div>
+        <div class="cbp-radar-square"></div>
       </div>
       <div v-else-if="shape.radarCount" class="cbp-card cbp-center">
         <!-- Le nombre est ici la donnée du composant, pas un rappel de l'icône
@@ -788,47 +775,19 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
   color: #ffa726;
   font-size: 2em;
 }
-/* La jauge dans une cellule.
-
-   Aux proportions de la gouttière couchée (144 × 72) : côté appli, c'est une
-   boîte de ce format mise à l'échelle de la case (`BoxFit.contain`), pas un
-   dessin qui s'étire. Une jauge étirée mettrait ses véhicules ailleurs qu'où
-   ils seront.
-
-   L'axe n'est pas centré : il reste à un peu plus du quart du bord, la part que
-   prend `_axisInset` dans la largeur de la gouttière (19 sur 72) — c'est la
-   vision périphérique qui lit cette jauge, et elle lit le bord de l'écran. */
-.cbp-radar-gauge {
-  position: relative;
+/* Le carré du mode « jauge » : `BlockSurface` y dessine un simple aplat
+   (`DecoratedBox`, 64×64, coins arrondis 8px) — plus une jauge, un rectangle
+   coloré, mis à l'échelle de la case comme le reste du bloc. Rouge « proche »
+   (`0xFFEF5350`) ici ; les autres couleurs de `_emptyState` (orange « approche »
+   `0xFFFFA726`, vert « voie libre » `0xFF81C784`, gris « pas de radar ») ne sont
+   pas dans l'aperçu — un aplat seul ne peut pas montrer les quatre états à la
+   fois, et « proche » est celui qui justifie le mode. */
+.cbp-radar-square {
   width: 100%;
-  aspect-ratio: 2 / 1;
+  aspect-ratio: 1 / 1;
   max-height: 100%;
-}
-.cbp-radar-axis {
-  position: absolute;
-  background: rgba(255, 255, 255, 0.13);
-  border-radius: 0.1em;
-  left: 0;
-  right: 0;
-  top: 26%;
-  height: 0.2em;
-}
-
-/* Des pointes et non des ronds : une pointe est directionnelle, elle emmène le
-   regard hors de l'écran — du côté où il faudra bien finir par regarder. */
-.cbp-radar-mark {
-  position: absolute;
-  width: 0;
-  height: 0;
-  border: 0.45em solid transparent;
-  top: 26%;
-  transform: translate(-50%, -50%);
-  border-bottom-width: 0.7em;
-  border-bottom-color: #ffa726;
-  border-top-width: 0;
-}
-.cbp-radar-mark--close {
-  border-bottom-color: #ef5350;
+  border-radius: 0.15em;
+  background: #ef5350;
 }
 
 .cbp-empty {

@@ -381,21 +381,46 @@ module CompanionSettings
   end
 
   # Une page de tours : liste déroulante d'un côté, composants du tour choisi
-  # de l'autre. Même forme qu'une `sanitize_list`, plus la `series` qui dit
-  # quelle suite de tours cette page-là affiche.
+  # de l'autre — en liste défilante ou en grille, comme une page de mesures
+  # (`sanitize_list` / `sanitize_grid`). Plus la `series`, qui dit quelle
+  # suite de tours cette page-là affiche.
   #
-  # Aucun filtre sur les blocs qu'elle peut contenir : `sanitize_list` n'en a
-  # pas non plus, et c'est l'appli qui ignore silencieusement ce qui n'a pas
-  # de sens sur une page de tours (voir `LapListBody._block`, dépôt voisin) —
-  # ajouter la règle ici la ferait respecter *avant* que l'appli, plus stricte
-  # que le site, ne le soit jamais.
+  # `layout` **tranche seul**, et seulement sur `"grid"` : un document plus
+  # ancien que ce chantier, ou qui omet la clé, doit retomber sur la liste
+  # défilante d'aujourd'hui — jamais sur une grille dont il n'a jamais décrit
+  # `rows`/`cols`. Même repli côté Dart (`LapPageLayout.parse`).
+  #
+  # Aucun filtre sur les blocs qu'elle peut contenir, dans les deux cas :
+  # `sanitize_list`/`sanitize_grid` n'en ont pas non plus, et c'est l'appli qui
+  # ignore silencieusement ce qui n'a pas de sens sur une page de tours (voir
+  # `LapListBody._block`, dépôt voisin) — ajouter la règle ici la ferait
+  # respecter *avant* que l'appli, plus stricte que le site, ne le soit jamais.
   def sanitize_laps(page)
-    blocks = raw_array(page["blocks"]).filter_map { |block| sanitize_block(block) }
-    return nil if blocks.empty?
+    layout = page["layout"] == "grid" ? sanitize_lap_grid(page) : sanitize_lap_blocks(page)
+    return nil if layout.nil?
 
     { "kind" => "laps", "title" => page["title"].to_s.presence || "Tours",
       "series" => sanitize_series(page["series"]),
-      "blocks" => blocks, "menu" => menu_flag(page) }.compact
+      "menu" => menu_flag(page) }.merge(layout).compact
+  end
+
+  def sanitize_lap_blocks(page)
+    blocks = raw_array(page["blocks"]).filter_map { |block| sanitize_block(block) }
+    return nil if blocks.empty?
+
+    { "blocks" => blocks }
+  end
+
+  # Même géométrie que `sanitize_grid`, `place_cells` compris : une grille de
+  # tours ne défile pas plus qu'une grille de mesures, et n'a aucune raison
+  # d'obéir à une autre limite de côté.
+  def sanitize_lap_grid(page)
+    rows = clamp_side(page["rows"])
+    cols = clamp_side(page["cols"])
+    cells = place_cells(page["cells"], rows, cols)
+    return nil if cells.empty?
+
+    { "layout" => "grid", "rows" => rows, "cols" => cols, "cells" => cells }
   end
 
   # `'default'` sans configuration : c'est aussi la seule série que l'export

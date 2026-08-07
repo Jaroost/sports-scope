@@ -43,6 +43,11 @@ export interface Page {
   // Seulement pour `kind: 'laps'` : la série de tours que cette page affiche
   // (liste déroulante + composants du tour choisi). Absente vaut `'default'`.
   series?: string
+  // Seulement pour `kind: 'laps'` : liste défilante (absent, le cas
+  // d'avant ce réglage) ou grille qui tient tout entière (`'grid'`, avec
+  // `rows`/`cols`/`cells` comme une page `grid`). Une page `grid` n'a pas
+  // besoin de cette clé — son genre le dit déjà.
+  layout?: 'grid'
 }
 
 export interface Band {
@@ -114,6 +119,19 @@ export function canHideBehindMenu(page: Page, pages: Page[]): boolean {
   return pages.some(
     (other) => other !== page && !other.menu && other.kind !== 'map',
   )
+}
+
+// Cette page se compose-t-elle en grille — `rows`/`cols`/`cells` — plutôt
+// qu'en liste défilante ?
+//
+// Une page `grid` l'est toujours ; une page `laps` seulement si elle porte
+// `layout: 'grid'` (absent vaut liste, le cas d'avant ce réglage — même repli
+// que `LapPageLayout.parse` côté Dart). Centralisé ici plutôt que répété à
+// chaque endroit de l'éditeur qui doit choisir entre l'éditeur de grille et
+// celui de liste : les deux ne doivent jamais se découvrir sur des critères
+// différents.
+export function isGridLayout(page: Page): boolean {
+  return page.kind === 'grid' || (page.kind === 'laps' && page.layout === 'grid')
 }
 
 // ── Le profil par défaut d'un type d'itinéraire ─────────────────────────────

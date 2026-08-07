@@ -5,8 +5,8 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  canHideBehindMenu, fitCells, gridSideOf, maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE,
-  occupancy, phoneCell, previewScale, PHONE_GRID,
+  canHideBehindMenu, fitCells, gridSideOf, isGridLayout, maxSpan, metricDropdownLabel,
+  NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   type Band, type Block, type Catalog, type Cell, type CellSize,
   type CompanionDocument, type Page, type Preset, type Viewport,
 } from '../companionSettings'
@@ -243,6 +243,32 @@ function addPage(kind: string) {
     })
   }
   openPage.value = preset.value.pages.length - 1
+  selected.value = null
+}
+
+// Bascule une page `laps` entre liste défilante et grille — même choix
+// qu'entre une page `list` et une page `grid`, mais qui ne change pas le
+// `kind` : la série et la place dans le catalogue de pages restent, seule la
+// façon de composer le contenu change.
+//
+// Chaque branche **sème** un contenu par défaut si l'autre n'en a jamais eu
+// (`?.length` et non `!page.cells` : une page déjà composée dans un sens ne
+// perd pas ce qu'elle porte à l'aller-retour), sinon la première bascule vers
+// la grille tomberait sur une page vide, indiscernable d'une grille encore
+// non composée.
+function setLapLayout(page: Page, layout: 'list' | 'grid') {
+  if (layout === 'grid') {
+    page.layout = 'grid'
+    if (!page.cells?.length) {
+      page.rows = page.rows || 2
+      page.cols = page.cols || 2
+      page.cells = [{ row: 0, col: 0, row_span: 1, col_span: 1,
+                       block: { kind: 'lap_summary', mode: 'cards' } }]
+    }
+  } else {
+    delete page.layout
+    if (!page.blocks?.length) page.blocks = [{ kind: 'lap_summary', mode: 'cards' }]
+  }
   selected.value = null
 }
 
@@ -668,8 +694,27 @@ async function save() {
               <p class="text-body-secondary small mb-0">{{ t('companion.settings.lap_series_help') }}</p>
             </div>
 
+            <!-- Liste défilante ou grille : même choix qu'entre une page
+                 `list` et une page `grid`, mais qui reste une page `laps` —
+                 seule la disposition du contenu du tour choisi change. -->
+            <div v-if="page.kind === 'laps'" class="mb-3">
+              <label class="small mb-1 d-block">{{ t('companion.settings.lap_layout') }}</label>
+              <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn"
+                        :class="isGridLayout(page) ? 'btn-outline-secondary' : 'btn-secondary'"
+                        @click="setLapLayout(page, 'list')">
+                  {{ t('companion.settings.page_kinds.list') }}
+                </button>
+                <button type="button" class="btn"
+                        :class="isGridLayout(page) ? 'btn-secondary' : 'btn-outline-secondary'"
+                        @click="setLapLayout(page, 'grid')">
+                  {{ t('companion.settings.page_kinds.grid') }}
+                </button>
+              </div>
+            </div>
+
             <!-- Une grille -->
-            <template v-if="page.kind === 'grid'">
+            <template v-if="isGridLayout(page)">
               <div class="d-flex align-items-center gap-3 mb-2">
                 <!-- `change` et non `input` : la saisie n'est validée qu'une fois
                      le champ quitté (ou Entrée), sinon effacer pour retaper

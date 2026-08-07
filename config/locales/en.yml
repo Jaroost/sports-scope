@@ -1590,6 +1590,7 @@ en:
       page_laps: "Laps"
       lap_series: "Lap series"
       lap_series_help: "Laps in the same series follow one another; several series run in parallel without closing one another — a “Mark lap” button placed elsewhere must carry the same series to feed this page."
+      lap_layout: "Layout"
       edit: "Edit"
       rows: "Rows"
       cols: "Columns"

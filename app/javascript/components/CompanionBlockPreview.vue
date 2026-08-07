@@ -429,6 +429,12 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
           <i v-for="n in 2" :key="n" class="fa-solid fa-car" aria-hidden="true"></i>
         </div>
       </div>
+      <div v-else-if="shape.radarCompact" class="cbp-card cbp-center">
+        <!-- Les mêmes mètres que le mode « distance », sans l'icône ni le
+             ×N : rien que le chiffre, pour la cellule qui n'a pas la hauteur
+             d'en placer deux lignes. -->
+        <div class="cbp-radar-distance">48 m</div>
+      </div>
       <div v-else class="cbp-card cbp-center">
         <!-- L'icône part la première dans une petite case : elle redit ce que la
              couleur dit déjà, alors que le nombre de mètres ne se déduit de

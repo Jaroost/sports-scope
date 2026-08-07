@@ -51,7 +51,7 @@ module CompanionSettings
     # La jauge existe dans les deux sens : couchée elle prend une cellule large,
     # debout elle prend une colonne — c'est la case dont on dispose qui décide,
     # pas le radar. Le dessin est le même, tourné d'un quart de tour.
-    "radar" => %w[distance count icons gauge gauge_vertical],
+    "radar" => %w[distance count icons compact gauge gauge_vertical],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.

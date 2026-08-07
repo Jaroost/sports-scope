@@ -411,6 +411,7 @@ export interface BlockShape {
   radarVertical: boolean
   radarCount: boolean
   radarIcons: boolean
+  radarCompact: boolean
   budgetWeek: boolean
 }
 
@@ -445,6 +446,7 @@ export function blockShape(block: Block): BlockShape {
     radarVertical: block.kind === 'radar' && block.mode === 'gauge_vertical',
     radarCount: block.kind === 'radar' && block.mode === 'count',
     radarIcons: block.kind === 'radar' && block.mode === 'icons',
+    radarCompact: block.kind === 'radar' && block.mode === 'compact',
     budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
   }
 }

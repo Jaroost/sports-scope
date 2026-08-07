@@ -467,8 +467,25 @@ function labelFor(block: Block): string {
   const parts = [t(`companion.settings.blocks.${block.kind}`)]
   if (block.kind === 'metric') parts.push(t(`companion.settings.metrics.${block.metric}`))
   if (block.kind === 'zones') parts.push(t(`companion.settings.sources.${block.source}`))
+  // La série est un texte libre, pas une clé du catalogue : elle se relit
+  // telle quelle. Sans elle, deux boutons « Marquer un tour » de séries
+  // différentes se ressembleraient à l'identique dans la liste des
+  // composants d'une page — et c'est justement la série qui décide où le tour
+  // marqué atterrit.
+  if (block.kind === 'mark_lap') parts.push(block.series || 'default')
   if (block.mode) parts.push(t(`companion.settings.modes.${block.mode}`))
   return parts.join(' · ')
+}
+
+// Un bouton « Marquer un tour » posé sur une page Tours dont la série ne
+// correspond pas à celle de la page : il marque bien un tour, mais pas dans
+// la liste que cette page affiche — deux réglages indépendants de l'éditeur
+// que rien ne relie côté appli (`LapListBody._block`, dépôt voisin). Averti
+// ici plutôt que découvert sur la route, où le bouton semblerait ne rien
+// faire.
+function lapSeriesMismatch(page: Page, block: Block): boolean {
+  return page.kind === 'laps' && block.kind === 'mark_lap' &&
+    (block.series || 'default') !== (page.series || 'default')
 }
 
 // ── la page qui défile ──────────────────────────────────────────────────────
@@ -767,6 +784,10 @@ async function save() {
               <div v-if="selected" class="border rounded p-2 bg-body-tertiary">
                 <div class="d-flex align-items-center gap-2">
                   <span class="flex-grow-1 text-truncate small">{{ labelFor(selected.block) }}</span>
+                  <i v-if="lapSeriesMismatch(page, selected.block)"
+                     class="fa-solid fa-triangle-exclamation text-warning"
+                     :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
+                     aria-hidden="true"></i>
                   <button class="btn btn-sm btn-outline-secondary" type="button"
                           @click="picker = { at: 'cell', page, cell: selected }">
                     {{ t('companion.settings.change_block') }}
@@ -815,6 +836,14 @@ async function save() {
                   <CompanionBlockPreview :block="block" />
                 </div>
                 <span class="flex-grow-1 text-truncate small">{{ labelFor(block) }}</span>
+                <!-- La série du bouton et celle de la page sont deux réglages
+                     indépendants (voir `LapListBody._block`, dépôt voisin) :
+                     un bouton qui ne porte pas la série affichée marque un
+                     tour ailleurs, sans que rien ne bouge sous les yeux. -->
+                <i v-if="lapSeriesMismatch(page, block)"
+                   class="fa-solid fa-triangle-exclamation text-warning"
+                   :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
+                   aria-hidden="true"></i>
                 <button class="btn btn-sm btn-outline-secondary" type="button"
                         @click="picker = { at: 'block', page, index: i }">
                   {{ t('companion.settings.change_block') }}

@@ -1591,6 +1591,7 @@ fr:
       lap_series: "Série de tours"
       lap_series_help: "Les tours d'une même série se suivent ; plusieurs séries tournent en parallèle sans se fermer l'une l'autre — un bouton « Marquer un tour » posé ailleurs doit porter la même série pour alimenter cette page."
       lap_layout: "Disposition"
+      lap_series_mismatch: "La série de ce bouton ne correspond pas à celle affichée par cette page (« %{series} ») : il marquera un tour ailleurs, sans rien changer à ce qui est affiché ici."
       edit: "Modifier"
       rows: "Lignes"
       cols: "Colonnes"

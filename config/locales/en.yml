@@ -1591,6 +1591,7 @@ en:
       lap_series: "Lap series"
       lap_series_help: "Laps in the same series follow one another; several series run in parallel without closing one another — a “Mark lap” button placed elsewhere must carry the same series to feed this page."
       lap_layout: "Layout"
+      lap_series_mismatch: "This button's series doesn't match the one this page shows (\"%{series}\"): it will mark a lap elsewhere, without changing anything shown here."
       edit: "Edit"
       rows: "Rows"
       cols: "Columns"

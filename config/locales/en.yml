@@ -1693,6 +1693,7 @@ en:
         altitude: "Altitude"
         calories: "Calories"
         calories_per_hour: "Calories per hour"
+        tss: "TSS"
         gears: "Gear"
         chainring_position: "Chainring"
         sprocket_position: "Sprocket"

@@ -314,6 +314,7 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   grade: { value: '7', unit: '% pente', icon: 'fa-solid fa-arrow-up-right-dots' },
   calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire' },
   calories_per_hour: { value: '510', unit: 'kcal/h', icon: 'fa-solid fa-fire' },
+  tss: { value: '54', unit: 'TSS', icon: 'fa-solid fa-chart-column' },
   gears: { value: '50×15', unit: 'braquet', icon: 'fa-solid fa-gear' },
   chainring_position: { value: '2', unit: 'plateau', icon: 'fa-solid fa-circle-notch' },
   sprocket_position: { value: '5', unit: 'pignon', icon: 'fa-solid fa-record-vinyl' },

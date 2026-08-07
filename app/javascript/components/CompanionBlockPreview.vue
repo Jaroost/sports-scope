@@ -398,19 +398,17 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 
     <!-- Radar ------------------------------------------------------------- -->
     <template v-else-if="block.kind === 'radar'">
-      <!-- La jauge de la gouttière, posée dans une cellule : mêmes positions et
-           mêmes couleurs que sur les bords de la carte, à un quart de tour près
-           en mode couché. La proximité va **vers le haut** debout, **vers la
-           droite** couchée : c'est la rotation de la jauge du bord gauche
-           (`RotatedBox(quarterTurns: 1)`, dépôt voisin), et les pointes suivent
-           — vers la gauche debout, vers le haut couchée. -->
+      <!-- La jauge de la gouttière, posée dans une cellule et couchée : mêmes
+           positions et mêmes couleurs que sur les bords de la carte, à un quart
+           de tour près. La proximité va **vers la droite** : c'est la rotation
+           de la jauge du bord gauche (`RotatedBox(quarterTurns: 1)`, dépôt
+           voisin), et les pointes suivent — vers le haut. -->
       <div v-if="shape.radarGauge" class="cbp-card cbp-center">
-        <div class="cbp-radar-gauge"
-             :class="shape.radarVertical ? 'cbp-radar-gauge--v' : 'cbp-radar-gauge--h'">
+        <div class="cbp-radar-gauge">
           <span class="cbp-radar-axis"></span>
           <span v-for="mark in RADAR_MARKS" :key="mark.at" class="cbp-radar-mark"
                 :class="{ 'cbp-radar-mark--close': mark.close }"
-                :style="shape.radarVertical ? { bottom: `${mark.at}%` } : { left: `${mark.at}%` }"></span>
+                :style="{ left: `${mark.at}%` }"></span>
         </div>
       </div>
       <div v-else-if="shape.radarCount" class="cbp-card cbp-center">
@@ -792,43 +790,28 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 }
 /* La jauge dans une cellule.
 
-   Aux proportions de la gouttière (72 × 144), couchées ou debout selon le mode :
-   côté appli, c'est une boîte de ce format mise à l'échelle de la case
-   (`BoxFit.contain`), pas un dessin qui s'étire. Une jauge étirée mettrait ses
-   véhicules ailleurs qu'où ils seront.
+   Aux proportions de la gouttière couchée (144 × 72) : côté appli, c'est une
+   boîte de ce format mise à l'échelle de la case (`BoxFit.contain`), pas un
+   dessin qui s'étire. Une jauge étirée mettrait ses véhicules ailleurs qu'où
+   ils seront.
 
    L'axe n'est pas centré : il reste à un peu plus du quart du bord, la part que
    prend `_axisInset` dans la largeur de la gouttière (19 sur 72) — c'est la
    vision périphérique qui lit cette jauge, et elle lit le bord de l'écran. */
 .cbp-radar-gauge {
   position: relative;
-}
-.cbp-radar-gauge--h {
   width: 100%;
   aspect-ratio: 2 / 1;
   max-height: 100%;
-}
-.cbp-radar-gauge--v {
-  height: 100%;
-  aspect-ratio: 1 / 2;
-  max-width: 100%;
 }
 .cbp-radar-axis {
   position: absolute;
   background: rgba(255, 255, 255, 0.13);
   border-radius: 0.1em;
-}
-.cbp-radar-gauge--h .cbp-radar-axis {
   left: 0;
   right: 0;
   top: 26%;
   height: 0.2em;
-}
-.cbp-radar-gauge--v .cbp-radar-axis {
-  top: 0;
-  bottom: 0;
-  left: 26%;
-  width: 0.2em;
 }
 
 /* Des pointes et non des ronds : une pointe est directionnelle, elle emmène le
@@ -838,26 +821,14 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
   width: 0;
   height: 0;
   border: 0.45em solid transparent;
-}
-.cbp-radar-gauge--h .cbp-radar-mark {
   top: 26%;
   transform: translate(-50%, -50%);
   border-bottom-width: 0.7em;
   border-bottom-color: #ffa726;
   border-top-width: 0;
 }
-.cbp-radar-gauge--h .cbp-radar-mark--close {
+.cbp-radar-mark--close {
   border-bottom-color: #ef5350;
-}
-.cbp-radar-gauge--v .cbp-radar-mark {
-  left: 26%;
-  transform: translate(-50%, 50%);
-  border-right-width: 0.7em;
-  border-right-color: #ffa726;
-  border-left-width: 0;
-}
-.cbp-radar-gauge--v .cbp-radar-mark--close {
-  border-right-color: #ef5350;
 }
 
 .cbp-empty {

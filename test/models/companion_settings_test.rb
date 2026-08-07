@@ -443,17 +443,18 @@ class CompanionSettingsTest < ActiveSupport::TestCase
     assert_equal false, only([ preset("radar" => { "overlay" => false }) ])["radar"]["overlay"]
   end
 
-  test "la jauge radar se pose dans les deux sens" do
-    # Le mode décide du dessin, et un mode inconnu du contrat retomberait sur
-    # « Distance » — c'est-à-dire un composant qu'on n'a pas choisi.
+  test "la jauge radar se pose, un mode inconnu retombe sur la distance" do
+    # Le mode décide du dessin, et un mode inconnu du contrat (dont le mode
+    # `gauge_vertical`, retiré côté appli) retomberait sur « Distance » —
+    # c'est-à-dire un composant qu'on n'a pas choisi.
     page = { "kind" => "list", "title" => "Radar", "blocks" => [
-      { "kind" => "radar", "mode" => "gauge_vertical" },
       { "kind" => "radar", "mode" => "gauge" },
+      { "kind" => "radar", "mode" => "gauge_vertical" },
       { "kind" => "radar", "mode" => "renversée" }
     ] }
     blocks = only([ preset("pages" => [ page ]) ])["pages"].first["blocks"]
 
-    assert_equal %w[gauge_vertical gauge distance], blocks.map { |block| block["mode"] }
+    assert_equal %w[gauge distance distance], blocks.map { |block| block["mode"] }
   end
 
   # ── outils ──────────────────────────────────────────────────────────────────

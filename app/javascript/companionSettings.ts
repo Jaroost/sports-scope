@@ -408,7 +408,6 @@ export interface BlockShape {
   clearRouteCompact: boolean
   navFull: boolean
   radarGauge: boolean
-  radarVertical: boolean
   radarCount: boolean
   radarIcons: boolean
   radarCompact: boolean
@@ -439,11 +438,7 @@ export function blockShape(block: Block): BlockShape {
     changeRouteCompact: block.kind === 'change_route' && block.mode === 'compact',
     clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
-    // Les deux sens de la jauge radar : le dessin est le même, tourné d'un quart
-    // de tour.
-    radarGauge:
-      block.kind === 'radar' && (block.mode === 'gauge' || block.mode === 'gauge_vertical'),
-    radarVertical: block.kind === 'radar' && block.mode === 'gauge_vertical',
+    radarGauge: block.kind === 'radar' && block.mode === 'gauge',
     radarCount: block.kind === 'radar' && block.mode === 'count',
     radarIcons: block.kind === 'radar' && block.mode === 'icons',
     radarCompact: block.kind === 'radar' && block.mode === 'compact',

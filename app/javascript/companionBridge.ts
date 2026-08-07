@@ -1,6 +1,6 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { companionStore, type CompanionGears } from './stores/companionStore'
-import type { CompanionNavState } from './navHelpers'
+import type { CompanionClimbProfile, CompanionNavState } from './navHelpers'
 import { csrfToken } from './csrf'
 import {
   useTrainingPlan,
@@ -87,6 +87,15 @@ export function companionNav(state: CompanionNavState): void {
   lastNavJson = json
   lastNavAt = at
   target.postMessage(JSON.stringify(state))
+}
+
+// Publie le profil gradué d'un col, une fois à l'entrée (voir climbProfileFor
+// dans RouteNavigation.vue). Volumineux et statique pour tout le col — c'est
+// pourquoi il n'est PAS republié à chaque position comme companionNav, et
+// pourquoi il porte son propre `id` (startIdx) : l'appli s'en sert pour ignorer
+// un message qui répéterait le col déjà affiché.
+export function companionClimbProfile(profile: CompanionClimbProfile): void {
+  channel()?.postMessage(JSON.stringify(profile))
 }
 
 // Une page web ne peut pas savoir si l'appli est installée : au mieux on sait

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   textColorOn, turnIcon, buildTurnChain, turnEta, remainingSeconds, formatDuration,
   arrivalClock, moveLngLat, buildClimbProfile, profileYAt, buildDebugClimb,
+  buildCompanionClimbProfile, COMPANION_CLIMB_MAX_POINTS,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE,
   turnBanner, turnAlertStep, INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep,
   navStateFor, resyncOnTurn, turnLabel, turnsNearTap, TURN_TAP_RADIUS_PX,
@@ -222,6 +223,49 @@ describe('buildClimbProfile', () => {
   it('traite une altitude manquante comme zéro', () => {
     const { pts } = buildClimbProfile(climb, [500, null, 550, 575, 600], cum)
     expect(pts.every((p) => Number.isFinite(p.y))).toBe(true)
+  })
+})
+
+describe('buildCompanionClimbProfile', () => {
+  const climb: Climb = {
+    startIdx: 7, endIdx: 11, gain: 100, lengthM: 4000,
+    avgGrade: 2.5, category: '4', startKm: 0, endKm: 4,
+  }
+  const alts = [null, null, null, null, null, null, null, 500, 525, 550, 575, 600]
+  const cum = [0, 0, 0, 0, 0, 0, 0, 0, 1000, 2000, 3000, 4000]
+
+  it('utilise startIdx comme id, et couvre s..e uniquement', () => {
+    const profile = buildCompanionClimbProfile(climb, alts, cum)
+    expect(profile.type).toBe('climb_profile')
+    expect(profile.id).toBe(7)
+    expect(profile.points).toHaveLength(5)
+    expect(profile.points[0]).toEqual({ distM: 0, altM: 500 })
+    expect(profile.points[4]).toEqual({ distM: 4000, altM: 600 })
+    expect(profile.segmentGrades).toHaveLength(4)
+  })
+
+  it('reprend les métadonnées du col telles quelles', () => {
+    const profile = buildCompanionClimbProfile(climb, alts, cum)
+    expect(profile.gainM).toBe(100)
+    expect(profile.lengthM).toBe(4000)
+    expect(profile.avgGrade).toBe(2.5)
+    expect(profile.category).toBe('4')
+  })
+
+  it('rééchantillonne un col dense en gardant les deux extrémités et l\'ordre croissant', () => {
+    const n = 500
+    const denseClimb: Climb = { ...climb, startIdx: 0, endIdx: n }
+    const denseAlts = Array.from({ length: n + 1 }, (_, i) => 500 + i)
+    const denseCum = Array.from({ length: n + 1 }, (_, i) => i * 10)
+
+    const profile = buildCompanionClimbProfile(denseClimb, denseAlts, denseCum)
+    expect(profile.points.length).toBeLessThanOrEqual(COMPANION_CLIMB_MAX_POINTS)
+    expect(profile.points[0]).toEqual({ distM: 0, altM: 500 })
+    expect(profile.points[profile.points.length - 1]).toEqual({ distM: n * 10, altM: 500 + n })
+    for (let i = 1; i < profile.points.length; i++) {
+      expect(profile.points[i].distM).toBeGreaterThan(profile.points[i - 1].distM)
+    }
+    expect(profile.segmentGrades).toHaveLength(profile.points.length - 1)
   })
 })
 

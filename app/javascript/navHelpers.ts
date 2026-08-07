@@ -583,6 +583,87 @@ export function profileYAt(pts: ProfilePoint[], x: number): number {
   return pts[pts.length - 1].y
 }
 
+// ─── Profil de col pour l'appli compagnon ──────────────────────────────────────
+
+// Plafond de points republiés par col : un col dense (point GPX tous les 5-10 m
+// sur 8-10 km) ferait un message de plusieurs centaines de sommets ; l'appli n'a
+// besoin que d'assez de résolution pour un graphique large de quelques centaines
+// de pixels. Rééchantillonné par pas fixe plutôt que tronqué : les deux
+// extrémités du col (départ, sommet) sont toujours gardées.
+export const COMPANION_CLIMB_MAX_POINTS = 200
+
+export interface CompanionClimbPoint { distM: number; altM: number }
+
+// Ce que l'appli reçoit pour dessiner elle-même le profil gradué (voir
+// grade_colors.dart côté Dart) : des points bruts + une pente déjà lissée par
+// segment, jamais un chemin SVG ni une couleur toute faite — l'appli recalcule
+// sa propre mise à l'échelle 0-100 et sa propre table de couleurs, à la manière
+// de zone_colors.dart pour le cardio/la puissance.
+export interface CompanionClimbProfile {
+  type: 'climb_profile'
+  id: number                    // = climb.startIdx, clé de dédoublonnage stable pour ce col
+  gainM: number
+  lengthM: number
+  avgGrade: number
+  category: string | null
+  points: CompanionClimbPoint[]  // s..e ré-échantillonnés, distM relatif au départ du col
+  segmentGrades: number[]        // length = points.length - 1, pente lissée entre points[i] et points[i+1]
+}
+
+// Ré-échantillonne un profil dense par pas fixe, en gardant toujours les deux
+// extrémités. Pur, testable indépendamment de la géométrie de l'itinéraire.
+function decimateClimbProfile(
+  points: CompanionClimbPoint[],
+  grades: number[],
+  maxPoints: number,
+): { points: CompanionClimbPoint[]; segmentGrades: number[] } {
+  if (points.length <= maxPoints) return { points, segmentGrades: grades }
+  const step = Math.ceil((points.length - 1) / (maxPoints - 1))
+  const idx: number[] = []
+  for (let i = 0; i < points.length - 1; i += step) idx.push(i)
+  idx.push(points.length - 1)
+  const outPoints = idx.map((i) => points[i])
+  // La pente d'un segment fusionné est la pente moyenne du tronçon fusionné (delta
+  // altitude / delta distance entre les deux points retenus) — une fenêtre plus
+  // large que gradeForIndex, cohérente avec la résolution affichée, pas un
+  // nouveau calcul de lissage.
+  const outGrades: number[] = []
+  for (let k = 0; k < idx.length - 1; k++) {
+    const a = points[idx[k]]
+    const b = points[idx[k + 1]]
+    const dd = b.distM - a.distM
+    outGrades.push(dd > 0 ? ((b.altM - a.altM) / dd) * 100 : 0)
+  }
+  return { points: outPoints, segmentGrades: outGrades }
+}
+
+// Construit le message publié à l'appli à l'entrée d'un col (voir climbProfileFor
+// dans RouteNavigation.vue, qui le pousse une seule fois par col — au cache-miss
+// sur climb.startIdx). Pur, comme buildClimbProfile.
+export function buildCompanionClimbProfile(
+  climb: Climb,
+  alts: (number | null)[],
+  cumDistM: number[],
+): CompanionClimbProfile {
+  const { startIdx: s, endIdx: e } = climb
+  const startM = cumDistM[s]
+  const rawPoints: CompanionClimbPoint[] = []
+  for (let i = s; i <= e; i++) rawPoints.push({ distM: cumDistM[i] - startM, altM: alts[i] ?? 0 })
+  const rawGrades: number[] = []
+  for (let i = s; i < e; i++) rawGrades.push(gradeForIndex(i, alts, cumDistM))
+  const { points, segmentGrades } = decimateClimbProfile(rawPoints, rawGrades, COMPANION_CLIMB_MAX_POINTS)
+  return {
+    type: 'climb_profile',
+    id: s,
+    gainM: climb.gain,
+    lengthM: climb.lengthM,
+    avgGrade: climb.avgGrade,
+    category: climb.category,
+    points,
+    segmentGrades,
+  }
+}
+
 // ─── Débug ────────────────────────────────────────────────────────────────────
 
 // Profil de col synthétique pour la carte de col (climbInfo). Reproduit la forme des

@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen, companionLinkTarget, companionNav, pushTrainingBudget } from './companionBridge'
+import { installCompanionBridge, inCompanionApp, revealCompanionLinks, companionScreen, companionLinkTarget, companionNav, companionClimbProfile, pushTrainingBudget } from './companionBridge'
 import { isoLocal } from './composables/useTrainingPlan'
-import { navStateFor } from './navHelpers'
+import { navStateFor, buildCompanionClimbProfile } from './navHelpers'
 import type { TurnHint } from './navHelpers'
+import type { Climb } from './routeHelpers'
 import { companionStore } from './stores/companionStore'
 
 // Le pont installe une fonction globale que l'application mobile appelle depuis son
@@ -148,6 +149,29 @@ describe('companionBridge', () => {
     it('ne fait rien dans un navigateur ordinaire', () => {
       // Pas de canal : la veille reste un simple voile noir, sans erreur.
       expect(() => companionScreen('dimmed')).not.toThrow()
+    })
+  })
+
+  describe('companionClimbProfile', () => {
+    const climb: Climb = {
+      startIdx: 0, endIdx: 4, gain: 100, lengthM: 4000,
+      avgGrade: 2.5, category: '4', startKm: 0, endKm: 4,
+    }
+    const alts = [500, 525, 550, 575, 600]
+    const cum = [0, 1000, 2000, 3000, 4000]
+
+    it('publie le profil du col tel quel', () => {
+      const sent = fakeChannel()
+
+      companionClimbProfile(buildCompanionClimbProfile(climb, alts, cum))
+
+      expect(JSON.parse(sent[0])).toMatchObject({
+        type: 'climb_profile', id: 0, gainM: 100, lengthM: 4000, category: '4',
+      })
+    })
+
+    it('ne fait rien dans un navigateur ordinaire', () => {
+      expect(() => companionClimbProfile(buildCompanionClimbProfile(climb, alts, cum))).not.toThrow()
     })
   })
 

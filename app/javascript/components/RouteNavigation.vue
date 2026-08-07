@@ -14,7 +14,7 @@ import { fetchRouteToPlace, fetchRouteVia, waypointInsertIndex } from '../navRou
 import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../navReroute'
 import type { Waypoint } from '../navRoute'
 import {
-  textColorOn, moveLngLat, buildClimbProfile, profileYAt, buildTurnChain,
+  textColorOn, moveLngLat, buildClimbProfile, buildCompanionClimbProfile, profileYAt, buildTurnChain,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
   INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep, navStateFor,
   resyncOnTurn, turnLabel, turnsNearTap, turnIcon,
@@ -37,7 +37,7 @@ import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import {
-  companionScreen, companionNav, inCompanionApp,
+  companionScreen, companionNav, companionClimbProfile, inCompanionApp,
   registerOfflineMapsHandlers, pushOfflineMapsState,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
@@ -1327,6 +1327,12 @@ function unloadRoute() {
   alts = []
   cumDistM = []
   climbs = []
+  // Un `startIdx` est un indice dans CE tracé : le prochain trajet chargé peut,
+  // par pure coïncidence, ouvrir un col au même indice numérique. Sans ce reset,
+  // le cache le prendrait pour « déjà affiché » et ne republierait jamais son
+  // climb_profile vers l'appli.
+  profileForStart = -1
+  profileCache = null
   turns = []
   rawHints = []
   turnHint.value = null
@@ -2703,6 +2709,10 @@ function climbProfileFor(climb: Climb): ClimbProfile {
   if (profileForStart !== climb.startIdx || !profileCache) {
     profileForStart = climb.startIdx
     profileCache = buildClimbProfile(climb, alts, cumDistM)
+    // Même garde que le cache local : ce cache-miss est exactement « on vient
+    // d'entrer dans un nouveau col », le seul moment où l'appli a besoin du
+    // profil (voir companionClimbProfile, silencieux hors appli).
+    companionClimbProfile(buildCompanionClimbProfile(climb, alts, cumDistM))
   }
   return profileCache
 }

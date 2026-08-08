@@ -5,7 +5,7 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  canHideBehindMenu, climbLapSeries, fitCells, gridSideOf, isGridLayout, maxSpan,
+  canHideBehindMenu, canMoveCell, climbLapSeries, fitCells, gridSideOf, isGridLayout, maxSpan,
   metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   type Band, type Block, type Catalog, type Cell, type CellSize,
   type CompanionDocument, type Page, type Preset, type Viewport,
@@ -28,7 +28,10 @@ import {
 //
 // Pas de glisser-déposer : on compose ça une fois pour toutes, souvent sur un
 // portable, parfois sur une tablette. Des boutons ↑ ↓ et une grille qu'on tape
-// marchent au doigt comme à la souris, et coûtent le dixième du code.
+// marchent au doigt comme à la souris, et coûtent le dixième du code. Déplacer
+// une cellule déjà posée suit la même règle : un pavé de quatre flèches
+// (`moveCell`) plutôt qu'un glissé, chaque bouton s'éteignant dès que la case
+// visée est prise ou hors grille — la même logique que l'étendue (`maxSpan`).
 //
 // **Ce qu'on pose, on le voit** : le contenu des pages passe par une dialogue de
 // choix à vignettes (`CompanionBlockPicker`), et chaque composant déjà posé est
@@ -455,6 +458,24 @@ function stepSpan(page: Page, axis: 'row' | 'col', delta: number) {
   else cell.col_span = span
 }
 
+// La cellule sélectionnée peut-elle se déplacer d'une case dans ce sens ? Le
+// bouton s'éteint plutôt que de tenter le déplacement et de le refuser après
+// coup — même règle que `spanLimit`.
+function canMove(page: Page, axis: 'row' | 'col', delta: number): boolean {
+  if (!selected.value) return false
+  return canMoveCell(
+    selected.value, page.cells || [], page.rows || 1, page.cols || 1,
+    axis === 'row' ? delta : 0, axis === 'col' ? delta : 0,
+  )
+}
+
+function moveCell(page: Page, axis: 'row' | 'col', delta: number) {
+  if (!canMove(page, axis, delta)) return
+  const cell = selected.value!
+  if (axis === 'row') cell.row += delta
+  else cell.col += delta
+}
+
 function styleFor(page: Page, cell: Cell | null, row: number, col: number) {
   const rowSpan = cell?.row_span || 1
   const colSpan = cell?.col_span || 1
@@ -818,6 +839,43 @@ async function save() {
                      bord de la grille est atteint, si bien que la place libre se
                      voit sans avoir à la calculer. -->
                 <div class="d-flex align-items-end gap-3 mt-2 flex-wrap">
+                  <div>
+                    <div class="small mb-1">{{ t('companion.settings.move_cell') }}</div>
+                    <div class="companion-move-pad" role="group"
+                         :aria-label="t('companion.settings.move_cell')">
+                      <span></span>
+                      <button class="btn btn-sm btn-outline-secondary p-1" type="button"
+                              :disabled="!canMove(page, 'row', -1)"
+                              :aria-label="t('companion.settings.move_up')"
+                              @click="moveCell(page, 'row', -1)">
+                        <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+                      </button>
+                      <span></span>
+                      <button class="btn btn-sm btn-outline-secondary p-1" type="button"
+                              :disabled="!canMove(page, 'col', -1)"
+                              :aria-label="t('companion.settings.move_left')"
+                              @click="moveCell(page, 'col', -1)">
+                        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+                      </button>
+                      <span class="companion-move-center text-body-secondary">
+                        <i class="fa-solid fa-up-down-left-right" aria-hidden="true"></i>
+                      </span>
+                      <button class="btn btn-sm btn-outline-secondary p-1" type="button"
+                              :disabled="!canMove(page, 'col', 1)"
+                              :aria-label="t('companion.settings.move_right')"
+                              @click="moveCell(page, 'col', 1)">
+                        <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+                      </button>
+                      <span></span>
+                      <button class="btn btn-sm btn-outline-secondary p-1" type="button"
+                              :disabled="!canMove(page, 'row', 1)"
+                              :aria-label="t('companion.settings.move_down')"
+                              @click="moveCell(page, 'row', 1)">
+                        <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+                      </button>
+                      <span></span>
+                    </div>
+                  </div>
                   <div v-for="axis in (['row', 'col'] as const)" :key="axis">
                     <div class="small mb-1">{{ t(`companion.settings.${axis}_span`) }}</div>
                     <div class="input-group input-group-sm companion-span">
@@ -1119,5 +1177,28 @@ async function save() {
 .companion-cell.selected {
   outline: 2px solid var(--bs-primary);
   outline-offset: -2px;
+}
+
+/* Le pavé de déplacement d'une cellule : quatre flèches en croix, le centre
+   n'étant qu'un repère visuel. Une grille 3 × 3 plutôt que quatre boutons
+   alignés, pour que la direction se lise d'un coup d'œil, comme sur une
+   manette. */
+.companion-move-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1.75rem);
+  grid-template-rows: repeat(3, 1.75rem);
+  gap: 0.15rem;
+}
+
+.companion-move-pad button {
+  width: 100%;
+  height: 100%;
+}
+
+.companion-move-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
 }
 </style>

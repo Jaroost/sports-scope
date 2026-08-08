@@ -580,6 +580,27 @@ export function maxSpan(
   return limit
 }
 
+// [cell] peut-elle se déplacer de [drow]/[dcol] sans sortir de la grille ni
+// mordre sur une voisine ? Même principe que `maxSpan` — la cellule ne compte
+// pas comme un obstacle pour elle-même — mais on teste ici une case d'arrivée
+// entière plutôt qu'une étendue croissante.
+export function canMoveCell(
+  cell: Cell,
+  cells: Cell[],
+  rows: number,
+  cols: number,
+  drow: number,
+  dcol: number,
+): boolean {
+  const row = cell.row + drow
+  const col = cell.col + dcol
+  if (row < 0 || col < 0 || row + cell.row_span > rows || col + cell.col_span > cols) {
+    return false
+  }
+  const busy = occupancy(cells.filter((other) => other !== cell))
+  return !covered({ ...cell, row, col }).some((key) => busy.has(key))
+}
+
 // Les cellules qui tiennent encore dans une grille de [rows] × [cols].
 //
 // Appelé quand on réduit la grille. Les étendues sont **rognées** — réduire une

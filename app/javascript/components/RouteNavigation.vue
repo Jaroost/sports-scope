@@ -7,9 +7,9 @@ import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
   haversine, bearingBetween, bearingDelta, nearestGeomIndex, nearestGeomIndexPreferring, projectOnRoute,
   lngLatAtDistanceM, sliceLineBetween, maneuverEndIdx, progressFor, activeClimb, gradeForIndex, colorForGrade,
-  buildOffsetDisplayLine, formatDistancePrecise,
+  buildOffsetDisplayLine, formatDistancePrecise, attachClimbNames,
 } from '../routeHelpers'
-import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver } from '../routeHelpers'
+import type { Coord, Climb, LngLat, TurnPoint, VoiceHint, Maneuver, ClimbName } from '../routeHelpers'
 import { fetchRouteToPlace, fetchRouteVia, waypointInsertIndex } from '../navRoute'
 import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../navReroute'
 import type { Waypoint } from '../navRoute'
@@ -556,6 +556,11 @@ let displayWScale: number[] = []
 let alts: (number | null)[] = []
 let cumDistM: number[] = []
 let climbs: Climb[] = []
+// Noms donnés à la main aux cols de CE tracé (routes.climb_names), réappariés à
+// chaque recalcul par attachClimbNames — voir rebuildRouteState. Vide pour une
+// destination ad hoc ou un reroutage hors-trace : attachClimbNames n'y change alors
+// rien.
+let routeClimbNames: ClimbName[] = []
 let turns: TurnPoint[] = []
 let turnsFromBRouter = false
 // Voicehints bruts du tracé (lng/lat/cmd/angle) conservés pour reconstruire les virages
@@ -971,6 +976,7 @@ async function loadSharedRouteData(token: string) {
   routeId = typeof route.id === 'number' ? route.id : null
   routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
   routeVias = []
+  routeClimbNames = Array.isArray(route.climb_names) ? route.climb_names : []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
@@ -992,7 +998,7 @@ function rebuildRouteState(newGeometry: Coord[], hints: VoiceHint[]) {
   alts = geometry.map((c) => c[2] ?? null)
   cumDistM = buildDistancesM(geometry)
   ;({ line: displayLine, wscale: displayWScale } = buildOffsetDisplayLine(geometry, cumDistM))
-  climbs = detectClimbs(alts, cumDistM)
+  climbs = attachClimbNames(detectClimbs(alts, cumDistM), geometry, routeClimbNames)
   companionRouteClimbs(buildCompanionRouteClimbs(climbs, cumDistM))
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
@@ -1277,6 +1283,7 @@ function loadRoute(route: any) {
   routeId = typeof route.id === 'number' ? route.id : null
   routeWaypoints = Array.isArray(route.waypoints) ? route.waypoints : []
   routeVias = []
+  routeClimbNames = Array.isArray(route.climb_names) ? route.climb_names : []
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
@@ -1329,6 +1336,7 @@ function unloadRoute() {
   alts = []
   cumDistM = []
   climbs = []
+  routeClimbNames = []
   companionRouteClimbs(buildCompanionRouteClimbs([], []))
   // Un `startIdx` est un indice dans CE tracé : le prochain trajet chargé peut,
   // par pure coïncidence, ouvrir un col au même indice numérique. Sans ce reset,

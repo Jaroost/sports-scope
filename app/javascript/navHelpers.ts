@@ -678,6 +678,8 @@ export interface CompanionRouteClimb {
   lengthM: number
   avgGrade: number
   category: string | null
+  /** Nom donné à la main (routes.climb_names, cf. attachClimbNames), absent sinon. */
+  name: string | null
 }
 
 // La liste ordonnée des cols du tracé en cours, avec la distance totale du
@@ -708,6 +710,7 @@ export function buildCompanionRouteClimbs(
       lengthM: climb.lengthM,
       avgGrade: climb.avgGrade,
       category: climb.category,
+      name: climb.name || null,
     })),
   }
 }

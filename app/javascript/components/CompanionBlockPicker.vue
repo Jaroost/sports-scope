@@ -58,6 +58,15 @@ const source = ref(props.block?.source || props.catalog.zone_sources[0])
 const series = ref(props.block?.series || 'default')
 const format = ref(props.block?.format || 'hm')
 
+// La couleur de fond et de texte : contrairement à la mesure ou à la source,
+// elle vaut pour n'importe quel genre choisi dans cette dialogue, pas pour un
+// seul groupe — d'où un réglage unique, en tête, plutôt que répété dans
+// chaque `cbpk-group-head`. `null` tant que rien n'est réglé : l'appli garde
+// alors son calcul habituel (couleur de zone, ou gris des cartes) plutôt que
+// de recevoir une couleur qu'on n'a pas choisie.
+const color = ref<string | null>(props.block?.color || null)
+const textColor = ref<string | null>(props.block?.text_color || null)
+
 // Le min/max de la jauge à plage libre : ceux du composant en cours d'édition
 // pour sa propre mesure, sinon le repli de `METRIC_RANGE_DEFAULTS` — un point
 // de départ plausible plutôt que des champs vides. Recalculés à chaque
@@ -119,7 +128,7 @@ const groups = computed(() => {
         key: `${choice.kind}:${choice.mode || ''}`,
         block: blockFor(choice, {
           metric: metric.value, source: source.value, series: series.value, format: format.value,
-          min: min.value, max: max.value,
+          min: min.value, max: max.value, color: color.value, textColor: textColor.value,
         }),
         label: labelOf(choice),
       })) as Tile[]
@@ -217,6 +226,33 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
       <div class="cbpk-body">
         <p class="text-body-secondary small mb-2">{{ t('companion.settings.pick_block_help') }}</p>
         <p v-if="cellNote" class="text-body-secondary small">{{ cellNote }}</p>
+
+        <!-- Le fond et le texte : un seul réglage pour toute la dialogue, quel que
+             soit le genre choisi ensuite — contrairement à la mesure ou à la
+             source, qui sont propres à un groupe. Les vignettes ci-dessous se
+             redessinent aussitôt, comme pour n'importe quel autre réglage ici. -->
+        <div class="cbpk-colors mb-3">
+          <label class="cbpk-color-field small">
+            {{ t('companion.settings.block_color') }}
+            <input type="color" class="form-control form-control-color"
+                   :value="color || '#1f2226'"
+                   @input="color = ($event.target as HTMLInputElement).value">
+          </label>
+          <button v-if="color" type="button" class="btn btn-sm btn-link p-0"
+                  @click="color = null">
+            {{ t('companion.settings.reset_color') }}
+          </button>
+          <label class="cbpk-color-field small">
+            {{ t('companion.settings.block_text_color') }}
+            <input type="color" class="form-control form-control-color"
+                   :value="textColor || '#ffffff'"
+                   @input="textColor = ($event.target as HTMLInputElement).value">
+          </label>
+          <button v-if="textColor" type="button" class="btn btn-sm btn-link p-0"
+                  @click="textColor = null">
+            {{ t('companion.settings.reset_color') }}
+          </button>
+        </div>
 
         <section v-for="group in groups" :key="group.kind" class="cbpk-group">
           <div class="cbpk-group-head">
@@ -401,6 +437,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 }
 .cbpk-range-field input {
   width: 4.5rem;
+}
+
+.cbpk-colors {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.cbpk-color-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0;
+}
+.cbpk-color-field input {
+  width: 2.5rem;
+  padding: 0.15rem;
 }
 
 /* Des vignettes de même taille : on compare des dessins, et deux tailles

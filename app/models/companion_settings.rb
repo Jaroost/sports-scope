@@ -527,7 +527,21 @@ module CompanionSettings
       block["series"] = sanitize_series(raw["series"])
     end
 
+    color = sanitize_hex_color(raw["color"])
+    block["color"] = color if color
+    text_color = sanitize_hex_color(raw["text_color"])
+    block["text_color"] = text_color if text_color
+
     block
+  end
+
+  # `nil` plutôt qu'un repli : contrairement aux capteurs ou au radar, il n'y a pas
+  # de couleur par défaut sensée à imposer — une clé absente laisse simplement
+  # l'appli à son calcul habituel (couleur de zone, ou gris des cartes).
+  def sanitize_hex_color(value)
+    return nil unless value.is_a?(String)
+
+    value.strip.downcase[/\A#[0-9a-f]{6}\z/]
   end
 
   def sanitize_bands(raw)

@@ -44,6 +44,22 @@ const props = defineProps<{
   block: Block
 }>()
 
+// Le fond et le texte réglés dans l'éditeur : valent pour n'importe quel
+// genre de composant, contrairement aux couleurs de zone ou de pente
+// ci-dessous qui restent des données et ne s'en trouvent jamais remplacées.
+// `overrideInk` retombe sur un texte calculé pour rester lisible sur le fond
+// choisi (`textColorOn`, même règle que `foregroundOf` côté appli) quand
+// seul le fond a été réglé — jamais sur du blanc fixe qui disparaîtrait sur
+// un fond clair.
+const overrideBg = computed(() => props.block.color || null)
+const overrideInk = computed(
+  () => props.block.text_color || (overrideBg.value ? textColorOn(overrideBg.value) : null),
+)
+const overrideStyle = computed(() => ({
+  background: overrideBg.value || undefined,
+  color: overrideInk.value || undefined,
+}))
+
 // Ce que ce mode dessine : les branches sont calculées une fois, dans
 // `companionSettings`, parce que la dialogue de choix s'en sert aussi.
 const shape = computed(() => blockShape(props.block))
@@ -100,9 +116,11 @@ const metricZone = computed(() => shape.value.metricZone)
 // d'entraînement (`MetricSample.background`, mutuellement exclusif avec
 // `metricZone` — même règle que `MetricReading.background` côté appli).
 const metricBackground = computed(
-  () => sample.value.background || (metricZone.value ? ZONE_COLORS[metricZone.value] : null),
+  () => overrideBg.value || sample.value.background
+    || (metricZone.value ? ZONE_COLORS[metricZone.value] : null),
 )
 const metricInk = computed(() => {
+  if (overrideInk.value) return overrideInk.value
   if (sample.value.background) return textColorOn(sample.value.background)
   return metricZone.value && DARK_INK.has(metricZone.value) ? '#000' : '#fff'
 })
@@ -266,7 +284,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
            l'appli retombe sur le chiffre plein cadre plutôt que d'inventer un
            maximum. Une vignette qui montrerait des paliers sur la cadence
            promettrait un dessin que le téléphone ne fera jamais. -->
-      <div v-if="shape.metricGauge" class="cbp-card cbp-center">
+      <div v-if="shape.metricGauge" class="cbp-card cbp-center" :style="overrideStyle">
         <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
         <div class="cbp-gauge">
           <span
@@ -283,7 +301,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
            mesure sans zones d'entraînement, sur un min/max réglé dans
            l'éditeur — mêmes paliers, une seule couleur puisqu'aucun d'eux
            n'a de teinte propre. -->
-      <div v-else-if="shape.metricRangeGauge" class="cbp-card cbp-center">
+      <div v-else-if="shape.metricRangeGauge" class="cbp-card cbp-center" :style="overrideStyle">
         <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
         <div class="cbp-gauge">
           <span
@@ -300,7 +318,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
            remplissage jusqu'à la position réelle plutôt que des paliers,
            puisque la plage (min/max de la sortie, ou progression vers
            l'itinéraire) est une vraie progression, pas des seuils. -->
-      <div v-else-if="shape.metricDynamicGauge" class="cbp-card cbp-center">
+      <div v-else-if="shape.metricDynamicGauge" class="cbp-card cbp-center" :style="overrideStyle">
         <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
         <div class="cbp-dyngauge-track">
           <span
@@ -353,7 +371,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
 
     <!-- Temps par zone -- et son pendant « ce tour » (lap_zones), même dessin,
          seul le titre distingue les deux. ----------------------------------- -->
-    <div v-else-if="block.kind === 'zones' || block.kind === 'lap_zones'" class="cbp-card">
+    <div v-else-if="block.kind === 'zones' || block.kind === 'lap_zones'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title">{{ zonesTitle }}</div>
       <div v-if="shape.zonesBar" class="cbp-bar">
         <span
@@ -390,7 +408,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
 
     <!-- Moyennes -- et son pendant « ce tour » (lap_averages). ------------ -->
     <template v-else-if="block.kind === 'averages' || block.kind === 'lap_averages'">
-      <div v-if="!shape.averagesCards" class="cbp-card">
+      <div v-if="!shape.averagesCards" class="cbp-card" :style="overrideStyle">
         <div class="cbp-title">{{ averagesTitle }}</div>
         <div v-for="stat in AVERAGES_SAMPLE" :key="stat.name" class="cbp-line">
           {{ stat.name }} {{ stat.avg }} {{ stat.unit }} ({{ stat.min }} – {{ stat.max }})
@@ -398,7 +416,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
       </div>
       <div v-else class="cbp-stack">
         <div v-for="pair in averagesRows" :key="pair[0].name" class="cbp-row">
-          <div v-for="stat in pair" :key="stat.name" class="cbp-card cbp-half">
+          <div v-for="stat in pair" :key="stat.name" class="cbp-card cbp-half" :style="overrideStyle">
             <div class="cbp-title">{{ stat.name }} ({{ stat.unit }})</div>
             <div class="cbp-stat"><span>Moyen</span><b>{{ stat.avg }}</b></div>
             <div class="cbp-stat"><span>Min</span><b>{{ stat.min }}</b></div>
@@ -411,7 +429,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
     <!-- Bilan du tour : durée, distance, D+, calories, TSS — cinq lignes,
          jamais quatre cartes moyenne/min/max comme « Moyennes » : ce n'est
          pas la même forme, donc pas une variante de la branche au-dessus. -->
-    <div v-else-if="block.kind === 'lap_summary'" class="cbp-card">
+    <div v-else-if="block.kind === 'lap_summary'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title">Bilan du tour</div>
       <template v-if="shape.lapSummaryCards">
         <div v-for="row in LAP_SUMMARY_SAMPLE" :key="row.label" class="cbp-stat">
@@ -429,13 +447,13 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          Clôt le tour courant d'une série et en ouvre un nouveau : un geste
          sec, pas une bascule comme l'enregistrement. -->
     <template v-else-if="block.kind === 'mark_lap'">
-      <div v-if="shape.markLapCompact" class="cbp-card cbp-center">
-        <span class="cbp-action-compact">
+      <div v-if="shape.markLapCompact" class="cbp-card cbp-center" :style="overrideStyle">
+        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
           <i class="fa-solid fa-flag" aria-hidden="true"></i>
         </span>
       </div>
       <div v-else class="cbp-center cbp-plain">
-        <span class="cbp-action-button">
+        <span class="cbp-action-button" :style="overrideStyle">
           <i class="fa-solid fa-flag" aria-hidden="true"></i>
           Marquer un tour
         </span>
@@ -445,12 +463,14 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
     <!-- Enregistrement --------------------------------------------------- -->
     <template v-else-if="block.kind === 'recording'">
       <!-- Compact : l'icône seule, pour une cellule de grille. -->
-      <div v-if="shape.recordingCompact" class="cbp-card cbp-center">
-        <span class="cbp-action-compact"><span class="cbp-rec-dot"></span></span>
+      <div v-if="shape.recordingCompact" class="cbp-card cbp-center" :style="overrideStyle">
+        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
+          <span class="cbp-rec-dot"></span>
+        </span>
       </div>
       <!-- Complet : le bouton large, à portée de pouce sur une route bosselée. -->
       <div v-else class="cbp-center cbp-plain">
-        <span class="cbp-action-button">
+        <span class="cbp-action-button" :style="overrideStyle">
           <span class="cbp-rec-dot"></span>
           Démarrer l'enregistrement
         </span>
@@ -461,13 +481,13 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          Même geste que « Choisir un autre itinéraire » dans le menu ⋮ de
          l'appli, posé directement sur une page plutôt que rangé dedans. -->
     <template v-else-if="block.kind === 'change_route'">
-      <div v-if="shape.changeRouteCompact" class="cbp-card cbp-center">
-        <span class="cbp-action-compact">
+      <div v-if="shape.changeRouteCompact" class="cbp-card cbp-center" :style="overrideStyle">
+        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
         </span>
       </div>
       <div v-else class="cbp-center cbp-plain">
-        <span class="cbp-action-button">
+        <span class="cbp-action-button" :style="overrideStyle">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
           Changer d'itinéraire
         </span>
@@ -479,13 +499,13 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          position restent. Même geste que « Retirer l'itinéraire » dans le
          menu ⋮. -->
     <template v-else-if="block.kind === 'clear_route'">
-      <div v-if="shape.clearRouteCompact" class="cbp-card cbp-center">
-        <span class="cbp-action-compact">
+      <div v-if="shape.clearRouteCompact" class="cbp-card cbp-center" :style="overrideStyle">
+        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
           <i class="fa-solid fa-eraser" aria-hidden="true"></i>
         </span>
       </div>
       <div v-else class="cbp-center cbp-plain">
-        <span class="cbp-action-button">
+        <span class="cbp-action-button" :style="overrideStyle">
           <i class="fa-solid fa-eraser" aria-hidden="true"></i>
           Retirer l'itinéraire
         </span>
@@ -499,13 +519,13 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          L'aperçu ne connaît pas cet état à la composition — il montre donc
          le geste qui pose un tracé, celui qu'on obtient hors navigation. -->
     <template v-else-if="block.kind === 'route'">
-      <div v-if="shape.routeCompact" class="cbp-card cbp-center">
-        <span class="cbp-action-compact">
+      <div v-if="shape.routeCompact" class="cbp-card cbp-center" :style="overrideStyle">
+        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
         </span>
       </div>
       <div v-else class="cbp-center cbp-plain">
-        <span class="cbp-action-button">
+        <span class="cbp-action-button" :style="overrideStyle">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
           Choisir un itinéraire
         </span>
@@ -513,7 +533,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
     </template>
 
     <!-- État de navigation ------------------------------------------------ -->
-    <div v-else-if="block.kind === 'nav_state'" class="cbp-card">
+    <div v-else-if="block.kind === 'nav_state'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title">Navigation</div>
       <div class="cbp-line">21,4 km restants</div>
       <template v-if="shape.navFull">
@@ -528,10 +548,10 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
            plus vite du coin de l'œil, pour la case la plus petite de la
            grille. Rouge : mêmes couleurs que les autres modes du bloc,
            « proche ». Ça n'est plus la jauge de gouttière couchée. -->
-      <div v-if="shape.radarGauge" class="cbp-card cbp-center">
+      <div v-if="shape.radarGauge" class="cbp-card cbp-center" :style="overrideStyle">
         <div class="cbp-radar-square"></div>
       </div>
-      <div v-else-if="shape.radarCount" class="cbp-card cbp-center">
+      <div v-else-if="shape.radarCount" class="cbp-card cbp-center" :style="overrideStyle">
         <!-- Le nombre est ici la donnée du composant, pas un rappel de l'icône
              (contrairement au mode « distance ») : même échelle que le chiffre
              plein cadre qu'il remplace. -->
@@ -540,20 +560,20 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
           <span>×2</span>
         </div>
       </div>
-      <div v-else-if="shape.radarIcons" class="cbp-card cbp-center">
+      <div v-else-if="shape.radarIcons" class="cbp-card cbp-center" :style="overrideStyle">
         <!-- Une icône par véhicule, sans chiffre — le compte se lit d'un coup
              d'œil. -->
         <div class="cbp-radar-icons">
           <i v-for="n in 2" :key="n" class="fa-solid fa-car" aria-hidden="true"></i>
         </div>
       </div>
-      <div v-else-if="shape.radarCompact" class="cbp-card cbp-center">
+      <div v-else-if="shape.radarCompact" class="cbp-card cbp-center" :style="overrideStyle">
         <!-- Les mêmes mètres que le mode « distance », sans l'icône ni le
              ×N : rien que le chiffre, pour la cellule qui n'a pas la hauteur
              d'en placer deux lignes. -->
         <div class="cbp-radar-distance">48 m</div>
       </div>
-      <div v-else class="cbp-card cbp-center">
+      <div v-else class="cbp-card cbp-center" :style="overrideStyle">
         <!-- L'icône part la première dans une petite case : elle redit ce que la
              couleur dit déjà, alors que le nombre de mètres ne se déduit de
              rien. -->
@@ -566,7 +586,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
     </template>
 
     <!-- Budget de charge -------------------------------------------------- -->
-    <div v-else-if="block.kind === 'training_budget'" class="cbp-card">
+    <div v-else-if="block.kind === 'training_budget'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title cbp-budget-title">
         <i
           v-if="!budgetWeek"
@@ -634,7 +654,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          La liste déroulante qui choisit le tour affiché par les autres
          composants de la page — plaçable comme eux, voir `LapSelectorBlock`
          côté appli. -->
-    <div v-else-if="block.kind === 'lap_selector'" class="cbp-card cbp-selector">
+    <div v-else-if="block.kind === 'lap_selector'" class="cbp-card cbp-selector" :style="overrideStyle">
       <span>Tour 3 (en cours)</span>
       <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
     </div>
@@ -643,7 +663,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          Compact : une ligne, le col en cours. Complet : la liste, avec le
          même repère « en cours / prochain » que l'appli (route_climbs.dart,
          dépôt voisin) — plein pour le premier, en liseré pour le second. -->
-    <div v-else-if="block.kind === 'climb_list'" class="cbp-card">
+    <div v-else-if="block.kind === 'climb_list'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title">Cols du tracé</div>
       <div v-if="!shape.climbListFull" class="cbp-line">
         En cours : {{ climbListCurrent?.figures }}

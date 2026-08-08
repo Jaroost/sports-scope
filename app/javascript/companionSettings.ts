@@ -31,6 +31,14 @@ export interface Block {
   // le chiffre plein cadre, comme avant que ce réglage existe pour ces mesures.
   min?: number
   max?: number
+  // Couleur de fond de la carte et de son texte, en `#rrggbb` — valent pour
+  // n'importe quel genre de composant, contrairement à `metric`/`source` qui
+  // sont propres à un genre. Absentes, l'appli garde son calcul habituel
+  // (couleur de zone si la mesure en porte une, gris des cartes sinon) ; un
+  // fond réglé sans texte choisi retombe sur un texte calculé pour rester
+  // lisible dessus (`foregroundOf`), jamais sur du blanc fixe.
+  color?: string
+  text_color?: string
 }
 
 // Série de tours que l'appli compagnon remplit toute seule, sur les fronts
@@ -201,6 +209,7 @@ export function blockFor(
   choice: BlockChoice,
   params: {
     metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
+    color?: string | null; textColor?: string | null
   },
 ): Block {
   const block: Block = { kind: choice.kind }
@@ -217,6 +226,10 @@ export function blockFor(
   }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
   if (choice.kind === 'mark_lap') block.series = params.series || 'default'
+  // Contrairement à `metric`/`source`, valent pour n'importe quel genre : le
+  // réglage se fait une fois dans la dialogue, pas par groupe.
+  if (params.color) block.color = params.color
+  if (params.textColor) block.text_color = params.textColor
   return block
 }
 

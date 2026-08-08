@@ -7,8 +7,8 @@ import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
-import { POI_CATEGORIES, isPointType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, shareVersionParam } from '../routeHelpers'
+import { POI_CATEGORIES, isPointType, categoryForType } from '../poiCategories'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, shareVersionParam, fillDefaultClimbNames } from '../routeHelpers'
 import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
@@ -786,6 +786,18 @@ async function persist() {
   saving.value = true
   routeStore.error.value = null
   try {
+    // Comble les cols jamais renommés à la main avec leur défaut (lieu d'arrivée) :
+    // sans ça, seul l'éditeur les affiche (displayClimbName), et la navigation, qui ne
+    // recherche pas les localités, n'a rien à transmettre à l'appli compagnon — voir
+    // fillDefaultClimbNames. Mêmes localités que celles déjà utilisées pour l'affichage
+    // par défaut dans RouteBuilderStats.vue.
+    const climbLocalities = placesStore.importantPlaces.value.filter((p) => categoryForType(p.type)?.key === 'localities')
+    const climbNamesToSave = fillDefaultClimbNames(
+      routeStore.detectedClimbs.value,
+      routeStore.geometry.value,
+      climbLocalities,
+      routeStore.climbNames.value,
+    )
     const body = JSON.stringify({
       name: routeStore.name.value.trim(),
       waypoints: routeStore.waypoints.value,
@@ -797,7 +809,7 @@ async function persist() {
       // autant se retrouver enregistrées comme POI de l'itinéraire.
       pois: placesStore.relevantPlaces.value.map(({ name, type, lat, lng }) => ({ name, type, lat, lng })),
       markers: routeStore.markers.value,
-      climb_names: routeStore.climbNames.value,
+      climb_names: climbNamesToSave,
       distance_m: routeStore.distanceM.value,
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,
@@ -825,6 +837,10 @@ async function persist() {
     // dès le premier enregistrement (un itinéraire neuf n'en avait pas encore).
     if (r?.share_token) routeShareToken.value = r.share_token
     routeUpdatedAt.value = r?.updated_at || null
+    // Reflète ce que le serveur a vraiment retenu (dont les défauts qu'on vient de
+    // combler) : sans ça, la liste garderait les cols « par défaut » dans le style
+    // grisé de climb-pill-name-default jusqu'au prochain fetchRoute.
+    routeStore.climbNames.value = Array.isArray(r?.climb_names) ? r.climb_names : climbNamesToSave
     if (!isEditMode() && r?.id) {
       routeStore.currentId.value = r.id
       window.history.replaceState({}, '', `${localePrefix}/routes/${r.id}/edit`)

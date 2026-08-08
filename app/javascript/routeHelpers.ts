@@ -476,6 +476,31 @@ export function displayClimbName(climb: Climb, localities: ClimbLocality[]): str
   return climb.name || nearestLocalityName(climb, localities)
 }
 
+// Comble d'un nom par défaut les cols jamais renommés à la main, au moment de la
+// sauvegarde : dans l'éditeur, displayClimbName calcule ce défaut à l'affichage,
+// mais rien de tout ça ne voyage jusqu'à la navigation (RouteNavigation.vue ne
+// cherche pas les localités) — sans cette étape, l'appli compagnon n'aurait jamais
+// que « Col N » pour un col jamais renommé (route_climbs.dart côté
+// sports-scope-companion). Un col déjà nommé, ou sans localité assez proche, n'est
+// pas touché — pur, comme attachClimbNames : ne modifie ni `climbs` ni `existing`.
+export function fillDefaultClimbNames(
+  climbs: Climb[],
+  geometry: Coord[],
+  localities: ClimbLocality[],
+  existing: ClimbName[],
+): ClimbName[] {
+  const additions: ClimbName[] = []
+  for (const climb of climbs) {
+    if (climb.name) continue
+    const summit = geometry[climb.endIdx]
+    if (!summit) continue
+    const name = nearestLocalityName(climb, localities)
+    if (!name) continue
+    additions.push({ lng: summit[0], lat: summit[1], km: climb.endKm, name })
+  }
+  return additions.length ? [...existing, ...additions] : existing
+}
+
 export function buildGradedSegments(
   coords: LngLat[],
   altitudes: (number | null)[],

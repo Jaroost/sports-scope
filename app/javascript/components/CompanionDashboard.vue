@@ -5,8 +5,8 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  canHideBehindMenu, fitCells, gridSideOf, isGridLayout, maxSpan, metricDropdownLabel,
-  NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
+  canHideBehindMenu, climbLapSeries, fitCells, gridSideOf, isGridLayout, maxSpan,
+  metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   type Band, type Block, type Catalog, type Cell, type CellSize,
   type CompanionDocument, type Page, type Preset, type Viewport,
 } from '../companionSettings'
@@ -106,7 +106,11 @@ const hasMap = computed(() => preset.value.pages.some((page) => page.kind === 'm
 // bouton dans `CompanionBlockPicker`) : c'est une clé de texte libre, et une
 // suggestion évite l'écart d'orthographe entre un bouton et sa page.
 const lapSeries = computed(() => {
-  const keys = new Set<string>()
+  // `climbLapSeries` ('cols') est toujours suggérée, même avant d'avoir été
+  // posée où que ce soit dans le profil : c'est l'appli qui la remplit, pas
+  // un bouton de ce profil, et l'éditeur ne la découvrirait donc jamais
+  // toute seule.
+  const keys = new Set<string>([climbLapSeries])
   const collect = (block?: Block) => {
     if (block?.kind === 'mark_lap') keys.add(block.series || 'default')
   }
@@ -725,6 +729,7 @@ async function save() {
                        class="form-control form-control-sm">
               </label>
               <p class="text-body-secondary small mb-0">{{ t('companion.settings.lap_series_help') }}</p>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.lap_series_cols_hint') }}</p>
             </div>
 
             <!-- Liste défilante ou grille : même choix qu'entre une page

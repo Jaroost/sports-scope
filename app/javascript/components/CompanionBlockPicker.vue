@@ -226,6 +226,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             </label>
           </div>
 
+          <p v-if="group.kind === 'mark_lap'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.lap_series_cols_hint') }}
+          </p>
+
           <div class="cbpk-tiles">
             <button
               v-for="tile in group.tiles"

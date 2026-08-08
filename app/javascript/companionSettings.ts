@@ -22,6 +22,14 @@ export interface Block {
   series?: string
 }
 
+// Série de tours que l'appli compagnon remplit toute seule, sur les fronts
+// montant et descendant d'un col (voir `climbLapSeries` dans
+// `lib/ride/climb_profile.dart` du dépôt voisin) : une page ou un bouton posé
+// sur cette clé n'a besoin d'aucun geste du cycliste. Convention partagée
+// entre les deux dépôts — un nom différent des deux côtés ferait un bouton
+// muet.
+export const climbLapSeries = 'cols'
+
 export interface Cell {
   row: number
   col: number

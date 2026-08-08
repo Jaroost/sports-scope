@@ -335,14 +335,14 @@ const swipeCount = computed(
 // Le nombre de lignes / colonnes, validé **quand on quitte le champ** et non à
 // chaque frappe.
 //
-// À la frappe, c'était intenable au doigt : pour remplacer 6 par 2 on efface
+// À la frappe, c'était intenable au doigt : pour remplacer 9 par 2 on efface
 // d'abord, or un champ vide vaut 0, ramené à 1 — ce qui **jetait au passage
-// toutes les cellules des lignes 2 à 6** (`fitCells` perd une origine hors
+// toutes les cellules des lignes 2 à 9** (`fitCells` perd une origine hors
 // grille, à dessein). Vue réécrivait ensuite « 1 » dans le champ, si bien que le
-// « 2 » tapé ensuite donnait « 12 », borné à 6 : la grille refusait de rétrécir
-// et le contenu était déjà perdu. Sur ordinateur ça passait inaperçu — on
-// sélectionne le chiffre et on tape par-dessus, ce qui ne fait qu'une seule
-// saisie valide.
+// « 2 » tapé ensuite donnait « 12 » plutôt que « 2 » : la grille refusait de
+// rétrécir et le contenu était déjà perdu. Sur ordinateur ça passait
+// inaperçu — on sélectionne le chiffre et on tape par-dessus, ce qui ne fait
+// qu'une seule saisie valide.
 function commitSide(page: Page, axis: 'rows' | 'cols', input: HTMLInputElement) {
   const side = Math.min(gridSideOf(input.value), props.catalog.max_grid_side)
   page[axis] = side

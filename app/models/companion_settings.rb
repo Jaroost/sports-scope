@@ -119,9 +119,9 @@ module CompanionSettings
   # être lus d'un coup d'œil en roulant, ce qui est son seul usage.
   MAX_BAND_METRICS = 4
 
-  # Six lignes ou colonnes au plus : au-delà, les cases ne portent plus un chiffre
+  # Douze lignes ou colonnes au plus : au-delà, les cases ne portent plus un chiffre
   # lisible. Même borne que `GridPageSpec.maxSide` côté Dart.
-  MAX_GRID_SIDE = 6
+  MAX_GRID_SIDE = 12
 
   # La description tient dans le sous-titre d'un `ListTile`, au moment où l'on
   # choisit son profil avant de partir — pas dans un paragraphe.

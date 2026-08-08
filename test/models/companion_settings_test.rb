@@ -194,7 +194,7 @@ class CompanionSettingsTest < ActiveSupport::TestCase
 
   # ── la grille ───────────────────────────────────────────────────────────────
 
-  test "une grille trop grande est ramenée à six côtés" do
+  test "une grille trop grande est ramenée à douze côtés" do
     result = only([ preset("pages" => [ grid_page(rows: 99, cols: 99, cells: [
       cell(0, 0, "speed")
     ]) ]) ])

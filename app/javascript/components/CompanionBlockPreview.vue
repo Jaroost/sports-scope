@@ -34,6 +34,7 @@ import {
   type Block,
 } from '../companionSettings'
 import { colorForGrade } from '../routeHelpers'
+import { textColorOn } from '../navHelpers'
 import { zoneColor, acwrColor } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
@@ -91,12 +92,17 @@ const sample = computed(() => metricSample(props.block.metric))
 // peint le fond dès que la mesure porte une zone, quel que soit celui des deux.
 // Les deux vignettes se ressemblent donc — et l'aperçu ne ment pas là-dessus.
 const metricZone = computed(() => shape.value.metricZone)
-const metricBackground = computed(() =>
-  metricZone.value ? ZONE_COLORS[metricZone.value] : null,
+
+// La pente, sur sa couleur de tranche de difficulté plutôt que sur une zone
+// d'entraînement (`MetricSample.background`, mutuellement exclusif avec
+// `metricZone` — même règle que `MetricReading.background` côté appli).
+const metricBackground = computed(
+  () => sample.value.background || (metricZone.value ? ZONE_COLORS[metricZone.value] : null),
 )
-const metricInk = computed(() =>
-  metricZone.value && DARK_INK.has(metricZone.value) ? '#000' : '#fff',
-)
+const metricInk = computed(() => {
+  if (sample.value.background) return textColorOn(sample.value.background)
+  return metricZone.value && DARK_INK.has(metricZone.value) ? '#000' : '#fff'
+})
 
 // La jauge : une case par zone jusqu'à celle du moment, les suivantes éteintes.
 // Des paliers et pas un remplissage continu — un dégradé laisserait croire à une

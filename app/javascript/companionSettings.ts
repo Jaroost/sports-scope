@@ -11,6 +11,8 @@
 // disponible **avant** de proposer l'étendue, si bien qu'on ne peut pas composer
 // ce qui sera jeté.
 
+import { colorForGrade } from './routeHelpers'
+
 export interface Block {
   kind: string
   mode?: string
@@ -319,6 +321,13 @@ export interface MetricSample {
   // La clé de zone (`z1`…`z7`), pour les seules mesures qui en portent une :
   // l'appli peint alors l'aplat de la zone du moment sous le chiffre.
   zone?: string
+  // Couleur de fond directe, pour les mesures qui ne se rangent pas en zones
+  // d'entraînement — la pente, dont la couleur vient de sa tranche de
+  // difficulté (`colorForGrade`, mêmes seuils que le profil altimétrique) et
+  // non des seuils du cycliste. Mutuellement exclusif avec `zone` : côté
+  // appli (`MetricReading.background`, dépôt voisin), aucune mesure n'a
+  // besoin des deux.
+  background?: string
   // L'icône du mode compact, transposée de `MetricId.icon` en FontAwesome.
   icon: string
 }
@@ -345,9 +354,9 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   cadence_max: { value: '112', unit: 'tr/min max', icon: 'fa-solid fa-rotate' },
   ascent: { value: '640 m', unit: 'D+', icon: 'fa-solid fa-arrow-trend-up' },
   altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain' },
-  grade: { value: '7', unit: '% pente', icon: 'fa-solid fa-arrow-up-right-dots' },
-  grade_avg: { value: '5', unit: '% pente moy', icon: 'fa-solid fa-arrow-up-right-dots' },
-  grade_max: { value: '14', unit: '% pente max', icon: 'fa-solid fa-arrow-up-right-dots' },
+  grade: { value: '7', unit: '% pente', background: colorForGrade(7), icon: 'fa-solid fa-arrow-up-right-dots' },
+  grade_avg: { value: '5', unit: '% pente moy', background: colorForGrade(5), icon: 'fa-solid fa-arrow-up-right-dots' },
+  grade_max: { value: '14', unit: '% pente max', background: colorForGrade(14), icon: 'fa-solid fa-arrow-up-right-dots' },
   calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire' },
   calories_per_hour: { value: '510', unit: 'kcal/h', icon: 'fa-solid fa-fire' },
   tss: { value: '54', unit: 'TSS', icon: 'fa-solid fa-chart-column' },

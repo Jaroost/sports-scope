@@ -1651,6 +1651,7 @@ fr:
         nav_state: "État de navigation"
         radar: "Radar"
         training_budget: "Budget de charge"
+        climb_list: "Cols du tracé"
         empty: "Case vide"
       modes:
         big: "Chiffre plein cadre"

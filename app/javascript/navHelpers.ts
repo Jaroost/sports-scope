@@ -664,6 +664,54 @@ export function buildCompanionClimbProfile(
   }
 }
 
+// ─── Liste des cols du tracé pour l'appli compagnon ────────────────────────────
+
+// Un col de la liste : juste de quoi le situer et le comparer aux autres, jamais
+// son profil gradué (CompanionClimbProfile ci-dessus, poussé à part et une seule
+// fois, pour le seul col en cours). `id` reprend `climb.startIdx`, même
+// convention que CompanionClimbProfile.id — une clé stable pour CE tracé, à
+// comparer entre deux entrées, jamais affichée.
+export interface CompanionRouteClimb {
+  id: number
+  startDistM: number
+  gainM: number
+  lengthM: number
+  avgGrade: number
+  category: string | null
+}
+
+// La liste ordonnée des cols du tracé en cours, avec la distance totale du
+// tracé — ce qu'il faut à l'appli pour situer le cycliste sans lui faire
+// redétecter les cols elle-même. Elle recoupe `totalDistM` avec le
+// `remainingM` déjà publié par `nav` pour se placer dans le même repère que
+// `startDistM` (voir `traveledDistM` côté Dart, route_climbs.dart).
+export interface CompanionRouteClimbs {
+  type: 'route_climbs'
+  totalDistM: number
+  climbs: CompanionRouteClimb[]
+}
+
+// Construit le message poussé une fois par (re)chargement de tracé (voir
+// `rebuildRouteState`/`unloadRoute` dans RouteNavigation.vue) — jamais par
+// position, contrairement à `companionNav`. Pur, comme `buildCompanionClimbProfile`.
+export function buildCompanionRouteClimbs(
+  climbs: Climb[],
+  cumDistM: number[],
+): CompanionRouteClimbs {
+  return {
+    type: 'route_climbs',
+    totalDistM: cumDistM.length ? cumDistM[cumDistM.length - 1] : 0,
+    climbs: climbs.map((climb) => ({
+      id: climb.startIdx,
+      startDistM: cumDistM[climb.startIdx],
+      gainM: climb.gain,
+      lengthM: climb.lengthM,
+      avgGrade: climb.avgGrade,
+      category: climb.category,
+    })),
+  }
+}
+
 // ─── Débug ────────────────────────────────────────────────────────────────────
 
 // Profil de col synthétique pour la carte de col (climbInfo). Reproduit la forme des

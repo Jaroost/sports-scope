@@ -1651,6 +1651,7 @@ en:
         nav_state: "Navigation state"
         radar: "Radar"
         training_budget: "Training budget"
+        climb_list: "Route climbs"
         empty: "Empty cell"
       modes:
         big: "Full-frame figure"

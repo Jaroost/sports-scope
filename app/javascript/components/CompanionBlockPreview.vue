@@ -27,11 +27,13 @@ import { computed } from 'vue'
 import {
   AVERAGES_SAMPLE,
   BUDGET_SAMPLE,
+  CLIMB_LIST_SAMPLE,
   LAP_SUMMARY_SAMPLE,
   blockShape,
   metricSample,
   type Block,
 } from '../companionSettings'
+import { colorForGrade } from '../routeHelpers'
 import { zoneColor, acwrColor } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
@@ -217,6 +219,13 @@ const budgetAside = computed(() =>
 )
 
 const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'hui'))
+
+// ── Cols du tracé ────────────────────────────────────────────────────────────
+//
+// Compact ne montre qu'une ligne, celle qui compte le plus — le col en cours,
+// même échantillon que le mode complet — exactement ce que dessine l'appli
+// (`ClimbListCard._compact`, dépôt voisin).
+const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status === 'current'))
 </script>
 
 <template>
@@ -569,6 +578,39 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
       <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
     </div>
 
+    <!-- Cols du tracé -------------------------------------------------------
+         Compact : une ligne, le col en cours. Complet : la liste, avec le
+         même repère « en cours / prochain » que l'appli (route_climbs.dart,
+         dépôt voisin) — plein pour le premier, en liseré pour le second. -->
+    <div v-else-if="block.kind === 'climb_list'" class="cbp-card">
+      <div class="cbp-title">Cols du tracé</div>
+      <div v-if="!shape.climbListFull" class="cbp-line">
+        En cours : {{ climbListCurrent?.figures }}
+      </div>
+      <div
+        v-for="climb in CLIMB_LIST_SAMPLE"
+        v-else
+        :key="climb.label"
+        class="cbp-climb-row"
+        :class="{ 'cbp-climb-row--done': climb.status === 'done' }"
+      >
+        <span class="cbp-dot" :style="{ background: colorForGrade(climb.grade) }"></span>
+        <div class="cbp-climb-body">
+          <div class="cbp-climb-head">
+            <span>{{ climb.label }}</span>
+            <span
+              v-if="climb.status !== 'done'"
+              class="cbp-climb-chip"
+              :class="{ 'cbp-climb-chip--current': climb.status === 'current' }"
+            >
+              {{ climb.status === 'current' ? 'EN COURS' : 'PROCHAIN' }}
+            </span>
+          </div>
+          <div class="cbp-climb-figures">{{ climb.figures }}</div>
+        </div>
+      </div>
+    </div>
+
     <!-- Case vide : un choix de composition, et il se voit comme tel. ------ -->
     <div v-else class="cbp-empty"></div>
   </div>
@@ -692,6 +734,61 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 .cbp-selector i {
   color: rgba(255, 255, 255, 0.7);
   flex-shrink: 0;
+}
+
+/* La liste des cols : un point de la couleur de sa pente moyenne, son
+   libellé, et le repère « en cours / prochain » — même dessin que
+   `ClimbListCard` côté appli. Un col déjà grimpé s'efface plutôt que de
+   disparaître, on garde le compte de ce qui reste. */
+.cbp-climb-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+  margin-top: 0.5em;
+}
+.cbp-climb-row--done {
+  opacity: 0.5;
+}
+.cbp-climb-row .cbp-dot {
+  border-radius: 50%;
+  margin-top: 0.35em;
+}
+.cbp-climb-body {
+  flex: 1;
+  min-width: 0;
+}
+.cbp-climb-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.cbp-climb-head span:first-child {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cbp-climb-chip {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: 700;
+  padding: 0.1em 0.5em;
+  border-radius: 0.5em;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.8);
+}
+.cbp-climb-chip--current {
+  background: #f97316;
+  border-color: transparent;
+  color: #fff;
+}
+.cbp-climb-figures {
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Le chiffre aussi grand que la case le permet — c'est ce qu'on lit à 30 km/h

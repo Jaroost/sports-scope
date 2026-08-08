@@ -402,6 +402,15 @@ export const LAP_SUMMARY_SAMPLE = [
   { label: 'TSS', value: '24' },
 ]
 
+// Trois cols plausibles pour la vignette : un déjà grimpé (grisé), un en
+// cours (repère plein), un à venir (repère en liseré) — les trois états que
+// `climbStatusOf` distingue côté appli (route_climbs.dart).
+export const CLIMB_LIST_SAMPLE = [
+  { label: 'Col 1', figures: '4,1 km · 260 m D+ · 6 % moy', grade: 6, status: 'done' as const },
+  { label: 'Col 2 · Cat. 2', figures: '6,8 km · 480 m D+ · 7 % moy', grade: 7, status: 'current' as const },
+  { label: 'Col 3', figures: '2,3 km · 140 m D+ · 6 % moy', grade: 6, status: 'next' as const },
+]
+
 // Le tiret et pas un chiffre inventé quand la mesure est inconnue de cette
 // version : c'est **exactement** ce que le téléphone affichera d'une mesure
 // qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
@@ -463,6 +472,7 @@ export interface BlockShape {
   radarIcons: boolean
   radarCompact: boolean
   budgetWeek: boolean
+  climbListFull: boolean
 }
 
 export function blockShape(block: Block): BlockShape {
@@ -501,6 +511,9 @@ export function blockShape(block: Block): BlockShape {
     radarIcons: block.kind === 'radar' && block.mode === 'icons',
     radarCompact: block.kind === 'radar' && block.mode === 'compact',
     budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
+    // La liste entière, ou une seule ligne (le col en cours / prochain) —
+    // même distinction que `navFull` pour `nav_state`.
+    climbListFull: block.kind === 'climb_list' && block.mode !== 'compact',
   }
 }
 

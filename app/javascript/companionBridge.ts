@@ -1,6 +1,6 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { companionStore, type CompanionGears } from './stores/companionStore'
-import type { CompanionClimbProfile, CompanionNavState } from './navHelpers'
+import type { CompanionClimbProfile, CompanionNavState, CompanionRouteClimbs } from './navHelpers'
 import { csrfToken } from './csrf'
 import {
   useTrainingPlan,
@@ -96,6 +96,14 @@ export function companionNav(state: CompanionNavState): void {
 // un message qui répéterait le col déjà affiché.
 export function companionClimbProfile(profile: CompanionClimbProfile): void {
   channel()?.postMessage(JSON.stringify(profile))
+}
+
+// Publie la liste ordonnée des cols du tracé, une fois par (re)chargement (voir
+// buildCompanionRouteClimbs, appelé depuis RouteNavigation.vue). Vidée
+// (climbs: []) quand le tracé est retiré, pour que l'appli n'affiche pas les
+// cols d'un tracé qu'on a quitté.
+export function companionRouteClimbs(climbs: CompanionRouteClimbs): void {
+  channel()?.postMessage(JSON.stringify(climbs))
 }
 
 // Une page web ne peut pas savoir si l'appli est installée : au mieux on sait

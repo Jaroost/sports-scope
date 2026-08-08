@@ -83,6 +83,12 @@ module CompanionSettings
     # le téléphone. D'où son état vide, qu'aucun autre composant n'a — un profil de
     # home-trainer sans WebView n'en recevra jamais, et il doit le dire.
     "training_budget" => %w[day week],
+    # La liste des cols du tracé (D+, longueur, pente moyenne), avec un repère
+    # « en cours / prochain » que l'appli calcule elle-même à partir de la
+    # distance déjà parcourue (cf. companionBridge.ts::companionRouteClimbs).
+    # Comme `training_budget`, ça vient de la page de navigation : un profil
+    # de home-trainer sans WebView n'en recevra jamais.
+    "climb_list" => %w[full compact],
     "empty" => []
   }.freeze
 

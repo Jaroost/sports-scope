@@ -14,7 +14,8 @@ import { fetchRouteToPlace, fetchRouteVia, waypointInsertIndex } from '../navRou
 import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../navReroute'
 import type { Waypoint } from '../navRoute'
 import {
-  textColorOn, moveLngLat, buildClimbProfile, buildCompanionClimbProfile, profileYAt, buildTurnChain,
+  textColorOn, moveLngLat, buildClimbProfile, buildCompanionClimbProfile, buildCompanionRouteClimbs,
+  profileYAt, buildTurnChain,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
   INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep, navStateFor,
   resyncOnTurn, turnLabel, turnsNearTap, turnIcon,
@@ -37,7 +38,7 @@ import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import {
-  companionScreen, companionNav, companionClimbProfile, inCompanionApp,
+  companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, inCompanionApp,
   registerOfflineMapsHandlers, pushOfflineMapsState,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
@@ -992,6 +993,7 @@ function rebuildRouteState(newGeometry: Coord[], hints: VoiceHint[]) {
   cumDistM = buildDistancesM(geometry)
   ;({ line: displayLine, wscale: displayWScale } = buildOffsetDisplayLine(geometry, cumDistM))
   climbs = detectClimbs(alts, cumDistM)
+  companionRouteClimbs(buildCompanionRouteClimbs(climbs, cumDistM))
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
   turnsFromBRouter = hints.length > 0
@@ -1327,6 +1329,7 @@ function unloadRoute() {
   alts = []
   cumDistM = []
   climbs = []
+  companionRouteClimbs(buildCompanionRouteClimbs([], []))
   // Un `startIdx` est un indice dans CE tracé : le prochain trajet chargé peut,
   // par pure coïncidence, ouvrir un col au même indice numérique. Sans ce reset,
   // le cache le prendrait pour « déjà affiché » et ne republierait jamais son

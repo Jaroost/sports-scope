@@ -23,12 +23,12 @@ import type { MarkerKind } from '../routeMarkers'
 import {
   GRADE_BUCKETS, haversine, buildGradedSegments, geomIdxForKm,
   bearingFromRoute, bearingAlongRoute, simplifyTrack, formatDistancePrecise,
-  nearestGeomIndex, buildOffsetDisplayLine,
+  nearestGeomIndex, buildOffsetDisplayLine, displayClimbName,
 } from '../routeHelpers'
 import {
   streetViewUrl, checkStreetView, probeStreetViewLink, applyStreetViewState,
 } from '../streetView'
-import type { Climb, Coord, LngLat } from '../routeHelpers'
+import type { Climb, ClimbLocality, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 import { createScaledMarkerGroup, mergeOverlappingMarkers, MARKER_SCALE_VAR } from '../mapMarkerGroup'
 import {
@@ -922,6 +922,14 @@ function updateDivergentLayer() {
 
 // ─── Climb markers ────────────────────────────────────────────────────────────
 
+// Localités le long du tracé, pour le nom par défaut d'un col sans nom — mêmes
+// données et même seuil que RouteBuilderStats.vue (RouteBuilder.vue force toujours
+// leur recherche, cf. fetchImportantPlaces), partagés via displayClimbName
+// (routeHelpers.ts) pour rester cohérents entre panneau et carte.
+const climbLocalities = computed<ClimbLocality[]>(() =>
+  placesStore.importantPlaces.value.filter((p) => categoryForType(p.type)?.key === 'localities'),
+)
+
 function installClimbMarkers() {
   climbGroup.clear()
   if (!props.state.showClimbs || routeStore.geometry.value.length < 2) return
@@ -937,7 +945,11 @@ function buildClimbMarkerEl(climb: Climb) {
   const catClass = climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'
   el.className = `climb-marker ${catClass}`
   const lengthStr = climb.lengthM >= 1000 ? `${(climb.lengthM / 1000).toFixed(1)} km` : `${Math.round(climb.lengthM)} m`
-  el.innerHTML = `<i class="fa-solid fa-mountain" aria-hidden="true"></i><span class="climb-marker-stats">${lengthStr}&nbsp;·&nbsp;+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}`
+  const name = displayClimbName(climb, climbLocalities.value)
+  const nameHtml = name
+    ? `<span class="climb-marker-name${climb.name ? '' : ' climb-marker-name-default'}">${escapeHtml(name)}</span>`
+    : ''
+  el.innerHTML = `${nameHtml}<span class="climb-marker-row"><i class="fa-solid fa-mountain" aria-hidden="true"></i><span class="climb-marker-stats">${lengthStr}&nbsp;·&nbsp;+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}</span>`
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
     selectionStore.selectionRange.value = { startKm: climb.startKm, endKm: climb.endKm }
@@ -2455,6 +2467,13 @@ function applyRouteOpacity() {
   }
 }
 watch(() => props.state.routeOpacity, applyRouteOpacity)
+
+// Rafraîchit les marqueurs de col quand leur NOM change — renommage depuis le
+// panneau de stats (routeStore.climbNames), ou arrivée asynchrone des localités
+// qui alimentent le défaut (climbLocalities). Le recalcul des cols eux-mêmes
+// (géométrie, sport…) est déjà suivi explicitement par les appels à
+// installClimbMarkers() après chaque recompute du tracé (RouteBuilder.vue).
+watch([routeStore.climbNames, climbLocalities], () => installClimbMarkers())
 
 function setOverlays(ids: string[]) {
   props.state.overlays = ids

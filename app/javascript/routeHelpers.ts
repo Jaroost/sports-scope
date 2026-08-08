@@ -443,6 +443,39 @@ export function attachClimbNames(climbs: Climb[], geometry: Coord[], names: Clim
   })
 }
 
+// Lieu par défaut d'un col non nommé (« lieu d'arrivée ») : la localité (ville /
+// village / hameau) la plus proche de son sommet le long du tracé — c'est en
+// général le lieu qu'on associe au col (« Col de la Croix », arrivée à la localité
+// éponyme). Décorrélé de placesStore : reçoit les localités déjà filtrées, pour
+// rester utilisable aussi bien dans le panneau de stats que sur les marqueurs
+// carte (RouteBuilderStats.vue, RouteBuilderMap.vue).
+export interface ClimbLocality {
+  name: string
+  /** Position le long du tracé (m), cf. placesStore.Place#distanceM. */
+  distanceM: number
+}
+
+// Écart maximal (m, le long du tracé) toléré entre le sommet d'un col et la
+// localité candidate. Au-delà, aucun lieu n'est assez proche pour être un défaut
+// crédible (recherche désactivée, sommet isolé…) — mieux vaut laisser l'utilisateur
+// saisir à la main que proposer un nom sans rapport.
+export const CLIMB_LOCALITY_MATCH_M = 3000
+
+export function nearestLocalityName(climb: Climb, localities: ClimbLocality[]): string {
+  let best: ClimbLocality | null = null
+  let bestDist = Infinity
+  for (const p of localities) {
+    const d = Math.abs(p.distanceM - climb.endKm * 1000)
+    if (d < bestDist) { bestDist = d; best = p }
+  }
+  return best && bestDist <= CLIMB_LOCALITY_MATCH_M ? best.name : ''
+}
+
+// Nom affiché pour un col : celui enregistré, sinon le défaut (lieu d'arrivée).
+export function displayClimbName(climb: Climb, localities: ClimbLocality[]): string {
+  return climb.name || nearestLocalityName(climb, localities)
+}
+
 export function buildGradedSegments(
   coords: LngLat[],
   altitudes: (number | null)[],

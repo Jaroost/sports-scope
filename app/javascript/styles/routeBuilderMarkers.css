@@ -328,8 +328,9 @@
 }
 .climb-marker {
   display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
   background: rgba(255,255,255,0.96);
   padding: 0.18rem 0.45rem 0.18rem 0.4rem;
   border-radius: 12px;
@@ -346,8 +347,13 @@
   transition: box-shadow 0.1s ease;
 }
 .climb-marker:hover { box-shadow: 0 6px 14px -3px rgba(0,0,0,0.45); }
+.climb-marker-row { display: inline-flex; align-items: center; gap: 0.25rem; }
 .climb-marker i { font-size: 0.74rem; }
 .climb-marker .climb-marker-stats { color: #212529; }
+.climb-marker-name { color: #111827; }
+/* Nom par défaut (lieu d'arrivée), pas encore confirmé par l'utilisateur — cf.
+   .climb-pill-name-default dans RouteBuilderStats.vue, même intention. */
+.climb-marker-name-default { font-style: italic; font-weight: 500; color: #6b7280; }
 .climb-marker .climb-marker-cat {
   background: currentColor;
   color: #fff !important;

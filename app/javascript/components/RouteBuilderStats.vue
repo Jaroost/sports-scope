@@ -3,8 +3,8 @@ import { ref, computed, nextTick } from 'vue'
 import { t } from '../i18n'
 import { routeStore } from '../stores/routeStore'
 import { placesStore } from '../stores/placesStore'
-import { formatKm, formatDistanceShort, formatDuration } from '../routeHelpers'
-import type { Climb } from '../routeHelpers'
+import { formatKm, formatDistanceShort, formatDuration, displayClimbName as displayClimbNameFor } from '../routeHelpers'
+import type { Climb, ClimbLocality } from '../routeHelpers'
 import type { Place } from '../stores/placesStore'
 import { categoryForType } from '../poiCategories'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
@@ -35,28 +35,19 @@ const renamingClimbIdx = ref<number | null>(null)
 const climbNameDraft = ref('')
 const climbNameInputEl = ref<HTMLInputElement | null>(null)
 
-// Défaut proposé pour un col sans nom : la localité (ville/village/hameau) la plus
-// proche de son sommet le long du tracé — c'est en général le lieu qu'on associe au
-// col (« Col de la Croix », arrivée à la localité éponyme). Vide si aucune localité
-// n'est assez proche (recherche désactivée, sommet isolé…) : l'utilisateur saisit
-// alors à la main plutôt que de se voir proposer un nom sans rapport.
-const LOCALITY_MATCH_M = 3000
-function defaultClimbName(climb: Climb): string {
-  let best: Place | null = null
-  let bestDist = Infinity
-  for (const p of placesStore.importantPlaces.value) {
-    if (categoryForType(p.type)?.key !== 'localities') continue
-    const d = Math.abs(p.distanceM - climb.endKm * 1000)
-    if (d < bestDist) { bestDist = d; best = p }
-  }
-  return best && bestDist <= LOCALITY_MATCH_M ? best.name : ''
-}
+// Localités connues le long du tracé — alimente le nom par défaut d'un col sans
+// nom (RouteBuilder.vue force toujours leur recherche, cf. fetchImportantPlaces).
+// Partagé avec RouteBuilderMap.vue via nearestLocalityName/displayClimbName
+// (routeHelpers.ts) pour rester cohérent entre le panneau et les marqueurs carte.
+const climbLocalities = computed<ClimbLocality[]>(() =>
+  placesStore.importantPlaces.value.filter((p) => categoryForType(p.type)?.key === 'localities'),
+)
 
 // Nom affiché pour un col : celui enregistré, sinon le défaut (lieu d'arrivée) —
 // affiché tel quel dans la liste, pas seulement proposé au moment du renommage,
 // sinon un col jamais renommé à la main resterait sans nom visible.
 function displayClimbName(climb: Climb): string {
-  return climb.name || defaultClimbName(climb)
+  return displayClimbNameFor(climb, climbLocalities.value)
 }
 
 // Ref de fonction plutôt que `ref="climbNameInputEl"` : ce champ est un descendant
@@ -70,7 +61,7 @@ function setClimbNameInputRef(el: Element | null) {
 
 async function startClimbRename(idx: number, climb: Climb) {
   renamingClimbIdx.value = idx
-  climbNameDraft.value = climb.name ?? defaultClimbName(climb)
+  climbNameDraft.value = displayClimbName(climb)
   await nextTick()
   climbNameInputEl.value?.focus()
   climbNameInputEl.value?.select()

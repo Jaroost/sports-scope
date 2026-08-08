@@ -1621,6 +1621,9 @@ fr:
       metric: "Mesure"
       mode: "Affichage"
       source: "Source"
+      duration_format: "Format"
+      range_min: "Min"
+      range_max: "Max"
       bands: "Bandeau du bas"
       bands_help: "Les jeux de valeurs entre lesquels un glissé fait défiler, sans changer de page. Quatre cases au plus : au-delà, les chiffres ne se lisent plus d'un coup d'œil en roulant."
       add_band: "Ajouter un jeu"
@@ -1676,6 +1679,9 @@ fr:
         icons: "Icônes"
         day: "Aujourd'hui"
         week: "La semaine"
+      duration_formats:
+        hm: "HH:MM"
+        hms: "HH:MM:SS"
       sources:
         hr: "Cardio"
         power: "Puissance"

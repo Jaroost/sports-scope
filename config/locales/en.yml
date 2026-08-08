@@ -1621,6 +1621,9 @@ en:
       metric: "Metric"
       mode: "Display"
       source: "Source"
+      duration_format: "Format"
+      range_min: "Min"
+      range_max: "Max"
       bands: "Bottom band"
       bands_help: "The value sets a swipe cycles through, without changing page. Four slots at most: beyond that the figures cannot be read at a glance while riding."
       add_band: "Add a set"
@@ -1676,6 +1679,9 @@ en:
         icons: "Icons"
         day: "Today"
         week: "This week"
+      duration_formats:
+        hm: "HH:MM"
+        hms: "HH:MM:SS"
       sources:
         hr: "Heart rate"
         power: "Power"

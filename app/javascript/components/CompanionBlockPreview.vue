@@ -29,6 +29,8 @@ import {
   BUDGET_SAMPLE,
   CLIMB_LIST_SAMPLE,
   LAP_SUMMARY_SAMPLE,
+  RANGE_GAUGE_COLOR,
+  RANGE_GAUGE_SEGMENTS,
   blockShape,
   metricSample,
   type Block,
@@ -86,7 +88,7 @@ const POWER_SHARES = [
   { key: 'z7', share: 0.02, time: '01:27' },
 ]
 
-const sample = computed(() => metricSample(props.block.metric))
+const sample = computed(() => metricSample(props.block.metric, props.block.format))
 
 // L'aplat de zone du mode `big` comme du mode `zone` : côté appli, `MetricView`
 // peint le fond dès que la mesure porte une zone, quel que soit celui des deux.
@@ -113,6 +115,21 @@ const gaugeCells = computed(() => {
     lit: i <= index,
     color: ZONE_COLORS[`z${i + 1}`],
   }))
+})
+
+// La jauge à plage libre : même dessin par paliers que la jauge de zones,
+// mais répartis également entre `block.min` et `block.max` plutôt que sur des
+// seuils réels — d'où une seule couleur au lieu d'une par palier. `null` sur
+// l'un des trois (mesure sans échantillon numérique, min/max pas encore
+// réglés) éteint tous les paliers plutôt que de deviner une position.
+const rangeGaugeCells = computed(() => {
+  const { min, max } = props.block
+  const value = sample.value.numeric
+  const fraction = value != null && min != null && max != null && max > min
+    ? Math.min(Math.max((value - min) / (max - min), 0), 1)
+    : null
+  const lit = fraction == null ? -1 : Math.round(fraction * RANGE_GAUGE_SEGMENTS)
+  return Array.from({ length: RANGE_GAUGE_SEGMENTS }, (_, i) => ({ lit: i < lit }))
 })
 
 // « Ce tour — » en préfixe côté `lap_zones`/`lap_averages` : même dessin que
@@ -251,6 +268,23 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
             :key="i"
             class="cbp-gauge-cell"
             :style="{ background: gaugeCell.lit ? gaugeCell.color : 'rgba(255,255,255,0.12)' }"
+          ></span>
+        </div>
+        <div class="cbp-unit">{{ sample.unit }}</div>
+      </div>
+
+      <!-- Jauge à plage libre : le pendant de la jauge ci-dessus pour une
+           mesure sans zones d'entraînement, sur un min/max réglé dans
+           l'éditeur — mêmes paliers, une seule couleur puisqu'aucun d'eux
+           n'a de teinte propre. -->
+      <div v-else-if="shape.metricRangeGauge" class="cbp-card cbp-center">
+        <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
+        <div class="cbp-gauge">
+          <span
+            v-for="(gaugeCell, i) in rangeGaugeCells"
+            :key="i"
+            class="cbp-gauge-cell"
+            :style="{ background: gaugeCell.lit ? RANGE_GAUGE_COLOR : 'rgba(255,255,255,0.12)' }"
           ></span>
         </div>
         <div class="cbp-unit">{{ sample.unit }}</div>

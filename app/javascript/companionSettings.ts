@@ -22,6 +22,15 @@ export interface Block {
   // absente vaut `'default'`, la seule série que l'export `.fit` de l'appli
   // sait porter (une seule hiérarchie de tours possible dans le format).
   series?: string
+  // `'hm'` (HH:MM) ou `'hms'` (HH:MM:SS) — seulement pour un bloc `metric` dont
+  // la mesure est une durée (voir `isDurationMetric`). Absent vaut `'hm'`, le
+  // seul format que l'appli connaissait avant ce réglage.
+  format?: string
+  // Bornes de la jauge à plage libre (mode `gauge` sur une mesure sans zones
+  // d'entraînement — voir `isRangeGaugeMetric`). Absentes, l'appli retombe sur
+  // le chiffre plein cadre, comme avant que ce réglage existe pour ces mesures.
+  min?: number
+  max?: number
 }
 
 // Série de tours que l'appli compagnon remplit toute seule, sur les fronts
@@ -190,11 +199,22 @@ export function blockChoices(catalog: Catalog): BlockChoice[] {
 // différence entre ce qu'on voit et ce qui part.
 export function blockFor(
   choice: BlockChoice,
-  params: { metric?: string; source?: string; series?: string },
+  params: {
+    metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
+  },
 ): Block {
   const block: Block = { kind: choice.kind }
   if (choice.mode) block.mode = choice.mode
   if (choice.kind === 'metric') block.metric = params.metric
+  if (choice.kind === 'metric' && isDurationMetric(params.metric)) block.format = params.format || 'hm'
+  // Seulement pour la vignette `gauge` : les autres modes ignorent min/max, et
+  // les y poser laisserait une clé morte que l'assainisseur retirerait — la
+  // même règle que `format`, qui lui s'applique à tous les modes parce que la
+  // durée s'écrit pareil dans chacun d'eux.
+  if (choice.kind === 'metric' && choice.mode === 'gauge' && isRangeGaugeMetric(params.metric)) {
+    block.min = params.min
+    block.max = params.max
+  }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
   if (choice.kind === 'mark_lap') block.series = params.series || 'default'
   return block
@@ -330,43 +350,70 @@ export interface MetricSample {
   background?: string
   // L'icône du mode compact, transposée de `MetricId.icon` en FontAwesome.
   icon: string
+  // La même valeur que `value`, non mise en forme — seulement pour les mesures
+  // de `RANGE_GAUGE_METRICS`, où la jauge à plage libre en a besoin pour situer
+  // le chiffre entre `min` et `max` (`value` porte une unité ou une virgule
+  // française, inutilisables pour une position).
+  numeric?: number
 }
 
 const METRIC_SAMPLES: Record<string, MetricSample> = {
   duration: { value: '01:12', unit: 'durée', icon: 'fa-regular fa-clock' },
   moving_time: { value: '01:08', unit: 'en mouvement', icon: 'fa-solid fa-person-biking' },
   pause_time: { value: '00:04', unit: 'Durée pause', icon: 'fa-regular fa-circle-pause' },
-  distance: { value: '38,42 km', unit: 'distance', icon: 'fa-solid fa-ruler-horizontal' },
-  speed: { value: '32', unit: 'km/h', icon: 'fa-solid fa-gauge-high' },
-  speed_avg: { value: '27 km/h', unit: 'Vitesse moyenne', icon: 'fa-solid fa-gauge-high' },
-  speed_max: { value: '61', unit: 'km/h max', icon: 'fa-solid fa-gauge-high' },
+  distance: { value: '38,42 km', unit: 'distance', icon: 'fa-solid fa-ruler-horizontal', numeric: 38.42 },
+  speed: { value: '32', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 32 },
+  speed_avg: { value: '27 km/h', unit: 'Vitesse moyenne', icon: 'fa-solid fa-gauge-high', numeric: 27 },
+  speed_max: { value: '61', unit: 'km/h max', icon: 'fa-solid fa-gauge-high', numeric: 61 },
   heart_rate: { value: '154', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
   hr_zone: { value: 'Z3', unit: 'zone bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
-  hr_avg: { value: '141', unit: 'bpm moy', icon: 'fa-regular fa-heart' },
-  hr_max: { value: '178', unit: 'bpm max', icon: 'fa-regular fa-heart' },
+  hr_avg: { value: '141', unit: 'bpm moy', icon: 'fa-regular fa-heart', numeric: 141 },
+  hr_max: { value: '178', unit: 'bpm max', icon: 'fa-regular fa-heart', numeric: 178 },
   power: { value: '248', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
   power_zone: { value: 'Z3', unit: 'zone W', zone: 'z3', icon: 'fa-solid fa-bolt' },
-  power_avg: { value: '212', unit: 'W moy', icon: 'fa-solid fa-bolt' },
-  power_np: { value: '236', unit: 'W NP', icon: 'fa-solid fa-bolt' },
-  power_max: { value: '744', unit: 'W max', icon: 'fa-solid fa-bolt' },
-  cadence: { value: '88', unit: 'tr/min', icon: 'fa-solid fa-rotate' },
-  cadence_avg: { value: '84', unit: 'tr/min moy', icon: 'fa-solid fa-rotate' },
-  cadence_max: { value: '112', unit: 'tr/min max', icon: 'fa-solid fa-rotate' },
-  ascent: { value: '640 m', unit: 'D+', icon: 'fa-solid fa-arrow-trend-up' },
-  altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain' },
-  grade: { value: '7', unit: '% pente', background: colorForGrade(7), icon: 'fa-solid fa-arrow-up-right-dots' },
-  grade_avg: { value: '5', unit: '% pente moy', background: colorForGrade(5), icon: 'fa-solid fa-arrow-up-right-dots' },
-  grade_max: { value: '14', unit: '% pente max', background: colorForGrade(14), icon: 'fa-solid fa-arrow-up-right-dots' },
-  calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire' },
-  calories_per_hour: { value: '510', unit: 'kcal/h', icon: 'fa-solid fa-fire' },
-  tss: { value: '54', unit: 'TSS', icon: 'fa-solid fa-chart-column' },
+  power_avg: { value: '212', unit: 'W moy', icon: 'fa-solid fa-bolt', numeric: 212 },
+  power_np: { value: '236', unit: 'W NP', icon: 'fa-solid fa-bolt', numeric: 236 },
+  power_max: { value: '744', unit: 'W max', icon: 'fa-solid fa-bolt', numeric: 744 },
+  cadence: { value: '88', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
+  cadence_avg: { value: '84', unit: 'tr/min moy', icon: 'fa-solid fa-rotate', numeric: 84 },
+  cadence_max: { value: '112', unit: 'tr/min max', icon: 'fa-solid fa-rotate', numeric: 112 },
+  ascent: { value: '640 m', unit: 'D+', icon: 'fa-solid fa-arrow-trend-up', numeric: 640 },
+  altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain', numeric: 1204 },
+  grade: {
+    value: '7', unit: '% pente', background: colorForGrade(7), icon: 'fa-solid fa-arrow-up-right-dots', numeric: 7,
+  },
+  grade_avg: {
+    value: '5', unit: '% pente moy', background: colorForGrade(5), icon: 'fa-solid fa-arrow-up-right-dots',
+    numeric: 5,
+  },
+  grade_max: {
+    value: '14', unit: '% pente max', background: colorForGrade(14), icon: 'fa-solid fa-arrow-up-right-dots',
+    numeric: 14,
+  },
+  calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire', numeric: 612 },
+  calories_per_hour: { value: '510', unit: 'kcal/h', icon: 'fa-solid fa-fire', numeric: 510 },
+  tss: { value: '54', unit: 'TSS', icon: 'fa-solid fa-chart-column', numeric: 54 },
   gears: { value: '50×15', unit: 'braquet', icon: 'fa-solid fa-gear' },
-  chainring_position: { value: '2', unit: 'plateau', icon: 'fa-solid fa-circle-notch' },
-  sprocket_position: { value: '5', unit: 'pignon', icon: 'fa-solid fa-record-vinyl' },
-  gear_ratio: { value: '3,3', unit: 'rapport', icon: 'fa-solid fa-arrows-left-right' },
-  route_remaining: { value: '21,40 km', unit: 'Distance restante', icon: 'fa-regular fa-flag' },
-  route_remaining_gain: { value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up' },
+  chainring_position: { value: '2', unit: 'plateau', icon: 'fa-solid fa-circle-notch', numeric: 2 },
+  sprocket_position: { value: '5', unit: 'pignon', icon: 'fa-solid fa-record-vinyl', numeric: 5 },
+  gear_ratio: { value: '3,3', unit: 'rapport', icon: 'fa-solid fa-arrows-left-right', numeric: 3.3 },
+  route_remaining: {
+    value: '21,40 km', unit: 'Distance restante', icon: 'fa-regular fa-flag', numeric: 21.4,
+  },
+  route_remaining_gain: {
+    value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up', numeric: 380,
+  },
   route_eta: { value: '00:48', unit: 'temps restant', icon: 'fa-regular fa-clock' },
+}
+
+// La même vignette en `HH:MM:SS`, pour le réglage de format des mesures de
+// durée — uniquement les valeurs, les autres champs (unité, icône, zone) ne
+// changent pas avec le format.
+const DURATION_SAMPLES_HMS: Record<string, string> = {
+  duration: '01:12:47',
+  moving_time: '01:08:32',
+  pause_time: '00:04:15',
+  route_eta: '00:48:20',
 }
 
 // Les quatre mesures du bloc « Moyennes », et leurs trois chiffres — les mêmes
@@ -423,8 +470,12 @@ export const CLIMB_LIST_SAMPLE = [
 // Le tiret et pas un chiffre inventé quand la mesure est inconnue de cette
 // version : c'est **exactement** ce que le téléphone affichera d'une mesure
 // qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
-export function metricSample(metric: string | undefined): MetricSample {
-  return METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
+export function metricSample(metric: string | undefined, format?: string): MetricSample {
+  const sample = METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
+  if (format === 'hms' && metric && metric in DURATION_SAMPLES_HMS) {
+    return { ...sample, value: DURATION_SAMPLES_HMS[metric] }
+  }
+  return sample
 }
 
 // ── Le libellé d'une mesure dans une liste déroulante ───────────────────────
@@ -441,6 +492,82 @@ export function metricSample(metric: string | undefined): MetricSample {
 // regrouper au même endroit une fois triées par libellé, plutôt que
 // dispersées selon leur nom (« Braquet », « Pignon », « Plateau », « Rapport »).
 const DI2_METRICS = new Set(['gears', 'chainring_position', 'sprocket_position', 'gear_ratio'])
+
+// Les mesures de durée, seules à proposer le réglage HH:MM / HH:MM:SS dans
+// la dialogue de choix — même liste que `CompanionSettings::DURATION_METRICS`
+// côté serveur.
+const DURATION_METRICS = new Set(['duration', 'moving_time', 'pause_time', 'route_eta'])
+
+export function isDurationMetric(metric: string | undefined): boolean {
+  return !!metric && DURATION_METRICS.has(metric)
+}
+
+// ── Jauge à plage libre ──────────────────────────────────────────────────────
+//
+// Le mode `gauge` existait déjà, mais seulement pour une mesure qui porte des
+// zones d'entraînement (cardio, puissance) : la plage, ce sont elles, et sans
+// elles l'appli retombait sur le chiffre plein cadre plutôt que d'inventer un
+// maximum. Ici on laisse justement composer ce maximum — min et max se règlent
+// dans la dialogue de choix, pour toute mesure numérique qui n'a pas déjà de
+// zones. Exclues : les mesures de durée (déjà un autre réglage, `format`, et
+// une plage de temps n'a pas le même sens qu'une plage de chiffre), et
+// `gears`, dont la valeur (« 50 × 15 ») n'est pas un nombre unique.
+const RANGE_GAUGE_METRICS = new Set([
+  'distance', 'speed', 'speed_avg', 'speed_max',
+  'hr_avg', 'hr_max', 'power_avg', 'power_np', 'power_max',
+  'cadence', 'cadence_avg', 'cadence_max',
+  'ascent', 'altitude', 'grade', 'grade_avg', 'grade_max',
+  'calories', 'calories_per_hour', 'tss',
+  'chainring_position', 'sprocket_position', 'gear_ratio',
+  'route_remaining', 'route_remaining_gain',
+])
+
+export function isRangeGaugeMetric(metric: string | undefined): boolean {
+  return !!metric && RANGE_GAUGE_METRICS.has(metric)
+}
+
+// Le min/max proposé au premier réglage — un point de départ plausible plutôt
+// que des champs vides, ajusté ensuite par qui compose son tableau de bord.
+export const METRIC_RANGE_DEFAULTS: Record<string, { min: number; max: number }> = {
+  distance: { min: 0, max: 100 },
+  speed: { min: 0, max: 60 },
+  speed_avg: { min: 0, max: 40 },
+  speed_max: { min: 0, max: 80 },
+  hr_avg: { min: 40, max: 200 },
+  hr_max: { min: 40, max: 200 },
+  power_avg: { min: 0, max: 400 },
+  power_np: { min: 0, max: 400 },
+  power_max: { min: 0, max: 1000 },
+  cadence: { min: 0, max: 120 },
+  cadence_avg: { min: 0, max: 120 },
+  cadence_max: { min: 0, max: 150 },
+  ascent: { min: 0, max: 2000 },
+  altitude: { min: 0, max: 3000 },
+  grade: { min: -15, max: 15 },
+  grade_avg: { min: -10, max: 10 },
+  grade_max: { min: -20, max: 20 },
+  calories: { min: 0, max: 3000 },
+  calories_per_hour: { min: 0, max: 1000 },
+  tss: { min: 0, max: 150 },
+  chainring_position: { min: 1, max: 2 },
+  sprocket_position: { min: 1, max: 12 },
+  gear_ratio: { min: 0.5, max: 5 },
+  route_remaining: { min: 0, max: 100 },
+  route_remaining_gain: { min: 0, max: 2000 },
+}
+
+// Le nombre de paliers de la jauge à plage libre — même dessin que la jauge de
+// zones (`gaugeCells`), mais répartis également entre `min` et `max` plutôt
+// que sur des seuils réels. Cinq, comme les zones cardio : c'est la jauge la
+// plus familière de l'appli.
+export const RANGE_GAUGE_SEGMENTS = 5
+
+// Une seule couleur pour tous les paliers allumés : contrairement aux zones,
+// une plage libre n'a pas de teinte propre à chaque tranche — juste « on y
+// est », donc un accent unique. Le vert-bleu du thème appli
+// (`ColorScheme.fromSeed(Colors.teal)`), déjà utilisé pour les boutons
+// d'action, mais éclairci pour rester lisible sur les cases éteintes.
+export const RANGE_GAUGE_COLOR = '#26A69A'
 
 const METRIC_LABEL_OVERRIDES: Record<string, string> = {
   ascent: 'D+',
@@ -463,6 +590,7 @@ export function metricDropdownLabel(metric: string, translate: (key: string) => 
 export interface BlockShape {
   kind: string
   metricGauge: boolean
+  metricRangeGauge: boolean
   metricCompact: boolean
   metricZone: string | null
   metricZoneMode: boolean
@@ -489,9 +617,16 @@ export function blockShape(block: Block): BlockShape {
 
   return {
     kind: block.kind,
-    // La jauge n'existe que pour une mesure qui a des zones — sans plage, l'appli
-    // retombe sur le chiffre plein cadre plutôt que d'inventer un maximum.
+    // La jauge de zones n'existe que pour une mesure qui en a — sans elles,
+    // l'appli retombe sur le chiffre plein cadre plutôt que d'inventer un
+    // maximum.
     metricGauge: block.kind === 'metric' && block.mode === 'gauge' && !!zone,
+    // La jauge à plage libre : le pendant sans zones, sur un min/max réglé
+    // dans l'éditeur plutôt que sur les seuils du cycliste. Les deux jauges
+    // sont mutuellement exclusives — une mesure zonée ignore min/max même
+    // réglés (documents plus anciens compris), et retombe sur `metricGauge`.
+    metricRangeGauge:
+      block.kind === 'metric' && block.mode === 'gauge' && !zone && block.min != null && block.max != null,
     metricCompact: block.kind === 'metric' && block.mode === 'compact',
     // C'est elle qui colore l'aplat, du mode `zone` comme du mode `big` : côté
     // appli, `MetricView` peint le fond dès que la mesure porte une zone.

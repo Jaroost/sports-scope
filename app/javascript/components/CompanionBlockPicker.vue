@@ -24,11 +24,12 @@
 // que ça tient ? — était justement ce qu'elle ne montrait pas. Le rapport de la
 // case et le facteur d'échelle sont donc les mêmes que dans la grille de
 // l'éditeur (`styleFor`), à un budget de tuile près.
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  blockChoices, blockFor, isChoiceOf, metricDropdownLabel, NATURAL_LINE_SIZE, previewScale,
+  blockChoices, blockFor, isChoiceOf, isDurationMetric, isRangeGaugeMetric, METRIC_RANGE_DEFAULTS,
+  metricDropdownLabel, NATURAL_LINE_SIZE, previewScale,
   type Block, type BlockChoice, type Catalog, type CellSize,
 } from '../companionSettings'
 
@@ -55,6 +56,29 @@ const emit = defineEmits<{ close: []; choose: [block: Block] }>()
 const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
 const series = ref(props.block?.series || 'default')
+const format = ref(props.block?.format || 'hm')
+
+// Le min/max de la jauge à plage libre : ceux du composant en cours d'édition
+// pour sa propre mesure, sinon le repli de `METRIC_RANGE_DEFAULTS` — un point
+// de départ plausible plutôt que des champs vides. Recalculés à chaque
+// changement de mesure (`watch` plus bas) : le 0–60 km/h de la vitesse n'a
+// aucun sens sur la cadence.
+function rangeDefaultsFor(m: string): { min: number; max: number } {
+  return METRIC_RANGE_DEFAULTS[m] || { min: 0, max: 100 }
+}
+function initialRangeFor(m: string): { min: number; max: number } {
+  if (props.block?.metric === m && props.block?.min != null && props.block?.max != null) {
+    return { min: props.block.min, max: props.block.max }
+  }
+  return rangeDefaultsFor(m)
+}
+const min = ref(initialRangeFor(metric.value).min)
+const max = ref(initialRangeFor(metric.value).max)
+watch(metric, (value) => {
+  const range = initialRangeFor(value)
+  min.value = range.min
+  max.value = range.max
+})
 
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec le bandeau du bas (`CompanionDashboard.vue`) — voir
@@ -93,7 +117,10 @@ const groups = computed(() => {
       .filter((choice) => choice.kind === kind)
       .map((choice) => ({
         key: `${choice.kind}:${choice.mode || ''}`,
-        block: blockFor(choice, { metric: metric.value, source: source.value, series: series.value }),
+        block: blockFor(choice, {
+          metric: metric.value, source: source.value, series: series.value, format: format.value,
+          min: min.value, max: max.value,
+        }),
         label: labelOf(choice),
       })) as Tile[]
 
@@ -205,6 +232,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 </option>
               </select>
             </label>
+
+            <label v-if="group.kind === 'metric' && isDurationMetric(metric)" class="cbpk-param small">
+              {{ t('companion.settings.duration_format') }}
+              <select v-model="format" class="form-select form-select-sm">
+                <option value="hm">{{ t('companion.settings.duration_formats.hm') }}</option>
+                <option value="hms">{{ t('companion.settings.duration_formats.hms') }}</option>
+              </select>
+            </label>
+
+            <div
+              v-else-if="group.kind === 'metric' && isRangeGaugeMetric(metric)"
+              class="cbpk-param small cbpk-param-range"
+            >
+              <label class="cbpk-range-field">
+                {{ t('companion.settings.range_min') }}
+                <input v-model.number="min" type="number" class="form-control form-control-sm">
+              </label>
+              <label class="cbpk-range-field">
+                {{ t('companion.settings.range_max') }}
+                <input v-model.number="max" type="number" class="form-control form-control-sm">
+              </label>
+            </div>
 
             <label v-else-if="group.kind === 'zones' || group.kind === 'lap_zones'" class="cbpk-param small">
               {{ t('companion.settings.source') }}
@@ -339,6 +388,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 }
 .cbpk-param select {
   width: auto;
+}
+/* Deux champs plutôt qu'un select : chacun garde son propre libellé au lieu
+   de se disputer celui du conteneur. */
+.cbpk-param-range {
+  gap: 0.75rem;
+}
+.cbpk-range-field {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cbpk-range-field input {
+  width: 4.5rem;
 }
 
 /* Des vignettes de même taille : on compare des dessins, et deux tailles

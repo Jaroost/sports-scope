@@ -108,6 +108,34 @@ module CompanionSettings
     route_remaining route_remaining_gain route_eta
   ].freeze
 
+  # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
+  # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.
+  DURATION_METRICS = %w[duration moving_time pause_time route_eta].freeze
+
+  # `hm` en tête : c'est le comportement de l'appli avant ce réglage, donc le
+  # repli d'un document déjà existant ou malformé.
+  DURATION_FORMATS = %w[hm hms].freeze
+
+  # Les mesures éligibles au réglage `min`/`max` d'un bloc `metric` en mode
+  # `gauge` (voir `sanitize_block`) — même liste que
+  # `RANGE_GAUGE_METRICS` côté site (`companionSettings.ts`) et que le
+  # `switch` de `MetricView._gauge` côté appli.
+  #
+  # Exclues : `heart_rate`/`hr_zone`/`power`/`power_zone`, qui ont déjà une
+  # vraie plage (les zones du cycliste) et gardent la jauge existante ; les
+  # mesures de durée (`DURATION_METRICS`), qui ont déjà un autre réglage et
+  # dont la plage n'a pas le même sens qu'un min/max de chiffre ; `gears`,
+  # dont la valeur (« 50 × 15 ») n'est pas un nombre unique.
+  RANGE_GAUGE_METRICS = %w[
+    distance speed speed_avg speed_max
+    hr_avg hr_max power_avg power_np power_max
+    cadence cadence_avg cadence_max
+    ascent altitude grade grade_avg grade_max
+    calories calories_per_hour tss
+    chainring_position sprocket_position gear_ratio
+    route_remaining route_remaining_gain
+  ].freeze
+
   SENSORS = %w[gps barometer light compass radar power heart_rate cadence gears].freeze
 
   # Les types d'itinéraire auxquels un profil peut être lié — mêmes valeurs que
@@ -468,6 +496,17 @@ module CompanionSettings
       return nil unless METRICS.include?(raw["metric"])
 
       block["metric"] = raw["metric"]
+      if DURATION_METRICS.include?(raw["metric"])
+        block["format"] = DURATION_FORMATS.include?(raw["format"]) ? raw["format"] : DURATION_FORMATS.first
+      end
+      # Seulement pour la jauge, et seulement quand min/max sont exploitables :
+      # sinon on ne les écrit pas du tout plutôt que d'inventer une plage,
+      # même règle que la jauge de zones — l'appli retombe alors sur le
+      # chiffre plein cadre.
+      if block["mode"] == "gauge" && RANGE_GAUGE_METRICS.include?(raw["metric"])
+        range = sanitize_range(raw["min"], raw["max"])
+        block.merge!(range) if range
+      end
     when "zones", "lap_zones"
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
     when "mark_lap"
@@ -555,6 +594,17 @@ module CompanionSettings
     return fallback unless value.is_a?(Numeric) && value.positive?
 
     value
+  end
+
+  # `nil` plutôt qu'un repli : contrairement à `positive`, il n'y a pas de
+  # valeur par défaut sensée pour la plage d'une jauge, et une plage à moitié
+  # inventée (un seul des deux bornes gardée) serait pire qu'aucune plage —
+  # `min`/`max` restent alors absents, et le bloc retombe sur le chiffre plein
+  # cadre. La pente peut être négative, donc pas de `positive` ici.
+  def sanitize_range(min, max)
+    return nil unless min.is_a?(Numeric) && max.is_a?(Numeric) && min < max
+
+    { "min" => min.to_f, "max" => max.to_f }
   end
 
   def raw_array(value)

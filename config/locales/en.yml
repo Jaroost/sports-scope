@@ -1683,6 +1683,8 @@ en:
         gears: "Di2 gears"
       metrics:
         grade: "Grade"
+        grade_avg: "Average grade"
+        grade_max: "Max grade"
         duration: "Duration"
         moving_time: "Moving time"
         pause_time: "Pause time"

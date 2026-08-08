@@ -346,6 +346,8 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   ascent: { value: '640 m', unit: 'D+', icon: 'fa-solid fa-arrow-trend-up' },
   altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain' },
   grade: { value: '7', unit: '% pente', icon: 'fa-solid fa-arrow-up-right-dots' },
+  grade_avg: { value: '5', unit: '% pente moy', icon: 'fa-solid fa-arrow-up-right-dots' },
+  grade_max: { value: '14', unit: '% pente max', icon: 'fa-solid fa-arrow-up-right-dots' },
   calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire' },
   calories_per_hour: { value: '510', unit: 'kcal/h', icon: 'fa-solid fa-fire' },
   tss: { value: '54', unit: 'TSS', icon: 'fa-solid fa-chart-column' },

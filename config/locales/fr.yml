@@ -1683,6 +1683,8 @@ fr:
         gears: "Vitesses Di2"
       metrics:
         grade: "Pente"
+        grade_avg: "Pente moyenne"
+        grade_max: "Pente max"
         duration: "Durée"
         moving_time: "Temps en mouvement"
         pause_time: "Durée pause"

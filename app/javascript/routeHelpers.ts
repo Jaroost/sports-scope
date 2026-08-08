@@ -312,6 +312,8 @@ export interface Climb {
   category: string | null
   startKm: number
   endKm: number
+  /** Nom donné à la main (cf. attachClimbNames), absent si le col n'a pas été nommé. */
+  name?: string
 }
 
 function climbCategory(lengthKm: number, avgGrade: number): string | null {
@@ -386,6 +388,59 @@ export function detectClimbs(
       }
     })
     .filter((c) => c.gain >= MIN_GAIN_M && c.lengthM >= MIN_LENGTH_M && c.avgGrade >= MIN_GRADE)
+}
+
+// Nom donné à la main à un col, enregistré avec l'itinéraire (routes.climb_names).
+// Ancré par coordonnées (le sommet au moment du renommage) et non par index de
+// géométrie : detectClimbs recalcule les cols à chaque affichage (tracé retouché,
+// seuils de détection changés…), un index ne survivrait pas au recalcul. `km`
+// (position le long du tracé au moment du renommage) lève l'ambiguïté d'un aller-
+// retour ou d'une boucle qui repasse près d'un sommet déjà grimpé — cf.
+// CLIMB_NAME_KM_TOLERANCE.
+export interface ClimbName {
+  lng: number
+  lat: number
+  km: number
+  name: string
+}
+
+// Écart maximal (m) toléré entre un nom enregistré et le sommet auquel on le
+// réapparie. Plus large que l'ancrage des voix (MAX_ANCHOR_M, 100 m) : un col est
+// un sommet approximatif (fenêtre de lissage du profil), pas un point BRouter exact,
+// et le tracé a pu être légèrement retouché depuis le renommage.
+export const CLIMB_NAME_ANCHOR_M = 500
+
+// Écart maximal (km) toléré sur la position le long du tracé. Un aller-retour ou une
+// boucle peut repasser à quelques dizaines de mètres d'un sommet déjà grimpé, sans
+// rapport avec lui : la seule distance à vol d'oiseau ne suffit pas à départager deux
+// cols distincts qui partagent presque le même point (cf. route avec un col en
+// aller ET au retour, sommets à 55 m l'un de l'autre mais à 120 km d'écart sur le
+// tracé). Assez large pour absorber le glissement de km qu'une retouche du tracé
+// PLUS TÔT peut provoquer sur tout ce qui suit.
+export const CLIMB_NAME_KM_TOLERANCE = 5
+
+// Réapparie les noms enregistrés aux cols fraîchement détectés, par plus proche
+// sommet — sous la double contrainte spatiale (CLIMB_NAME_ANCHOR_M) ET de position
+// le long du tracé (CLIMB_NAME_KM_TOLERANCE) — appariement glouton, sans réutiliser
+// un nom déjà pris. Pure : ne modifie ni `climbs` ni `names`.
+export function attachClimbNames(climbs: Climb[], geometry: Coord[], names: ClimbName[]): Climb[] {
+  if (!names.length) return climbs
+  const used = new Set<number>()
+  return climbs.map((c) => {
+    const summit = geometry[c.endIdx]
+    if (!summit) return c
+    let bestIdx = -1
+    let bestDist = Infinity
+    names.forEach((n, i) => {
+      if (used.has(i)) return
+      if (Math.abs(c.endKm - n.km) > CLIMB_NAME_KM_TOLERANCE) return
+      const d = haversine(summit, [n.lng, n.lat])
+      if (d < bestDist) { bestDist = d; bestIdx = i }
+    })
+    if (bestIdx < 0 || bestDist > CLIMB_NAME_ANCHOR_M) return c
+    used.add(bestIdx)
+    return { ...c, name: names[bestIdx].name }
+  })
 }
 
 export function buildGradedSegments(

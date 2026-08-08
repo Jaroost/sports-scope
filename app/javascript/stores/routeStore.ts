@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
-import { haversine, detectClimbs, computeGainLoss, buildDistancesM, formatDuration } from '../routeHelpers'
-import type { Coord, Climb, VoiceHint } from '../routeHelpers'
+import { haversine, detectClimbs, attachClimbNames, CLIMB_NAME_ANCHOR_M, CLIMB_NAME_KM_TOLERANCE, computeGainLoss, buildDistancesM, formatDuration } from '../routeHelpers'
+import type { Coord, Climb, ClimbName, VoiceHint } from '../routeHelpers'
 import { userPreferences, speedForSport, routeProfileForSport, setActiveSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { isProfileValidForSport } from '../brouter'
@@ -22,6 +22,10 @@ class RouteStore {
   // enregistrés avec l'itinéraire (colonne `routes.markers`). Distincts des POI
   // Overpass, cf. routeMarkers.ts.
   readonly markers = ref<RouteMarker[]>([])
+  // Noms donnés à la main aux cols détectés (colonne `routes.climb_names`). Ancrés
+  // par coordonnées, réappariés aux cols recalculés à chaque affichage — cf.
+  // attachClimbNames dans routeHelpers.ts.
+  readonly climbNames = ref<ClimbName[]>([])
   readonly distanceM = ref(0)
   readonly elevGainM = ref(0)
   readonly elevLossM = ref(0)
@@ -76,8 +80,40 @@ class RouteStore {
     void this.sport.value
     const altitudes = g.map((c) => c[2])
     const distances = buildDistancesM(g)
-    return detectClimbs(altitudes, distances)
+    return attachClimbNames(detectClimbs(altitudes, distances), g, this.climbNames.value)
   })
+
+  // Enregistre (ou efface, si `name` est vide) le nom d'un col. Réancre sur son
+  // sommet courant (geometry[climb.endIdx]) : réutilise l'entrée existante la plus
+  // proche si le col était déjà nommé (renommage), sinon en crée une nouvelle.
+  setClimbName(climb: Climb, name: string) {
+    const summit = this.geometry.value[climb.endIdx]
+    if (!summit) return
+    const trimmed = name.trim()
+    let bestIdx = -1
+    let bestDist = Infinity
+    this.climbNames.value.forEach((n, i) => {
+      // Même double contrainte que attachClimbNames : sur un aller-retour ou une
+      // boucle, un sommet déjà nommé peut se trouver à quelques mètres d'un AUTRE
+      // col, à des dizaines de km sur le tracé — la seule proximité spatiale
+      // renommerait alors le mauvais col.
+      if (Math.abs(climb.endKm - n.km) > CLIMB_NAME_KM_TOLERANCE) return
+      const d = haversine(summit, [n.lng, n.lat])
+      if (d < bestDist) { bestDist = d; bestIdx = i }
+    })
+    const matched = bestIdx >= 0 && bestDist <= CLIMB_NAME_ANCHOR_M
+    if (!trimmed) {
+      if (matched) this.climbNames.value = this.climbNames.value.filter((_, i) => i !== bestIdx)
+      return
+    }
+    if (matched) {
+      this.climbNames.value = this.climbNames.value.map((n, i) =>
+        i === bestIdx ? { ...n, name: trimmed, km: climb.endKm } : n,
+      )
+    } else {
+      this.climbNames.value = [...this.climbNames.value, { lng: summit[0], lat: summit[1], km: climb.endKm, name: trimmed }]
+    }
+  }
 
   // Change la catégorie d'activité et réaligne sur les réglages du profil pour ce
   // sport : vitesse moyenne, profil de routage, et tout ce que lisent les modules
@@ -132,6 +168,7 @@ class RouteStore {
     this.waypoints.value = []
     this.voiceHints.value = []
     this.markers.value = []
+    this.climbNames.value = []
     this.distanceM.value = 0
     this.elevGainM.value = 0
     this.elevLossM.value = 0

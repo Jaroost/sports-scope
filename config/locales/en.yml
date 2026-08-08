@@ -1367,6 +1367,8 @@ en:
     marker_start: "Start"
     marker_finish: "Finish"
     marker_parking: "Parking"
+    climb_rename_hint: "Name this climb"
+    climb_name_placeholder: "Climb name"
     copy_latitude: "Copy latitude"
     copy_longitude: "Copy longitude"
     komoot_waypoint_limit: "Your route has %{count} points, but Komoot only accepts 20 via URL. The route will be simplified while keeping the start and end. Continue?"

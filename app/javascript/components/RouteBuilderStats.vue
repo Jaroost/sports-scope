@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { t } from '../i18n'
 import { routeStore } from '../stores/routeStore'
 import { placesStore } from '../stores/placesStore'
@@ -26,6 +26,65 @@ const emit = defineEmits<{
 // Repliée par défaut : la liste des cols peut être longue et repousser le reste des
 // stats hors de vue ; l'en-tête suffit à annoncer combien il y en a.
 const climbsExpanded = ref(false)
+
+// ── Nom des cols ─────────────────────────────────────────────────────────────
+// Un seul col en édition à la fois (index dans detectedClimbs) — la liste est
+// recalculée à chaque changement de géométrie, mais l'index reste stable le temps
+// d'une saisie.
+const renamingClimbIdx = ref<number | null>(null)
+const climbNameDraft = ref('')
+const climbNameInputEl = ref<HTMLInputElement | null>(null)
+
+// Défaut proposé pour un col sans nom : la localité (ville/village/hameau) la plus
+// proche de son sommet le long du tracé — c'est en général le lieu qu'on associe au
+// col (« Col de la Croix », arrivée à la localité éponyme). Vide si aucune localité
+// n'est assez proche (recherche désactivée, sommet isolé…) : l'utilisateur saisit
+// alors à la main plutôt que de se voir proposer un nom sans rapport.
+const LOCALITY_MATCH_M = 3000
+function defaultClimbName(climb: Climb): string {
+  let best: Place | null = null
+  let bestDist = Infinity
+  for (const p of placesStore.importantPlaces.value) {
+    if (categoryForType(p.type)?.key !== 'localities') continue
+    const d = Math.abs(p.distanceM - climb.endKm * 1000)
+    if (d < bestDist) { bestDist = d; best = p }
+  }
+  return best && bestDist <= LOCALITY_MATCH_M ? best.name : ''
+}
+
+// Nom affiché pour un col : celui enregistré, sinon le défaut (lieu d'arrivée) —
+// affiché tel quel dans la liste, pas seulement proposé au moment du renommage,
+// sinon un col jamais renommé à la main resterait sans nom visible.
+function displayClimbName(climb: Climb): string {
+  return climb.name || defaultClimbName(climb)
+}
+
+// Ref de fonction plutôt que `ref="climbNameInputEl"` : ce champ est un descendant
+// d'un élément `v-for`, et Vue transforme alors automatiquement une ref nommée en
+// tableau (un slot par itération), même si un seul élément n'est jamais monté à la
+// fois ici (l'éditeur est en plus sous v-if). Une ref de fonction reçoit l'élément
+// directement, sans cette coercion.
+function setClimbNameInputRef(el: Element | null) {
+  climbNameInputEl.value = el as HTMLInputElement | null
+}
+
+async function startClimbRename(idx: number, climb: Climb) {
+  renamingClimbIdx.value = idx
+  climbNameDraft.value = climb.name ?? defaultClimbName(climb)
+  await nextTick()
+  climbNameInputEl.value?.focus()
+  climbNameInputEl.value?.select()
+}
+
+function confirmClimbRename(climb: Climb) {
+  if (renamingClimbIdx.value === null) return
+  routeStore.setClimbName(climb, climbNameDraft.value)
+  renamingClimbIdx.value = null
+}
+
+function cancelClimbRename() {
+  renamingClimbIdx.value = null
+}
 
 // ── TSS estimé ───────────────────────────────────────────────────────────────
 // Recalculé à chaque changement de tracé, de sport ou de vitesse saisie. `athlete`
@@ -92,23 +151,52 @@ const routeLoad = computed(() => {
           <i :class="climbsExpanded ? 'fa-solid fa-chevron-up' : 'fa-solid fa-chevron-down'" aria-hidden="true"></i>
         </button>
         <template v-if="climbsExpanded">
-          <button
-            v-for="(climb, idx) in routeStore.detectedClimbs.value"
-            :key="idx"
-            type="button"
-            class="climb-pill"
-            @click="emit('select-climb', climb)"
-            @mouseenter="emit('hover-climb', climb)"
-            @mouseleave="emit('hover-climb', null)"
-          >
-            <span class="climb-pill-cat" :class="climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'">
-              {{ climb.category || 'HC' }}
-            </span>
-            <span class="climb-pill-stats">
-              <span>{{ climb.lengthM >= 1000 ? (climb.lengthM / 1000).toFixed(1) + ' km' : Math.round(climb.lengthM) + ' m' }} · +{{ Math.round(climb.gain) }} m</span>
-              <span class="climb-pill-grade">{{ climb.avgGrade.toFixed(1) }}%</span>
-            </span>
-          </button>
+          <div v-for="(climb, idx) in routeStore.detectedClimbs.value" :key="idx" class="climb-item">
+            <div
+              class="climb-pill"
+              role="button"
+              tabindex="0"
+              @click="emit('select-climb', climb)"
+              @keyup.enter="emit('select-climb', climb)"
+              @mouseenter="emit('hover-climb', climb)"
+              @mouseleave="emit('hover-climb', null)"
+            >
+              <span class="climb-pill-cat" :class="climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'">
+                {{ climb.category || 'HC' }}
+              </span>
+              <span class="climb-pill-stats">
+                <span
+                  v-if="displayClimbName(climb)"
+                  class="climb-pill-name"
+                  :class="{ 'climb-pill-name-default': !climb.name }"
+                >{{ displayClimbName(climb) }}</span>
+                <span>{{ climb.lengthM >= 1000 ? (climb.lengthM / 1000).toFixed(1) + ' km' : Math.round(climb.lengthM) + ' m' }} · +{{ Math.round(climb.gain) }} m</span>
+                <span class="climb-pill-grade">{{ climb.avgGrade.toFixed(1) }}%</span>
+              </span>
+              <button
+                v-if="!routeStore.readOnly.value"
+                type="button"
+                class="climb-pill-rename"
+                :title="t('routes.climb_rename_hint')"
+                @click.stop="startClimbRename(idx, climb)"
+              >
+                <i class="fa-solid fa-pen" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div v-if="renamingClimbIdx === idx" class="climb-name-editor">
+              <input
+                :ref="setClimbNameInputRef"
+                v-model="climbNameDraft"
+                type="text"
+                maxlength="60"
+                :placeholder="t('routes.climb_name_placeholder')"
+                @click.stop
+                @keyup.enter="confirmClimbRename(climb)"
+                @keyup.esc="cancelClimbRename"
+                @blur="confirmClimbRename(climb)"
+              />
+            </div>
+          </div>
         </template>
       </template>
 
@@ -194,7 +282,7 @@ const routeLoad = computed(() => {
       </button>
 
       <!-- Lieux -->
-      <template v-if="placesStore.importantPlaces.value.length || placesStore.isFetchingPlaces.value || placesStore.placesFetchFailed.value">
+      <template v-if="placesStore.relevantPlaces.value.length || placesStore.isFetchingPlaces.value || placesStore.placesFetchFailed.value">
         <button
           type="button"
           class="places-section-toggle"
@@ -207,7 +295,7 @@ const routeLoad = computed(() => {
             <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
             {{ placesStore.placesFetchFailed.value || placesStore.placesExpanded.value
               ? t('routes.places_title')
-              : `${placesStore.importantPlaces.value.length} ${t('routes.places_count')}` }}
+              : `${placesStore.relevantPlaces.value.length} ${t('routes.places_count')}` }}
           </span>
           <span v-if="placesStore.isFetchingPlaces.value" class="spinner-border spinner-border-sm text-secondary" aria-hidden="true"></span>
           <i v-else-if="placesStore.placesFetchFailed.value" class="fa-solid fa-rotate-right" aria-hidden="true"></i>
@@ -217,7 +305,7 @@ const routeLoad = computed(() => {
           {{ t('routes.places_error') }}
         </div>
         <template v-if="!placesStore.placesFetchFailed.value && placesStore.placesExpanded.value">
-          <div v-if="placesStore.isFetchingPlaces.value && !placesStore.importantPlaces.value.length" class="places-loading">
+          <div v-if="placesStore.isFetchingPlaces.value && !placesStore.relevantPlaces.value.length" class="places-loading">
             <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
             <span>{{ t('routes.places_loading') }}</span>
           </div>
@@ -391,8 +479,30 @@ const routeLoad = computed(() => {
 }
 .climb-pill:hover { background: #f0fdf4; border-color: #16a34a; }
 .climb-pill-cat { font-weight: 700; font-size: 0.72rem; min-width: 1.5rem; text-align: center; flex-shrink: 0; }
-.climb-pill-stats { display: flex; flex-direction: column; line-height: 1.25; color: #374151; }
+.climb-pill-stats { display: flex; flex-direction: column; line-height: 1.25; color: #374151; flex: 1; min-width: 0; }
+.climb-pill-name { font-weight: 600; color: #14532d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.climb-pill-name-default { font-weight: 500; font-style: italic; color: #6b7280; }
 .climb-pill-grade { color: #6b7280; font-size: 0.73rem; }
+.climb-pill-rename {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  padding: 0.2rem;
+  border-radius: 0.3rem;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+.climb-pill-rename:hover { color: #16a34a; background: rgba(22, 163, 74, 0.12); }
+.climb-name-editor { padding: 0.1rem 0.2rem 0.3rem; }
+.climb-name-editor input {
+  width: 100%;
+  border: 1px solid rgba(22, 163, 74, 0.4);
+  border-radius: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.8rem;
+}
+.climb-name-editor input:focus { outline: none; border-color: #16a34a; box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15); }
 
 .climb-cat-HC    { color: #111827; }
 .climb-cat-1     { color: #b91c1c; }

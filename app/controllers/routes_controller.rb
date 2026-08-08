@@ -166,6 +166,7 @@ class RoutesController < ApplicationController
       voice_hints: src.voice_hints,
       pois: src.pois,
       markers: src.markers,
+      climb_names: src.climb_names,
       distance_m: src.distance_m,
       elevation_gain_m: src.elevation_gain_m,
       elevation_loss_m: src.elevation_loss_m,
@@ -222,6 +223,7 @@ class RoutesController < ApplicationController
     out[:voice_hints] = clean_voice_hints(p[:voice_hints]) if p.key?(:voice_hints)
     out[:pois] = clean_pois(p[:pois]) if p.key?(:pois)
     out[:markers] = clean_markers(p[:markers]) if p.key?(:markers)
+    out[:climb_names] = clean_climb_names(p[:climb_names]) if p.key?(:climb_names)
     out[:distance_m] = p[:distance_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:distance_m)
     out[:elevation_gain_m] = p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_gain_m)
     out[:elevation_loss_m] = p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_loss_m)
@@ -265,6 +267,8 @@ class RoutesController < ApplicationController
   MAX_VOICE_HINTS = 2_000
   MAX_POIS = 2_000
   MAX_MARKERS = 50
+  MAX_CLIMB_NAMES = 200
+  MAX_CLIMB_NAME_LEN = 60
 
   def clean_voice_hints(raw)
     return [] unless raw.is_a?(Array)
@@ -315,6 +319,30 @@ class RoutesController < ApplicationController
       label = (h["label"] || h[:label]).to_s.strip.first(100)
       marker["label"] = label if label.present?
       marker
+    end
+  end
+
+  # Noms donnés à la main aux cols détectés. Ancrés par coordonnées (le sommet du
+  # col au moment du renommage) ET par sa position le long du tracé (`km`) plutôt
+  # que par index de géométrie : les cols sont recalculés à chaque affichage (cf.
+  # detectClimbs côté front), un index ne survivrait pas à un recalcul du tracé. Le
+  # `km` lève l'ambiguïté d'un aller-retour ou d'une boucle qui repasse à quelques
+  # mètres d'un sommet déjà grimpé, sans rapport avec lui — la seule proximité
+  # spatiale ne suffit pas à départager (cf. attachClimbNames, routeHelpers.ts). Une
+  # entrée sans nom (effacée par l'utilisateur) n'est pas conservée.
+  def clean_climb_names(raw)
+    return [] unless raw.is_a?(Array)
+    raw.take(MAX_CLIMB_NAMES).filter_map do |item|
+      h = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
+      next unless h.is_a?(Hash)
+      lat = h["lat"] || h[:lat]
+      lng = h["lng"] || h[:lng]
+      km = h["km"] || h[:km]
+      next unless lat.is_a?(Numeric) && lng.is_a?(Numeric) && km.is_a?(Numeric)
+      next if lat.abs > 90 || lng.abs > 180
+      name = (h["name"] || h[:name]).to_s.strip.first(MAX_CLIMB_NAME_LEN)
+      next if name.blank?
+      { "lat" => lat.to_f, "lng" => lng.to_f, "km" => km.to_f, "name" => name }
     end
   end
 
@@ -405,6 +433,7 @@ class RoutesController < ApplicationController
       voice_hints: route.voice_hints || [],
       pois: route.pois || [],
       markers: route.markers || [],
+      climb_names: route.climb_names || [],
     )
   end
 

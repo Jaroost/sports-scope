@@ -249,14 +249,13 @@ async function fetchImportantPlaces() {
   const geom = routeStore.geometry.value
   if (geom.length < 2) { placesStore.isFetchingPlaces.value = false; return }
 
-  // On ne recherche que les catégories cochées dans le profil. Si aucune n'est
-  // activée, on n'interroge pas Overpass du tout.
+  // On ne recherche que les catégories cochées dans le profil — sauf les localités,
+  // toujours interrogées : le nom par défaut d'un col (RouteBuilderStats, « lieu
+  // d'arrivée ») en dépend même si l'utilisateur n'a pas activé cet affichage. Ce
+  // réglage ne pilote alors plus que leur AFFICHAGE dans le panneau Lieux (cf.
+  // placesStore.relevantPlaces/presentCategories/filteredPlaces), pas leur recherche.
   const types = POI_CATEGORIES.filter((c) => placesStore.search[c.key]).map((c) => c.key)
-  if (types.length === 0) {
-    placesStore.importantPlaces.value = []
-    placesStore.isFetchingPlaces.value = false
-    return
-  }
+  if (!types.includes('localities')) types.push('localities')
   placesStore.isFetchingPlaces.value = true
   placesStore.placesFetchFailed.value = false
 
@@ -509,6 +508,7 @@ async function fetchRoute(id: number) {
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
     routeStore.markers.value = Array.isArray(r.markers) ? r.markers : []
+    routeStore.climbNames.value = Array.isArray(r.climb_names) ? r.climb_names : []
     routeStore.distanceM.value = r.distance_m || 0
     routeStore.elevGainM.value = r.elevation_gain_m || 0
     routeStore.elevLossM.value = r.elevation_loss_m || 0
@@ -560,6 +560,7 @@ async function fetchSharedRoute(token: string) {
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
     routeStore.markers.value = Array.isArray(r.markers) ? r.markers : []
+    routeStore.climbNames.value = Array.isArray(r.climb_names) ? r.climb_names : []
     routeStore.distanceM.value = r.distance_m || 0
     routeStore.elevGainM.value = r.elevation_gain_m || 0
     routeStore.elevLossM.value = r.elevation_loss_m || 0
@@ -790,8 +791,13 @@ async function persist() {
       waypoints: routeStore.waypoints.value,
       geometry: routeStore.geometry.value,
       voice_hints: routeStore.voiceHints.value,
-      pois: placesStore.importantPlaces.value.map(({ name, type, lat, lng }) => ({ name, type, lat, lng })),
+      // `relevantPlaces`, pas la liste brute : les localités sont désormais toujours
+      // interrogées pour nommer les cols par défaut (RouteBuilderStats), même si
+      // l'utilisateur n'a pas activé cet affichage — elles ne doivent pas pour
+      // autant se retrouver enregistrées comme POI de l'itinéraire.
+      pois: placesStore.relevantPlaces.value.map(({ name, type, lat, lng }) => ({ name, type, lat, lng })),
       markers: routeStore.markers.value,
+      climb_names: routeStore.climbNames.value,
       distance_m: routeStore.distanceM.value,
       elevation_gain_m: routeStore.elevGainM.value,
       elevation_loss_m: routeStore.elevLossM.value,

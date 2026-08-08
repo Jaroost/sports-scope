@@ -44,11 +44,23 @@ class PlacesStore {
     }
   }
 
-  // Catégories effectivement présentes dans les résultats — pour n'afficher que
-  // les boutons de filtre pertinents (dans l'ordre du registre).
+  // Résultats correspondant à une catégorie effectivement demandée par le profil
+  // (`search`) — exclut les localités forcées en plus pour le nom par défaut des
+  // cols (RouteBuilderStats, cf. RouteBuilder.vue#fetchImportantPlaces) quand
+  // l'utilisateur n'a pas activé ce POI. C'est cette liste, et non la liste brute,
+  // qui doit alimenter tout ce que l'utilisateur peut voir dans le panneau Lieux.
+  readonly relevantPlaces = computed(() =>
+    this.importantPlaces.value.filter((p) => {
+      const cat = categoryForType(p.type)
+      return cat ? this.search[cat.key] : true
+    }),
+  )
+
+  // Catégories effectivement présentes dans les résultats pertinents — pour
+  // n'afficher que les boutons de filtre pertinents (dans l'ordre du registre).
   readonly presentCategories = computed(() =>
     POI_CATEGORIES.filter((cat) =>
-      this.importantPlaces.value.some((p) => cat.serverTypes.includes(p.type)),
+      this.relevantPlaces.value.some((p) => cat.serverTypes.includes(p.type)),
     ),
   )
 

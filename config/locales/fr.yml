@@ -1367,6 +1367,8 @@ fr:
     marker_start: "Départ"
     marker_finish: "Arrivée"
     marker_parking: "Parking"
+    climb_rename_hint: "Nommer ce col"
+    climb_name_placeholder: "Nom du col"
     copy_latitude: "Copier la latitude"
     copy_longitude: "Copier la longitude"
     komoot_waypoint_limit: "Votre itinéraire contient %{count} points, mais Komoot n'en accepte que 20 via l'URL. Le tracé sera simplifié en conservant le départ et l'arrivée. Continuer ?"

@@ -10,7 +10,7 @@
 // Complémentaire de `sportsScope.navProgress.*` (RouteNavigation), qui mémorise OÙ on en
 // est le long du tracé ; ici on mémorise QUEL tracé.
 
-import type { Coord, LngLat, VoiceHint } from './routeHelpers'
+import type { Coord, LngLat, VoiceHint, ClimbName } from './routeHelpers'
 import type { Waypoint } from './navRoute'
 import type { RouteMarker } from './routeMarkers'
 import type { Sport } from './userPreferences'
@@ -40,6 +40,9 @@ export interface NavSession {
   vias: LngLat[]
   pois: NavSessionPoi[]
   markers: RouteMarker[]
+  /** Noms donnés à la main aux cols (routes.climb_names) — sans elle, un rechargement
+   *  de page (retour dans l'appli, reprise) réapparierait les cols sans aucun nom. */
+  climbNames: ClimbName[]
 }
 
 /** Enregistre la session courante. Best-effort : quota / mode privé ne doit rien casser. */

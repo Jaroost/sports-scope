@@ -43,6 +43,7 @@ function payload(over: Partial<Omit<NavSession, 'v' | 't'>> = {}): Omit<NavSessi
     vias: [],
     pois: [],
     markers: [],
+    climbNames: [],
     ...over,
   }
 }

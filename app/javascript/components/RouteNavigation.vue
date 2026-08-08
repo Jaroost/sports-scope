@@ -1230,6 +1230,7 @@ function persistSession() {
     vias: routeVias,
     pois: offlinePois.value,
     markers: routeMarkersRaw.value,
+    climbNames: routeClimbNames,
   })
 }
 
@@ -1247,6 +1248,9 @@ function restoreSession(): boolean {
   routeId = s.routeId
   routeWaypoints = s.waypoints
   routeVias = s.vias
+  // `Array.isArray` : une session écrite avant l'ajout de ce champ n'en a pas —
+  // sans ce filet, attachClimbNames planterait sur un `undefined.length`.
+  routeClimbNames = Array.isArray(s.climbNames) ? s.climbNames : []
   rebuildRouteState(s.geometry, s.hints)
   offlinePois.value = s.pois
   if (s.pois.length > 0) pois.setRoutePlaces(s.pois)

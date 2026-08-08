@@ -28,6 +28,7 @@ import {
   AVERAGES_SAMPLE,
   BUDGET_SAMPLE,
   CLIMB_LIST_SAMPLE,
+  DYNAMIC_GAUGE_PREVIEW_FRACTION,
   LAP_SUMMARY_SAMPLE,
   RANGE_GAUGE_COLOR,
   RANGE_GAUGE_SEGMENTS,
@@ -131,6 +132,11 @@ const rangeGaugeCells = computed(() => {
   const lit = fraction == null ? -1 : Math.round(fraction * RANGE_GAUGE_SEGMENTS)
   return Array.from({ length: RANGE_GAUGE_SEGMENTS }, (_, i) => ({ lit: i < lit }))
 })
+
+// Le curseur de la jauge dynamique : une position fixe et illustrative
+// (`DYNAMIC_GAUGE_PREVIEW_FRACTION`), l'éditeur n'ayant pas de sortie en
+// cours pour en tirer une vraie plage.
+const dynamicGaugeFraction = computed(() => DYNAMIC_GAUGE_PREVIEW_FRACTION[props.block.metric || ''] ?? 0.5)
 
 // « Ce tour — » en préfixe côté `lap_zones`/`lap_averages` : même dessin que
 // `zones`/`averages`, seul ce qu'on mesure change — depuis l'ouverture du
@@ -285,6 +291,21 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
             :key="i"
             class="cbp-gauge-cell"
             :style="{ background: gaugeCell.lit ? RANGE_GAUGE_COLOR : 'rgba(255,255,255,0.12)' }"
+          ></span>
+        </div>
+        <div class="cbp-unit">{{ sample.unit }}</div>
+      </div>
+
+      <!-- Jauge dynamique : le chiffre, une piste continue, l'unité — un
+           remplissage jusqu'à la position réelle plutôt que des paliers,
+           puisque la plage (min/max de la sortie, ou progression vers
+           l'itinéraire) est une vraie progression, pas des seuils. -->
+      <div v-else-if="shape.metricDynamicGauge" class="cbp-card cbp-center">
+        <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
+        <div class="cbp-dyngauge-track">
+          <span
+            class="cbp-dyngauge-fill"
+            :style="{ width: `${dynamicGaugeFraction * 100}%`, background: RANGE_GAUGE_COLOR }"
           ></span>
         </div>
         <div class="cbp-unit">{{ sample.unit }}</div>
@@ -892,6 +913,28 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   flex: 1;
   height: 0.6em;
   border-radius: 0.15em;
+}
+
+/* Le remplissage de la jauge dynamique : une piste continue, pas des
+   paliers — la plage y est une vraie progression (min/max de la sortie, ou
+   vers l'arrivée), pas des seuils entre lesquels un dégradé mentirait. Plus
+   épaisse que `.cbp-gauge-cell` : c'est elle qui porte l'information ici,
+   pas des paliers à côté d'un chiffre déjà lisible seul — même hauteur que
+   `.cbp-bar`, les deux valant `BlockMetrics.natural.barHeight` côté appli. */
+.cbp-dyngauge-track {
+  position: relative;
+  width: 100%;
+  height: 1.6em;
+  margin: 0.6em 0 0.35em;
+  border-radius: 0.3em;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.cbp-dyngauge-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
 }
 
 /* Une barre unique et non cinq jauges : ce qu'on lit est une proportion, et une

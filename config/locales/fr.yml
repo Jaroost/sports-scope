@@ -1667,6 +1667,7 @@ fr:
         big: "Chiffre plein cadre"
         compact: "Compact"
         gauge: "Jauge"
+        dynamic_gauge: "Jauge dynamique"
         zone: "Aplat de zone"
         bar: "Barre et légende"
         bar_only: "Barre seule"

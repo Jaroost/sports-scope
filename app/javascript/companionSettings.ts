@@ -526,6 +526,33 @@ export function isRangeGaugeMetric(metric: string | undefined): boolean {
   return !!metric && RANGE_GAUGE_METRICS.has(metric)
 }
 
+// ── Jauge dynamique ──────────────────────────────────────────────────────────
+//
+// Le pendant de la jauge à plage libre pour une plage qui ne se règle pas dans
+// l'éditeur : le min et le max observés depuis le départ de la sortie
+// (cadence, cardio, puissance, vitesse, pente), ou la progression vers
+// l'itinéraire chargé (distance, durée) — voir `MetricId.liveRangeOf` côté
+// appli. D'où l'absence de `min`/`max` sur le bloc : rien à régler ici,
+// contrairement à `RANGE_GAUGE_METRICS`.
+const DYNAMIC_GAUGE_METRICS = new Set(['cadence', 'heart_rate', 'power', 'speed', 'grade', 'distance', 'duration'])
+
+export function isDynamicGaugeMetric(metric: string | undefined): boolean {
+  return !!metric && DYNAMIC_GAUGE_METRICS.has(metric)
+}
+
+// La position du curseur dans la vignette : purement illustrative, l'éditeur
+// n'a pas de sortie en cours pour en tirer une vraie — même esprit que
+// `METRIC_SAMPLES`, qui invente déjà les valeurs affichées.
+export const DYNAMIC_GAUGE_PREVIEW_FRACTION: Record<string, number> = {
+  cadence: 0.55,
+  heart_rate: 0.65,
+  power: 0.5,
+  speed: 0.6,
+  grade: 0.7,
+  distance: 0.4,
+  duration: 0.3,
+}
+
 // Le min/max proposé au premier réglage — un point de départ plausible plutôt
 // que des champs vides, ajusté ensuite par qui compose son tableau de bord.
 export const METRIC_RANGE_DEFAULTS: Record<string, { min: number; max: number }> = {
@@ -591,6 +618,7 @@ export interface BlockShape {
   kind: string
   metricGauge: boolean
   metricRangeGauge: boolean
+  metricDynamicGauge: boolean
   metricCompact: boolean
   metricZone: string | null
   metricZoneMode: boolean
@@ -627,6 +655,13 @@ export function blockShape(block: Block): BlockShape {
     // réglés (documents plus anciens compris), et retombe sur `metricGauge`.
     metricRangeGauge:
       block.kind === 'metric' && block.mode === 'gauge' && !zone && block.min != null && block.max != null,
+    // La jauge dynamique : un mode à part entière, pas une variante de
+    // `gauge` — sa plage ne vient ni des zones ni d'un min/max réglé, donc
+    // pas de repli sur `metricGauge`/`metricRangeGauge` à gérer ici. Sans
+    // mesure éligible, la vignette retombe plus bas dans la chaîne (compact,
+    // zone, ou le chiffre plein cadre) — même mécanisme que les deux jauges
+    // ci-dessus sur une mesure qui n'a ni zones ni min/max.
+    metricDynamicGauge: block.kind === 'metric' && block.mode === 'dynamic_gauge' && isDynamicGaugeMetric(block.metric),
     metricCompact: block.kind === 'metric' && block.mode === 'compact',
     // C'est elle qui colore l'aplat, du mode `zone` comme du mode `big` : côté
     // appli, `MetricView` peint le fond dès que la mesure porte une zone.

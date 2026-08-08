@@ -1667,6 +1667,7 @@ en:
         big: "Full-frame figure"
         compact: "Compact"
         gauge: "Gauge"
+        dynamic_gauge: "Dynamic gauge"
         zone: "Zone fill"
         bar: "Bar and legend"
         bar_only: "Bar only"

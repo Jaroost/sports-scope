@@ -37,7 +37,7 @@ module CompanionSettings
   # Le premier mode de chaque liste est **le mode par défaut** — celui sur lequel
   # l'appli retombe quand elle n'en reconnaît pas un. Même ordre des deux côtés.
   BLOCKS = {
-    "metric" => %w[big compact gauge zone],
+    "metric" => %w[big compact gauge zone dynamic_gauge],
     "zones" => %w[bar bar_only legend],
     # Les mêmes répartitions/moyennes, mais du tour choisi sur une page `laps`
     # plutôt que de la sortie entière — mêmes modes, aucune table de plus à
@@ -135,6 +135,17 @@ module CompanionSettings
     chainring_position sprocket_position gear_ratio
     route_remaining route_remaining_gain
   ].freeze
+
+  # Les mesures éligibles au mode `dynamic_gauge` d'un bloc `metric` — même
+  # liste que `DYNAMIC_GAUGE_METRICS` côté site (`companionSettings.ts`) et
+  # que le `switch` de `MetricId.liveRangeOf` côté appli.
+  #
+  # Contrairement à `RANGE_GAUGE_METRICS`, ce mode ne pose pas de `min`/`max`
+  # sur le document : la plage n'est pas réglée dans l'éditeur, elle se lit
+  # dans la sortie en cours (le min/max observé pour cadence/cardio/
+  # puissance/vitesse/pente, la progression vers l'itinéraire chargé pour
+  # distance/durée) — voir `MetricId.liveRangeOf` côté appli.
+  DYNAMIC_GAUGE_METRICS = %w[cadence heart_rate power speed grade distance duration].freeze
 
   SENSORS = %w[gps barometer light compass radar power heart_rate cadence gears].freeze
 
@@ -503,6 +514,9 @@ module CompanionSettings
       # sinon on ne les écrit pas du tout plutôt que d'inventer une plage,
       # même règle que la jauge de zones — l'appli retombe alors sur le
       # chiffre plein cadre.
+      # `dynamic_gauge` n'a rien de plus à assainir ici : sa plage se lit dans
+      # la sortie en cours (`MetricId.liveRangeOf` côté appli), pas dans le
+      # document — poser min/max dessus laisserait une clé morte.
       if block["mode"] == "gauge" && RANGE_GAUGE_METRICS.include?(raw["metric"])
         range = sanitize_range(raw["min"], raw["max"])
         block.merge!(range) if range

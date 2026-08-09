@@ -447,8 +447,8 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          Clôt le tour courant d'une série et en ouvre un nouveau : un geste
          sec, pas une bascule comme l'enregistrement. -->
     <template v-else-if="block.kind === 'mark_lap'">
-      <div v-if="shape.markLapCompact" class="cbp-card cbp-center" :style="overrideStyle">
-        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
+      <div v-if="shape.markLapCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
           <i class="fa-solid fa-flag" aria-hidden="true"></i>
         </span>
       </div>
@@ -463,8 +463,8 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
     <!-- Enregistrement --------------------------------------------------- -->
     <template v-else-if="block.kind === 'recording'">
       <!-- Compact : l'icône seule, pour une cellule de grille. -->
-      <div v-if="shape.recordingCompact" class="cbp-card cbp-center" :style="overrideStyle">
-        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
+      <div v-if="shape.recordingCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
           <span class="cbp-rec-dot"></span>
         </span>
       </div>
@@ -481,8 +481,8 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          Même geste que « Choisir un autre itinéraire » dans le menu ⋮ de
          l'appli, posé directement sur une page plutôt que rangé dedans. -->
     <template v-else-if="block.kind === 'change_route'">
-      <div v-if="shape.changeRouteCompact" class="cbp-card cbp-center" :style="overrideStyle">
-        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
+      <div v-if="shape.changeRouteCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
         </span>
       </div>
@@ -499,8 +499,8 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          position restent. Même geste que « Retirer l'itinéraire » dans le
          menu ⋮. -->
     <template v-else-if="block.kind === 'clear_route'">
-      <div v-if="shape.clearRouteCompact" class="cbp-card cbp-center" :style="overrideStyle">
-        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
+      <div v-if="shape.clearRouteCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
           <i class="fa-solid fa-eraser" aria-hidden="true"></i>
         </span>
       </div>
@@ -519,8 +519,8 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          L'aperçu ne connaît pas cet état à la composition — il montre donc
          le geste qui pose un tracé, celui qu'on obtient hors navigation. -->
     <template v-else-if="block.kind === 'route'">
-      <div v-if="shape.routeCompact" class="cbp-card cbp-center" :style="overrideStyle">
-        <span class="cbp-action-compact" :style="{ color: overrideInk || undefined }">
+      <div v-if="shape.routeCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
           <i class="fa-solid fa-route" aria-hidden="true"></i>
         </span>
       </div>
@@ -1018,6 +1018,10 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   max-width: 100%;
   overflow: hidden;
 }
+/* Fond par défaut #1F2226 — celui de `Material(color: color ?? const
+   Color(0xFF1F2226))` côté appli (`action_button.dart`/`mark_lap_block.dart`) —
+   pour que la couleur réglée dans l'éditeur se voie sur le bouton lui-même,
+   plutôt que sur la carte qui l'entoure et qui l'aurait alors noyé dedans. */
 .cbp-action-compact {
   display: inline-flex;
   align-items: center;
@@ -1026,6 +1030,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   height: 2.6em;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.24);
+  background: #1f2226;
   color: #fff;
 }
 .cbp-rec-dot {

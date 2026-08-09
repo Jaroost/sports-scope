@@ -56,6 +56,7 @@ import {
 } from '../composables/useNavCamera'
 import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
+import { useTrackOpacityDrag } from '../composables/useTrackOpacityDrag'
 import { useSleepHold } from '../composables/useSleepHold'
 import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX } from '../navConstants'
 import { useOfflineMaps } from '../composables/useOfflineMaps'
@@ -619,6 +620,23 @@ const turnFlowWidth = computed(() => Math.max(1.2, routeLineWidth.value * 0.45))
 // Rayon (px) des pastilles de changement de direction.
 const turnMarkerSize = computed(() => sportNav.value.turn_marker_size)
 
+// ─── Opacité du tracé, ajustable en séance (glissé vertical, bord gauche) ──────
+// Amorcée sur le réglage du profil, mais jamais écrite dedans : voir useTrackOpacityDrag.
+// Un changement de sport écrase l'ajustement du geste — pas de raison de garder celui
+// d'un autre sport, aux couleurs et à la largeur différentes.
+const trackOpacity = ref(sportNav.value.line_opacity)
+watch(sportNav, (nav) => { trackOpacity.value = nav.line_opacity })
+const {
+  dragging: opacityDragging,
+  onDown: onOpacityDragDown,
+  onMove: onOpacityDragMove,
+  onUp: onOpacityDragUp,
+  cancel: cancelOpacityDrag,
+} = useTrackOpacityDrag({
+  getOpacity: () => trackOpacity.value,
+  setOpacity: (v) => { trackOpacity.value = v; applyTrackOpacity() },
+})
+
 // Changer de sport en séance rejoue tout ce qui a été peint avec ses réglages : le tracé
 // (largeur, couleur, opacité) et les pastilles de virage, reconstruites en marqueurs DOM.
 // Au passage, les modules hors composant qui lisent les préférences par sport (seuils de
@@ -634,7 +652,8 @@ watch(routeSport, (sport) => {
 // déjà aux bonnes valeurs.
 function applyRouteLinePaint() {
   if (!map) return
-  const { line_color: color, line_opacity: opacity } = sportNav.value
+  const { line_color: color } = sportNav.value
+  const opacity = trackOpacity.value
   if (map.getLayer('nav-route-border')) map.setPaintProperty('nav-route-border', 'line-width', zoomWidthExpr(routeBorderWidth.value, true))
   if (map.getLayer('nav-route-done')) {
     map.setPaintProperty('nav-route-done', 'line-width', zoomWidthExpr(routeLineWidth.value, true))
@@ -658,6 +677,18 @@ function applyRouteLinePaint() {
     map.setPaintProperty(TURN_FLOW_LAYER, 'line-opacity', opacity)
   }
   applyPreviewLinePaint()
+}
+
+// Repeint uniquement l'opacité des couches du tracé, sans toucher largeur/couleur ni
+// rejouer le surlignage de virage (hiKey) : c'est la version bon marché d'
+// applyRouteLinePaint, appelée à chaque pointermove du geste d'opacité.
+function applyTrackOpacity() {
+  if (!map) return
+  const opacity = trackOpacity.value
+  if (map.getLayer('nav-route-done')) map.setPaintProperty('nav-route-done', 'line-opacity', opacity)
+  if (map.getLayer('nav-route-remaining')) map.setPaintProperty('nav-route-remaining', 'line-opacity', opacity)
+  if (map.getLayer('nav-turn-highlight')) map.setPaintProperty('nav-turn-highlight', 'line-opacity', opacity)
+  if (map.getLayer(TURN_FLOW_LAYER)) map.setPaintProperty(TURN_FLOW_LAYER, 'line-opacity', opacity)
 }
 
 // ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
@@ -1625,12 +1656,12 @@ function installRouteLayers() {
   map.addSource('nav-remaining', { type: 'geojson', data: widthRunsCollection(displayLine, displayWScale) })
 
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(routeBorderWidth.value, true) } })
-  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
-  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.line_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
+  map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': trackOpacity.value } })
+  map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.line_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': trackOpacity.value } })
   // Surlignage du prochain virage : même ruban (largeur, opacité, amincissement des
   // recouvrements) mais à la couleur de la pastille, posé PAR-DESSUS le tracé restant.
   map.addSource('nav-turn-hi', { type: 'geojson', data: widthRunsCollection([], []) })
-  map.addLayer({ id: 'nav-turn-highlight', type: 'line', source: 'nav-turn-hi', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.turn_marker_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': sportNav.value.line_opacity } })
+  map.addLayer({ id: 'nav-turn-highlight', type: 'line', source: 'nav-turn-hi', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.turn_marker_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': trackOpacity.value } })
   // Flux animé PAR-DESSUS le surlignage : traitillé blanc qui défile vers le virage, donc
   // dans le sens où il faut tourner (le tracé est orienté dans le sens de parcours).
   turnFlowStep = -1
@@ -1642,7 +1673,7 @@ function installRouteLayers() {
     paint: {
       'line-color': '#ffffff',
       'line-width': zoomWidthExpr(turnFlowWidth.value, true),
-      'line-opacity': sportNav.value.line_opacity,
+      'line-opacity': trackOpacity.value,
       'line-dasharray': TURN_FLOW_DASHES[0],
     },
   })
@@ -3265,6 +3296,28 @@ function onScreenOffTap() {
         <i class="fa-solid" :class="bottomOverlaysVisible ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
       </span>
     </div>
+
+    <!-- Opacité du tracé : fine zone au bord GAUCHE, glissé vertical continu (haut =
+         plus opaque, bas = plus transparent) pour voir un repère de la carte que le
+         tracé recouvrirait. Symétrique de la zone de masquage des overlays, mais un
+         glissé continu et non un geste à seuil — voir useTrackOpacityDrag. Masquée en
+         recherche / édition, où le geste sert déjà à poser un point, et en veille : le
+         voile noir cache justement ce que ce geste sert à voir. -->
+    <div
+      v-if="hasRoute && !placeNavActive && !editMode && !screenOff"
+      class="nav-opacity-drag-zone"
+      @pointerdown="onOpacityDragDown"
+      @pointermove="onOpacityDragMove"
+      @pointerup="onOpacityDragUp"
+      @pointercancel="cancelOpacityDrag"
+    >
+      <span class="nav-opacity-grabber" aria-hidden="true">
+        <i class="fa-solid fa-droplet"></i>
+      </span>
+    </div>
+    <div v-if="opacityDragging" class="nav-opacity-indicator" aria-hidden="true">
+      {{ Math.round(trackOpacity * 100) }} %
+    </div>
   </div>
 </template>
 
@@ -3402,6 +3455,32 @@ function onScreenOffTap() {
 /* En veille, le fond sombre du grabber se confondrait avec le voile noir : on l'éclaircit
    pour qu'il reste repérable. */
 .nav-bottom-reveal-zone--sleep .nav-bottom-grabber { background: rgba(255, 255, 255, 0.25); }
+
+/* Zone de geste « glissé vertical » de l'opacité du tracé : bord GAUCHE, symétrique de
+   .nav-bottom-reveal-zone. touch-action:none pour que le glissement déclenche pointermove
+   plutôt qu'un pan de carte. Même z-index : les deux bords ne se recouvrent jamais. */
+.nav-opacity-drag-zone {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 2.4rem; height: 8rem; z-index: 8; touch-action: none;
+  display: flex; justify-content: flex-start; align-items: center;
+}
+/* Goutte discrète indiquant qu'on peut glisser verticalement pour régler l'opacité. */
+.nav-opacity-grabber {
+  margin-left: 0.2rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.3rem; height: 2.4rem; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.28); color: #fff; font-size: 0.7rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  animation: nav-reveal-pulse 2.4s ease-in-out infinite;
+}
+/* Pastille de retour affichée pendant le geste, valeur en pourcent — même famille que le
+   bandeau de virage. Centrée verticalement à côté de la zone de geste. */
+.nav-opacity-indicator {
+  position: absolute; left: 3rem; top: 50%; transform: translateY(-50%);
+  z-index: 9; padding: 0.35rem 0.7rem; border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72); color: #fff; font-weight: 600; font-size: 0.9rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); pointer-events: none;
+}
 
 .nav-banner {
   /* + --app-inset-top : encoche du téléphone quand l'application mobile affiche

@@ -1627,6 +1627,8 @@ fr:
       block_color: "Fond"
       block_text_color: "Texte"
       reset_color: "Par défaut"
+      custom_color: "Personnalisée"
+      no_recent_colors: "Aucune couleur utilisée pour l'instant."
       bands: "Bandeau du bas"
       bands_help: "Les jeux de valeurs entre lesquels un glissé fait défiler, sans changer de page. Quatre cases au plus : au-delà, les chiffres ne se lisent plus d'un coup d'œil en roulant."
       add_band: "Ajouter un jeu"

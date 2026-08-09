@@ -27,6 +27,7 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
+import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
   blockChoices, blockFor, isChoiceOf, isDurationMetric, isRangeGaugeMetric, METRIC_RANGE_DEFAULTS,
   metricDropdownLabel, NATURAL_LINE_SIZE, previewScale,
@@ -234,24 +235,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
         <div class="cbpk-colors mb-3">
           <label class="cbpk-color-field small">
             {{ t('companion.settings.block_color') }}
-            <input type="color" class="form-control form-control-color"
-                   :value="color || '#1f2226'"
-                   @input="color = ($event.target as HTMLInputElement).value">
+            <CompanionColorPicker v-model="color" fallback="#1f2226" :label="t('companion.settings.block_color')" />
           </label>
-          <button v-if="color" type="button" class="btn btn-sm btn-link p-0"
-                  @click="color = null">
-            {{ t('companion.settings.reset_color') }}
-          </button>
           <label class="cbpk-color-field small">
             {{ t('companion.settings.block_text_color') }}
-            <input type="color" class="form-control form-control-color"
-                   :value="textColor || '#ffffff'"
-                   @input="textColor = ($event.target as HTMLInputElement).value">
+            <CompanionColorPicker v-model="textColor" fallback="#ffffff" :label="t('companion.settings.block_text_color')" />
           </label>
-          <button v-if="textColor" type="button" class="btn btn-sm btn-link p-0"
-                  @click="textColor = null">
-            {{ t('companion.settings.reset_color') }}
-          </button>
         </div>
 
         <section v-for="group in groups" :key="group.kind" class="cbpk-group">
@@ -450,10 +439,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   align-items: center;
   gap: 0.4rem;
   margin-bottom: 0;
-}
-.cbpk-color-field input {
-  width: 2.5rem;
-  padding: 0.15rem;
 }
 
 /* Des vignettes de même taille : on compare des dessins, et deux tailles

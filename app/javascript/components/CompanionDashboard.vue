@@ -60,14 +60,13 @@ const openPage = ref<number | null>(null)
 const selected = ref<Cell | null>(null)
 
 // Échanger la cellule sélectionnée avec une autre : le bouton « Échanger »
-// l'arme, et la case suivante qu'on touche reçoit l'échange — un autre
-// composant, qui prend alors la place et la taille de la case qui le reçoit
-// (`swapCells` n'échange que le composant, jamais la position ni l'étendue :
-// les échanger aussi serait indiscernable d'un no-op une fois rendu), ou une
-// case vide, qui ne fait alors que recevoir la cellule sélectionnée avec sa
-// propre étendue. Un pas de plus que `moveCell` (qui ne bouge que d'une case
-// libre voisine), pour aller directement là où l'on veut sans franchir
-// chaque case entre les deux.
+// l'arme, et la case suivante qu'on touche reçoit l'échange — toujours
+// permis, qu'elle porte un composant ou non. Le composant sélectionné prend
+// la taille de la case qui le reçoit : la sienne pour un autre composant
+// (`swapCells` n'échange que le composant, jamais la position ni l'étendue —
+// les échanger aussi serait indiscernable d'un no-op une fois rendu), 1 × 1
+// pour une case vide, qui n'en a pas d'autre à offrir — l'ancien emplacement
+// redevient alors entièrement vide, aussi grand qu'il était.
 const swapping = ref(false)
 
 // Toute nouvelle sélection éteint un échange resté armé : il n'a de sens que
@@ -402,22 +401,12 @@ function slots(page: Page) {
 // ira, sans avoir à le tenter pour le savoir — même règle que
 // `spanLimit`/`canMove`).
 //
-// Avec un autre composant, toujours permis, quelle que soit sa forme :
-// `swapCells` échange seulement le composant, la case garde sa position et
-// son étendue — rien à refuser, le composant reçu s'affiche à la taille de
-// la case qui le reçoit.
-//
-// Avec une case vide, c'est un déplacement — il n'y a rien en face à quoi
-// permuter, seule la cellule sélectionnée bouge et garde sa propre étendue,
-// qui doit donc y tenir (`canMoveCell`, la même règle que le pavé de
-// déplacement).
-function canSwapTo(page: Page, row: number, col: number, cell: Cell | null): boolean {
-  if (!selected.value || cell === selected.value) return false
-  if (cell) return true
-  return canMoveCell(
-    selected.value, page.cells || [], page.rows || 1, page.cols || 1,
-    row - selected.value.row, col - selected.value.col,
-  )
+// Toujours permis, qu'elle soit remplie ou vide : le composant reçu s'affiche
+// à la taille de la case qui le reçoit — la sienne pour un autre composant
+// (`swapCells`), 1 × 1 pour une case vide (elle n'en a pas d'autre). Rien à
+// vérifier ni à refuser dans un cas comme dans l'autre.
+function canSwapTo(cell: Cell | null): boolean {
+  return !!selected.value && cell !== selected.value
 }
 
 function tapSlot(page: Page, row: number, col: number, cell: Cell | null) {
@@ -425,12 +414,26 @@ function tapSlot(page: Page, row: number, col: number, cell: Cell | null) {
     const target = selected.value
     // Se retoucher soi-même annule l'échange plutôt que de ne rien faire :
     // c'est le seul moyen de sortir du mode sans retomber sur le bouton
-    // « Échanger ». Une case qui ne convient pas, elle, est ignorée en
-    // silence — la grille l'a déjà montré en ne la mettant pas en évidence.
+    // « Échanger ». canSwapTo ne peut renvoyer faux qu'ici (aucune autre
+    // case ne peut être refusée), mais on garde l'appel pour rester
+    // cohérent avec la grille, qui s'en sert pour éteindre cette case-là.
     if (!target || cell === target) { swapping.value = false; return }
-    if (!canSwapTo(page, row, col, cell)) return
-    if (cell) swapCells(target, cell)
-    else { target.row = row; target.col = col }
+    if (!canSwapTo(cell)) return
+    if (cell) {
+      swapCells(target, cell)
+    } else {
+      // Une case vide n'a que sa propre taille (1 × 1) à offrir en retour : le
+      // composant qui l'y rejoint devient donc 1 × 1, et son ancien
+      // emplacement — la cellule qu'on retire — redevient entièrement vide,
+      // aussi grand qu'il était.
+      const cells = [...(page.cells || []).filter((c) => c !== target),
+        { row, col, row_span: 1, col_span: 1, block: target.block }]
+      page.cells = cells
+      // On relit la cellule dans le tableau plutôt que de garder l'objet
+      // qu'on vient d'écrire — même raison qu'`applyPick` : `presets` est
+      // réactif, ce qui en ressort est un proxy et non l'original.
+      selected.value = page.cells[page.cells.length - 1]
+    }
     swapping.value = false
     return
   }
@@ -857,7 +860,7 @@ async function save() {
                 <button v-for="slot in slots(page)" :key="slot.key" type="button"
                         class="companion-cell"
                         :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected,
-                                  'swap-target': swapping && canSwapTo(page, slot.row, slot.col, slot.cell),
+                                  'swap-target': swapping && canSwapTo(slot.cell),
                                   'swap-source': swapping && slot.cell === selected }"
                         :style="styleFor(page, slot.cell, slot.row, slot.col)"
                         :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"

@@ -1613,6 +1613,8 @@ en:
       move_right: "Move right"
       add_block: "Add a component"
       change_block: "Change"
+      swap_cell: "Swap"
+      swap_hint: "Tap another component or an empty cell to swap it with this one — or tap it again to cancel."
       pick_block: "Choose a component"
       pick_block_help: "Each tile shows what the phone will draw. The display mode is the choice: the same content does not fit a quarter of the screen and a two-cell strip the same way. Pick the metric or the source above its tiles — they redraw at once."
       pick_block_cell: "Tiles are drawn at the size of the cell: %{width} × %{height} px. The smaller the cell, the smaller the component is scaled down."

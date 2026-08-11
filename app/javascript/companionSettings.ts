@@ -784,6 +784,26 @@ export function canMoveCell(
   return !covered({ ...cell, row, col }).some((key) => busy.has(key))
 }
 
+// Échange le composant posé dans [a] avec celui posé dans [b] — position et
+// étendue de chacune restent les leurs, c'est le contenu qui change de case.
+//
+// C'est délibéré, et pas seulement plus simple : permuter aussi la position
+// et l'étendue serait indiscernable d'un no-op une fois rendu, puisque la
+// grille n'affiche que des couples (position, étendue, composant), jamais
+// l'identité de l'objet qui les porte — échanger les trois à la fois entre
+// deux cellules revient donc à ne rien changer à ce qui s'affiche (constaté
+// en pratique : le bug qui a motivé cette réécriture).
+//
+// Un composant échangé dans une case plus grande ou plus petite que la
+// sienne s'y affiche donc à cette taille-là, jamais à la sienne — sans
+// aucune vérification à faire, la case existait déjà valablement avant
+// l'échange.
+export function swapCells(a: Cell, b: Cell): void {
+  const block = a.block
+  a.block = b.block
+  b.block = block
+}
+
 // Les cellules qui tiennent encore dans une grille de [rows] × [cols].
 //
 // Appelé quand on réduit la grille. Les étendues sont **rognées** — réduire une

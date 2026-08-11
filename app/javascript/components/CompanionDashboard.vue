@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { computed, reactive, ref, toRaw } from 'vue'
+import { computed, reactive, ref, toRaw, watch } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  canHideBehindMenu, canMoveCell, climbLapSeries, fitCells, gridSideOf, isGridLayout, maxSpan,
-  metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
+  canHideBehindMenu, canMoveCell, climbLapSeries, fitCells, gridSideOf, isGridLayout,
+  maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
+  swapCells,
   type Band, type Block, type Catalog, type Cell, type CellSize,
   type CompanionDocument, type Page, type Preset, type Viewport,
 } from '../companionSettings'
@@ -57,6 +58,21 @@ const presets = reactive<Preset[]>(structuredClone(props.document.presets))
 const current = ref(0)
 const openPage = ref<number | null>(null)
 const selected = ref<Cell | null>(null)
+
+// Échanger la cellule sélectionnée avec une autre : le bouton « Échanger »
+// l'arme, et la case suivante qu'on touche reçoit l'échange — un autre
+// composant, qui prend alors la place et la taille de la case qui le reçoit
+// (`swapCells` n'échange que le composant, jamais la position ni l'étendue :
+// les échanger aussi serait indiscernable d'un no-op une fois rendu), ou une
+// case vide, qui ne fait alors que recevoir la cellule sélectionnée avec sa
+// propre étendue. Un pas de plus que `moveCell` (qui ne bouge que d'une case
+// libre voisine), pour aller directement là où l'on veut sans franchir
+// chaque case entre les deux.
+const swapping = ref(false)
+
+// Toute nouvelle sélection éteint un échange resté armé : il n'a de sens que
+// pour la cellule qu'on vient de quitter.
+watch(selected, () => { swapping.value = false })
 
 // Où ira le composant que la dialogue va rendre. Quatre destinations et pas une
 // seule : poser dans une case vide n'est pas remplacer une cellule, et ajouter à
@@ -381,7 +397,43 @@ function slots(page: Page) {
   return out
 }
 
+// Cette case peut-elle recevoir l'échange ? Sert à la fois à `tapSlot`
+// (n'agir que si c'est permis) et à la grille (montrer la case où l'échange
+// ira, sans avoir à le tenter pour le savoir — même règle que
+// `spanLimit`/`canMove`).
+//
+// Avec un autre composant, toujours permis, quelle que soit sa forme :
+// `swapCells` échange seulement le composant, la case garde sa position et
+// son étendue — rien à refuser, le composant reçu s'affiche à la taille de
+// la case qui le reçoit.
+//
+// Avec une case vide, c'est un déplacement — il n'y a rien en face à quoi
+// permuter, seule la cellule sélectionnée bouge et garde sa propre étendue,
+// qui doit donc y tenir (`canMoveCell`, la même règle que le pavé de
+// déplacement).
+function canSwapTo(page: Page, row: number, col: number, cell: Cell | null): boolean {
+  if (!selected.value || cell === selected.value) return false
+  if (cell) return true
+  return canMoveCell(
+    selected.value, page.cells || [], page.rows || 1, page.cols || 1,
+    row - selected.value.row, col - selected.value.col,
+  )
+}
+
 function tapSlot(page: Page, row: number, col: number, cell: Cell | null) {
+  if (swapping.value) {
+    const target = selected.value
+    // Se retoucher soi-même annule l'échange plutôt que de ne rien faire :
+    // c'est le seul moyen de sortir du mode sans retomber sur le bouton
+    // « Échanger ». Une case qui ne convient pas, elle, est ignorée en
+    // silence — la grille l'a déjà montré en ne la mettant pas en évidence.
+    if (!target || cell === target) { swapping.value = false; return }
+    if (!canSwapTo(page, row, col, cell)) return
+    if (cell) swapCells(target, cell)
+    else { target.row = row; target.col = col }
+    swapping.value = false
+    return
+  }
   if (cell) {
     selected.value = selected.value === cell ? null : cell
     return
@@ -804,7 +856,9 @@ async function save() {
                      ne sélectionne rien. -->
                 <button v-for="slot in slots(page)" :key="slot.key" type="button"
                         class="companion-cell"
-                        :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected }"
+                        :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected,
+                                  'swap-target': swapping && canSwapTo(page, slot.row, slot.col, slot.cell),
+                                  'swap-source': swapping && slot.cell === selected }"
                         :style="styleFor(page, slot.cell, slot.row, slot.col)"
                         :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
                         @click="tapSlot(page, slot.row, slot.col, slot.cell)">
@@ -812,6 +866,13 @@ async function save() {
                   <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
                 </button>
               </div>
+
+              <!-- Le mode échange s'annonce sous la grille : c'est la seule
+                   phrase qui dit ce que touchent maintenant les cases, y
+                   compris celles restées ternes (pas de cible valable). -->
+              <p v-if="swapping" class="text-primary small mb-2">
+                <i class="fa-solid fa-right-left me-1" aria-hidden="true"></i>{{ t('companion.settings.swap_hint') }}
+              </p>
 
               <!-- À quelle échelle on vient de composer. La phrase change selon
                    que l'appli a annoncé sa grille ou non : une mesure et une
@@ -833,6 +894,11 @@ async function save() {
                   <button class="btn btn-sm btn-outline-secondary" type="button"
                           @click="picker = { at: 'cell', page, cell: selected }">
                     {{ t('companion.settings.change_block') }}
+                  </button>
+                  <button class="btn btn-sm btn-outline-secondary" type="button"
+                          :class="{ active: swapping }"
+                          @click="swapping = !swapping">
+                    <i class="fa-solid fa-right-left me-1" aria-hidden="true"></i>{{ t('companion.settings.swap_cell') }}
                   </button>
                 </div>
                 <!-- L'étendue au pas : le « + » s'éteint dès que la voisine ou le
@@ -1177,6 +1243,22 @@ async function save() {
 .companion-cell.selected {
   outline: 2px solid var(--bs-primary);
   outline-offset: -2px;
+}
+
+/* Pendant un échange : la case qu'on va quitter reste marquée mais s'efface un
+   peu, les cases où l'échange est possible se distinguent par un liseré en
+   tirets — les autres restent ternes, pour que la limite se voie sans avoir à
+   la tenter (même règle que `spanLimit`/`canMove`). */
+.companion-cell.swap-source {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -2px;
+  opacity: 0.5;
+}
+
+.companion-cell.swap-target {
+  outline: 2px dashed var(--bs-primary);
+  outline-offset: -2px;
+  cursor: pointer;
 }
 
 /* Le pavé de déplacement d'une cellule : quatre flèches en croix, le centre

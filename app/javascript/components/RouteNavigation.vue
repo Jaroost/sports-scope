@@ -3461,7 +3461,7 @@ function onScreenOffTap() {
    plutôt qu'un pan de carte. Même z-index : les deux bords ne se recouvrent jamais. */
 .nav-opacity-drag-zone {
   position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 2.4rem; height: 8rem; z-index: 8; touch-action: none;
+  width: 4rem; height: 16rem; z-index: 8; touch-action: none;
   display: flex; justify-content: flex-start; align-items: center;
 }
 /* Goutte discrète indiquant qu'on peut glisser verticalement pour régler l'opacité. */
@@ -3476,7 +3476,7 @@ function onScreenOffTap() {
 /* Pastille de retour affichée pendant le geste, valeur en pourcent — même famille que le
    bandeau de virage. Centrée verticalement à côté de la zone de geste. */
 .nav-opacity-indicator {
-  position: absolute; left: 3rem; top: 50%; transform: translateY(-50%);
+  position: absolute; left: 4.6rem; top: 50%; transform: translateY(-50%);
   z-index: 9; padding: 0.35rem 0.7rem; border-radius: 999px;
   background: rgba(0, 0, 0, 0.72); color: #fff; font-weight: 600; font-size: 0.9rem;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); pointer-events: none;

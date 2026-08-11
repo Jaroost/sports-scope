@@ -164,10 +164,21 @@ export interface MetricLayoutRow {
   columns: { col: 'left' | 'center' | 'right'; tokens: LayoutToken[] }[]
 }
 
-// Le poids d'une rangée, en facteur `flex-grow`/`Expanded.flex` — même
-// rapport des deux côtés (1 / 2 / 4), pour qu'une rangée « grande » prenne le
-// même quadruple de place sur le site et sur le téléphone.
-export const ROW_HEIGHT_WEIGHT: Record<RowHeight, number> = { small: 1, normal: 2, large: 4 }
+// Le poids d'une rangée, en facteur `flex-grow` — même rapport des deux
+// côtés (2 / 4 / 8), et dans les mêmes proportions que `ROW_HEIGHT_SCALE` :
+// une rangée ne reçoit plus de place que si son contenu grandit d'autant,
+// sinon une rangée « petite » à côté d'une « grande » se retrouverait avec un
+// texte à sa taille habituelle dans une case bien plus étroite que ce qu'il
+// lui faut.
+export const ROW_HEIGHT_WEIGHT: Record<RowHeight, number> = { small: 2, normal: 4, large: 8 }
+
+// Le facteur de taille de l'icône, de l'étiquette, de l'unité et du chiffre
+// d'une rangée — même rapport que `RowHeight.scale` côté appli (de « petite »
+// à « grande », le contenu quadruple). Appliqué comme `font-size` de la
+// rangée elle-même plutôt que sur chaque élément : leurs tailles sont déjà en
+// `em`, donc ce `font-size`-là les multiplie toutes d'un coup, en cascade —
+// la même mécanique CSS qui fait déjà fonctionner `--cbp-em`/`tileStyle`.
+export const ROW_HEIGHT_SCALE: Record<RowHeight, number> = { small: 0.5, normal: 1, large: 2 }
 
 // Les rangées effectivement utilisées, dans l'ordre — une rangée sans aucun
 // occupant n'y figure pas (elle ne prend aucune place, ni dans l'appli ni

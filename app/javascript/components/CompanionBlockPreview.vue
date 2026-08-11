@@ -37,6 +37,7 @@ import {
   metricIcon,
   metricLayout,
   metricSample,
+  ROW_HEIGHT_SCALE,
   ROW_HEIGHT_WEIGHT,
   type Block,
 } from '../companionSettings'
@@ -334,7 +335,11 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
             ></span>
           </div>
         </div>
-        <div v-else class="cbp-metric-row" :style="{ flexGrow: ROW_HEIGHT_WEIGHT[row.height] }">
+        <div
+          v-else
+          class="cbp-metric-row"
+          :style="{ flexGrow: ROW_HEIGHT_WEIGHT[row.height], fontSize: `${ROW_HEIGHT_SCALE[row.height]}em` }"
+        >
           <div
             v-for="col in row.columns"
             :key="col.col"

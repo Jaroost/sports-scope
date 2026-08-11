@@ -37,6 +37,7 @@ import {
   metricIcon,
   metricLayout,
   metricSample,
+  ROW_HEIGHT_WEIGHT,
   type Block,
 } from '../companionSettings'
 import { colorForGrade } from '../routeHelpers'
@@ -333,7 +334,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
             ></span>
           </div>
         </div>
-        <div v-else class="cbp-metric-row">
+        <div v-else class="cbp-metric-row" :style="{ flexGrow: ROW_HEIGHT_WEIGHT[row.height] }">
           <div
             v-for="col in row.columns"
             :key="col.col"
@@ -866,28 +867,36 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   font-size: 2.6em;
 }
 
-/* La disposition d'un bloc `metric` : des rangées empilées et centrées dans
-   la carte (pas de `cbp-center` — ses rangées doivent s'étirer sur toute la
-   largeur pour que l'alignement gauche/centre/droite ait un bord réel à
-   viser, voir `cbp-metric-row`), une rangée sans occupant n'y figurant pas. */
+/* La disposition d'un bloc `metric` : des rangées empilées, remplissant la
+   carte du haut vers le bas — pas de `cbp-center` — chacune avec sa part de
+   la hauteur réelle (`flex-grow`, voir `ROW_HEIGHT_WEIGHT`) plutôt qu'un
+   bloc de contenu recentré avec du vide au-dessus et en dessous ; ses
+   rangées doivent aussi s'étirer sur toute la largeur pour que l'alignement
+   gauche/centre/droite ait un bord réel à viser (voir `cbp-metric-row`).
+   Une rangée sans occupant n'y figure pas. */
 .cbp-metric {
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 0.4em;
   text-align: center;
 }
-/* Le motif « barre d'outils » : toujours 3 tiers égaux, y compris vides —
-   c'est ce qui fait qu'une case seule à droite touche vraiment le bord
-   droit, quelle que soit la longueur de ce qu'il y a (ou pas) à gauche et
-   au centre. */
+/* Le motif « barre d'outils » : gauche et droite ne prennent que la place que
+   réclame leur contenu (`flex: 0 1 auto`, la valeur par défaut — elles
+   peuvent encore se réduire si les trois colonnes sont chargées à la fois,
+   d'où l'ellipse sur `.cbp-metric-label`/`.cbp-metric-unit`), seul le centre
+   absorbe ce qu'il reste (`flex: 1 1 0`). Une seule colonne occupée récupère
+   ainsi toute la largeur de la rangée plutôt qu'un tiers fixe — et touche
+   vraiment le bord qu'on lui a donné, gauche ou droite, au lieu d'être
+   écrasée dans un tiers trop étroit pour son texte. */
 .cbp-metric-row {
   display: flex;
   align-items: center;
   width: 100%;
+  /* `flex-grow` posé en ligne (`ROW_HEIGHT_WEIGHT[row.height]`) — 1/2/4
+     selon la rangée, une jauge (`.cbp-metric-gauge-row`, pas ici) gardant
+     elle sa hauteur naturelle sans jamais grossir. */
 }
 .cbp-metric-col {
-  flex: 1 1 0;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -898,6 +907,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   justify-content: flex-start;
 }
 .cbp-metric-col--center {
+  flex: 1 1 0;
   justify-content: center;
 }
 .cbp-metric-col--right {

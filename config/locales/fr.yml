@@ -1701,6 +1701,14 @@ fr:
         unit: "Unité"
         value: "Chiffre"
         gauge: "Jauge"
+      row_height: "Hauteur de la rangée"
+      row_heights:
+        small: "Petite"
+        small_short: "P"
+        normal: "Normale"
+        normal_short: "N"
+        large: "Grande"
+        large_short: "G"
       metric_layouts:
         load: "Partir d'une disposition enregistrée"
         load_placeholder: "Disposition neutre"

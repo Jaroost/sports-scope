@@ -33,7 +33,7 @@ import {
   DEFAULT_METRIC_LAYOUT, LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS, METRIC_RANGE_DEFAULTS,
   metricDropdownLabel, metricLayout, metricSample, NATURAL_LINE_SIZE, previewScale,
   type Block, type BlockChoice, type Catalog, type CellSize, type LayoutToken, type MetricLayout,
-  type MetricLayoutPreset,
+  type MetricLayoutPreset, type RowHeight,
 } from '../companionSettings'
 
 const props = defineProps<{
@@ -186,6 +186,19 @@ function removeToken(token: 'icon' | 'label' | 'unit' | 'gauge') {
   const next: MetricLayout = { ...layout.value }
   delete next[token]
   layout.value = next
+}
+
+// Le poids d'une rangée — `'normal'` quand `row_heights` ne la mentionne pas
+// (jamais écrit dans ce cas, voir `setRowHeight`).
+function rowHeightAt(row: number): RowHeight {
+  return layout.value.row_heights?.[String(row)] || 'normal'
+}
+
+function setRowHeight(row: number, height: RowHeight) {
+  const heights = { ...layout.value.row_heights }
+  if (height === 'normal') delete heights[String(row)]
+  else heights[String(row)] = height
+  layout.value = { ...layout.value, row_heights: Object.keys(heights).length ? heights : undefined }
 }
 
 function onCellClick(row: number, col: 'left' | 'center' | 'right') {
@@ -527,6 +540,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                       </span>
                     </template>
                   </button>
+
+                  <!-- La jauge garde toujours sa hauteur naturelle (une barre
+                       plus haute n'apporte rien) : ce réglage n'a de sens que
+                       pour une rangée de texte/chiffre. -->
+                  <div class="cbpk-row-heights" role="group" :aria-label="t('companion.settings.row_height')">
+                    <button
+                      v-for="h in (['small', 'normal', 'large'] as const)"
+                      :key="h"
+                      type="button"
+                      class="cbpk-row-height-btn"
+                      :class="{ 'cbpk-row-height-btn--selected': rowHeightAt(row - 1) === h }"
+                      :title="t(`companion.settings.row_heights.${h}`)"
+                      @click="setRowHeight(row - 1, h)"
+                    >
+                      {{ t(`companion.settings.row_heights.${h}_short`) }}
+                    </button>
+                  </div>
                 </template>
               </div>
             </div>
@@ -774,6 +804,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   border-radius: 0.3rem;
   background: var(--bs-secondary-bg, #e9ecef);
   white-space: nowrap;
+}
+
+/* Le poids d'une rangée — pas un des 3 tiers de la grille (`flex: 1 1 0`
+   comme les cases), à côté d'elle plutôt que dedans. */
+.cbpk-row-heights {
+  flex: none;
+  display: flex;
+  gap: 0.2rem;
+}
+.cbpk-row-height-btn {
+  min-width: 1.8rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.3rem;
+  background: transparent;
+  font-size: 0.75rem;
+}
+.cbpk-row-height-btn--selected {
+  border-color: var(--bs-primary);
+  background: var(--bs-primary);
+  color: #fff;
 }
 
 .cbpk-palette {

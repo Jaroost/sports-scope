@@ -183,6 +183,12 @@ module CompanionSettings
 
   LAYOUT_ROW_PATTERN = /\A[0-#{MAX_LAYOUT_ROWS - 1}]\z/
 
+  # Le poids d'une rangée dans le partage de la hauteur réelle de la case —
+  # voir `sanitize_row_heights`. `"normal"` n'y figure pas : c'est la valeur
+  # par défaut d'une rangée absente de `row_heights`, elle n'a donc jamais
+  # besoin d'être écrite.
+  ROW_HEIGHTS = %w[small large].freeze
+
   # Combien de dispositions un compte peut enregistrer — voir
   # `sanitize_metric_layouts`. Au-delà, une bibliothèque n'aide plus personne à
   # choisir vite.
@@ -665,7 +671,24 @@ module CompanionSettings
     # d'éviter.
     layout["value"] ||= "#{gauge_row == '0' ? 1 : 0}-center"
 
+    row_heights = sanitize_row_heights(source["row_heights"])
+    layout["row_heights"] = row_heights if row_heights
+
     compact_layout_rows(layout)
+  end
+
+  # Le poids de chaque rangée, ex. `{"1" => "large"}` pour mettre le chiffre
+  # plus en évidence que son étiquette — voir `ROW_HEIGHTS`. Une rangée
+  # absente d'ici vaut `"normal"`, jamais écrite pour rester silencieuse.
+  def sanitize_row_heights(raw)
+    return nil unless raw.is_a?(Hash)
+
+    raw.filter_map do |row, size|
+      next nil unless row.is_a?(String) && row.match?(LAYOUT_ROW_PATTERN)
+      next nil unless ROW_HEIGHTS.include?(size)
+
+      [ row, size ]
+    end.to_h.presence
   end
 
   def valid_position(value)
@@ -683,19 +706,28 @@ module CompanionSettings
 
   # Les numéros de rangée utilisés, ramenés à `0, 1, 2…` sans trou — sinon un
   # document composé à la main pourrait accumuler des rangées arbitrairement
-  # grandes tout en restant *valide* case par case.
+  # grandes tout en restant *valide* case par case. `row_heights` n'est pas
+  # une position : il ne compte pas pour établir la liste des rangées, mais
+  # ses propres clés doivent suivre le même renumérotage.
   def compact_layout_rows(layout)
-    rows = layout.filter_map { |token, pos| token == "gauge" ? pos.to_i : pos.split("-").first.to_i }.uniq.sort
+    rows = layout.filter_map do |token, value|
+      next nil if token == "row_heights"
+      token == "gauge" ? value.to_i : value.split("-").first.to_i
+    end.uniq.sort
     mapping = rows.each_with_index.to_h
 
-    layout.transform_values do |pos|
-      if pos.include?("-")
-        row, col = pos.split("-", 2)
-        "#{mapping[row.to_i]}-#{col}"
+    layout.filter_map do |token, value|
+      case token
+      when "row_heights"
+        remapped = value.filter_map { |row, size| [ mapping[row.to_i].to_s, size ] if mapping.key?(row.to_i) }.to_h
+        [ token, remapped ] unless remapped.empty?
+      when "gauge"
+        [ token, mapping[value.to_i].to_s ]
       else
-        mapping[pos.to_i].to_s
+        row, col = value.split("-", 2)
+        [ token, "#{mapping[row.to_i]}-#{col}" ]
       end
-    end
+    end.to_h
   end
 
   # Le type de jauge qu'un ancien mode dessinait — `dynamic_gauge` seul

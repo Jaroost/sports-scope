@@ -1701,6 +1701,14 @@ en:
         unit: "Unit"
         value: "Figure"
         gauge: "Gauge"
+      row_height: "Row height"
+      row_heights:
+        small: "Small"
+        small_short: "S"
+        normal: "Normal"
+        normal_short: "N"
+        large: "Large"
+        large_short: "L"
       metric_layouts:
         load: "Start from a saved layout"
         load_placeholder: "Neutral layout"

@@ -29,9 +29,11 @@ import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
-  blockChoices, blockFor, isChoiceOf, isDurationMetric, isRangeGaugeMetric, METRIC_RANGE_DEFAULTS,
-  metricDropdownLabel, NATURAL_LINE_SIZE, previewScale,
-  type Block, type BlockChoice, type Catalog, type CellSize,
+  blockChoices, blockFor, isChoiceOf, isDurationMetric, isDynamicGaugeMetric, isRangeGaugeMetric,
+  DEFAULT_METRIC_LAYOUT, LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS, METRIC_RANGE_DEFAULTS,
+  metricDropdownLabel, metricLayout, metricSample, NATURAL_LINE_SIZE, previewScale,
+  type Block, type BlockChoice, type Catalog, type CellSize, type LayoutToken, type MetricLayout,
+  type MetricLayoutPreset,
 } from '../companionSettings'
 
 const props = defineProps<{
@@ -50,14 +52,179 @@ const props = defineProps<{
   // texte libre, mais un bouton et sa page de tours doivent porter la même
   // clé pour se répondre, et une suggestion évite l'écart d'orthographe.
   knownSeries?: string[]
+  // Les dispositions de bloc `metric` déjà enregistrées par l'utilisateur —
+  // un point de départ qu'on charge dans la grille ci-dessous, pas un lien
+  // conservé : la modifier ensuite ne change pas la disposition enregistrée.
+  metricLayouts?: MetricLayoutPreset[]
 }>()
 
-const emit = defineEmits<{ close: []; choose: [block: Block] }>()
+const emit = defineEmits<{
+  close: []
+  choose: [block: Block]
+  // Une nouvelle disposition à ajouter à `metric_layouts`, sur demande de
+  // l'utilisateur (« Enregistrer cette disposition ») — `CompanionDashboard`
+  // porte le document entier, c'est elle qui l'y ajoute.
+  saveLayout: [preset: { name: string; layout: MetricLayout }]
+}>()
 
 const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
 const series = ref(props.block?.series || 'default')
 const format = ref(props.block?.format || 'hm')
+
+// ── La disposition d'un bloc `metric` ───────────────────────────────────────
+//
+// Une grille à 3 colonnes et jusqu'à `MAX_LAYOUT_ROWS` rangées, où chaque
+// élément (icône, étiquette, unité, chiffre, jauge) se pose dans une case
+// précise — voir `companionSettings.ts` pour le contrat complet. `layout` est
+// l'état brut, éditable librement ; `currentLayout` (plus bas) en est la
+// version qui sera réellement enregistrée, jauge retirée si la mesure
+// choisie n'y a pas droit — c'est elle que l'aperçu et la vignette doivent
+// lire, pour ne jamais promettre ce que l'assainisseur retirerait.
+const layout = ref<MetricLayout>(
+  props.block?.kind === 'metric' ? metricLayout(props.block) : { ...DEFAULT_METRIC_LAYOUT },
+)
+const iconChoice = ref<string | undefined>(props.block?.icon)
+const gaugeKindChoice = ref<string>(props.block?.gauge_kind || 'range')
+
+// Le jeton de palette actuellement « en main » — un tap sur une case de la
+// grille l'y pose, sans glisser-déposer. `null` : un tap sur une case
+// occupée la libère à la place.
+const selectedToken = ref<LayoutToken | 'gauge' | null>(null)
+
+const metricZoneEligible = computed(() => !!metricSample(metric.value).zone)
+const rangeEligible = computed(() => isRangeGaugeMetric(metric.value))
+const dynamicEligible = computed(() => isDynamicGaugeMetric(metric.value))
+const gaugeEligible = computed(
+  () => metricZoneEligible.value || rangeEligible.value || dynamicEligible.value,
+)
+const hasUnit = computed(() => metricSample(metric.value).unit !== '')
+
+// `range` ou `dynamic` seulement si la mesure a droit aux deux — sinon
+// dérivé de l'éligibilité, comme le fait `sanitize_block` côté Rails.
+const effectiveGaugeKind = computed<'range' | 'dynamic' | null>(() => {
+  if (metricZoneEligible.value) return null
+  if (rangeEligible.value && dynamicEligible.value) return gaugeKindChoice.value as 'range' | 'dynamic'
+  return rangeEligible.value ? 'range' : 'dynamic'
+})
+
+// Ce que l'enregistrement gardera réellement : la jauge retirée si la mesure
+// choisie n'y a pas droit (un changement de mesure en cours d'édition peut
+// rendre une jauge déjà posée caduque). Tout le reste de la dialogue — aperçu,
+// vignette, palette — lit cette version-ci, jamais `layout` directement.
+const currentLayout = computed<MetricLayout>(() => {
+  if (layout.value.gauge && !gaugeEligible.value) {
+    const { gauge, ...rest } = layout.value
+    return rest as MetricLayout
+  }
+  return layout.value
+})
+
+// Les jetons que la palette propose : le chiffre est toujours là (déplaçable,
+// jamais retirable), la jauge et l'unité seulement quand la mesure choisie
+// leur donne un sens.
+const paletteTokens = computed<('icon' | 'label' | 'unit' | 'value' | 'gauge')[]>(() => {
+  const tokens: ('icon' | 'label' | 'unit' | 'value' | 'gauge')[] = ['value', 'icon', 'label']
+  if (hasUnit.value) tokens.push('unit')
+  if (gaugeEligible.value) tokens.push('gauge')
+  return tokens
+})
+
+function isPlaced(token: 'icon' | 'label' | 'unit' | 'value' | 'gauge'): boolean {
+  return token === 'gauge' ? !!currentLayout.value.gauge : !!currentLayout.value[token]
+}
+
+// Les jetons posés dans une case précise, dans l'ordre d'affichage fixe
+// (icône, étiquette, unité, chiffre) — un empilement volontaire (ex.
+// étiquette + unité dans la même case) s'y lit dans cet ordre, pas celui où
+// on les y a posés.
+function tokensAt(row: number, col: 'left' | 'center' | 'right'): LayoutToken[] {
+  return LAYOUT_TOKEN_ORDER.filter((token) => {
+    const pos = currentLayout.value[token]
+    if (!pos) return false
+    const [r, c] = pos.split('-')
+    return Number(r) === row && c === col
+  })
+}
+
+// Une rangée de plus que la plus haute utilisée, dans la limite du plafond —
+// toujours une case vide où poser le prochain élément, sans bouton
+// « + » séparé : elle apparaît d'elle-même, et disparaît de la même façon
+// quand on retire ce qui l'occupait.
+const highestUsedRow = computed(() => {
+  const rows: number[] = []
+  for (const token of LAYOUT_TOKEN_ORDER) {
+    const pos = currentLayout.value[token]
+    if (pos) rows.push(Number(pos.split('-')[0]))
+  }
+  if (currentLayout.value.gauge) rows.push(Number(currentLayout.value.gauge))
+  return rows.length ? Math.max(...rows) : 0
+})
+const visibleRowCount = computed(() => Math.min(highestUsedRow.value + 2, MAX_LAYOUT_ROWS))
+
+// Pose [token] en `[row]-[col]` (la colonne ne veut rien dire pour la jauge,
+// une barre pleine largeur). Toujours au moins un `value` valide en sortie —
+// jamais de bloc qui n'afficherait pas le chiffre — et jamais de jauge qui
+// partage sa rangée avec autre chose, dans les deux sens : la poser évince ce
+// qui s'y trouvait, et poser autre chose sur sa rangée la retire.
+function placeToken(token: 'icon' | 'label' | 'unit' | 'value' | 'gauge', row: number, col: 'left' | 'center' | 'right') {
+  const next: MetricLayout = { ...layout.value }
+  if (token === 'gauge') {
+    for (const other of ['icon', 'label', 'unit', 'value'] as const) {
+      if (next[other]?.startsWith(`${row}-`)) delete next[other]
+    }
+    next.gauge = String(row)
+  } else {
+    if (next.gauge === String(row)) delete next.gauge
+    next[token] = `${row}-${col}`
+  }
+  if (!next.value) next.value = `${next.gauge === '0' ? 1 : 0}-center`
+  layout.value = next
+}
+
+function removeToken(token: 'icon' | 'label' | 'unit' | 'gauge') {
+  const next: MetricLayout = { ...layout.value }
+  delete next[token]
+  layout.value = next
+}
+
+function onCellClick(row: number, col: 'left' | 'center' | 'right') {
+  if (selectedToken.value) {
+    placeToken(selectedToken.value, row, col)
+    selectedToken.value = null
+    return
+  }
+  for (const token of tokensAt(row, col)) {
+    if (token !== 'value') removeToken(token)
+  }
+}
+
+function onGaugeRowClick(row: number) {
+  if (selectedToken.value) {
+    placeToken(selectedToken.value, row, 'center')
+    selectedToken.value = null
+    return
+  }
+  removeToken('gauge')
+}
+
+function toggleToken(token: 'icon' | 'label' | 'unit' | 'value' | 'gauge') {
+  selectedToken.value = selectedToken.value === token ? null : token
+}
+
+function onLoadPreset(event: Event) {
+  const key = (event.target as HTMLSelectElement).value
+  const preset = props.metricLayouts?.find((p) => p.key === key)
+  if (preset) layout.value = { ...preset.layout }
+  ;(event.target as HTMLSelectElement).value = ''
+}
+
+function saveLayoutPreset() {
+  // eslint-disable-next-line no-alert
+  const name = window.prompt(t('companion.settings.metric_layouts.name_prompt'))?.trim()
+  if (!name) return
+  emit('saveLayout', { name, layout: currentLayout.value })
+}
 
 // La couleur de fond et de texte : contrairement à la mesure ou à la source,
 // elle vaut pour n'importe quel genre choisi dans cette dialogue, pas pour un
@@ -129,6 +296,7 @@ const groups = computed(() => {
         key: `${choice.kind}:${choice.mode || ''}`,
         block: blockFor(choice, {
           metric: metric.value, source: source.value, series: series.value, format: format.value,
+          layout: currentLayout.value, icon: iconChoice.value, gaugeKind: effectiveGaugeKind.value || undefined,
           min: min.value, max: max.value, color: color.value, textColor: textColor.value,
         }),
         label: labelOf(choice),
@@ -266,8 +434,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </select>
             </label>
 
+            <label
+              v-if="group.kind === 'metric' && !!currentLayout.gauge && rangeEligible && dynamicEligible && !metricZoneEligible"
+              class="cbpk-param small"
+            >
+              {{ t('companion.settings.gauge_kind') }}
+              <select v-model="gaugeKindChoice" class="form-select form-select-sm">
+                <option value="range">{{ t('companion.settings.gauge_kinds.range') }}</option>
+                <option value="dynamic">{{ t('companion.settings.gauge_kinds.dynamic') }}</option>
+              </select>
+            </label>
+
             <div
-              v-else-if="group.kind === 'metric' && isRangeGaugeMetric(metric)"
+              v-if="group.kind === 'metric' && !!currentLayout.gauge && effectiveGaugeKind === 'range'"
               class="cbpk-param small cbpk-param-range"
             >
               <label class="cbpk-range-field">
@@ -280,7 +459,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </label>
             </div>
 
-            <label v-else-if="group.kind === 'zones' || group.kind === 'lap_zones'" class="cbpk-param small">
+            <label v-if="group.kind === 'zones' || group.kind === 'lap_zones'" class="cbpk-param small">
               {{ t('companion.settings.source') }}
               <select v-model="source" class="form-select form-select-sm">
                 <option v-for="s in catalog.zone_sources" :key="s" :value="s">
@@ -289,7 +468,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </select>
             </label>
 
-            <label v-else-if="group.kind === 'mark_lap'" class="cbpk-param small">
+            <label v-if="group.kind === 'mark_lap'" class="cbpk-param small">
               {{ t('companion.settings.lap_series') }}
               <input
                 v-model="series"
@@ -303,6 +482,97 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           <p v-if="group.kind === 'mark_lap'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.lap_series_cols_hint') }}
           </p>
+
+          <!-- L'éditeur de disposition d'un bloc `metric` : une grille à 3
+               colonnes et jusqu'à `MAX_LAYOUT_ROWS` rangées, chaque case
+               recevant un jeton de la palette d'en dessous. -->
+          <div v-if="group.kind === 'metric'" class="cbpk-layout">
+            <label v-if="metricLayouts?.length" class="cbpk-param small cbpk-layout-presets">
+              {{ t('companion.settings.metric_layouts.load') }}
+              <select class="form-select form-select-sm" @change="onLoadPreset($event)">
+                <option value="">{{ t('companion.settings.metric_layouts.load_placeholder') }}</option>
+                <option v-for="preset in metricLayouts" :key="preset.key" :value="preset.key">
+                  {{ preset.name }}
+                </option>
+              </select>
+            </label>
+
+            <div class="cbpk-grid">
+              <div v-for="row in visibleRowCount" :key="row - 1" class="cbpk-grid-row">
+                <button
+                  v-if="currentLayout.gauge === String(row - 1)"
+                  type="button"
+                  class="cbpk-grid-gauge"
+                  @click="onGaugeRowClick(row - 1)"
+                >
+                  {{ t('companion.settings.layout_tokens.gauge') }}
+                </button>
+                <template v-else>
+                  <button
+                    v-for="col in (['left', 'center', 'right'] as const)"
+                    :key="col"
+                    type="button"
+                    class="cbpk-grid-cell"
+                    @click="onCellClick(row - 1, col)"
+                  >
+                    <template v-for="token in tokensAt(row - 1, col)" :key="token">
+                      <i
+                        v-if="token === 'icon'"
+                        class="cbpk-grid-icon"
+                        :class="iconChoice || metricSample(metric).icon"
+                        aria-hidden="true"
+                      ></i>
+                      <span v-else class="cbpk-grid-token">
+                        {{ t(`companion.settings.layout_tokens.${token}`) }}
+                      </span>
+                    </template>
+                  </button>
+                </template>
+              </div>
+            </div>
+
+            <div class="cbpk-palette">
+              <button
+                v-for="token in paletteTokens"
+                :key="token"
+                type="button"
+                class="cbpk-chip"
+                :class="{
+                  'cbpk-chip--selected': selectedToken === token,
+                  'cbpk-chip--placed': isPlaced(token),
+                }"
+                @click="toggleToken(token)"
+              >
+                {{ t(`companion.settings.layout_tokens.${token}`) }}
+              </button>
+            </div>
+
+            <div v-if="currentLayout.icon" class="cbpk-icons">
+              <button
+                type="button"
+                class="cbpk-icon-btn"
+                :class="{ 'cbpk-icon-btn--selected': !iconChoice }"
+                :title="t('companion.settings.default_icon')"
+                @click="iconChoice = undefined"
+              >
+                {{ t('companion.settings.default_icon') }}
+              </button>
+              <button
+                v-for="ic in catalog.icons"
+                :key="ic"
+                type="button"
+                class="cbpk-icon-btn"
+                :class="{ 'cbpk-icon-btn--selected': iconChoice === ic }"
+                @click="iconChoice = ic"
+              >
+                <i :class="ic" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            <button type="button" class="btn btn-sm btn-outline-secondary" @click="saveLayoutPreset">
+              {{ t('companion.settings.metric_layouts.save') }}
+            </button>
+          </div>
 
           <div class="cbpk-tiles">
             <button
@@ -439,6 +709,117 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   align-items: center;
   gap: 0.4rem;
   margin-bottom: 0;
+}
+
+/* L'éditeur de disposition d'un bloc `metric` : la grille, la palette de
+   jetons, la grille d'icônes — dans cet ordre, celui où on les utilise. */
+.cbpk-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+  padding: 0.6rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.5rem;
+}
+.cbpk-layout-presets {
+  margin-left: 0;
+}
+
+.cbpk-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.cbpk-grid-row {
+  display: flex;
+  gap: 0.35rem;
+}
+.cbpk-grid-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 2.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border: 1px dashed var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: transparent;
+  padding: 0.3rem;
+}
+.cbpk-grid-cell:hover {
+  border-color: var(--bs-primary);
+}
+.cbpk-grid-gauge {
+  flex: 1 1 0;
+  min-height: 2.6rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--bs-primary);
+  border-radius: 0.4rem;
+  background: var(--bs-primary-bg-subtle, rgba(13, 110, 253, 0.1));
+  font-size: 0.85rem;
+  text-transform: uppercase;
+}
+.cbpk-grid-icon {
+  font-size: 1.1rem;
+  opacity: 0.8;
+}
+.cbpk-grid-token {
+  font-size: 0.78rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.3rem;
+  background: var(--bs-secondary-bg, #e9ecef);
+  white-space: nowrap;
+}
+
+.cbpk-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.cbpk-chip {
+  border: 1px solid var(--bs-border-color);
+  border-radius: 1rem;
+  background: transparent;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.85rem;
+}
+.cbpk-chip--placed {
+  border-style: solid;
+  opacity: 0.7;
+}
+.cbpk-chip--selected {
+  border-color: var(--bs-primary);
+  background: var(--bs-primary);
+  color: #fff;
+  opacity: 1;
+}
+
+.cbpk-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.cbpk-icon-btn {
+  width: 2.2rem;
+  height: 2.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: transparent;
+  font-size: 0.65rem;
+  padding: 0;
+}
+.cbpk-icon-btn--selected {
+  border-color: var(--bs-primary);
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -2px;
 }
 
 /* Des vignettes de même taille : on compare des dessins, et deux tailles

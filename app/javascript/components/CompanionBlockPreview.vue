@@ -33,6 +33,9 @@ import {
   RANGE_GAUGE_COLOR,
   RANGE_GAUGE_SEGMENTS,
   blockShape,
+  layoutRows,
+  metricIcon,
+  metricLayout,
   metricSample,
   type Block,
 } from '../companionSettings'
@@ -106,11 +109,28 @@ const POWER_SHARES = [
 ]
 
 const sample = computed(() => metricSample(props.block.metric, props.block.format))
+const icon = computed(() => metricIcon(props.block))
 
-// L'aplat de zone du mode `big` comme du mode `zone` : côté appli, `MetricView`
-// peint le fond dès que la mesure porte une zone, quel que soit celui des deux.
-// Les deux vignettes se ressemblent donc — et l'aperçu ne ment pas là-dessus.
-const metricZone = computed(() => shape.value.metricZone)
+// La disposition du bloc — `layout` s'il en a un, sinon la traduction de son
+// `mode` (document d'avant ce chantier) — et les rangées qu'elle occupe,
+// dans l'ordre. Une rangée sans occupant n'y figure pas : elle ne prend
+// aucune place, exactement ce que dessinera l'appli.
+const rows = computed(() => layoutRows(metricLayout(props.block)))
+
+// Le fond se peint dès que la mesure porte une zone, quelle que soit la
+// disposition composée — côté appli, `MetricView` peint le fond de la carte
+// entière, pas seulement autour du chiffre.
+const metricZone = computed(() => sample.value.zone || null)
+
+// Y a-t-il une jauge quelque part dans la disposition, et de quelle nature —
+// détermine à la fois quel dessin de barre utiliser et si le chiffre prend
+// la taille réduite qui lui laisse de la place (`cbp-big--gauge`), comme la
+// carte de jauge d'avant ce chantier.
+const gaugeKind = computed<'zone' | 'range' | 'dynamic' | null>(() => {
+  if (!rows.value.some((row) => row.gauge)) return null
+  if (metricZone.value) return 'zone'
+  return props.block.gauge_kind === 'dynamic' ? 'dynamic' : 'range'
+})
 
 // La pente, sur sa couleur de tranche de difficulté plutôt que sur une zone
 // d'entraînement (`MetricSample.background`, mutuellement exclusif avec
@@ -150,6 +170,16 @@ const rangeGaugeCells = computed(() => {
   const lit = fraction == null ? -1 : Math.round(fraction * RANGE_GAUGE_SEGMENTS)
   return Array.from({ length: RANGE_GAUGE_SEGMENTS }, (_, i) => ({ lit: i < lit }))
 })
+
+// Les paliers à dessiner pour la rangée-jauge, quelle que soit sa nature —
+// zone (une couleur par palier) ou plage libre (une seule couleur, tous les
+// paliers allumés confondus) — pour que le template n'ait qu'une seule
+// boucle à écrire, pas un `v-if` de plus par nature de jauge.
+const litGaugeCells = computed(() => (
+  gaugeKind.value === 'zone'
+    ? gaugeCells.value.map((cell) => ({ lit: cell.lit, color: cell.color }))
+    : rangeGaugeCells.value.map((cell) => ({ lit: cell.lit, color: RANGE_GAUGE_COLOR }))
+))
 
 // Le curseur de la jauge dynamique : une position fixe et illustrative
 // (`DYNAMIC_GAUGE_PREVIEW_FRACTION`), l'éditeur n'ayant pas de sortie en
@@ -278,96 +308,48 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
 <template>
   <div class="cbp">
     <!-- Une mesure ------------------------------------------------------- -->
-    <template v-if="block.kind === 'metric'">
-      <!-- Jauge : le chiffre, les paliers, l'unité. **Seulement pour une mesure
-           qui a des zones** — la plage d'une jauge, ce sont elles, et sans elles
-           l'appli retombe sur le chiffre plein cadre plutôt que d'inventer un
-           maximum. Une vignette qui montrerait des paliers sur la cadence
-           promettrait un dessin que le téléphone ne fera jamais. -->
-      <div v-if="shape.metricGauge" class="cbp-card cbp-center" :style="overrideStyle">
-        <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
-        <div class="cbp-gauge">
-          <span
-            v-for="(gaugeCell, i) in gaugeCells"
-            :key="i"
-            class="cbp-gauge-cell"
-            :style="{ background: gaugeCell.lit ? gaugeCell.color : 'rgba(255,255,255,0.12)' }"
-          ></span>
+    <div
+      v-if="block.kind === 'metric'"
+      class="cbp-card cbp-metric"
+      :style="{ background: metricBackground || undefined, color: metricInk }"
+    >
+      <template v-for="row in rows" :key="row.row">
+        <!-- La jauge est une barre pleine largeur, pas un texte : dès qu'elle
+             occupe une rangée, elle en est la seule occupante (voir
+             l'assainisseur), donc pas de colonnes à dessiner ici. -->
+        <div v-if="row.gauge" class="cbp-metric-gauge-row">
+          <div v-if="gaugeKind === 'dynamic'" class="cbp-dyngauge-track">
+            <span
+              class="cbp-dyngauge-fill"
+              :style="{ width: `${dynamicGaugeFraction * 100}%`, background: RANGE_GAUGE_COLOR }"
+            ></span>
+          </div>
+          <div v-else class="cbp-gauge">
+            <span
+              v-for="(cell, i) in litGaugeCells"
+              :key="i"
+              class="cbp-gauge-cell"
+              :style="{ background: cell.lit ? cell.color : 'rgba(255,255,255,0.12)' }"
+            ></span>
+          </div>
         </div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
-      </div>
-
-      <!-- Jauge à plage libre : le pendant de la jauge ci-dessus pour une
-           mesure sans zones d'entraînement, sur un min/max réglé dans
-           l'éditeur — mêmes paliers, une seule couleur puisqu'aucun d'eux
-           n'a de teinte propre. -->
-      <div v-else-if="shape.metricRangeGauge" class="cbp-card cbp-center" :style="overrideStyle">
-        <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
-        <div class="cbp-gauge">
-          <span
-            v-for="(gaugeCell, i) in rangeGaugeCells"
-            :key="i"
-            class="cbp-gauge-cell"
-            :style="{ background: gaugeCell.lit ? RANGE_GAUGE_COLOR : 'rgba(255,255,255,0.12)' }"
-          ></span>
+        <div v-else class="cbp-metric-row">
+          <div
+            v-for="col in row.columns"
+            :key="col.col"
+            class="cbp-metric-col"
+            :class="`cbp-metric-col--${col.col}`"
+          >
+            <template v-for="token in col.tokens" :key="token">
+              <i v-if="token === 'icon'" class="cbp-metric-icon" :class="icon" aria-hidden="true"></i>
+              <span v-else-if="token === 'label'" class="cbp-metric-label">{{ sample.name }}</span>
+              <span v-else-if="token === 'unit'" class="cbp-metric-unit">{{ sample.unit }}</span>
+              <span v-else class="cbp-big" :class="{ 'cbp-big--gauge': gaugeKind }">{{ sample.value }}</span>
+            </template>
+          </div>
         </div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
-      </div>
-
-      <!-- Jauge dynamique : le chiffre, une piste continue, l'unité — un
-           remplissage jusqu'à la position réelle plutôt que des paliers,
-           puisque la plage (min/max de la sortie, ou progression vers
-           l'itinéraire) est une vraie progression, pas des seuils. -->
-      <div v-else-if="shape.metricDynamicGauge" class="cbp-card cbp-center" :style="overrideStyle">
-        <div class="cbp-big cbp-big--gauge">{{ sample.value }}</div>
-        <div class="cbp-dyngauge-track">
-          <span
-            class="cbp-dyngauge-fill"
-            :style="{ width: `${dynamicGaugeFraction * 100}%`, background: RANGE_GAUGE_COLOR }"
-          ></span>
-        </div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
-      </div>
-
-      <!-- Compact : icône, valeur, unité — la mise en forme de `MetricTile`.
-           L'icône part avant l'unité : elle ne fait que redire ce que l'unité
-           dit déjà. -->
-      <div
-        v-else-if="shape.metricCompact"
-        class="cbp-card cbp-center"
-        :style="{ background: metricBackground || undefined, color: metricInk }"
-      >
-        <i class="cbp-icon" :class="sample.icon" aria-hidden="true"></i>
-        <div class="cbp-mid">{{ sample.value }}</div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
-      </div>
-
-      <!-- Aplat de zone : le même aplat que le plein cadre, mais l'icône se
-           pose devant le **titre** (l'unité) et non devant le chiffre — cœur
-           ou éclair au même endroit que le nom qui confirme la mesure,
-           avant qu'on descende lire le chiffre lui-même. -->
-      <div
-        v-else-if="shape.metricZoneMode"
-        class="cbp-card cbp-center"
-        :style="{ background: metricBackground || undefined, color: metricInk }"
-      >
-        <div class="cbp-zone-title">
-          <i :class="sample.icon" aria-hidden="true"></i>
-          <span>{{ sample.unit }}</span>
-        </div>
-        <div class="cbp-big cbp-big--zone">{{ sample.value }}</div>
-      </div>
-
-      <!-- Plein cadre : le chiffre seul, sans icône. -->
-      <div
-        v-else
-        class="cbp-card cbp-center"
-        :style="{ background: metricBackground || undefined, color: metricInk }"
-      >
-        <div class="cbp-big">{{ sample.value }}</div>
-        <div class="cbp-unit">{{ sample.unit }}</div>
-      </div>
-    </template>
+      </template>
+    </div>
 
     <!-- Temps par zone -- et son pendant « ce tour » (lap_zones), même dessin,
          seul le titre distingue les deux. ----------------------------------- -->
@@ -883,51 +865,72 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
 .cbp-big--gauge {
   font-size: 2.6em;
 }
-/* Le chiffre de l'aplat de zone garde le rythme du plein cadre, juste sous
-   son titre plutôt que centré seul dans la case. */
-.cbp-big--zone {
-  margin-top: 0.1em;
+
+/* La disposition d'un bloc `metric` : des rangées empilées et centrées dans
+   la carte (pas de `cbp-center` — ses rangées doivent s'étirer sur toute la
+   largeur pour que l'alignement gauche/centre/droite ait un bord réel à
+   viser, voir `cbp-metric-row`), une rangée sans occupant n'y figurant pas. */
+.cbp-metric {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.4em;
+  text-align: center;
 }
-/* Le titre de l'aplat de zone : l'icône devant l'unité en capitales, à même
-   ligne — c'est elle qui distingue la case cardio de la case puissance, deux
-   aplats de zone identiques sinon. Au-dessus du chiffre et non devant lui. */
-.cbp-zone-title {
+/* Le motif « barre d'outils » : toujours 3 tiers égaux, y compris vides —
+   c'est ce qui fait qu'une case seule à droite touche vraiment le bord
+   droit, quelle que soit la longueur de ce qu'il y a (ou pas) à gauche et
+   au centre. */
+.cbp-metric-row {
   display: flex;
   align-items: center;
+  width: 100%;
+}
+.cbp-metric-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  overflow: hidden;
+}
+.cbp-metric-col--left {
+  justify-content: flex-start;
+}
+.cbp-metric-col--center {
   justify-content: center;
-  gap: 0.25em;
-  font-size: 1.15em;
+}
+.cbp-metric-col--right {
+  justify-content: flex-end;
+}
+.cbp-metric-icon {
+  font-size: 1.4em;
+  opacity: 0.7;
+  flex: none;
+}
+.cbp-metric-label {
+  font-size: 1.05em;
   font-weight: 700;
   text-transform: uppercase;
   opacity: 0.85;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.cbp-zone-title i {
-  font-size: 1.3em;
-}
-.cbp-mid {
-  font-size: 1.9em;
-  line-height: 1.1;
-  white-space: nowrap;
-}
-.cbp-unit {
+.cbp-metric-unit {
   font-size: 0.9em;
   opacity: 0.6;
-  margin-top: 0.2em;
   text-transform: uppercase;
   white-space: nowrap;
 }
-.cbp-icon {
-  font-size: 1.7em;
-  opacity: 0.7;
-  margin-bottom: 0.3em;
+.cbp-metric-gauge-row {
+  width: 100%;
 }
 
 .cbp-gauge {
   display: flex;
   gap: 0.15em;
   width: 100%;
-  margin: 0.6em 0 0.35em;
 }
 .cbp-gauge-cell {
   flex: 1;
@@ -945,7 +948,6 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   position: relative;
   width: 100%;
   height: 1.6em;
-  margin: 0.6em 0 0.35em;
   border-radius: 0.3em;
   background: rgba(255, 255, 255, 0.12);
   overflow: hidden;

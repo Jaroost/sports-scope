@@ -1624,8 +1624,10 @@ en:
       mode: "Display"
       source: "Source"
       duration_format: "Format"
+      gauge_kind: "Gauge"
       range_min: "Min"
       range_max: "Max"
+      default_icon: "Default icon"
       block_color: "Background"
       block_text_color: "Text"
       reset_color: "Default"
@@ -1690,6 +1692,20 @@ en:
       duration_formats:
         hm: "HH:MM"
         hms: "HH:MM:SS"
+      gauge_kinds:
+        range: "Set range"
+        dynamic: "Dynamic range"
+      layout_tokens:
+        icon: "Icon"
+        label: "Label"
+        unit: "Unit"
+        value: "Figure"
+        gauge: "Gauge"
+      metric_layouts:
+        load: "Start from a saved layout"
+        load_placeholder: "Neutral layout"
+        save: "Save this layout"
+        name_prompt: "Layout name"
       sources:
         hr: "Heart rate"
         power: "Power"

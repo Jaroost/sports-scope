@@ -15,6 +15,11 @@ import { colorForGrade } from './routeHelpers'
 
 export interface Block {
   kind: string
+  // Vestige d'avant ce chantier — un bloc `metric` n'en écrit plus, mais un
+  // document enregistré avant ce chantier peut encore le porter (voir
+  // `metricLayout`, qui le traduit en `layout`). Toujours actif pour les
+  // autres genres de composants (`zones`, `radar`, …), qui gardent leurs
+  // modes.
   mode?: string
   metric?: string
   source?: string
@@ -26,9 +31,23 @@ export interface Block {
   // la mesure est une durée (voir `isDurationMetric`). Absent vaut `'hm'`, le
   // seul format que l'appli connaissait avant ce réglage.
   format?: string
-  // Bornes de la jauge à plage libre (mode `gauge` sur une mesure sans zones
-  // d'entraînement — voir `isRangeGaugeMetric`). Absentes, l'appli retombe sur
-  // le chiffre plein cadre, comme avant que ce réglage existe pour ces mesures.
+  // La disposition d'un bloc `metric` — voir `MetricLayout`/`metricLayout`.
+  // Absente sur un document d'avant ce chantier, où c'était `mode` qui
+  // décidait de tout.
+  layout?: MetricLayout
+  // Icône personnalisée, propre à ce bloc — une clé de `Catalog.icons`.
+  // Absente : l'appli garde l'icône par défaut de la mesure (`MetricId.icon`).
+  icon?: string
+  // `'range'` (bornes réglées ci-dessous) ou `'dynamic'` (plage lue en
+  // roulant) — seulement quand `layout.gauge` est réglé sur une mesure sans
+  // zones d'entraînement éligible aux deux (voir `isRangeGaugeMetric`/
+  // `isDynamicGaugeMetric`). Une mesure éligible à un seul des deux l'impose,
+  // ce champ ne sert alors à rien.
+  gauge_kind?: string
+  // Bornes de la jauge à plage libre (`layout.gauge` réglé, `gauge_kind ===
+  // 'range'`, sur une mesure sans zones d'entraînement — voir
+  // `isRangeGaugeMetric`). Absentes, l'appli retombe sur le chiffre plein
+  // cadre, comme avant que ce réglage existe pour ces mesures.
   min?: number
   max?: number
   // Couleur de fond de la carte et de son texte, en `#rrggbb` — valent pour
@@ -39,6 +58,137 @@ export interface Block {
   // lisible dessus (`foregroundOf`), jamais sur du blanc fixe.
   color?: string
   text_color?: string
+}
+
+// ── La disposition d'un bloc `metric` ───────────────────────────────────────
+//
+// Remplace les cinq anciens `mode` (`big`, `compact`, `zone`, `gauge`,
+// `dynamic_gauge`) par une grille librement composable, à 3 colonnes et
+// jusqu'à `MAX_LAYOUT_ROWS` rangées : chaque élément se pose dans une case
+// `"<rangée>-<colonne>"` (`icon`/`label`/`unit`/`value`), `gauge` — une barre
+// pleine largeur, pas un texte — sur une rangée entière (`"<rangée>"`, sans
+// colonne). Une clé absente = élément masqué ; `value` est la seule
+// obligatoire. Même contrat que `CompanionSettings::LAYOUT_*`/
+// `sanitize_layout_positions` côté Rails — c'est lui qui fait foi, ce fichier
+// ne fait qu'aider l'éditeur à ne pas composer ce que le serveur retirera.
+export interface MetricLayout {
+  icon?: string
+  label?: string
+  unit?: string
+  value: string
+  gauge?: string
+}
+
+export type LayoutToken = 'icon' | 'label' | 'unit' | 'value'
+
+export const LAYOUT_TOKEN_ORDER: LayoutToken[] = ['icon', 'label', 'unit', 'value']
+
+export const MAX_LAYOUT_ROWS = 4
+
+// La disposition qu'un ancien `mode` de bloc `metric` dessinait — même table
+// que `CompanionSettings::LEGACY_LAYOUTS` côté Rails, pour que l'aperçu d'un
+// document enregistré avant ce chantier (jamais rouvert dans l'éditeur
+// depuis) se dessine comme avant, sans que l'utilisateur ait à le retoucher.
+const LEGACY_METRIC_LAYOUTS: Record<string, MetricLayout> = {
+  big: { value: '0-center', unit: '1-center' },
+  compact: { icon: '0-center', value: '1-center', unit: '2-center' },
+  zone: { icon: '0-center', label: '0-center', value: '1-center' },
+  gauge: { value: '0-center', gauge: '1', unit: '2-center' },
+  dynamic_gauge: { value: '0-center', gauge: '1', unit: '2-center' },
+}
+
+// Le repli d'avant `big` : chiffre plein cadre, unité en dessous — même
+// valeur que `CompanionSettings::DEFAULT_METRIC_LAYOUT`.
+export const DEFAULT_METRIC_LAYOUT: MetricLayout = { value: '0-center', unit: '1-center' }
+
+// La disposition d'un bloc `metric`, quelle que soit sa provenance : `layout`
+// s'il en a un, sinon la traduction de son `mode` (document d'avant ce
+// chantier), sinon le repli neutre. C'est elle que l'aperçu et l'éditeur
+// doivent lire — jamais `block.layout`/`block.mode` directement, qui ne
+// couvrent chacun qu'un des deux cas.
+export function metricLayout(block: Block): MetricLayout {
+  if (block.layout) return block.layout
+  if (block.mode && LEGACY_METRIC_LAYOUTS[block.mode]) return LEGACY_METRIC_LAYOUTS[block.mode]
+  return DEFAULT_METRIC_LAYOUT
+}
+
+// L'icône à dessiner pour un bloc `metric` : celle réglée sur le bloc, sinon
+// celle par défaut de la mesure.
+export function metricIcon(block: Block): string {
+  return block.icon || metricSample(block.metric).icon
+}
+
+export interface GridPosition {
+  row: number
+  col: 'left' | 'center' | 'right'
+}
+
+// `undefined`/hors grille rendent `null` plutôt que de lever : ce fichier lit
+// aussi bien un document tout juste composé qu'un document repris tel quel
+// d'avant ce chantier, jamais garanti valide avant d'être passé par
+// l'assainisseur Rails.
+export function parsePosition(value: string | undefined): GridPosition | null {
+  if (!value) return null
+  const [rowPart, col] = value.split('-', 2)
+  const row = Number(rowPart)
+  if (!Number.isInteger(row) || row < 0 || row >= MAX_LAYOUT_ROWS) return null
+  if (col !== 'left' && col !== 'center' && col !== 'right') return null
+  return { row, col }
+}
+
+export function parseGaugeRow(value: string | undefined): number | null {
+  if (!value) return null
+  const row = Number(value)
+  return Number.isInteger(row) && row >= 0 && row < MAX_LAYOUT_ROWS ? row : null
+}
+
+export interface MetricLayoutRow {
+  row: number
+  // Une rangée-jauge n'a pas de colonnes : la barre occupe toute sa largeur.
+  gauge: boolean
+  // Toujours les 3 colonnes, y compris vides : c'est ce qui permet à
+  // l'aperçu de réserver 3 tiers égaux (motif « barre d'outils »,
+  // gauche/centre/droite) plutôt que de ne réserver que ce qui est occupé —
+  // sinon une case seule à droite se retrouverait centrée, pas au bord.
+  columns: { col: 'left' | 'center' | 'right'; tokens: LayoutToken[] }[]
+}
+
+// Les rangées effectivement utilisées, dans l'ordre — une rangée sans aucun
+// occupant n'y figure pas (elle ne prend aucune place, ni dans l'appli ni
+// dans l'aperçu). Partagée entre `CompanionBlockPreview` (dessiner) et
+// `CompanionBlockPicker` (savoir quelles cases de la grille d'édition sont
+// déjà prises).
+export function layoutRows(layout: MetricLayout): MetricLayoutRow[] {
+  const rows = new Map<number, { gauge: boolean; columns: Map<string, LayoutToken[]> }>()
+  const ensure = (row: number) => {
+    let entry = rows.get(row)
+    if (!entry) {
+      entry = { gauge: false, columns: new Map() }
+      rows.set(row, entry)
+    }
+    return entry
+  }
+
+  for (const token of LAYOUT_TOKEN_ORDER) {
+    const pos = parsePosition(layout[token])
+    if (!pos) continue
+    const entry = ensure(pos.row)
+    const tokens = entry.columns.get(pos.col) || []
+    tokens.push(token)
+    entry.columns.set(pos.col, tokens)
+  }
+
+  const gaugeRow = parseGaugeRow(layout.gauge)
+  if (gaugeRow != null) ensure(gaugeRow).gauge = true
+
+  return [...rows.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([row, entry]) => ({
+      row,
+      gauge: entry.gauge,
+      columns: (['left', 'center', 'right'] as const)
+        .map((col) => ({ col, tokens: entry.columns.get(col) || [] })),
+    }))
 }
 
 // Série de tours que l'appli compagnon remplit toute seule, sur les fronts
@@ -100,9 +250,20 @@ export interface Preset {
   screen?: Record<string, number>
 }
 
+// Une disposition de bloc `metric` enregistrée pour être réutilisée sur une
+// prochaine mesure — un **arrangement**, pas un bloc : ni icône choisie, ni
+// type de jauge, ni min/max, propres à une mesure précise et pas à sa
+// disposition.
+export interface MetricLayoutPreset {
+  key?: string
+  name: string
+  layout: MetricLayout
+}
+
 export interface CompanionDocument {
   v?: number
   presets: Preset[]
+  metric_layouts?: MetricLayoutPreset[]
 }
 
 export interface Catalog {
@@ -114,6 +275,7 @@ export interface Catalog {
   activities: string[]
   max_band_metrics: number
   max_grid_side: number
+  icons: string[]
 }
 
 // ── Derrière le menu, ou dans le défilement ─────────────────────────────────
@@ -209,6 +371,7 @@ export function blockFor(
   choice: BlockChoice,
   params: {
     metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
+    layout?: MetricLayout; icon?: string; gaugeKind?: string
     color?: string | null; textColor?: string | null
   },
 ): Block {
@@ -216,13 +379,18 @@ export function blockFor(
   if (choice.mode) block.mode = choice.mode
   if (choice.kind === 'metric') block.metric = params.metric
   if (choice.kind === 'metric' && isDurationMetric(params.metric)) block.format = params.format || 'hm'
-  // Seulement pour la vignette `gauge` : les autres modes ignorent min/max, et
-  // les y poser laisserait une clé morte que l'assainisseur retirerait — la
-  // même règle que `format`, qui lui s'applique à tous les modes parce que la
-  // durée s'écrit pareil dans chacun d'eux.
-  if (choice.kind === 'metric' && choice.mode === 'gauge' && isRangeGaugeMetric(params.metric)) {
-    block.min = params.min
-    block.max = params.max
+  if (choice.kind === 'metric') block.layout = params.layout || DEFAULT_METRIC_LAYOUT
+  if (choice.kind === 'metric' && params.icon) block.icon = params.icon
+  // Seulement quand la jauge est effectivement posée, et seulement sur une
+  // plage réglée dans l'éditeur — la dynamique se lit dans la sortie en
+  // cours, poser min/max dessus laisserait une clé morte que l'assainisseur
+  // retirerait.
+  if (choice.kind === 'metric' && params.layout?.gauge) {
+    if (params.gaugeKind) block.gauge_kind = params.gaugeKind
+    if (params.gaugeKind !== 'dynamic' && isRangeGaugeMetric(params.metric)) {
+      block.min = params.min
+      block.max = params.max
+    }
   }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
   if (choice.kind === 'mark_lap') block.series = params.series || 'default'
@@ -350,6 +518,14 @@ export function zoneCount(source?: string): number {
 // dessinera jamais.
 export interface MetricSample {
   value: string
+  // Le nom de la mesure, ex. « Cardio » — même valeur que `MetricId.name`
+  // côté appli (français en dur, l'appli ne traduit pas ce document — voir
+  // plus bas).
+  name: string
+  // L'unité physique, ex. « bpm » — vide pour les mesures qui n'en ont pas
+  // (une durée, une position de plateau…). Distincte de `name` depuis ce
+  // chantier : avant, un seul champ (`unit`) faisait les deux, tantôt un nom
+  // tantôt une unité selon la mesure.
   unit: string
   // La clé de zone (`z1`…`z7`), pour les seules mesures qui en portent une :
   // l'appli peint alors l'aplat de la zone du moment sous le chiffre.
@@ -361,7 +537,8 @@ export interface MetricSample {
   // appli (`MetricReading.background`, dépôt voisin), aucune mesure n'a
   // besoin des deux.
   background?: string
-  // L'icône du mode compact, transposée de `MetricId.icon` en FontAwesome.
+  // L'icône par défaut de la mesure, transposée de `MetricId.icon` en
+  // FontAwesome — remplacée par `block.icon` quand il est réglé.
   icon: string
   // La même valeur que `value`, non mise en forme — seulement pour les mesures
   // de `RANGE_GAUGE_METRICS`, où la jauge à plage libre en a besoin pour situer
@@ -370,53 +547,61 @@ export interface MetricSample {
   numeric?: number
 }
 
+// **Les noms et unités ne sont pas traduits, et c'est voulu** : ce sont ceux
+// que le téléphone écrira, or l'appli est en français et ne connaît pas
+// d'i18n (`MetricId.name`/`MetricId.unit`, dépôt voisin) — un nom traduit
+// ferait un aperçu que l'écran ne dessinera jamais. Mêmes chaînes des deux
+// côtés, à tenir synchronisées à la main.
 const METRIC_SAMPLES: Record<string, MetricSample> = {
-  duration: { value: '01:12', unit: 'durée', icon: 'fa-regular fa-clock' },
-  moving_time: { value: '01:08', unit: 'en mouvement', icon: 'fa-solid fa-person-biking' },
-  pause_time: { value: '00:04', unit: 'Durée pause', icon: 'fa-regular fa-circle-pause' },
-  distance: { value: '38,42 km', unit: 'distance', icon: 'fa-solid fa-ruler-horizontal', numeric: 38.42 },
-  speed: { value: '32', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 32 },
-  speed_avg: { value: '27 km/h', unit: 'Vitesse moyenne', icon: 'fa-solid fa-gauge-high', numeric: 27 },
-  speed_max: { value: '61', unit: 'km/h max', icon: 'fa-solid fa-gauge-high', numeric: 61 },
-  heart_rate: { value: '154', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
-  hr_zone: { value: 'Z3', unit: 'zone bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
-  hr_avg: { value: '141', unit: 'bpm moy', icon: 'fa-regular fa-heart', numeric: 141 },
-  hr_max: { value: '178', unit: 'bpm max', icon: 'fa-regular fa-heart', numeric: 178 },
-  power: { value: '248', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
-  power_zone: { value: 'Z3', unit: 'zone W', zone: 'z3', icon: 'fa-solid fa-bolt' },
-  power_avg: { value: '212', unit: 'W moy', icon: 'fa-solid fa-bolt', numeric: 212 },
-  power_np: { value: '236', unit: 'W NP', icon: 'fa-solid fa-bolt', numeric: 236 },
-  power_max: { value: '744', unit: 'W max', icon: 'fa-solid fa-bolt', numeric: 744 },
-  cadence: { value: '88', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
-  cadence_avg: { value: '84', unit: 'tr/min moy', icon: 'fa-solid fa-rotate', numeric: 84 },
-  cadence_max: { value: '112', unit: 'tr/min max', icon: 'fa-solid fa-rotate', numeric: 112 },
-  ascent: { value: '640 m', unit: 'D+', icon: 'fa-solid fa-arrow-trend-up', numeric: 640 },
-  altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain', numeric: 1204 },
+  duration: { value: '01:12', name: 'Durée', unit: '', icon: 'fa-regular fa-clock' },
+  moving_time: { value: '01:08', name: 'Temps en mouvement', unit: '', icon: 'fa-solid fa-person-biking' },
+  pause_time: { value: '00:04', name: 'Durée pause', unit: '', icon: 'fa-regular fa-circle-pause' },
+  distance: { value: '38,42 km', name: 'Distance', unit: 'km', icon: 'fa-solid fa-ruler-horizontal', numeric: 38.42 },
+  speed: { value: '32', name: 'Vitesse', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 32 },
+  speed_avg: { value: '27', name: 'Vitesse moyenne', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 27 },
+  speed_max: { value: '61', name: 'Vitesse max', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 61 },
+  heart_rate: { value: '154', name: 'Cardio', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
+  hr_zone: { value: 'Z3', name: 'Zone cardio', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
+  hr_avg: { value: '141', name: 'Cardio moyen', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 141 },
+  hr_max: { value: '178', name: 'Cardio max', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 178 },
+  power: { value: '248', name: 'Puissance', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
+  power_zone: { value: 'Z3', name: 'Zone de puissance', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
+  power_avg: { value: '212', name: 'Puissance moyenne', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 212 },
+  power_np: { value: '236', name: 'Puissance normalisée', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 236 },
+  power_max: { value: '744', name: 'Puissance max', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 744 },
+  cadence: { value: '88', name: 'Cadence', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
+  cadence_avg: { value: '84', name: 'Cadence moyenne', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 84 },
+  cadence_max: { value: '112', name: 'Cadence max', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 112 },
+  ascent: { value: '640', name: 'Dénivelé positif', unit: 'm', icon: 'fa-solid fa-arrow-trend-up', numeric: 640 },
+  altitude: { value: '1204', name: 'Altitude', unit: 'm', icon: 'fa-solid fa-mountain', numeric: 1204 },
   grade: {
-    value: '7', unit: '% pente', background: colorForGrade(7), icon: 'fa-solid fa-arrow-up-right-dots', numeric: 7,
+    value: '7', name: 'Pente', unit: '%', background: colorForGrade(7), icon: 'fa-solid fa-arrow-up-right-dots',
+    numeric: 7,
   },
   grade_avg: {
-    value: '5', unit: '% pente moy', background: colorForGrade(5), icon: 'fa-solid fa-arrow-up-right-dots',
-    numeric: 5,
+    value: '5', name: 'Pente moyenne', unit: '%', background: colorForGrade(5),
+    icon: 'fa-solid fa-arrow-up-right-dots', numeric: 5,
   },
   grade_max: {
-    value: '14', unit: '% pente max', background: colorForGrade(14), icon: 'fa-solid fa-arrow-up-right-dots',
-    numeric: 14,
+    value: '14', name: 'Pente max', unit: '%', background: colorForGrade(14),
+    icon: 'fa-solid fa-arrow-up-right-dots', numeric: 14,
   },
-  calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire', numeric: 612 },
-  calories_per_hour: { value: '510', unit: 'kcal/h', icon: 'fa-solid fa-fire', numeric: 510 },
-  tss: { value: '54', unit: 'TSS', icon: 'fa-solid fa-chart-column', numeric: 54 },
-  gears: { value: '50×15', unit: 'braquet', icon: 'fa-solid fa-gear' },
-  chainring_position: { value: '2', unit: 'plateau', icon: 'fa-solid fa-circle-notch', numeric: 2 },
-  sprocket_position: { value: '5', unit: 'pignon', icon: 'fa-solid fa-record-vinyl', numeric: 5 },
-  gear_ratio: { value: '3,3', unit: 'rapport', icon: 'fa-solid fa-arrows-left-right', numeric: 3.3 },
+  calories: { value: '612', name: 'Calories', unit: 'kcal', icon: 'fa-solid fa-fire', numeric: 612 },
+  calories_per_hour: {
+    value: '510', name: 'Calories par heure', unit: 'kcal/h', icon: 'fa-solid fa-fire', numeric: 510,
+  },
+  tss: { value: '54', name: 'TSS', unit: 'TSS', icon: 'fa-solid fa-chart-column', numeric: 54 },
+  gears: { value: '50×15', name: 'Braquet', unit: '', icon: 'fa-solid fa-gear' },
+  chainring_position: { value: '2', name: 'Plateau', unit: '', icon: 'fa-solid fa-circle-notch', numeric: 2 },
+  sprocket_position: { value: '5', name: 'Pignon', unit: '', icon: 'fa-solid fa-record-vinyl', numeric: 5 },
+  gear_ratio: { value: '3,3', name: 'Rapport', unit: '', icon: 'fa-solid fa-arrows-left-right', numeric: 3.3 },
   route_remaining: {
-    value: '21,40 km', unit: 'Distance restante', icon: 'fa-regular fa-flag', numeric: 21.4,
+    value: '21,40', name: 'Distance restante', unit: 'km', icon: 'fa-regular fa-flag', numeric: 21.4,
   },
   route_remaining_gain: {
-    value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up', numeric: 380,
+    value: '380', name: 'D+ restant', unit: 'm', icon: 'fa-solid fa-arrow-trend-up', numeric: 380,
   },
-  route_eta: { value: '00:48', unit: 'temps restant', icon: 'fa-regular fa-clock' },
+  route_eta: { value: '00:48', name: 'Temps restant', unit: '', icon: 'fa-regular fa-clock' },
 }
 
 // La même vignette en `HH:MM:SS`, pour le réglage de format des mesures de
@@ -484,7 +669,7 @@ export const CLIMB_LIST_SAMPLE = [
 // version : c'est **exactement** ce que le téléphone affichera d'une mesure
 // qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
 export function metricSample(metric: string | undefined, format?: string): MetricSample {
-  const sample = METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
+  const sample = METRIC_SAMPLES[metric || ''] || { value: '—', name: '', unit: '', icon: 'fa-solid fa-question' }
   if (format === 'hms' && metric && metric in DURATION_SAMPLES_HMS) {
     return { ...sample, value: DURATION_SAMPLES_HMS[metric] }
   }
@@ -629,12 +814,6 @@ export function metricDropdownLabel(metric: string, translate: (key: string) => 
 // dialogue de choix s'en sert aussi maintenant.
 export interface BlockShape {
   kind: string
-  metricGauge: boolean
-  metricRangeGauge: boolean
-  metricDynamicGauge: boolean
-  metricCompact: boolean
-  metricZone: string | null
-  metricZoneMode: boolean
   zonesBar: boolean
   zonesLegend: boolean
   averagesCards: boolean
@@ -654,34 +833,8 @@ export interface BlockShape {
 }
 
 export function blockShape(block: Block): BlockShape {
-  const zone = block.kind === 'metric' ? metricSample(block.metric).zone : undefined
-
   return {
     kind: block.kind,
-    // La jauge de zones n'existe que pour une mesure qui en a — sans elles,
-    // l'appli retombe sur le chiffre plein cadre plutôt que d'inventer un
-    // maximum.
-    metricGauge: block.kind === 'metric' && block.mode === 'gauge' && !!zone,
-    // La jauge à plage libre : le pendant sans zones, sur un min/max réglé
-    // dans l'éditeur plutôt que sur les seuils du cycliste. Les deux jauges
-    // sont mutuellement exclusives — une mesure zonée ignore min/max même
-    // réglés (documents plus anciens compris), et retombe sur `metricGauge`.
-    metricRangeGauge:
-      block.kind === 'metric' && block.mode === 'gauge' && !zone && block.min != null && block.max != null,
-    // La jauge dynamique : un mode à part entière, pas une variante de
-    // `gauge` — sa plage ne vient ni des zones ni d'un min/max réglé, donc
-    // pas de repli sur `metricGauge`/`metricRangeGauge` à gérer ici. Sans
-    // mesure éligible, la vignette retombe plus bas dans la chaîne (compact,
-    // zone, ou le chiffre plein cadre) — même mécanisme que les deux jauges
-    // ci-dessus sur une mesure qui n'a ni zones ni min/max.
-    metricDynamicGauge: block.kind === 'metric' && block.mode === 'dynamic_gauge' && isDynamicGaugeMetric(block.metric),
-    metricCompact: block.kind === 'metric' && block.mode === 'compact',
-    // C'est elle qui colore l'aplat, du mode `zone` comme du mode `big` : côté
-    // appli, `MetricView` peint le fond dès que la mesure porte une zone.
-    metricZone: zone || null,
-    // Distingue le dessin de `zone` de celui de `big` : même aplat de couleur,
-    // mais l'icône de la mesure (cœur / éclair) se pose devant le chiffre.
-    metricZoneMode: block.kind === 'metric' && block.mode === 'zone',
     // Le mode dit exactement ce qu'on dessine : `bar` les deux, `bar_only` la
     // barre seule, `legend` la légende seule. `lap_zones`/`lap_averages`
     // dessinent la même chose que `zones`/`averages` — seul le titre change

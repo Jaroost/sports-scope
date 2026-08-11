@@ -1624,8 +1624,10 @@ fr:
       mode: "Affichage"
       source: "Source"
       duration_format: "Format"
+      gauge_kind: "Jauge"
       range_min: "Min"
       range_max: "Max"
+      default_icon: "Icône par défaut"
       block_color: "Fond"
       block_text_color: "Texte"
       reset_color: "Par défaut"
@@ -1690,6 +1692,20 @@ fr:
       duration_formats:
         hm: "HH:MM"
         hms: "HH:MM:SS"
+      gauge_kinds:
+        range: "Plage réglée"
+        dynamic: "Plage dynamique"
+      layout_tokens:
+        icon: "Icône"
+        label: "Étiquette"
+        unit: "Unité"
+        value: "Chiffre"
+        gauge: "Jauge"
+      metric_layouts:
+        load: "Partir d'une disposition enregistrée"
+        load_placeholder: "Disposition neutre"
+        save: "Enregistrer cette disposition"
+        name_prompt: "Nom de la disposition"
       sources:
         hr: "Cardio"
         power: "Puissance"

@@ -36,8 +36,13 @@ module CompanionSettings
 
   # Le premier mode de chaque liste est **le mode par défaut** — celui sur lequel
   # l'appli retombe quand elle n'en reconnaît pas un. Même ordre des deux côtés.
+  #
+  # `"metric"` n'a plus de modes : sa mise en page se compose librement dans une
+  # grille (`layout`, voir `sanitize_metric_layout`) plutôt que de choisir parmi
+  # quelques formes figées. Une liste vide donne une seule vignette dans l'éditeur
+  # (`blockChoices`), comme `"lap_selector"` déjà plus bas.
   BLOCKS = {
-    "metric" => %w[big compact gauge zone dynamic_gauge],
+    "metric" => [],
     "zones" => %w[bar bar_only legend],
     # Les mêmes répartitions/moyennes, mais du tour choisi sur une page `laps`
     # plutôt que de la sortie entière — mêmes modes, aucune table de plus à
@@ -147,6 +152,78 @@ module CompanionSettings
   # distance/durée) — voir `MetricId.liveRangeOf` côté appli.
   DYNAMIC_GAUGE_METRICS = %w[cadence heart_rate power speed grade distance duration].freeze
 
+  # Les mesures qui portent une zone d'entraînement (cardio, puissance) — la
+  # jauge d'un bloc `metric` posé sur l'une d'elles est toujours celle des zones
+  # du cycliste, jamais `RANGE_GAUGE_METRICS`/`DYNAMIC_GAUGE_METRICS` (mêmes
+  # exclusions que ces deux listes). Même liste que `MetricId.hasZone` côté
+  # appli, nommée ici pour la première fois — avant ce chantier, elle ne
+  # s'exprimait qu'en creux (la seule branche qui n'utilisait ni min/max ni
+  # plage dynamique).
+  ZONE_METRICS = %w[heart_rate hr_zone power power_zone].freeze
+
+  # Les deux natures de jauge pour une mesure sans zones — voir
+  # `sanitize_metric_layout`. `range` en tête : c'est le repli d'une mesure
+  # éligible aux deux (cadence, vitesse, pente, distance) sans préférence
+  # explicite.
+  GAUGE_KINDS = %w[range dynamic].freeze
+
+  # ── Disposition d'un bloc `metric` ──────────────────────────────────────────
+  #
+  # Remplace les cinq anciens `mode` (`big`, `compact`, `zone`, `gauge`,
+  # `dynamic_gauge`) par une grille librement composable : chaque élément
+  # (`icon`/`label`/`unit`/`value`) se pose dans une case `"<rangée>-<colonne>"`,
+  # `gauge` — une barre pleine largeur, pas un texte — sur une rangée entière
+  # (`"<rangée>"`, sans colonne). Une rangée sans occupant ne prend aucune place ;
+  # `value` est la seule clé obligatoire.
+  LAYOUT_COLUMNS = %w[left center right].freeze
+
+  # Au-delà, une case ne serait plus lisible d'un coup d'œil en roulant — même
+  # esprit que `MAX_GRID_SIDE` pour la grille de pages.
+  MAX_LAYOUT_ROWS = 4
+
+  LAYOUT_ROW_PATTERN = /\A[0-#{MAX_LAYOUT_ROWS - 1}]\z/
+
+  # Combien de dispositions un compte peut enregistrer — voir
+  # `sanitize_metric_layouts`. Au-delà, une bibliothèque n'aide plus personne à
+  # choisir vite.
+  MAX_METRIC_LAYOUTS = 20
+
+  # La disposition qu'un ancien `mode` de bloc `metric` dessinait — utilisée à la
+  # fois pour migrer un document enregistré avant ce chantier (`sanitize_block`)
+  # et pour l'appli, qui fait le même travail en lecture seule
+  # (`MetricBlock.parse`, dépôt voisin) sur un document jamais repassé par
+  # l'éditeur depuis. Toutes les positions en colonne `center` : c'était déjà
+  # centré partout avant ce réglage.
+  LEGACY_LAYOUTS = {
+    "big" => { "value" => "0-center", "unit" => "1-center" },
+    "compact" => { "icon" => "0-center", "value" => "1-center", "unit" => "2-center" },
+    "zone" => { "icon" => "0-center", "label" => "0-center", "value" => "1-center" },
+    "gauge" => { "value" => "0-center", "gauge" => "1", "unit" => "2-center" },
+    "dynamic_gauge" => { "value" => "0-center", "gauge" => "1", "unit" => "2-center" }
+  }.freeze
+
+  # Le repli d'`avant `big`` : chiffre plein cadre, unité en dessous — c'est
+  # aussi ce que dessinait le mode par défaut d'un ancien bloc `metric`.
+  DEFAULT_METRIC_LAYOUT = { "value" => "0-center", "unit" => "1-center" }.freeze
+
+  # La liste blanche d'icônes personnalisables — voir `sanitize_block`. Mêmes
+  # classes FontAwesome que celles déjà utilisées comme icône par défaut d'une
+  # mesure (`METRIC_SAMPLES` côté site), plus une quinzaine de génériques.
+  # `fa-solid fa-question` n'y est pas : réservée au repli « mesure inconnue »
+  # de l'aperçu, elle ne doit jamais devenir un choix.
+  ICONS = %w[
+    fa-regular\ fa-clock fa-solid\ fa-person-biking fa-regular\ fa-circle-pause
+    fa-solid\ fa-ruler-horizontal fa-solid\ fa-gauge-high fa-solid\ fa-heart
+    fa-regular\ fa-heart fa-solid\ fa-bolt fa-solid\ fa-rotate
+    fa-solid\ fa-arrow-trend-up fa-solid\ fa-mountain fa-solid\ fa-arrow-up-right-dots
+    fa-solid\ fa-fire fa-solid\ fa-chart-column fa-solid\ fa-gear
+    fa-solid\ fa-circle-notch fa-solid\ fa-record-vinyl fa-solid\ fa-arrows-left-right
+    fa-regular\ fa-flag fa-solid\ fa-weight-hanging fa-solid\ fa-star
+    fa-solid\ fa-bell fa-solid\ fa-compass fa-solid\ fa-wind fa-solid\ fa-snowflake
+    fa-solid\ fa-sun fa-solid\ fa-moon fa-solid\ fa-droplet fa-solid\ fa-battery-full
+    fa-solid\ fa-trophy fa-solid\ fa-route fa-solid\ fa-bicycle fa-solid\ fa-map
+  ].freeze
+
   SENSORS = %w[gps barometer light compass radar power heart_rate cadence gears].freeze
 
   # Les types d'itinéraire auxquels un profil peut être lié — mêmes valeurs que
@@ -176,7 +253,8 @@ module CompanionSettings
       "sensors" => SENSORS,
       "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
-      "max_grid_side" => MAX_GRID_SIDE
+      "max_grid_side" => MAX_GRID_SIDE,
+      "icons" => ICONS
     }
   end
 
@@ -236,7 +314,9 @@ module CompanionSettings
 
     return defaults if cleaned.empty?
 
-    { "v" => VERSION, "presets" => cleaned }
+    metric_layouts = sanitize_metric_layouts(document.is_a?(Hash) ? document["metric_layouts"] : nil)
+
+    { "v" => VERSION, "presets" => cleaned, "metric_layouts" => metric_layouts.presence }.compact
   end
 
   def sanitize_preset(raw, index, seen, default_seen)
@@ -506,20 +586,40 @@ module CompanionSettings
     when "metric"
       return nil unless METRICS.include?(raw["metric"])
 
-      block["metric"] = raw["metric"]
-      if DURATION_METRICS.include?(raw["metric"])
+      metric = raw["metric"]
+      block["metric"] = metric
+      if DURATION_METRICS.include?(metric)
         block["format"] = DURATION_FORMATS.include?(raw["format"]) ? raw["format"] : DURATION_FORMATS.first
       end
-      # Seulement pour la jauge, et seulement quand min/max sont exploitables :
-      # sinon on ne les écrit pas du tout plutôt que d'inventer une plage,
-      # même règle que la jauge de zones — l'appli retombe alors sur le
-      # chiffre plein cadre.
-      # `dynamic_gauge` n'a rien de plus à assainir ici : sa plage se lit dans
-      # la sortie en cours (`MetricId.liveRangeOf` côté appli), pas dans le
-      # document — poser min/max dessus laisserait une clé morte.
-      if block["mode"] == "gauge" && RANGE_GAUGE_METRICS.include?(raw["metric"])
-        range = sanitize_range(raw["min"], raw["max"])
-        block.merge!(range) if range
+      block["icon"] = raw["icon"] if ICONS.include?(raw["icon"])
+
+      layout = sanitize_layout_positions(raw["layout"], raw["mode"])
+      zone_metric = ZONE_METRICS.include?(metric)
+      eligible_range = RANGE_GAUGE_METRICS.include?(metric)
+      eligible_dynamic = DYNAMIC_GAUGE_METRICS.include?(metric)
+      layout.delete("gauge") unless zone_metric || eligible_range || eligible_dynamic
+      block["layout"] = layout
+
+      # Seulement quand la jauge est effectivement posée sur une mesure sans
+      # zones : une mesure à zones garde la jauge du cycliste, `gauge_kind`
+      # ne veut rien dire pour elle. `dynamic_gauge` n'a rien de plus à
+      # assainir ici : sa plage se lit dans la sortie en cours
+      # (`MetricId.liveRangeOf` côté appli), pas dans le document — poser
+      # min/max dessus laisserait une clé morte.
+      if layout["gauge"] && !zone_metric
+        preferred = raw["layout"].is_a?(Hash) ? raw["gauge_kind"] : legacy_gauge_kind(raw["mode"])
+        block["gauge_kind"] =
+          if eligible_range && eligible_dynamic
+            GAUGE_KINDS.include?(preferred) ? preferred : GAUGE_KINDS.first
+          elsif eligible_range
+            "range"
+          else
+            "dynamic"
+          end
+        if block["gauge_kind"] == "range"
+          range = sanitize_range(raw["min"], raw["max"])
+          block.merge!(range) if range
+        end
       end
     when "zones", "lap_zones"
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
@@ -533,6 +633,96 @@ module CompanionSettings
     block["text_color"] = text_color if text_color
 
     block
+  end
+
+  # La disposition d'un bloc `metric`, sans encore savoir si sa mesure a droit à
+  # une jauge — `sanitize_block` retire `"gauge"` après coup selon la mesure
+  # choisie, `sanitize_metric_layouts` (une disposition **enregistrée**, pas
+  # encore appliquée à une mesure précise) ne le fait jamais. Migration
+  # `mode` → `layout` incluse : un document qui n'a que l'ancien `mode` (jamais
+  # rouvert dans l'éditeur depuis ce chantier) retombe sur `LEGACY_LAYOUTS`.
+  def sanitize_layout_positions(raw, legacy_mode)
+    source = raw.is_a?(Hash) ? raw : (LEGACY_LAYOUTS[legacy_mode] || DEFAULT_METRIC_LAYOUT)
+    gauge_row = valid_row(source["gauge"])
+
+    layout = {}
+    %w[icon label unit value].each do |token|
+      pos = valid_position(source[token])
+      next unless pos
+      # La jauge est une barre pleine largeur, pas un texte : dès qu'elle
+      # occupe une rangée, rien d'autre n'y tient — un document malformé qui
+      # les superposerait perd l'autre élément plutôt que la jauge, même
+      # arbitrage que partout ailleurs dans ce fichier (la première règle
+      # cohérente gagne, rien n'est deviné).
+      next if gauge_row && pos.start_with?("#{gauge_row}-")
+
+      layout[token] = pos
+    end
+    layout["gauge"] = gauge_row if gauge_row
+    # Un bloc qui n'affiche pas le chiffre n'a pas de sens — voir
+    # `DEFAULT_METRIC_LAYOUT`. Jamais sur la rangée de la jauge : ce serait
+    # fabriquer nous-mêmes la collision que la boucle au-dessus vient
+    # d'éviter.
+    layout["value"] ||= "#{gauge_row == '0' ? 1 : 0}-center"
+
+    compact_layout_rows(layout)
+  end
+
+  def valid_position(value)
+    return nil unless value.is_a?(String)
+
+    row, col = value.split("-", 2)
+    return nil unless row&.match?(LAYOUT_ROW_PATTERN) && LAYOUT_COLUMNS.include?(col)
+
+    value
+  end
+
+  def valid_row(value)
+    value if value.is_a?(String) && value.match?(LAYOUT_ROW_PATTERN)
+  end
+
+  # Les numéros de rangée utilisés, ramenés à `0, 1, 2…` sans trou — sinon un
+  # document composé à la main pourrait accumuler des rangées arbitrairement
+  # grandes tout en restant *valide* case par case.
+  def compact_layout_rows(layout)
+    rows = layout.filter_map { |token, pos| token == "gauge" ? pos.to_i : pos.split("-").first.to_i }.uniq.sort
+    mapping = rows.each_with_index.to_h
+
+    layout.transform_values do |pos|
+      if pos.include?("-")
+        row, col = pos.split("-", 2)
+        "#{mapping[row.to_i]}-#{col}"
+      else
+        mapping[pos.to_i].to_s
+      end
+    end
+  end
+
+  # Le type de jauge qu'un ancien mode dessinait — `dynamic_gauge` seul
+  # voulait la plage lue en roulant, tout le reste (y compris `gauge` sur une
+  # mesure sans zones) voulait la plage réglée dans l'éditeur.
+  def legacy_gauge_kind(mode)
+    mode == "dynamic_gauge" ? "dynamic" : "range"
+  end
+
+  # Les dispositions que l'utilisateur a enregistrées pour les réutiliser sur
+  # une prochaine mesure — un **arrangement**, pas un bloc : ni icône choisie,
+  # ni type de jauge, ni min/max, qui sont propres à une mesure précise et pas
+  # à sa disposition. `sanitize_layout_positions` ne sait donc pas encore si
+  # `"gauge"` a un sens ici — c'est `sanitize_block` qui tranchera, plus tard,
+  # une fois la disposition appliquée à une mesure choisie.
+  def sanitize_metric_layouts(raw)
+    seen = []
+    raw_array(raw).first(MAX_METRIC_LAYOUTS).filter_map.with_index do |entry, index|
+      next nil unless entry.is_a?(Hash)
+
+      name = entry["name"].to_s.strip
+      next nil if name.blank?
+
+      { "key" => unique_key(entry["key"], name, index, seen),
+        "name" => name,
+        "layout" => sanitize_layout_positions(entry["layout"], nil) }
+    end
   end
 
   # `nil` plutôt qu'un repli : contrairement aux capteurs ou au radar, il n'y a pas
@@ -777,8 +967,13 @@ module CompanionSettings
     }
   end
 
+  # Écrit directement au format final (`layout`, pas `mode`) : ces profils par
+  # défaut ne repassent jamais par `sanitize_block`, contrairement à un profil
+  # composé dans l'éditeur. `LEGACY_LAYOUTS` porte déjà la traduction de
+  # chacun de ces anciens noms de mode — une seule table à tenir à jour pour
+  # que ces profils gardent le même aspect qu'avant ce chantier.
   def metric(key, mode)
-    { "kind" => "metric", "metric" => key, "mode" => mode }
+    { "kind" => "metric", "metric" => key, "layout" => LEGACY_LAYOUTS.fetch(mode) }
   end
 
   # Quatre mesures au plus : au-delà, les chiffres du bandeau deviennent trop petits

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, isChoiceOf, metricSample,
-  canHideBehindMenu, phoneCell, PHONE_GRID,
+  canHideBehindMenu, phoneCell, PHONE_GRID, DEFAULT_METRIC_LAYOUT,
   type Catalog, type Cell, type Page,
 } from './companionSettings'
 
@@ -74,6 +74,7 @@ const catalog: Catalog = {
   activities: ['cycling', 'mtb', 'hiking'],
   max_band_metrics: 4,
   max_grid_side: 6,
+  icons: ['fa-solid fa-heart'],
 }
 
 describe('blockChoices', () => {
@@ -103,9 +104,12 @@ describe('blockFor', () => {
 
     expect(zones).toEqual({ kind: 'zones', mode: 'bar', source: 'power' })
 
-    const metric = blockFor({ kind: 'metric', mode: 'big' }, { metric: 'speed', source: 'power' })
+    // `metric` n'a plus de mode : sa disposition se compose librement
+    // (`layout`), pas choisie parmi quelques formes figées — voir
+    // `DEFAULT_METRIC_LAYOUT`.
+    const metric = blockFor({ kind: 'metric' }, { metric: 'speed', source: 'power' })
 
-    expect(metric).toEqual({ kind: 'metric', mode: 'big', metric: 'speed' })
+    expect(metric).toEqual({ kind: 'metric', metric: 'speed', layout: DEFAULT_METRIC_LAYOUT })
   })
 
   it('n\'écrit pas de mode pour un genre qui n\'en a pas', () => {

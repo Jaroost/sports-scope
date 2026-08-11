@@ -5,11 +5,11 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import {
-  canHideBehindMenu, canMoveCell, climbLapSeries, fitCells, gridSideOf, isGridLayout,
+  canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_METRIC_LAYOUT, fitCells, gridSideOf, isGridLayout,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
   type Band, type Block, type Catalog, type Cell, type CellSize,
-  type CompanionDocument, type Page, type Preset, type Viewport,
+  type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Page, type Preset, type Viewport,
 } from '../companionSettings'
 
 // L'éditeur des profils de sortie de l'app compagnon.
@@ -55,6 +55,16 @@ const grid = computed<Viewport>(() => props.viewport || PHONE_GRID)
 const measured = computed(() => !!props.viewport)
 
 const presets = reactive<Preset[]>(structuredClone(props.document.presets))
+
+// Les dispositions de bloc `metric` enregistrées, proposées comme point de
+// départ dans `CompanionBlockPicker` — un réglage de compte comme les
+// profils, gardé dans le même document et enregistré par le même `PATCH`.
+const metricLayouts = reactive<MetricLayoutPreset[]>(structuredClone(props.document.metric_layouts || []))
+
+function onSaveLayout(preset: { name: string; layout: MetricLayout }) {
+  metricLayouts.push({ name: preset.name, layout: preset.layout })
+}
+
 const current = ref(0)
 const openPage = ref<number | null>(null)
 const selected = ref<Cell | null>(null)
@@ -247,7 +257,7 @@ function addPage(kind: string) {
     preset.value.pages.push({
       kind: 'grid', title: t('companion.settings.page_numbers'), rows: 2, cols: 2,
       cells: [{ row: 0, col: 0, row_span: 1, col_span: 1,
-                block: { kind: 'metric', metric: 'speed', mode: 'big' } }],
+                block: { kind: 'metric', metric: 'speed', layout: { ...DEFAULT_METRIC_LAYOUT } } }],
     })
   } else if (kind === 'laps') {
     // `lap_selector` d'abord — sans lui, la page ne montre jamais que le tour
@@ -654,7 +664,7 @@ async function save() {
         'X-CSRF-Token': csrfToken(),
       },
       credentials: 'same-origin',
-      body: JSON.stringify({ presets }),
+      body: JSON.stringify({ presets, metric_layouts: metricLayouts }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
@@ -663,6 +673,7 @@ async function save() {
     // les montrer ici est la seule occasion de s'en apercevoir.
     const payload = (await res.json()) as CompanionDocument
     presets.splice(0, presets.length, ...payload.presets)
+    metricLayouts.splice(0, metricLayouts.length, ...(payload.metric_layouts || []))
     current.value = Math.min(current.value, presets.length - 1)
     openPage.value = null
     selected.value = null
@@ -1153,8 +1164,8 @@ async function save() {
     <!-- Montée par `v-if` : la dialogue pose son écouteur clavier au montage, et
          une dialogue toujours montée mangerait la touche Échap de l'éditeur. -->
     <CompanionBlockPicker v-if="picker" :block="pickerBlock" :catalog="catalog"
-                          :cell="pickerCell" :known-series="lapSeries"
-                          @choose="applyPick" @close="picker = null" />
+                          :cell="pickerCell" :known-series="lapSeries" :metric-layouts="metricLayouts"
+                          @choose="applyPick" @close="picker = null" @save-layout="onSaveLayout" />
 
     <datalist id="companion-series-list">
       <option v-for="s in lapSeries" :key="s" :value="s" />

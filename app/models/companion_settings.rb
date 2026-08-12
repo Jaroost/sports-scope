@@ -353,7 +353,7 @@ module CompanionSettings
       # une coquille vide qu'on ne diagnostique pas au guidon.
       "pages" => pages.presence || [ builtin_effort_page ],
       "bands" => bands.presence || builtin_bands,
-      "notch" => sanitize_notch(raw["notch"]),
+      "notch" => sanitize_notch_sets(raw["notch"]),
       "sensors" => sanitize_sensors(raw["sensors"]),
       "radar" => sanitize_radar(raw["radar"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
@@ -779,10 +779,21 @@ module CompanionSettings
     end
   end
 
-  # La bande de l'encoche : une mesure au plus de chaque côté. Contrairement au
-  # bandeau, l'absence ne retombe jamais sur un contenu par défaut — un profil
-  # qui n'a jamais touché ce réglage ne doit rien changer à l'écran.
-  def sanitize_notch(raw)
+  # La bande de l'encoche : plusieurs jeux, une mesure au plus de chaque côté
+  # dans chacun — même forme que `bands`, entre lesquels un glissé fait
+  # défiler côté appli. Contrairement au bandeau, une liste vide ne retombe
+  # jamais sur un contenu par défaut — un profil qui n'a jamais touché ce
+  # réglage ne doit rien changer à l'écran.
+  #
+  # Un `Hash` isolé (l'ancien format, un seul jeu) est accepté comme un
+  # tableau à un seul élément : un profil enregistré avant ce changement ne
+  # doit pas perdre son jeu déjà configuré.
+  def sanitize_notch_sets(raw)
+    candidates = raw.is_a?(Array) ? raw : (raw.is_a?(Hash) ? [ raw ] : [])
+    candidates.filter_map { |entry| sanitize_notch_set(entry) }.presence
+  end
+
+  def sanitize_notch_set(raw)
     return nil unless raw.is_a?(Hash)
 
     { "left" => sanitize_notch_metric(raw["left"]), "right" => sanitize_notch_metric(raw["right"]) }

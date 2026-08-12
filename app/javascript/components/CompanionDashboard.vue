@@ -629,11 +629,21 @@ function setBandMetric(band: Band, index: number, value: string) {
 
 // ── la bande de l'encoche ───────────────────────────────────────────────────
 
-function setNotchMetric(side: 'left' | 'right', value: string) {
-  const notch: Notch = preset.value.notch || (preset.value.notch = {})
-  if (value) notch[side] = value
-  else delete notch[side]
-  if (!notch.left && !notch.right) preset.value.notch = undefined
+function addNotchSet() {
+  const notch = preset.value.notch || (preset.value.notch = [])
+  notch.push({})
+}
+
+function setNotchMetric(set: Notch, side: 'left' | 'right', value: string) {
+  if (value) set[side] = value
+  else delete set[side]
+}
+
+function removeNotchSet(index: number) {
+  const notch = preset.value.notch
+  if (!notch) return
+  notch.splice(index, 1)
+  if (notch.length === 0) preset.value.notch = undefined
 }
 
 // ── les capteurs et les réglages ────────────────────────────────────────────
@@ -1090,28 +1100,35 @@ async function save() {
         <h2 class="h6">{{ t('companion.settings.notch') }}</h2>
         <p class="text-body-secondary small">{{ t('companion.settings.notch_help') }}</p>
 
-        <div class="row g-3 mb-4">
-          <div class="col-6">
-            <label class="form-label small mb-1">{{ t('companion.settings.notch_left') }}</label>
-            <select class="form-select form-select-sm" :value="preset.notch?.left || ''"
-                    @change="setNotchMetric('left', ($event.target as HTMLSelectElement).value)">
-              <option value="">—</option>
-              <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                {{ metricLabel(metric) }}
-              </option>
-            </select>
+        <div v-for="(set, index) in preset.notch || []" :key="index"
+             class="d-flex align-items-center gap-2 mb-2">
+          <div class="row g-1 flex-grow-1">
+            <div class="col-6">
+              <select class="form-select form-select-sm" :value="set.left || ''"
+                      @change="setNotchMetric(set, 'left', ($event.target as HTMLSelectElement).value)">
+                <option value="">—</option>
+                <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                  {{ metricLabel(metric) }}
+                </option>
+              </select>
+            </div>
+            <div class="col-6">
+              <select class="form-select form-select-sm" :value="set.right || ''"
+                      @change="setNotchMetric(set, 'right', ($event.target as HTMLSelectElement).value)">
+                <option value="">—</option>
+                <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                  {{ metricLabel(metric) }}
+                </option>
+              </select>
+            </div>
           </div>
-          <div class="col-6">
-            <label class="form-label small mb-1">{{ t('companion.settings.notch_right') }}</label>
-            <select class="form-select form-select-sm" :value="preset.notch?.right || ''"
-                    @change="setNotchMetric('right', ($event.target as HTMLSelectElement).value)">
-              <option value="">—</option>
-              <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                {{ metricLabel(metric) }}
-              </option>
-            </select>
-          </div>
+          <button class="btn btn-sm btn-link text-danger p-1" type="button" @click="removeNotchSet(index)">
+            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+          </button>
         </div>
+        <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addNotchSet">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_notch_set') }}
+        </button>
 
         <!-- Les capteurs -->
         <h2 class="h6">{{ t('companion.settings.sensors_title') }}</h2>

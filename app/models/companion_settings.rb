@@ -635,6 +635,14 @@ module CompanionSettings
           block.merge!(range) if range
         end
       end
+    when "clock"
+      # Réglable comme un bloc `metric` (icône, étiquette, disposition), mais
+      # jamais d'unité ni de jauge : une horloge n'a ni l'une ni l'autre.
+      block["icon"] = raw["icon"] if ICONS.include?(raw["icon"])
+      layout = sanitize_layout_positions(raw["layout"], nil)
+      layout.delete("unit")
+      layout.delete("gauge")
+      block["layout"] = layout
     when "zones", "lap_zones"
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
     when "mark_lap"

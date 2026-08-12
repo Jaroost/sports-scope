@@ -411,6 +411,10 @@ export function blockFor(
   params: {
     metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
     layout?: MetricLayout; icon?: string; gaugeKind?: string
+    // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
+    // restent celles du bloc `metric`) : les deux genres se règlent en même
+    // temps dans la dialogue de choix, ce ne peut donc pas être le même état.
+    clockLayout?: MetricLayout; clockIcon?: string
     color?: string | null; textColor?: string | null
   },
 ): Block {
@@ -420,6 +424,8 @@ export function blockFor(
   if (choice.kind === 'metric' && isDurationMetric(params.metric)) block.format = params.format || 'hm'
   if (choice.kind === 'metric') block.layout = params.layout || DEFAULT_METRIC_LAYOUT
   if (choice.kind === 'metric' && params.icon) block.icon = params.icon
+  if (choice.kind === 'clock') block.layout = params.clockLayout || { value: '0-center' }
+  if (choice.kind === 'clock' && params.clockIcon) block.icon = params.clockIcon
   // Seulement quand la jauge est effectivement posée, et seulement sur une
   // plage réglée dans l'éditeur — la dynamique se lit dans la sortie en
   // cours, poser min/max dessus laisserait une clé morte que l'assainisseur
@@ -886,7 +892,6 @@ export interface BlockShape {
   radarIcons: boolean
   radarCompact: boolean
   budgetWeek: boolean
-  clockHms: boolean
   climbListFull: boolean
 }
 
@@ -914,8 +919,6 @@ export function blockShape(block: Block): BlockShape {
     radarIcons: block.kind === 'radar' && block.mode === 'icons',
     radarCompact: block.kind === 'radar' && block.mode === 'compact',
     budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
-    // La seconde comptée, ou non — même distinction que `budgetWeek`.
-    clockHms: block.kind === 'clock' && block.mode === 'hms',
     // La liste entière, ou une seule ligne (le col en cours / prochain) —
     // même distinction que `navFull` pour `nav_state`.
     climbListFull: block.kind === 'climb_list' && block.mode !== 'compact',

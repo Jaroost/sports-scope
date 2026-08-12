@@ -1219,6 +1219,7 @@ async function save() {
          une dialogue toujours montée mangerait la touche Échap de l'éditeur. -->
     <CompanionBlockPicker v-if="picker" :block="pickerBlock" :catalog="catalog"
                           :cell="pickerCell" :known-series="lapSeries" :metric-layouts="metricLayouts"
+                          :page-kind="picker.page.kind"
                           @choose="applyPick" @close="picker = null" @save-layout="onSaveLayout" />
 
     <datalist id="companion-series-list">

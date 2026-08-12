@@ -113,6 +113,14 @@ const POWER_SHARES = [
 const sample = computed(() => metricSample(props.block.metric, props.block.format))
 const icon = computed(() => metricIcon(props.block))
 
+// Le contenu fixe d'un bloc `clock` — pas de `MetricId` pour porter un nom ou
+// une icône par défaut, contrairement à `metricSample`/`metricIcon`.
+const clockSample = computed(() => ({
+  name: 'Horloge',
+  value: props.block.mode === 'hms' ? '14:03:07' : '14:03',
+}))
+const clockIcon = computed(() => props.block.icon || 'fa-regular fa-clock')
+
 // La disposition du bloc — `layout` s'il en a un, sinon la traduction de son
 // `mode` (document d'avant ce chantier) — et les rangées qu'elle occupe,
 // dans l'ordre. Une rangée sans occupant n'y figure pas : elle ne prend
@@ -681,10 +689,32 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
     </div>
 
     <!-- Horloge ---------------------------------------------------------
-         Une valeur figée, purement illustrative — même esprit que
-         `METRIC_SAMPLES` : l'éditeur n'a pas d'heure « en cours » à montrer. -->
-    <div v-else-if="block.kind === 'clock'" class="cbp-card cbp-center" :style="overrideStyle">
-      <span class="cbp-big">{{ shape.clockHms ? '14:03:07' : '14:03' }}</span>
+         Même grille qu'une mesure (`rows`, `layoutRows(metricLayout(block))`
+         — générique, ne teste jamais `kind`, donc réutilisable telle quelle),
+         mais un contenu fixe (nom, icône par défaut, heure figée) plutôt que
+         `metricSample`/`metricIcon`, qui attendent une clé de `METRICS`.
+         L'heure est purement illustrative — même esprit que `METRIC_SAMPLES` :
+         l'éditeur n'a pas d'heure « en cours » à montrer. -->
+    <div v-else-if="block.kind === 'clock'" class="cbp-card cbp-metric" :style="overrideStyle">
+      <template v-for="row in rows" :key="row.row">
+        <div
+          class="cbp-metric-row"
+          :style="{ flexGrow: ROW_HEIGHT_WEIGHT[row.height], fontSize: `${ROW_HEIGHT_SCALE[row.height]}em` }"
+        >
+          <div
+            v-for="col in row.columns"
+            :key="col.col"
+            class="cbp-metric-col"
+            :class="`cbp-metric-col--${col.col}`"
+          >
+            <template v-for="token in col.tokens" :key="token">
+              <i v-if="token === 'icon'" class="cbp-metric-icon" :class="clockIcon" aria-hidden="true"></i>
+              <span v-else-if="token === 'label'" class="cbp-metric-label">{{ clockSample.name }}</span>
+              <span v-else-if="token === 'value'" class="cbp-big">{{ clockSample.value }}</span>
+            </template>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Case vide : un choix de composition, et il se voit comme tel. ------ -->

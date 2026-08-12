@@ -310,6 +310,11 @@ export interface Catalog {
   blocks: Record<string, string[]>
   zone_sources: string[]
   metrics: string[]
+  // Ce qu'une case du bandeau ou de la bande de l'encoche peut porter à la
+  // place d'une mesure — une seule aujourd'hui, `sleep`. À part de `metrics`
+  // et non fondue dedans : une case de bandeau reste d'abord un chiffre à
+  // lire, l'éditeur présente les deux catalogues séparément.
+  band_actions: string[]
   sensors: string[]
   activities: string[]
   max_band_metrics: number

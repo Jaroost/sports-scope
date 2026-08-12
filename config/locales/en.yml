@@ -1639,6 +1639,8 @@ en:
       notch: "Camera notch band"
       notch_help: "The sets of values a swipe scrolls through, one value on each side of the camera notch. The radar alert frame is drawn on top of it."
       add_notch_set: "Add a set"
+      band_metrics_group: "Measurements"
+      band_actions_group: "Controls"
       sensors_title: "Sensors"
       sensors_help: "What this profile goes looking for. A disabled sensor is not disconnected: if it is already connected it keeps measuring. Without GPS the app asks for neither a foreground service nor a position — distance and elevation then show a dash."
       radar_title: "Radar"

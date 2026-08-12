@@ -70,6 +70,7 @@ const catalog: Catalog = {
   blocks: { metric: ['big', 'compact'], zones: ['bar'], empty: [] },
   zone_sources: ['hr', 'power'],
   metrics: ['speed', 'power'],
+  band_actions: ['sleep'],
   sensors: ['gps'],
   activities: ['cycling', 'mtb', 'hiking'],
   max_band_metrics: 4,

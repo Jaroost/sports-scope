@@ -165,6 +165,12 @@ const sortedMetrics = computed(() => (
   [...props.catalog.metrics].sort((a, b) => metricLabel(a).localeCompare(metricLabel(b)))
 ))
 
+// Le libellé d'une commande de case (`sleep`) : celui de sa vignette dans la
+// dialogue de choix de bloc, pas un nouveau texte à tenir à jour à part.
+function bandActionLabel(action: string): string {
+  return t(`companion.settings.blocks.${action}`)
+}
+
 // ── les profils ─────────────────────────────────────────────────────────────
 
 function select(index: number) {
@@ -1081,9 +1087,16 @@ async function save() {
                       :value="band.metrics[slot - 1] || ''"
                       @change="setBandMetric(band, slot - 1, ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
-                <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                  {{ metricLabel(metric) }}
-                </option>
+                <optgroup :label="t('companion.settings.band_actions_group')">
+                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                    {{ bandActionLabel(action) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_metrics_group')">
+                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                    {{ metricLabel(metric) }}
+                  </option>
+                </optgroup>
               </select>
             </div>
           </div>
@@ -1107,18 +1120,32 @@ async function save() {
               <select class="form-select form-select-sm" :value="set.left || ''"
                       @change="setNotchMetric(set, 'left', ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
-                <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                  {{ metricLabel(metric) }}
-                </option>
+                <optgroup :label="t('companion.settings.band_actions_group')">
+                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                    {{ bandActionLabel(action) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_metrics_group')">
+                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                    {{ metricLabel(metric) }}
+                  </option>
+                </optgroup>
               </select>
             </div>
             <div class="col-6">
               <select class="form-select form-select-sm" :value="set.right || ''"
                       @change="setNotchMetric(set, 'right', ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
-                <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                  {{ metricLabel(metric) }}
-                </option>
+                <optgroup :label="t('companion.settings.band_actions_group')">
+                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                    {{ bandActionLabel(action) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_metrics_group')">
+                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                    {{ metricLabel(metric) }}
+                  </option>
+                </optgroup>
               </select>
             </div>
           </div>

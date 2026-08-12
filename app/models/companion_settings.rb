@@ -126,6 +126,14 @@ module CompanionSettings
     route_remaining route_remaining_gain route_eta
   ].freeze
 
+  # Les commandes qu'une case du bandeau ou de la bande de l'encoche peut
+  # porter à la place d'une mesure. Une seule aujourd'hui — un bouton, pas une
+  # mesure, même raison que `BLOCKS["sleep"]` sur une page. Liste à part de
+  # `METRICS` et non fondue dedans : une case de bandeau reste d'abord un
+  # chiffre à lire, l'éditeur doit pouvoir présenter les deux catalogues
+  # séparément plutôt que mélangés dans un seul menu déroulant.
+  BAND_ACTIONS = %w[sleep].freeze
+
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.
   DURATION_METRICS = %w[duration moving_time pause_time route_eta].freeze
@@ -270,6 +278,7 @@ module CompanionSettings
       "blocks" => BLOCKS,
       "zone_sources" => ZONE_SOURCES,
       "metrics" => METRICS,
+      "band_actions" => BAND_ACTIONS,
       "sensors" => SENSORS,
       "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
@@ -796,7 +805,7 @@ module CompanionSettings
       # l'éditeur se retrouverait toujours en bout de jeu.
       metrics = raw_array(band.is_a?(Hash) ? band["metrics"] : band)
                 .first(MAX_BAND_METRICS)
-                .map { |metric| metric if METRICS.include?(metric) }
+                .map { |metric| metric if band_slot?(metric) }
       metrics.all?(&:nil?) ? nil : { "metrics" => metrics }
     end
   end
@@ -823,7 +832,13 @@ module CompanionSettings
   end
 
   def sanitize_notch_metric(raw)
-    raw if METRICS.include?(raw)
+    raw if band_slot?(raw)
+  end
+
+  # Une case de bandeau ou de bande de l'encoche : une mesure, ou une
+  # commande — voir `BAND_ACTIONS`.
+  def band_slot?(raw)
+    METRICS.include?(raw) || BAND_ACTIONS.include?(raw)
   end
 
   # Absent vaut **activé** : un profil écrit à la main, ou venu d'une version

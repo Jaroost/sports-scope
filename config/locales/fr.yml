@@ -1639,6 +1639,8 @@ fr:
       notch: "Bande de l'encoche"
       notch_help: "Les jeux de valeurs entre lesquels un glissé fait défiler, une mesure de chaque côté de l'encoche caméra. Le cadre d'alerte radar s'affiche par-dessus."
       add_notch_set: "Ajouter un jeu"
+      band_metrics_group: "Mesures"
+      band_actions_group: "Commandes"
       sensors_title: "Capteurs"
       sensors_help: "Ce que ce profil va chercher. Un capteur coupé n'est pas déconnecté pour autant : s'il est déjà connecté, il continue de mesurer. Sans GPS, l'appli ne demande ni service au premier plan ni position — la distance et le dénivelé affichent alors un tiret."
       radar_title: "Radar"

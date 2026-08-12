@@ -680,6 +680,13 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
       </div>
     </div>
 
+    <!-- Horloge ---------------------------------------------------------
+         Une valeur figée, purement illustrative — même esprit que
+         `METRIC_SAMPLES` : l'éditeur n'a pas d'heure « en cours » à montrer. -->
+    <div v-else-if="block.kind === 'clock'" class="cbp-card cbp-center" :style="overrideStyle">
+      <span class="cbp-big">{{ shape.clockHms ? '14:03:07' : '14:03' }}</span>
+    </div>
+
     <!-- Case vide : un choix de composition, et il se voit comme tel. ------ -->
     <div v-else class="cbp-empty"></div>
   </div>

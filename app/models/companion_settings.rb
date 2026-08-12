@@ -94,6 +94,10 @@ module CompanionSettings
     # Comme `training_budget`, ça vient de la page de navigation : un profil
     # de home-trainer sans WebView n'en recevra jamais.
     "climb_list" => %w[full compact],
+    # L'heure courante. Seul composant, avec `training_budget`/`climb_list`, à
+    # ne rien vérifier au-delà du mode générique — pas de mesure ni de source
+    # à valider, comme `radar`/`recording`.
+    "clock" => %w[hm hms],
     "empty" => []
   }.freeze
 
@@ -108,7 +112,9 @@ module CompanionSettings
     heart_rate hr_zone hr_avg hr_max
     power power_zone power_avg power_np power_max
     cadence cadence_avg cadence_max
-    ascent altitude grade grade_avg grade_max calories calories_per_hour tss gears
+    ascent altitude grade grade_avg grade_max
+    climb_rate climb_rate_avg climb_rate_max
+    calories calories_per_hour tss gears
     chainring_position sprocket_position gear_ratio
     route_remaining route_remaining_gain route_eta
   ].freeze
@@ -136,6 +142,7 @@ module CompanionSettings
     hr_avg hr_max power_avg power_np power_max
     cadence cadence_avg cadence_max
     ascent altitude grade grade_avg grade_max
+    climb_rate climb_rate_avg climb_rate_max
     calories calories_per_hour tss
     chainring_position sprocket_position gear_ratio
     route_remaining route_remaining_gain

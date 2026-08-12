@@ -1674,6 +1674,7 @@ fr:
         radar: "Radar"
         training_budget: "Budget de charge"
         climb_list: "Cols du tracé"
+        clock: "Horloge"
         empty: "Case vide"
       modes:
         big: "Chiffre plein cadre"
@@ -1692,6 +1693,8 @@ fr:
         icons: "Icônes"
         day: "Aujourd'hui"
         week: "La semaine"
+        hm: "HH:MM"
+        hms: "HH:MM:SS"
       duration_formats:
         hm: "HH:MM"
         hms: "HH:MM:SS"
@@ -1734,6 +1737,9 @@ fr:
         grade: "Pente"
         grade_avg: "Pente moyenne"
         grade_max: "Pente max"
+        climb_rate: "Vitesse ascensionnelle"
+        climb_rate_avg: "Vitesse ascensionnelle moyenne"
+        climb_rate_max: "Vitesse ascensionnelle max"
         duration: "Durée"
         moving_time: "Temps en mouvement"
         pause_time: "Durée pause"

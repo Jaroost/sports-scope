@@ -1674,6 +1674,7 @@ en:
         radar: "Radar"
         training_budget: "Training budget"
         climb_list: "Route climbs"
+        clock: "Clock"
         empty: "Empty cell"
       modes:
         big: "Full-frame figure"
@@ -1692,6 +1693,8 @@ en:
         icons: "Icons"
         day: "Today"
         week: "This week"
+        hm: "HH:MM"
+        hms: "HH:MM:SS"
       duration_formats:
         hm: "HH:MM"
         hms: "HH:MM:SS"
@@ -1734,6 +1737,9 @@ en:
         grade: "Grade"
         grade_avg: "Average grade"
         grade_max: "Max grade"
+        climb_rate: "Climb rate"
+        climb_rate_avg: "Average climb rate"
+        climb_rate_max: "Max climb rate"
         duration: "Duration"
         moving_time: "Moving time"
         pause_time: "Pause time"

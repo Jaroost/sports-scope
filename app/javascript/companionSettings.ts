@@ -627,6 +627,18 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
     value: '14', name: 'Pente max', unit: '%', background: colorForGrade(14),
     icon: 'fa-solid fa-arrow-up-right-dots', numeric: 14,
   },
+  climb_rate: {
+    value: '620', name: 'Vitesse ascensionnelle', unit: 'm/h',
+    icon: 'fa-solid fa-arrow-trend-up', numeric: 620,
+  },
+  climb_rate_avg: {
+    value: '480', name: 'Vitesse ascensionnelle moyenne', unit: 'm/h',
+    icon: 'fa-solid fa-arrow-trend-up', numeric: 480,
+  },
+  climb_rate_max: {
+    value: '1150', name: 'Vitesse ascensionnelle max', unit: 'm/h',
+    icon: 'fa-solid fa-arrow-trend-up', numeric: 1150,
+  },
   calories: { value: '612', name: 'Calories', unit: 'kcal', icon: 'fa-solid fa-fire', numeric: 612 },
   calories_per_hour: {
     value: '510', name: 'Calories par heure', unit: 'kcal/h', icon: 'fa-solid fa-fire', numeric: 510,
@@ -756,6 +768,7 @@ const RANGE_GAUGE_METRICS = new Set([
   'hr_avg', 'hr_max', 'power_avg', 'power_np', 'power_max',
   'cadence', 'cadence_avg', 'cadence_max',
   'ascent', 'altitude', 'grade', 'grade_avg', 'grade_max',
+  'climb_rate', 'climb_rate_avg', 'climb_rate_max',
   'calories', 'calories_per_hour', 'tss',
   'chainring_position', 'sprocket_position', 'gear_ratio',
   'route_remaining', 'route_remaining_gain',
@@ -812,6 +825,9 @@ export const METRIC_RANGE_DEFAULTS: Record<string, { min: number; max: number }>
   grade: { min: -15, max: 15 },
   grade_avg: { min: -10, max: 10 },
   grade_max: { min: -20, max: 20 },
+  climb_rate: { min: -500, max: 2000 },
+  climb_rate_avg: { min: 0, max: 1500 },
+  climb_rate_max: { min: 0, max: 2500 },
   calories: { min: 0, max: 3000 },
   calories_per_hour: { min: 0, max: 1000 },
   tss: { min: 0, max: 150 },
@@ -870,6 +886,7 @@ export interface BlockShape {
   radarIcons: boolean
   radarCompact: boolean
   budgetWeek: boolean
+  clockHms: boolean
   climbListFull: boolean
 }
 
@@ -897,6 +914,8 @@ export function blockShape(block: Block): BlockShape {
     radarIcons: block.kind === 'radar' && block.mode === 'icons',
     radarCompact: block.kind === 'radar' && block.mode === 'compact',
     budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
+    // La seconde comptée, ou non — même distinction que `budgetWeek`.
+    clockHms: block.kind === 'clock' && block.mode === 'hms',
     // La liste entière, ou une seule ligne (le col en cours / prochain) —
     // même distinction que `navFull` pour `nav_state`.
     climbListFull: block.kind === 'climb_list' && block.mode !== 'compact',

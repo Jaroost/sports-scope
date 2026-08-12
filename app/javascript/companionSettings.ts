@@ -259,6 +259,14 @@ export interface Band {
   metrics: string[]
 }
 
+// La bande de l'encoche : une mesure au plus de chaque côté. Contrairement à
+// `bands`, l'absence d'un côté (ou du champ entier) ne retombe jamais sur un
+// contenu par défaut — voir `CompanionSettings.sanitize_notch`.
+export interface Notch {
+  left?: string
+  right?: string
+}
+
 export interface Preset {
   key?: string
   name: string
@@ -273,6 +281,7 @@ export interface Preset {
   default_for?: string[]
   pages: Page[]
   bands: Band[]
+  notch?: Notch
   sensors?: Record<string, boolean>
   radar?: Record<string, number | boolean>
   screen?: Record<string, number>

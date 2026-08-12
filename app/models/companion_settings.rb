@@ -353,6 +353,7 @@ module CompanionSettings
       # une coquille vide qu'on ne diagnostique pas au guidon.
       "pages" => pages.presence || [ builtin_effort_page ],
       "bands" => bands.presence || builtin_bands,
+      "notch" => sanitize_notch(raw["notch"]),
       "sensors" => sanitize_sensors(raw["sensors"]),
       "radar" => sanitize_radar(raw["radar"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
@@ -776,6 +777,20 @@ module CompanionSettings
                 .map { |metric| metric if METRICS.include?(metric) }
       metrics.all?(&:nil?) ? nil : { "metrics" => metrics }
     end
+  end
+
+  # La bande de l'encoche : une mesure au plus de chaque côté. Contrairement au
+  # bandeau, l'absence ne retombe jamais sur un contenu par défaut — un profil
+  # qui n'a jamais touché ce réglage ne doit rien changer à l'écran.
+  def sanitize_notch(raw)
+    return nil unless raw.is_a?(Hash)
+
+    { "left" => sanitize_notch_metric(raw["left"]), "right" => sanitize_notch_metric(raw["right"]) }
+      .compact.presence
+  end
+
+  def sanitize_notch_metric(raw)
+    raw if METRICS.include?(raw)
   end
 
   # Absent vaut **activé** : un profil écrit à la main, ou venu d'une version

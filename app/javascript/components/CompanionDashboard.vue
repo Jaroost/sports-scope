@@ -9,7 +9,8 @@ import {
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
   type Band, type Block, type Catalog, type Cell, type CellSize,
-  type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Page, type Preset, type Viewport,
+  type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch, type Page, type Preset,
+  type Viewport,
 } from '../companionSettings'
 
 // L'éditeur des profils de sortie de l'app compagnon.
@@ -626,6 +627,15 @@ function setBandMetric(band: Band, index: number, value: string) {
   }
 }
 
+// ── la bande de l'encoche ───────────────────────────────────────────────────
+
+function setNotchMetric(side: 'left' | 'right', value: string) {
+  const notch: Notch = preset.value.notch || (preset.value.notch = {})
+  if (value) notch[side] = value
+  else delete notch[side]
+  if (!notch.left && !notch.right) preset.value.notch = undefined
+}
+
 // ── les capteurs et les réglages ────────────────────────────────────────────
 
 // Absent vaut activé : on ne stocke que les coupures. Une case décochée écrit
@@ -1075,6 +1085,33 @@ async function save() {
         <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addBand">
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_band') }}
         </button>
+
+        <!-- La bande de l'encoche -->
+        <h2 class="h6">{{ t('companion.settings.notch') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.notch_help') }}</p>
+
+        <div class="row g-3 mb-4">
+          <div class="col-6">
+            <label class="form-label small mb-1">{{ t('companion.settings.notch_left') }}</label>
+            <select class="form-select form-select-sm" :value="preset.notch?.left || ''"
+                    @change="setNotchMetric('left', ($event.target as HTMLSelectElement).value)">
+              <option value="">—</option>
+              <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                {{ metricLabel(metric) }}
+              </option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small mb-1">{{ t('companion.settings.notch_right') }}</label>
+            <select class="form-select form-select-sm" :value="preset.notch?.right || ''"
+                    @change="setNotchMetric('right', ($event.target as HTMLSelectElement).value)">
+              <option value="">—</option>
+              <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                {{ metricLabel(metric) }}
+              </option>
+            </select>
+          </div>
+        </div>
 
         <!-- Les capteurs -->
         <h2 class="h6">{{ t('companion.settings.sensors_title') }}</h2>

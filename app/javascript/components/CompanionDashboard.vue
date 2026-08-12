@@ -62,7 +62,7 @@ const presets = reactive<Preset[]>(structuredClone(props.document.presets))
 const metricLayouts = reactive<MetricLayoutPreset[]>(structuredClone(props.document.metric_layouts || []))
 
 function onSaveLayout(preset: { name: string; layout: MetricLayout }) {
-  metricLayouts.push({ name: preset.name, layout: preset.layout })
+  metricLayouts.push({ key: crypto.randomUUID(), name: preset.name, layout: preset.layout })
 }
 
 const current = ref(0)

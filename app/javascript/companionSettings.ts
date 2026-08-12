@@ -584,11 +584,9 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   duration: { value: '01:12', name: 'Durée', unit: '', icon: 'fa-regular fa-clock' },
   moving_time: { value: '01:08', name: 'Temps en mouvement', unit: '', icon: 'fa-solid fa-person-biking' },
   pause_time: { value: '00:04', name: 'Durée pause', unit: '', icon: 'fa-regular fa-circle-pause' },
-  // `unit` vide : côté appli, `read()` écrit déjà l'unité dans la valeur
-  // elle-même (`formatDistanceKm`/`'${…} m'`) pour ces quatre mesures — un
-  // jeton `unit` séparé la redirait en double plutôt que de la compléter,
-  // comme `sample.value` le montre déjà ici.
-  distance: { value: '38,42 km', name: 'Distance', unit: '', icon: 'fa-solid fa-ruler-horizontal', numeric: 38.42 },
+  distance: {
+    value: '38,42', name: 'Distance', unit: 'km', icon: 'fa-solid fa-ruler-horizontal', numeric: 38.42,
+  },
   speed: { value: '32', name: 'Vitesse', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 32 },
   speed_avg: { value: '27', name: 'Vitesse moyenne', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 27 },
   speed_max: { value: '61', name: 'Vitesse max', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 61 },
@@ -604,7 +602,7 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   cadence: { value: '88', name: 'Cadence', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
   cadence_avg: { value: '84', name: 'Cadence moyenne', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 84 },
   cadence_max: { value: '112', name: 'Cadence max', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 112 },
-  ascent: { value: '640 m', name: 'Dénivelé positif', unit: '', icon: 'fa-solid fa-arrow-trend-up', numeric: 640 },
+  ascent: { value: '640', name: 'Dénivelé positif', unit: 'm', icon: 'fa-solid fa-arrow-trend-up', numeric: 640 },
   altitude: { value: '1204', name: 'Altitude', unit: 'm', icon: 'fa-solid fa-mountain', numeric: 1204 },
   grade: {
     value: '7', name: 'Pente', unit: '%', background: colorForGrade(7), icon: 'fa-solid fa-arrow-up-right-dots',
@@ -628,10 +626,10 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   sprocket_position: { value: '5', name: 'Pignon', unit: '', icon: 'fa-solid fa-record-vinyl', numeric: 5 },
   gear_ratio: { value: '3,3', name: 'Rapport', unit: '', icon: 'fa-solid fa-arrows-left-right', numeric: 3.3 },
   route_remaining: {
-    value: '21,40 km', name: 'Distance restante', unit: '', icon: 'fa-regular fa-flag', numeric: 21.4,
+    value: '21,40', name: 'Distance restante', unit: 'km', icon: 'fa-regular fa-flag', numeric: 21.4,
   },
   route_remaining_gain: {
-    value: '380 m', name: 'D+ restant', unit: '', icon: 'fa-solid fa-arrow-trend-up', numeric: 380,
+    value: '380', name: 'D+ restant', unit: 'm', icon: 'fa-solid fa-arrow-trend-up', numeric: 380,
   },
   route_eta: { value: '00:48', name: 'Temps restant', unit: '', icon: 'fa-regular fa-clock' },
 }

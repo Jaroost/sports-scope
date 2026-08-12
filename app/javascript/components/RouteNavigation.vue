@@ -39,7 +39,7 @@ import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import {
   companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, inCompanionApp,
-  registerOfflineMapsHandlers, pushOfflineMapsState,
+  registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
@@ -178,6 +178,18 @@ registerOfflineMapsHandlers({
   remove: () => { void removeOfflineMap() },
 })
 onBeforeUnmount(() => registerOfflineMapsHandlers(null))
+
+// L'appli demande la veille depuis un bouton natif, sur une page de données
+// qui n'a pas cette carte sous les yeux (voir SleepBlock côté Dart). On
+// réutilise le chemin exact de l'appui long — toggleScreenOffManual, plus bas
+// — pour que l'appli n'ait rien de plus à apprendre : même remise à zéro
+// d'autoWoken, même message `screen` renvoyé en confirmation. Le garde
+// `!screenOff.value` évite qu'un second appui (bouton retapé, page rechargée)
+// ne rendorme ce qui vient de se réveiller.
+registerSleepHandlers({
+  enter: () => { if (!screenOff.value) toggleScreenOffManual() },
+})
+onBeforeUnmount(() => registerSleepHandlers(null))
 
 watch(
   () => ({

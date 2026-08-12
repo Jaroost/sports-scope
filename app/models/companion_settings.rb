@@ -74,6 +74,13 @@ module CompanionSettings
     # commandes séparées plutôt qu'à leur place : un profil déjà composé avec
     # `change_route`/`clear_route` ne doit rien perdre à l'enregistrement.
     "route" => %w[full compact],
+    # Met la carte en veille depuis une page de données — voile noir et
+    # rétroéclairage à 1 %, exactement comme un appui long sur la carte.
+    # L'appli ramène le cycliste sur la carte puis demande la veille au
+    # bridge (`sleepEnter`, companionBridge.ts) : même chemin que l'appui
+    # long, `toggleScreenOffManual`. Rien à sanitizer au-delà du mode, même
+    # raison que `recording`/`change_route` : un bouton, pas une mesure.
+    "sleep" => %w[full compact],
     "nav_state" => %w[full compact],
     # La jauge est couchée, à l'échelle d'une cellule large : le sens debout a
     # été retiré côté appli (un seul dessin à garder cohérent avec les bords de

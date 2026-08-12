@@ -1670,6 +1670,7 @@ fr:
         change_route: "Changer d'itinéraire"
         clear_route: "Retirer l'itinéraire"
         route: "Itinéraire"
+        sleep: "Mettre en veille"
         nav_state: "État de navigation"
         radar: "Radar"
         training_budget: "Budget de charge"

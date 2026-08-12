@@ -59,6 +59,27 @@ export function companionScreen(state: 'dimmed' | 'normal'): void {
   channel()?.postMessage(JSON.stringify({ type: 'screen', state }))
 }
 
+// ─── Veille demandée par l'appli ───────────────────────────────────────────
+//
+// L'appui long ne marche que sur la carte : une page de données de l'appli
+// peut vouloir la même veille sans avoir de geste à faire sur cette carte-là,
+// qu'elle ne montre pas. `sleepEnter()` (installCompanionBridge, plus bas) lui
+// donne donc une porte d'entrée, sur le même modèle que les commandes hors
+// ligne ci-dessous : RouteNavigation.vue s'enregistre tant que la page de
+// navigation est montée, et l'appli n'a qu'à appeler le geste, jamais à
+// dupliquer la logique de veille.
+interface SleepBridgeHandlers {
+  enter(): void
+}
+
+let sleepHandlers: SleepBridgeHandlers | null = null
+
+// Appelé par RouteNavigation.vue au montage et au démontage (`null` alors) : un
+// bouton pressé après que la page de navigation a disparu ne doit rien faire.
+export function registerSleepHandlers(handlers: SleepBridgeHandlers | null): void {
+  sleepHandlers = handlers
+}
+
 // Dernier état de navigation publié, pour n'envoyer que ce qui change.
 let lastNavJson = ''
 let lastNavAt = 0
@@ -228,6 +249,7 @@ export function installCompanionBridge(): void {
       offlineStart(): void
       offlineCancel(): void
       offlineRemove(): void
+      sleepEnter(): void
     }
   }
 
@@ -251,6 +273,7 @@ export function installCompanionBridge(): void {
     offlineStart() { offlineHandlers?.start() },
     offlineCancel() { offlineHandlers?.cancel() },
     offlineRemove() { offlineHandlers?.remove() },
+    sleepEnter() { sleepHandlers?.enter() },
   }
 
   // On annonce que le pont est prêt : l'appli répond par un état complet, sans

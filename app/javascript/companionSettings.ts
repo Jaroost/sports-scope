@@ -886,6 +886,7 @@ export interface BlockShape {
   changeRouteCompact: boolean
   clearRouteCompact: boolean
   routeCompact: boolean
+  sleepCompact: boolean
   navFull: boolean
   radarGauge: boolean
   radarCount: boolean
@@ -913,6 +914,7 @@ export function blockShape(block: Block): BlockShape {
     changeRouteCompact: block.kind === 'change_route' && block.mode === 'compact',
     clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',
     routeCompact: block.kind === 'route' && block.mode === 'compact',
+    sleepCompact: block.kind === 'sleep' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
     radarGauge: block.kind === 'radar' && block.mode === 'gauge',
     radarCount: block.kind === 'radar' && block.mode === 'count',

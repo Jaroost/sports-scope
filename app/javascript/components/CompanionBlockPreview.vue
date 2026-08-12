@@ -528,6 +528,25 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
       </div>
     </template>
 
+    <!-- Mettre en veille ----------------------------------------------------
+         Met la carte en veille depuis une page de données qui ne l'a pas
+         sous les yeux : ce bouton demande le même geste qu'un appui long sur
+         la carte (voile noir, rétroéclairage à 1 %), la page n'a rien de
+         plus à savoir dessiner. -->
+    <template v-else-if="block.kind === 'sleep'">
+      <div v-if="shape.sleepCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
+          <i class="fa-solid fa-moon" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button" :style="overrideStyle">
+          <i class="fa-solid fa-moon" aria-hidden="true"></i>
+          Mettre en veille
+        </span>
+      </div>
+    </template>
+
     <!-- État de navigation ------------------------------------------------ -->
     <div v-else-if="block.kind === 'nav_state'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title">Navigation</div>

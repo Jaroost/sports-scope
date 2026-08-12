@@ -1670,6 +1670,7 @@ en:
         change_route: "Change route"
         clear_route: "Clear route"
         route: "Route"
+        sleep: "Put to sleep"
         nav_state: "Navigation state"
         radar: "Radar"
         training_budget: "Training budget"

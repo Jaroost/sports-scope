@@ -315,6 +315,11 @@ export interface Catalog {
   // et non fondue dedans : une case de bandeau reste d'abord un chiffre à
   // lire, l'éditeur présente les deux catalogues séparément.
   band_actions: string[]
+  // Le radar arrière, en case de bandeau ou d'encoche — `radar_distance`,
+  // `radar_count`, `radar_gauge` (voir `CompanionSettings::BAND_RADAR`). Un
+  // troisième catalogue et non un mode de plus dans `band_actions` : ce n'est
+  // ni une mesure ni une commande, l'éditeur lui garde son propre groupe.
+  band_radar: string[]
   sensors: string[]
   activities: string[]
   max_band_metrics: number

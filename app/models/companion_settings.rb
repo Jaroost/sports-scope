@@ -134,6 +134,15 @@ module CompanionSettings
   # séparément plutôt que mélangés dans un seul menu déroulant.
   BAND_ACTIONS = %w[sleep].freeze
 
+  # Le radar arrière, en case de bandeau ou d'encoche — un sous-ensemble des
+  # modes de `BLOCKS["radar"]` : seuls ceux qui restent lisibles dans une case
+  # aussi petite (au plus un quart du bandeau, une moitié de l'encoche).
+  # Préfixées `radar_` pour rester des clés à part de `METRICS` et
+  # `BAND_ACTIONS` dans le même menu déroulant — voir `BandRadarSlot` côté
+  # Dart (`ride_preset.dart`).
+  BAND_RADAR_MODES = %w[distance count gauge].freeze
+  BAND_RADAR = BAND_RADAR_MODES.map { |mode| "radar_#{mode}" }.freeze
+
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.
   DURATION_METRICS = %w[duration moving_time pause_time route_eta].freeze
@@ -279,6 +288,7 @@ module CompanionSettings
       "zone_sources" => ZONE_SOURCES,
       "metrics" => METRICS,
       "band_actions" => BAND_ACTIONS,
+      "band_radar" => BAND_RADAR,
       "sensors" => SENSORS,
       "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
@@ -835,10 +845,10 @@ module CompanionSettings
     raw if band_slot?(raw)
   end
 
-  # Une case de bandeau ou de bande de l'encoche : une mesure, ou une
-  # commande — voir `BAND_ACTIONS`.
+  # Une case de bandeau ou de bande de l'encoche : une mesure, une commande
+  # (`BAND_ACTIONS`) ou un mode de radar (`BAND_RADAR`).
   def band_slot?(raw)
-    METRICS.include?(raw) || BAND_ACTIONS.include?(raw)
+    METRICS.include?(raw) || BAND_ACTIONS.include?(raw) || BAND_RADAR.include?(raw)
   end
 
   # Absent vaut **activé** : un profil écrit à la main, ou venu d'une version

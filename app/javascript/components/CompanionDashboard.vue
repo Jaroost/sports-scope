@@ -171,6 +171,14 @@ function bandActionLabel(action: string): string {
   return t(`companion.settings.blocks.${action}`)
 }
 
+// Le libellé d'un mode de radar de case (`radar_distance`) : le nom du
+// composant puis son mode — même format que `labelFor` pour un bloc de
+// grille, pour que « Radar » se lise pareil aux deux endroits.
+function bandRadarLabel(key: string): string {
+  const mode = key.slice('radar_'.length)
+  return `${t('companion.settings.blocks.radar')} · ${t(`companion.settings.modes.${mode}`)}`
+}
+
 // ── les profils ─────────────────────────────────────────────────────────────
 
 function select(index: number) {
@@ -1092,6 +1100,11 @@ async function save() {
                     {{ bandActionLabel(action) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_radar_group')">
+                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                    {{ bandRadarLabel(radar) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">
                   <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
                     {{ metricLabel(metric) }}
@@ -1125,6 +1138,11 @@ async function save() {
                     {{ bandActionLabel(action) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_radar_group')">
+                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                    {{ bandRadarLabel(radar) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">
                   <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
                     {{ metricLabel(metric) }}
@@ -1139,6 +1157,11 @@ async function save() {
                 <optgroup :label="t('companion.settings.band_actions_group')">
                   <option v-for="action in catalog.band_actions" :key="action" :value="action">
                     {{ bandActionLabel(action) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_radar_group')">
+                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                    {{ bandRadarLabel(radar) }}
                   </option>
                 </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">

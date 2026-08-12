@@ -71,6 +71,7 @@ const catalog: Catalog = {
   zone_sources: ['hr', 'power'],
   metrics: ['speed', 'power'],
   band_actions: ['sleep'],
+  band_radar: ['radar_distance', 'radar_count', 'radar_gauge'],
   sensors: ['gps'],
   activities: ['cycling', 'mtb', 'hiking'],
   max_band_metrics: 4,

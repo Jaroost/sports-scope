@@ -356,7 +356,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
           >
             <template v-for="token in col.tokens" :key="token">
               <i v-if="token === 'icon'" class="cbp-metric-icon" :class="icon" aria-hidden="true"></i>
-              <span v-else-if="token === 'label'" class="cbp-metric-label">{{ sample.name }}</span>
+              <span v-else-if="token === 'label'" class="cbp-metric-label">{{ block.label?.trim() || sample.name }}</span>
               <span v-else-if="token === 'unit'" class="cbp-metric-unit">{{ sample.unit }}</span>
               <span v-else class="cbp-big" :class="{ 'cbp-big--gauge': gaugeKind }">{{ sample.value }}</span>
             </template>

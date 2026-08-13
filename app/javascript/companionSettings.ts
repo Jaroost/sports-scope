@@ -38,6 +38,10 @@ export interface Block {
   // Icône personnalisée, propre à ce bloc — une clé de `Catalog.icons`.
   // Absente : l'appli garde l'icône par défaut de la mesure (`MetricId.icon`).
   icon?: string
+  // Libellé personnalisé d'un bloc `metric`, propre à ce bloc — remplace le
+  // nom traduit de la mesure partout où l'appli dessine le jeton `label` de
+  // `layout`. Absent : le nom de la mesure fait foi, comme avant ce réglage.
+  label?: string
   // `'range'` (bornes réglées ci-dessous) ou `'dynamic'` (plage lue en
   // roulant) — seulement quand `layout.gauge` est réglé sur une mesure sans
   // zones d'entraînement éligible aux deux (voir `isRangeGaugeMetric`/
@@ -420,7 +424,7 @@ export function blockFor(
   choice: BlockChoice,
   params: {
     metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
-    layout?: MetricLayout; icon?: string; gaugeKind?: string
+    layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
     // restent celles du bloc `metric`) : les deux genres se règlent en même
     // temps dans la dialogue de choix, ce ne peut donc pas être le même état.
@@ -434,6 +438,7 @@ export function blockFor(
   if (choice.kind === 'metric' && isDurationMetric(params.metric)) block.format = params.format || 'hm'
   if (choice.kind === 'metric') block.layout = params.layout || DEFAULT_METRIC_LAYOUT
   if (choice.kind === 'metric' && params.icon) block.icon = params.icon
+  if (choice.kind === 'metric' && params.label?.trim()) block.label = params.label.trim()
   if (choice.kind === 'clock') block.layout = params.clockLayout || { value: '0-center' }
   if (choice.kind === 'clock' && params.clockIcon) block.icon = params.clockIcon
   // Seulement quand la jauge est effectivement posée, et seulement sur une

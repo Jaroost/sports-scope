@@ -1621,6 +1621,7 @@ en:
       cancel: "Cancel"
       block: "Component"
       metric: "Metric"
+      metric_label: "Custom label"
       mode: "Display"
       source: "Source"
       duration_format: "Format"

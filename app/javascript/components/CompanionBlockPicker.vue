@@ -90,6 +90,7 @@ const layout = ref<MetricLayout>(
   props.block?.kind === 'metric' ? metricLayout(props.block) : { ...DEFAULT_METRIC_LAYOUT },
 )
 const iconChoice = ref<string | undefined>(props.block?.icon)
+const labelChoice = ref<string>(props.block?.label || '')
 const gaugeKindChoice = ref<string>(props.block?.gauge_kind || 'range')
 
 // Le jeton de palette actuellement « en main » — un tap sur une case de la
@@ -399,7 +400,8 @@ const groups = computed(() => {
           key: `${choice.kind}:${choice.mode || ''}`,
           block: blockFor(choice, {
             metric: metric.value, source: source.value, series: series.value, format: format.value,
-            layout: currentLayout.value, icon: iconChoice.value, gaugeKind: effectiveGaugeKind.value || undefined,
+            layout: currentLayout.value, icon: iconChoice.value, label: labelChoice.value,
+            gaugeKind: effectiveGaugeKind.value || undefined,
             clockLayout: clockLayout.value, clockIcon: clockIconChoice.value,
             min: min.value, max: max.value, color: color.value, textColor: textColor.value,
           }),
@@ -528,6 +530,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                   {{ metricLabel(m) }}
                 </option>
               </select>
+            </label>
+
+            <label v-if="group.kind === 'metric'" class="cbpk-param small">
+              {{ t('companion.settings.metric_label') }}
+              <input
+                v-model="labelChoice"
+                type="text"
+                class="form-control form-control-sm"
+                :placeholder="metricLabel(metric)"
+                maxlength="24"
+              >
             </label>
 
             <label v-if="group.kind === 'metric' && isDurationMetric(metric)" class="cbpk-param small">

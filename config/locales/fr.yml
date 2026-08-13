@@ -1621,6 +1621,7 @@ fr:
       cancel: "Annuler"
       block: "Composant"
       metric: "Mesure"
+      metric_label: "Libellé personnalisé"
       mode: "Affichage"
       source: "Source"
       duration_format: "Format"

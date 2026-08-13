@@ -280,6 +280,12 @@ module CompanionSettings
   # choisit son profil avant de partir — pas dans un paragraphe.
   MAX_DESCRIPTION_LENGTH = 140
 
+  # Le libellé personnalisé d'un bloc `metric` tient dans une case de grille,
+  # déjà tronquée à l'écran par l'appli (`cbp-metric-label`/`Text.ellipsis`
+  # côté Dart) : une borne courte évite juste d'enregistrer un texte que
+  # personne ne lira jamais en entier, pas de faire perdre le réglage.
+  MAX_METRIC_LABEL_LENGTH = 24
+
   # Ce que l'éditeur reçoit en props. Sérialisé tel quel dans la page.
   def catalog
     {
@@ -632,6 +638,13 @@ module CompanionSettings
         block["format"] = DURATION_FORMATS.include?(raw["format"]) ? raw["format"] : DURATION_FORMATS.first
       end
       block["icon"] = raw["icon"] if ICONS.include?(raw["icon"])
+      # Libre et facultatif, comme `description` sur un profil : tronqué plutôt
+      # que rejeté, pour ne jamais faire perdre le réglage à cause d'un mot de
+      # trop. Absent, le jeton `label` du bloc garde le nom traduit de la
+      # mesure (`companion.settings.metrics.<metric>`) — le comportement d'avant
+      # ce réglage.
+      label = raw["label"].to_s.strip[0, MAX_METRIC_LABEL_LENGTH]
+      block["label"] = label if label.present?
 
       layout = sanitize_layout_positions(raw["layout"], raw["mode"])
       zone_metric = ZONE_METRICS.include?(metric)

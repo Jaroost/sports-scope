@@ -586,7 +586,7 @@ function sizeFor(page: Page, cell: Cell): CellSize {
 // puissance normalisée et non la puissance moyenne.
 function labelFor(block: Block): string {
   const parts = [t(`companion.settings.blocks.${block.kind}`)]
-  if (block.kind === 'metric') parts.push(t(`companion.settings.metrics.${block.metric}`))
+  if (block.kind === 'metric') parts.push(block.label?.trim() || t(`companion.settings.metrics.${block.metric}`))
   if (block.kind === 'zones') parts.push(t(`companion.settings.sources.${block.source}`))
   // La série est un texte libre, pas une clé du catalogue : elle se relit
   // telle quelle. Sans elle, deux boutons « Marquer un tour » de séries

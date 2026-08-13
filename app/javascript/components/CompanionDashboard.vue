@@ -1382,6 +1382,12 @@ async function save() {
    exactement sur les espaces qu'elles doivent colorer. */
 .companion-grid-wrap {
   position: relative;
+  /* Sans ceci, `position: relative` seul ne crée pas de contexte d'empilement
+     (il en faudrait un `z-index` non `auto`) : le `z-index: -1` d'une
+     gouttière irait alors chercher le contexte d'empilement le plus proche
+     au-dessus — potentiellement bien plus haut dans la page — plutôt que de
+     rester sous les cases de *cette* grille. */
+  isolation: isolate;
   width: 100%;
   max-width: 16rem;
 }
@@ -1399,24 +1405,38 @@ async function save() {
      ordinaire sinon. Une hauteur en dur redeviendrait fausse au premier écran
      qui n'a pas ce format. */
   aspect-ratio: 328 / 598;
+  /* Le conteneur occupe tout le wrapper, gouttières comprises — même là où
+     aucune case n'est dessinée (une fusion de 2 colonnes n'a pas de
+     gouttière interne à son propre travers). Sans ceci, cette zone
+     transparente resterait quand même la cible des clics/survols (une boîte
+     HTML capte les événements même sans rien y peindre), et les gouttières
+     dessous — reculées par `z-index: -1` — ne recevraient plus jamais rien.
+     `.companion-cell` republie `auto` pour rester cliquable. */
+  pointer-events: none;
 }
 
-/* Positionnée par `styleForGutter` (`gutterRect`), en `%` du wrapper. Vide,
+/* Positionnée par `styleForGutter` (`gutterRect`), en `%` du wrapper, à la
+   même géométrie que les cases (`phoneCell`) : les deux se partagent
+   exactement la largeur/hauteur du conteneur, sans jamais se chevaucher. Vide,
    elle ne se voit qu'au survol — une ligne pointillée discrète, la même
    invite que la case vide (`+`) — pour ne pas couvrir la grille de traits
-   tant qu'on n'a rien posé. La zone cliquable déborde un peu de la gouttière
-   réelle (0.4 rem) : au clic, pas au survol, sans quoi elle grignoterait la
-   case voisine. */
+   tant qu'on n'a rien posé.
+
+   `z-index: -1` (et `isolation: isolate` sur le wrapper, juste au-dessus) :
+   un élément positionné se peint après le contenu normal de son empilement,
+   quel que soit son ordre dans le HTML — sans ceci, un séparateur poserait sa
+   couleur *par-dessus* le coin d'une case voisine plutôt que dessous, dès que
+   les deux se frôlent. Même règle que côté appli, où les séparateurs sont
+   peints avant les cellules dans le `Stack` (`DashboardGrid`). */
 .companion-gutter {
   position: absolute;
+  z-index: -1;
   border: none;
   border-radius: 2px;
   background: transparent;
   padding: 0;
   cursor: pointer;
 }
-.companion-gutter-h { margin: -0.25rem 0; }
-.companion-gutter-v { margin: 0 -0.25rem; }
 
 .companion-gutter:not(.filled):hover {
   background: repeating-linear-gradient(
@@ -1424,9 +1444,12 @@ async function save() {
   );
 }
 
+/* `outline-offset` négatif plutôt que positif : la gouttière peint sous les
+   cases (`z-index: -1`), un liseré qui déborderait vers l'extérieur se
+   ferait donc en partie recouvrir par la case voisine. */
 .companion-gutter.selected {
   outline: 2px solid var(--bs-primary);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
 /* Les cases posées portent la vignette du composant : la disposition est exacte,
@@ -1444,6 +1467,10 @@ async function save() {
   padding: 0;
   text-align: center;
   overflow: hidden;
+  /* Rétablit ce que `.companion-grid` vient d'éteindre : la case reste
+     cliquable, seul le conteneur (gouttières comprises) ne doit plus
+     intercepter les clics à la place des gouttières qu'il recouvre. */
+  pointer-events: auto;
   /* La case devient l'unité de mesure de sa vignette : `1cqw` vaut 1 % de sa
      largeur, ce dont `--cbp-em` a besoin pour rendre les proportions du
      téléphone quelle que soit la largeur laissée à la grille. */

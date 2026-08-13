@@ -276,6 +276,12 @@ module CompanionSettings
   # lisible. Même borne que `GridPageSpec.maxSide` côté Dart.
   MAX_GRID_SIDE = 12
 
+  # La couleur d'un séparateur qui n'en a pas reçu (ou une couleur invalide) — un
+  # séparateur est purement décoratif, contrairement à `block.color` il n'y a pas
+  # de « laisser l'appli calculer » possible : il lui faut toujours une teinte.
+  # Même littéral que `DEFAULT_DIVIDER_COLOR` côté TS et Dart.
+  DEFAULT_DIVIDER_COLOR = "#9ca3af"
+
   # La description tient dans le sous-titre d'un `ListTile`, au moment où l'on
   # choisit son profil avant de partir — pas dans un paragraphe.
   MAX_DESCRIPTION_LENGTH = 140
@@ -514,9 +520,36 @@ module CompanionSettings
     # cycliste jusqu'à un rectangle noir.
     return nil if cells.empty?
 
+    dividers = sanitize_dividers(page["dividers"], rows, cols)
+
     { "kind" => "grid", "title" => page["title"].to_s.presence || "Mesures",
-      "rows" => rows, "cols" => cols, "cells" => cells,
+      "rows" => rows, "cols" => cols, "cells" => cells, "dividers" => dividers.presence,
       "menu" => menu_flag(page) }.compact
+  end
+
+  # Les séparateurs qui tiennent dans la grille : une ligne (`"h"`) ou une colonne
+  # (`"v"`) entière, à une gouttière valide — `1..rows-1` / `1..cols-1`, `0` étant le
+  # bord de la grille et pas une gouttière. Sur deux séparateurs à la même gouttière,
+  # **le premier posé gagne**, même règle que `place_cells`/`overlap?` sur les
+  # cellules — c'est l'ordre du document, donc celui que l'éditeur affiche.
+  def sanitize_dividers(raw, rows, cols)
+    return [] unless raw.is_a?(Array)
+
+    seen = Set.new
+    raw.filter_map do |divider|
+      next nil unless divider.is_a?(Hash)
+
+      axis = divider["axis"]
+      next nil unless %w[h v].include?(axis)
+
+      limit = (axis == "h" ? rows : cols) - 1
+      at = divider["at"].to_i
+      next nil if at < 1 || at > limit
+      next nil unless seen.add?([ axis, at ])
+
+      { "axis" => axis, "at" => at,
+        "color" => sanitize_hex_color(divider["color"]) || DEFAULT_DIVIDER_COLOR }
+    end
   end
 
   # Les cellules qui tiennent dans la grille et ne se recouvrent pas.
@@ -604,7 +637,10 @@ module CompanionSettings
     cells = place_cells(page["cells"], rows, cols)
     return nil if cells.empty?
 
-    { "layout" => "grid", "rows" => rows, "cols" => cols, "cells" => cells }
+    dividers = sanitize_dividers(page["dividers"], rows, cols)
+
+    { "layout" => "grid", "rows" => rows, "cols" => cols, "cells" => cells,
+      "dividers" => dividers.presence }.compact
   end
 
   # `'default'` sans configuration : c'est aussi la seule série que l'export

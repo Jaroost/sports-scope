@@ -4,11 +4,13 @@ import { t } from '../i18n'
 import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
+import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
-  canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_METRIC_LAYOUT, fitCells, gridSideOf, isGridLayout,
+  canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR, DEFAULT_METRIC_LAYOUT, fitCells,
+  fitDividers, gridSideOf, gutterRect, isGridLayout,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
-  type Band, type Block, type Catalog, type Cell, type CellSize,
+  type Band, type Block, type Catalog, type Cell, type CellSize, type Divider,
   type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch, type Page, type Preset,
   type Viewport,
 } from '../companionSettings'
@@ -69,6 +71,13 @@ function onSaveLayout(preset: { name: string; layout: MetricLayout }) {
 const current = ref(0)
 const openPage = ref<number | null>(null)
 const selected = ref<Cell | null>(null)
+
+// La gouttière sélectionnée — jamais en même temps qu'une cellule : les deux
+// panneaux de réglage (couleur du séparateur / étendue de la cellule)
+// prendraient sinon la même place sous la grille.
+const selectedDivider = ref<Divider | null>(null)
+watch(selected, (cell) => { if (cell) selectedDivider.value = null })
+watch(selectedDivider, (divider) => { if (divider) selected.value = null })
 
 // Échanger la cellule sélectionnée avec une autre : le bouton « Échanger »
 // l'arme, et la case suivante qu'on touche reçoit l'échange — toujours
@@ -391,6 +400,8 @@ function commitSide(page: Page, axis: 'rows' | 'cols', input: HTMLInputElement) 
   page[axis] = side
   page.cells = fitCells(page.cells || [], page.rows || 1, page.cols || 1)
   if (selected.value && !page.cells.includes(selected.value)) selected.value = null
+  page.dividers = fitDividers(page.dividers || [], page.rows || 1, page.cols || 1)
+  if (selectedDivider.value && !page.dividers.includes(selectedDivider.value)) selectedDivider.value = null
   repaint(input, side)
 }
 
@@ -420,6 +431,52 @@ function slots(page: Page) {
   }
   return out
 }
+
+// Ce qu'on dessine par-dessus la grille : une gouttière par ligne/colonne
+// interne — `rows - 1` horizontales, `cols - 1` verticales — avec le
+// séparateur qui l'occupe, s'il y en a un. `at` commence à 1 : la gouttière 0
+// serait le bord de la grille, pas un espace entre deux cases.
+function gutters(page: Page) {
+  const dividers = page.dividers || []
+  const out: { key: string; axis: 'h' | 'v'; at: number; divider: Divider | null }[] = []
+
+  for (let at = 1; at < (page.rows || 1); at++) {
+    out.push({ key: `h:${at}`, axis: 'h', at, divider: dividers.find((d) => d.axis === 'h' && d.at === at) || null })
+  }
+  for (let at = 1; at < (page.cols || 1); at++) {
+    out.push({ key: `v:${at}`, axis: 'v', at, divider: dividers.find((d) => d.axis === 'v' && d.at === at) || null })
+  }
+  return out
+}
+
+// Une gouttière vide en pose un séparateur et le sélectionne aussitôt — un
+// clic suffit, la couleur se règle ensuite dans le panneau sous la grille.
+// Une gouttière déjà occupée bascule sa sélection, comme une cellule
+// (`tapSlot`).
+function tapGutter(page: Page, axis: 'h' | 'v', at: number, divider: Divider | null) {
+  if (divider) {
+    selectedDivider.value = selectedDivider.value === divider ? null : divider
+    return
+  }
+  const created: Divider = { axis, at, color: DEFAULT_DIVIDER_COLOR }
+  page.dividers = [...(page.dividers || []), created]
+  selectedDivider.value = created
+}
+
+function removeDivider(page: Page) {
+  page.dividers = (page.dividers || []).filter((divider) => divider !== selectedDivider.value)
+  selectedDivider.value = null
+}
+
+// `CompanionColorPicker` porte un bouton « réinitialiser » qui émet `null` —
+// pertinent pour `block.color` (l'absence laisse l'appli calculer), pas pour
+// un séparateur, purement décoratif, qui a toujours besoin d'une couleur : un
+// `null` y retombe donc sur la couleur par défaut plutôt que de rester sans
+// couleur.
+const dividerColor = computed<string | null>({
+  get: () => selectedDivider.value?.color ?? null,
+  set: (value) => { if (selectedDivider.value) selectedDivider.value.color = value || DEFAULT_DIVIDER_COLOR },
+})
 
 // Cette case peut-elle recevoir l'échange ? Sert à la fois à `tapSlot`
 // (n'agir que si c'est permis) et à la grille (montrer la case où l'échange
@@ -578,6 +635,18 @@ function sizeFor(page: Page, cell: Cell): CellSize {
   return phoneCell(
     page.rows || 1, page.cols || 1, cell.row_span, cell.col_span, grid.value,
   )
+}
+
+// Le rectangle d'une gouttière, en `%` du conteneur — celui-ci est positionné
+// en absolu par-dessus `.companion-grid`, qui a déjà l'échelle du téléphone
+// (`aspect-ratio`), d'où la conversion directe en pourcentage plutôt qu'une
+// mesure du DOM.
+function styleForGutter(page: Page, axis: 'h' | 'v', at: number, color: string | undefined) {
+  const rect = gutterRect(axis, at, page.rows || 1, page.cols || 1, grid.value)
+  return {
+    left: `${rect.left}%`, top: `${rect.top}%`, width: `${rect.width}%`, height: `${rect.height}%`,
+    backgroundColor: color,
+  }
 }
 
 // Le nom de ce qui est posé : le genre, son paramètre, son mode. La vignette
@@ -894,24 +963,37 @@ async function save() {
 
               <p class="text-body-secondary small mb-1">{{ t('companion.settings.grid_help') }}</p>
 
-              <div class="companion-grid mb-2"
-                   :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
-                             gridTemplateRows: `repeat(${page.rows}, 1fr)`,
-                             aspectRatio: `${grid.width} / ${grid.height}` }">
-                <!-- `selected` teste `!!slot.cell` d'abord : sans lui, une case
-                     vide (`null`) est « égale » à l'absence de sélection (`null`
-                     aussi), et **toutes** les cases libres s'allument dès qu'on
-                     ne sélectionne rien. -->
-                <button v-for="slot in slots(page)" :key="slot.key" type="button"
-                        class="companion-cell"
-                        :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected,
-                                  'swap-target': swapping && canSwapTo(slot.cell),
-                                  'swap-source': swapping && slot.cell === selected }"
-                        :style="styleFor(page, slot.cell, slot.row, slot.col)"
-                        :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
-                        @click="tapSlot(page, slot.row, slot.col, slot.cell)">
-                  <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block" />
-                  <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
+              <div class="companion-grid-wrap mb-2">
+                <div class="companion-grid"
+                     :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
+                               gridTemplateRows: `repeat(${page.rows}, 1fr)`,
+                               aspectRatio: `${grid.width} / ${grid.height}` }">
+                  <!-- `selected` teste `!!slot.cell` d'abord : sans lui, une case
+                       vide (`null`) est « égale » à l'absence de sélection (`null`
+                       aussi), et **toutes** les cases libres s'allument dès qu'on
+                       ne sélectionne rien. -->
+                  <button v-for="slot in slots(page)" :key="slot.key" type="button"
+                          class="companion-cell"
+                          :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected,
+                                    'swap-target': swapping && canSwapTo(slot.cell),
+                                    'swap-source': swapping && slot.cell === selected }"
+                          :style="styleFor(page, slot.cell, slot.row, slot.col)"
+                          :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
+                          @click="tapSlot(page, slot.row, slot.col, slot.cell)">
+                    <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block" />
+                    <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <!-- Les gouttières, en survol par-dessus la grille : un séparateur
+                     traverse toujours toute la largeur/hauteur, un clic sur sa
+                     gouttière suffit donc à le poser. -->
+                <button v-for="gutter in gutters(page)" :key="gutter.key" type="button"
+                        class="companion-gutter"
+                        :class="[`companion-gutter-${gutter.axis}`,
+                                 { filled: !!gutter.divider, selected: !!gutter.divider && gutter.divider === selectedDivider }]"
+                        :style="styleForGutter(page, gutter.axis, gutter.at, gutter.divider?.color)"
+                        :title="t('companion.settings.divider_hint')"
+                        @click="tapGutter(page, gutter.axis, gutter.at, gutter.divider)">
                 </button>
               </div>
 
@@ -1017,6 +1099,15 @@ async function save() {
                     {{ t('companion.settings.remove_cell') }}
                   </button>
                 </div>
+              </div>
+
+              <div v-if="selectedDivider" class="border rounded p-2 bg-body-tertiary d-flex align-items-center gap-2">
+                <span class="flex-grow-1 small">{{ t('companion.settings.divider_color') }}</span>
+                <CompanionColorPicker v-model="dividerColor" :fallback="DEFAULT_DIVIDER_COLOR"
+                                       :label="t('companion.settings.divider_color')" />
+                <button class="btn btn-sm btn-outline-danger" type="button" @click="removeDivider(page)">
+                  {{ t('companion.settings.remove_divider') }}
+                </button>
               </div>
             </template>
 
@@ -1285,6 +1376,16 @@ async function save() {
    qui n'existe nulle part. La hauteur est fixe et les lignes se partagent la
    place (`1fr`) : ajouter une ligne resserre les cases, exactement comme sur
    l'écran, plutôt que d'allonger un écran qui ne s'allonge pas. */
+/* La grille et ses gouttières partagent le même repère : le wrapper ne fait
+   que la taille de la grille (aucun autre enfant en flux normal), si bien que
+   les gouttières — positionnées en absolu dedans, en `%` — retombent
+   exactement sur les espaces qu'elles doivent colorer. */
+.companion-grid-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 16rem;
+}
+
 .companion-grid {
   display: grid;
   /* Les proportions exactes de `PHONE_GRID` (328 × 598 px logiques, gouttières
@@ -1293,12 +1394,39 @@ async function save() {
      grilles, quel que soit le nombre de lignes et de colonnes. */
   gap: 0.4rem;
   width: 100%;
-  max-width: 16rem;
   /* La hauteur se déduit des proportions du téléphone, posées par `aspectRatio` :
      celles de l'appareil quand il les a annoncées, celles d'un téléphone
      ordinaire sinon. Une hauteur en dur redeviendrait fausse au premier écran
      qui n'a pas ce format. */
   aspect-ratio: 328 / 598;
+}
+
+/* Positionnée par `styleForGutter` (`gutterRect`), en `%` du wrapper. Vide,
+   elle ne se voit qu'au survol — une ligne pointillée discrète, la même
+   invite que la case vide (`+`) — pour ne pas couvrir la grille de traits
+   tant qu'on n'a rien posé. La zone cliquable déborde un peu de la gouttière
+   réelle (0.4 rem) : au clic, pas au survol, sans quoi elle grignoterait la
+   case voisine. */
+.companion-gutter {
+  position: absolute;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.companion-gutter-h { margin: -0.25rem 0; }
+.companion-gutter-v { margin: 0 -0.25rem; }
+
+.companion-gutter:not(.filled):hover {
+  background: repeating-linear-gradient(
+    90deg, var(--bs-secondary-color) 0 4px, transparent 4px 8px
+  );
+}
+
+.companion-gutter.selected {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: 1px;
 }
 
 /* Les cases posées portent la vignette du composant : la disposition est exacte,

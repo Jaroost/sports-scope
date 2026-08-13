@@ -239,12 +239,32 @@ export interface Cell {
   block: Block
 }
 
+// Un séparateur : une ligne colorée qui traverse toute une gouttière de la
+// grille, sans changer la largeur ni la hauteur des cases — `axis: 'h'` sous
+// la ligne `at` (`1..rows-1`), `axis: 'v'` à droite de la colonne `at`
+// (`1..cols-1`). Pas de position/longueur libres : il traverse toujours toute
+// la grille, ce qui suffit à poser un clic sur la gouttière pour le créer.
+// Même contrat que `CompanionSettings.sanitize_dividers` côté Rails et
+// `GridDivider` côté Dart.
+export interface Divider {
+  axis: 'h' | 'v'
+  at: number
+  color: string
+}
+
+// Purement décoratif : contrairement à `block.color`, il n'y a pas de calcul
+// de repli possible pour un séparateur sans couleur — il lui en faut toujours
+// une. Même littéral que `CompanionSettings::DEFAULT_DIVIDER_COLOR` (Rails) et
+// `DEFAULT_DIVIDER_COLOR` (Dart).
+export const DEFAULT_DIVIDER_COLOR = '#9ca3af'
+
 export interface Page {
   kind: 'map' | 'grid' | 'list' | 'laps'
   title?: string
   rows?: number
   cols?: number
   cells?: Cell[]
+  dividers?: Divider[]
   blocks?: Block[]
   // Rangée derrière le menu d'actions plutôt que dans le défilement. Absent vaut
   // « dans le défilement » — voir `canHideBehindMenu`.
@@ -531,6 +551,36 @@ export function phoneCell(
     width: cellWidth * colSpan + GRID_GAP * (colSpan - 1),
     height: cellHeight * rowSpan + GRID_GAP * (rowSpan - 1),
   }
+}
+
+export interface GutterRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+// Le rectangle d'une gouttière entière, en pourcentage du conteneur — même
+// géométrie que `phoneCell`/`gridRectFor` (dépôt voisin), mais pour la bande
+// **entre** deux cases plutôt qu'une case. Le conteneur (`.companion-grid`)
+// est déjà calé sur `grid.width`/`grid.height` (`aspect-ratio`), d'où la
+// conversion directe pixel-téléphone → pourcentage plutôt qu'une mesure du
+// DOM.
+export function gutterRect(
+  axis: 'h' | 'v',
+  at: number,
+  rows: number,
+  cols: number,
+  grid: Viewport = PHONE_GRID,
+): GutterRect {
+  if (axis === 'h') {
+    const cellHeight = (grid.height - GRID_GAP * (rows - 1)) / rows
+    const top = at * cellHeight + (at - 1) * GRID_GAP
+    return { left: 0, top: (top / grid.height) * 100, width: 100, height: (GRID_GAP / grid.height) * 100 }
+  }
+  const cellWidth = (grid.width - GRID_GAP * (cols - 1)) / cols
+  const left = at * cellWidth + (at - 1) * GRID_GAP
+  return { top: 0, left: (left / grid.width) * 100, height: 100, width: (GRID_GAP / grid.width) * 100 }
 }
 
 // La ligne de texte, en pixels du téléphone, à laquelle un composant se dessine
@@ -1052,4 +1102,13 @@ export function fitCells(cells: Cell[], rows: number, cols: number): Cell[] {
       row_span: Math.min(cell.row_span, rows - cell.row),
       col_span: Math.min(cell.col_span, cols - cell.col),
     }))
+}
+
+// Les séparateurs qui tiennent encore dans une grille de [rows] × [cols] —
+// pendant de `fitCells` pour les gouttières : une gouttière dont l'indice
+// dépasse `rows - 1` / `cols - 1` une fois la grille rétrécie n'a plus de
+// sens et disparaît, plutôt que de rester accrochée à un bord qui n'existe
+// plus.
+export function fitDividers(dividers: Divider[], rows: number, cols: number): Divider[] {
+  return dividers.filter((divider) => divider.at <= (divider.axis === 'h' ? rows : cols) - 1)
 }

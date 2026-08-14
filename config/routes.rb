@@ -132,6 +132,10 @@ Rails.application.routes.draw do
   # Météo historique (Open-Meteo) — conditions du jour d'une activité
   get "/api/weather", to: "weather#show"
 
+  # Catalogue de frames radar RainViewer (public, cf. RainviewerController) — bloc
+  # "précipitations" du dashboard de l'appli compagnon.
+  get "/api/rainviewer", to: "rainviewer#show"
+
   # Route builder (JSON CRUD consumed by Vue components)
   get "/api/routes", to: "routes#index"
   post "/api/routes", to: "routes#create"

@@ -1680,6 +1680,7 @@ fr:
         sleep: "Mettre en veille"
         nav_state: "État de navigation"
         radar: "Radar"
+        precip_radar: "Précipitations"
         training_budget: "Budget de charge"
         climb_list: "Cols du tracé"
         clock: "Horloge"

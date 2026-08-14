@@ -86,6 +86,13 @@ module CompanionSettings
     # été retiré côté appli (un seul dessin à garder cohérent avec les bords de
     # la carte).
     "radar" => %w[distance count icons compact gauge],
+    # Animation radar des précipitations (RainViewer), centrée sur la position GPS
+    # du cycliste — passé récent puis prévision courte ("nowcast"). Un seul mode :
+    # rien à faire varier, le dessin (tuiles + repère central) ne change pas selon
+    # la case, seule son échelle. Contrairement à `training_budget`/`climb_list`,
+    # la donnée ne dépend pas de la page de navigation : le GPS suffit, un profil
+    # de home-trainer sans capteur GPS affichera simplement l'état vide.
+    "precip_radar" => [],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.

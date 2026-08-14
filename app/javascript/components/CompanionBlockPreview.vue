@@ -600,6 +600,22 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
       </div>
     </template>
 
+    <!-- Précipitations ------------------------------------------------------
+         Radar RainViewer centré sur la position GPS du cycliste : l'appli
+         anime de vraies tuiles réseau, ici un fac-similé fixe fait à la main
+         (pas de capteur ni de réseau dans l'éditeur) — mêmes teintes que
+         `ZONE_COLORS` pour rester dans la palette du reste du dashboard. Le
+         point central figure le cycliste, toujours au milieu puisque c'est
+         la carte qui se recentre sur lui, jamais l'inverse. -->
+    <div v-else-if="block.kind === 'precip_radar'" class="cbp-card cbp-precip" :style="overrideStyle">
+      <div class="cbp-precip-radar">
+        <span class="cbp-precip-blob cbp-precip-blob--1"></span>
+        <span class="cbp-precip-blob cbp-precip-blob--2"></span>
+        <span class="cbp-precip-blob cbp-precip-blob--3"></span>
+        <span class="cbp-precip-rider"></span>
+      </div>
+    </div>
+
     <!-- Budget de charge -------------------------------------------------- -->
     <div v-else-if="block.kind === 'training_budget'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title cbp-budget-title">
@@ -1160,6 +1176,62 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   max-height: 100%;
   border-radius: 0.15em;
   background: #ef5350;
+}
+
+/* Précipitations : le radar est une carte sans marge (les tuiles couvrent
+   toute la case côté appli), une poignée de taches floues tenant lieu de
+   précipitations, et un repère fixe au centre pour le cycliste. */
+.cbp-precip {
+  padding: 0;
+  position: relative;
+}
+.cbp-precip-radar {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 1em;
+  overflow: hidden;
+  background: #10151c;
+}
+.cbp-precip-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(0.5em);
+  opacity: 0.75;
+}
+/* #2E9E4F / #2E6FD6 / #E0C000 : mêmes teintes que ZONE_COLORS (z2/z1/z3). */
+.cbp-precip-blob--1 {
+  width: 60%;
+  height: 60%;
+  top: -10%;
+  left: 5%;
+  background: radial-gradient(circle, #2e9e4f, transparent 70%);
+}
+.cbp-precip-blob--2 {
+  width: 45%;
+  height: 45%;
+  bottom: -8%;
+  right: 0%;
+  background: radial-gradient(circle, #2e6fd6, transparent 70%);
+}
+.cbp-precip-blob--3 {
+  width: 32%;
+  height: 32%;
+  top: 38%;
+  left: 42%;
+  background: radial-gradient(circle, #e0c000, transparent 70%);
+}
+.cbp-precip-rider {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.8em;
+  height: 0.8em;
+  margin: -0.4em;
+  border-radius: 50%;
+  background: #fff;
+  border: 0.15em solid #000;
+  box-shadow: 0 0 0 0.15em rgba(255, 255, 255, 0.5);
 }
 
 .cbp-empty {

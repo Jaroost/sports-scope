@@ -1680,6 +1680,7 @@ en:
         sleep: "Put to sleep"
         nav_state: "Navigation state"
         radar: "Radar"
+        precip_radar: "Precipitation"
         training_budget: "Training budget"
         climb_list: "Route climbs"
         clock: "Clock"

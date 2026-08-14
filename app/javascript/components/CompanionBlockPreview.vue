@@ -110,6 +110,35 @@ const POWER_SHARES = [
   { key: 'z7', share: 0.02, time: '01:27' },
 ]
 
+// Le bloc "orage qui arrive" (`precip_forecast`) : douze pas de 15 minutes
+// (3h), une averse qui monte puis retombe — de quoi montrer les trois teintes
+// et une légende non vide. Mêmes seuils et couleurs que côté appli
+// (`precip_forecast_block.dart`) : c'est un fac-similé, pas un rendu partagé,
+// donc les deux copies doivent rester synchronisées à la main.
+const PRECIP_FORECAST_SAMPLE = [0, 0, 0.05, 0.3, 1.2, 2.6, 1.8, 0.6, 0.1, 0, 0, 0]
+const PRECIP_LIGHT_THRESHOLD = 0.1
+const PRECIP_MODERATE_THRESHOLD = 0.5
+const PRECIP_HEAVY_THRESHOLD = 2.0
+const PRECIP_MAX_MM = 4.0
+
+const precipHeadline = computed(() => {
+  const idx = PRECIP_FORECAST_SAMPLE.findIndex((mm) => mm >= PRECIP_LIGHT_THRESHOLD)
+  if (idx === -1) return 'Pas de pluie prévue.'
+  if (idx === 0) return 'Pluie en cours.'
+  return `Averse dans ${idx * 15} min.`
+})
+
+function precipBarHeight(mm: number) {
+  return Math.min(1, Math.max(0.04, mm / PRECIP_MAX_MM)) * 100
+}
+
+function precipBarColor(mm: number) {
+  if (mm >= PRECIP_HEAVY_THRESHOLD) return '#d32f2f'
+  if (mm >= PRECIP_MODERATE_THRESHOLD) return '#e0c000'
+  if (mm >= PRECIP_LIGHT_THRESHOLD) return '#2e6fd6'
+  return 'rgba(255, 255, 255, 0.15)'
+}
+
 const sample = computed(() => metricSample(props.block.metric, props.block.format))
 const icon = computed(() => metricIcon(props.block))
 
@@ -613,6 +642,29 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
         <span class="cbp-precip-blob cbp-precip-blob--2"></span>
         <span class="cbp-precip-blob cbp-precip-blob--3"></span>
         <span class="cbp-precip-rider"></span>
+      </div>
+    </div>
+
+    <!-- Orage qui arrive -------------------------------------------------
+         Prévision Open-Meteo à 15 minutes pour la position GPS courante : une
+         frise de barres (3h) et une phrase disant si une averse arrive et
+         dans combien de temps — chiffré, là où `precip_radar` ne fait que le
+         montrer à l'œil. Douze pas fixes ici (pas de capteur ni de réseau
+         dans l'éditeur), mêmes seuils/couleurs que côté appli. -->
+    <div v-else-if="block.kind === 'precip_forecast'" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-title">Orage qui arrive</div>
+      <div class="cbp-precip-headline">{{ precipHeadline }}</div>
+      <div class="cbp-precip-bars">
+        <span
+          v-for="(mm, i) in PRECIP_FORECAST_SAMPLE"
+          :key="i"
+          class="cbp-precip-bar"
+          :style="{ height: `${precipBarHeight(mm)}%`, background: precipBarColor(mm) }"
+        ></span>
+      </div>
+      <div class="cbp-precip-labels">
+        <span>Maintenant</span>
+        <span>+3h</span>
       </div>
     </div>
 
@@ -1238,6 +1290,34 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   flex: 1;
   border: 1px dashed rgba(255, 255, 255, 0.25);
   border-radius: 1em;
+}
+
+/* Orage qui arrive : une phrase, puis une frise de barres — chaque barre
+   pousse depuis le bas (`align-items: flex-end`), sa hauteur en pourcentage
+   posée en style inline (`precipBarHeight`). */
+.cbp-precip-headline {
+  font-size: 1.1em;
+  font-weight: 600;
+  margin-top: 0.3em;
+}
+.cbp-precip-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.2em;
+  height: 3.2em;
+  margin-top: 0.6em;
+}
+.cbp-precip-bar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 0.15em;
+}
+.cbp-precip-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.2em;
+  font-size: 0.75em;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 /* Budget de charge : le chiffre, sa barre, son contexte. Le chiffre est plus gros

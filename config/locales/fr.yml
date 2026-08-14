@@ -1681,6 +1681,7 @@ fr:
         nav_state: "État de navigation"
         radar: "Radar"
         precip_radar: "Précipitations"
+        precip_forecast: "Orage qui arrive"
         training_budget: "Budget de charge"
         climb_list: "Cols du tracé"
         clock: "Horloge"

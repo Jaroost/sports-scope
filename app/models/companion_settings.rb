@@ -93,6 +93,14 @@ module CompanionSettings
     # la donnée ne dépend pas de la page de navigation : le GPS suffit, un profil
     # de home-trainer sans capteur GPS affichera simplement l'état vide.
     "precip_radar" => [],
+    # Prévision de précipitations à 15 minutes (Open-Meteo) sur les prochaines
+    # heures, centrée sur la position GPS du cycliste — répond à « une averse
+    # arrive, et dans combien de temps ? » en chiffres, là où `precip_radar`
+    # ne fait que le montrer à l'œil sur une carte. Même raisonnement que lui
+    # pour le reste : un seul mode (une frise, rien à faire varier selon la
+    # case), et la donnée vient du GPS et non de la page de navigation — un
+    # profil de home-trainer sans capteur GPS affichera simplement l'état vide.
+    "precip_forecast" => [],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.

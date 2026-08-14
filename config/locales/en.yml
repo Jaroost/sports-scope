@@ -1681,6 +1681,7 @@ en:
         nav_state: "Navigation state"
         radar: "Radar"
         precip_radar: "Precipitation"
+        precip_forecast: "Incoming rain"
         training_budget: "Training budget"
         climb_list: "Route climbs"
         clock: "Clock"

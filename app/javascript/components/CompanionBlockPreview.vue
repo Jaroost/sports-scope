@@ -139,6 +139,60 @@ function precipBarColor(mm: number) {
   return 'rgba(255, 255, 255, 0.15)'
 }
 
+// Le bloc "prévisions météo" (`weather_forecast`) : douze heures, température
+// et vent en courbes, précipitations en barres — la tendance de toute la
+// sortie, là où `precip_forecast` ne répond qu'à « une averse arrive-t-elle
+// bientôt ? ». Fac-similé au même titre que PRECIP_FORECAST_SAMPLE : pas de
+// prévision réelle dans l'éditeur, juste de quoi montrer les trois séries.
+const WEATHER_FORECAST_SAMPLE = {
+  temperature: [14, 15, 16, 18, 20, 22, 22, 20, 18, 16, 15, 14],
+  windSpeed: [8, 9, 10, 13, 17, 19, 16, 13, 11, 10, 9, 8],
+  precipitation: [0, 0, 0, 0, 0, 0.2, 0.6, 0.3, 0, 0, 0, 0],
+}
+
+const WEATHER_CHART_WIDTH = 120
+const WEATHER_CHART_HEIGHT = 60
+// La hauteur pleine d'une barre, en mm sur l'heure — un cumul horaire est
+// d'ordinaire plus faible qu'un pic à 15 min (`PRECIP_MAX_MM`), d'où un
+// plafond plus bas.
+const WEATHER_PRECIP_MAX_MM = 2.0
+// Les barres ne montent que sur le tiers bas du graphique : au-dessus, c'est
+// la place des courbes de température/vent, qui ont besoin de toute la
+// hauteur pour rester lisibles.
+const WEATHER_BAR_AREA_FRACTION = 0.35
+
+// Une polyligne SVG normalisée sur `WEATHER_CHART_WIDTH` × `WEATHER_CHART_HEIGHT`,
+// à l'échelle propre de la série (son min et son max, pas une plage partagée
+// avec l'autre courbe) — température et vent n'ont pas les mêmes unités, les
+// superposer sur une échelle commune n'aurait pas de sens.
+function weatherLinePoints(values: number[], padding = 6) {
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min || 1
+  const stepX = WEATHER_CHART_WIDTH / (values.length - 1)
+  return values
+    .map((v, i) => {
+      const x = i * stepX
+      const y = padding + (1 - (v - min) / span) * (WEATHER_CHART_HEIGHT - padding * 2)
+      return `${x.toFixed(1)},${y.toFixed(1)}`
+    })
+    .join(' ')
+}
+
+const weatherTempPoints = computed(() => weatherLinePoints(WEATHER_FORECAST_SAMPLE.temperature))
+const weatherWindPoints = computed(() => weatherLinePoints(WEATHER_FORECAST_SAMPLE.windSpeed))
+
+const weatherBarStepX = WEATHER_CHART_WIDTH / WEATHER_FORECAST_SAMPLE.precipitation.length
+const weatherBarWidth = weatherBarStepX * 0.7
+
+function weatherBarX(i: number) {
+  return i * weatherBarStepX + weatherBarStepX * 0.15
+}
+
+function weatherBarHeight(mm: number) {
+  return Math.min(1, mm / WEATHER_PRECIP_MAX_MM) * (WEATHER_CHART_HEIGHT * WEATHER_BAR_AREA_FRACTION)
+}
+
 const sample = computed(() => metricSample(props.block.metric, props.block.format))
 const icon = computed(() => metricIcon(props.block))
 
@@ -651,7 +705,7 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
          dans combien de temps — chiffré, là où `precip_radar` ne fait que le
          montrer à l'œil. Douze pas fixes ici (pas de capteur ni de réseau
          dans l'éditeur), mêmes seuils/couleurs que côté appli. -->
-    <div v-else-if="block.kind === 'precip_forecast'" class="cbp-card" :style="overrideStyle">
+    <div v-else-if="block.kind === 'precip_forecast'" class="cbp-card cbp-precip-forecast" :style="overrideStyle">
       <div class="cbp-title">Orage qui arrive</div>
       <div class="cbp-precip-headline">{{ precipHeadline }}</div>
       <div class="cbp-precip-bars">
@@ -665,6 +719,41 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
       <div class="cbp-precip-labels">
         <span>Maintenant</span>
         <span>+3h</span>
+      </div>
+    </div>
+
+    <!-- Prévisions météo ---------------------------------------------------
+         Douze heures Open-Meteo pour la position GPS courante : température
+         et vent en courbes (chacune sur sa propre échelle, un min/max ne
+         disant rien de l'autre), précipitations en barres sur le tiers bas —
+         la tendance de toute la sortie, là où `precip_forecast` ne répond
+         qu'à l'averse qui approche. Un seul mode, mêmes raisons que lui :
+         rien à faire varier dans l'éditeur, pas de capteur pour en tirer une
+         vraie prévision. -->
+    <div v-else-if="block.kind === 'weather_forecast'" class="cbp-card cbp-weather" :style="overrideStyle">
+      <div class="cbp-title">Prévisions météo</div>
+      <svg class="cbp-weather-chart" viewBox="0 0 120 60" preserveAspectRatio="none">
+        <rect
+          v-for="(mm, i) in WEATHER_FORECAST_SAMPLE.precipitation"
+          :key="`bar-${i}`"
+          :x="weatherBarX(i)"
+          :y="60 - weatherBarHeight(mm)"
+          :width="weatherBarWidth"
+          :height="weatherBarHeight(mm)"
+          fill="#2e6fd6"
+          opacity="0.55"
+        />
+        <polyline :points="weatherWindPoints" fill="none" stroke="#8fd3ff" stroke-width="1.5" stroke-dasharray="3,2" />
+        <polyline :points="weatherTempPoints" fill="none" stroke="#ff8a3d" stroke-width="2" />
+      </svg>
+      <div class="cbp-weather-labels">
+        <span>Maintenant</span>
+        <span>+12h</span>
+      </div>
+      <div class="cbp-weather-legend">
+        <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #ff8a3d"></span>Température</span>
+        <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #8fd3ff"></span>Vent</span>
+        <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #2e6fd6"></span>Précipitations</span>
       </div>
     </div>
 
@@ -1292,19 +1381,28 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   border-radius: 1em;
 }
 
-/* Orage qui arrive : une phrase, puis une frise de barres — chaque barre
-   pousse depuis le bas (`align-items: flex-end`), sa hauteur en pourcentage
-   posée en style inline (`precipBarHeight`). */
+/* Orage qui arrive : remplit toute la case, comme `precip_radar` — pas figée
+   à une taille naturelle réduite comme la plupart des cartes de texte, une
+   frise de barres profite d'une case généreuse (barres plus hautes, mieux
+   lisibles). Seul le texte garde une taille fixe (`em`, comme le reste de la
+   vignette) ; c'est la zone des barres qui s'étire (`flex: 1`), même
+   convention que `precip_forecast_block.dart` côté appli. */
+.cbp-precip-forecast {
+  display: flex;
+  flex-direction: column;
+}
 .cbp-precip-headline {
   font-size: 1.1em;
   font-weight: 600;
   margin-top: 0.3em;
+  flex-shrink: 0;
 }
 .cbp-precip-bars {
   display: flex;
   align-items: flex-end;
   gap: 0.2em;
-  height: 3.2em;
+  flex: 1;
+  min-height: 0;
   margin-top: 0.6em;
 }
 .cbp-precip-bar {
@@ -1318,6 +1416,44 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   margin-top: 0.2em;
   font-size: 0.75em;
   color: rgba(255, 255, 255, 0.6);
+}
+
+/* Prévisions météo : même convention que "Orage qui arrive" juste au-dessus —
+   le graphique profite d'une case généreuse (`flex: 1`), seuls les textes
+   (titre, labels, légende) gardent une taille fixe en `em`. */
+.cbp-weather {
+  display: flex;
+  flex-direction: column;
+}
+.cbp-weather-chart {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  margin-top: 0.4em;
+}
+.cbp-weather-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.2em;
+  font-size: 0.75em;
+  color: rgba(255, 255, 255, 0.6);
+}
+.cbp-weather-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6em;
+  margin-top: 0.3em;
+  font-size: 0.7em;
+  color: rgba(255, 255, 255, 0.75);
+}
+.cbp-weather-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+}
+.cbp-weather-legend-item .cbp-dot {
+  width: 0.6em;
+  height: 0.6em;
 }
 
 /* Budget de charge : le chiffre, sa barre, son contexte. Le chiffre est plus gros

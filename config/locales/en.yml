@@ -1682,6 +1682,7 @@ en:
         radar: "Radar"
         precip_radar: "Precipitation"
         precip_forecast: "Incoming rain"
+        weather_forecast: "Weather forecast"
         training_budget: "Training budget"
         climb_list: "Route climbs"
         clock: "Clock"

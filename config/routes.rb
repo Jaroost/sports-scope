@@ -141,6 +141,11 @@ Rails.application.routes.draw do
   # l'appli compagnon.
   get "/api/precipitation_forecast", to: "precipitation_forecast#show"
 
+  # Prévision météo horaire (Open-Meteo, public, cf. WeatherForecastController)
+  # — bloc "prévisions météo" du dashboard de l'appli compagnon (température,
+  # vent, précipitations sur les heures qui viennent).
+  get "/api/weather_forecast", to: "weather_forecast#show"
+
   # Route builder (JSON CRUD consumed by Vue components)
   get "/api/routes", to: "routes#index"
   post "/api/routes", to: "routes#create"

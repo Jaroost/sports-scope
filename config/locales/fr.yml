@@ -1682,6 +1682,7 @@ fr:
         radar: "Radar"
         precip_radar: "Précipitations"
         precip_forecast: "Orage qui arrive"
+        weather_forecast: "Prévisions météo"
         training_budget: "Budget de charge"
         climb_list: "Cols du tracé"
         clock: "Horloge"

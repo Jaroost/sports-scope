@@ -101,6 +101,15 @@ module CompanionSettings
     # case), et la donnée vient du GPS et non de la page de navigation — un
     # profil de home-trainer sans capteur GPS affichera simplement l'état vide.
     "precip_forecast" => [],
+    # Prévisions météo horaires (Open-Meteo, 12h) sur la position GPS du
+    # cycliste — température, vent et précipitations sur un même graphique,
+    # pour lire la tendance de toute la sortie plutôt qu'une seule averse qui
+    # approche (`precip_forecast`). Même raisonnement que les deux blocs
+    # précipitations pour le reste : un seul mode (le graphique, rien à faire
+    # varier selon la case), et la donnée vient du GPS et non de la page de
+    # navigation — un profil de home-trainer sans capteur GPS affichera
+    # simplement l'état vide.
+    "weather_forecast" => [],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.

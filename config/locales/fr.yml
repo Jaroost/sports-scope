@@ -1661,6 +1661,7 @@ fr:
       band_metrics_group: "Mesures"
       band_actions_group: "Commandes"
       band_radar_group: "Radar"
+      band_bell_group: "Sonnette"
       sensors_title: "Capteurs"
       sensors_help: "Ce que ce profil va chercher. Un capteur coupé n'est pas déconnecté pour autant : s'il est déjà connecté, il continue de mesurer. Sans GPS, l'appli ne demande ni service au premier plan ni position — la distance et le dénivelé affichent alors un tiret."
       radar_title: "Radar"

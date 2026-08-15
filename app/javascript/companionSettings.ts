@@ -376,10 +376,14 @@ export interface Catalog {
   // troisième catalogue et non un mode de plus dans `band_actions` : ce n'est
   // ni une mesure ni une commande, l'éditeur lui garde son propre groupe.
   band_radar: string[]
+  // La sonnette, en case de bandeau ou d'encoche — `bell_bell`, `bell_horn`
+  // (voir `CompanionSettings::BAND_BELL`). Même raisonnement que `band_radar` :
+  // la case porte directement le son choisi, plutôt qu'un `bell` nu dans
+  // `band_actions` suivi d'un réglage qu'une case-chaîne ne peut pas porter.
+  band_bell: string[]
   // Ce qu'un bloc `bell` peut jouer — voir `CompanionSettings::BELL_SOUNDS`.
-  // Pas de case de bandeau/encoche pour un choix précis : `BandActionSlot`
-  // reste une simple clé (`band_actions`), la sonnette y garde le repli
-  // 'bell'.
+  // Même liste que `band_bell` (sans le préfixe `bell_`) : un bloc de page
+  // choisit son son, une case de bandeau/encoche choisit sa clé directement.
   bell_sounds: string[]
   sensors: string[]
   activities: string[]

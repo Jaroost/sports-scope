@@ -183,11 +183,16 @@ module CompanionSettings
 
   # Les commandes qu'une case du bandeau ou de la bande de l'encoche peut
   # porter à la place d'une mesure — des boutons, pas des mesures, même
-  # raison que `BLOCKS["sleep"]`/`BLOCKS["bell"]` sur une page. Liste à part
-  # de `METRICS` et non fondue dedans : une case de bandeau reste d'abord un
-  # chiffre à lire, l'éditeur doit pouvoir présenter les deux catalogues
-  # séparément plutôt que mélangés dans un seul menu déroulant.
-  BAND_ACTIONS = %w[sleep bell].freeze
+  # raison que `BLOCKS["sleep"]` sur une page. Liste à part de `METRICS` et
+  # non fondue dedans : une case de bandeau reste d'abord un chiffre à lire,
+  # l'éditeur doit pouvoir présenter les deux catalogues séparément plutôt
+  # que mélangés dans un seul menu déroulant.
+  #
+  # `bell` n'y est plus : contrairement à `sleep`, il a un réglage propre (le
+  # son, voir `BELL_SOUNDS`) — même raison que `radar`, sorti dans son propre
+  # `BAND_RADAR` plutôt que fondu ici, pour la même faute qu'aurait porté un
+  # `"bell"` sans dire lequel des deux sons il joue.
+  BAND_ACTIONS = %w[sleep].freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`. `horn` imite le
@@ -196,6 +201,13 @@ module CompanionSettings
   # n'est PAS le son des autres alertes de l'appli (radar, virages), qui
   # doivent rester identifiables sans confusion possible.
   BELL_SOUNDS = %w[bell horn].freeze
+
+  # `bell`, en case de bandeau ou d'encoche — même raisonnement que
+  # `BAND_RADAR` pour `radar` : la case porte directement le son choisi
+  # (`bell_bell`, `bell_horn`) plutôt qu'un `"bell"` nu suivi d'un réglage
+  # qu'une case-string ne peut pas porter. Voir `BandBellSlot` côté Dart
+  # (`ride_preset.dart`).
+  BAND_BELL = BELL_SOUNDS.map { |sound| "bell_#{sound}" }.freeze
 
   # Le radar arrière, en case de bandeau ou d'encoche — un sous-ensemble des
   # modes de `BLOCKS["radar"]` : seuls ceux qui restent lisibles dans une case
@@ -376,6 +388,7 @@ module CompanionSettings
       "metrics" => METRICS,
       "band_actions" => BAND_ACTIONS,
       "band_radar" => BAND_RADAR,
+      "band_bell" => BAND_BELL,
       "bell_sounds" => BELL_SOUNDS,
       "sensors" => SENSORS,
       "activities" => ACTIVITIES,
@@ -1020,9 +1033,10 @@ module CompanionSettings
   end
 
   # Une case de bandeau ou de bande de l'encoche : une mesure, une commande
-  # (`BAND_ACTIONS`) ou un mode de radar (`BAND_RADAR`).
+  # (`BAND_ACTIONS`), un son de sonnette (`BAND_BELL`) ou un mode de radar
+  # (`BAND_RADAR`).
   def band_slot?(raw)
-    METRICS.include?(raw) || BAND_ACTIONS.include?(raw) || BAND_RADAR.include?(raw)
+    METRICS.include?(raw) || BAND_ACTIONS.include?(raw) || BAND_BELL.include?(raw) || BAND_RADAR.include?(raw)
   end
 
   # Absent vaut **activé** : un profil écrit à la main, ou venu d'une version

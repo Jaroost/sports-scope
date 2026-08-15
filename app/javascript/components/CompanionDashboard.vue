@@ -189,6 +189,13 @@ function bandRadarLabel(key: string): string {
   return `${t('companion.settings.blocks.radar')} · ${t(`companion.settings.modes.${mode}`)}`
 }
 
+// Le libellé d'un son de sonnette de case (`bell_horn`) — même format que
+// `bandRadarLabel` : le nom du composant puis le son choisi.
+function bandBellLabel(key: string): string {
+  const sound = key.slice('bell_'.length)
+  return `${t('companion.settings.blocks.bell')} · ${t(`companion.settings.bell_sounds.${sound}`)}`
+}
+
 // ── les profils ─────────────────────────────────────────────────────────────
 
 function select(index: number) {
@@ -1286,6 +1293,11 @@ async function save() {
                     {{ bandRadarLabel(radar) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_bell_group')">
+                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                    {{ bandBellLabel(bell) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">
                   <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
                     {{ metricLabel(metric) }}
@@ -1324,6 +1336,11 @@ async function save() {
                     {{ bandRadarLabel(radar) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_bell_group')">
+                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                    {{ bandBellLabel(bell) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">
                   <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
                     {{ metricLabel(metric) }}
@@ -1343,6 +1360,11 @@ async function save() {
                 <optgroup :label="t('companion.settings.band_radar_group')">
                   <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
                     {{ bandRadarLabel(radar) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_bell_group')">
+                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                    {{ bandBellLabel(bell) }}
                   </option>
                 </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">

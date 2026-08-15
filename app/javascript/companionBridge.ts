@@ -1,5 +1,10 @@
 import { ref, computed, watch, type Ref } from 'vue'
-import { companionStore, type CompanionGears } from './stores/companionStore'
+import {
+  companionStore,
+  type CompanionGears,
+  type CompanionTraveledPathPoint,
+  type CompanionTraveledPathStyle,
+} from './stores/companionStore'
 import type { CompanionClimbProfile, CompanionNavState, CompanionRouteClimbs } from './navHelpers'
 import { csrfToken } from './csrf'
 import {
@@ -34,6 +39,11 @@ interface CompanionPayload {
   // recours comme d'habitude — voir sports-scope-companion, `RiderCompass.forced`.
   headingForced?: boolean | null
   sensors?: { name: string; connected: boolean; kinds: string[] }[]
+  // Le trajet réellement parcouru, en delta — voir `TraveledPathTracker` côté
+  // sports-scope-companion. Contrairement au reste de cette charge utile,
+  // absent ou vide ne veut PAS dire « rien à afficher » mais « rien de neuf
+  // ce tic » : la ligne déjà affichée reste telle quelle.
+  traveledPath?: { points: CompanionTraveledPathPoint[]; reset?: boolean } | null
 }
 
 // Canal JavaScript injecté par le WebView de l'appli. Sa seule présence dit
@@ -251,6 +261,7 @@ export function installCompanionBridge(): void {
   const target = window as unknown as {
     sportsScopeCompanion?: {
       push(payload: CompanionPayload): void
+      configureTraveledPath(style: CompanionTraveledPathStyle): void
       offlineStart(): void
       offlineCancel(): void
       offlineRemove(): void
@@ -269,9 +280,20 @@ export function installCompanionBridge(): void {
           headingDeg: payload.headingDeg,
           headingForced: payload.headingForced,
         })
+        if (payload.traveledPath) companionStore.applyTraveledPath(payload.traveledPath)
       } catch {
         // Une charge utile inattendue ne doit jamais casser la navigation :
         // mieux vaut des valeurs figées qu'une carte morte.
+      }
+    },
+    // Appel one-off, pas un champ de `push` : la couleur/largeur/opacité de la
+    // ligne ne change pas d'un tic à l'autre — voir `SensorBridge._sendTraveledPathConfig`
+    // côté sports-scope-companion.
+    configureTraveledPath(style: CompanionTraveledPathStyle) {
+      try {
+        companionStore.configureTraveledPath(style)
+      } catch {
+        // Même garde que `push` : un style malformé ne doit pas casser la navigation.
       }
     },
     // `?.` : aucun trajet affiché (page de navigation démontée, ou pas encore

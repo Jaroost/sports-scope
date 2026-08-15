@@ -306,6 +306,11 @@ module CompanionSettings
   # Même littéral que `DEFAULT_DIVIDER_COLOR` côté TS et Dart.
   DEFAULT_DIVIDER_COLOR = "#9ca3af"
 
+  # La couleur du trajet réellement parcouru, pour un profil qui n'a jamais
+  # touché ce réglage. Même littéral que `TraveledPathSettings` côté Dart et
+  # que le style par défaut posé côté Rails dans `companionStore.ts`.
+  DEFAULT_TRAVELED_PATH_COLOR = "#2196f3"
+
   # La description tient dans le sous-titre d'un `ListTile`, au moment où l'on
   # choisit son profil avant de partir — pas dans un paragraphe.
   MAX_DESCRIPTION_LENGTH = 140
@@ -426,7 +431,8 @@ module CompanionSettings
       "sensors" => sanitize_sensors(raw["sensors"]),
       "radar" => sanitize_radar(raw["radar"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
-      "screen" => sanitize_screen(raw["screen"])
+      "screen" => sanitize_screen(raw["screen"]),
+      "traveled_path" => sanitize_traveled_path(raw["traveled_path"])
     }.compact
   end
 
@@ -980,6 +986,20 @@ module CompanionSettings
     return nil unless raw["dim_level"].is_a?(Numeric)
 
     { "dim_level" => raw["dim_level"].to_f.clamp(0.01, 1.0) }
+  end
+
+  # Couleur/largeur/opacité de la ligne du trajet réellement parcouru,
+  # dessinée par `RouteNavigation.vue` par-dessus le tracé prévu — jamais
+  # calculée côté Rails, seulement transmise au pont puis à la page. Même
+  # forme que `sanitize_radar`/`sanitize_lighting`.
+  def sanitize_traveled_path(raw)
+    return nil unless raw.is_a?(Hash)
+
+    {
+      "color" => sanitize_hex_color(raw["color"]) || DEFAULT_TRAVELED_PATH_COLOR,
+      "width" => positive(raw["width"], 4),
+      "opacity" => raw["opacity"].is_a?(Numeric) ? raw["opacity"].to_f.clamp(0.0, 1.0) : 0.85
+    }
   end
 
   def clamp_side(value)

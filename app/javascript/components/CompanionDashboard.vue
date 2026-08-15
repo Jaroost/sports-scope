@@ -6,7 +6,8 @@ import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
-  canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR, DEFAULT_METRIC_LAYOUT, fitCells,
+  canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR, DEFAULT_METRIC_LAYOUT,
+  DEFAULT_TRAVELED_PATH_COLOR, fitCells,
   fitDividers, gridSideOf, gutterRect, isGridLayout,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
@@ -753,6 +754,24 @@ function setRadar(key: string, value: number | boolean) {
   preset.value.radar = { ...(preset.value.radar || {}), [key]: value }
 }
 
+function traveledPathValue(key: string, fallback: number): number {
+  const value = preset.value.traveled_path?.[key]
+  return typeof value === 'number' ? value : fallback
+}
+
+function setTraveledPath(key: string, value: number | string) {
+  preset.value.traveled_path = { ...(preset.value.traveled_path || {}), [key]: value }
+}
+
+// Même raison qu'un séparateur (`dividerColor`) : la ligne du trajet parcouru
+// a toujours besoin d'une couleur, un `null` (bouton « réinitialiser » de
+// `CompanionColorPicker`) retombe donc sur la couleur par défaut plutôt que de
+// rester sans couleur.
+const traveledPathColor = computed<string | null>({
+  get: () => (typeof preset.value.traveled_path?.color === 'string' ? preset.value.traveled_path.color : null),
+  set: (value) => setTraveledPath('color', value || DEFAULT_TRAVELED_PATH_COLOR),
+})
+
 // ── enregistrer ─────────────────────────────────────────────────────────────
 
 async function save() {
@@ -1337,6 +1356,29 @@ async function save() {
                 {{ t('companion.settings.radar_wake') }}
               </label>
             </div>
+          </div>
+        </div>
+
+        <!-- Trajet parcouru -->
+        <h2 class="h6">{{ t('companion.settings.traveled_path_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.traveled_path_help') }}</p>
+        <div class="row g-2 align-items-end">
+          <div class="col-6 col-md-3 d-flex align-items-center gap-2">
+            <span class="small">{{ t('companion.settings.traveled_path_color') }}</span>
+            <CompanionColorPicker v-model="traveledPathColor" :fallback="DEFAULT_TRAVELED_PATH_COLOR"
+                                   :label="t('companion.settings.traveled_path_color')" />
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">{{ t('companion.settings.traveled_path_width') }}</label>
+            <input class="form-control form-control-sm" type="number" min="1" step="1"
+                   :value="traveledPathValue('width', 4)"
+                   @input="setTraveledPath('width', Number(($event.target as HTMLInputElement).value))">
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">{{ t('companion.settings.traveled_path_opacity') }}</label>
+            <input class="form-control form-control-sm" type="number" min="0" max="1" step="0.05"
+                   :value="traveledPathValue('opacity', 0.85)"
+                   @input="setTraveledPath('opacity', Number(($event.target as HTMLInputElement).value))">
           </div>
         </div>
       </div>

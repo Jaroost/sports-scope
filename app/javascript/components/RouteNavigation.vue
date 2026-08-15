@@ -703,6 +703,48 @@ function applyTrackOpacity() {
   if (map.getLayer(TURN_FLOW_LAYER)) map.setPaintProperty(TURN_FLOW_LAYER, 'line-opacity', opacity)
 }
 
+// ─── Trajet réellement parcouru (application companion) ────────────────────────
+// La carte ne le calcule pas elle-même — elle ne sait pas où le cycliste est
+// réellement passé, seulement où le tracé prévu l'emmène. C'est l'appli qui pousse
+// les positions acceptées par son enregistreur (voir CLAUDE.md, TraveledPathTracker),
+// en delta à chaque tic, avec un renvoi complet marqué `reset` après un rechargement
+// de page. Style par défaut ci-dessous tant que `configureTraveledPath` n'est pas
+// encore arrivé (premier rendu, avant que l'appli ait eu le temps de répondre).
+const traveledPathColor = computed(() => companionStore.traveledPathStyle.value?.color ?? '#2196f3')
+const traveledPathWidth = computed(() => companionStore.traveledPathStyle.value?.width ?? 4)
+const traveledPathOpacity = computed(() => companionStore.traveledPathStyle.value?.opacity ?? 0.85)
+
+function emptyLineStringFeature() {
+  return { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: [] as number[][] } }
+}
+
+// Repeint la ligne du trajet parcouru à son style courant, sans effet avant la pose de
+// la couche (voir installRouteLayers, qui la crée déjà aux bonnes valeurs).
+function applyTraveledPathPaint() {
+  if (!map || !map.getLayer('nav-traveled-path')) return
+  map.setPaintProperty('nav-traveled-path', 'line-color', traveledPathColor.value)
+  map.setPaintProperty('nav-traveled-path', 'line-width', zoomWidthExpr(traveledPathWidth.value, true))
+  map.setPaintProperty('nav-traveled-path', 'line-opacity', traveledPathOpacity.value)
+}
+watch(companionStore.traveledPathStyle, applyTraveledPathPaint)
+
+// Remplace la géométrie de la ligne par ce que le store a accumulé. `setData` seul,
+// jamais `addLayer` : la couche existe déjà, poser une géométrie qui grandit ne coûte
+// pas de rechargement de style — même idiome que `nav-route`/`nav-remaining`.
+//
+// Conversion `{lat, lng}` → `[lng, lat]` À CET ENDROIT SEULEMENT : c'est l'ordre GeoJSON,
+// l'inverse de la lecture GPS habituelle, et c'est le seul point du fichier qui la fait —
+// une inversion ici se verrait comme une diagonale à travers la carte plutôt que par une
+// erreur de compilation.
+function applyTraveledPathData() {
+  if (!map) return
+  const src = map.getSource('nav-traveled')
+  if (!src) return
+  const coordinates = companionStore.traveledPathPoints.value.map((p) => [ p.lng, p.lat ])
+  src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } })
+}
+watch(companionStore.traveledPathPoints, applyTraveledPathData)
+
 // ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
 // Points d'ancrage (waypoints) de l'itinéraire chargé : source de vérité de l'édition.
 // Présents pour un itinéraire chargé depuis la liste / un lien partagé ; vides pour une
@@ -1418,10 +1460,10 @@ function unloadRoute() {
   turnMarkers = []
   if (map) {
     stopTurnFlow()
-    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining', 'nav-turn-highlight', TURN_FLOW_LAYER]) {
+    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining', 'nav-traveled-path', 'nav-turn-highlight', TURN_FLOW_LAYER]) {
       if (map.getLayer(id)) map.removeLayer(id)
     }
-    for (const id of ['nav-route', 'nav-remaining', 'nav-turn-hi']) {
+    for (const id of ['nav-route', 'nav-remaining', 'nav-traveled', 'nav-turn-hi']) {
       if (map.getSource(id)) map.removeSource(id)
     }
   }
@@ -1670,6 +1712,23 @@ function installRouteLayers() {
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(routeBorderWidth.value, true) } })
   map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': trackOpacity.value } })
   map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.line_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': trackOpacity.value } })
+  // Le trajet réellement parcouru, poussé par l'appli companion (voir
+  // companionStore.traveledPath*) : par-dessus le tracé prévu — sinon un aller-retour
+  // ou une boucle le recouvrirait totalement — mais SOUS la mise en avant du virage, qui
+  // doit rester lisible même là où le cycliste vient de repasser.
+  map.addSource('nav-traveled', { type: 'geojson', data: emptyLineStringFeature() })
+  map.addLayer({
+    id: 'nav-traveled-path',
+    type: 'line',
+    source: 'nav-traveled',
+    layout: ROUTE_LINE_LAYOUT,
+    paint: {
+      'line-color': traveledPathColor.value,
+      'line-width': zoomWidthExpr(traveledPathWidth.value, true),
+      'line-opacity': traveledPathOpacity.value,
+    },
+  })
+  applyTraveledPathData()
   // Surlignage du prochain virage : même ruban (largeur, opacité, amincissement des
   // recouvrements) mais à la couleur de la pastille, posé PAR-DESSUS le tracé restant.
   map.addSource('nav-turn-hi', { type: 'geojson', data: widthRunsCollection([], []) })

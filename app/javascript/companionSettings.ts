@@ -258,6 +258,11 @@ export interface Divider {
 // `DEFAULT_DIVIDER_COLOR` (Dart).
 export const DEFAULT_DIVIDER_COLOR = '#9ca3af'
 
+// Couleur du trajet réellement parcouru pour un profil qui n'a jamais touché
+// ce réglage. Même littéral que `CompanionSettings::DEFAULT_TRAVELED_PATH_COLOR`
+// (Rails) et `TraveledPathSettings` (Dart).
+export const DEFAULT_TRAVELED_PATH_COLOR = '#2196f3'
+
 export interface Page {
   kind: 'map' | 'grid' | 'list' | 'laps'
   title?: string
@@ -311,6 +316,10 @@ export interface Preset {
   sensors?: Record<string, boolean>
   radar?: Record<string, number | boolean>
   screen?: Record<string, number>
+  // Couleur/largeur/opacité de la ligne du trajet réellement parcouru,
+  // dessinée par l'appli companion — voir `sanitize_traveled_path` (Rails) et
+  // `TraveledPathSettings` (Dart).
+  traveled_path?: Record<string, number | string>
 }
 
 // Une disposition de bloc `metric` enregistrée pour être réutilisée sur une

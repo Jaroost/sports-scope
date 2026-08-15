@@ -77,6 +77,7 @@ const catalog: Catalog = {
   max_band_metrics: 4,
   max_grid_side: 6,
   icons: ['fa-solid fa-heart'],
+  menu_conditions: ['route_active', 'descending', 'near_col'],
 }
 
 describe('blockChoices', () => {

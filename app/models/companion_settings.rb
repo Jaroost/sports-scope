@@ -136,6 +136,11 @@ module CompanionSettings
 
   PAGE_KINDS = %w[map grid list laps].freeze
 
+  # Les conditions de sortie qu'une page rangée derrière le menu peut porter pour
+  # rejoindre le défilement toute seule (`menu_condition`) — voir `menu_flag` et
+  # `RideShellPage._updateConditionalPages` côté appli, qui les évalue en roulant.
+  MENU_CONDITIONS = %w[route_active descending near_col].freeze
+
   # Les mesures affichables. Exactement les clés de `MetricId` côté Dart, dans le
   # même ordre : c'est la liste que l'éditeur déroule.
   METRICS = %w[
@@ -334,7 +339,8 @@ module CompanionSettings
       "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
       "max_grid_side" => MAX_GRID_SIDE,
-      "icons" => ICONS
+      "icons" => ICONS,
+      "menu_conditions" => MENU_CONDITIONS
     }
   end
 
@@ -518,6 +524,13 @@ module CompanionSettings
     true if page["menu"] == true
   end
 
+  # La condition qui fait rejoindre le défilement à une page rangée derrière le
+  # menu, ou `nil` — absente ou inconnue, la page reste purement statique, comme
+  # avant que ce réglage existe.
+  def sanitize_menu_condition(raw)
+    raw if MENU_CONDITIONS.include?(raw)
+  end
+
   # Une page rangée derrière le menu doit rester joignable.
   #
   # Il y faut une page du défilement **qui ne soit pas la carte** : c'est
@@ -537,7 +550,9 @@ module CompanionSettings
     index = pages.index { |page| page["menu"] }
     return pages if index.nil?
 
-    pages.each_with_index.map { |page, i| i == index ? page.except("menu") : page }
+    pages.each_with_index.map do |page, i|
+      i == index ? page.except("menu", "menu_condition", "menu_auto_open") : page
+    end
   end
 
   def sanitize_grid(page)
@@ -551,10 +566,13 @@ module CompanionSettings
     return nil if cells.empty?
 
     dividers = sanitize_dividers(page["dividers"], rows, cols)
+    menu = menu_flag(page)
+    condition = menu && sanitize_menu_condition(page["menu_condition"])
 
     { "kind" => "grid", "title" => page["title"].to_s.presence || "Mesures",
       "rows" => rows, "cols" => cols, "cells" => cells, "dividers" => dividers.presence,
-      "menu" => menu_flag(page) }.compact
+      "menu" => menu, "menu_condition" => condition,
+      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil }.compact
   end
 
   # Les séparateurs qui tiennent dans la grille : une ligne (`"h"`) ou une colonne
@@ -623,8 +641,12 @@ module CompanionSettings
     blocks = raw_array(page["blocks"]).filter_map { |block| sanitize_block(block) }
     return nil if blocks.empty?
 
+    menu = menu_flag(page)
+    condition = menu && sanitize_menu_condition(page["menu_condition"])
+
     { "kind" => "list", "title" => page["title"].to_s.presence || "Sortie",
-      "blocks" => blocks, "menu" => menu_flag(page) }.compact
+      "blocks" => blocks, "menu" => menu, "menu_condition" => condition,
+      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil }.compact
   end
 
   # Une page de tours : liste déroulante d'un côté, composants du tour choisi
@@ -646,9 +668,13 @@ module CompanionSettings
     layout = page["layout"] == "grid" ? sanitize_lap_grid(page) : sanitize_lap_blocks(page)
     return nil if layout.nil?
 
+    menu = menu_flag(page)
+    condition = menu && sanitize_menu_condition(page["menu_condition"])
+
     { "kind" => "laps", "title" => page["title"].to_s.presence || "Tours",
       "series" => sanitize_series(page["series"]),
-      "menu" => menu_flag(page) }.merge(layout).compact
+      "menu" => menu, "menu_condition" => condition,
+      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil }.merge(layout).compact
   end
 
   def sanitize_lap_blocks(page)

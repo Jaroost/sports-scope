@@ -377,6 +377,18 @@ function toggleMenuPage(page: Page) {
   else page.menu = true
 }
 
+// La condition qui fait rejoindre le défilement à une page rangée derrière le
+// menu, le temps qu'elle dure — voir `Page.menu_condition`. Effacée et non mise
+// à une valeur creuse quand on choisit « aucune », même règle que `menu`.
+function setMenuCondition(page: Page, value: string) {
+  if (props.catalog.menu_conditions.includes(value)) {
+    page.menu_condition = value as Page['menu_condition']
+  } else {
+    delete page.menu_condition
+    delete page.menu_auto_open
+  }
+}
+
 // Combien de pages restent à faire défiler. Sert à dire, sous la liste, ce que le
 // cycliste trouvera au glissé et ce qu'il devra aller chercher.
 const swipeCount = computed(
@@ -928,6 +940,29 @@ async function save() {
           <div v-if="openPage === index" class="border-top p-2">
             <input v-model="page.title" class="form-control form-control-sm mb-2"
                    :placeholder="t('companion.settings.page_title')">
+
+            <!-- Seulement pour une page déjà rangée derrière le menu : la
+                 condition qui l'en fait ressortir toute seule pendant la
+                 sortie, et si on bascule dessus quand elle devient vraie. -->
+            <div v-if="page.menu" class="mb-2">
+              <label class="small mb-1 d-block">{{ t('companion.settings.menu_condition_label') }}
+                <select class="form-select form-select-sm" :value="page.menu_condition || ''"
+                        @change="setMenuCondition(page, ($event.target as HTMLSelectElement).value)">
+                  <option value="">{{ t('companion.settings.menu_condition_options.none') }}</option>
+                  <option v-for="condition in catalog.menu_conditions" :key="condition" :value="condition">
+                    {{ t(`companion.settings.menu_condition_options.${condition}`) }}
+                  </option>
+                </select>
+              </label>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.menu_condition_help') }}</p>
+              <div v-if="page.menu_condition" class="form-check mt-1">
+                <input v-model="page.menu_auto_open" type="checkbox" class="form-check-input"
+                       :id="`menu-auto-open-${index}`">
+                <label class="form-check-label small" :for="`menu-auto-open-${index}`">
+                  {{ t('companion.settings.menu_auto_open_label') }}
+                </label>
+              </div>
+            </div>
 
             <!-- Une page de tours : la série qu'elle affiche. Un bouton
                  « Marquer un tour » posé ailleurs doit porter la même clé

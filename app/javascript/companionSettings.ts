@@ -274,6 +274,16 @@ export interface Page {
   // Rangée derrière le menu d'actions plutôt que dans le défilement. Absent vaut
   // « dans le défilement » — voir `canHideBehindMenu`.
   menu?: boolean
+  // Seulement quand `menu` est vrai : fait rejoindre le défilement à cette page,
+  // le temps que la condition dure, plutôt que de l'y ranger en permanence.
+  // Absente ou inconnue : la page reste purement statique derrière le menu,
+  // comme avant ce réglage — voir `RideShellPage._updateConditionalPages` côté
+  // appli.
+  menu_condition?: 'route_active' | 'descending' | 'near_col'
+  // Bascule automatiquement dessus quand la condition devient vraie, plutôt que
+  // de seulement la faire rejoindre le défilement. N'a de sens que si
+  // `menu_condition` est posé.
+  menu_auto_open?: boolean
   // Seulement pour `kind: 'laps'` : la série de tours que cette page affiche
   // (liste déroulante + composants du tour choisi). Absente vaut `'default'`.
   series?: string
@@ -358,6 +368,9 @@ export interface Catalog {
   max_band_metrics: number
   max_grid_side: number
   icons: string[]
+  // Les conditions qu'une page rangée derrière le menu peut porter pour
+  // rejoindre le défilement toute seule — voir `Page.menu_condition`.
+  menu_conditions: string[]
 }
 
 // ── Derrière le menu, ou dans le défilement ─────────────────────────────────

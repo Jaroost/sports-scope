@@ -619,6 +619,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             {{ t('companion.settings.lap_series_cols_hint') }}
           </p>
 
+          <p v-if="group.kind === 'metric' && props.pageKind === 'laps'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.metric_lap_scope_hint') }}
+          </p>
+
           <p v-if="group.kind === 'altitude_profile'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.altitude_window_km_hint') }}
           </p>
@@ -828,7 +832,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                    quand les vignettes, elles, n'ont plus la même forme. -->
               <div class="cbpk-preview">
                 <div class="cbpk-cell" :style="tileStyle">
-                  <CompanionBlockPreview :block="tile.block" />
+                  <CompanionBlockPreview :block="tile.block" :lap-scoped="pageKind === 'laps'" />
                 </div>
               </div>
               <span class="cbpk-tile-label">{{ tile.label }}</span>

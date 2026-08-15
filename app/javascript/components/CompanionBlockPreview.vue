@@ -47,6 +47,14 @@ import { zoneColor, acwrColor } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
   block: Block
+  // Vrai quand l'appelant sait que ce composant est posé sur une page Tours
+  // (`page.kind === 'laps'`) — le seul contexte où une mesure `metric`
+  // (`block.kind === 'metric'`) lit le tour affiché plutôt que la sortie
+  // entière (`LapListBody._block`, `MetricSources.forLap`, dépôt voisin).
+  // Absent ailleurs : cette vignette sert aussi la dialogue de choix
+  // (`CompanionBlockPicker`) avant qu'on sache sur quelle page on pose le
+  // composant, et les autres pages n'ont pas de tour à montrer.
+  lapScoped?: boolean
 }>()
 
 // Le fond et le texte réglés dans l'éditeur : valent pour n'importe quel
@@ -284,6 +292,15 @@ const dynamicGaugeFraction = computed(() => DYNAMIC_GAUGE_PREVIEW_FRACTION[props
 // tour choisi, pas depuis le départ de la sortie.
 const lapScope = computed(() => (props.block.kind.startsWith('lap_') ? 'Ce tour — ' : ''))
 
+// Une mesure ordinaire (`metric`) n'a pas de titre — sa disposition libre ne
+// réserve pas forcément de case à un libellé (mode « chiffre plein cadre »,
+// par exemple) — donc pas d'endroit où glisser un préfixe comme `lapScope`
+// ci-dessus. Un badge posé sur la carte le dit à la place, seulement quand
+// l'appelant sait qu'elle atterrit sur une page Tours (voir la doc de
+// `lapScoped`) : ailleurs, une mesure `metric` reste celle de la sortie
+// entière et n'a rien à annoncer.
+const showLapBadge = computed(() => props.lapScoped === true && props.block.kind === 'metric')
+
 const zonesTitle = computed(() =>
   lapScope.value + (props.block.source === 'power' ? 'Temps par zone de puissance' : 'Temps par zone cardio'),
 )
@@ -430,6 +447,7 @@ const altitudeProfileClipId = useId()
       class="cbp-card cbp-metric"
       :style="{ background: metricBackground || undefined, color: metricInk }"
     >
+      <span v-if="showLapBadge" class="cbp-lap-badge">Ce tour</span>
       <template v-for="row in rows" :key="row.row">
         <!-- La jauge est une barre pleine largeur, pas un texte : dès qu'elle
              occupe une rangée, elle en est la seule occupante (voir
@@ -1037,12 +1055,31 @@ const altitudeProfileClipId = useId()
 }
 
 .cbp-card {
+  position: relative;
   background: #1f2226;
   border-radius: 1em;
   padding: 0.8em;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+/* Le badge « Ce tour » d'une mesure posée sur une page Tours — voir la doc de
+   `showLapBadge`. Un coin plutôt qu'un titre : une mesure `metric` n'a pas
+   forcément de rangée d'étiquette dans sa disposition, contrairement à
+   `lap_zones`/`lap_averages` qui préfixent la leur (`lapScope`). */
+.cbp-lap-badge {
+  position: absolute;
+  top: 0.35em;
+  left: 0.35em;
+  padding: 0.1em 0.4em;
+  border-radius: 0.3em;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 0.6em;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* Le bouton d'enregistrement n'est pas dans une carte : il flotte sur le fond

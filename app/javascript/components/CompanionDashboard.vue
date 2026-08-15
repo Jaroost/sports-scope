@@ -389,6 +389,14 @@ function setMenuCondition(page: Page, value: string) {
   }
 }
 
+// L'icône qui repère la page dans le menu ⋮ de l'appli — voir `Page.icon`.
+// Effacée et non mise à une valeur creuse quand on choisit « par défaut »,
+// même règle que `menu`/`menu_condition` ci-dessus.
+function setPageIcon(page: Page, icon: string | undefined) {
+  if (icon) page.icon = icon
+  else delete page.icon
+}
+
 // Combien de pages restent à faire défiler. Sert à dire, sous la liste, ce que le
 // cycliste trouvera au glissé et ce qu'il devra aller chercher.
 const swipeCount = computed(
@@ -904,6 +912,10 @@ async function save() {
             <span v-if="page.menu" class="badge text-bg-light border">
               <i class="fa-solid fa-ellipsis-vertical me-1" aria-hidden="true"></i>{{ t('companion.settings.behind_menu') }}
             </span>
+            <!-- Le même repère qu'on ira relire dans le menu ⋮ du téléphone :
+                 le voir déjà ici aide à choisir une icône qui distingue
+                 vraiment cette page des pages voisines. -->
+            <i v-if="page.icon" :class="page.icon" class="text-body-secondary" aria-hidden="true"></i>
             <span class="flex-grow-1 text-truncate">{{ page.title || t('companion.settings.page_kinds.map') }}</span>
             <button class="btn btn-sm btn-link p-1" type="button"
                     :disabled="index === 0" @click="movePage(index, -1)">
@@ -940,6 +952,29 @@ async function save() {
           <div v-if="openPage === index" class="border-top p-2">
             <input v-model="page.title" class="form-control form-control-sm mb-2"
                    :placeholder="t('companion.settings.page_title')">
+
+            <!-- Le repère qui la distingue dans le menu ⋮ du téléphone, où
+                 plusieurs pages du même genre (deux grilles, par exemple) se
+                 ressembleraient sinon trait pour trait. Pas seulement pour les
+                 pages rangées derrière le menu : une page du défilement peut y
+                 être rangée plus tard sans repasser par ici. -->
+            <div class="mb-2">
+              <label class="small mb-1 d-block">{{ t('companion.settings.page_icon_label') }}</label>
+              <div class="cdb-icons">
+                <button type="button" class="cdb-icon-btn"
+                        :class="{ 'cdb-icon-btn--selected': !page.icon }"
+                        :title="t('companion.settings.default_icon')"
+                        @click="setPageIcon(page, undefined)">
+                  {{ t('companion.settings.default_icon') }}
+                </button>
+                <button v-for="ic in catalog.icons" :key="ic" type="button"
+                        class="cdb-icon-btn" :class="{ 'cdb-icon-btn--selected': page.icon === ic }"
+                        @click="setPageIcon(page, ic)">
+                  <i :class="ic" aria-hidden="true"></i>
+                </button>
+              </div>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_icon_help') }}</p>
+            </div>
 
             <!-- Seulement pour une page déjà rangée derrière le menu : la
                  condition qui l'en fait ressortir toute seule pendant la
@@ -1034,7 +1069,8 @@ async function save() {
                           :style="styleFor(page, slot.cell, slot.row, slot.col)"
                           :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
                           @click="tapSlot(page, slot.row, slot.col, slot.cell)">
-                    <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block" />
+                    <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block"
+                                           :lap-scoped="page.kind === 'laps'" />
                     <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
                   </button>
                 </div>
@@ -1171,7 +1207,7 @@ async function save() {
               <div v-for="(block, i) in page.blocks" :key="i"
                    class="d-flex align-items-center gap-2 mb-2">
                 <div class="companion-block-preview flex-shrink-0">
-                  <CompanionBlockPreview :block="block" />
+                  <CompanionBlockPreview :block="block" :lap-scoped="page.kind === 'laps'" />
                 </div>
                 <span class="flex-grow-1 text-truncate small">{{ labelFor(block) }}</span>
                 <!-- La série du bouton et celle de la page sont deux réglages
@@ -1633,5 +1669,33 @@ async function save() {
   align-items: center;
   justify-content: center;
   font-size: 0.75rem;
+}
+
+/* Même dessin que le sélecteur d'icône d'un composant `metric`
+   (`CompanionBlockPicker.cbpk-icons`) — une seule grille de vignettes, pour
+   qu'apprendre l'un vaille pour l'autre. Dupliqué plutôt que partagé : les
+   deux composants n'ont aujourd'hui rien d'autre en commun qui justifie un
+   fichier de styles à eux deux. */
+.cdb-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.cdb-icon-btn {
+  width: 2.2rem;
+  height: 2.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: transparent;
+  font-size: 0.65rem;
+  padding: 0;
+}
+.cdb-icon-btn--selected {
+  border-color: var(--bs-primary);
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -2px;
 }
 </style>

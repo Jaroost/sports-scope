@@ -551,6 +551,16 @@ module CompanionSettings
     true if page["menu"] == true
   end
 
+  # L'icône choisie dans l'éditeur pour repérer cette page dans le menu ⋮ du
+  # dépôt voisin (`DashboardPage._menuFor`) — `nil` quand la clé est absente ou
+  # inconnue, et l'appli retombe alors sur l'icône déduite du genre de page
+  # (grille ou liste), comme avant ce réglage. Même liste blanche que les
+  # icônes de composant (`ICONS`) plutôt qu'un vocabulaire de plus à tenir à
+  # jour des deux côtés.
+  def sanitize_page_icon(page)
+    page["icon"] if ICONS.include?(page["icon"])
+  end
+
   # La condition qui fait rejoindre le défilement à une page rangée derrière le
   # menu, ou `nil` — absente ou inconnue, la page reste purement statique, comme
   # avant que ce réglage existe.
@@ -599,7 +609,8 @@ module CompanionSettings
     { "kind" => "grid", "title" => page["title"].to_s.presence || "Mesures",
       "rows" => rows, "cols" => cols, "cells" => cells, "dividers" => dividers.presence,
       "menu" => menu, "menu_condition" => condition,
-      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil }.compact
+      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
+      "icon" => sanitize_page_icon(page) }.compact
   end
 
   # Les séparateurs qui tiennent dans la grille : une ligne (`"h"`) ou une colonne
@@ -673,7 +684,8 @@ module CompanionSettings
 
     { "kind" => "list", "title" => page["title"].to_s.presence || "Sortie",
       "blocks" => blocks, "menu" => menu, "menu_condition" => condition,
-      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil }.compact
+      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
+      "icon" => sanitize_page_icon(page) }.compact
   end
 
   # Une page de tours : liste déroulante d'un côté, composants du tour choisi
@@ -691,6 +703,10 @@ module CompanionSettings
   # ignore silencieusement ce qui n'a pas de sens sur une page de tours (voir
   # `LapListBody._block`, dépôt voisin) — ajouter la règle ici la ferait
   # respecter *avant* que l'appli, plus stricte que le site, ne le soit jamais.
+  # `metric` (une mesure) **a un sens ici**, contrairement à la plupart des
+  # autres genres : l'appli la lit alors sur le tour choisi et non sur la
+  # sortie entière (`MetricSources.forLap`) — c'est `mode`/`gauge`/`min`/`max`
+  # qui décident du dessin, pas de quoi elle est cumulée.
   def sanitize_laps(page)
     layout = page["layout"] == "grid" ? sanitize_lap_grid(page) : sanitize_lap_blocks(page)
     return nil if layout.nil?
@@ -701,7 +717,8 @@ module CompanionSettings
     { "kind" => "laps", "title" => page["title"].to_s.presence || "Tours",
       "series" => sanitize_series(page["series"]),
       "menu" => menu, "menu_condition" => condition,
-      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil }.merge(layout).compact
+      "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
+      "icon" => sanitize_page_icon(page) }.merge(layout).compact
   end
 
   def sanitize_lap_blocks(page)

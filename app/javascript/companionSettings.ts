@@ -297,6 +297,11 @@ export interface Page {
   // `rows`/`cols`/`cells` comme une page `grid`). Une page `grid` n'a pas
   // besoin de cette clé — son genre le dit déjà.
   layout?: 'grid'
+  // L'icône qui la repère dans le menu ⋮ de l'appli (`DashboardPage._menuFor`,
+  // dépôt voisin) — une classe FontAwesome de `catalog.icons`, même liste
+  // blanche que l'icône d'un composant `metric`. Absente ou inconnue : l'appli
+  // retombe sur l'icône déduite du genre de page (grille ou liste).
+  icon?: string
 }
 
 export interface Band {

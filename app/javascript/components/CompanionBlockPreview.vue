@@ -23,7 +23,7 @@
 // dessinées quelle que soit la case — c'est l'appelant qui réduit l'ensemble
 // pour qu'il tienne (`--cbp-em`/`tileStyle`), pas ce composant qui retire un de
 // ses éléments.
-import { computed } from 'vue'
+import { computed, useId } from 'vue'
 import {
   AVERAGES_SAMPLE,
   BUDGET_SAMPLE,
@@ -41,8 +41,8 @@ import {
   ROW_HEIGHT_WEIGHT,
   type Block,
 } from '../companionSettings'
-import { colorForGrade } from '../routeHelpers'
-import { textColorOn } from '../navHelpers'
+import { colorForGrade, formatDistancePrecise } from '../routeHelpers'
+import { buildDebugClimb, textColorOn } from '../navHelpers'
 import { zoneColor, acwrColor } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
@@ -396,6 +396,21 @@ const budgetTitle = computed(() => (budgetWeek.value ? 'La semaine' : 'Aujourd\'
 // même échantillon que le mode complet — exactement ce que dessine l'appli
 // (`ClimbListCard._compact`, dépôt voisin).
 const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status === 'current'))
+
+// ── Profil du col ────────────────────────────────────────────────────────────
+//
+// Même dessin que `NavClimbCard.vue` (segments colorés, aire « déjà grimpée »
+// clippée, curseur) — fac-similé au même titre que `CLIMB_LIST_SAMPLE` :
+// `buildDebugClimb` synthétise un col plausible sans dépendre d'un tracé,
+// déjà utilisé pour déboguer cette même carte sur la carte de navigation.
+// Figé (pas un `computed`) : rien dont il dépend ne change jamais.
+const climbProfileSample = buildDebugClimb()
+
+// L'identifiant du `<clipPath>` doit être unique par instance : plusieurs
+// vignettes de ce composant se montent en même temps (dialogue de choix,
+// cases de grille), et un `id` en dur collisionnerait — le `url(#id)` de
+// toutes les cartes suivrait alors le curseur de la première montée.
+const climbProfileClipId = useId()
 </script>
 
 <template>
@@ -864,6 +879,55 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
       </div>
     </div>
 
+    <!-- Profil du col ---------------------------------------------------
+         Le graphique gradué complet du col en cours (D+ restant, pente
+         colorée, curseur de progression) — même dessin que la carte de col
+         dépliée sur la carte (`NavClimbCard.vue`), posable comme un bloc de
+         page ordinaire plutôt que réservé à ce geste. Un seul mode, même
+         raison que `weather_forecast` : rien à faire varier dans l'éditeur. -->
+    <div v-else-if="block.kind === 'climb_profile'" class="cbp-card cbp-climb-profile" :style="overrideStyle">
+      <div class="cbp-title">Profil du col</div>
+      <div class="cbp-climb-profile-header">
+        <span class="cbp-climb-profile-progress">
+          <span class="cbp-climb-profile-gain">+{{ Math.round(climbProfileSample.remainingGainM) }} m</span>
+          <span class="cbp-climb-profile-pct">{{ Math.round(climbProfileSample.ratio * 100) }} %</span>
+        </span>
+        <span class="cbp-climb-profile-aside">
+          <span class="cbp-climb-profile-dist">
+            {{ formatDistancePrecise(climbProfileSample.climb.lengthM * (1 - climbProfileSample.ratio)) }}
+          </span>
+          <span
+            class="cbp-climb-profile-grade"
+            :style="{ background: climbProfileSample.gradeColor, color: climbProfileSample.gradeText }"
+          >
+            {{ Math.round(climbProfileSample.grade) }} %
+          </span>
+        </span>
+      </div>
+      <div class="cbp-climb-profile-graph">
+        <svg class="cbp-climb-profile-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <clipPath :id="climbProfileClipId">
+              <rect x="0" y="0" :width="climbProfileSample.posX" height="100" />
+            </clipPath>
+          </defs>
+          <path v-for="(seg, i) in climbProfileSample.segments" :key="i" :d="seg.d" :fill="seg.color" />
+          <!-- Portion déjà grimpée : l'aire entière redessinée en gris, clippée au curseur. -->
+          <path :d="climbProfileSample.areaD" fill="#9ca3af" :clip-path="`url(#${climbProfileClipId})`" />
+        </svg>
+        <div class="cbp-climb-profile-cursor" :style="{ left: `${climbProfileSample.posX}%` }">
+          <span
+            class="cbp-climb-profile-remain"
+            :style="{
+              top: `${climbProfileSample.topY}%`,
+              height: `${Math.max(0, climbProfileSample.posY - climbProfileSample.topY)}%`,
+            }"
+          ></span>
+          <span class="cbp-climb-profile-dot" :style="{ top: `${climbProfileSample.posY}%` }"></span>
+        </div>
+      </div>
+    </div>
+
     <!-- Horloge ---------------------------------------------------------
          Même grille qu'une mesure (`rows`, `layoutRows(metricLayout(block))`
          — générique, ne teste jamais `kind`, donc réutilisable telle quelle),
@@ -1071,6 +1135,94 @@ const climbListCurrent = computed(() => CLIMB_LIST_SAMPLE.find((c) => c.status =
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Profil du col : même convention que "Prévisions météo" — le graphique
+   profite d'une case généreuse (`flex: 1`), seuls les textes gardent une
+   taille fixe en `em`. Le graphique garde son propre fond clair (`#f8f9fa`)
+   quel que soit le fond de la carte : les segments colorés et l'aire grise
+   « déjà grimpée » en ont besoin pour rester lisibles, même dessin que
+   `nav-climb-svg` (`NavClimbCard.vue`). */
+.cbp-climb-profile {
+  display: flex;
+  flex-direction: column;
+}
+.cbp-climb-profile-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: 0.3em;
+  flex-shrink: 0;
+}
+.cbp-climb-profile-progress {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+}
+.cbp-climb-profile-gain {
+  font-size: 1.3em;
+  font-weight: 800;
+  color: #c2410c;
+}
+.cbp-climb-profile-pct {
+  font-size: 1em;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.6);
+}
+.cbp-climb-profile-aside {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+}
+.cbp-climb-profile-dist {
+  font-size: 1.1em;
+  font-weight: 800;
+}
+.cbp-climb-profile-grade {
+  font-weight: 700;
+  font-size: 0.9em;
+  padding: 0.1em 0.4em;
+  border-radius: 0.4em;
+}
+.cbp-climb-profile-graph {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin-top: 0.5em;
+}
+.cbp-climb-profile-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0.5em;
+  background: #f8f9fa;
+}
+.cbp-climb-profile-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(17, 24, 39, 0.55);
+  transform: translateX(-1px);
+}
+.cbp-climb-profile-remain {
+  position: absolute;
+  left: 50%;
+  width: 0;
+  border-left: 2px dashed #f97316;
+  transform: translateX(-1px);
+}
+.cbp-climb-profile-dot {
+  position: absolute;
+  left: 50%;
+  width: 0.7em;
+  height: 0.7em;
+  background: #111827;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 /* Le chiffre aussi grand que la case le permet — c'est ce qu'on lit à 30 km/h

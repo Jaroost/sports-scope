@@ -1698,6 +1698,7 @@ en:
         weather_forecast: "Weather forecast"
         training_budget: "Training budget"
         climb_list: "Route climbs"
+        climb_profile: "Climb profile"
         clock: "Clock"
         empty: "Empty cell"
       modes:

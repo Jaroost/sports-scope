@@ -131,7 +131,11 @@ export function navStateFor(input: {
     speedKmh: input.speedKmh,
     remainingM: hasRoute ? input.remainingM : 0,
     remainingGainM: hasRoute ? input.remainingGainM : 0,
-    climb: climb
+    // Même garde que `turn`, et pour la même raison : hors trajet, l'index
+    // auquel la position est accrochée peut retomber n'importe où sur le
+    // tracé (GPS instable avant de rejoindre l'itinéraire, par exemple) — le
+    // col qu'il désigne alors n'est pas celui qu'on est en train de grimper.
+    climb: hasRoute && !offRoute && climb
       ? {
           ratio: climb.ratio,
           remainingGainM: climb.remainingGainM,

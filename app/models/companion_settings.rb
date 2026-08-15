@@ -125,6 +125,14 @@ module CompanionSettings
     # Comme `training_budget`, ça vient de la page de navigation : un profil
     # de home-trainer sans WebView n'en recevra jamais.
     "climb_list" => %w[full compact],
+    # Le profil gradué du col en cours, en graphique (D+ restant, pente colorée,
+    # curseur de progression) — même dessin que la carte dépliée sur la carte de
+    # l'appli (tap du badge de col), posable comme un bloc de page ordinaire.
+    # Comme `climb_list`, ça vient de la page de navigation : un profil de
+    # home-trainer sans WebView n'en recevra jamais. Un seul mode, même raison que
+    # `precip_radar`/`weather_forecast` : le graphique remplit toute la case, rien
+    # à faire varier selon la case.
+    "climb_profile" => [],
     # L'heure courante. Seul composant, avec `training_budget`/`climb_list`, à
     # ne rien vérifier au-delà du mode générique — pas de mesure ni de source
     # à valider, comme `radar`/`recording`.

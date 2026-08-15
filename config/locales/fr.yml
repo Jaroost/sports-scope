@@ -1698,6 +1698,7 @@ fr:
         weather_forecast: "Prévisions météo"
         training_budget: "Budget de charge"
         climb_list: "Cols du tracé"
+        climb_profile: "Profil du col"
         clock: "Horloge"
         empty: "Case vide"
       modes:

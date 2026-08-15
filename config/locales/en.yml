@@ -1639,6 +1639,9 @@ en:
       gauge_kind: "Gauge"
       range_min: "Min"
       range_max: "Max"
+      altitude_window_km: "Rolling window (km)"
+      altitude_window_km_placeholder: "Whole profile"
+      altitude_window_km_hint: "On a followed route, shows only the next few kilometres, sliding forward as you ride — leave blank for the whole route profile."
       default_icon: "Default icon"
       block_color: "Background"
       block_text_color: "Text"
@@ -1699,6 +1702,7 @@ en:
         training_budget: "Training budget"
         climb_list: "Route climbs"
         climb_profile: "Climb profile"
+        altitude_profile: "Altitude profile"
         clock: "Clock"
         empty: "Empty cell"
       modes:

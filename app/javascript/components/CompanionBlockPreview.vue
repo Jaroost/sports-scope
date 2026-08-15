@@ -42,7 +42,7 @@ import {
   type Block,
 } from '../companionSettings'
 import { colorForGrade, formatDistancePrecise } from '../routeHelpers'
-import { buildDebugClimb, textColorOn } from '../navHelpers'
+import { buildDebugClimb, buildDebugRouteProfile, textColorOn } from '../navHelpers'
 import { zoneColor, acwrColor } from '../composables/useTrainingPlan'
 
 const props = defineProps<{
@@ -411,6 +411,15 @@ const climbProfileSample = buildDebugClimb()
 // cases de grille), et un `id` en dur collisionnerait — le `url(#id)` de
 // toutes les cartes suivrait alors le curseur de la première montée.
 const climbProfileClipId = useId()
+
+// ── Profil d'altitude ────────────────────────────────────────────────────────
+//
+// Même dessin que « Profil du col » ci-dessus, mais sur toute la sortie plutôt
+// que sur un seul col — fac-similé au même titre, buildDebugRouteProfile
+// synthétise un tracé plausible (vallonné, pas une montée) sans dépendre d'un
+// itinéraire réel.
+const altitudeProfileSample = buildDebugRouteProfile()
+const altitudeProfileClipId = useId()
 </script>
 
 <template>
@@ -924,6 +933,54 @@ const climbProfileClipId = useId()
             }"
           ></span>
           <span class="cbp-climb-profile-dot" :style="{ top: `${climbProfileSample.posY}%` }"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Profil d'altitude -------------------------------------------------
+         Même dessin que « Profil du col » ci-dessus, mais sur toute la sortie :
+         un tracé chargé donne ce même graphique sur toute la distance, sans
+         tracé l'appli le rebâtit sur la sortie déjà enregistrée. Un seul mode :
+         c'est le contexte de la sortie qui choisit l'allure, pas l'éditeur. -->
+    <div v-else-if="block.kind === 'altitude_profile'" class="cbp-card cbp-climb-profile" :style="overrideStyle">
+      <div class="cbp-title">Profil d'altitude</div>
+      <div class="cbp-climb-profile-header">
+        <span class="cbp-climb-profile-progress">
+          <span class="cbp-climb-profile-gain">+{{ Math.round(altitudeProfileSample.remainingGainM) }} m</span>
+          <span class="cbp-climb-profile-pct">{{ Math.round(altitudeProfileSample.ratio * 100) }} %</span>
+        </span>
+        <span class="cbp-climb-profile-aside">
+          <span class="cbp-climb-profile-dist">
+            {{ formatDistancePrecise(altitudeProfileSample.climb.lengthM * (1 - altitudeProfileSample.ratio)) }}
+          </span>
+          <span
+            class="cbp-climb-profile-grade"
+            :style="{ background: altitudeProfileSample.gradeColor, color: altitudeProfileSample.gradeText }"
+          >
+            {{ Math.round(altitudeProfileSample.grade) }} %
+          </span>
+        </span>
+      </div>
+      <div class="cbp-climb-profile-graph">
+        <svg class="cbp-climb-profile-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <clipPath :id="altitudeProfileClipId">
+              <rect x="0" y="0" :width="altitudeProfileSample.posX" height="100" />
+            </clipPath>
+          </defs>
+          <path v-for="(seg, i) in altitudeProfileSample.segments" :key="i" :d="seg.d" :fill="seg.color" />
+          <!-- Portion déjà parcourue : l'aire entière redessinée en gris, clippée au curseur. -->
+          <path :d="altitudeProfileSample.areaD" fill="#9ca3af" :clip-path="`url(#${altitudeProfileClipId})`" />
+        </svg>
+        <div class="cbp-climb-profile-cursor" :style="{ left: `${altitudeProfileSample.posX}%` }">
+          <span
+            class="cbp-climb-profile-remain"
+            :style="{
+              top: `${altitudeProfileSample.topY}%`,
+              height: `${Math.max(0, altitudeProfileSample.posY - altitudeProfileSample.topY)}%`,
+            }"
+          ></span>
+          <span class="cbp-climb-profile-dot" :style="{ top: `${altitudeProfileSample.posY}%` }"></span>
         </div>
       </div>
     </div>

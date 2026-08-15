@@ -76,6 +76,11 @@ const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
 const series = ref(props.block?.series || 'default')
 const format = ref(props.block?.format || 'hm')
+// La fenêtre roulante d'un bloc `altitude_profile` — vide par défaut (`0` ne
+// sort jamais du composant, voir plus bas et `blockFor`) : le profil entier
+// du tracé, comportement d'avant ce réglage, plutôt qu'une fenêtre choisie
+// pour personne.
+const windowKm = ref<number>(props.block?.window_km || 0)
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
 //
@@ -403,7 +408,8 @@ const groups = computed(() => {
             layout: currentLayout.value, icon: iconChoice.value, label: labelChoice.value,
             gaugeKind: effectiveGaugeKind.value || undefined,
             clockLayout: clockLayout.value, clockIcon: clockIconChoice.value,
-            min: min.value, max: max.value, color: color.value, textColor: textColor.value,
+            min: min.value, max: max.value, windowKm: windowKm.value || undefined,
+            color: color.value, textColor: textColor.value,
           }),
           label: labelOf(choice),
         })) as Tile[]
@@ -594,10 +600,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 class="form-control form-control-sm"
               >
             </label>
+
+            <label v-if="group.kind === 'altitude_profile'" class="cbpk-param small">
+              {{ t('companion.settings.altitude_window_km') }}
+              <input
+                v-model.number="windowKm"
+                type="number"
+                min="1"
+                max="50"
+                step="1"
+                :placeholder="t('companion.settings.altitude_window_km_placeholder')"
+                class="form-control form-control-sm"
+              >
+            </label>
           </div>
 
           <p v-if="group.kind === 'mark_lap'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.lap_series_cols_hint') }}
+          </p>
+
+          <p v-if="group.kind === 'altitude_profile'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.altitude_window_km_hint') }}
           </p>
 
           <!-- L'éditeur de disposition d'un bloc `metric` : une grille à 3

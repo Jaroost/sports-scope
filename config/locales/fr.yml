@@ -1639,6 +1639,9 @@ fr:
       gauge_kind: "Jauge"
       range_min: "Min"
       range_max: "Max"
+      altitude_window_km: "Fenêtre roulante (km)"
+      altitude_window_km_placeholder: "Profil entier"
+      altitude_window_km_hint: "Sur un tracé suivi, n'affiche que les prochains kilomètres, qui défilent à mesure qu'on avance — laissez vide pour le profil entier du tracé."
       default_icon: "Icône par défaut"
       block_color: "Fond"
       block_text_color: "Texte"
@@ -1699,6 +1702,7 @@ fr:
         training_budget: "Budget de charge"
         climb_list: "Cols du tracé"
         climb_profile: "Profil du col"
+        altitude_profile: "Profil d'altitude"
         clock: "Horloge"
         empty: "Case vide"
       modes:

@@ -15,7 +15,7 @@ import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../nav
 import type { Waypoint } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, buildCompanionClimbProfile, buildCompanionRouteClimbs,
-  profileYAt, buildTurnChain,
+  buildCompanionRouteProfile, profileYAt, buildTurnChain,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
   INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep, navStateFor,
   resyncOnTurn, turnLabel, turnsNearTap, turnIcon,
@@ -38,8 +38,8 @@ import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import {
-  companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, inCompanionApp,
-  registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
+  companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, companionRouteProfile,
+  inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
@@ -1122,6 +1122,7 @@ function rebuildRouteState(newGeometry: Coord[], hints: VoiceHint[]) {
   ;({ line: displayLine, wscale: displayWScale } = buildOffsetDisplayLine(geometry, cumDistM))
   climbs = attachClimbNames(detectClimbs(alts, cumDistM), geometry, routeClimbNames)
   companionRouteClimbs(buildCompanionRouteClimbs(climbs, cumDistM))
+  companionRouteProfile(buildCompanionRouteProfile(alts, cumDistM))
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
   turnsFromBRouter = hints.length > 0
@@ -1464,6 +1465,7 @@ function unloadRoute() {
   climbs = []
   routeClimbNames = []
   companionRouteClimbs(buildCompanionRouteClimbs([], []))
+  companionRouteProfile(buildCompanionRouteProfile([], []))
   // Un `startIdx` est un indice dans CE tracé : le prochain trajet chargé peut,
   // par pure coïncidence, ouvrir un col au même indice numérique. Sans ce reset,
   // le cache le prendrait pour « déjà affiché » et ne republierait jamais son

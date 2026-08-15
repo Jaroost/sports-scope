@@ -133,6 +133,18 @@ module CompanionSettings
     # `precip_radar`/`weather_forecast` : le graphique remplit toute la case, rien
     # à faire varier selon la case.
     "climb_profile" => [],
+    # Le profil d'altitude de toute la sortie. Deux allures selon le contexte,
+    # décidées par l'appli elle-même (rien à choisir ici, un seul mode) :
+    # un tracé chargé donne le profil du parcours entier avec la portion déjà
+    # roulée distinguée de ce qui reste (même dessin que `climb_profile`, sur
+    # toute la distance), ou — si `window_km` est réglé (voir `sanitize_block`)
+    # — une fenêtre « roulante » des seuls prochains kilomètres, qui glisse à
+    # mesure qu'on avance ; sans tracé, le profil de ce qui a été effectivement
+    # parcouru, où `window_km` n'a aucun effet (rien « à venir » à montrer).
+    # C'est le seul des composants « page de navigation » à ne PAS dépendre
+    # d'une WebView : sans tracé il se rabat sur la sortie enregistrée par le
+    # téléphone, qui existe même hors navigation.
+    "altitude_profile" => [],
     # L'heure courante. Seul composant, avec `training_budget`/`climb_list`, à
     # ne rien vérifier au-delà du mode générique — pas de mesure ni de source
     # à valider, comme `radar`/`recording`.
@@ -333,6 +345,13 @@ module CompanionSettings
   # côté Dart) : une borne courte évite juste d'enregistrer un texte que
   # personne ne lira jamais en entier, pas de faire perdre le réglage.
   MAX_METRIC_LABEL_LENGTH = 24
+
+  # La fenêtre roulante d'un bloc `altitude_profile` (`window_km`) : sous la
+  # borne basse, la fenêtre serait plus étroite que le pas d'échantillonnage
+  # du profil côté appli et n'afficherait presque rien ; au-delà de la haute,
+  # elle vaudrait autant que le profil entier (comportement d'avant ce
+  # réglage, déjà disponible en laissant le champ vide) sans le dire.
+  ALTITUDE_PROFILE_WINDOW_KM_RANGE = 1..50
 
   # Ce que l'éditeur reçoit en props. Sérialisé tel quel dans la page.
   def catalog
@@ -786,6 +805,14 @@ module CompanionSettings
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
     when "mark_lap"
       block["series"] = sanitize_series(raw["series"])
+    when "altitude_profile"
+      # Absent (`nil`) plutôt qu'un repli : c'est le profil entier, le
+      # comportement d'avant ce réglage, et pas une fenêtre à moitié devinée —
+      # même raisonnement que `sanitize_range` pour la jauge à plage libre.
+      window_km = raw["window_km"]
+      if window_km.is_a?(Numeric) && window_km.positive?
+        block["window_km"] = window_km.to_f.clamp(ALTITUDE_PROFILE_WINDOW_KM_RANGE)
+      end
     end
 
     color = sanitize_hex_color(raw["color"])

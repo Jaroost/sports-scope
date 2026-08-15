@@ -54,6 +54,11 @@ export interface Block {
   // cadre, comme avant que ce réglage existe pour ces mesures.
   min?: number
   max?: number
+  // La fenêtre « roulante » d'un bloc `altitude_profile`, en km à venir depuis
+  // la position courante — seulement quand un tracé est suivi (voir
+  // `sanitize_block`). Absente : le profil entier du tracé, fait/restant,
+  // comportement d'avant ce réglage.
+  window_km?: number
   // Couleur de fond de la carte et de son texte, en `#rrggbb` — valent pour
   // n'importe quel genre de composant, contrairement à `metric`/`source` qui
   // sont propres à un genre. Absentes, l'appli garde son calcul habituel
@@ -466,6 +471,7 @@ export function blockFor(
   choice: BlockChoice,
   params: {
     metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
+    windowKm?: number
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
     // restent celles du bloc `metric`) : les deux genres se règlent en même
@@ -496,6 +502,9 @@ export function blockFor(
   }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
   if (choice.kind === 'mark_lap') block.series = params.series || 'default'
+  // Absent (`undefined`) plutôt qu'un repli : c'est le profil entier, pas une
+  // fenêtre à moitié réglée — même raisonnement que `min`/`max` de la jauge.
+  if (choice.kind === 'altitude_profile' && params.windowKm) block.window_km = params.windowKm
   // Contrairement à `metric`/`source`, valent pour n'importe quel genre : le
   // réglage se fait une fois dans la dialogue, pas par groupe.
   if (params.color) block.color = params.color

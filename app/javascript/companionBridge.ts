@@ -5,7 +5,12 @@ import {
   type CompanionTraveledPathPoint,
   type CompanionTraveledPathStyle,
 } from './stores/companionStore'
-import type { CompanionClimbProfile, CompanionNavState, CompanionRouteClimbs } from './navHelpers'
+import type {
+  CompanionClimbProfile,
+  CompanionNavState,
+  CompanionRouteClimbs,
+  CompanionRouteProfile,
+} from './navHelpers'
 import { csrfToken } from './csrf'
 import {
   useTrainingPlan,
@@ -140,6 +145,13 @@ export function companionClimbProfile(profile: CompanionClimbProfile): void {
 // cols d'un tracé qu'on a quitté.
 export function companionRouteClimbs(climbs: CompanionRouteClimbs): void {
   channel()?.postMessage(JSON.stringify(climbs))
+}
+
+// Publie le profil d'altitude du tracé entier, une fois par (re)chargement —
+// même cadence que companionRouteClimbs (voir buildCompanionRouteProfile,
+// appelé depuis RouteNavigation.vue), jamais republié par position.
+export function companionRouteProfile(profile: CompanionRouteProfile): void {
+  channel()?.postMessage(JSON.stringify(profile))
 }
 
 // Une page web ne peut pas savoir si l'appli est installée : au mieux on sait

@@ -1638,6 +1638,7 @@ fr:
       metric_lap_scope_hint: "Sur une page Tours, cette mesure lit le tour affiché et non la sortie entière : durée, distance, dénivelé, moyennes, calories, TSS s'y calculent depuis l'ouverture du tour. Une mesure instantanée (cardio, cadence, puissance, vitesse du moment…) reste celle de maintenant, quel que soit le tour consulté."
       mode: "Affichage"
       source: "Source"
+      sound: "Sonnerie"
       duration_format: "Format"
       gauge_kind: "Jauge"
       range_min: "Min"
@@ -1697,6 +1698,7 @@ fr:
         clear_route: "Retirer l'itinéraire"
         route: "Itinéraire"
         sleep: "Mettre en veille"
+        bell: "Sonnette"
         nav_state: "État de navigation"
         radar: "Radar"
         precip_radar: "Précipitations"
@@ -1755,6 +1757,9 @@ fr:
       sources:
         hr: "Cardio"
         power: "Puissance"
+      bell_sounds:
+        bell: "Sonnette"
+        horn: "Klaxon (caravane du Tour)"
       sensors:
         gps: "GPS"
         barometer: "Baromètre"

@@ -74,6 +74,7 @@ const emit = defineEmits<{
 
 const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
+const sound = ref(props.block?.sound || props.catalog.bell_sounds[0])
 const series = ref(props.block?.series || 'default')
 const format = ref(props.block?.format || 'hm')
 // La fenêtre roulante d'un bloc `altitude_profile` — vide par défaut (`0` ne
@@ -404,7 +405,7 @@ const groups = computed(() => {
         .map((choice) => ({
           key: `${choice.kind}:${choice.mode || ''}`,
           block: blockFor(choice, {
-            metric: metric.value, source: source.value, series: series.value, format: format.value,
+            metric: metric.value, source: source.value, sound: sound.value, series: series.value, format: format.value,
             layout: currentLayout.value, icon: iconChoice.value, label: labelChoice.value,
             gaugeKind: effectiveGaugeKind.value || undefined,
             clockLayout: clockLayout.value, clockIcon: clockIconChoice.value,
@@ -587,6 +588,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               <select v-model="source" class="form-select form-select-sm">
                 <option v-for="s in catalog.zone_sources" :key="s" :value="s">
                   {{ t(`companion.settings.sources.${s}`) }}
+                </option>
+              </select>
+            </label>
+
+            <label v-if="group.kind === 'bell'" class="cbpk-param small">
+              {{ t('companion.settings.sound') }}
+              <select v-model="sound" class="form-select form-select-sm">
+                <option v-for="s in catalog.bell_sounds" :key="s" :value="s">
+                  {{ t(`companion.settings.bell_sounds.${s}`) }}
                 </option>
               </select>
             </label>

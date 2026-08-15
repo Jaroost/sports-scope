@@ -1638,6 +1638,7 @@ en:
       metric_lap_scope_hint: "On a Laps page, this metric reads the lap shown, not the whole ride: duration, distance, elevation gain, averages, calories and TSS are computed from the moment the lap opened. An instantaneous metric (heart rate, cadence, power, current speed…) stays whatever it is right now, whichever lap you're viewing."
       mode: "Display"
       source: "Source"
+      sound: "Ring tone"
       duration_format: "Format"
       gauge_kind: "Gauge"
       range_min: "Min"
@@ -1697,6 +1698,7 @@ en:
         clear_route: "Clear route"
         route: "Route"
         sleep: "Put to sleep"
+        bell: "Bell"
         nav_state: "Navigation state"
         radar: "Radar"
         precip_radar: "Precipitation"
@@ -1755,6 +1757,9 @@ en:
       sources:
         hr: "Heart rate"
         power: "Power"
+      bell_sounds:
+        bell: "Bell"
+        horn: "Horn (Tour de France caravan)"
       sensors:
         gps: "GPS"
         barometer: "Barometer"

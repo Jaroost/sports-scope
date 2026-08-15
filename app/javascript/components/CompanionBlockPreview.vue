@@ -672,6 +672,25 @@ const altitudeProfileClipId = useId()
       </div>
     </template>
 
+    <!-- Sonnette --------------------------------------------------------------
+         Fait sonner fort le téléphone (son + vibration), pour le retrouver
+         dans un sac ou une poche — même famille de bouton que « Mettre en
+         veille », sans état à montrer dans l'aperçu (l'appli l'arrête d'elle-
+         même après quelques secondes). -->
+    <template v-else-if="block.kind === 'bell'">
+      <div v-if="shape.bellCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
+          <i class="fa-solid fa-bell" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button" :style="overrideStyle">
+          <i class="fa-solid fa-bell" aria-hidden="true"></i>
+          Faire sonner
+        </span>
+      </div>
+    </template>
+
     <!-- État de navigation ------------------------------------------------ -->
     <div v-else-if="block.kind === 'nav_state'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title">Navigation</div>

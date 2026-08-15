@@ -81,6 +81,12 @@ module CompanionSettings
     # long, `toggleScreenOffManual`. Rien à sanitizer au-delà du mode, même
     # raison que `recording`/`change_route` : un bouton, pas une mesure.
     "sleep" => %w[full compact],
+    # Fait sonner fort le téléphone (son + vibration), pour le retrouver dans
+    # un sac ou une poche — l'appli choisit un flux audio d'alarme plutôt que
+    # média, pour traverser le mode silencieux comme le ferait un réveil. Le
+    # mode choisit toujours la taille du bouton, comme `sleep`/`recording` ;
+    # `sound` (voir `BELL_SOUNDS`) choisit ce qu'il joue.
+    "bell" => %w[full compact],
     "nav_state" => %w[full compact],
     # La jauge est couchée, à l'échelle d'une cellule large : le sens debout a
     # été retiré côté appli (un seul dessin à garder cohérent avec les bords de
@@ -176,12 +182,20 @@ module CompanionSettings
   ].freeze
 
   # Les commandes qu'une case du bandeau ou de la bande de l'encoche peut
-  # porter à la place d'une mesure. Une seule aujourd'hui — un bouton, pas une
-  # mesure, même raison que `BLOCKS["sleep"]` sur une page. Liste à part de
-  # `METRICS` et non fondue dedans : une case de bandeau reste d'abord un
+  # porter à la place d'une mesure — des boutons, pas des mesures, même
+  # raison que `BLOCKS["sleep"]`/`BLOCKS["bell"]` sur une page. Liste à part
+  # de `METRICS` et non fondue dedans : une case de bandeau reste d'abord un
   # chiffre à lire, l'éditeur doit pouvoir présenter les deux catalogues
   # séparément plutôt que mélangés dans un seul menu déroulant.
-  BAND_ACTIONS = %w[sleep].freeze
+  BAND_ACTIONS = %w[sleep bell].freeze
+
+  # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
+  # le repli d'un document qui ne connaît pas encore `horn`. `horn` imite le
+  # klaxon deux tons des voitures de la caravane du Tour de France — plus
+  # reconnaissable dans le vent qu'une tonalité pure, précisément parce que ce
+  # n'est PAS le son des autres alertes de l'appli (radar, virages), qui
+  # doivent rester identifiables sans confusion possible.
+  BELL_SOUNDS = %w[bell horn].freeze
 
   # Le radar arrière, en case de bandeau ou d'encoche — un sous-ensemble des
   # modes de `BLOCKS["radar"]` : seuls ceux qui restent lisibles dans une case
@@ -362,6 +376,7 @@ module CompanionSettings
       "metrics" => METRICS,
       "band_actions" => BAND_ACTIONS,
       "band_radar" => BAND_RADAR,
+      "bell_sounds" => BELL_SOUNDS,
       "sensors" => SENSORS,
       "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
@@ -822,6 +837,8 @@ module CompanionSettings
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
     when "mark_lap"
       block["series"] = sanitize_series(raw["series"])
+    when "bell"
+      block["sound"] = BELL_SOUNDS.include?(raw["sound"]) ? raw["sound"] : BELL_SOUNDS.first
     when "altitude_profile"
       # Absent (`nil`) plutôt qu'un repli : c'est le profil entier, le
       # comportement d'avant ce réglage, et pas une fenêtre à moitié devinée —

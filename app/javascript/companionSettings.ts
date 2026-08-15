@@ -23,6 +23,9 @@ export interface Block {
   mode?: string
   metric?: string
   source?: string
+  // Ce que joue un bloc `bell` — 'bell' (sonnette) ou 'horn' (klaxon), voir
+  // `CompanionSettings::BELL_SOUNDS`. Absent vaut 'bell'.
+  sound?: string
   // La série de tours qu'un bouton « Marquer un tour » (`mark_lap`) ouvre —
   // absente vaut `'default'`, la seule série que l'export `.fit` de l'appli
   // sait porter (une seule hiérarchie de tours possible dans le format).
@@ -373,6 +376,11 @@ export interface Catalog {
   // troisième catalogue et non un mode de plus dans `band_actions` : ce n'est
   // ni une mesure ni une commande, l'éditeur lui garde son propre groupe.
   band_radar: string[]
+  // Ce qu'un bloc `bell` peut jouer — voir `CompanionSettings::BELL_SOUNDS`.
+  // Pas de case de bandeau/encoche pour un choix précis : `BandActionSlot`
+  // reste une simple clé (`band_actions`), la sonnette y garde le repli
+  // 'bell'.
+  bell_sounds: string[]
   sensors: string[]
   activities: string[]
   max_band_metrics: number
@@ -476,7 +484,7 @@ export function blockFor(
   choice: BlockChoice,
   params: {
     metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
-    windowKm?: number
+    windowKm?: number; sound?: string
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
     // restent celles du bloc `metric`) : les deux genres se règlent en même
@@ -506,6 +514,7 @@ export function blockFor(
     }
   }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
+  if (choice.kind === 'bell') block.sound = params.sound || 'bell'
   if (choice.kind === 'mark_lap') block.series = params.series || 'default'
   // Absent (`undefined`) plutôt qu'un repli : c'est le profil entier, pas une
   // fenêtre à moitié réglée — même raisonnement que `min`/`max` de la jauge.
@@ -988,6 +997,7 @@ export interface BlockShape {
   clearRouteCompact: boolean
   routeCompact: boolean
   sleepCompact: boolean
+  bellCompact: boolean
   navFull: boolean
   radarGauge: boolean
   radarCount: boolean
@@ -1016,6 +1026,7 @@ export function blockShape(block: Block): BlockShape {
     clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',
     routeCompact: block.kind === 'route' && block.mode === 'compact',
     sleepCompact: block.kind === 'sleep' && block.mode === 'compact',
+    bellCompact: block.kind === 'bell' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
     radarGauge: block.kind === 'radar' && block.mode === 'gauge',
     radarCount: block.kind === 'radar' && block.mode === 'count',

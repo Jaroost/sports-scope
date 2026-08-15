@@ -28,6 +28,11 @@ interface CompanionPayload {
   cadence?: number | null
   gears?: CompanionGears | null
   headingDeg?: number | null
+  // Le cycliste a explicitement forcé la boussole (couvert forestier, vitesse
+  // GPS trop bruitée pour distinguer un arrêt d'un mouvement) : `updateBearing`
+  // doit alors priori­ser ce cap avant son propre GPS, pas seulement en dernier
+  // recours comme d'habitude — voir sports-scope-companion, `RiderCompass.forced`.
+  headingForced?: boolean | null
   sensors?: { name: string; connected: boolean; kinds: string[] }[]
 }
 
@@ -262,6 +267,7 @@ export function installCompanionBridge(): void {
           cadence: payload.cadence,
           gears: payload.gears,
           headingDeg: payload.headingDeg,
+          headingForced: payload.headingForced,
         })
       } catch {
         // Une charge utile inattendue ne doit jamais casser la navigation :

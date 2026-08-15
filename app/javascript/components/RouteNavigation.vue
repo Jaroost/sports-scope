@@ -2688,6 +2688,16 @@ function updateOffRoute(here: LngLat, idx: number) {
 }
 
 function updateBearing(pos: GeolocationPosition, here: LngLat) {
+  // Le cycliste a explicitement forcé la boussole côté appli — geste
+  // volontaire pour un couvert forestier où SA PROPRE vitesse GPS (celle
+  // captée ici, dans ce WebView) n'est presque jamais nulle : les paliers
+  // GPS/déplacement ci-dessous gagneraient donc systématiquement et
+  // ignoreraient en silence le cap forcé, précisément le cas qu'on veut
+  // couvrir. D'où la priorité absolue, avant tout calcul GPS local.
+  if (companionStore.headingForced.value && companionStore.headingDeg.value != null) {
+    currentBearing = companionStore.headingDeg.value
+    return
+  }
   const speed = pos.coords.speed
   const heading = pos.coords.heading
   if (heading != null && !Number.isNaN(heading) && speed != null && speed > MIN_SPEED_MS) {

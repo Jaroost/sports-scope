@@ -40,6 +40,11 @@ class CompanionStore {
   // la seule mesure d'ici qui ne vient pas d'un capteur du vélo, et la seule que
   // la page consomme au lieu de l'afficher — cf. updateBearing.
   readonly headingDeg = ref<number | null>(null)
+  // Le cycliste a explicitement forcé la boussole (pastille de l'appli, utile
+  // sous un couvert forestier où sa propre vitesse GPS reste rarement nulle).
+  // `updateBearing` doit alors la prioriser avant son propre GPS, pas
+  // seulement en dernier recours comme d'habitude.
+  readonly headingForced = ref(false)
   // Horodatage (ms) du dernier message reçu.
   readonly lastUpdate = ref(0)
 
@@ -61,6 +66,7 @@ class CompanionStore {
     cadence?: number | null
     gears?: CompanionGears | null
     headingDeg?: number | null
+    headingForced?: boolean | null
   }): void {
     this.present.value = true
     this.heartRate.value = values.heartRate ?? null
@@ -68,6 +74,7 @@ class CompanionStore {
     this.cadence.value = values.cadence ?? null
     this.gears.value = values.gears ?? null
     this.headingDeg.value = values.headingDeg ?? null
+    this.headingForced.value = values.headingForced ?? false
     this.lastUpdate.value = Date.now()
   }
 
@@ -78,6 +85,7 @@ class CompanionStore {
     this.cadence.value = null
     this.gears.value = null
     this.headingDeg.value = null
+    this.headingForced.value = false
     this.lastUpdate.value = 0
   }
 }

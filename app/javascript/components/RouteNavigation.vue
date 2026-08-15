@@ -718,8 +718,45 @@ function emptyLineStringFeature() {
   return { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: [] as number[][] } }
 }
 
+// Pose (ou replace) la couche du trajet parcouru — appelée au premier chargement de la
+// carte, après chaque changement de style, ET à la fin d'installRouteLayers.
+//
+// INDÉPENDANTE du tracé prévu à dessein : contrairement à installRouteLayers, elle
+// tourne aussi **en mode libre** (aucun itinéraire choisi), où `hasRoute` reste faux et
+// installRouteLayers n'est jamais appelée — le trajet réellement parcouru n'a aucune
+// raison de dépendre de l'existence d'un tracé à suivre.
+//
+// Idempotente (elle vérifie avant de créer) pour deux raisons : elle peut être rappelée
+// sans qu'un style ait été rechargé entre-temps (un itinéraire choisi en pleine
+// navigation libre), et parce qu'il faut alors REPOSITIONNER la couche déjà là — sinon
+// elle resterait sous le tracé qu'on vient d'ajouter, ou pire, entièrement recouverte.
+function installOrReorderTraveledPath() {
+  if (!map) return
+  const beforeId = map.getLayer('nav-turn-highlight') ? 'nav-turn-highlight' : undefined
+
+  if (!map.getSource('nav-traveled')) {
+    map.addSource('nav-traveled', { type: 'geojson', data: emptyLineStringFeature() })
+  }
+  if (!map.getLayer('nav-traveled-path')) {
+    map.addLayer({
+      id: 'nav-traveled-path',
+      type: 'line',
+      source: 'nav-traveled',
+      layout: ROUTE_LINE_LAYOUT,
+      paint: {
+        'line-color': traveledPathColor.value,
+        'line-width': zoomWidthExpr(traveledPathWidth.value, true),
+        'line-opacity': traveledPathOpacity.value,
+      },
+    }, beforeId)
+  } else if (beforeId) {
+    map.moveLayer('nav-traveled-path', beforeId)
+  }
+  applyTraveledPathData()
+}
+
 // Repeint la ligne du trajet parcouru à son style courant, sans effet avant la pose de
-// la couche (voir installRouteLayers, qui la crée déjà aux bonnes valeurs).
+// la couche (voir installOrReorderTraveledPath, qui la crée déjà aux bonnes valeurs).
 function applyTraveledPathPaint() {
   if (!map || !map.getLayer('nav-traveled-path')) return
   map.setPaintProperty('nav-traveled-path', 'line-color', traveledPathColor.value)
@@ -1460,10 +1497,13 @@ function unloadRoute() {
   turnMarkers = []
   if (map) {
     stopTurnFlow()
-    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining', 'nav-traveled-path', 'nav-turn-highlight', TURN_FLOW_LAYER]) {
+    // 'nav-traveled-path'/'nav-traveled' n'y sont PAS : retirer l'itinéraire ne doit
+    // pas effacer où on est réellement passé, et installOrReorderTraveledPath est de
+    // toute façon idempotente — rien ne la force à être recréée ici.
+    for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining', 'nav-turn-highlight', TURN_FLOW_LAYER]) {
       if (map.getLayer(id)) map.removeLayer(id)
     }
-    for (const id of ['nav-route', 'nav-remaining', 'nav-traveled', 'nav-turn-hi']) {
+    for (const id of ['nav-route', 'nav-remaining', 'nav-turn-hi']) {
       if (map.getSource(id)) map.removeSource(id)
     }
   }
@@ -1696,6 +1736,10 @@ async function initMap() {
         coords.forEach((c) => b.extend(c))
         map.fitBounds(b, { padding: 60, duration: 0, pitch: 0 })
       }
+      // Indépendant du tracé : installRouteLayers l'a déjà posé ci-dessus si un
+      // itinéraire est chargé, mais le mode libre (rien à installer, cf. commentaire
+      // au-dessus) n'a personne d'autre pour le faire.
+      installOrReorderTraveledPath()
       resolve()
     })
   })
@@ -1712,23 +1756,6 @@ function installRouteLayers() {
   map.addLayer({ id: 'nav-route-border', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { ...ROUTE_BORDER_PAINT, 'line-width': zoomWidthExpr(routeBorderWidth.value, true) } })
   map.addLayer({ id: 'nav-route-done', type: 'line', source: 'nav-route', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': '#9ca3af', 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': trackOpacity.value } })
   map.addLayer({ id: 'nav-route-remaining', type: 'line', source: 'nav-remaining', layout: ROUTE_LINE_LAYOUT, paint: { 'line-color': sportNav.value.line_color, 'line-width': zoomWidthExpr(routeLineWidth.value, true), 'line-opacity': trackOpacity.value } })
-  // Le trajet réellement parcouru, poussé par l'appli companion (voir
-  // companionStore.traveledPath*) : par-dessus le tracé prévu — sinon un aller-retour
-  // ou une boucle le recouvrirait totalement — mais SOUS la mise en avant du virage, qui
-  // doit rester lisible même là où le cycliste vient de repasser.
-  map.addSource('nav-traveled', { type: 'geojson', data: emptyLineStringFeature() })
-  map.addLayer({
-    id: 'nav-traveled-path',
-    type: 'line',
-    source: 'nav-traveled',
-    layout: ROUTE_LINE_LAYOUT,
-    paint: {
-      'line-color': traveledPathColor.value,
-      'line-width': zoomWidthExpr(traveledPathWidth.value, true),
-      'line-opacity': traveledPathOpacity.value,
-    },
-  })
-  applyTraveledPathData()
   // Surlignage du prochain virage : même ruban (largeur, opacité, amincissement des
   // recouvrements) mais à la couleur de la pastille, posé PAR-DESSUS le tracé restant.
   map.addSource('nav-turn-hi', { type: 'geojson', data: widthRunsCollection([], []) })
@@ -1750,6 +1777,11 @@ function installRouteLayers() {
   })
   hiKey = ''
   refreshTurnHighlight()
+  // Repositionne le trajet parcouru juste sous la mise en avant du virage qu'on vient
+  // de recréer — sans ça il resterait sous le tracé prévu qu'on venait d'ajouter, ou
+  // pire, disparaîtrait sous elle. Voir installOrReorderTraveledPath : la ligne du
+  // trajet n'est PAS installée ici, elle vit indépendamment du tracé (mode libre compris).
+  installOrReorderTraveledPath()
 }
 
 // Longueur (m) de tracé colorée de part et d'autre du virage mis en avant. Assez court
@@ -2095,6 +2127,9 @@ function setMapStyle(id: string) {
 function afterStyleLoad() {
   // Pas de couches de tracé à réinstaller en mode libre.
   if (hasRoute.value) installRouteLayers()
+  // Le trajet parcouru, lui, n'a jamais dépendu du tracé : un changement de fond de
+  // carte efface TOUTES les sources/couches (setStyle), y compris en mode libre.
+  else installOrReorderTraveledPath()
   // Replace le marqueur sur la position AFFICHÉE (snappée et décalée sur sa voie si on est
   // sur le tracé), pas sur le GPS brut, pour rester cohérent avec la boucle d'animation.
   const restore = anchorPos ?? lastPos

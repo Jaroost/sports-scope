@@ -74,6 +74,8 @@ const catalog: Catalog = {
   band_radar: ['radar_distance', 'radar_count', 'radar_gauge'],
   band_bell: ['bell_bell', 'bell_horn'],
   bell_sounds: ['bell', 'horn'],
+  button_gestures: ['click', 'double_click', 'long_press'],
+  button_actions: ['next_page', 'previous_page', 'bell', 'horn', 'start_lap', 'sleep', 'wake'],
   sensors: ['gps'],
   activities: ['cycling', 'mtb', 'hiking'],
   max_band_metrics: 4,

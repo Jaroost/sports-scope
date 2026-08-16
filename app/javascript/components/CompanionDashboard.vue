@@ -11,7 +11,7 @@ import {
   fitDividers, gridSideOf, gutterRect, isGridLayout,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
-  type Band, type Block, type Catalog, type Cell, type CellSize, type Divider,
+  type Band, type Block, type Buttons, type ButtonChannel, type Catalog, type Cell, type CellSize, type Divider,
   type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch, type Page, type Preset,
   type Viewport,
 } from '../companionSettings'
@@ -194,6 +194,20 @@ function bandRadarLabel(key: string): string {
 function bandBellLabel(key: string): string {
   const sound = key.slice('bell_'.length)
   return `${t('companion.settings.blocks.bell')} · ${t(`companion.settings.bell_sounds.${sound}`)}`
+}
+
+// Le libellé d'une action de bouton Di2 (`catalog.button_actions`) — sa
+// propre table plutôt qu'un renvoi vers `blocks.*` comme `bandActionLabel` :
+// « Sortir de veille » ou « Page suivante » n'ont pas de vignette de bloc
+// dont ils reprendraient le nom.
+function buttonActionLabel(action: string): string {
+  return t(`companion.settings.button_actions.${action}`)
+}
+
+// Le libellé d'une page visée par « Aller à… » : son titre s'il en a un, sinon
+// le nom de son genre — une carte n'a pas de titre côté document.
+function pageLabel(page: Page): string {
+  return page.title || t(`companion.settings.page_kinds.${page.kind}`)
 }
 
 // ── les profils ─────────────────────────────────────────────────────────────
@@ -779,6 +793,35 @@ function radarValue(key: string, fallback: number): number {
 
 function setRadar(key: string, value: number | boolean) {
   preset.value.radar = { ...(preset.value.radar || {}), [key]: value }
+}
+
+// ── les boutons Di2 ─────────────────────────────────────────────────────────
+//
+// Quatre canaux fixes — seuls 1 et 2 sont câblés sur le matériel testé côté
+// appli, mais 3 et 4 suivent le même format et n'ont pas de raison d'attendre
+// pour être configurables. Une constante locale et non un catalogue serveur,
+// contrairement aux gestes (`catalog.button_gestures`) : c'est une propriété
+// du D-Fly, pas un réglage qui pourrait évoluer sans toucher au code.
+const BUTTON_CHANNELS = ['channel1', 'channel2', 'channel3', 'channel4'] as const
+
+// Seules les pages déjà enregistrées (qui ont donc une clé — voir `Page.key`)
+// peuvent être visées par « Aller à… » : le serveur est ce qui fabrique la
+// clé, une page qui vient d'être ajoutée n'en a pas encore.
+const goToPageTargets = computed(() => preset.value.pages.filter((page) => page.key))
+
+function buttonAction(channel: keyof Buttons, gesture: keyof ButtonChannel): string {
+  return preset.value.buttons?.[channel]?.[gesture] || ''
+}
+
+function setButtonAction(channel: keyof Buttons, gesture: keyof ButtonChannel, value: string) {
+  const buttons: Buttons = { ...(preset.value.buttons || {}) }
+  const channelActions: ButtonChannel = { ...(buttons[channel] || {}) }
+  if (value) channelActions[gesture] = value
+  else delete channelActions[gesture]
+
+  if (Object.keys(channelActions).length > 0) buttons[channel] = channelActions
+  else delete buttons[channel]
+  preset.value.buttons = Object.keys(buttons).length > 0 ? buttons : undefined
 }
 
 function traveledPathValue(key: string, fallback: number): number {
@@ -1399,6 +1442,46 @@ async function save() {
             </div>
           </div>
         </div>
+
+        <!-- Les boutons Di2 -->
+        <h2 class="h6">{{ t('companion.settings.buttons_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.buttons_help') }}</p>
+
+        <div class="row g-2 mb-1">
+          <div v-for="(channel, index) in BUTTON_CHANNELS" :key="channel" class="col-12 col-md-6">
+            <div class="small text-body-secondary mb-1">
+              {{ t('companion.settings.button_channel', { n: index + 1 }) }}
+            </div>
+            <div class="row g-1 mb-3">
+              <div v-for="gesture in catalog.button_gestures" :key="gesture" class="col-4">
+                <label class="form-label small mb-1">
+                  {{ t(`companion.settings.button_gestures.${gesture}`) }}
+                </label>
+                <select class="form-select form-select-sm"
+                        :value="buttonAction(channel, gesture as keyof ButtonChannel)"
+                        @change="setButtonAction(channel, gesture as keyof ButtonChannel,
+                                                  ($event.target as HTMLSelectElement).value)">
+                  <option value="">{{ t('companion.settings.button_action_none') }}</option>
+                  <optgroup :label="t('companion.settings.button_actions_group')">
+                    <option v-for="action in catalog.button_actions" :key="action" :value="action">
+                      {{ buttonActionLabel(action) }}
+                    </option>
+                  </optgroup>
+                  <optgroup v-if="goToPageTargets.length" :label="t('companion.settings.button_go_to_page_group')">
+                    <option v-for="page in goToPageTargets" :key="page.key" :value="`go_to_page:${page.key}`">
+                      {{ pageLabel(page) }}
+                    </option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Une page fraîchement ajoutée n'a pas encore de clé (voir `Page.key`) :
+             elle ne peut donc pas encore être visée par « Aller à… ». -->
+        <p v-if="preset.pages.length > goToPageTargets.length" class="text-body-secondary small mb-4">
+          {{ t('companion.settings.button_go_to_page_pending') }}
+        </p>
 
         <!-- Le radar -->
         <h2 class="h6">{{ t('companion.settings.radar_title') }}</h2>

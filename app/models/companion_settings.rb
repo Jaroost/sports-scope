@@ -218,6 +218,24 @@ module CompanionSettings
   BAND_RADAR_MODES = %w[distance count gauge].freeze
   BAND_RADAR = BAND_RADAR_MODES.map { |mode| "radar_#{mode}" }.freeze
 
+  # Les trois gestes que le D-Fly (boutons satellites du Di2) sait distinguer
+  # lui-même dans la trame — voir `Di2ButtonGesturePolicy` côté Dart. Un clic
+  # bref ne peut pas encore devenir un double-clic ni un appui long, le D-Fly
+  # les classe avant que l'appli n'ait rien à deviner.
+  BUTTON_GESTURES = %w[click double_click long_press].freeze
+
+  # Ce qu'un geste sur un canal du D-Fly peut déclencher — jetons de chaîne
+  # plutôt qu'une liste de composants (`BLOCKS`) : ce ne sont pas des mesures à
+  # poser sur une page, et deux d'entre elles (`bell`/`horn`) recoupent déjà
+  # `BELL_SOUNDS` sous un autre nom, la sonnette n'ayant pas de réglage à part
+  # ici comme elle en a un sur un bloc `bell`. `go_to_page:<clé>` n'y figure
+  # pas : c'est un jeton composé, dont la partie variable est une clé de page
+  # et pas un choix fixe de ce catalogue — voir `sanitize_button_action`, seul
+  # endroit qui la valide. Même contrat que `ButtonAction.parse` côté Dart
+  # (`ride_preset.dart`) : un jeton que l'une des deux versions ne connaît pas
+  # encore ne fait simplement rien, plutôt que de casser la sortie.
+  BUTTON_ACTIONS = %w[next_page previous_page bell horn start_lap sleep wake].freeze
+
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.
   DURATION_METRICS = %w[duration moving_time pause_time route_eta].freeze
@@ -390,6 +408,8 @@ module CompanionSettings
       "band_radar" => BAND_RADAR,
       "band_bell" => BAND_BELL,
       "bell_sounds" => BELL_SOUNDS,
+      "button_gestures" => BUTTON_GESTURES,
+      "button_actions" => BUTTON_ACTIONS,
       "sensors" => SENSORS,
       "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
@@ -465,7 +485,12 @@ module CompanionSettings
 
     name = raw["name"].to_s.strip
     key = unique_key(raw["key"], name, index, seen)
-    pages = sanitize_pages(raw["pages"])
+    # Un profil vidé de toutes ses pages retombe sur la page Effort : on ne
+    # laisse jamais partir un tableau de bord sans contenu, l'appli monterait
+    # une coquille vide qu'on ne diagnostique pas au guidon. Résolu **avant**
+    # `sanitize_buttons` : un bouton « aller à la page X » ne peut viser que
+    # les pages qui survivent réellement, celle-ci comprise.
+    pages = sanitize_pages(raw["pages"]).presence || [ builtin_effort_page ]
     bands = sanitize_bands(raw["bands"])
     activities = sanitize_activities(raw["activities"])
 
@@ -483,17 +508,15 @@ module CompanionSettings
       # continue de se proposer partout, comme avant que la fonctionnalité existe.
       "activities" => activities.presence,
       "default_for" => sanitize_default_for(raw["default_for"], activities, default_seen).presence,
-      # Un profil vidé de toutes ses pages retombe sur la page Effort : on ne
-      # laisse jamais partir un tableau de bord sans contenu, l'appli monterait
-      # une coquille vide qu'on ne diagnostique pas au guidon.
-      "pages" => pages.presence || [ builtin_effort_page ],
+      "pages" => pages,
       "bands" => bands.presence || builtin_bands,
       "notch" => sanitize_notch_sets(raw["notch"]),
       "sensors" => sanitize_sensors(raw["sensors"]),
       "radar" => sanitize_radar(raw["radar"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
       "screen" => sanitize_screen(raw["screen"]),
-      "traveled_path" => sanitize_traveled_path(raw["traveled_path"])
+      "traveled_path" => sanitize_traveled_path(raw["traveled_path"]),
+      "buttons" => sanitize_buttons(raw["buttons"], pages.filter_map { |p| p["key"] })
     }.compact
   end
 
@@ -516,14 +539,16 @@ module CompanionSettings
 
   # Une clé utilisable et unique. Fabriquée au besoin — voir l'entête de
   # `sanitize` : perdre un profil parce qu'on l'a dupliqué serait le pire service
-  # à rendre à un éditeur.
-  def unique_key(raw, name, index, seen)
+  # à rendre à un éditeur. Même fonction pour les clés de page (`fallback_prefix:
+  # "page"`, unicité par profil plutôt que globale) : générer une deuxième
+  # version de cette logique reviendrait à devoir les faire évoluer ensemble.
+  def unique_key(raw, name, index, seen, fallback_prefix: "preset")
     # Le nom sert de repli avant le rang : une clé lisible aide au diagnostic (les
     # journaux de l'appli la citent), et « home-trainer » se reconnaît là où
     # « preset-3 » demande d'aller compter.
     base = raw.to_s.strip.parameterize.presence ||
            name.parameterize.presence ||
-           "preset-#{index + 1}"
+           "#{fallback_prefix}-#{index + 1}"
     key = base
     suffix = 2
     while seen.include?(key)
@@ -539,10 +564,19 @@ module CompanionSettings
   #
   # Et **de quoi joindre ce qui est rangé derrière le menu** : voir
   # `keep_one_swipeable`.
+  #
+  # Chaque page reçoit ici une **clé stable** (`key_seen`, unique dans ce
+  # profil seulement — voir `unique_key`) : c'est elle qu'un bouton Di2 réglé
+  # en « aller à la page X » (`GoToPageAction` côté Dart) vise, jamais un
+  # index qui se décale au moindre réordonnancement. `key_seen.length` sert
+  # d'index de repli plutôt que la position dans `raw` : une page invalide
+  # écartée en cours de route ne doit pas laisser de trou dans la numérotation
+  # des clés générées (« page-1 », « page-3 » sans « page-2 »).
   def sanitize_pages(raw)
     return [] unless raw.is_a?(Array)
 
     map_seen = false
+    key_seen = []
     pages = raw.filter_map do |page|
       next nil unless page.is_a?(Hash)
 
@@ -554,14 +588,18 @@ module CompanionSettings
         # Sans `menu`, et pas par oubli : la carte est le WebView peint au fond
         # de la pile pour toute la sortie, pas une page qu'on ouvre et qu'on
         # referme. La ranger derrière le menu ne voudrait rien dire.
-        { "kind" => "map" }
-      when "grid" then sanitize_grid(page)
-      when "list" then sanitize_list(page)
-      when "laps" then sanitize_laps(page)
+        { "kind" => "map", "key" => page_key(page, "Carte", key_seen) }
+      when "grid" then sanitize_grid(page, key_seen)
+      when "list" then sanitize_list(page, key_seen)
+      when "laps" then sanitize_laps(page, key_seen)
       end
     end
 
     keep_one_swipeable(pages)
+  end
+
+  def page_key(page, title, key_seen)
+    unique_key(page["key"], title, key_seen.length, key_seen, fallback_prefix: "page")
   end
 
   # Une page rangée derrière le menu d'actions plutôt que dans le défilement.
@@ -620,7 +658,7 @@ module CompanionSettings
     end
   end
 
-  def sanitize_grid(page)
+  def sanitize_grid(page, key_seen)
     rows = clamp_side(page["rows"])
     cols = clamp_side(page["cols"])
     cells = place_cells(page["cells"], rows, cols)
@@ -633,8 +671,9 @@ module CompanionSettings
     dividers = sanitize_dividers(page["dividers"], rows, cols)
     menu = menu_flag(page)
     condition = menu && sanitize_menu_condition(page["menu_condition"])
+    title = page["title"].to_s.presence || "Mesures"
 
-    { "kind" => "grid", "title" => page["title"].to_s.presence || "Mesures",
+    { "kind" => "grid", "key" => page_key(page, title, key_seen), "title" => title,
       "rows" => rows, "cols" => cols, "cells" => cells, "dividers" => dividers.presence,
       "menu" => menu, "menu_condition" => condition,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
@@ -703,14 +742,15 @@ module CompanionSettings
     a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
   end
 
-  def sanitize_list(page)
+  def sanitize_list(page, key_seen)
     blocks = raw_array(page["blocks"]).filter_map { |block| sanitize_block(block) }
     return nil if blocks.empty?
 
     menu = menu_flag(page)
     condition = menu && sanitize_menu_condition(page["menu_condition"])
+    title = page["title"].to_s.presence || "Sortie"
 
-    { "kind" => "list", "title" => page["title"].to_s.presence || "Sortie",
+    { "kind" => "list", "key" => page_key(page, title, key_seen), "title" => title,
       "blocks" => blocks, "menu" => menu, "menu_condition" => condition,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page) }.compact
@@ -735,14 +775,15 @@ module CompanionSettings
   # autres genres : l'appli la lit alors sur le tour choisi et non sur la
   # sortie entière (`MetricSources.forLap`) — c'est `mode`/`gauge`/`min`/`max`
   # qui décident du dessin, pas de quoi elle est cumulée.
-  def sanitize_laps(page)
+  def sanitize_laps(page, key_seen)
     layout = page["layout"] == "grid" ? sanitize_lap_grid(page) : sanitize_lap_blocks(page)
     return nil if layout.nil?
 
     menu = menu_flag(page)
     condition = menu && sanitize_menu_condition(page["menu_condition"])
+    title = page["title"].to_s.presence || "Tours"
 
-    { "kind" => "laps", "title" => page["title"].to_s.presence || "Tours",
+    { "kind" => "laps", "key" => page_key(page, title, key_seen), "title" => title,
       "series" => sanitize_series(page["series"]),
       "menu" => menu, "menu_condition" => condition,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
@@ -1039,6 +1080,54 @@ module CompanionSettings
     METRICS.include?(raw) || BAND_ACTIONS.include?(raw) || BAND_BELL.include?(raw) || BAND_RADAR.include?(raw)
   end
 
+  # Ce que les quatre canaux du D-Fly déclenchent, par profil de sortie — voir
+  # `ButtonSettings.parse` côté Dart (`ride_preset.dart`), qui applique
+  # exactement le même repli : une clé de canal absente laisse l'appli à son
+  # comportement par défaut (canal 1 = page précédente, canal 2 = page
+  # suivante, rien sur 3 et 4), donc `nil` ici plutôt qu'une structure creuse.
+  def sanitize_buttons(raw, page_keys)
+    return nil unless raw.is_a?(Hash)
+
+    channels = %w[channel1 channel2 channel3 channel4].filter_map do |channel|
+      gestures = sanitize_button_gestures(raw[channel], page_keys)
+      [ channel, gestures ] if gestures
+    end.to_h
+
+    channels.presence
+  end
+
+  def sanitize_button_gestures(raw, page_keys)
+    return nil unless raw.is_a?(Hash)
+
+    gestures = BUTTON_GESTURES.filter_map do |gesture|
+      action = sanitize_button_action(raw[gesture], page_keys)
+      [ gesture, action ] if action
+    end.to_h
+
+    gestures.presence
+  end
+
+  # `go_to_page:<clé>` est le seul jeton composé (voir `BUTTON_ACTIONS`) : il ne
+  # tient que si la clé désigne une page qui existe réellement dans **ce**
+  # profil-ci, une fois assaini — c'est ce qui rend l'éditeur honnête, même
+  # raison que `sanitize_default_for` ne garde que des types d'itinéraire
+  # connus. Une clé qui ne correspond à aucune page (page supprimée depuis,
+  # faute de frappe dans un document composé à la main) est silencieusement
+  # abandonnée plutôt que de laisser partir un bouton qui ne fera jamais rien
+  # sans qu'on le sache.
+  def sanitize_button_action(raw, page_keys)
+    return nil unless raw.is_a?(String)
+
+    if raw.start_with?("go_to_page:")
+      target = raw.delete_prefix("go_to_page:")
+      return "go_to_page:#{target}" if page_keys.include?(target)
+
+      return nil
+    end
+
+    raw if BUTTON_ACTIONS.include?(raw)
+  end
+
   # Absent vaut **activé** : un profil écrit à la main, ou venu d'une version
   # antérieure du contrat, ne doit jamais éteindre un capteur en silence. On
   # n'écrit donc que ce qui est explicitement coupé.
@@ -1140,7 +1229,7 @@ module CompanionSettings
   # (`RidePreset.builtIn`). Sert de filet quand un profil perd toutes ses pages.
   def builtin_effort_page
     {
-      "kind" => "list", "title" => "Effort",
+      "kind" => "list", "key" => "effort", "title" => "Effort",
       "blocks" => [
         { "kind" => "recording", "mode" => "full" },
         { "kind" => "zones", "source" => "hr", "mode" => "bar" },
@@ -1167,9 +1256,9 @@ module CompanionSettings
       "activities" => %w[cycling],
       "default_for" => %w[cycling],
       "pages" => [
-        { "kind" => "map" },
+        { "kind" => "map", "key" => "map" },
         {
-          "kind" => "list", "title" => "Effort",
+          "kind" => "list", "key" => "effort", "title" => "Effort",
           "blocks" => [
             { "kind" => "recording", "mode" => "full" },
             { "kind" => "zones", "source" => "hr", "mode" => "bar" },
@@ -1178,7 +1267,7 @@ module CompanionSettings
           ]
         },
         {
-          "kind" => "grid", "title" => "Chiffres", "rows" => 4, "cols" => 3,
+          "kind" => "grid", "key" => "chiffres", "title" => "Chiffres", "rows" => 4, "cols" => 3,
           "cells" => [
             { "row" => 0, "col" => 0, "block" => metric("speed", "big") },
             { "row" => 0, "col" => 1, "block" => metric("distance", "compact") },
@@ -1215,9 +1304,9 @@ module CompanionSettings
       "activities" => %w[mtb],
       "default_for" => %w[mtb],
       "pages" => [
-        { "kind" => "map" },
+        { "kind" => "map", "key" => "map" },
         {
-          "kind" => "grid", "title" => "Effort", "rows" => 2, "cols" => 2,
+          "kind" => "grid", "key" => "effort", "title" => "Effort", "rows" => 2, "cols" => 2,
           "cells" => [
             { "row" => 0, "col" => 0, "block" => metric("heart_rate", "zone") },
             { "row" => 0, "col" => 1, "block" => metric("ascent", "big") },
@@ -1247,7 +1336,7 @@ module CompanionSettings
       "description" => "Sans carte ni GPS — pour rouler à l'intérieur.",
       "pages" => [
         {
-          "kind" => "grid", "title" => "Séance", "rows" => 2, "cols" => 2,
+          "kind" => "grid", "key" => "seance-grille", "title" => "Séance", "rows" => 2, "cols" => 2,
           "cells" => [
             { "row" => 0, "col" => 0, "col_span" => 2, "block" => metric("power", "zone") },
             { "row" => 1, "col" => 0, "block" => metric("cadence", "big") },
@@ -1255,7 +1344,7 @@ module CompanionSettings
           ]
         },
         {
-          "kind" => "list", "title" => "Séance",
+          "kind" => "list", "key" => "seance-liste", "title" => "Séance",
           "blocks" => [
             { "kind" => "recording", "mode" => "full" },
             { "kind" => "zones", "source" => "power", "mode" => "bar" },

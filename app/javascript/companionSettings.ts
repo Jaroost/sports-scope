@@ -273,6 +273,15 @@ export const DEFAULT_TRAVELED_PATH_COLOR = '#2196f3'
 
 export interface Page {
   kind: 'map' | 'grid' | 'list' | 'laps'
+  // Identifiant stable, fabriqué **par le serveur** à l'enregistrement — voir
+  // `CompanionSettings.page_key` (Rails) et `RidePageSpec.key` (Dart). Absent
+  // sur une page qui n'a encore jamais été enregistrée (nouvelle page, ou
+  // profil dupliqué) : même raison que `Preset.key`, le recopier ici ferait
+  // perdre l'unicité que le serveur garantit. C'est ce qu'un bouton Di2 réglé
+  // en « aller à la page X » vise — l'éditeur ne peut donc proposer une page
+  // comme cible qu'une fois qu'elle en a une, c'est-à-dire après un premier
+  // « Enregistrer ».
+  key?: string
   title?: string
   rows?: number
   cols?: number
@@ -311,6 +320,27 @@ export interface Band {
   metrics: string[]
 }
 
+// Ce qu'un geste sur un canal du D-Fly déclenche — une chaîne du catalogue
+// `button_actions`, ou `go_to_page:<clé>` (voir `Page.key`). Trois clés fixes
+// et non un `Record<string, string>` : les trois gestes sont ceux que le D-Fly
+// distingue lui-même (`catalog.button_gestures`), pas une liste ouverte.
+export interface ButtonChannel {
+  click?: string
+  double_click?: string
+  long_press?: string
+}
+
+// Ce que les quatre canaux du D-Fly déclenchent, par profil — voir
+// `CompanionSettings.sanitize_buttons` (Rails) et `ButtonSettings` (Dart).
+// Absent (ou un canal absent) laisse l'appli à son comportement par défaut :
+// canal 1 = page précédente, canal 2 = page suivante, rien sur 3 et 4.
+export interface Buttons {
+  channel1?: ButtonChannel
+  channel2?: ButtonChannel
+  channel3?: ButtonChannel
+  channel4?: ButtonChannel
+}
+
 // La bande de l'encoche : une mesure au plus de chaque côté, dans un jeu.
 // `Preset.notch` est une liste de jeux — même forme que `bands`, entre
 // lesquels un glissé fait défiler côté appli. Contrairement à `bands`,
@@ -343,6 +373,7 @@ export interface Preset {
   // dessinée par l'appli companion — voir `sanitize_traveled_path` (Rails) et
   // `TraveledPathSettings` (Dart).
   traveled_path?: Record<string, number | string>
+  buttons?: Buttons
 }
 
 // Une disposition de bloc `metric` enregistrée pour être réutilisée sur une
@@ -385,6 +416,18 @@ export interface Catalog {
   // Même liste que `band_bell` (sans le préfixe `bell_`) : un bloc de page
   // choisit son son, une case de bandeau/encoche choisit sa clé directement.
   bell_sounds: string[]
+  // Les trois gestes que le D-Fly (boutons satellites du Di2) distingue
+  // lui-même — voir `CompanionSettings::BUTTON_GESTURES`. Toujours les mêmes
+  // trois, mais tirés du catalogue plutôt que codés en dur dans l'éditeur :
+  // une seule liste à faire évoluer si l'appli en reconnaît un jour un
+  // quatrième.
+  button_gestures: string[]
+  // Ce qu'un geste sur un canal du D-Fly peut déclencher — voir
+  // `CompanionSettings::BUTTON_ACTIONS`. `go_to_page:<clé>` n'y figure pas :
+  // c'est un jeton composé, construit dans l'éditeur à partir des pages du
+  // profil en cours plutôt que choisi dans ce catalogue-ci (voir
+  // `goToPageTargets` dans `CompanionDashboard.vue`).
+  button_actions: string[]
   sensors: string[]
   activities: string[]
   max_band_metrics: number

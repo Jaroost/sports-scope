@@ -188,6 +188,10 @@ onBeforeUnmount(() => registerOfflineMapsHandlers(null))
 // ne rendorme ce qui vient de se réveiller.
 registerSleepHandlers({
   enter: () => { if (!screenOff.value) toggleScreenOffManual() },
+  // Même garde symétrique : un second appui sur « sortir de veille » (bouton
+  // Di2 retapé, page rechargée pendant que l'écran était déjà réveillé) ne
+  // doit pas rendormir ce qui vient de se réveiller.
+  exit: () => { if (screenOff.value) toggleScreenOffManual() },
 })
 onBeforeUnmount(() => registerSleepHandlers(null))
 

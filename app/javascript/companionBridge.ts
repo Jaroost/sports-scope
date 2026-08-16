@@ -90,6 +90,10 @@ export function companionScreen(state: 'dimmed' | 'normal'): void {
 // dupliquer la logique de veille.
 interface SleepBridgeHandlers {
   enter(): void
+  // Symétrique d'`enter`, pour un bouton Di2 réglé en « sortir de veille »
+  // (`ExitSleepAction` côté Dart) — le même geste que le tap sur le voile
+  // noir, mais déclenché sans qu'il y ait de voile sous le doigt.
+  exit(): void
 }
 
 let sleepHandlers: SleepBridgeHandlers | null = null
@@ -278,6 +282,7 @@ export function installCompanionBridge(): void {
       offlineCancel(): void
       offlineRemove(): void
       sleepEnter(): void
+      sleepExit(): void
     }
   }
 
@@ -314,6 +319,7 @@ export function installCompanionBridge(): void {
     offlineCancel() { offlineHandlers?.cancel() },
     offlineRemove() { offlineHandlers?.remove() },
     sleepEnter() { sleepHandlers?.enter() },
+    sleepExit() { sleepHandlers?.exit() },
   }
 
   // On annonce que le pont est prêt : l'appli répond par un état complet, sans

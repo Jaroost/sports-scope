@@ -1679,6 +1679,7 @@ fr:
         next_page: "Page suivante"
         previous_page: "Page précédente"
         bell: "Sonnette"
+        booster: "Booster"
         horn: "Klaxon"
         start_lap: "Marquer un tour"
         sleep: "Mettre en veille"
@@ -1780,6 +1781,7 @@ fr:
         power: "Puissance"
       bell_sounds:
         bell: "Sonnette"
+        booster: "Booster"
         horn: "Klaxon (caravane du Tour)"
       sensors:
         gps: "GPS"

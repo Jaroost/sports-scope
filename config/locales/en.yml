@@ -1679,6 +1679,7 @@ en:
         next_page: "Next page"
         previous_page: "Previous page"
         bell: "Bell"
+        booster: "Booster"
         horn: "Horn"
         start_lap: "Mark a lap"
         sleep: "Sleep"
@@ -1780,6 +1781,7 @@ en:
         power: "Power"
       bell_sounds:
         bell: "Bell"
+        booster: "Booster"
         horn: "Horn (Tour de France caravan)"
       sensors:
         gps: "GPS"

@@ -23,8 +23,8 @@ export interface Block {
   mode?: string
   metric?: string
   source?: string
-  // Ce que joue un bloc `bell` — 'bell' (sonnette) ou 'horn' (klaxon), voir
-  // `CompanionSettings::BELL_SOUNDS`. Absent vaut 'bell'.
+  // Ce que joue un bloc `bell` — 'bell' (sonnette), 'horn' (klaxon) ou
+  // 'booster', voir `CompanionSettings::BELL_SOUNDS`. Absent vaut 'bell'.
   sound?: string
   // La série de tours qu'un bouton « Marquer un tour » (`mark_lap`) ouvre —
   // absente vaut `'default'`, la seule série que l'export `.fit` de l'appli
@@ -407,8 +407,9 @@ export interface Catalog {
   // troisième catalogue et non un mode de plus dans `band_actions` : ce n'est
   // ni une mesure ni une commande, l'éditeur lui garde son propre groupe.
   band_radar: string[]
-  // La sonnette, en case de bandeau ou d'encoche — `bell_bell`, `bell_horn`
-  // (voir `CompanionSettings::BAND_BELL`). Même raisonnement que `band_radar` :
+  // La sonnette, en case de bandeau ou d'encoche — `bell_bell`, `bell_horn`,
+  // `bell_booster` (voir `CompanionSettings::BAND_BELL`). Même raisonnement
+  // que `band_radar` :
   // la case porte directement le son choisi, plutôt qu'un `bell` nu dans
   // `band_actions` suivi d'un réglage qu'une case-chaîne ne peut pas porter.
   band_bell: string[]

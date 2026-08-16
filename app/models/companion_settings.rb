@@ -195,12 +195,14 @@ module CompanionSettings
   BAND_ACTIONS = %w[sleep].freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
-  # le repli d'un document qui ne connaît pas encore `horn`. `horn` imite le
-  # klaxon deux tons des voitures de la caravane du Tour de France — plus
-  # reconnaissable dans le vent qu'une tonalité pure, précisément parce que ce
-  # n'est PAS le son des autres alertes de l'appli (radar, virages), qui
-  # doivent rester identifiables sans confusion possible.
-  BELL_SOUNDS = %w[bell horn].freeze
+  # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`
+  # imite le klaxon deux tons des voitures de la caravane du Tour de France —
+  # plus reconnaissable dans le vent qu'une tonalité pure, précisément parce
+  # que ce n'est PAS le son des autres alertes de l'appli (radar, virages),
+  # qui doivent rester identifiables sans confusion possible. `booster` est
+  # le plus long des trois (~6 s) — le minuteur de secours côté appli
+  # (`BellPlayer`, `bell_player.dart`) est calé dessus.
+  BELL_SOUNDS = %w[bell horn booster].freeze
 
   # `bell`, en case de bandeau ou d'encoche — même raisonnement que
   # `BAND_RADAR` pour `radar` : la case porte directement le son choisi
@@ -226,20 +228,21 @@ module CompanionSettings
 
   # Ce qu'un geste sur un canal du D-Fly peut déclencher — jetons de chaîne
   # plutôt qu'une liste de composants (`BLOCKS`) : ce ne sont pas des mesures à
-  # poser sur une page, et deux d'entre elles (`bell`/`horn`) recoupent déjà
-  # `BELL_SOUNDS` sous un autre nom, la sonnette n'ayant pas de réglage à part
-  # ici comme elle en a un sur un bloc `bell`. `go_to_page:<clé>` n'y figure
-  # pas : c'est un jeton composé, dont la partie variable est une clé de page
-  # et pas un choix fixe de ce catalogue — voir `sanitize_button_action`, seul
-  # endroit qui la valide. Même contrat que `ButtonAction.parse` côté Dart
-  # (`ride_preset.dart`) : un jeton que l'une des deux versions ne connaît pas
-  # encore ne fait simplement rien, plutôt que de casser la sortie.
+  # poser sur une page, et trois d'entre elles (`bell`/`horn`/`booster`)
+  # recoupent déjà `BELL_SOUNDS` sous un autre nom, la sonnette n'ayant pas de
+  # réglage à part ici comme elle en a un sur un bloc `bell`. `go_to_page:<clé>`
+  # n'y figure pas : c'est un jeton composé, dont la partie variable est une
+  # clé de page et pas un choix fixe de ce catalogue — voir
+  # `sanitize_button_action`, seul endroit qui la valide. Même contrat que
+  # `ButtonAction.parse` côté Dart (`ride_preset.dart`) : un jeton que l'une
+  # des deux versions ne connaît pas encore ne fait simplement rien, plutôt
+  # que de casser la sortie.
   #
   # `toggle_sleep` couvre `sleep`/`wake` en un seul bouton — le cas courant
   # (« un bouton pour la veille ») n'a pas besoin de deux gestes ou de deux
   # canaux distincts. Les trois cohabitent : `sleep`/`wake` restent utiles à
   # qui veut deux boutons séparés (un par geste, par exemple).
-  BUTTON_ACTIONS = %w[next_page previous_page bell horn start_lap sleep wake toggle_sleep].freeze
+  BUTTON_ACTIONS = %w[next_page previous_page bell horn booster start_lap sleep wake toggle_sleep].freeze
 
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.

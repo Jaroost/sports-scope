@@ -767,13 +767,36 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   speed_max: { value: '61', name: 'Vitesse max', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 61 },
   heart_rate: { value: '154', name: 'Cardio', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
   hr_zone: { value: 'Z3', name: 'Zone cardio', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
-  hr_avg: { value: '141', name: 'Cardio moyen', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 141 },
-  hr_max: { value: '178', name: 'Cardio max', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 178 },
+  // `background` et non `zone` : ces trois-là restent dans `RANGE_GAUGE_METRICS`
+  // (leur jauge reste la plage min/max, jamais celle des zones du cycliste,
+  // voir `ZONE_METRICS`/`MetricId.zonesOf` côté appli) — `zone` ferait aussi
+  // basculer `metricZoneEligible`/`gaugeKind` sur la jauge de zones. Le fond
+  // est bien tinté par la zone côté appli (`MetricId.read`, `zoneKey` sur la
+  // moyenne/le max), donc l'aperçu doit montrer la même teinte, seulement pas
+  // par ce champ-là. Même z3 que `heart_rate` ci-dessus, pour rester dans la
+  // même vignette plausible.
+  hr_avg: {
+    value: '141', name: 'Cardio moyen', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 141,
+    background: '#E0C000',
+  },
+  hr_max: {
+    value: '178', name: 'Cardio max', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 178,
+    background: '#E0C000',
+  },
   power: { value: '248', name: 'Puissance', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
   power_zone: { value: 'Z3', name: 'Zone de puissance', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
-  power_avg: { value: '212', name: 'Puissance moyenne', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 212 },
-  power_np: { value: '236', name: 'Puissance normalisée', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 236 },
-  power_max: { value: '744', name: 'Puissance max', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 744 },
+  power_avg: {
+    value: '212', name: 'Puissance moyenne', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 212,
+    background: '#E0C000',
+  },
+  power_np: {
+    value: '236', name: 'Puissance normalisée', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 236,
+    background: '#E0C000',
+  },
+  power_max: {
+    value: '744', name: 'Puissance max', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 744,
+    background: '#E0C000',
+  },
   cadence: { value: '88', name: 'Cadence', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
   cadence_avg: { value: '84', name: 'Cadence moyenne', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 84 },
   cadence_max: { value: '112', name: 'Cadence max', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 112 },

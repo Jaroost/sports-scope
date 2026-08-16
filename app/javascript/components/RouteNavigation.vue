@@ -1125,7 +1125,7 @@ function rebuildRouteState(newGeometry: Coord[], hints: VoiceHint[]) {
   cumDistM = buildDistancesM(geometry)
   ;({ line: displayLine, wscale: displayWScale } = buildOffsetDisplayLine(geometry, cumDistM))
   climbs = attachClimbNames(detectClimbs(alts, cumDistM), geometry, routeClimbNames)
-  companionRouteClimbs(buildCompanionRouteClimbs(climbs, cumDistM))
+  companionRouteClimbs(buildCompanionRouteClimbs(climbs, alts, cumDistM))
   companionRouteProfile(buildCompanionRouteProfile(alts, cumDistM))
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
@@ -1468,7 +1468,7 @@ function unloadRoute() {
   cumDistM = []
   climbs = []
   routeClimbNames = []
-  companionRouteClimbs(buildCompanionRouteClimbs([], []))
+  companionRouteClimbs(buildCompanionRouteClimbs([], [], []))
   companionRouteProfile(buildCompanionRouteProfile([], []))
   // Un `startIdx` est un indice dans CE tracé : le prochain trajet chargé peut,
   // par pure coïncidence, ouvrir un col au même indice numérique. Sans ce reset,

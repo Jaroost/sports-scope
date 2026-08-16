@@ -76,6 +76,10 @@ export interface CompanionNavTurn {
 }
 
 export interface CompanionNavClimb {
+  // = climb.startIdx, même clé que CompanionRouteClimb.id — permet à l'appli
+  // de retrouver le profil gradué déjà reçu dans `route_climbs` plutôt que
+  // d'en attendre un nouveau (voir la doc de CompanionRouteClimb).
+  id: number
   ratio: number
   remainingGainM: number
   grade: number
@@ -150,6 +154,7 @@ export function navStateFor(input: {
     // col qu'il désigne alors n'est pas celui qu'on est en train de grimper.
     climb: hasRoute && !offRoute && climb
       ? {
+          id: climb.climb.startIdx,
           ratio: climb.ratio,
           remainingGainM: climb.remainingGainM,
           grade: climb.grade,
@@ -740,11 +745,13 @@ export function buildCompanionRouteProfile(
 
 // ─── Liste des cols du tracé pour l'appli compagnon ────────────────────────────
 
-// Un col de la liste : juste de quoi le situer et le comparer aux autres, jamais
-// son profil gradué (CompanionClimbProfile ci-dessus, poussé à part et une seule
-// fois, pour le seul col en cours). `id` reprend `climb.startIdx`, même
-// convention que CompanionClimbProfile.id — une clé stable pour CE tracé, à
-// comparer entre deux entrées, jamais affichée.
+// Un col de la liste : de quoi le situer et le comparer aux autres, ET son
+// profil gradué (points + pentes par segment) — le même contenu que
+// CompanionClimbProfile, mais poussé pour TOUS les cols du tracé d'un coup,
+// au chargement, plutôt qu'un par un à l'entrée de chacun (voir la doc de
+// CompanionRouteClimbs). `id` reprend `climb.startIdx`, une clé stable pour CE
+// tracé, à comparer entre deux entrées ou au `id` de `nav.climb`, jamais
+// affichée.
 export interface CompanionRouteClimb {
   id: number
   startDistM: number
@@ -754,6 +761,8 @@ export interface CompanionRouteClimb {
   category: string | null
   /** Nom donné à la main (routes.climb_names, cf. attachClimbNames), absent sinon. */
   name: string | null
+  points: CompanionClimbPoint[]  // ré-échantillonnés, distM relatif au départ du col
+  segmentGrades: number[]        // length = points.length - 1
 }
 
 // La liste ordonnée des cols du tracé en cours, avec la distance totale du
@@ -761,6 +770,13 @@ export interface CompanionRouteClimb {
 // redétecter les cols elle-même. Elle recoupe `totalDistM` avec le
 // `remainingM` déjà publié par `nav` pour se placer dans le même repère que
 // `startDistM` (voir `traveledDistM` côté Dart, route_climbs.dart).
+//
+// Porte aussi le profil gradué de chaque col (voir CompanionRouteClimb) : reçue
+// une fois au chargement du tracé, donc disponible hors ligne pour toute la
+// sortie, plutôt que redemandée col par col en roulant — un aller-retour qui
+// ne peut aboutir que si le pont est vivant à l'instant précis où le col
+// commence (voir `climbProfileFor`, dont c'est resté le seul rôle : la
+// composition SVG locale de la carte de col sur la page elle-même).
 export interface CompanionRouteClimbs {
   type: 'route_climbs'
   totalDistM: number
@@ -769,23 +785,32 @@ export interface CompanionRouteClimbs {
 
 // Construit le message poussé une fois par (re)chargement de tracé (voir
 // `rebuildRouteState`/`unloadRoute` dans RouteNavigation.vue) — jamais par
-// position, contrairement à `companionNav`. Pur, comme `buildCompanionClimbProfile`.
+// position, contrairement à `companionNav`. Pur, comme `buildCompanionClimbProfile`,
+// dont elle réutilise le calcul de profil (rawCompanionProfile/decimateClimbProfile)
+// pour chaque col plutôt que d'attendre d'y entrer pour le construire.
 export function buildCompanionRouteClimbs(
   climbs: Climb[],
+  alts: (number | null)[],
   cumDistM: number[],
 ): CompanionRouteClimbs {
   return {
     type: 'route_climbs',
     totalDistM: cumDistM.length ? cumDistM[cumDistM.length - 1] : 0,
-    climbs: climbs.map((climb) => ({
-      id: climb.startIdx,
-      startDistM: cumDistM[climb.startIdx],
-      gainM: climb.gain,
-      lengthM: climb.lengthM,
-      avgGrade: climb.avgGrade,
-      category: climb.category,
-      name: climb.name || null,
-    })),
+    climbs: climbs.map((climb) => {
+      const { points: rawPoints, grades: rawGrades } = rawCompanionProfile(climb, alts, cumDistM)
+      const { points, segmentGrades } = decimateClimbProfile(rawPoints, rawGrades, COMPANION_CLIMB_MAX_POINTS)
+      return {
+        id: climb.startIdx,
+        startDistM: cumDistM[climb.startIdx],
+        gainM: climb.gain,
+        lengthM: climb.lengthM,
+        avgGrade: climb.avgGrade,
+        category: climb.category,
+        name: climb.name || null,
+        points,
+        segmentGrades,
+      }
+    }),
   }
 }
 

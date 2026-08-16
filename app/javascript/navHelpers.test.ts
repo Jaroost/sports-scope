@@ -727,7 +727,7 @@ describe('navStateFor', () => {
     const state = navStateFor({ ...base, climb })
 
     expect(state.climb).toEqual({
-      ratio: 0.42, remainingGainM: 210, grade: 6.4,
+      id: 10, ratio: 0.42, remainingGainM: 210, grade: 6.4,
       gain: 780, lengthM: 12400, category: '2',
     })
     expect(JSON.stringify(state)).not.toContain('M0,0')

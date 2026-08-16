@@ -311,12 +311,14 @@ et un bilan ouvert par-dessus la carte se serait lu « il y est déjà, rien à 
 
 ### Colonnes d'une page qui défile
 
-Une page `list` peut se répartir en 1 à 4 colonnes (`Page.cols`,
-`MAX_LIST_COLS`) plutôt qu'une seule pile pleine largeur — chaque composant
-vise la sienne (`Block.col`, `0` par défaut). Contrairement à une grille, une
-colonne n'a pas de hauteur à tenir : elle empile ses blocs dans l'ordre du
-document et peut déborder, c'est toute la page qui défile alors d'un bloc,
-colonnes comprises.
+Une page `list` — ou une page `laps` en liste défilante, la même disposition
+une fois le tour choisi (`sanitize_lap_blocks`, `LapBlocksLayout` côté Dart)
+— peut se répartir en 1 à 4 colonnes (`Page.cols`, `MAX_LIST_COLS`) plutôt
+qu'une seule pile pleine largeur — chaque composant vise la sienne
+(`Block.col`, `0` par défaut). Contrairement à une grille, une colonne n'a
+pas de hauteur à tenir : elle empile ses blocs dans l'ordre du document et
+peut déborder, c'est toute la page qui défile alors d'un bloc, colonnes
+comprises.
 
 `col` est **fusionné dans le bloc lui-même** (`place_list_blocks`) plutôt que
 dans une enveloppe à part comme `Cell` (`{row, col, row_span, col_span,

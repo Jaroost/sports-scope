@@ -772,7 +772,9 @@ module CompanionSettings
       "icon" => sanitize_page_icon(page) }.compact
   end
 
-  # Les blocs d'une page `list`, chacun avec sa colonne — `col` fusionné
+  # Les blocs d'une page `list`, ou d'une page `laps` en liste défilante
+  # (`sanitize_lap_blocks`) — même géométrie dans les deux cas, seul ce que la
+  # série de tours ajoute autour diffère. Chacun avec sa colonne, `col` fusionné
   # directement dans le bloc assaini plutôt qu'une enveloppe à part comme
   # `place_cells`/`Cell` : une entrée reste le bloc, avec une clé de plus, donc
   # un document d'avant ce réglage (aucune entrée n'a `col`) se lit sans
@@ -834,10 +836,11 @@ module CompanionSettings
   end
 
   def sanitize_lap_blocks(page)
-    blocks = raw_array(page["blocks"]).filter_map { |block| sanitize_block(block) }
+    cols = (page["cols"]).to_i.clamp(1, MAX_LIST_COLS)
+    blocks = place_list_blocks(page["blocks"], cols)
     return nil if blocks.empty?
 
-    { "blocks" => blocks }
+    { "blocks" => blocks, "cols" => cols }
   end
 
   # Même géométrie que `sanitize_grid`, `place_cells` compris : une grille de

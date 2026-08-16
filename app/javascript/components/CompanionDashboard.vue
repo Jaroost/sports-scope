@@ -362,6 +362,14 @@ function setLapLayout(page: Page, layout: 'list' | 'grid') {
     if (!page.blocks?.length) {
       page.blocks = [{ kind: 'lap_selector' }, { kind: 'lap_summary', mode: 'cards' }]
     }
+    // `cols` sert aux deux dispositions (colonnes de grille, colonnes de
+    // liste) avec deux plafonds différents : une grille large basculée en
+    // liste ne doit pas laisser un nombre de colonnes que celle-ci refuse,
+    // ni des blocs dont la colonne dépasserait ce qui reste.
+    if ((page.cols || 1) > props.catalog.max_list_cols) {
+      page.cols = props.catalog.max_list_cols
+      page.blocks = fitListBlocks(page.blocks || [], page.cols)
+    }
   }
   selected.value = null
 }
@@ -1273,12 +1281,11 @@ async function save() {
             </template>
 
             <!-- Une page qui défile : les composants dans l'ordre où elle les
-                 empile, chacun dessiné tel qu'il paraîtra. -->
+                 empile, chacun dessiné tel qu'il paraîtra. Vaut aussi bien pour
+                 `list` que pour `laps` en liste défilante — même disposition
+                 des deux côtés, seule la série de tours change autour. -->
             <template v-else>
-              <!-- Le nombre de colonnes n'existe que pour `list` — une page
-                   `laps` défilante reste une pile unique, comme avant ce
-                   réglage. -->
-              <div v-if="page.kind === 'list'" class="d-flex align-items-center gap-3 mb-2">
+              <div class="d-flex align-items-center gap-3 mb-2">
                 <label class="small mb-0">{{ t('companion.settings.cols') }}
                   <input class="form-control form-control-sm d-inline-block ms-1"
                          style="width: 5rem" type="number" min="1"
@@ -1307,7 +1314,7 @@ async function save() {
                 <!-- Seulement quand la page a plus d'une colonne : à une seule,
                      la case n'aurait qu'un choix, et l'afficher quand même
                      ferait chercher un réglage qui ne change jamais rien. -->
-                <select v-if="page.kind === 'list' && (page.cols || 1) > 1"
+                <select v-if="(page.cols || 1) > 1"
                         class="form-select form-select-sm" style="width: auto"
                         :value="block.col || 0"
                         :aria-label="t('companion.settings.block_col')"

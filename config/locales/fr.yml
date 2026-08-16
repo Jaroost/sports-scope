@@ -1683,6 +1683,7 @@ fr:
         start_lap: "Marquer un tour"
         sleep: "Mettre en veille"
         wake: "Sortir de veille"
+        toggle_sleep: "Basculer la veille"
       radar_title: "Radar"
       close_m: "Proche (m)"
       range_m: "Portée (m)"

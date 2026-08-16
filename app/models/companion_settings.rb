@@ -234,7 +234,12 @@ module CompanionSettings
   # endroit qui la valide. Même contrat que `ButtonAction.parse` côté Dart
   # (`ride_preset.dart`) : un jeton que l'une des deux versions ne connaît pas
   # encore ne fait simplement rien, plutôt que de casser la sortie.
-  BUTTON_ACTIONS = %w[next_page previous_page bell horn start_lap sleep wake].freeze
+  #
+  # `toggle_sleep` couvre `sleep`/`wake` en un seul bouton — le cas courant
+  # (« un bouton pour la veille ») n'a pas besoin de deux gestes ou de deux
+  # canaux distincts. Les trois cohabitent : `sleep`/`wake` restent utiles à
+  # qui veut deux boutons séparés (un par geste, par exemple).
+  BUTTON_ACTIONS = %w[next_page previous_page bell horn start_lap sleep wake toggle_sleep].freeze
 
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.

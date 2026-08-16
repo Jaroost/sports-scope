@@ -8,7 +8,7 @@ import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
   canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR, DEFAULT_METRIC_LAYOUT,
   DEFAULT_TRAVELED_PATH_COLOR, fitCells,
-  fitDividers, gridSideOf, gutterRect, isGridLayout,
+  fitDividers, fitListBlocks, gridSideOf, gutterRect, isGridLayout,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
   type Band, type Block, type Buttons, type ButtonChannel, type Catalog, type Cell, type CellSize, type Divider,
@@ -455,6 +455,19 @@ function repaint(input: HTMLInputElement, value: number) {
   input.value = String(value)
 }
 
+// ── la liste ────────────────────────────────────────────────────────────────
+
+// Le nombre de colonnes d'une page `list` — même piège que `commitSide` (voir
+// son commentaire) : validé à la sortie du champ, jamais à la frappe. Réduire
+// ramène chaque bloc dans les colonnes qui restent (`fitListBlocks`) plutôt
+// que de les y perdre, même arbitrage que l'assainisseur.
+function commitListCols(page: Page, input: HTMLInputElement) {
+  const cols = Math.min(gridSideOf(input.value), props.catalog.max_list_cols)
+  page.cols = cols
+  page.blocks = fitListBlocks(page.blocks || [], cols)
+  repaint(input, cols)
+}
+
 // Ce qu'on dessine : une entrée par case de la grille, en sautant celles qu'une
 // cellule fusionnée recouvre déjà.
 function slots(page: Page) {
@@ -593,9 +606,17 @@ function applyPick(block: Block) {
       selected.value = target.page.cells![target.page.cells!.length - 1]
       break
     }
-    case 'block':
-      if (target.page.blocks) target.page.blocks[target.index] = block
+    case 'block': {
+      // `blockFor` fabrique un bloc neuf, sans `col` : le recopier de l'ancien
+      // évite qu'un simple changement de genre/mode renvoie le composant en
+      // première colonne, sous les yeux de personne.
+      const previous = target.page.blocks?.[target.index]
+      if (target.page.blocks) {
+        target.page.blocks[target.index] =
+          previous?.col !== undefined ? { ...block, col: previous.col } : block
+      }
       break
+    }
     case 'append':
       target.page.blocks = [...(target.page.blocks || []), block]
       break
@@ -1254,6 +1275,21 @@ async function save() {
             <!-- Une page qui défile : les composants dans l'ordre où elle les
                  empile, chacun dessiné tel qu'il paraîtra. -->
             <template v-else>
+              <!-- Le nombre de colonnes n'existe que pour `list` — une page
+                   `laps` défilante reste une pile unique, comme avant ce
+                   réglage. -->
+              <div v-if="page.kind === 'list'" class="d-flex align-items-center gap-3 mb-2">
+                <label class="small mb-0">{{ t('companion.settings.cols') }}
+                  <input class="form-control form-control-sm d-inline-block ms-1"
+                         style="width: 5rem" type="number" min="1"
+                         :max="catalog.max_list_cols" :value="page.cols || 1"
+                         @change="commitListCols(page, $event.target as HTMLInputElement)">
+                </label>
+                <p v-if="(page.cols || 1) > 1" class="text-body-secondary small mb-0">
+                  {{ t('companion.settings.list_cols_help') }}
+                </p>
+              </div>
+
               <div v-for="(block, i) in page.blocks" :key="i"
                    class="d-flex align-items-center gap-2 mb-2">
                 <div class="companion-block-preview flex-shrink-0">
@@ -1268,6 +1304,18 @@ async function save() {
                    class="fa-solid fa-triangle-exclamation text-warning"
                    :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
                    aria-hidden="true"></i>
+                <!-- Seulement quand la page a plus d'une colonne : à une seule,
+                     la case n'aurait qu'un choix, et l'afficher quand même
+                     ferait chercher un réglage qui ne change jamais rien. -->
+                <select v-if="page.kind === 'list' && (page.cols || 1) > 1"
+                        class="form-select form-select-sm" style="width: auto"
+                        :value="block.col || 0"
+                        :aria-label="t('companion.settings.block_col')"
+                        @change="block.col = Number(($event.target as HTMLSelectElement).value)">
+                  <option v-for="c in (page.cols || 1)" :key="c" :value="c - 1">
+                    {{ t('companion.settings.block_col_option', { col: c }) }}
+                  </option>
+                </select>
                 <button class="btn btn-sm btn-outline-secondary" type="button"
                         @click="picker = { at: 'block', page, index: i }">
                   {{ t('companion.settings.change_block') }}

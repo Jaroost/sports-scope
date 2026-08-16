@@ -70,6 +70,12 @@ export interface Block {
   // lisible dessus (`foregroundOf`), jamais sur du blanc fixe.
   color?: string
   text_color?: string
+  // Seulement dans `blocks` d'une page `list` (`Page.cols`) : la colonne qui
+  // affiche ce bloc, `0` par défaut. Fusionné dans le bloc plutôt qu'une
+  // enveloppe à part comme `Cell` : une page à une seule colonne (le cas
+  // courant) n'a alors rien de plus à savoir lire, et un document d'avant ce
+  // réglage — où aucun bloc n'a `col` — se comporte comme `col: 0` partout.
+  col?: number
 }
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
@@ -284,6 +290,10 @@ export interface Page {
   key?: string
   title?: string
   rows?: number
+  // Colonnes d'une page `grid` (avec `rows`/`cells`), **ou** d'une page `list`
+  // (avec `blocks`, chacun visant la sienne via `Block.col`) — même nom des
+  // deux côtés, deux bornes différentes (`max_grid_side` contre
+  // `max_list_cols`) : `isGridLayout(page)` dit laquelle s'applique.
   cols?: number
   cells?: Cell[]
   dividers?: Divider[]
@@ -433,6 +443,11 @@ export interface Catalog {
   activities: string[]
   max_band_metrics: number
   max_grid_side: number
+  // Colonnes au plus pour une page `list` — voir `Page.cols`/`Block.col`.
+  // Borne distincte de `max_grid_side` : une colonne de liste n'a pas de
+  // hauteur à tenir, elle n'a donc besoin d'être ni aussi étroite ni aussi
+  // nombreuse qu'une case de grille.
+  max_list_cols: number
   icons: string[]
   // Les conditions qu'une page rangée derrière le menu peut porter pour
   // rejoindre le défilement toute seule — voir `Page.menu_condition`.
@@ -1229,4 +1244,19 @@ export function fitCells(cells: Cell[], rows: number, cols: number): Cell[] {
 // plus.
 export function fitDividers(dividers: Divider[], rows: number, cols: number): Divider[] {
   return dividers.filter((divider) => divider.at <= (divider.axis === 'h' ? rows : cols) - 1)
+}
+
+// Ramène la colonne de chaque bloc d'une page `list` dans `0..cols-1`.
+//
+// Appelé quand on réduit le nombre de colonnes. **Ramenée, jamais perdue** :
+// contrairement à l'origine d'une cellule de grille, il y a toujours une
+// colonne la plus proche, et perdre un composant entier pour un mauvais
+// numéro de colonne serait pire qu'un rangement approximatif — même
+// arbitrage que `CompanionSettings.place_list_blocks` (Rails), pour que
+// l'écran et l'enregistrement disent la même chose.
+export function fitListBlocks(blocks: Block[], cols: number): Block[] {
+  return blocks.map((block) => ({
+    ...block,
+    col: Math.min(Math.max(block.col || 0, 0), cols - 1),
+  }))
 }

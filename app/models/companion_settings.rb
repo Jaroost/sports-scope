@@ -377,6 +377,12 @@ module CompanionSettings
   # lisible. Même borne que `GridPageSpec.maxSide` côté Dart.
   MAX_GRID_SIDE = 12
 
+  # Quatre colonnes au plus pour une page `list` : au-delà, une colonne devient
+  # trop étroite pour un composant lisible sur un téléphone en portrait — même
+  # borne que le bandeau (`MAX_BAND_METRICS`). Même littéral que
+  # `ListPageSpec.maxCols` côté Dart.
+  MAX_LIST_COLS = 4
+
   # La couleur d'un séparateur qui n'en a pas reçu (ou une couleur invalide) — un
   # séparateur est purement décoratif, contrairement à `block.color` il n'y a pas
   # de « laisser l'appli calculer » possible : il lui faut toujours une teinte.
@@ -422,6 +428,7 @@ module CompanionSettings
       "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
       "max_grid_side" => MAX_GRID_SIDE,
+      "max_list_cols" => MAX_LIST_COLS,
       "icons" => ICONS,
       "menu_conditions" => MENU_CONDITIONS
     }
@@ -751,7 +758,8 @@ module CompanionSettings
   end
 
   def sanitize_list(page, key_seen)
-    blocks = raw_array(page["blocks"]).filter_map { |block| sanitize_block(block) }
+    cols = (page["cols"]).to_i.clamp(1, MAX_LIST_COLS)
+    blocks = place_list_blocks(page["blocks"], cols)
     return nil if blocks.empty?
 
     menu = menu_flag(page)
@@ -759,9 +767,36 @@ module CompanionSettings
     title = page["title"].to_s.presence || "Sortie"
 
     { "kind" => "list", "key" => page_key(page, title, key_seen), "title" => title,
-      "blocks" => blocks, "menu" => menu, "menu_condition" => condition,
+      "blocks" => blocks, "cols" => cols, "menu" => menu, "menu_condition" => condition,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page) }.compact
+  end
+
+  # Les blocs d'une page `list`, chacun avec sa colonne — `col` fusionné
+  # directement dans le bloc assaini plutôt qu'une enveloppe à part comme
+  # `place_cells`/`Cell` : une entrée reste le bloc, avec une clé de plus, donc
+  # un document d'avant ce réglage (aucune entrée n'a `col`) se lit sans
+  # distinguer un ancien format d'un nouveau — toutes deux tombent sur `col`
+  # absent, ramené à 0.
+  #
+  # Pas de ligne ni d'étendue comme `place_cells` : une liste n'a pas de hauteur
+  # à tenir, chaque colonne empile ses blocs dans l'ordre du document et peut
+  # déborder — aucun recouvrement n'est donc possible, contrairement à une
+  # grille. `col` est **ramené** dans `0..cols-1` plutôt que rejeté :
+  # contrairement à l'origine d'une cellule de grille, il y a toujours une
+  # colonne la plus proche, et perdre un composant entier pour un mauvais
+  # numéro de colonne serait pire qu'un rangement approximatif.
+  def place_list_blocks(raw, cols)
+    return [] unless raw.is_a?(Array)
+
+    raw.filter_map do |entry|
+      next nil unless entry.is_a?(Hash)
+
+      block = sanitize_block(entry)
+      next nil if block.nil?
+
+      block.merge("col" => entry["col"].to_i.clamp(0, cols - 1))
+    end
   end
 
   # Une page de tours : liste déroulante d'un côté, composants du tour choisi

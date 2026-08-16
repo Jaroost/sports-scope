@@ -80,6 +80,7 @@ const catalog: Catalog = {
   activities: ['cycling', 'mtb', 'hiking'],
   max_band_metrics: 4,
   max_grid_side: 6,
+  max_list_cols: 4,
   icons: ['fa-solid fa-heart'],
   menu_conditions: ['route_active', 'descending', 'near_col'],
 }

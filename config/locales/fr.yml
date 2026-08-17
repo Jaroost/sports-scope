@@ -1828,6 +1828,7 @@ fr:
         power_avg: "Puissance moyenne"
         power_np: "Puissance normalisée"
         power_max: "Puissance max"
+        power_balance: "Équilibre G/D"
         cadence: "Cadence"
         cadence_avg: "Cadence moyenne"
         cadence_max: "Cadence max"

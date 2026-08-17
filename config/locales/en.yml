@@ -1828,6 +1828,7 @@ en:
         power_avg: "Average power"
         power_np: "Normalized power"
         power_max: "Max power"
+        power_balance: "L/R balance"
         cadence: "Cadence"
         cadence_avg: "Average cadence"
         cadence_max: "Max cadence"

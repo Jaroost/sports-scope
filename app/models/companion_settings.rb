@@ -185,7 +185,7 @@ module CompanionSettings
   METRICS = %w[
     duration moving_time pause_time distance speed speed_avg speed_max
     heart_rate hr_zone hr_avg hr_max
-    power power_zone power_avg power_np power_max
+    power power_zone power_avg power_np power_max power_balance
     cadence cadence_avg cadence_max
     ascent altitude grade grade_avg grade_max
     climb_rate climb_rate_avg climb_rate_max

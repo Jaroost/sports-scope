@@ -827,6 +827,10 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
     value: '744', name: 'Puissance max', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 744,
     background: '#E0C000',
   },
+  // Pas de `numeric` : comme `gears`, la valeur affichée est une paire
+  // (« 48 / 52 »), pas un chiffre unique qu'une jauge pourrait situer — même
+  // raison que son absence de `RANGE_GAUGE_METRICS`.
+  power_balance: { value: '48 / 52', name: 'Équilibre G/D', unit: '%', icon: 'fa-solid fa-scale-balanced' },
   cadence: { value: '88', name: 'Cadence', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
   cadence_avg: { value: '84', name: 'Cadence moyenne', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 84 },
   cadence_max: { value: '112', name: 'Cadence max', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 112 },

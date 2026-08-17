@@ -838,7 +838,16 @@ function setBattery(key: string, value: number | boolean) {
 function addReminder() {
   const reminders = preset.value.reminders || (preset.value.reminders = [])
   if (reminders.length >= props.catalog.max_reminders) return
-  reminders.push({ interval_minutes: 30, message: '', sound: props.catalog.reminder_sounds[0] })
+  // Un message non vide dès la création : un rappel sans texte est rejeté par
+  // l'assainisseur (`CompanionSettings.sanitize_reminder`) comme un rappel qui
+  // ne dirait jamais rien, et disparaîtrait donc silencieusement au premier
+  // « Enregistrer » avant même d'avoir eu le temps de le remplir — même raison
+  // qu'`addBand` ne part jamais d'un jeu vide.
+  reminders.push({
+    interval_minutes: 30,
+    message: t('companion.settings.new_reminder_message'),
+    sound: props.catalog.reminder_sounds[0],
+  })
 }
 
 function removeReminder(index: number) {

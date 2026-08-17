@@ -1717,6 +1717,7 @@ fr:
       reminder_interval: "Toutes les (min)"
       reminder_message: "Message"
       reminder_message_placeholder: "Bois de l'eau"
+      new_reminder_message: "Nouveau rappel"
       reminder_sound: "Son"
       add_reminder: "Ajouter un rappel"
       traveled_path_title: "Trajet parcouru"

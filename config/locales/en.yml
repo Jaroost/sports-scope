@@ -1717,6 +1717,7 @@ en:
       reminder_interval: "Every (min)"
       reminder_message: "Message"
       reminder_message_placeholder: "Drink some water"
+      new_reminder_message: "New reminder"
       reminder_sound: "Sound"
       add_reminder: "Add a reminder"
       traveled_path_title: "Traveled path"

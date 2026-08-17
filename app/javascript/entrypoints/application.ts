@@ -5,6 +5,7 @@ import 'bootstrap'
 import { setupI18n } from '../i18n'
 import { installCompanionBridge, revealCompanionLinks } from '../companionBridge'
 import { mountVueIslands } from '../mountVueIslands'
+import { installAddressCopyButtons } from '../routeSummaryCopyAddress'
 
 const i18nReady = setupI18n()
 
@@ -79,6 +80,7 @@ function trackNavbar(): void {
 whenDomReady(async () => {
   trackNavbar()
   revealCompanionLinks()
+  installAddressCopyButtons()
   await i18nReady
   mountVueIslands()
 })

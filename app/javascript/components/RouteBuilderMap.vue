@@ -35,7 +35,7 @@ import {
   escapeHtml, googleMapsUrl, popupHeaderHtml, popupLinkHtml, popupMapLinksHtml,
 } from '../placePopup'
 import { useMapLocation } from '../composables/useMapLocation'
-import { usePlaceSearch, placeShortName, flyToPlace } from '../composables/usePlaceSearch'
+import { usePlaceSearch, placeShortName, flyToPlace, reverseGeocode } from '../composables/usePlaceSearch'
 import { useMapMeasure, MEASURE_SOURCE, MEASURE_LINE_LAYER } from '../composables/useMapMeasure'
 import {
   assignWaypointGeomIndices, waypointPosForEdge, waypointPosForVertex, inheritsFree,
@@ -1406,7 +1406,7 @@ function installRouteMarkers() {
   })
 }
 
-function buildRouteMarkerEl(marker: { kind: string; lng: number; lat: number; label?: string }) {
+function buildRouteMarkerEl(marker: { kind: string; lng: number; lat: number; label?: string; address?: string }) {
   const el = document.createElement('div')
   const meta = markerMeta(marker.kind)
   const icon = meta?.icon ?? 'fa-location-dot'
@@ -1437,10 +1437,11 @@ function closeRouteMarkerPopup() {
 // Popup d'un repère : titre = libellé (ou type), liens Google Maps / Street View (mêmes
 // que les POI) et — hors lecture seule — actions renommer / supprimer. Retrouve le repère
 // par identité de coordonnées.
-function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; label?: string }) {
+function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; label?: string; address?: string }) {
   if (!_maplibregl || !mapInstance) return
   closeRouteMarkerPopup()
   const title = marker.label ? `${markerKindLabel(marker.kind)} — ${marker.label}` : markerKindLabel(marker.kind)
+  const addressRow = marker.address ? `<div class="place-popup-address">${escapeHtml(marker.address)}</div>` : ''
   const OFFSET = 0.00008
   const mapsUrl = googleMapsUrl(marker.lat + OFFSET, marker.lng + OFFSET)
   // Navigation Google Maps en voiture depuis la position courante vers le repère
@@ -1462,6 +1463,7 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
     </button>`
   wrap.innerHTML = `
     ${popupHeaderHtml(title)}
+    ${addressRow}
     ${editActions}
     ${popupLinkHtml({ href: mapsUrl, icon: 'fa-brands fa-google', label: 'Google Maps' })}
     ${popupLinkHtml({ href: dirUrl, icon: 'fa-solid fa-diamond-turn-right', label: t('routes.directions') })}
@@ -1479,7 +1481,8 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
     if (idx < 0) return
     const clean = label.trim()
     const cur = routeStore.markers.value[idx]
-    routeStore.markers.value[idx] = clean ? { ...cur, label: clean } : { kind: cur.kind, lng: cur.lng, lat: cur.lat }
+    const { label: _oldLabel, ...rest } = cur
+    routeStore.markers.value[idx] = clean ? { ...rest, label: clean } : rest
     installRouteMarkers()
   })
   wrap.querySelector('.place-popup-link--delete')?.addEventListener('click', () => {
@@ -1512,14 +1515,25 @@ function openMarkerDialog(lng: number, lat: number) {
   markerDialog.value = { lng, lat, kind: MARKER_KINDS[0].kind, label: '' }
 }
 
-// Enregistre le repère saisi dans le dialogue et le rend immédiatement.
-function saveMarkerFromDialog() {
+// Enregistre le repère saisi dans le dialogue et le rend immédiatement. L'adresse est
+// détectée après coup (Nominatim /reverse) et ajoutée au repère quand elle arrive — la
+// pose elle-même n'attend jamais le réseau.
+async function saveMarkerFromDialog() {
   const d = markerDialog.value
   if (!d) return
   const label = d.label.trim()
   const marker = label ? { kind: d.kind, lng: d.lng, lat: d.lat, label } : { kind: d.kind, lng: d.lng, lat: d.lat }
   routeStore.markers.value.push(marker)
   markerDialog.value = null
+  installRouteMarkers()
+  const address = await reverseGeocode(d.lat, d.lng)
+  if (!address) return
+  const idx = routeStore.markers.value.indexOf(marker)
+  if (idx < 0) return
+  routeStore.markers.value[idx] = { ...routeStore.markers.value[idx], address }
+  // Reconstruit les repères de la carte : le gestionnaire de clic posé par
+  // installRouteMarkers() plus haut a capturé l'ancien objet (sans adresse) dans sa
+  // closure, il faut le réinstaller pour qu'un clic ouvre la popup à jour.
   installRouteMarkers()
 }
 

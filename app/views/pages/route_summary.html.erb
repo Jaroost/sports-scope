@@ -133,30 +133,42 @@
         <%# L'id sert d'ancre à la vignette : un clic sur la pastille du repère fait
             défiler la page jusqu'à cette ligne (cf. SharedRoutePreviewMap). L'index
             suit celui du tableau passé à l'îlot — même source, même ordre. %>
-        <div id="route-summary-marker-<%= i %>" class="list-group-item d-flex align-items-center flex-wrap gap-2">
-          <i class="fa-solid <%= { "start" => "fa-flag", "finish" => "fa-flag-checkered", "parking" => "fa-square-parking" }.fetch(marker["kind"], "fa-location-dot") %> fa-fw text-warning" aria-hidden="true"></i>
-          <%# Le type porte le nom du repère ; le libellé saisi ne s'affiche à côté que
-              s'il ajoute quelque chose (sinon on répéterait « Départ · Départ »). %>
-          <span class="badge rounded-pill route-summary-pill route-summary-pill-<%= marker["kind"] %>"><%= kind_label %></span>
-          <span class="flex-grow-1 text-truncate">
-            <%= marker["label"] if marker["label"].present? && marker["label"] != kind_label %>
-          </span>
-          <%# `travelmode=driving` : on va en voiture au départ ou au parking, le vélo ou
-              les chaussures commencent une fois sur place. %>
-          <span class="d-flex align-items-center gap-2 flex-shrink-0 ms-auto">
-            <a class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
-               href="https://www.google.com/maps/search/?api=1&query=<%= u(coords) %>"
-               target="_blank" rel="noopener noreferrer" title="<%= t("routes.summary.open_in_maps") %>">
-              <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
-              <%= t("routes.summary.marker_view") %>
-            </a>
-            <a class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
-               href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=<%= u(coords) %>"
-               target="_blank" rel="noopener noreferrer" title="<%= t("routes.summary.drive_there") %>">
-              <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
-              <%= t("routes.summary.marker_directions") %>
-            </a>
-          </span>
+        <div id="route-summary-marker-<%= i %>" class="list-group-item">
+          <div class="d-flex align-items-center flex-wrap gap-2">
+            <i class="fa-solid <%= { "start" => "fa-flag", "finish" => "fa-flag-checkered", "parking" => "fa-square-parking" }.fetch(marker["kind"], "fa-location-dot") %> fa-fw text-warning" aria-hidden="true"></i>
+            <%# Le type porte le nom du repère ; le libellé saisi ne s'affiche à côté que
+                s'il ajoute quelque chose (sinon on répéterait « Départ · Départ »). %>
+            <span class="badge rounded-pill route-summary-pill route-summary-pill-<%= marker["kind"] %>"><%= kind_label %></span>
+            <span class="flex-grow-1 text-truncate">
+              <%= marker["label"] if marker["label"].present? && marker["label"] != kind_label %>
+            </span>
+            <%# `travelmode=driving` : on va en voiture au départ ou au parking, le vélo ou
+                les chaussures commencent une fois sur place. %>
+            <span class="d-flex align-items-center gap-2 flex-shrink-0 ms-auto">
+              <a class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+                 href="https://www.google.com/maps/search/?api=1&query=<%= u(coords) %>"
+                 target="_blank" rel="noopener noreferrer" title="<%= t("routes.summary.open_in_maps") %>">
+                <i class="fa-solid fa-map-location-dot" aria-hidden="true"></i>
+                <%= t("routes.summary.marker_view") %>
+              </a>
+              <a class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+                 href="https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=<%= u(coords) %>"
+                 target="_blank" rel="noopener noreferrer" title="<%= t("routes.summary.drive_there") %>">
+                <i class="fa-solid fa-diamond-turn-right" aria-hidden="true"></i>
+                <%= t("routes.summary.marker_directions") %>
+              </a>
+            </span>
+          </div>
+          <% if marker["address"].present? %>
+            <div class="route-summary-marker-address text-body-secondary small mt-1 d-flex align-items-center gap-2">
+              <span class="flex-grow-1"><%= marker["address"] %></span>
+              <button type="button" class="btn btn-sm btn-link route-summary-copy-address p-0"
+                      data-address="<%= marker["address"] %>" title="<%= t("routes.summary.copy_address") %>"
+                      aria-label="<%= t("routes.summary.copy_address") %>">
+                <i class="fa-regular fa-copy" aria-hidden="true"></i>
+              </button>
+            </div>
+          <% end %>
         </div>
       <% end %>
     </div>

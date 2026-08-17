@@ -1109,6 +1109,7 @@ en:
       marker_view: "View"
       marker_directions: "Drive there"
       drive_there: "Drive there with Google Maps"
+      copy_address: "Copy address"
       actions: "Open this route"
       view: "View the route"
       view_hint: "Map, elevation profile and stats, read-only."

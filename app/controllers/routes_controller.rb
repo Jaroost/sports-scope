@@ -302,8 +302,9 @@ class RoutesController < ApplicationController
   end
 
   # Repères posés à la main : `kind` restreint (MARKER_KINDS), coordonnées bornées,
-  # `label` libre optionnel. Distinct de clean_pois — ces repères ne sont jamais
-  # écrasés par la recherche de POI.
+  # `label` libre optionnel, `address` libre optionnelle (détectée côté front via
+  # Nominatim /reverse à la pose, cf. usePlaceSearch.ts). Distinct de clean_pois — ces
+  # repères ne sont jamais écrasés par la recherche de POI.
   def clean_markers(raw)
     return [] unless raw.is_a?(Array)
     raw.take(MAX_MARKERS).filter_map do |item|
@@ -318,6 +319,8 @@ class RoutesController < ApplicationController
       marker = { "kind" => kind, "lat" => lat.to_f, "lng" => lng.to_f }
       label = (h["label"] || h[:label]).to_s.strip.first(100)
       marker["label"] = label if label.present?
+      address = (h["address"] || h[:address]).to_s.strip.first(200)
+      marker["address"] = address if address.present?
       marker
     end
   end

@@ -366,6 +366,21 @@ body.fullscreen-page {
   background: var(--bs-danger-bg-subtle);
   border-color: var(--bs-danger-border-subtle);
 }
+/* Adresse détectée automatiquement à la pose du repère (reverse geocoding, cf.
+   routeMarkers.ts) — sous la ligne icône/pastille, décalée pour retomber sous elles. */
+.route-summary-marker-address {
+  padding-left: 1.75rem;
+}
+/* Icône seule (pas un lien de navigation) : couleur alignée sur le texte muet de la
+   ligne plutôt que le bleu par défaut de .btn-link. Le vert de la coche de confirmation
+   (cf. routeSummaryCopyAddress.ts) reste posé par la classe Bootstrap .text-success. */
+.route-summary-copy-address {
+  color: var(--bs-secondary-color);
+  text-decoration: none;
+}
+.route-summary-copy-address:hover {
+  color: var(--bs-body-color);
+}
 /* Clic sur une pastille de repère de la vignette : la ligne correspondante de la liste
    défile dans la vue et clignote une fois. Sans ce flash, un défilement de quelques
    centaines de pixels laisse le lecteur chercher ce qui a bougé. */

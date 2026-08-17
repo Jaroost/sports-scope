@@ -127,6 +127,12 @@
   text-align: left;
   font-variant-numeric: tabular-nums;
 }
+.place-popup-address {
+  font-size: 0.72rem;
+  color: #9ca3af;
+  padding: 0 0.65rem 0.3rem;
+  max-width: 14rem;
+}
 .place-popup-coords-row { display: flex; gap: 0.25rem; }
 .place-popup-coords-row .place-popup-link { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; }
 .place-popup-coords-row .place-popup-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

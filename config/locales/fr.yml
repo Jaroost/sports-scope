@@ -1109,6 +1109,7 @@ fr:
       marker_view: "Voir"
       marker_directions: "S'y rendre"
       drive_there: "S'y rendre en voiture avec Google Maps"
+      copy_address: "Copier l'adresse"
       actions: "Ouvrir cet itinéraire"
       view: "Voir le tracé"
       view_hint: "Carte, profil altimétrique et statistiques, en lecture seule."

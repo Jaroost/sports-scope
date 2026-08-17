@@ -7,7 +7,7 @@
 // le libellé de chaque type — réutilisée par le créateur ET la navigation.
 //
 // Le contrat avec le serveur : le champ `kind` (une clé ci-dessous) est validé par
-// RoutesController (MARKER_KINDS) ; `label` est un texte libre optionnel.
+// RoutesController (MARKER_KINDS) ; `label` et `address` sont du texte libre optionnel.
 
 import { t } from './i18n'
 
@@ -19,6 +19,8 @@ export interface RouteMarker {
   lat: number
   /** Libellé libre optionnel (ex. « Parking payant »). */
   label?: string
+  /** Adresse détectée automatiquement à la pose (Nominatim /reverse), best-effort. */
+  address?: string
 }
 
 export interface MarkerKindMeta {

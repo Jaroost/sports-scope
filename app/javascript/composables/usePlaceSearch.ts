@@ -39,6 +39,22 @@ export function flyToPlace(map: any, p: PlaceResult): void {
   }
 }
 
+// Adresse au point posé (Nominatim /reverse) : appelée à la création d'un repère
+// d'itinéraire pour le pré-remplir sans que l'utilisateur ait à la saisir. Best-effort
+// (réseau, lieu sans adresse connue) — un échec laisse simplement le repère sans adresse,
+// il reste posable et enregistrable.
+export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=jsonv2&addressdetails=1&zoom=18`
+    const res = await fetch(url, { headers: { Accept: 'application/json' } })
+    if (!res.ok) return null
+    const data = await res.json()
+    return typeof data?.display_name === 'string' ? data.display_name : null
+  } catch {
+    return null
+  }
+}
+
 export function usePlaceSearch() {
   // Liste ordonnée des pays privilégiés, configurée dans le profil
   // (search.country_codes). L'ordre = la priorité d'affichage ; on la passe aussi

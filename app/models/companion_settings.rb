@@ -92,6 +92,10 @@ module CompanionSettings
     # été retiré côté appli (un seul dessin à garder cohérent avec les bords de
     # la carte).
     "radar" => %w[distance count icons compact gauge],
+    # L'état des batteries des capteurs BLE connus (appli compagnon) — `list`
+    # une ligne par appareil, `compact` le pire pourcentage connu en un seul
+    # chiffre, même distinction que les autres blocs à deux tailles.
+    "battery" => %w[list compact],
     # Animation radar des précipitations (RainViewer), centrée sur la position GPS
     # du cycliste — passé récent puis prévision courte ("nowcast"). Un seul mode :
     # rien à faire varier, le dessin (tuiles + repère central) ne change pas selon
@@ -528,6 +532,7 @@ module CompanionSettings
       "notch" => sanitize_notch_sets(raw["notch"]),
       "sensors" => sanitize_sensors(raw["sensors"]),
       "radar" => sanitize_radar(raw["radar"]),
+      "battery" => sanitize_battery(raw["battery"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
       "screen" => sanitize_screen(raw["screen"]),
       "traveled_path" => sanitize_traveled_path(raw["traveled_path"]),
@@ -1205,6 +1210,18 @@ module CompanionSettings
       "sounds" => raw["sounds"] != false,
       "wake_screen" => raw["wake_screen"] != false,
       "wake_hold_s" => positive(raw["wake_hold_s"], 5)
+    }
+  end
+
+  # Le seuil d'alerte batterie des capteurs BLE de l'appli, et son son. Même
+  # repli que `sanitize_radar` : absent vaut activé, un profil venu d'une
+  # version antérieure du contrat ne doit pas perdre son alerte en silence.
+  def sanitize_battery(raw)
+    return nil unless raw.is_a?(Hash)
+
+    {
+      "threshold_percent" => positive(raw["threshold_percent"], 20).clamp(1, 100),
+      "sounds" => raw["sounds"] != false
     }
   end
 

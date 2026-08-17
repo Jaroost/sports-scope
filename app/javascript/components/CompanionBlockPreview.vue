@@ -26,6 +26,7 @@
 import { computed, useId } from 'vue'
 import {
   AVERAGES_SAMPLE,
+  BATTERY_SAMPLE,
   BUDGET_SAMPLE,
   CLIMB_LIST_SAMPLE,
   DYNAMIC_GAUGE_PREVIEW_FRACTION,
@@ -741,6 +742,25 @@ const altitudeProfileClipId = useId()
           <span class="cbp-radar-count">×2</span>
         </div>
         <div class="cbp-radar-distance">48 m</div>
+      </div>
+    </template>
+
+    <!-- Batteries -----------------------------------------------------------
+         L'état des capteurs BLE connus de l'appli companion — une ligne par
+         appareil en mode « liste », le pire pourcentage connu en un seul
+         chiffre en mode « compact », même distinction que le radar. Les
+         chiffres sont ceux de BATTERY_SAMPLE (voir companionSettings.ts) :
+         plausibles et faux, comme le reste de cet aperçu. -->
+    <template v-else-if="block.kind === 'battery'">
+      <div v-if="shape.batteryCompact" class="cbp-card cbp-center" :style="overrideStyle">
+        <div class="cbp-radar-distance" style="color: #EF5350">14 %</div>
+      </div>
+      <div v-else class="cbp-card" :style="overrideStyle">
+        <div class="cbp-title">Batteries</div>
+        <div v-for="device in BATTERY_SAMPLE" :key="device.label" class="cbp-stat">
+          <span>{{ device.label }}</span>
+          <b :style="device.percent <= 20 ? 'color: #EF5350' : undefined">{{ device.percent }} %</b>
+        </div>
       </div>
     </template>
 

@@ -824,6 +824,15 @@ function setRadar(key: string, value: number | boolean) {
   preset.value.radar = { ...(preset.value.radar || {}), [key]: value }
 }
 
+function batteryValue(key: string, fallback: number): number {
+  const value = preset.value.battery?.[key]
+  return typeof value === 'number' ? value : fallback
+}
+
+function setBattery(key: string, value: number | boolean) {
+  preset.value.battery = { ...(preset.value.battery || {}), [key]: value }
+}
+
 // ── les boutons Di2 ─────────────────────────────────────────────────────────
 //
 // Quatre canaux fixes — seuls 1 et 2 sont câblés sur le matériel testé côté
@@ -1585,6 +1594,28 @@ async function save() {
                      @change="setRadar('wake_screen', ($event.target as HTMLInputElement).checked)">
               <label class="form-check-label small" for="radar-wake">
                 {{ t('companion.settings.radar_wake') }}
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Les batteries -->
+        <h2 class="h6">{{ t('companion.settings.battery_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.battery_help') }}</p>
+        <div class="row g-2 align-items-end mb-4">
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">{{ t('companion.settings.battery_threshold') }}</label>
+            <input class="form-control form-control-sm" type="number" min="1" max="100"
+                   :value="batteryValue('threshold_percent', 20)"
+                   @input="setBattery('threshold_percent', Number(($event.target as HTMLInputElement).value))">
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="battery-sounds"
+                     :checked="preset.battery?.sounds !== false"
+                     @change="setBattery('sounds', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="battery-sounds">
+                {{ t('companion.settings.battery_sounds') }}
               </label>
             </div>
           </div>

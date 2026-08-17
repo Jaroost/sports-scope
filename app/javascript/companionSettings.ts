@@ -378,6 +378,9 @@ export interface Preset {
   notch?: Notch[]
   sensors?: Record<string, boolean>
   radar?: Record<string, number | boolean>
+  // Seuil d'alerte batterie des capteurs BLE de l'appli, et son son — même
+  // forme que `radar`.
+  battery?: Record<string, number | boolean>
   screen?: Record<string, number>
   // Couleur/largeur/opacité de la ligne du trajet réellement parcouru,
   // dessinée par l'appli companion — voir `sanitize_traveled_path` (Rails) et
@@ -911,6 +914,14 @@ export const LAP_SUMMARY_SAMPLE = [
   { label: 'TSS', value: '24' },
 ]
 
+// Deux appareils plausibles pour la vignette du bloc `battery` : un cardio
+// encore confortable, un Varia sous le seuil par défaut (20 %) — pour que
+// l'aperçu montre aussi la couleur d'alerte, pas seulement la forme.
+export const BATTERY_SAMPLE = [
+  { label: 'Cardio', percent: 62 },
+  { label: 'Varia', percent: 14 },
+]
+
 // Trois cols plausibles pour la vignette : un déjà grimpé (grisé), un en
 // cours (repère plein), un à venir (repère en liseré) — les trois états que
 // `climbStatusOf` distingue côté appli (route_climbs.dart).
@@ -1089,6 +1100,7 @@ export interface BlockShape {
   radarCount: boolean
   radarIcons: boolean
   radarCompact: boolean
+  batteryCompact: boolean
   budgetWeek: boolean
   climbListFull: boolean
 }
@@ -1118,6 +1130,7 @@ export function blockShape(block: Block): BlockShape {
     radarCount: block.kind === 'radar' && block.mode === 'count',
     radarIcons: block.kind === 'radar' && block.mode === 'icons',
     radarCompact: block.kind === 'radar' && block.mode === 'compact',
+    batteryCompact: block.kind === 'battery' && block.mode === 'compact',
     budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
     // La liste entière, ou une seule ligne (le col en cours / prochain) —
     // même distinction que `navFull` pour `nav_state`.

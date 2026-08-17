@@ -926,15 +926,16 @@ export const LAP_SUMMARY_SAMPLE = [
   { label: 'TSS', value: '24' },
 ]
 
-// Deux appareils plausibles pour la vignette du bloc `battery` : un cardio
-// encore confortable, un Varia sous le seuil par défaut (20 %) — pour que
-// l'aperçu montre aussi la couleur d'alerte, pas seulement la forme. `kind`
-// sert au mode compact : quand `block.sensor` en vise un, l'aperçu montre son
-// pourcentage plutôt que le pire des deux, pour que choisir un capteur se
-// voie vraiment changer quelque chose.
+// Trois appareils plausibles pour la vignette du bloc `battery` : un cardio
+// encore confortable, un Varia sous le seuil par défaut (20 %), et le
+// téléphone lui-même — pour que l'aperçu montre aussi la couleur d'alerte,
+// pas seulement la forme. `kind` sert au mode compact : quand `block.sensor`
+// en vise un, l'aperçu montre son pourcentage plutôt que le pire des trois,
+// pour que choisir un capteur se voie vraiment changer quelque chose.
 export const BATTERY_SAMPLE = [
   { label: 'Cardio', percent: 62, kind: 'heart_rate' },
   { label: 'Varia', percent: 14, kind: 'radar' },
+  { label: 'Téléphone', percent: 47, kind: 'phone' },
 ]
 
 // Trois cols plausibles pour la vignette : un déjà grimpé (grisé), un en

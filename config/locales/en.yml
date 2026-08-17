@@ -1643,7 +1643,7 @@ en:
       source: "Source"
       battery_sensor: "Sensor"
       battery_sensor_any: "All devices"
-      battery_sensor_hint: "The worst known percentage then covers only that sensor — useful to watch the power meter without a heart rate strap left on the table taking over. No effect in the detailed display, which already lists every device."
+      battery_sensor_hint: "The worst known percentage then covers only that sensor — useful to watch the power meter without a heart rate strap left on the table taking over, or to keep an eye on the phone's own battery once the screen goes fully immersive. No effect in the detailed display, which already lists every device."
       sound: "Ring tone"
       duration_format: "Format"
       gauge_kind: "Gauge"
@@ -1804,6 +1804,7 @@ en:
         heart_rate: "Heart rate"
         cadence: "Speed and cadence"
         gears: "Di2 gears"
+        phone: "Phone"
       metrics:
         grade: "Grade"
         grade_avg: "Average grade"

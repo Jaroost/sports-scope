@@ -167,10 +167,11 @@ module CompanionSettings
   # Le capteur visé par un bloc `battery` en mode `compact` — restreint le
   # « pire pourcentage connu » à cet appareil-là plutôt qu'à tous les appareils
   # connus (sinon la ceinture cardio oubliée sur la table gagnerait contre le
-  # capteur de puissance qu'on veut réellement surveiller). Sous-ensemble de
-  # `SENSORS` : seuls les capteurs BLE publient une batterie, pas les capteurs
-  # du téléphone (`gps`, `barometer`, `light`, `compass`).
-  BATTERY_SENSORS = %w[heart_rate power cadence gears radar].freeze
+  # capteur de puissance qu'on veut réellement surveiller). Quatre capteurs
+  # BLE, plus `phone` : la batterie du téléphone lui-même, utile en
+  # particulier en sortie — l'appli passe alors l'écran en plein immersif, la
+  # pastille système disparaît avec les barres qui la portent.
+  BATTERY_SENSORS = %w[heart_rate power cadence gears radar phone].freeze
 
   PAGE_KINDS = %w[map grid list laps].freeze
 

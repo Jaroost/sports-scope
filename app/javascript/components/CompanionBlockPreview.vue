@@ -757,11 +757,12 @@ const altitudeProfileClipId = useId()
     </template>
 
     <!-- Batteries -----------------------------------------------------------
-         L'état des capteurs BLE connus de l'appli companion — une ligne par
-         appareil en mode « liste », le pire pourcentage connu en un seul
-         chiffre en mode « compact », même distinction que le radar. Les
-         chiffres sont ceux de BATTERY_SAMPLE (voir companionSettings.ts) :
-         plausibles et faux, comme le reste de cet aperçu. -->
+         L'état des capteurs BLE connus de l'appli companion, et de la
+         batterie du téléphone lui-même — une ligne par appareil en mode
+         « liste », le pire pourcentage connu en un seul chiffre en mode
+         « compact », même distinction que le radar. Les chiffres sont ceux
+         de BATTERY_SAMPLE (voir companionSettings.ts) : plausibles et faux,
+         comme le reste de cet aperçu. -->
     <template v-else-if="block.kind === 'battery'">
       <div v-if="shape.batteryCompact" class="cbp-card cbp-center" :style="overrideStyle">
         <div

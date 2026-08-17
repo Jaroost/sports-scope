@@ -951,6 +951,26 @@ export const CLIMB_LIST_SAMPLE = [
   { label: 'Col 3', figures: '2,3 km · 140 m D+ · 6 % moy', grade: 6, status: 'next' as const },
 ]
 
+// La courbe de puissance, pour la vignette : onze durées, une moyenne
+// plausible et décroissante — c'est la **forme** qui compte ici (un sprint
+// très au-dessus du reste, un plateau aux longues durées), les chiffres eux-
+// mêmes sont inventés comme partout ailleurs dans ce fichier. Les libellés
+// sont ceux que dessine le dépôt voisin (`PowerCurveCard._durationLabel`) :
+// secondes en dessous de la minute, minutes entières au-delà.
+export const POWER_CURVE_SAMPLE = [
+  { duration: '5 s', watts: 850 },
+  { duration: '15 s', watts: 620 },
+  { duration: '30 s', watts: 480 },
+  { duration: '1 min', watts: 380 },
+  { duration: '2 min', watts: 320 },
+  { duration: '5 min', watts: 290 },
+  { duration: '10 min', watts: 265 },
+  { duration: '20 min', watts: 245 },
+  { duration: '30 min', watts: 230 },
+  { duration: '60 min', watts: 205 },
+  { duration: '90 min', watts: 190 },
+]
+
 // Le tiret et pas un chiffre inventé quand la mesure est inconnue de cette
 // version : c'est **exactement** ce que le téléphone affichera d'une mesure
 // qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
@@ -1123,6 +1143,7 @@ export interface BlockShape {
   batteryCompact: boolean
   budgetWeek: boolean
   climbListFull: boolean
+  powerCurveChart: boolean
 }
 
 export function blockShape(block: Block): BlockShape {
@@ -1155,6 +1176,8 @@ export function blockShape(block: Block): BlockShape {
     // La liste entière, ou une seule ligne (le col en cours / prochain) —
     // même distinction que `navFull` pour `nav_state`.
     climbListFull: block.kind === 'climb_list' && block.mode !== 'compact',
+    // Le tableau (une ligne par durée), ou la même courbe en graphique.
+    powerCurveChart: block.kind === 'power_curve' && block.mode === 'chart',
   }
 }
 

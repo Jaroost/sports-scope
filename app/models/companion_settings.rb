@@ -155,6 +155,18 @@ module CompanionSettings
     # d'une WebView : sans tracé il se rabat sur la sortie enregistrée par le
     # téléphone, qui existe même hors navigation.
     "altitude_profile" => [],
+    # La courbe de puissance : la meilleure moyenne tenue depuis le départ, pour
+    # onze durées standard (5 s à 90 min, mêmes bornes que `PeakPowerCurve::DURATIONS`
+    # côté site — la sortie ne doit pas afficher deux jeux de chiffres selon l'écran
+    # qui la montre). `table` une ligne par durée, `chart` la même courbe en
+    # graphique, abscisse logarithmique.
+    #
+    # Comme `training_budget`, la donnée ne vient pas d'ici : c'est l'appli qui la
+    # calcule, à partir de son propre capteur de puissance — rien à vérifier
+    # au-delà du mode générique. Contrairement à lui, elle ne dépend d'aucune page
+    # de navigation ni du GPS : un profil de home-trainer avec capteur de
+    # puissance la reçoit tout autant qu'une sortie sur route.
+    "power_curve" => %w[table chart],
     # L'heure courante. Seul composant, avec `training_budget`/`climb_list`, à
     # ne rien vérifier au-delà du mode générique — pas de mesure ni de source
     # à valider, comme `radar`/`recording`.

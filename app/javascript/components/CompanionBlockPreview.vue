@@ -31,6 +31,7 @@ import {
   CLIMB_LIST_SAMPLE,
   DYNAMIC_GAUGE_PREVIEW_FRACTION,
   LAP_SUMMARY_SAMPLE,
+  POWER_CURVE_SAMPLE,
   RANGE_GAUGE_COLOR,
   RANGE_GAUGE_SEGMENTS,
   blockShape,
@@ -449,6 +450,24 @@ const climbProfileClipId = useId()
 // itinéraire réel.
 const altitudeProfileSample = buildDebugRouteProfile()
 const altitudeProfileClipId = useId()
+
+// ── Courbe de puissance ──────────────────────────────────────────────────────
+//
+// Abscisse en index régulier dans cet aperçu — un aplat plausible de onze points
+// suffit à montrer la forme (sprint au-dessus du reste, plateau aux longues
+// durées) sans reconstruire l'échelle logarithmique du vrai graphique
+// (`PowerCurveGraph`, dépôt voisin), qui a besoin de vraies durées à espacer.
+const powerCurvePoints = computed(() => {
+  const watts = POWER_CURVE_SAMPLE.map((point) => point.watts)
+  const min = Math.min(...watts)
+  const max = Math.max(...watts)
+  const span = max - min || 1
+  return POWER_CURVE_SAMPLE.map((point, i) => ({
+    x: (i / (POWER_CURVE_SAMPLE.length - 1)) * 100,
+    y: 96 - ((point.watts - min) / span) * 88,
+  }))
+})
+const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p.x},${p.y}`).join(' '))
 </script>
 
 <template>
@@ -1059,6 +1078,36 @@ const altitudeProfileClipId = useId()
       </div>
     </div>
 
+    <!-- Courbe de puissance -----------------------------------------------
+         La meilleure moyenne tenue depuis le départ, par durée — calculée
+         par l'appli à partir de son propre capteur, jamais ici (voir
+         `sanitize_block` : `power_curve` ne vérifie rien au-delà du mode
+         générique). `table` une ligne par durée, `chart` la même courbe en
+         graphique. -->
+    <template v-else-if="block.kind === 'power_curve'">
+      <div v-if="!shape.powerCurveChart" class="cbp-card" :style="overrideStyle">
+        <div class="cbp-title">Courbe de puissance</div>
+        <div v-for="point in POWER_CURVE_SAMPLE" :key="point.duration" class="cbp-stat">
+          <span>{{ point.duration }}</span><b>{{ point.watts }} W</b>
+        </div>
+      </div>
+      <div v-else class="cbp-card cbp-power-curve" :style="overrideStyle">
+        <div class="cbp-title">Courbe de puissance</div>
+        <div class="cbp-power-curve-graph">
+          <svg class="cbp-power-curve-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <polyline
+              :points="powerCurvePolyline"
+              fill="none"
+              stroke="#ffa726"
+              stroke-width="2"
+              vector-effect="non-scaling-stroke"
+            />
+            <circle v-for="(p, i) in powerCurvePoints" :key="i" :cx="p.x" :cy="p.y" r="1.6" fill="#ffa726" />
+          </svg>
+        </div>
+      </div>
+    </template>
+
     <!-- Horloge ---------------------------------------------------------
          Même grille qu'une mesure (`rows`, `layoutRows(metricLayout(block))`
          — générique, ne teste jamais `kind`, donc réutilisable telle quelle),
@@ -1373,6 +1422,30 @@ const altitudeProfileClipId = useId()
   border-radius: 50%;
   transform: translate(-50%, -50%);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Fond sombre et non clair (#f8f9fa) comme le profil d'altitude ci-dessus :
+   celui-là en a besoin pour que ses segments de pente colorés restent
+   lisibles, la courbe de puissance n'a qu'un trait — même fond que les
+   cartes du tableau de bord (#1F2226, `BlockCard.background`), à peine
+   assombri pour se distinguer d'elles. */
+.cbp-power-curve {
+  display: flex;
+  flex-direction: column;
+}
+.cbp-power-curve-graph {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin-top: 0.5em;
+}
+.cbp-power-curve-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0.5em;
+  background: #14161a;
 }
 
 /* Le chiffre aussi grand que la case le permet — c'est ce qu'on lit à 30 km/h

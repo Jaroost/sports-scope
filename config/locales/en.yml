@@ -1741,6 +1741,7 @@ en:
         climb_list: "Route climbs"
         climb_profile: "Climb profile"
         altitude_profile: "Altitude profile"
+        power_curve: "Power curve"
         clock: "Clock"
         empty: "Empty cell"
       modes:
@@ -1762,6 +1763,8 @@ en:
         week: "This week"
         hm: "HH:MM"
         hms: "HH:MM:SS"
+        table: "Table"
+        chart: "Chart"
       duration_formats:
         hm: "HH:MM"
         hms: "HH:MM:SS"

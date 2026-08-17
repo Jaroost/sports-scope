@@ -1741,6 +1741,7 @@ fr:
         climb_list: "Cols du tracé"
         climb_profile: "Profil du col"
         altitude_profile: "Profil d'altitude"
+        power_curve: "Courbe de puissance"
         clock: "Horloge"
         empty: "Case vide"
       modes:
@@ -1762,6 +1763,8 @@ fr:
         week: "La semaine"
         hm: "HH:MM"
         hms: "HH:MM:SS"
+        table: "Tableau"
+        chart: "Graphique"
       duration_formats:
         hm: "HH:MM"
         hms: "HH:MM:SS"

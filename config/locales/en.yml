@@ -1653,6 +1653,10 @@ en:
       gauge_kind: "Gauge"
       range_min: "Min"
       range_max: "Max"
+      gauge_fill: "Fill"
+      gauge_segments: "Number of segments"
+      gauge_color_mode: "Color"
+      gauge_color: "Fixed color"
       altitude_window_km: "Rolling window (km)"
       altitude_window_km_placeholder: "Whole profile"
       altitude_window_km_hint: "On a followed route, shows only the next few kilometres, sliding forward as you ride — leave blank for the whole route profile."
@@ -1775,6 +1779,12 @@ en:
       gauge_kinds:
         range: "Set range"
         dynamic: "Dynamic range"
+      gauge_fills:
+        segments: "Segmented"
+        full: "Full"
+      gauge_color_modes:
+        fixed: "Fixed"
+        auto: "Automatic (by zone)"
       layout_tokens:
         icon: "Icon"
         label: "Label"

@@ -273,7 +273,9 @@ const metricInk = computed(() => {
 
 // La jauge : une case par zone jusqu'à celle du moment, les suivantes éteintes.
 // Des paliers et pas un remplissage continu — un dégradé laisserait croire à une
-// progression linéaire que les zones n'ont pas.
+// progression linéaire que les zones n'ont pas. Cinq zones en dur (comme
+// l'aperçu cardio le plus courant) : contrairement à l'appli, l'éditeur n'a
+// pas de vrai profil de cycliste pour compter les zones de puissance (z6/z7).
 const gaugeCells = computed(() => {
   const index = metricZone.value ? Number(metricZone.value.slice(1)) - 1 : -1
   return [0, 1, 2, 3, 4].map((i) => ({
@@ -282,35 +284,87 @@ const gaugeCells = computed(() => {
   }))
 })
 
-// La jauge à plage libre : même dessin par paliers que la jauge de zones,
-// mais répartis également entre `block.min` et `block.max` plutôt que sur des
-// seuils réels — d'où une seule couleur au lieu d'une par palier. `null` sur
-// l'un des trois (mesure sans échantillon numérique, min/max pas encore
-// réglés) éteint tous les paliers plutôt que de deviner une position.
-const rangeGaugeCells = computed(() => {
-  const { min, max } = props.block
-  const value = sample.value.numeric
-  const fraction = value != null && min != null && max != null && max > min
-    ? Math.min(Math.max((value - min) / (max - min), 0), 1)
-    : null
-  const lit = fraction == null ? -1 : Math.round(fraction * RANGE_GAUGE_SEGMENTS)
-  return Array.from({ length: RANGE_GAUGE_SEGMENTS }, (_, i) => ({ lit: i < lit }))
-})
-
-// Les paliers à dessiner pour la rangée-jauge, quelle que soit sa nature —
-// zone (une couleur par palier) ou plage libre (une seule couleur, tous les
-// paliers allumés confondus) — pour que le template n'ait qu'une seule
-// boucle à écrire, pas un `v-if` de plus par nature de jauge.
-const litGaugeCells = computed(() => (
-  gaugeKind.value === 'zone'
-    ? gaugeCells.value.map((cell) => ({ lit: cell.lit, color: cell.color }))
-    : rangeGaugeCells.value.map((cell) => ({ lit: cell.lit, color: RANGE_GAUGE_COLOR }))
-))
-
 // Le curseur de la jauge dynamique : une position fixe et illustrative
 // (`DYNAMIC_GAUGE_PREVIEW_FRACTION`), l'éditeur n'ayant pas de sortie en
 // cours pour en tirer une vraie plage.
 const dynamicGaugeFraction = computed(() => DYNAMIC_GAUGE_PREVIEW_FRACTION[props.block.metric || ''] ?? 0.5)
+
+// La forme et la couleur choisies dans l'éditeur (`gauge_fill`/
+// `gauge_color_mode`, voir `CompanionBlockPicker.vue`) — repli sur le rendu
+// d'avant ce réglage quand elles sont absentes, propre à la nature de la
+// jauge : tronçons pour zones/plage libre, barre continue pour la dynamique ;
+// automatique pour une jauge de zones, fixe sinon. Même règle que
+// `MetricView` côté appli.
+const gaugeFill = computed<'segments' | 'full'>(() => {
+  const raw = props.block.gauge_fill
+  if (raw === 'segments' || raw === 'full') return raw
+  return gaugeKind.value === 'dynamic' ? 'full' : 'segments'
+})
+const gaugeColorMode = computed<'fixed' | 'auto'>(() => {
+  const raw = props.block.gauge_color_mode
+  if (raw === 'fixed' || raw === 'auto') return raw
+  return gaugeKind.value === 'zone' ? 'auto' : 'fixed'
+})
+
+// La fraction 0–1 atteinte, quelle que soit la nature de la jauge — sert à la
+// fois à la barre continue et au nombre de tronçons allumés d'un remplissage
+// à couleur unique. `null` (mesure sans échantillon numérique, min/max pas
+// réglés, ou zone du moment inconnue) éteint tout plutôt que de deviner une
+// position.
+const gaugeFraction = computed<number | null>(() => {
+  if (gaugeKind.value === 'zone') {
+    const index = metricZone.value ? Number(metricZone.value.slice(1)) - 1 : -1
+    return index < 0 ? null : (index + 1) / 5
+  }
+  if (gaugeKind.value === 'dynamic') return dynamicGaugeFraction.value
+  const { min, max } = props.block
+  const value = sample.value.numeric
+  return value != null && min != null && max != null && max > min
+    ? Math.min(Math.max((value - min) / (max - min), 0), 1)
+    : null
+})
+
+// Le rendu natif de la jauge de zones (une couleur par palier, `gaugeCells`)
+// n'est gardé que tant que rien ne casse la correspondance tronçon↔zone —
+// même condition que `MetricView._zoneGaugeBar` côté appli.
+const useZoneLadder = computed(() => (
+  gaugeKind.value === 'zone'
+    && gaugeFill.value === 'segments'
+    && props.block.gauge_segments == null
+    && gaugeColorMode.value === 'auto'
+))
+
+// La couleur unique d'un remplissage qui n'est pas le ladder de zones — fixe
+// (`gauge_color`, repli `RANGE_GAUGE_COLOR`) ou celle de la zone du moment
+// avec le même repli si la mesure n'en a pas.
+const gaugeColor = computed(() => {
+  const fallback = props.block.gauge_color || RANGE_GAUGE_COLOR
+  if (gaugeColorMode.value === 'fixed') return fallback
+  return (metricZone.value && ZONE_COLORS[metricZone.value]) || fallback
+})
+
+// Le nombre de tronçons d'un remplissage segmenté qui n'est pas le ladder de
+// zones — celui réglé dans l'éditeur, sinon le repli propre à la nature de
+// la jauge (même 5 zones en dur que `gaugeCells`, `RANGE_GAUGE_SEGMENTS`
+// sinon).
+const gaugeSegmentCount = computed(
+  () => props.block.gauge_segments || (gaugeKind.value === 'zone' ? 5 : RANGE_GAUGE_SEGMENTS),
+)
+
+// Les paliers à dessiner pour la rangée-jauge quand elle n'est ni le ladder
+// de zones ni une barre continue — une seule couleur, tous les paliers
+// allumés confondus, sur `gaugeFraction`.
+const resolvedGaugeCells = computed(() => {
+  const count = gaugeSegmentCount.value
+  const fraction = gaugeFraction.value
+  const lit = fraction == null ? -1 : Math.round(fraction * count)
+  return Array.from({ length: count }, (_, i) => ({ lit: i < lit, color: gaugeColor.value }))
+})
+
+// Les paliers à dessiner pour la rangée-jauge, quelle que soit sa nature —
+// pour que le template n'ait qu'une seule boucle à écrire, pas un `v-if` de
+// plus par nature de jauge.
+const litGaugeCells = computed(() => (useZoneLadder.value ? gaugeCells.value : resolvedGaugeCells.value))
 
 // « Ce tour — » en préfixe côté `lap_zones`/`lap_averages` : même dessin que
 // `zones`/`averages`, seul ce qu'on mesure change — depuis l'ouverture du
@@ -496,10 +550,10 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
              occupe une rangée, elle en est la seule occupante (voir
              l'assainisseur), donc pas de colonnes à dessiner ici. -->
         <div v-if="row.gauge" class="cbp-metric-gauge-row">
-          <div v-if="gaugeKind === 'dynamic'" class="cbp-dyngauge-track">
+          <div v-if="gaugeFill === 'full'" class="cbp-dyngauge-track">
             <span
               class="cbp-dyngauge-fill"
-              :style="{ width: `${dynamicGaugeFraction * 100}%`, background: RANGE_GAUGE_COLOR }"
+              :style="{ width: `${(gaugeFraction ?? 0) * 100}%`, background: gaugeColor }"
             ></span>
           </div>
           <div v-else class="cbp-gauge">

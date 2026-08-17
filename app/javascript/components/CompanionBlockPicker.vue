@@ -30,10 +30,11 @@ import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
   blockChoices, blockFor, isChoiceOf, isDurationMetric, isDynamicGaugeMetric, isRangeGaugeMetric,
-  DEFAULT_METRIC_LAYOUT, LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS, MAX_SECONDARY_METRICS, METRIC_RANGE_DEFAULTS,
-  metricDropdownLabel, metricLayout, metricSample, NATURAL_LINE_SIZE, previewScale,
-  type Block, type BlockChoice, type Catalog, type CellSize, type LayoutToken, type MetricLayout,
-  type MetricLayoutPreset, type RowHeight, type SecondaryMetricSlot,
+  DEFAULT_METRIC_LAYOUT, GAUGE_SEGMENTS_MAX, GAUGE_SEGMENTS_MIN, LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS,
+  MAX_SECONDARY_METRICS, METRIC_RANGE_DEFAULTS, metricDropdownLabel, metricLayout, metricSample,
+  NATURAL_LINE_SIZE, previewScale, RANGE_GAUGE_COLOR, RANGE_GAUGE_SEGMENTS,
+  type Block, type BlockChoice, type Catalog, type CellSize, type GaugeColorMode, type GaugeFill,
+  type LayoutToken, type MetricLayout, type MetricLayoutPreset, type RowHeight, type SecondaryMetricSlot,
 } from '../companionSettings'
 
 const props = defineProps<{
@@ -448,6 +449,26 @@ watch(metric, (value) => {
   max.value = range.max
 })
 
+// La forme, le nombre de tronçons et la couleur du remplissage de la jauge :
+// ceux du composant en cours d'édition, sinon les mêmes replis que côté
+// appli (`RANGE_GAUGE_SEGMENTS`/`RANGE_GAUGE_COLOR`) — sauf la couleur
+// automatique, dont le repli dépend de la nature de la jauge au moment où la
+// dialogue s'ouvre : automatique pour une jauge de zones (le rendu d'avant
+// ce réglage), fixe sinon. Contrairement à min/max, on ne les réinitialise
+// pas à chaque changement de mesure : la forme et la couleur choisies
+// restent valables pour n'importe quelle mesure, elles ne sont pas mises à
+// l'échelle comme une plage.
+const gaugeFillChoice = ref<GaugeFill>((props.block?.gauge_fill as GaugeFill | undefined) || 'segments')
+const gaugeSegmentsChoice = ref<number>(props.block?.gauge_segments || RANGE_GAUGE_SEGMENTS)
+const gaugeColorModeChoice = ref<GaugeColorMode>(
+  (props.block?.gauge_color_mode as GaugeColorMode | undefined) || (metricZoneEligible.value ? 'auto' : 'fixed'),
+)
+// `null` (pas un repli concret) : même contrat que `color`/`textColor` — le
+// sélecteur peut y revenir explicitement (bouton « Réinitialiser »), et
+// c'est ce qui laisse alors l'appli sur `_defaultColor` plutôt que d'y écrire
+// la couleur par défaut en dur.
+const gaugeColorChoice = ref<string | null>(props.block?.gauge_color || null)
+
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec le bandeau du bas (`CompanionDashboard.vue`) — voir
 // `metricDropdownLabel` dans `companionSettings.ts`.
@@ -495,6 +516,8 @@ const groups = computed(() => {
             sound: sound.value, series: series.value, format: format.value,
             layout: currentLayout.value, icon: iconChoice.value, label: labelChoice.value,
             gaugeKind: effectiveGaugeKind.value || undefined,
+            gaugeFill: gaugeFillChoice.value, gaugeSegments: gaugeSegmentsChoice.value,
+            gaugeColorMode: gaugeColorModeChoice.value, gaugeColor: gaugeColorChoice.value ?? undefined,
             clockLayout: clockLayout.value, clockIcon: clockIconChoice.value,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             color: color.value, textColor: textColor.value,
@@ -669,6 +692,44 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 <input v-model.number="max" type="number" class="form-control form-control-sm">
               </label>
             </div>
+
+            <label v-if="group.kind === 'metric' && !!currentLayout.gauge" class="cbpk-param small">
+              {{ t('companion.settings.gauge_fill') }}
+              <select v-model="gaugeFillChoice" class="form-select form-select-sm">
+                <option value="segments">{{ t('companion.settings.gauge_fills.segments') }}</option>
+                <option value="full">{{ t('companion.settings.gauge_fills.full') }}</option>
+              </select>
+            </label>
+
+            <label
+              v-if="group.kind === 'metric' && !!currentLayout.gauge && gaugeFillChoice === 'segments'"
+              class="cbpk-param small"
+            >
+              {{ t('companion.settings.gauge_segments') }}
+              <input
+                v-model.number="gaugeSegmentsChoice" type="number"
+                :min="GAUGE_SEGMENTS_MIN" :max="GAUGE_SEGMENTS_MAX"
+                class="form-control form-control-sm"
+              >
+            </label>
+
+            <label v-if="group.kind === 'metric' && !!currentLayout.gauge" class="cbpk-param small">
+              {{ t('companion.settings.gauge_color_mode') }}
+              <select v-model="gaugeColorModeChoice" class="form-select form-select-sm">
+                <option value="fixed">{{ t('companion.settings.gauge_color_modes.fixed') }}</option>
+                <option value="auto">{{ t('companion.settings.gauge_color_modes.auto') }}</option>
+              </select>
+            </label>
+
+            <label
+              v-if="group.kind === 'metric' && !!currentLayout.gauge && gaugeColorModeChoice === 'fixed'"
+              class="cbpk-color-field small"
+            >
+              {{ t('companion.settings.gauge_color') }}
+              <CompanionColorPicker
+                v-model="gaugeColorChoice" :fallback="RANGE_GAUGE_COLOR" :label="t('companion.settings.gauge_color')"
+              />
+            </label>
 
             <label v-if="group.kind === 'zones' || group.kind === 'lap_zones'" class="cbpk-param small">
               {{ t('companion.settings.source') }}

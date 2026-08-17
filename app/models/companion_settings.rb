@@ -324,6 +324,24 @@ module CompanionSettings
   # explicite.
   GAUGE_KINDS = %w[range dynamic].freeze
 
+  # La forme du remplissage d'une jauge — tronçons (le rendu d'avant ce
+  # réglage) ou barre continue. `nil` côté document retombe sur la forme
+  # d'avant, propre à la nature de la jauge (tronçons pour zones/plage libre,
+  # barre continue pour la dynamique) : voir `sanitize_block`.
+  GAUGE_FILLS = %w[segments full].freeze
+
+  # Au-delà, un tronçon devient un pixel sur une carte compagnon (environ
+  # 220 px) — illisible en roulant, même esprit que le plafond à 4 colonnes
+  # d'une page `list`. En dessous de 2, un seul tronçon n'a pas de sens :
+  # c'est `gauge_fill: "full"` qu'il faut poser.
+  GAUGE_SEGMENTS_RANGE = (2..10).freeze
+
+  # Couleur fixe (`gauge_color`) ou couleur de la zone du moment. `nil` côté
+  # document retombe sur le repli d'avant ce réglage : automatique pour une
+  # jauge de zones (chaque tronçon garde la couleur de sa propre zone), fixe
+  # sinon.
+  GAUGE_COLOR_MODES = %w[fixed auto].freeze
+
   # ── Disposition d'un bloc `metric` ──────────────────────────────────────────
   #
   # Remplace les cinq anciens `mode` (`big`, `compact`, `zone`, `gauge`,
@@ -960,6 +978,27 @@ module CompanionSettings
           range = sanitize_range(raw["min"], raw["max"])
           block.merge!(range) if range
         end
+      end
+
+      # La forme et la couleur de la barre — contrairement à `gauge_kind`,
+      # ça s'applique aussi à une jauge de zones : `gauge_fill`/
+      # `gauge_color_mode` explicites y cassent la correspondance
+      # tronçon↔zone (voir `MetricView` côté appli), `gauge_kind` lui n'a
+      # jamais de sens pour elle. Absentes, ces quatre clés laissent l'appli
+      # sur le rendu d'avant ce réglage — voir `GAUGE_FILLS`/
+      # `GAUGE_SEGMENTS_RANGE`/`GAUGE_COLOR_MODES`.
+      if layout["gauge"]
+        fill = GAUGE_FILLS.include?(raw["gauge_fill"]) ? raw["gauge_fill"] : nil
+        block["gauge_fill"] = fill if fill
+
+        segments = raw["gauge_segments"]
+        block["gauge_segments"] = segments.to_i.clamp(GAUGE_SEGMENTS_RANGE) if segments.is_a?(Numeric)
+
+        color_mode = GAUGE_COLOR_MODES.include?(raw["gauge_color_mode"]) ? raw["gauge_color_mode"] : nil
+        block["gauge_color_mode"] = color_mode if color_mode
+
+        gauge_color = sanitize_hex_color(raw["gauge_color"])
+        block["gauge_color"] = gauge_color if gauge_color
       end
     when "clock"
       # Réglable comme un bloc `metric` (icône, étiquette, disposition), mais

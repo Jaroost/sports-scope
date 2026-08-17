@@ -123,6 +123,32 @@ describe('blockFor', () => {
   it('n\'écrit pas de mode pour un genre qui n\'en a pas', () => {
     expect(blockFor({ kind: 'empty' }, {})).toEqual({ kind: 'empty' })
   })
+
+  it('n\'écrit la forme/couleur de la jauge que si une jauge est posée', () => {
+    // Sans `layout.gauge`, ces clés seraient mortes : l'assainisseur les
+    // retirerait, ce qu'on voit et ce qui part diffèreraient.
+    const noGauge = blockFor(
+      { kind: 'metric' },
+      { metric: 'speed', layout: { value: '0-center' }, gaugeFill: 'full', gaugeColorMode: 'auto' },
+    )
+    expect(noGauge).not.toHaveProperty('gauge_fill')
+    expect(noGauge).not.toHaveProperty('gauge_color_mode')
+
+    const withGauge = blockFor(
+      { kind: 'metric' },
+      {
+        metric: 'speed',
+        layout: { value: '0-center', gauge: '1' },
+        gaugeFill: 'full',
+        gaugeSegments: 8,
+        gaugeColorMode: 'fixed',
+        gaugeColor: '#ff0000',
+      },
+    )
+    expect(withGauge).toMatchObject({
+      gauge_fill: 'full', gauge_segments: 8, gauge_color_mode: 'fixed', gauge_color: '#ff0000',
+    })
+  })
 })
 
 describe('isChoiceOf', () => {

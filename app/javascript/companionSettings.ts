@@ -62,6 +62,18 @@ export interface Block {
   // cadre, comme avant que ce réglage existe pour ces mesures.
   min?: number
   max?: number
+  // La forme, le nombre de tronçons et la couleur du remplissage de la
+  // jauge — voir `GAUGE_FILLS`/`GAUGE_SEGMENTS_RANGE`/`GAUGE_COLOR_MODES`.
+  // Absents (`gauge_fill`/`gauge_color_mode` valant alors `undefined`, pas
+  // une chaîne vide), l'appli retombe sur le rendu d'avant ce réglage,
+  // propre à la nature de la jauge — mêmes replis que `RANGE_GAUGE_SEGMENTS`/
+  // `RANGE_GAUGE_COLOR` ci-dessous. `gauge_color_mode: 'auto'` n'a d'effet
+  // que sur une mesure qui porte une zone du moment (cardio, puissance) ;
+  // sinon l'appli retombe sur `gauge_color`.
+  gauge_fill?: string
+  gauge_segments?: number
+  gauge_color_mode?: string
+  gauge_color?: string
   // La fenêtre « roulante » d'un bloc `altitude_profile`, en km à venir depuis
   // la position courante — seulement quand un tracé est suivi (voir
   // `sanitize_block`). Absente : le profil entier du tracé, fait/restant,
@@ -594,6 +606,7 @@ export function blockFor(
     metric?: string; source?: string; sensor?: string; series?: string; format?: string; min?: number; max?: number
     windowKm?: number; sound?: string
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
+    gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
     // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
     // restent celles du bloc `metric`) : les deux genres se règlent en même
     // temps dans la dialogue de choix, ce ne peut donc pas être le même état.
@@ -620,6 +633,12 @@ export function blockFor(
       block.min = params.min
       block.max = params.max
     }
+    // La forme et la couleur de la barre — contrairement à `gauge_kind`,
+    // ça s'applique aussi à une jauge de zones (cardio, puissance).
+    if (params.gaugeFill) block.gauge_fill = params.gaugeFill
+    if (params.gaugeSegments) block.gauge_segments = params.gaugeSegments
+    if (params.gaugeColorMode) block.gauge_color_mode = params.gaugeColorMode
+    if (params.gaugeColor) block.gauge_color = params.gaugeColor
   }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
   // Absent (`undefined`) plutôt qu'un repli : c'est « tous les appareils
@@ -1151,6 +1170,23 @@ export const RANGE_GAUGE_SEGMENTS = 5
 // (`ColorScheme.fromSeed(Colors.teal)`), déjà utilisé pour les boutons
 // d'action, mais éclairci pour rester lisible sur les cases éteintes.
 export const RANGE_GAUGE_COLOR = '#26A69A'
+
+// La forme du remplissage d'une jauge — voir `Block.gauge_fill`. Même
+// contrat que `CompanionSettings::GAUGE_FILLS` côté Rails.
+export const GAUGE_FILLS = ['segments', 'full'] as const
+export type GaugeFill = (typeof GAUGE_FILLS)[number]
+
+// Même borne que `CompanionSettings::GAUGE_SEGMENTS_RANGE` côté Rails : en
+// dessous, un seul tronçon n'a pas de sens (poser `'full'` à la place) ; au-
+// delà, sur une carte compagnon d'environ 220 px, un tronçon devient un
+// pixel illisible en roulant.
+export const GAUGE_SEGMENTS_MIN = 2
+export const GAUGE_SEGMENTS_MAX = 10
+
+// Couleur fixe ou couleur de la zone du moment — voir `Block.gauge_color_mode`.
+// Même contrat que `CompanionSettings::GAUGE_COLOR_MODES` côté Rails.
+export const GAUGE_COLOR_MODES = ['fixed', 'auto'] as const
+export type GaugeColorMode = (typeof GAUGE_COLOR_MODES)[number]
 
 const METRIC_LABEL_OVERRIDES: Record<string, string> = {
   ascent: 'D+',

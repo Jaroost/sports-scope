@@ -273,6 +273,68 @@ class CompanionSettingsTest < ActiveSupport::TestCase
     assert_equal "big", result["pages"].first["cells"].first["block"]["mode"]
   end
 
+  def metric_block(metric, gauge_row: "1", **extra)
+    { "kind" => "metric", "metric" => metric,
+      "layout" => { "value" => "0-center", "gauge" => gauge_row } }.merge(extra)
+  end
+
+  test "la forme et la couleur de la jauge sont gardées, sur une jauge de zones comme sur une plage libre" do
+    # Contrairement à `gauge_kind`, ces quatre clés s'appliquent aussi à une
+    # jauge de zones (`heart_rate`) : `gauge_fill`/`gauge_color_mode`
+    # explicites y cassent la correspondance tronçon↔zone côté appli.
+    zones = only([ preset("pages" => [ { "kind" => "list", "blocks" => [
+      metric_block("heart_rate", "gauge_fill" => "full", "gauge_segments" => 8,
+                   "gauge_color_mode" => "fixed", "gauge_color" => "#ff0000")
+    ] } ]) ])["pages"].first["blocks"].first
+
+    assert_equal "full", zones["gauge_fill"]
+    assert_equal 8, zones["gauge_segments"]
+    assert_equal "fixed", zones["gauge_color_mode"]
+    assert_equal "#ff0000", zones["gauge_color"]
+
+    range = only([ preset("pages" => [ { "kind" => "list", "blocks" => [
+      metric_block("speed", "gauge_fill" => "segments", "gauge_color_mode" => "auto")
+    ] } ]) ])["pages"].first["blocks"].first
+
+    assert_equal "segments", range["gauge_fill"]
+    assert_equal "auto", range["gauge_color_mode"]
+  end
+
+  test "une forme ou une échelle de couleur de jauge inconnue est retirée, pas remplacée" do
+    # `nil` (clé absente) et non un repli deviné : c'est l'appli qui choisit
+    # alors le rendu d'avant ce réglage, propre à la nature de la jauge.
+    block = only([ preset("pages" => [ { "kind" => "list", "blocks" => [
+      metric_block("speed", "gauge_fill" => "arc-en-ciel", "gauge_color_mode" => "aléatoire")
+    ] } ]) ])["pages"].first["blocks"].first
+
+    assert_nil block["gauge_fill"]
+    assert_nil block["gauge_color_mode"]
+  end
+
+  test "le nombre de tronçons de la jauge est borné à 2..10" do
+    trop_bas = only([ preset("pages" => [ { "kind" => "list", "blocks" => [
+      metric_block("speed", "gauge_segments" => 1)
+    ] } ]) ])["pages"].first["blocks"].first
+    trop_haut = only([ preset("pages" => [ { "kind" => "list", "blocks" => [
+      metric_block("speed", "gauge_segments" => 99)
+    ] } ]) ])["pages"].first["blocks"].first
+
+    assert_equal 2, trop_bas["gauge_segments"]
+    assert_equal 10, trop_haut["gauge_segments"]
+  end
+
+  test "la forme/couleur de la jauge est ignorée quand aucune jauge n'est posée" do
+    # Mêmes clés que `min`/`max`/`gauge_kind` : mortes sans `layout.gauge`, le
+    # serveur ne doit pas les garder pour rien.
+    block = only([ preset("pages" => [ { "kind" => "list", "blocks" => [
+      metric_block("speed", gauge_row: nil, "gauge_fill" => "full", "gauge_color" => "#ff0000")
+    ] } ]) ])["pages"].first["blocks"].first
+
+    assert_nil block["layout"]["gauge"]
+    assert_nil block["gauge_fill"]
+    assert_nil block["gauge_color"]
+  end
+
   test "une mesure inconnue retire la cellule" do
     # Mieux qu'une case qui afficherait un tiret pour toujours — un tiret
     # permanent se lit comme un capteur en panne.

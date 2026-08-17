@@ -1653,6 +1653,10 @@ fr:
       gauge_kind: "Jauge"
       range_min: "Min"
       range_max: "Max"
+      gauge_fill: "Remplissage"
+      gauge_segments: "Nombre de tronçons"
+      gauge_color_mode: "Couleur"
+      gauge_color: "Couleur fixe"
       altitude_window_km: "Fenêtre roulante (km)"
       altitude_window_km_placeholder: "Profil entier"
       altitude_window_km_hint: "Sur un tracé suivi, n'affiche que les prochains kilomètres, qui défilent à mesure qu'on avance — laissez vide pour le profil entier du tracé."
@@ -1775,6 +1779,12 @@ fr:
       gauge_kinds:
         range: "Plage réglée"
         dynamic: "Plage dynamique"
+      gauge_fills:
+        segments: "En tronçons"
+        full: "Pleine"
+      gauge_color_modes:
+        fixed: "Fixe"
+        auto: "Automatique (par zone)"
       layout_tokens:
         icon: "Icône"
         label: "Étiquette"

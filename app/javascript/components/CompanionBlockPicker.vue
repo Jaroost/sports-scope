@@ -24,7 +24,7 @@
 // que ça tient ? — était justement ce qu'elle ne montrait pas. Le rapport de la
 // case et le facteur d'échelle sont donc les mêmes que dans la grille de
 // l'éditeur (`styleFor`), à un budget de tuile près.
-import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, nextTick, ref, watch } from 'vue'
 import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
@@ -596,7 +596,20 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('close')
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
+// La dialogue défile — voir l'en-tête du fichier. Sans ce réglage, elle
+// s'ouvre toujours en haut et il faut redescendre jusqu'au composant qu'on
+// modifie, à chaque fois qu'on revient l'ajuster.
+const currentTileEl = ref<HTMLElement | null>(null)
+function setCurrentTileRef(el: Element | null, tileBlock: Block) {
+  if (isChoiceOf(props.block, tileBlock)) currentTileEl.value = el as HTMLElement | null
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  if (props.block) {
+    nextTick(() => currentTileEl.value?.scrollIntoView({ block: 'center' }))
+  }
+})
 onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
@@ -1049,6 +1062,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               type="button"
               class="cbpk-tile"
               :class="{ 'cbpk-tile--current': isChoiceOf(block, tile.block) }"
+              :ref="(el) => setCurrentTileRef(el as Element | null, tile.block)"
               @click="choose(tile.block)"
             >
               <!-- La boîte extérieure garde la place d'une tuile pleine, celle de

@@ -195,11 +195,11 @@ module CompanionSettings
   # Les mesures affichables. Exactement les clés de `MetricId` côté Dart, dans le
   # même ordre : c'est la liste que l'éditeur déroule.
   METRICS = %w[
-    duration moving_time pause_time distance speed speed_avg speed_max
-    heart_rate hr_zone hr_avg hr_max
-    power power_zone power_avg power_np power_max power_balance
-    cadence cadence_avg cadence_max
-    ascent altitude grade grade_avg grade_max
+    duration moving_time pause_time distance speed speed_avg speed_max speed_min
+    heart_rate hr_zone hr_avg hr_max hr_min
+    power power_zone power_avg power_np power_max power_min power_balance
+    cadence cadence_avg cadence_max cadence_min
+    ascent altitude grade grade_avg grade_max grade_min
     climb_rate climb_rate_avg climb_rate_max
     calories calories_per_hour tss gears
     chainring_position sprocket_position gear_ratio
@@ -288,10 +288,10 @@ module CompanionSettings
   # dont la plage n'a pas le même sens qu'un min/max de chiffre ; `gears`,
   # dont la valeur (« 50 × 15 ») n'est pas un nombre unique.
   RANGE_GAUGE_METRICS = %w[
-    distance speed speed_avg speed_max
-    hr_avg hr_max power_avg power_np power_max
-    cadence cadence_avg cadence_max
-    ascent altitude grade grade_avg grade_max
+    distance speed speed_avg speed_max speed_min
+    hr_avg hr_max hr_min power_avg power_np power_max power_min
+    cadence cadence_avg cadence_max cadence_min
+    ascent altitude grade grade_avg grade_max grade_min
     climb_rate climb_rate_avg climb_rate_max
     calories calories_per_hour tss
     chainring_position sprocket_position gear_ratio
@@ -428,6 +428,15 @@ module CompanionSettings
   # côté Dart) : une borne courte évite juste d'enregistrer un texte que
   # personne ne lira jamais en entier, pas de faire perdre le réglage.
   MAX_METRIC_LABEL_LENGTH = 24
+
+  # Combien d'annotations de coin (`layout.secondary`) un bloc `metric` peut
+  # porter — même esprit que `MAX_BAND_METRICS` : au-delà, les chiffres
+  # deviennent illisibles d'un coup d'œil en roulant.
+  MAX_SECONDARY_METRICS = 4
+
+  # Un repère de coin (« MOY », « MAX »…) tient collé au chiffre, pas un
+  # libellé de bloc — borne bien plus courte que `MAX_METRIC_LABEL_LENGTH`.
+  MAX_SECONDARY_LABEL_LENGTH = 6
 
   # La fenêtre roulante d'un bloc `altitude_profile` (`window_km`) : sous la
   # borne basse, la fenêtre serait plus étroite que le pas d'échantillonnage
@@ -1023,7 +1032,39 @@ module CompanionSettings
     row_heights = sanitize_row_heights(source["row_heights"])
     layout["row_heights"] = row_heights if row_heights
 
+    secondary = sanitize_secondary_slots(source["secondary"], layout, gauge_row)
+    layout["secondary"] = secondary if secondary.any?
+
     compact_layout_rows(layout)
+  end
+
+  # Les annotations de coin d'un bloc `metric` (`speed_avg` en bas à gauche,
+  # `speed_max` en bas à droite…) : chacune sa propre mesure, sa propre
+  # position, un petit repère facultatif (« MOY », « MAX »… réglé dans
+  # l'éditeur, sinon déduit du suffixe de la clé côté appli). « Premier posé
+  # gagne » sur une collision — même règle que partout ailleurs dans ce
+  # document (recouvrement de grille, clé de profil dupliquée) : une position
+  # déjà prise par un token classique ou par une entrée précédente fait
+  # ignorer la suivante plutôt que de deviner où la caser. Jamais sur la
+  # rangée de la jauge, pour la même raison qu'un token classique.
+  def sanitize_secondary_slots(raw, layout, gauge_row)
+    return [] unless raw.is_a?(Array)
+
+    claimed = layout.values_at("icon", "label", "unit", "value").compact
+
+    raw.first(MAX_SECONDARY_METRICS).filter_map do |entry|
+      next nil unless entry.is_a?(Hash)
+      next nil unless METRICS.include?(entry["metric"])
+
+      pos = valid_position(entry["position"])
+      next nil unless pos
+      next nil if gauge_row && pos.start_with?("#{gauge_row}-")
+      next nil if claimed.include?(pos)
+
+      claimed << pos
+      label = entry["label"].to_s.strip[0, MAX_SECONDARY_LABEL_LENGTH]
+      { "metric" => entry["metric"], "position" => pos, "label" => label.presence }.compact
+    end
   end
 
   # Le poids de chaque rangée, ex. `{"1" => "large"}` pour mettre le chiffre
@@ -1057,18 +1098,28 @@ module CompanionSettings
   # document composé à la main pourrait accumuler des rangées arbitrairement
   # grandes tout en restant *valide* case par case. `row_heights` n'est pas
   # une position : il ne compte pas pour établir la liste des rangées, mais
-  # ses propres clés doivent suivre le même renumérotage.
+  # ses propres clés doivent suivre le même renumérotage — `secondary` non
+  # plus une position à lui seul (c'est une liste), mais chacune de ses
+  # entrées en porte une, et doit suivre le même renumérotage que les tokens
+  # classiques.
   def compact_layout_rows(layout)
     rows = layout.filter_map do |token, value|
-      next nil if token == "row_heights"
+      next nil if token == "row_heights" || token == "secondary"
       token == "gauge" ? value.to_i : value.split("-").first.to_i
-    end.uniq.sort
-    mapping = rows.each_with_index.to_h
+    end
+    rows += Array(layout["secondary"]).map { |entry| entry["position"].split("-").first.to_i }
+    mapping = rows.uniq.sort.each_with_index.to_h
 
     layout.filter_map do |token, value|
       case token
       when "row_heights"
         remapped = value.filter_map { |row, size| [ mapping[row.to_i].to_s, size ] if mapping.key?(row.to_i) }.to_h
+        [ token, remapped ] unless remapped.empty?
+      when "secondary"
+        remapped = value.map do |entry|
+          row, col = entry["position"].split("-", 2)
+          entry.merge("position" => "#{mapping[row.to_i]}-#{col}")
+        end
         [ token, remapped ] unless remapped.empty?
       when "gauge"
         [ token, mapping[value.to_i].to_s ]

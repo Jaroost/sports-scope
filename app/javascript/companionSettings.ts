@@ -108,6 +108,18 @@ export interface MetricLayout {
   // positions). Une rangée absente d'ici vaut `'normal'`, jamais écrite pour
   // rester silencieuse (même contrat que `CompanionSettings::ROW_HEIGHTS`).
   row_heights?: Record<string, 'small' | 'large'>
+  // Les annotations de coin — `speed_avg` en bas à gauche, `speed_max` en bas
+  // à droite… Chacune sa propre mesure, sa propre position, un petit repère
+  // facultatif (sinon déduit du suffixe de la clé côté appli, `_avg` → « MOY »
+  // etc.). Même contrat que `CompanionSettings::MAX_SECONDARY_METRICS`/
+  // `sanitize_secondary_slots` côté Rails.
+  secondary?: SecondaryMetricSlot[]
+}
+
+export interface SecondaryMetricSlot {
+  metric: string
+  position: string
+  label?: string
 }
 
 export type LayoutToken = 'icon' | 'label' | 'unit' | 'value'
@@ -115,6 +127,10 @@ export type LayoutToken = 'icon' | 'label' | 'unit' | 'value'
 export const LAYOUT_TOKEN_ORDER: LayoutToken[] = ['icon', 'label', 'unit', 'value']
 
 export const MAX_LAYOUT_ROWS = 4
+
+// Même borne que `CompanionSettings::MAX_SECONDARY_METRICS` côté Rails —
+// au-delà, les chiffres deviennent illisibles d'un coup d'œil en roulant.
+export const MAX_SECONDARY_METRICS = 4
 
 // La disposition qu'un ancien `mode` de bloc `metric` dessinait — même table
 // que `CompanionSettings::LEGACY_LAYOUTS` côté Rails, pour que l'aperçu d'un
@@ -184,7 +200,11 @@ export interface MetricLayoutRow {
   // l'aperçu de réserver 3 tiers égaux (motif « barre d'outils »,
   // gauche/centre/droite) plutôt que de ne réserver que ce qui est occupé —
   // sinon une case seule à droite se retrouverait centrée, pas au bord.
-  columns: { col: 'left' | 'center' | 'right'; tokens: LayoutToken[] }[]
+  //
+  // `secondary` : au plus une annotation de coin par case (une collision est
+  // déjà tranchée en amont, côté Rails ou par [layoutRows] lui-même) —
+  // `undefined` sur une case qui n'en porte pas.
+  columns: { col: 'left' | 'center' | 'right'; tokens: LayoutToken[]; secondary?: SecondaryMetricSlot }[]
 }
 
 // Le poids d'une rangée, en facteur `flex-grow` — même rapport des deux
@@ -209,11 +229,14 @@ export const ROW_HEIGHT_SCALE: Record<RowHeight, number> = { small: 0.5, normal:
 // `CompanionBlockPicker` (savoir quelles cases de la grille d'édition sont
 // déjà prises).
 export function layoutRows(layout: MetricLayout): MetricLayoutRow[] {
-  const rows = new Map<number, { gauge: boolean; columns: Map<string, LayoutToken[]> }>()
+  const rows = new Map<
+    number,
+    { gauge: boolean; columns: Map<string, LayoutToken[]>; secondary: Map<string, SecondaryMetricSlot> }
+  >()
   const ensure = (row: number) => {
     let entry = rows.get(row)
     if (!entry) {
-      entry = { gauge: false, columns: new Map() }
+      entry = { gauge: false, columns: new Map(), secondary: new Map() }
       rows.set(row, entry)
     }
     return entry
@@ -228,6 +251,17 @@ export function layoutRows(layout: MetricLayout): MetricLayoutRow[] {
     entry.columns.set(pos.col, tokens)
   }
 
+  // Une case déjà prise par un token classique garde son occupant — même
+  // ordre de priorité que côté Rails (`sanitize_secondary_slots`), rejoué
+  // ici pour que l'aperçu ne dessine jamais ce que le serveur retirerait.
+  for (const slot of layout.secondary || []) {
+    const pos = parsePosition(slot.position)
+    if (!pos) continue
+    const entry = ensure(pos.row)
+    if (entry.columns.has(pos.col) || entry.secondary.has(pos.col)) continue
+    entry.secondary.set(pos.col, slot)
+  }
+
   const gaugeRow = parseGaugeRow(layout.gauge)
   if (gaugeRow != null) ensure(gaugeRow).gauge = true
 
@@ -238,7 +272,7 @@ export function layoutRows(layout: MetricLayout): MetricLayoutRow[] {
       gauge: entry.gauge,
       height: layout.row_heights?.[String(row)] || 'normal',
       columns: (['left', 'center', 'right'] as const)
-        .map((col) => ({ col, tokens: entry.columns.get(col) || [] })),
+        .map((col) => ({ col, tokens: entry.columns.get(col) || [], secondary: entry.secondary.get(col) })),
     }))
 }
 
@@ -795,6 +829,7 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   speed: { value: '32', name: 'Vitesse', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 32 },
   speed_avg: { value: '27', name: 'Vitesse moyenne', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 27 },
   speed_max: { value: '61', name: 'Vitesse max', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 61 },
+  speed_min: { value: '4', name: 'Vitesse minimum', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 4 },
   heart_rate: { value: '154', name: 'Cardio', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
   hr_zone: { value: 'Z3', name: 'Zone cardio', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
   // `background` et non `zone` : ces trois-là restent dans `RANGE_GAUGE_METRICS`
@@ -813,6 +848,10 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
     value: '178', name: 'Cardio max', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 178,
     background: '#E0C000',
   },
+  hr_min: {
+    value: '61', name: 'Cardio minimum', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 61,
+    background: '#E0C000',
+  },
   power: { value: '248', name: 'Puissance', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
   power_zone: { value: 'Z3', name: 'Zone de puissance', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
   power_avg: {
@@ -827,6 +866,10 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
     value: '744', name: 'Puissance max', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 744,
     background: '#E0C000',
   },
+  power_min: {
+    value: '0', name: 'Puissance minimum', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 0,
+    background: '#E0C000',
+  },
   // Pas de `numeric` : comme `gears`, la valeur affichée est une paire
   // (« 48 / 52 »), pas un chiffre unique qu'une jauge pourrait situer — même
   // raison que son absence de `RANGE_GAUGE_METRICS`.
@@ -834,6 +877,7 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   cadence: { value: '88', name: 'Cadence', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
   cadence_avg: { value: '84', name: 'Cadence moyenne', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 84 },
   cadence_max: { value: '112', name: 'Cadence max', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 112 },
+  cadence_min: { value: '0', name: 'Cadence minimum', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 0 },
   ascent: { value: '640', name: 'Dénivelé positif', unit: 'm', icon: 'fa-solid fa-arrow-trend-up', numeric: 640 },
   altitude: { value: '1204', name: 'Altitude', unit: 'm', icon: 'fa-solid fa-mountain', numeric: 1204 },
   grade: {
@@ -847,6 +891,10 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   grade_max: {
     value: '14', name: 'Pente max', unit: '%', background: colorForGrade(14),
     icon: 'fa-solid fa-arrow-up-right-dots', numeric: 14,
+  },
+  grade_min: {
+    value: '-9', name: 'Pente minimum', unit: '%', background: colorForGrade(-9),
+    icon: 'fa-solid fa-arrow-up-right-dots', numeric: -9,
   },
   climb_rate: {
     value: '620', name: 'Vitesse ascensionnelle', unit: 'm/h',

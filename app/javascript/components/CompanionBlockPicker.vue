@@ -30,10 +30,10 @@ import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
   blockChoices, blockFor, isChoiceOf, isDurationMetric, isDynamicGaugeMetric, isRangeGaugeMetric,
-  DEFAULT_METRIC_LAYOUT, LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS, METRIC_RANGE_DEFAULTS,
+  DEFAULT_METRIC_LAYOUT, LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS, MAX_SECONDARY_METRICS, METRIC_RANGE_DEFAULTS,
   metricDropdownLabel, metricLayout, metricSample, NATURAL_LINE_SIZE, previewScale,
   type Block, type BlockChoice, type Catalog, type CellSize, type LayoutToken, type MetricLayout,
-  type MetricLayoutPreset, type RowHeight,
+  type MetricLayoutPreset, type RowHeight, type SecondaryMetricSlot,
 } from '../companionSettings'
 
 const props = defineProps<{
@@ -107,6 +107,18 @@ const gaugeKindChoice = ref<string>(props.block?.gauge_kind || 'range')
 // grille l'y pose, sans glisser-déposer. `null` : un tap sur une case
 // occupée la libère à la place.
 const selectedToken = ref<LayoutToken | 'gauge' | null>(null)
+
+// ── Les annotations de coin (`layout.secondary`) ────────────────────────────
+//
+// Même geste palette → case que les jetons classiques, mais un slot
+// secondaire porte en plus sa propre mesure : il faut donc d'abord la
+// choisir (`newSecondaryMetric`/`newSecondaryLabel`), « Ajouter » le posant
+// en attente (`pendingSecondary`) plutôt que directement dans `layout` — un
+// tap sur une case le place ensuite, exactement comme pour icône/étiquette/
+// unité/chiffre.
+const newSecondaryMetric = ref<string>(props.catalog.metrics[0])
+const newSecondaryLabel = ref<string>('')
+const pendingSecondary = ref<{ metric: string; label?: string } | null>(null)
 
 // ── La disposition d'un bloc `clock` ────────────────────────────────────────
 //
@@ -243,6 +255,51 @@ function tokensAt(row: number, col: 'left' | 'center' | 'right'): LayoutToken[] 
   })
 }
 
+// L'annotation de coin posée dans cette case, s'il y en a une — au plus une :
+// `placeSecondary` refuse une case déjà prise par un jeton classique, et
+// `placeToken` évince l'annotation qui s'y trouverait déjà.
+function secondaryAt(row: number, col: 'left' | 'center' | 'right'): SecondaryMetricSlot | undefined {
+  return (currentLayout.value.secondary || []).find((slot) => {
+    const [r, c] = slot.position.split('-')
+    return Number(r) === row && c === col
+  })
+}
+
+// « Ajouter » ne pose rien tout de suite : il met la mesure choisie « en
+// main » (comme un jeton de palette), à poser sur une case d'un tap suivant.
+function addPendingSecondary() {
+  if ((currentLayout.value.secondary || []).length >= MAX_SECONDARY_METRICS) return
+  pendingSecondary.value = { metric: newSecondaryMetric.value, label: newSecondaryLabel.value.trim() || undefined }
+  selectedToken.value = null
+  newSecondaryLabel.value = ''
+}
+
+// Refuse une case déjà prise par un jeton classique ou par la jauge — même
+// règle que côté Rails (`sanitize_secondary_slots`) : la poser quand même
+// ferait composer ici ce que le serveur retirerait à l'enregistrement.
+function placeSecondary(row: number, col: 'left' | 'center' | 'right') {
+  const slot = pendingSecondary.value
+  if (!slot) return
+  if (tokensAt(row, col).length || currentLayout.value.gauge === String(row)) return
+
+  const next = (currentLayout.value.secondary || []).filter((entry) => entry.position !== `${row}-${col}`)
+  next.push({ metric: slot.metric, position: `${row}-${col}`, label: slot.label })
+  layout.value = { ...layout.value, secondary: next }
+  pendingSecondary.value = null
+}
+
+function removeSecondaryAt(row: number, col: 'left' | 'center' | 'right') {
+  const next = (currentLayout.value.secondary || []).filter((entry) => entry.position !== `${row}-${col}`)
+  layout.value = { ...layout.value, secondary: next.length ? next : undefined }
+}
+
+// Retirer directement depuis la liste des annotations déjà posées (pas
+// besoin de retrouver puis cliquer la bonne case de la grille).
+function removeSecondarySlot(slot: SecondaryMetricSlot) {
+  const next = (currentLayout.value.secondary || []).filter((entry) => entry.position !== slot.position)
+  layout.value = { ...layout.value, secondary: next.length ? next : undefined }
+}
+
 // Une rangée de plus que la plus haute utilisée, dans la limite du plafond —
 // toujours une case vide où poser le prochain élément, sans bouton
 // « + » séparé : elle apparaît d'elle-même, et disparaît de la même façon
@@ -254,6 +311,7 @@ const highestUsedRow = computed(() => {
     if (pos) rows.push(Number(pos.split('-')[0]))
   }
   if (currentLayout.value.gauge) rows.push(Number(currentLayout.value.gauge))
+  for (const slot of currentLayout.value.secondary || []) rows.push(Number(slot.position.split('-')[0]))
   return rows.length ? Math.max(...rows) : 0
 })
 const visibleRowCount = computed(() => Math.min(highestUsedRow.value + 2, MAX_LAYOUT_ROWS))
@@ -270,9 +328,21 @@ function placeToken(token: 'icon' | 'label' | 'unit' | 'value' | 'gauge', row: n
       if (next[other]?.startsWith(`${row}-`)) delete next[other]
     }
     next.gauge = String(row)
+    // La jauge est une barre pleine largeur : elle évince aussi les
+    // annotations de coin de sa rangée, texte ou annotation.
+    if (next.secondary?.some((entry) => entry.position.startsWith(`${row}-`))) {
+      next.secondary = next.secondary.filter((entry) => !entry.position.startsWith(`${row}-`))
+    }
   } else {
     if (next.gauge === String(row)) delete next.gauge
     next[token] = `${row}-${col}`
+    // Un jeton classique gagne toujours sur une annotation de coin déjà posée
+    // dans la même case — même arbitrage que côté Rails
+    // (`sanitize_secondary_slots`) : la garder mentirait, le serveur la
+    // retirerait au premier enregistrement.
+    if (next.secondary?.some((entry) => entry.position === `${row}-${col}`)) {
+      next.secondary = next.secondary.filter((entry) => entry.position !== `${row}-${col}`)
+    }
   }
   if (!next.value) next.value = `${next.gauge === '0' ? 1 : 0}-center`
   layout.value = next
@@ -298,14 +368,26 @@ function setRowHeight(row: number, height: RowHeight) {
 }
 
 function onCellClick(row: number, col: 'left' | 'center' | 'right') {
+  if (pendingSecondary.value) {
+    placeSecondary(row, col)
+    return
+  }
   if (selectedToken.value) {
     placeToken(selectedToken.value, row, col)
     selectedToken.value = null
     return
   }
-  for (const token of tokensAt(row, col)) {
-    if (token !== 'value') removeToken(token)
+  const tokens = tokensAt(row, col)
+  if (tokens.length) {
+    for (const token of tokens) {
+      if (token !== 'value') removeToken(token)
+    }
+    return
   }
+  // Rien de classique ici : un tap libère l'annotation de coin éventuelle —
+  // les deux ne coexistent jamais dans la même case (`placeSecondary` le
+  // refuse déjà), donc ceci ne fait rien si la case était déjà vide.
+  removeSecondaryAt(row, col)
 }
 
 function onGaugeRowClick(row: number) {
@@ -699,6 +781,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                         {{ t(`companion.settings.layout_tokens.${token}`) }}
                       </span>
                     </template>
+                    <span v-if="secondaryAt(row - 1, col)" class="cbpk-grid-token cbpk-grid-token--secondary">
+                      {{ secondaryAt(row - 1, col)!.label || metricLabel(secondaryAt(row - 1, col)!.metric) }}
+                    </span>
                   </button>
 
                   <!-- La jauge garde toujours sa hauteur naturelle (une barre
@@ -757,6 +842,55 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               >
                 <i :class="ic" aria-hidden="true"></i>
               </button>
+            </div>
+
+            <!-- Les annotations de coin : une mesure dérivée (min/moyenne/max)
+                 plus petite que le chiffre principal, avec son propre repère.
+                 « Ajouter » met la mesure choisie en main comme un jeton de
+                 palette — un tap sur une case libre la pose ensuite. -->
+            <div class="cbpk-secondary">
+              <p class="cbpk-secondary-title small text-body-secondary mb-1">
+                {{ t('companion.settings.secondary_values') }}
+              </p>
+
+              <div v-if="currentLayout.secondary?.length" class="cbpk-palette mb-2">
+                <button
+                  v-for="slot in currentLayout.secondary"
+                  :key="slot.position"
+                  type="button"
+                  class="cbpk-chip cbpk-chip--placed"
+                  @click="removeSecondarySlot(slot)"
+                >
+                  {{ slot.label || metricLabel(slot.metric) }} ✕
+                </button>
+              </div>
+
+              <div class="cbpk-secondary-form">
+                <select v-model="newSecondaryMetric" class="form-select form-select-sm">
+                  <option v-for="m in sortedMetrics" :key="m" :value="m">
+                    {{ metricLabel(m) }}
+                  </option>
+                </select>
+                <input
+                  v-model="newSecondaryLabel"
+                  type="text"
+                  class="form-control form-control-sm"
+                  :placeholder="t('companion.settings.secondary_label_placeholder')"
+                  maxlength="6"
+                >
+                <button
+                  type="button"
+                  class="cbpk-chip"
+                  :class="{ 'cbpk-chip--selected': !!pendingSecondary }"
+                  :disabled="(currentLayout.secondary?.length || 0) >= MAX_SECONDARY_METRICS"
+                  @click="addPendingSecondary"
+                >
+                  {{ t('companion.settings.secondary_add') }}
+                </button>
+              </div>
+              <p v-if="pendingSecondary" class="cbpk-secondary-hint small text-body-secondary">
+                {{ t('companion.settings.secondary_add_hint') }}
+              </p>
             </div>
 
             <button type="button" class="btn btn-sm btn-outline-secondary" @click="saveLayoutPreset">
@@ -1048,6 +1182,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   background: var(--bs-secondary-bg, #e9ecef);
   white-space: nowrap;
 }
+/* Une annotation de coin se distingue des jetons classiques (icône/étiquette/
+   unité/chiffre) par un liseré en plus du fond — c'est un chiffre d'une autre
+   mesure, pas un simple élément de mise en forme du même chiffre. */
+.cbpk-grid-token--secondary {
+  border: 1px dashed var(--bs-primary);
+}
 
 /* Le poids d'une rangée — pas un des 3 tiers de la grille (`flex: 1 1 0`
    comme les cases), à côté d'elle plutôt que dedans. */
@@ -1114,6 +1254,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   border-color: var(--bs-primary);
   outline: 2px solid var(--bs-primary);
   outline-offset: -2px;
+}
+
+.cbpk-secondary-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+.cbpk-secondary-form select {
+  flex: 1 1 12rem;
+}
+.cbpk-secondary-form input {
+  flex: 0 1 6rem;
 }
 
 /* Des vignettes de même taille : on compare des dessins, et deux tailles

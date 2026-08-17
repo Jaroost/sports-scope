@@ -217,6 +217,18 @@ function weatherBarHeight(mm: number) {
 const sample = computed(() => metricSample(props.block.metric, props.block.format))
 const icon = computed(() => metricIcon(props.block))
 
+// Le repère par défaut d'une annotation de coin sans `label` — même règle
+// que côté appli (`MetricView._defaultSecondaryCaption`) : déduite du
+// suffixe de la clé, jamais du nom complet de la mesure, trop long pour un
+// coin de carte.
+function secondaryCaption(slot: { metric: string; label?: string }): string | null {
+  if (slot.label) return slot.label
+  if (slot.metric.endsWith('_avg')) return 'MOY'
+  if (slot.metric.endsWith('_max')) return 'MAX'
+  if (slot.metric.endsWith('_min')) return 'MIN'
+  return null
+}
+
 // Le contenu fixe d'un bloc `clock` — pas de `MetricId` pour porter un nom ou
 // une icône par défaut, contrairement à `metricSample`/`metricIcon`.
 const clockSample = computed(() => ({
@@ -516,6 +528,12 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
               <span v-else-if="token === 'unit'" class="cbp-metric-unit">{{ sample.unit }}</span>
               <span v-else class="cbp-big" :class="{ 'cbp-big--gauge': gaugeKind }">{{ sample.value }}</span>
             </template>
+            <span v-if="col.secondary" class="cbp-metric-secondary">
+              <span v-if="secondaryCaption(col.secondary)" class="cbp-metric-secondary-label">
+                {{ secondaryCaption(col.secondary) }}
+              </span>
+              {{ metricSample(col.secondary.metric).value }}
+            </span>
           </div>
         </div>
       </template>
@@ -1525,6 +1543,20 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
   opacity: 0.6;
   text-transform: uppercase;
   white-space: nowrap;
+}
+/* Une annotation de coin reste minuscule à dessein : c'est un repère à côté
+   du chiffre principal, pas une seconde carte dans la carte — pas d'icône ni
+   d'unité, contrairement aux jetons classiques. */
+.cbp-metric-secondary {
+  font-size: 0.7em;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cbp-metric-secondary-label {
+  font-size: 0.85em;
+  opacity: 0.6;
+  text-transform: uppercase;
+  margin-right: 0.2em;
 }
 .cbp-metric-gauge-row {
   width: 100%;

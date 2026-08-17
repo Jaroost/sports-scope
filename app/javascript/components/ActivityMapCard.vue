@@ -106,7 +106,7 @@ let suppressSelectionFit = false
 let selectionFitTimer: ReturnType<typeof setTimeout> | null = null
 const climbMarkers = []
 // Map climb.startIdx → marker DOM element so the parent-driven hover state
-// (hoveredClimbStartIdx prop) can add/remove the `.climb-marker-active` class.
+// (hoveredClimbStartIdx prop) can add/remove the `.activity-climb-marker-active` class.
 const climbMarkerEls = new Map()
 const photoMarkers = []
 let _maplibregl = null
@@ -530,13 +530,14 @@ function installClimbMarkers(maplibregl) {
 function buildClimbMarkerEl(climb) {
   const el = document.createElement('div')
   const catClass = climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'
-  el.className = `climb-marker ${catClass}`
+  const lengthStr = climb.lengthM >= 1000 ? `${(climb.lengthM / 1000).toFixed(1)} km` : `${Math.round(climb.lengthM)} m`
+  el.className = `activity-climb-marker ${catClass}`
   el.innerHTML = `
     <i class="fa-solid fa-mountain" aria-hidden="true"></i>
-    <span class="climb-marker-stats">+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>
-    ${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}
+    <span class="activity-climb-marker-stats">${lengthStr}&nbsp;·&nbsp;+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>
+    ${climb.category ? `<span class="activity-climb-marker-cat">${climb.category}</span>` : ''}
   `
-  el.title = `${climb.category ? 'Cat ' + climb.category + ' · ' : ''}+${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
+  el.title = `${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
     // Clic = on committe la sélection (le parent pin le tronçon) puis on zoome dessus.
@@ -1121,10 +1122,10 @@ watch(() => props.photos, () => {
 }, { deep: true })
 
 // Mirror the table → marker hover: parent flips `hoveredClimbStartIdx`,
-// we toggle `.climb-marker-active` on the right marker element.
+// we toggle `.activity-climb-marker-active` on the right marker element.
 watch(() => props.hoveredClimbStartIdx, (curr, prev) => {
-  if (prev != null) climbMarkerEls.get(prev)?.classList.remove('climb-marker-active')
-  if (curr != null) climbMarkerEls.get(curr)?.classList.add('climb-marker-active')
+  if (prev != null) climbMarkerEls.get(prev)?.classList.remove('activity-climb-marker-active')
+  if (curr != null) climbMarkerEls.get(curr)?.classList.add('activity-climb-marker-active')
 })
 
 watch(state, () => state.save(), { deep: true })
@@ -1480,7 +1481,7 @@ onBeforeUnmount(() => {
 <style>
 /* DOM markers + the route hover cursor are created via document.createElement,
    so they live outside Vue's scoped CSS. Keep these rules global. */
-.climb-marker {
+.activity-climb-marker {
   display: inline-flex;
   align-items: center;
   gap: 0.22rem;
@@ -1499,17 +1500,17 @@ onBeforeUnmount(() => {
   user-select: none;
   line-height: 1.4;
 }
-.climb-marker:hover,
-.climb-marker-active {
+.activity-climb-marker:hover,
+.activity-climb-marker-active {
   transform: translateY(-6px) scale(1.06);
   box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.45);
 }
 /* `-active` is "remote-controlled" from the stats table; nudge it above
    nearby markers so it's never hidden. */
-.climb-marker-active { z-index: 2; }
-.climb-marker i { font-size: 0.74rem; }
-.climb-marker .climb-marker-stats { color: #212529; }
-.climb-marker .climb-marker-cat {
+.activity-climb-marker-active { z-index: 2; }
+.activity-climb-marker i { font-size: 0.74rem; }
+.activity-climb-marker .activity-climb-marker-stats { color: #212529; }
+.activity-climb-marker .activity-climb-marker-cat {
   background: currentColor;
   color: #fff !important;
   padding: 0 0.3rem;
@@ -1519,7 +1520,7 @@ onBeforeUnmount(() => {
   min-width: 0.85rem;
   text-align: center;
 }
-.climb-marker .climb-marker-cat::first-letter { text-transform: uppercase; }
+.activity-climb-marker .activity-climb-marker-cat::first-letter { text-transform: uppercase; }
 
 .climb-cat-HC    { color: #111827; }
 .climb-cat-1     { color: #b91c1c; }

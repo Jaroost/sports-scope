@@ -78,6 +78,17 @@ const overrideStyle = computed(() => ({
 // `companionSettings`, parce que la dialogue de choix s'en sert aussi.
 const shape = computed(() => blockShape(props.block))
 
+// Le pire pourcentage de BATTERY_SAMPLE, restreint à `block.sensor` s'il en
+// vise un — même repli que côté appli (BatteryBlockView._compact) quand
+// aucun appareil de l'aperçu ne porte ce capteur.
+const batteryCompactSample = computed(() => {
+  const pool = props.block.sensor
+    ? BATTERY_SAMPLE.filter((d) => d.kind === props.block.sensor)
+    : BATTERY_SAMPLE
+  if (!pool.length) return null
+  return pool.reduce((worst, d) => (d.percent < worst.percent ? d : worst))
+})
+
 // La palette de `ui/zone_colors.dart` — saturée et non teintée, c'est ce qui la
 // rend lisible en plein soleil sur le fond sombre.
 const ZONE_COLORS: Record<string, string> = {
@@ -753,7 +764,12 @@ const altitudeProfileClipId = useId()
          plausibles et faux, comme le reste de cet aperçu. -->
     <template v-else-if="block.kind === 'battery'">
       <div v-if="shape.batteryCompact" class="cbp-card cbp-center" :style="overrideStyle">
-        <div class="cbp-radar-distance" style="color: #EF5350">14 %</div>
+        <div
+          v-if="batteryCompactSample"
+          class="cbp-radar-distance"
+          :style="batteryCompactSample.percent <= 20 ? 'color: #EF5350' : undefined"
+        >{{ batteryCompactSample.percent }} %</div>
+        <div v-else class="cbp-radar-distance">—</div>
       </div>
       <div v-else class="cbp-card" :style="overrideStyle">
         <div class="cbp-title">Batteries</div>

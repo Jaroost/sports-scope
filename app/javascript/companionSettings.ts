@@ -23,6 +23,11 @@ export interface Block {
   mode?: string
   metric?: string
   source?: string
+  // Le capteur visé par un bloc `battery` en mode `compact` — une clé de
+  // `Catalog.battery_sensors`. Absent : le pire pourcentage connu, tous
+  // appareils confondus, le comportement d'avant ce réglage. Sans effet en
+  // mode `list`, qui les liste déjà tous.
+  sensor?: string
   // Ce que joue un bloc `bell` — 'bell' (sonnette), 'horn' (klaxon) ou
   // 'booster', voir `CompanionSettings::BELL_SOUNDS`. Absent vaut 'bell'.
   sound?: string
@@ -409,6 +414,9 @@ export interface Catalog {
   page_kinds: string[]
   blocks: Record<string, string[]>
   zone_sources: string[]
+  // Le capteur qu'un bloc `battery` en mode `compact` peut viser — voir
+  // `Block.sensor`.
+  battery_sensors: string[]
   metrics: string[]
   // Ce qu'une case du bandeau ou de la bande de l'encoche peut porter à la
   // place d'une mesure — une seule aujourd'hui, `sleep`. À part de `metrics`
@@ -549,7 +557,7 @@ export function blockChoices(catalog: Catalog): BlockChoice[] {
 export function blockFor(
   choice: BlockChoice,
   params: {
-    metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
+    metric?: string; source?: string; sensor?: string; series?: string; format?: string; min?: number; max?: number
     windowKm?: number; sound?: string
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
@@ -580,6 +588,10 @@ export function blockFor(
     }
   }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
+  // Absent (`undefined`) plutôt qu'un repli : c'est « tous les appareils
+  // confondus », le comportement d'avant ce réglage — même raisonnement que
+  // `window_km`.
+  if (choice.kind === 'battery' && params.sensor) block.sensor = params.sensor
   if (choice.kind === 'bell') block.sound = params.sound || 'bell'
   if (choice.kind === 'mark_lap') block.series = params.series || 'default'
   // Absent (`undefined`) plutôt qu'un repli : c'est le profil entier, pas une
@@ -916,10 +928,13 @@ export const LAP_SUMMARY_SAMPLE = [
 
 // Deux appareils plausibles pour la vignette du bloc `battery` : un cardio
 // encore confortable, un Varia sous le seuil par défaut (20 %) — pour que
-// l'aperçu montre aussi la couleur d'alerte, pas seulement la forme.
+// l'aperçu montre aussi la couleur d'alerte, pas seulement la forme. `kind`
+// sert au mode compact : quand `block.sensor` en vise un, l'aperçu montre son
+// pourcentage plutôt que le pire des deux, pour que choisir un capteur se
+// voie vraiment changer quelque chose.
 export const BATTERY_SAMPLE = [
-  { label: 'Cardio', percent: 62 },
-  { label: 'Varia', percent: 14 },
+  { label: 'Cardio', percent: 62, kind: 'heart_rate' },
+  { label: 'Varia', percent: 14, kind: 'radar' },
 ]
 
 // Trois cols plausibles pour la vignette : un déjà grimpé (grisé), un en

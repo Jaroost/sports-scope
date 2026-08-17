@@ -164,6 +164,14 @@ module CompanionSettings
 
   ZONE_SOURCES = %w[hr power].freeze
 
+  # Le capteur visé par un bloc `battery` en mode `compact` — restreint le
+  # « pire pourcentage connu » à cet appareil-là plutôt qu'à tous les appareils
+  # connus (sinon la ceinture cardio oubliée sur la table gagnerait contre le
+  # capteur de puissance qu'on veut réellement surveiller). Sous-ensemble de
+  # `SENSORS` : seuls les capteurs BLE publient une batterie, pas les capteurs
+  # du téléphone (`gps`, `barometer`, `light`, `compass`).
+  BATTERY_SENSORS = %w[heart_rate power cadence gears radar].freeze
+
   PAGE_KINDS = %w[map grid list laps].freeze
 
   # Les conditions de sortie qu'une page rangée derrière le menu peut porter pour
@@ -421,6 +429,7 @@ module CompanionSettings
       "page_kinds" => PAGE_KINDS,
       "blocks" => BLOCKS,
       "zone_sources" => ZONE_SOURCES,
+      "battery_sensors" => BATTERY_SENSORS,
       "metrics" => METRICS,
       "band_actions" => BAND_ACTIONS,
       "band_radar" => BAND_RADAR,
@@ -952,6 +961,12 @@ module CompanionSettings
       if window_km.is_a?(Numeric) && window_km.positive?
         block["window_km"] = window_km.to_f.clamp(ALTITUDE_PROFILE_WINDOW_KM_RANGE)
       end
+    when "battery"
+      # Absent (`nil`) plutôt qu'un repli : c'est « tous les appareils
+      # confondus », le comportement d'avant ce réglage, pas un capteur deviné.
+      # Sans effet en mode `list`, réglable quand même : rien n'empêche de
+      # choisir le capteur avant le mode dans l'éditeur.
+      block["sensor"] = raw["sensor"] if BATTERY_SENSORS.include?(raw["sensor"])
     end
 
     color = sanitize_hex_color(raw["color"])

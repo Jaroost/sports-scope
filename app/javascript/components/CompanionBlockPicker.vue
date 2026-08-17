@@ -74,6 +74,10 @@ const emit = defineEmits<{
 
 const metric = ref(props.block?.metric || props.catalog.metrics[0])
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
+// Vide plutôt qu'un premier jeton par défaut, contrairement à `source` : « tous
+// les appareils confondus » est un choix à part entière (le comportement
+// d'avant ce réglage), pas un repli sur le premier capteur de la liste.
+const sensor = ref<string>(props.block?.sensor || '')
 const sound = ref(props.block?.sound || props.catalog.bell_sounds[0])
 const series = ref(props.block?.series || 'default')
 const format = ref(props.block?.format || 'hm')
@@ -405,7 +409,8 @@ const groups = computed(() => {
         .map((choice) => ({
           key: `${choice.kind}:${choice.mode || ''}`,
           block: blockFor(choice, {
-            metric: metric.value, source: source.value, sound: sound.value, series: series.value, format: format.value,
+            metric: metric.value, source: source.value, sensor: sensor.value || undefined,
+            sound: sound.value, series: series.value, format: format.value,
             layout: currentLayout.value, icon: iconChoice.value, label: labelChoice.value,
             gaugeKind: effectiveGaugeKind.value || undefined,
             clockLayout: clockLayout.value, clockIcon: clockIconChoice.value,
@@ -592,6 +597,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </select>
             </label>
 
+            <label v-if="group.kind === 'battery'" class="cbpk-param small">
+              {{ t('companion.settings.battery_sensor') }}
+              <select v-model="sensor" class="form-select form-select-sm">
+                <option value="">{{ t('companion.settings.battery_sensor_any') }}</option>
+                <option v-for="s in catalog.battery_sensors" :key="s" :value="s">
+                  {{ t(`companion.settings.sensors.${s}`) }}
+                </option>
+              </select>
+            </label>
+
             <label v-if="group.kind === 'bell'" class="cbpk-param small">
               {{ t('companion.settings.sound') }}
               <select v-model="sound" class="form-select form-select-sm">
@@ -624,6 +639,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               >
             </label>
           </div>
+
+          <p v-if="group.kind === 'battery'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.battery_sensor_hint') }}
+          </p>
 
           <p v-if="group.kind === 'mark_lap'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.lap_series_cols_hint') }}

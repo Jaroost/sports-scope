@@ -1,6 +1,9 @@
 # Pulls a user's Strava activity *summaries* into `strava_activities`.
 #
-# - Full sync (default first run, or `full: true`): paginates the whole history.
+# - Full sync (default first run, or `full: true`): paginates the whole history,
+#   and prunes local activities that Strava no longer returns (deleted on
+#   Strava's side) — incremental sync never sees enough of the history to tell
+#   a deletion apart from "just not fetched yet", so pruning only runs there.
 # - Incremental sync: only fetches activities newer than the most recent one
 #   already stored (via Strava's `after` epoch param), with a small overlap so
 #   an activity saved exactly on the boundary isn't missed.
@@ -30,6 +33,7 @@ class StravaSyncService
   def call(full: false)
     after = full ? nil : incremental_after
     count = 0
+    seen_strava_ids = full ? [] : nil
 
     (1..MAX_PAGES).each do |page|
       params = { per_page: PER_PAGE, page: page }
@@ -40,16 +44,27 @@ class StravaSyncService
 
       batch.each do |summary|
         StravaActivity.upsert_summary(user: @user, summary: summary)
+        seen_strava_ids << (summary['id'] || summary[:id]) if full
         count += 1
       end
 
       break if batch.length < PER_PAGE
     end
 
+    prune_deleted(seen_strava_ids) if full
+
     count
   end
 
   private
+
+  # A full sync just re-fetched the user's entire Strava history: any locally
+  # stored activity whose `strava_id` isn't in that set no longer exists on
+  # Strava (deleted there) and is pruned so caches derived from it (e.g.
+  # `PerformanceRecords`, keyed off `UserActivities.data_version`) refresh.
+  def prune_deleted(seen_strava_ids)
+    @user.strava_activities.where.not(strava_id: seen_strava_ids).destroy_all
+  end
 
   def incremental_after
     latest = @user.strava_activities.maximum(:started_at)

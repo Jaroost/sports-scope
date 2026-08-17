@@ -121,18 +121,31 @@ function sessionVerdict(channel: ZoneChannel): string {
   return 'mixed'
 }
 
-// On base le conseil sur la puissance quand elle est là (plus fiable), sinon la FC.
-const advice = computed(() => {
-  const channel = data.value?.power ?? data.value?.hr ?? null
-  if (!channel) return null
+// Un conseil par canal disponible : puissance et FC ne racontent pas forcément la même
+// histoire (temps passé en zone grise en FC dérivée à l'effort, pic de puissance ignoré
+// par une FC qui traîne...). Quand les deux sont là, on les affiche côte à côte plutôt
+// que de n'en garder qu'un — avec un libellé pour les distinguer.
+function buildAdvice(key: 'power' | 'hr', channel: ZoneChannel, label: string | null) {
   const verdict = sessionVerdict(channel)
   return {
+    key,
+    label,
     verdict,
     color: ADVICE_COLOR[verdict] ?? '#6c757d',
     // Ce que la séance ÉTAIT, puis ce qu'il faut travailler pour progresser.
     text: t(`strava.zones.advice_${verdict}`),
     improve: t(`strava.zones.improve_${verdict}`),
   }
+}
+
+const advices = computed(() => {
+  const d = data.value
+  if (!d) return []
+  const both = !!(d.power && d.hr)
+  const list = []
+  if (d.power) list.push(buildAdvice('power', d.power, both ? t('strava.zones.power_title') : null))
+  if (d.hr) list.push(buildAdvice('hr', d.hr, both ? t('strava.zones.hr_title') : null))
+  return list
 })
 </script>
 
@@ -159,17 +172,17 @@ const advice = computed(() => {
         <p v-if="!hasAny" class="text-muted mb-0">{{ t('strava.zones.no_data') }}</p>
 
         <template v-else>
-          <!-- Conseil de séance : encart mis en avant, comme les recos de la page performance. -->
-          <div v-if="advice" class="zone-advice mb-3" :style="{ borderColor: advice.color }">
+          <!-- Conseil de séance : un encart par canal disponible (puissance / FC). -->
+          <div v-for="a in advices" :key="a.key" class="zone-advice mb-3" :style="{ borderColor: a.color }">
             <div class="d-flex flex-wrap align-items-center gap-2">
-              <span class="zone-advice-badge" :style="{ backgroundColor: advice.color }">
-                <i class="fa-solid fa-lightbulb me-1" aria-hidden="true"></i>{{ t('strava.zones.advice_label') }}
+              <span class="zone-advice-badge" :style="{ backgroundColor: a.color }">
+                <i class="fa-solid fa-lightbulb me-1" aria-hidden="true"></i>{{ t('strava.zones.advice_label') }}<template v-if="a.label"> · {{ a.label }}</template>
               </span>
-              <span class="small">{{ advice.text }}</span>
+              <span class="small">{{ a.text }}</span>
             </div>
             <div class="zone-advice-improve small d-flex align-items-baseline gap-2">
-              <i class="fa-solid fa-arrow-trend-up" :style="{ color: advice.color }" aria-hidden="true"></i>
-              <span><span class="fw-semibold">{{ t('strava.zones.improve_label') }} :</span> {{ advice.improve }}</span>
+              <i class="fa-solid fa-arrow-trend-up" :style="{ color: a.color }" aria-hidden="true"></i>
+              <span><span class="fw-semibold">{{ t('strava.zones.improve_label') }} :</span> {{ a.improve }}</span>
             </div>
           </div>
 

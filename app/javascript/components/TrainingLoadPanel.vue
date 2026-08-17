@@ -22,9 +22,13 @@ const props = defineProps({
 })
 
 // Résumé remonté au parent pour les badges de sous-onglets : la reco du jour (badge
-// « Forme & fatigue ») et le verdict de polarisation des zones (badge « Zones »).
+// « Forme & fatigue ») et le verdict de polarisation des zones (badge « Zones »), un
+// par canal (puissance / FC) quand les deux sont disponibles.
 const emit = defineEmits<{
-  summary: [payload: { recoAction: string | null; zonesVerdict: string | null }]
+  summary: [payload: {
+    recoAction: string | null
+    zonesVerdict: { power: string | null; hr: string | null }
+  }]
   // Demande de changement de sous-onglet (le parent possède la navigation) : le seuil
   // FC se modifie dans « Seuils », pas ici.
   goto: [sub: 'ftp']
@@ -121,13 +125,16 @@ const {
 } = useTrainingPlan(data, plannedLoads, plannedDistances)
 const currentZone = computed(() => current.value?.form_zone ?? 'neutral')
 
-// Remonte le résumé au parent dès que la reco ou les zones changent. Verdict des zones :
-// on privilégie la puissance (vélo), à défaut la FC — un seul canal pour un badge.
+// Remonte le résumé au parent dès que la reco ou les zones changent. Un verdict par
+// canal : puissance et FC peuvent raconter des polarisations différentes.
 watchEffect(() => {
-  const zoneChannel = data.value?.zones?.power ?? data.value?.zones?.hr ?? null
+  const zones = data.value?.zones
   emit('summary', {
     recoAction: recommendation.value?.action ?? null,
-    zonesVerdict: zoneChannel ? polarize(zoneChannel).verdict : null,
+    zonesVerdict: {
+      power: zones?.power ? polarize(zones.power).verdict : null,
+      hr: zones?.hr ? polarize(zones.hr).verdict : null,
+    },
   })
 })
 

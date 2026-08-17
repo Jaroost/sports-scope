@@ -267,19 +267,20 @@ rememberHashTarget()
 const ftpWatts = ref<number | null>(null)
 const lthrBpm = ref<number | null>(null)
 const recoAction = ref<string | null>(null)
-const zonesVerdict = ref<string | null>(null)
+const zonesVerdict = ref<{ power: string | null; hr: string | null }>({ power: null, hr: null })
 
 function onFtpSummary(p: { ftpWatts: number | null }) { ftpWatts.value = p.ftpWatts }
 function onLthrSummary(p: { lthrBpm: number | null }) { lthrBpm.value = p.lthrBpm }
-function onFitnessSummary(p: { recoAction: string | null; zonesVerdict: string | null }) {
+function onFitnessSummary(p: { recoAction: string | null; zonesVerdict: { power: string | null; hr: string | null } }) {
   recoAction.value = p.recoAction
   zonesVerdict.value = p.zonesVerdict
 }
 
 // Badges d'un sous-onglet : une liste, parce que « Seuils » en porte deux (watts et
-// bpm). Chacun garde la couleur de son panneau — l'orange de la FTP, le rouge du
-// cardio — pour qu'on sache lequel on lit sans lire l'unité. Vide tant qu'aucun
-// panneau n'a répondu.
+// bpm), et « Zones » aussi désormais quand les deux canaux sont disponibles. Chacun
+// garde la couleur de son panneau — l'orange de la puissance, le rouge du cardio —
+// pour qu'on sache lequel on lit sans lire l'unité. Vide tant qu'aucun panneau n'a
+// répondu.
 function subBadge(key: FitnessSub): { text: string; color: string }[] {
   if (key === 'ftp') {
     return [
@@ -291,8 +292,21 @@ function subBadge(key: FitnessSub): { text: string; color: string }[] {
     const a = recoAction.value
     return a ? [{ text: t(`performance.load.reco.action_${a}`), color: ACTION_STYLE[a]?.color ?? '#6c757d' }] : []
   }
-  const v = zonesVerdict.value
-  return v ? [{ text: t(`performance.zones.verdict_${v}`), color: ZONE_VERDICT_COLOR[v as keyof typeof ZONE_VERDICT_COLOR] ?? '#6c757d' }] : []
+  // Ici la couleur code la qualité du verdict (vert = bien polarisé, rouge = trop
+  // d'intensité...), pas le canal — donc quand les deux sont présents, un préfixe
+  // texte (Puissance / FC) les distingue au lieu de la couleur.
+  const { power, hr } = zonesVerdict.value
+  const both = !!(power && hr)
+  return [
+    ...(power ? [{
+      text: (both ? `${t('performance.zones.power_title')} : ` : '') + t(`performance.zones.verdict_${power}`),
+      color: ZONE_VERDICT_COLOR[power as keyof typeof ZONE_VERDICT_COLOR] ?? '#6c757d',
+    }] : []),
+    ...(hr ? [{
+      text: (both ? `${t('performance.zones.hr_title')} : ` : '') + t(`performance.zones.verdict_${hr}`),
+      color: ZONE_VERDICT_COLOR[hr as keyof typeof ZONE_VERDICT_COLOR] ?? '#6c757d',
+    }] : []),
+  ]
 }
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''

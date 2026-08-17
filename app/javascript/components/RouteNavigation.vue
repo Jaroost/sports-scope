@@ -15,7 +15,7 @@ import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../nav
 import type { Waypoint } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, buildCompanionClimbProfile, buildCompanionRouteClimbs,
-  profileYAt, buildTurnChain,
+  buildCompanionRouteProfile, profileYAt, buildTurnChain,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
   INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep, navStateFor,
   resyncOnTurn, turnLabel, turnsNearTap, turnIcon,
@@ -38,8 +38,8 @@ import NavControlsPanel from './NavControlsPanel.vue'
 import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import {
-  companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, inCompanionApp,
-  registerOfflineMapsHandlers, pushOfflineMapsState,
+  companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, companionRouteProfile,
+  inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
@@ -178,6 +178,22 @@ registerOfflineMapsHandlers({
   remove: () => { void removeOfflineMap() },
 })
 onBeforeUnmount(() => registerOfflineMapsHandlers(null))
+
+// L'appli demande la veille depuis un bouton natif, sur une page de données
+// qui n'a pas cette carte sous les yeux (voir SleepBlock côté Dart). On
+// réutilise le chemin exact de l'appui long — toggleScreenOffManual, plus bas
+// — pour que l'appli n'ait rien de plus à apprendre : même remise à zéro
+// d'autoWoken, même message `screen` renvoyé en confirmation. Le garde
+// `!screenOff.value` évite qu'un second appui (bouton retapé, page rechargée)
+// ne rendorme ce qui vient de se réveiller.
+registerSleepHandlers({
+  enter: () => { if (!screenOff.value) toggleScreenOffManual() },
+  // Même garde symétrique : un second appui sur « sortir de veille » (bouton
+  // Di2 retapé, page rechargée pendant que l'écran était déjà réveillé) ne
+  // doit pas rendormir ce qui vient de se réveiller.
+  exit: () => { if (screenOff.value) toggleScreenOffManual() },
+})
+onBeforeUnmount(() => registerSleepHandlers(null))
 
 watch(
   () => ({
@@ -691,6 +707,85 @@ function applyTrackOpacity() {
   if (map.getLayer(TURN_FLOW_LAYER)) map.setPaintProperty(TURN_FLOW_LAYER, 'line-opacity', opacity)
 }
 
+// ─── Trajet réellement parcouru (application companion) ────────────────────────
+// La carte ne le calcule pas elle-même — elle ne sait pas où le cycliste est
+// réellement passé, seulement où le tracé prévu l'emmène. C'est l'appli qui pousse
+// les positions acceptées par son enregistreur (voir CLAUDE.md, TraveledPathTracker),
+// en delta à chaque tic, avec un renvoi complet marqué `reset` après un rechargement
+// de page. Style par défaut ci-dessous tant que `configureTraveledPath` n'est pas
+// encore arrivé (premier rendu, avant que l'appli ait eu le temps de répondre).
+const traveledPathColor = computed(() => companionStore.traveledPathStyle.value?.color ?? '#2196f3')
+const traveledPathWidth = computed(() => companionStore.traveledPathStyle.value?.width ?? 4)
+const traveledPathOpacity = computed(() => companionStore.traveledPathStyle.value?.opacity ?? 0.85)
+
+function emptyLineStringFeature() {
+  return { type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: [] as number[][] } }
+}
+
+// Pose (ou replace) la couche du trajet parcouru — appelée au premier chargement de la
+// carte, après chaque changement de style, ET à la fin d'installRouteLayers.
+//
+// INDÉPENDANTE du tracé prévu à dessein : contrairement à installRouteLayers, elle
+// tourne aussi **en mode libre** (aucun itinéraire choisi), où `hasRoute` reste faux et
+// installRouteLayers n'est jamais appelée — le trajet réellement parcouru n'a aucune
+// raison de dépendre de l'existence d'un tracé à suivre.
+//
+// Idempotente (elle vérifie avant de créer) pour deux raisons : elle peut être rappelée
+// sans qu'un style ait été rechargé entre-temps (un itinéraire choisi en pleine
+// navigation libre), et parce qu'il faut alors REPOSITIONNER la couche déjà là — sinon
+// elle resterait sous le tracé qu'on vient d'ajouter, ou pire, entièrement recouverte.
+function installOrReorderTraveledPath() {
+  if (!map) return
+  const beforeId = map.getLayer('nav-turn-highlight') ? 'nav-turn-highlight' : undefined
+
+  if (!map.getSource('nav-traveled')) {
+    map.addSource('nav-traveled', { type: 'geojson', data: emptyLineStringFeature() })
+  }
+  if (!map.getLayer('nav-traveled-path')) {
+    map.addLayer({
+      id: 'nav-traveled-path',
+      type: 'line',
+      source: 'nav-traveled',
+      layout: ROUTE_LINE_LAYOUT,
+      paint: {
+        'line-color': traveledPathColor.value,
+        'line-width': zoomWidthExpr(traveledPathWidth.value, true),
+        'line-opacity': traveledPathOpacity.value,
+      },
+    }, beforeId)
+  } else if (beforeId) {
+    map.moveLayer('nav-traveled-path', beforeId)
+  }
+  applyTraveledPathData()
+}
+
+// Repeint la ligne du trajet parcouru à son style courant, sans effet avant la pose de
+// la couche (voir installOrReorderTraveledPath, qui la crée déjà aux bonnes valeurs).
+function applyTraveledPathPaint() {
+  if (!map || !map.getLayer('nav-traveled-path')) return
+  map.setPaintProperty('nav-traveled-path', 'line-color', traveledPathColor.value)
+  map.setPaintProperty('nav-traveled-path', 'line-width', zoomWidthExpr(traveledPathWidth.value, true))
+  map.setPaintProperty('nav-traveled-path', 'line-opacity', traveledPathOpacity.value)
+}
+watch(companionStore.traveledPathStyle, applyTraveledPathPaint)
+
+// Remplace la géométrie de la ligne par ce que le store a accumulé. `setData` seul,
+// jamais `addLayer` : la couche existe déjà, poser une géométrie qui grandit ne coûte
+// pas de rechargement de style — même idiome que `nav-route`/`nav-remaining`.
+//
+// Conversion `{lat, lng}` → `[lng, lat]` À CET ENDROIT SEULEMENT : c'est l'ordre GeoJSON,
+// l'inverse de la lecture GPS habituelle, et c'est le seul point du fichier qui la fait —
+// une inversion ici se verrait comme une diagonale à travers la carte plutôt que par une
+// erreur de compilation.
+function applyTraveledPathData() {
+  if (!map) return
+  const src = map.getSource('nav-traveled')
+  if (!src) return
+  const coordinates = companionStore.traveledPathPoints.value.map((p) => [ p.lng, p.lat ])
+  src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates } })
+}
+watch(companionStore.traveledPathPoints, applyTraveledPathData)
+
 // ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
 // Points d'ancrage (waypoints) de l'itinéraire chargé : source de vérité de l'édition.
 // Présents pour un itinéraire chargé depuis la liste / un lien partagé ; vides pour une
@@ -1030,7 +1125,8 @@ function rebuildRouteState(newGeometry: Coord[], hints: VoiceHint[]) {
   cumDistM = buildDistancesM(geometry)
   ;({ line: displayLine, wscale: displayWScale } = buildOffsetDisplayLine(geometry, cumDistM))
   climbs = attachClimbNames(detectClimbs(alts, cumDistM), geometry, routeClimbNames)
-  companionRouteClimbs(buildCompanionRouteClimbs(climbs, cumDistM))
+  companionRouteClimbs(buildCompanionRouteClimbs(climbs, alts, cumDistM))
+  companionRouteProfile(buildCompanionRouteProfile(alts, cumDistM))
   // Prefer BRouter's turn-by-turn voicehints; fall back to geometric detection
   // for routes saved before voicehints were captured.
   turnsFromBRouter = hints.length > 0
@@ -1372,7 +1468,8 @@ function unloadRoute() {
   cumDistM = []
   climbs = []
   routeClimbNames = []
-  companionRouteClimbs(buildCompanionRouteClimbs([], []))
+  companionRouteClimbs(buildCompanionRouteClimbs([], [], []))
+  companionRouteProfile(buildCompanionRouteProfile([], []))
   // Un `startIdx` est un indice dans CE tracé : le prochain trajet chargé peut,
   // par pure coïncidence, ouvrir un col au même indice numérique. Sans ce reset,
   // le cache le prendrait pour « déjà affiché » et ne republierait jamais son
@@ -1406,6 +1503,9 @@ function unloadRoute() {
   turnMarkers = []
   if (map) {
     stopTurnFlow()
+    // 'nav-traveled-path'/'nav-traveled' n'y sont PAS : retirer l'itinéraire ne doit
+    // pas effacer où on est réellement passé, et installOrReorderTraveledPath est de
+    // toute façon idempotente — rien ne la force à être recréée ici.
     for (const id of ['nav-route-border', 'nav-route-done', 'nav-route-remaining', 'nav-turn-highlight', TURN_FLOW_LAYER]) {
       if (map.getLayer(id)) map.removeLayer(id)
     }
@@ -1642,6 +1742,10 @@ async function initMap() {
         coords.forEach((c) => b.extend(c))
         map.fitBounds(b, { padding: 60, duration: 0, pitch: 0 })
       }
+      // Indépendant du tracé : installRouteLayers l'a déjà posé ci-dessus si un
+      // itinéraire est chargé, mais le mode libre (rien à installer, cf. commentaire
+      // au-dessus) n'a personne d'autre pour le faire.
+      installOrReorderTraveledPath()
       resolve()
     })
   })
@@ -1679,6 +1783,11 @@ function installRouteLayers() {
   })
   hiKey = ''
   refreshTurnHighlight()
+  // Repositionne le trajet parcouru juste sous la mise en avant du virage qu'on vient
+  // de recréer — sans ça il resterait sous le tracé prévu qu'on venait d'ajouter, ou
+  // pire, disparaîtrait sous elle. Voir installOrReorderTraveledPath : la ligne du
+  // trajet n'est PAS installée ici, elle vit indépendamment du tracé (mode libre compris).
+  installOrReorderTraveledPath()
 }
 
 // Longueur (m) de tracé colorée de part et d'autre du virage mis en avant. Assez court
@@ -2024,6 +2133,9 @@ function setMapStyle(id: string) {
 function afterStyleLoad() {
   // Pas de couches de tracé à réinstaller en mode libre.
   if (hasRoute.value) installRouteLayers()
+  // Le trajet parcouru, lui, n'a jamais dépendu du tracé : un changement de fond de
+  // carte efface TOUTES les sources/couches (setStyle), y compris en mode libre.
+  else installOrReorderTraveledPath()
   // Replace le marqueur sur la position AFFICHÉE (snappée et décalée sur sa voie si on est
   // sur le tracé), pas sur le GPS brut, pour rester cohérent avec la boucle d'animation.
   const restore = anchorPos ?? lastPos
@@ -2676,6 +2788,16 @@ function updateOffRoute(here: LngLat, idx: number) {
 }
 
 function updateBearing(pos: GeolocationPosition, here: LngLat) {
+  // Le cycliste a explicitement forcé la boussole côté appli — geste
+  // volontaire pour un couvert forestier où SA PROPRE vitesse GPS (celle
+  // captée ici, dans ce WebView) n'est presque jamais nulle : les paliers
+  // GPS/déplacement ci-dessous gagneraient donc systématiquement et
+  // ignoreraient en silence le cap forcé, précisément le cas qu'on veut
+  // couvrir. D'où la priorité absolue, avant tout calcul GPS local.
+  if (companionStore.headingForced.value && companionStore.headingDeg.value != null) {
+    currentBearing = companionStore.headingDeg.value
+    return
+  }
   const speed = pos.coords.speed
   const heading = pos.coords.heading
   if (heading != null && !Number.isNaN(heading) && speed != null && speed > MIN_SPEED_MS) {

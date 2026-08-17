@@ -368,7 +368,7 @@ class CompanionSettingsTest < ActiveSupport::TestCase
         "blocks" => [ { "kind" => "training_budget", "mode" => "day", "metric" => "power" } ] }
     ]) ])
 
-    assert_equal({ "kind" => "training_budget", "mode" => "day" },
+    assert_equal({ "kind" => "training_budget", "mode" => "day", "col" => 0 },
                  result["pages"].first["blocks"].first)
   end
 

@@ -132,6 +132,20 @@ Rails.application.routes.draw do
   # Météo historique (Open-Meteo) — conditions du jour d'une activité
   get "/api/weather", to: "weather#show"
 
+  # Catalogue de frames radar RainViewer (public, cf. RainviewerController) — bloc
+  # "précipitations" du dashboard de l'appli compagnon.
+  get "/api/rainviewer", to: "rainviewer#show"
+
+  # Prévision de précipitations à 15 min (Open-Meteo, public, cf.
+  # PrecipitationForecastController) — bloc "orage qui arrive" du dashboard de
+  # l'appli compagnon.
+  get "/api/precipitation_forecast", to: "precipitation_forecast#show"
+
+  # Prévision météo horaire (Open-Meteo, public, cf. WeatherForecastController)
+  # — bloc "prévisions météo" du dashboard de l'appli compagnon (température,
+  # vent, précipitations sur les heures qui viennent).
+  get "/api/weather_forecast", to: "weather_forecast#show"
+
   # Route builder (JSON CRUD consumed by Vue components)
   get "/api/routes", to: "routes#index"
   post "/api/routes", to: "routes#create"

@@ -531,15 +531,12 @@ function buildClimbMarkerEl(climb) {
   const el = document.createElement('div')
   const catClass = climb.category ? `climb-cat-${climb.category}` : 'climb-cat-uncat'
   el.className = `climb-marker ${catClass}`
-  const lengthStr = climb.lengthM >= 1000
-    ? `${(climb.lengthM / 1000).toFixed(1)} km`
-    : `${Math.round(climb.lengthM)} m`
   el.innerHTML = `
     <i class="fa-solid fa-mountain" aria-hidden="true"></i>
     <span class="climb-marker-stats">+${Math.round(climb.gain)}m&nbsp;·&nbsp;${climb.avgGrade.toFixed(1)}%</span>
     ${climb.category ? `<span class="climb-marker-cat">${climb.category}</span>` : ''}
   `
-  el.title = `${t('strava.click_to_select_climb')}\n${climb.category ? 'Cat ' + climb.category + ' · ' : ''}${lengthStr} · +${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
+  el.title = `${climb.category ? 'Cat ' + climb.category + ' · ' : ''}+${Math.round(climb.gain)} m · ${climb.avgGrade.toFixed(1)} %`
   el.addEventListener('click', (ev) => {
     ev.stopPropagation()
     // Clic = on committe la sélection (le parent pin le tronçon) puis on zoome dessus.

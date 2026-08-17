@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   occupancy, maxSpan, fitCells, gridSideOf, blockChoices, blockFor, isChoiceOf, metricSample,
-  canHideBehindMenu, phoneCell, PHONE_GRID,
+  canHideBehindMenu, phoneCell, PHONE_GRID, DEFAULT_METRIC_LAYOUT,
   type Catalog, type Cell, type Page,
 } from './companionSettings'
 
@@ -70,10 +70,19 @@ const catalog: Catalog = {
   blocks: { metric: ['big', 'compact'], zones: ['bar'], empty: [] },
   zone_sources: ['hr', 'power'],
   metrics: ['speed', 'power'],
+  band_actions: ['sleep'],
+  band_radar: ['radar_distance', 'radar_count', 'radar_gauge'],
+  band_bell: ['bell_bell', 'bell_horn'],
+  bell_sounds: ['bell', 'horn'],
+  button_gestures: ['click', 'double_click', 'long_press'],
+  button_actions: ['next_page', 'previous_page', 'bell', 'horn', 'start_lap', 'sleep', 'wake'],
   sensors: ['gps'],
   activities: ['cycling', 'mtb', 'hiking'],
   max_band_metrics: 4,
   max_grid_side: 6,
+  max_list_cols: 4,
+  icons: ['fa-solid fa-heart'],
+  menu_conditions: ['route_active', 'descending', 'near_col'],
 }
 
 describe('blockChoices', () => {
@@ -103,9 +112,12 @@ describe('blockFor', () => {
 
     expect(zones).toEqual({ kind: 'zones', mode: 'bar', source: 'power' })
 
-    const metric = blockFor({ kind: 'metric', mode: 'big' }, { metric: 'speed', source: 'power' })
+    // `metric` n'a plus de mode : sa disposition se compose librement
+    // (`layout`), pas choisie parmi quelques formes figées — voir
+    // `DEFAULT_METRIC_LAYOUT`.
+    const metric = blockFor({ kind: 'metric' }, { metric: 'speed', source: 'power' })
 
-    expect(metric).toEqual({ kind: 'metric', mode: 'big', metric: 'speed' })
+    expect(metric).toEqual({ kind: 'metric', metric: 'speed', layout: DEFAULT_METRIC_LAYOUT })
   })
 
   it('n\'écrit pas de mode pour un genre qui n\'en a pas', () => {

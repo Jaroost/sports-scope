@@ -1,6 +1,16 @@
 import { ref, computed, watch, type Ref } from 'vue'
-import { companionStore, type CompanionGears } from './stores/companionStore'
-import type { CompanionClimbProfile, CompanionNavState, CompanionRouteClimbs } from './navHelpers'
+import {
+  companionStore,
+  type CompanionGears,
+  type CompanionTraveledPathPoint,
+  type CompanionTraveledPathStyle,
+} from './stores/companionStore'
+import type {
+  CompanionClimbProfile,
+  CompanionNavState,
+  CompanionRouteClimbs,
+  CompanionRouteProfile,
+} from './navHelpers'
 import { csrfToken } from './csrf'
 import {
   useTrainingPlan,
@@ -28,7 +38,17 @@ interface CompanionPayload {
   cadence?: number | null
   gears?: CompanionGears | null
   headingDeg?: number | null
+  // Le cycliste a explicitement forcé la boussole (couvert forestier, vitesse
+  // GPS trop bruitée pour distinguer un arrêt d'un mouvement) : `updateBearing`
+  // doit alors priori­ser ce cap avant son propre GPS, pas seulement en dernier
+  // recours comme d'habitude — voir sports-scope-companion, `RiderCompass.forced`.
+  headingForced?: boolean | null
   sensors?: { name: string; connected: boolean; kinds: string[] }[]
+  // Le trajet réellement parcouru, en delta — voir `TraveledPathTracker` côté
+  // sports-scope-companion. Contrairement au reste de cette charge utile,
+  // absent ou vide ne veut PAS dire « rien à afficher » mais « rien de neuf
+  // ce tic » : la ligne déjà affichée reste telle quelle.
+  traveledPath?: { points: CompanionTraveledPathPoint[]; reset?: boolean } | null
 }
 
 // Canal JavaScript injecté par le WebView de l'appli. Sa seule présence dit
@@ -57,6 +77,31 @@ export function inCompanionApp(): boolean {
 // à l'approche d'un virage.
 export function companionScreen(state: 'dimmed' | 'normal'): void {
   channel()?.postMessage(JSON.stringify({ type: 'screen', state }))
+}
+
+// ─── Veille demandée par l'appli ───────────────────────────────────────────
+//
+// L'appui long ne marche que sur la carte : une page de données de l'appli
+// peut vouloir la même veille sans avoir de geste à faire sur cette carte-là,
+// qu'elle ne montre pas. `sleepEnter()` (installCompanionBridge, plus bas) lui
+// donne donc une porte d'entrée, sur le même modèle que les commandes hors
+// ligne ci-dessous : RouteNavigation.vue s'enregistre tant que la page de
+// navigation est montée, et l'appli n'a qu'à appeler le geste, jamais à
+// dupliquer la logique de veille.
+interface SleepBridgeHandlers {
+  enter(): void
+  // Symétrique d'`enter`, pour un bouton Di2 réglé en « sortir de veille »
+  // (`ExitSleepAction` côté Dart) — le même geste que le tap sur le voile
+  // noir, mais déclenché sans qu'il y ait de voile sous le doigt.
+  exit(): void
+}
+
+let sleepHandlers: SleepBridgeHandlers | null = null
+
+// Appelé par RouteNavigation.vue au montage et au démontage (`null` alors) : un
+// bouton pressé après que la page de navigation a disparu ne doit rien faire.
+export function registerSleepHandlers(handlers: SleepBridgeHandlers | null): void {
+  sleepHandlers = handlers
 }
 
 // Dernier état de navigation publié, pour n'envoyer que ce qui change.
@@ -104,6 +149,13 @@ export function companionClimbProfile(profile: CompanionClimbProfile): void {
 // cols d'un tracé qu'on a quitté.
 export function companionRouteClimbs(climbs: CompanionRouteClimbs): void {
   channel()?.postMessage(JSON.stringify(climbs))
+}
+
+// Publie le profil d'altitude du tracé entier, une fois par (re)chargement —
+// même cadence que companionRouteClimbs (voir buildCompanionRouteProfile,
+// appelé depuis RouteNavigation.vue), jamais republié par position.
+export function companionRouteProfile(profile: CompanionRouteProfile): void {
+  channel()?.postMessage(JSON.stringify(profile))
 }
 
 // Une page web ne peut pas savoir si l'appli est installée : au mieux on sait
@@ -225,9 +277,12 @@ export function installCompanionBridge(): void {
   const target = window as unknown as {
     sportsScopeCompanion?: {
       push(payload: CompanionPayload): void
+      configureTraveledPath(style: CompanionTraveledPathStyle): void
       offlineStart(): void
       offlineCancel(): void
       offlineRemove(): void
+      sleepEnter(): void
+      sleepExit(): void
     }
   }
 
@@ -240,10 +295,22 @@ export function installCompanionBridge(): void {
           cadence: payload.cadence,
           gears: payload.gears,
           headingDeg: payload.headingDeg,
+          headingForced: payload.headingForced,
         })
+        if (payload.traveledPath) companionStore.applyTraveledPath(payload.traveledPath)
       } catch {
         // Une charge utile inattendue ne doit jamais casser la navigation :
         // mieux vaut des valeurs figées qu'une carte morte.
+      }
+    },
+    // Appel one-off, pas un champ de `push` : la couleur/largeur/opacité de la
+    // ligne ne change pas d'un tic à l'autre — voir `SensorBridge._sendTraveledPathConfig`
+    // côté sports-scope-companion.
+    configureTraveledPath(style: CompanionTraveledPathStyle) {
+      try {
+        companionStore.configureTraveledPath(style)
+      } catch {
+        // Même garde que `push` : un style malformé ne doit pas casser la navigation.
       }
     },
     // `?.` : aucun trajet affiché (page de navigation démontée, ou pas encore
@@ -251,6 +318,8 @@ export function installCompanionBridge(): void {
     offlineStart() { offlineHandlers?.start() },
     offlineCancel() { offlineHandlers?.cancel() },
     offlineRemove() { offlineHandlers?.remove() },
+    sleepEnter() { sleepHandlers?.enter() },
+    sleepExit() { sleepHandlers?.exit() },
   }
 
   // On annonce que le pont est prêt : l'appli répond par un état complet, sans

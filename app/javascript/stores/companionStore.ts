@@ -9,6 +9,24 @@ import { ref, computed } from 'vue'
 // les enregistre. La page reçoit donc un état déjà décodé et ne fait que
 // l'afficher.
 
+// Un point du trajet réellement parcouru, tel que publié par l'appli
+// (`TraveledPathTracker` côté sports-scope-companion). En `{lat, lng}` nommés
+// et non en tuple : GeoJSON veut `[lng, lat]`, l'ordre inverse de la lecture
+// GPS habituelle — la conversion se fait au point unique où RouteNavigation.vue
+// construit le `LineString`, jamais ici.
+export interface CompanionTraveledPathPoint {
+  lat: number
+  lng: number
+}
+
+// Couleur/largeur/opacité de la ligne du trajet parcouru, réglées par profil
+// de sortie côté site (`CompanionDashboard.vue`) et transmises telles quelles.
+export interface CompanionTraveledPathStyle {
+  color: string
+  width: number
+  opacity: number
+}
+
 export interface CompanionGears {
   // Positions brutes publiées par le Di2 (1 = plus facile).
   front: number
@@ -40,8 +58,21 @@ class CompanionStore {
   // la seule mesure d'ici qui ne vient pas d'un capteur du vélo, et la seule que
   // la page consomme au lieu de l'afficher — cf. updateBearing.
   readonly headingDeg = ref<number | null>(null)
+  // Le cycliste a explicitement forcé la boussole (pastille de l'appli, utile
+  // sous un couvert forestier où sa propre vitesse GPS reste rarement nulle).
+  // `updateBearing` doit alors la prioriser avant son propre GPS, pas
+  // seulement en dernier recours comme d'habitude.
+  readonly headingForced = ref(false)
   // Horodatage (ms) du dernier message reçu.
   readonly lastUpdate = ref(0)
+
+  // Le trajet réellement parcouru, accumulé au fil des envois de l'appli —
+  // voir `applyTraveledPath`. Ce n'est PAS remis à zéro par `update()` ni par
+  // `reset()` de la même façon que le reste : contrairement au cardio ou à la
+  // puissance, une valeur manquante ne veut pas dire « effacer la ligne »,
+  // seulement « rien de neuf ce tic ».
+  readonly traveledPathPoints = ref<CompanionTraveledPathPoint[]>([])
+  readonly traveledPathStyle = ref<CompanionTraveledPathStyle | null>(null)
 
   // Au moins une mesure à afficher.
   readonly hasValues = computed(() =>
@@ -61,6 +92,7 @@ class CompanionStore {
     cadence?: number | null
     gears?: CompanionGears | null
     headingDeg?: number | null
+    headingForced?: boolean | null
   }): void {
     this.present.value = true
     this.heartRate.value = values.heartRate ?? null
@@ -68,6 +100,7 @@ class CompanionStore {
     this.cadence.value = values.cadence ?? null
     this.gears.value = values.gears ?? null
     this.headingDeg.value = values.headingDeg ?? null
+    this.headingForced.value = values.headingForced ?? false
     this.lastUpdate.value = Date.now()
   }
 
@@ -78,7 +111,30 @@ class CompanionStore {
     this.cadence.value = null
     this.gears.value = null
     this.headingDeg.value = null
+    this.headingForced.value = false
     this.lastUpdate.value = 0
+    this.traveledPathPoints.value = []
+    this.traveledPathStyle.value = null
+  }
+
+  // Applique un envoi de trajet parcouru. `reset` remplace la ligne entière
+  // (l'appli vient de perdre la trace de ce qu'on savait déjà — rechargement
+  // de page, nouvelle sortie) ; sinon les points ne font qu'*allonger* la
+  // ligne, jamais la remplacer — contrairement au reste de `update()`, l'appli
+  // n'envoie ici qu'un delta pour ne pas réexpédier une sortie de plusieurs
+  // heures à chaque tic.
+  applyTraveledPath(payload: { points: CompanionTraveledPathPoint[]; reset?: boolean }): void {
+    if (payload.reset) {
+      this.traveledPathPoints.value = [ ...payload.points ]
+    } else if (payload.points.length > 0) {
+      this.traveledPathPoints.value = [ ...this.traveledPathPoints.value, ...payload.points ]
+    }
+  }
+
+  // Style de la ligne, reçu une fois par l'appel one-off `configureTraveledPath`
+  // (pas par `push`) : il ne change pas d'un tic à l'autre.
+  configureTraveledPath(style: CompanionTraveledPathStyle): void {
+    this.traveledPathStyle.value = style
   }
 }
 

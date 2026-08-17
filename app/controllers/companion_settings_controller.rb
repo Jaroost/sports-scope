@@ -21,7 +21,13 @@ class CompanionSettingsController < ApplicationController
   def show
     record_viewport
     render json: CompanionSettings.for(current_user).merge(
-      "training_budget" => current_user.training_budget
+      "training_budget" => current_user.training_budget,
+      # Le style de fond de carte choisi pour la navigation (éditeur de profil,
+      # `preferences.navigation.default_style`) — repris par le bloc "précipitations"
+      # du dashboard (dépôt voisin) pour afficher le même fond que celui vu en
+      # roulant, plutôt qu'un fond choisi indépendamment. `preferences_with_defaults`
+      # garantit une valeur même pour un compte qui n'a jamais ouvert ce réglage.
+      "map_style" => current_user.preferences_with_defaults.dig("navigation", "default_style")
     )
   end
 

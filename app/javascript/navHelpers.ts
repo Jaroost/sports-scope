@@ -21,6 +21,19 @@ export interface TurnHint {
 export interface ProfilePoint { x: number; y: number }
 export interface ProfileSegment { d: string; color: string }
 
+// Une plage d'indices sur `alts`/`cumDistM` — un `Climb` en est une (startIdx/
+// endIdx), mais aussi « tout le tracé » (cf. wholeRouteRange). Ce que
+// buildClimbProfile/buildCompanionClimbProfile lisent réellement de leur
+// paramètre, généralisé pour être rappelable sur la sortie entière.
+export interface ProfileRange { startIdx: number; endIdx: number }
+
+// La plage d'indices couvrant tout le tracé — pour réutiliser
+// buildClimbProfile/buildCompanionClimbProfile sur la sortie entière plutôt
+// que sur un seul col.
+export function wholeRouteRange(cumDistM: number[]): ProfileRange {
+  return { startIdx: 0, endIdx: Math.max(0, cumDistM.length - 1) }
+}
+
 // Profil d'altitude gradué d'un col (viewBox 0–100), construit une fois par col.
 export interface ClimbProfile {
   segments: ProfileSegment[]   // polygones colorés par pente
@@ -63,6 +76,10 @@ export interface CompanionNavTurn {
 }
 
 export interface CompanionNavClimb {
+  // = climb.startIdx, même clé que CompanionRouteClimb.id — permet à l'appli
+  // de retrouver le profil gradué déjà reçu dans `route_climbs` plutôt que
+  // d'en attendre un nouveau (voir la doc de CompanionRouteClimb).
+  id: number
   ratio: number
   remainingGainM: number
   grade: number
@@ -131,8 +148,13 @@ export function navStateFor(input: {
     speedKmh: input.speedKmh,
     remainingM: hasRoute ? input.remainingM : 0,
     remainingGainM: hasRoute ? input.remainingGainM : 0,
-    climb: climb
+    // Même garde que `turn`, et pour la même raison : hors trajet, l'index
+    // auquel la position est accrochée peut retomber n'importe où sur le
+    // tracé (GPS instable avant de rejoindre l'itinéraire, par exemple) — le
+    // col qu'il désigne alors n'est pas celui qu'on est en train de grimper.
+    climb: hasRoute && !offRoute && climb
       ? {
+          id: climb.climb.startIdx,
           ratio: climb.ratio,
           remainingGainM: climb.remainingGainM,
           grade: climb.grade,
@@ -536,8 +558,13 @@ export function moveLngLat([lng, lat]: LngLat, bearingDeg: number, distM: number
 // de la ligne d'altitude jusqu'à la base, coloré par sa pente. Coordonnées dans un
 // viewBox 0–100 : x couvre la distance du col, y est l'altitude normalisée sur la plage.
 // Pur : la mise en cache par startIdx reste à la charge de l'appelant.
+//
+// Prend une plage d'indices plutôt qu'un `Climb` complet — ne lit que
+// `startIdx`/`endIdx`, ce que `Climb` porte déjà (typage structurel) mais
+// aussi la plage « tout le tracé » (`wholeRouteRange`), pour le profil
+// d'altitude de la sortie entière (cf. buildCompanionRouteProfile).
 export function buildClimbProfile(
-  climb: Climb,
+  climb: ProfileRange,
   alts: (number | null)[],
   cumDistM: number[],
 ): ClimbProfile {
@@ -637,6 +664,24 @@ function decimateClimbProfile(
   return { points: outPoints, segmentGrades: outGrades }
 }
 
+// Points bruts + pentes par segment d'une plage d'indices, avant
+// rééchantillonnage — la partie commune à buildCompanionClimbProfile et
+// buildCompanionRouteProfile, qui ne diffèrent qu'au champ startM (relatif au
+// départ du col) et au plafond de points.
+function rawCompanionProfile(
+  range: ProfileRange,
+  alts: (number | null)[],
+  cumDistM: number[],
+): { points: CompanionClimbPoint[]; grades: number[] } {
+  const { startIdx: s, endIdx: e } = range
+  const startM = cumDistM[s] ?? 0
+  const points: CompanionClimbPoint[] = []
+  for (let i = s; i <= e; i++) points.push({ distM: cumDistM[i] - startM, altM: alts[i] ?? 0 })
+  const grades: number[] = []
+  for (let i = s; i < e; i++) grades.push(gradeForIndex(i, alts, cumDistM))
+  return { points, grades }
+}
+
 // Construit le message publié à l'appli à l'entrée d'un col (voir climbProfileFor
 // dans RouteNavigation.vue, qui le pousse une seule fois par col — au cache-miss
 // sur climb.startIdx). Pur, comme buildClimbProfile.
@@ -646,11 +691,7 @@ export function buildCompanionClimbProfile(
   cumDistM: number[],
 ): CompanionClimbProfile {
   const { startIdx: s, endIdx: e } = climb
-  const startM = cumDistM[s]
-  const rawPoints: CompanionClimbPoint[] = []
-  for (let i = s; i <= e; i++) rawPoints.push({ distM: cumDistM[i] - startM, altM: alts[i] ?? 0 })
-  const rawGrades: number[] = []
-  for (let i = s; i < e; i++) rawGrades.push(gradeForIndex(i, alts, cumDistM))
+  const { points: rawPoints, grades: rawGrades } = rawCompanionProfile(climb, alts, cumDistM)
   const { points, segmentGrades } = decimateClimbProfile(rawPoints, rawGrades, COMPANION_CLIMB_MAX_POINTS)
   return {
     type: 'climb_profile',
@@ -664,13 +705,53 @@ export function buildCompanionClimbProfile(
   }
 }
 
+// ─── Profil d'altitude du tracé entier pour l'appli compagnon ─────────────────
+
+// Plafond de points republiés pour le profil du tracé entier — plus généreux
+// que COMPANION_CLIMB_MAX_POINTS puisqu'un tracé complet est bien plus long
+// qu'un seul col ; toujours rééchantillonné par pas fixe (decimateClimbProfile),
+// les deux extrémités du tracé restant gardées.
+export const COMPANION_ROUTE_PROFILE_MAX_POINTS = 400
+
+export interface CompanionRouteProfile {
+  type: 'route_profile'
+  totalDistM: number
+  points: CompanionClimbPoint[]      // ré-échantillonnés, distM depuis le départ du tracé
+  segmentGrades: number[]            // length = points.length - 1
+}
+
+// Construit le message poussé une fois par (re)chargement de tracé (voir
+// rebuildRouteState dans RouteNavigation.vue, juste après
+// buildCompanionRouteClimbs) — même construction que buildCompanionClimbProfile,
+// sur la plage entière du tracé (wholeRouteRange) plutôt que sur un seul col.
+export function buildCompanionRouteProfile(
+  alts: (number | null)[],
+  cumDistM: number[],
+): CompanionRouteProfile {
+  // Tracé retiré (unloadRoute) : rien à rééchantillonner, on pousse un profil
+  // vide plutôt que de laisser le dernier tracé affiché sur le téléphone.
+  if (cumDistM.length === 0) return { type: 'route_profile', totalDistM: 0, points: [], segmentGrades: [] }
+
+  const range = wholeRouteRange(cumDistM)
+  const { points: rawPoints, grades: rawGrades } = rawCompanionProfile(range, alts, cumDistM)
+  const { points, segmentGrades } = decimateClimbProfile(rawPoints, rawGrades, COMPANION_ROUTE_PROFILE_MAX_POINTS)
+  return {
+    type: 'route_profile',
+    totalDistM: cumDistM[cumDistM.length - 1],
+    points,
+    segmentGrades,
+  }
+}
+
 // ─── Liste des cols du tracé pour l'appli compagnon ────────────────────────────
 
-// Un col de la liste : juste de quoi le situer et le comparer aux autres, jamais
-// son profil gradué (CompanionClimbProfile ci-dessus, poussé à part et une seule
-// fois, pour le seul col en cours). `id` reprend `climb.startIdx`, même
-// convention que CompanionClimbProfile.id — une clé stable pour CE tracé, à
-// comparer entre deux entrées, jamais affichée.
+// Un col de la liste : de quoi le situer et le comparer aux autres, ET son
+// profil gradué (points + pentes par segment) — le même contenu que
+// CompanionClimbProfile, mais poussé pour TOUS les cols du tracé d'un coup,
+// au chargement, plutôt qu'un par un à l'entrée de chacun (voir la doc de
+// CompanionRouteClimbs). `id` reprend `climb.startIdx`, une clé stable pour CE
+// tracé, à comparer entre deux entrées ou au `id` de `nav.climb`, jamais
+// affichée.
 export interface CompanionRouteClimb {
   id: number
   startDistM: number
@@ -680,6 +761,8 @@ export interface CompanionRouteClimb {
   category: string | null
   /** Nom donné à la main (routes.climb_names, cf. attachClimbNames), absent sinon. */
   name: string | null
+  points: CompanionClimbPoint[]  // ré-échantillonnés, distM relatif au départ du col
+  segmentGrades: number[]        // length = points.length - 1
 }
 
 // La liste ordonnée des cols du tracé en cours, avec la distance totale du
@@ -687,6 +770,13 @@ export interface CompanionRouteClimb {
 // redétecter les cols elle-même. Elle recoupe `totalDistM` avec le
 // `remainingM` déjà publié par `nav` pour se placer dans le même repère que
 // `startDistM` (voir `traveledDistM` côté Dart, route_climbs.dart).
+//
+// Porte aussi le profil gradué de chaque col (voir CompanionRouteClimb) : reçue
+// une fois au chargement du tracé, donc disponible hors ligne pour toute la
+// sortie, plutôt que redemandée col par col en roulant — un aller-retour qui
+// ne peut aboutir que si le pont est vivant à l'instant précis où le col
+// commence (voir `climbProfileFor`, dont c'est resté le seul rôle : la
+// composition SVG locale de la carte de col sur la page elle-même).
 export interface CompanionRouteClimbs {
   type: 'route_climbs'
   totalDistM: number
@@ -695,23 +785,32 @@ export interface CompanionRouteClimbs {
 
 // Construit le message poussé une fois par (re)chargement de tracé (voir
 // `rebuildRouteState`/`unloadRoute` dans RouteNavigation.vue) — jamais par
-// position, contrairement à `companionNav`. Pur, comme `buildCompanionClimbProfile`.
+// position, contrairement à `companionNav`. Pur, comme `buildCompanionClimbProfile`,
+// dont elle réutilise le calcul de profil (rawCompanionProfile/decimateClimbProfile)
+// pour chaque col plutôt que d'attendre d'y entrer pour le construire.
 export function buildCompanionRouteClimbs(
   climbs: Climb[],
+  alts: (number | null)[],
   cumDistM: number[],
 ): CompanionRouteClimbs {
   return {
     type: 'route_climbs',
     totalDistM: cumDistM.length ? cumDistM[cumDistM.length - 1] : 0,
-    climbs: climbs.map((climb) => ({
-      id: climb.startIdx,
-      startDistM: cumDistM[climb.startIdx],
-      gainM: climb.gain,
-      lengthM: climb.lengthM,
-      avgGrade: climb.avgGrade,
-      category: climb.category,
-      name: climb.name || null,
-    })),
+    climbs: climbs.map((climb) => {
+      const { points: rawPoints, grades: rawGrades } = rawCompanionProfile(climb, alts, cumDistM)
+      const { points, segmentGrades } = decimateClimbProfile(rawPoints, rawGrades, COMPANION_CLIMB_MAX_POINTS)
+      return {
+        id: climb.startIdx,
+        startDistM: cumDistM[climb.startIdx],
+        gainM: climb.gain,
+        lengthM: climb.lengthM,
+        avgGrade: climb.avgGrade,
+        category: climb.category,
+        name: climb.name || null,
+        points,
+        segmentGrades,
+      }
+    }),
   }
 }
 
@@ -747,6 +846,46 @@ export function buildDebugClimb(): ClimbInfo {
   const climb: Climb = { startIdx: 0, endIdx: 0, gain: 560, lengthM: 8400, avgGrade: 6.7, category: '2', startKm: 0, endKm: 8.4 }
   return {
     climb, ratio, remainingGainM: climb.gain * (1 - ratio),
+    segments, areaD, posX, posY,
+    topY: Math.min(...pts.map((p) => p.y)),
+    grade, gradeColor, gradeText: textColorOn(gradeColor),
+  }
+}
+
+// Profil de tracé synthétique pour l'aperçu du composant « Profil d'altitude »
+// (CompanionBlockPreview.vue). Contrairement à buildDebugClimb (une montée
+// monotone), un tracé complet vallonne — quelques bosses plutôt qu'un seul
+// sommet — pour rester représentatif du vrai composant sans dépendre d'un
+// tracé réel.
+export function buildDebugRouteProfile(): ClimbInfo {
+  const n = 48
+  const pts: ProfilePoint[] = []
+  for (let i = 0; i <= n; i++) {
+    const f = i / n
+    // Trois bosses d'amplitude décroissante puis une légère remontée finale —
+    // assez irrégulier pour ne pas ressembler à une seule montée.
+    const y = 70 - 22 * Math.sin(f * Math.PI * 2.6) - 10 * Math.sin(f * Math.PI * 7 + 1)
+    pts.push({ x: f * 100, y: Math.min(96, Math.max(4, y)) })
+  }
+  const segments: ProfileSegment[] = []
+  for (let i = 0; i < n; i++) {
+    const g = ((pts[i].y - pts[i + 1].y) / 100) * 60   // pente approx. à partir du dessin, bornée par colorForGrade
+    segments.push({
+      d: `M${pts[i].x},${pts[i].y} L${pts[i + 1].x},${pts[i + 1].y} L${pts[i + 1].x},100 L${pts[i].x},100 Z`,
+      color: colorForGrade(g),
+    })
+  }
+  let areaD = `M${pts[0].x},100`
+  for (const p of pts) areaD += ` L${p.x},${p.y}`
+  areaD += ` L${pts[n].x},100 Z`
+  const ratio = 0.58
+  const posX = ratio * 100
+  const posY = profileYAt(pts, posX)
+  const grade = 5
+  const gradeColor = colorForGrade(grade)
+  const route: Climb = { startIdx: 0, endIdx: n, gain: 640, lengthM: 34500, avgGrade: 1.9, category: null, startKm: 0, endKm: 34.5 }
+  return {
+    climb: route, ratio, remainingGainM: route.gain * (1 - ratio),
     segments, areaD, posX, posY,
     topY: Math.min(...pts.map((p) => p.y)),
     grade, gradeColor, gradeText: textColorOn(gradeColor),

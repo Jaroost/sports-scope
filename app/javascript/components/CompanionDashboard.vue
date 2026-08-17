@@ -4,12 +4,16 @@ import { t } from '../i18n'
 import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
+import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
-  canHideBehindMenu, canMoveCell, climbLapSeries, fitCells, gridSideOf, isGridLayout,
+  canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR, DEFAULT_METRIC_LAYOUT,
+  DEFAULT_TRAVELED_PATH_COLOR, fitCells,
+  fitDividers, fitListBlocks, gridSideOf, gutterRect, isGridLayout,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
-  type Band, type Block, type Catalog, type Cell, type CellSize,
-  type CompanionDocument, type Page, type Preset, type Viewport,
+  type Band, type Block, type Buttons, type ButtonChannel, type Catalog, type Cell, type CellSize, type Divider,
+  type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch, type Page, type Preset,
+  type Viewport,
 } from '../companionSettings'
 
 // L'éditeur des profils de sortie de l'app compagnon.
@@ -55,9 +59,26 @@ const grid = computed<Viewport>(() => props.viewport || PHONE_GRID)
 const measured = computed(() => !!props.viewport)
 
 const presets = reactive<Preset[]>(structuredClone(props.document.presets))
+
+// Les dispositions de bloc `metric` enregistrées, proposées comme point de
+// départ dans `CompanionBlockPicker` — un réglage de compte comme les
+// profils, gardé dans le même document et enregistré par le même `PATCH`.
+const metricLayouts = reactive<MetricLayoutPreset[]>(structuredClone(props.document.metric_layouts || []))
+
+function onSaveLayout(preset: { name: string; layout: MetricLayout }) {
+  metricLayouts.push({ key: crypto.randomUUID(), name: preset.name, layout: preset.layout })
+}
+
 const current = ref(0)
 const openPage = ref<number | null>(null)
 const selected = ref<Cell | null>(null)
+
+// La gouttière sélectionnée — jamais en même temps qu'une cellule : les deux
+// panneaux de réglage (couleur du séparateur / étendue de la cellule)
+// prendraient sinon la même place sous la grille.
+const selectedDivider = ref<Divider | null>(null)
+watch(selected, (cell) => { if (cell) selectedDivider.value = null })
+watch(selectedDivider, (divider) => { if (divider) selected.value = null })
 
 // Échanger la cellule sélectionnée avec une autre : le bouton « Échanger »
 // l'arme, et la case suivante qu'on touche reçoit l'échange — toujours
@@ -154,6 +175,41 @@ const sortedMetrics = computed(() => (
   [...props.catalog.metrics].sort((a, b) => metricLabel(a).localeCompare(metricLabel(b)))
 ))
 
+// Le libellé d'une commande de case (`sleep`) : celui de sa vignette dans la
+// dialogue de choix de bloc, pas un nouveau texte à tenir à jour à part.
+function bandActionLabel(action: string): string {
+  return t(`companion.settings.blocks.${action}`)
+}
+
+// Le libellé d'un mode de radar de case (`radar_distance`) : le nom du
+// composant puis son mode — même format que `labelFor` pour un bloc de
+// grille, pour que « Radar » se lise pareil aux deux endroits.
+function bandRadarLabel(key: string): string {
+  const mode = key.slice('radar_'.length)
+  return `${t('companion.settings.blocks.radar')} · ${t(`companion.settings.modes.${mode}`)}`
+}
+
+// Le libellé d'un son de sonnette de case (`bell_horn`) — même format que
+// `bandRadarLabel` : le nom du composant puis le son choisi.
+function bandBellLabel(key: string): string {
+  const sound = key.slice('bell_'.length)
+  return `${t('companion.settings.blocks.bell')} · ${t(`companion.settings.bell_sounds.${sound}`)}`
+}
+
+// Le libellé d'une action de bouton Di2 (`catalog.button_actions`) — sa
+// propre table plutôt qu'un renvoi vers `blocks.*` comme `bandActionLabel` :
+// « Sortir de veille » ou « Page suivante » n'ont pas de vignette de bloc
+// dont ils reprendraient le nom.
+function buttonActionLabel(action: string): string {
+  return t(`companion.settings.button_actions.${action}`)
+}
+
+// Le libellé d'une page visée par « Aller à… » : son titre s'il en a un, sinon
+// le nom de son genre — une carte n'a pas de titre côté document.
+function pageLabel(page: Page): string {
+  return page.title || t(`companion.settings.page_kinds.${page.kind}`)
+}
+
 // ── les profils ─────────────────────────────────────────────────────────────
 
 function select(index: number) {
@@ -247,7 +303,7 @@ function addPage(kind: string) {
     preset.value.pages.push({
       kind: 'grid', title: t('companion.settings.page_numbers'), rows: 2, cols: 2,
       cells: [{ row: 0, col: 0, row_span: 1, col_span: 1,
-                block: { kind: 'metric', metric: 'speed', mode: 'big' } }],
+                block: { kind: 'metric', metric: 'speed', layout: { ...DEFAULT_METRIC_LAYOUT } } }],
     })
   } else if (kind === 'laps') {
     // `lap_selector` d'abord — sans lui, la page ne montre jamais que le tour
@@ -306,6 +362,14 @@ function setLapLayout(page: Page, layout: 'list' | 'grid') {
     if (!page.blocks?.length) {
       page.blocks = [{ kind: 'lap_selector' }, { kind: 'lap_summary', mode: 'cards' }]
     }
+    // `cols` sert aux deux dispositions (colonnes de grille, colonnes de
+    // liste) avec deux plafonds différents : une grille large basculée en
+    // liste ne doit pas laisser un nombre de colonnes que celle-ci refuse,
+    // ni des blocs dont la colonne dépasserait ce qui reste.
+    if ((page.cols || 1) > props.catalog.max_list_cols) {
+      page.cols = props.catalog.max_list_cols
+      page.blocks = fitListBlocks(page.blocks || [], page.cols)
+    }
   }
   selected.value = null
 }
@@ -342,6 +406,26 @@ function toggleMenuPage(page: Page) {
   else page.menu = true
 }
 
+// La condition qui fait rejoindre le défilement à une page rangée derrière le
+// menu, le temps qu'elle dure — voir `Page.menu_condition`. Effacée et non mise
+// à une valeur creuse quand on choisit « aucune », même règle que `menu`.
+function setMenuCondition(page: Page, value: string) {
+  if (props.catalog.menu_conditions.includes(value)) {
+    page.menu_condition = value as Page['menu_condition']
+  } else {
+    delete page.menu_condition
+    delete page.menu_auto_open
+  }
+}
+
+// L'icône qui repère la page dans le menu ⋮ de l'appli — voir `Page.icon`.
+// Effacée et non mise à une valeur creuse quand on choisit « par défaut »,
+// même règle que `menu`/`menu_condition` ci-dessus.
+function setPageIcon(page: Page, icon: string | undefined) {
+  if (icon) page.icon = icon
+  else delete page.icon
+}
+
 // Combien de pages restent à faire défiler. Sert à dire, sous la liste, ce que le
 // cycliste trouvera au glissé et ce qu'il devra aller chercher.
 const swipeCount = computed(
@@ -366,6 +450,8 @@ function commitSide(page: Page, axis: 'rows' | 'cols', input: HTMLInputElement) 
   page[axis] = side
   page.cells = fitCells(page.cells || [], page.rows || 1, page.cols || 1)
   if (selected.value && !page.cells.includes(selected.value)) selected.value = null
+  page.dividers = fitDividers(page.dividers || [], page.rows || 1, page.cols || 1)
+  if (selectedDivider.value && !page.dividers.includes(selectedDivider.value)) selectedDivider.value = null
   repaint(input, side)
 }
 
@@ -375,6 +461,19 @@ function commitSide(page: Page, axis: 'rows' | 'cols', input: HTMLInputElement) 
 // nombre que le document ne contient pas.
 function repaint(input: HTMLInputElement, value: number) {
   input.value = String(value)
+}
+
+// ── la liste ────────────────────────────────────────────────────────────────
+
+// Le nombre de colonnes d'une page `list` — même piège que `commitSide` (voir
+// son commentaire) : validé à la sortie du champ, jamais à la frappe. Réduire
+// ramène chaque bloc dans les colonnes qui restent (`fitListBlocks`) plutôt
+// que de les y perdre, même arbitrage que l'assainisseur.
+function commitListCols(page: Page, input: HTMLInputElement) {
+  const cols = Math.min(gridSideOf(input.value), props.catalog.max_list_cols)
+  page.cols = cols
+  page.blocks = fitListBlocks(page.blocks || [], cols)
+  repaint(input, cols)
 }
 
 // Ce qu'on dessine : une entrée par case de la grille, en sautant celles qu'une
@@ -395,6 +494,52 @@ function slots(page: Page) {
   }
   return out
 }
+
+// Ce qu'on dessine par-dessus la grille : une gouttière par ligne/colonne
+// interne — `rows - 1` horizontales, `cols - 1` verticales — avec le
+// séparateur qui l'occupe, s'il y en a un. `at` commence à 1 : la gouttière 0
+// serait le bord de la grille, pas un espace entre deux cases.
+function gutters(page: Page) {
+  const dividers = page.dividers || []
+  const out: { key: string; axis: 'h' | 'v'; at: number; divider: Divider | null }[] = []
+
+  for (let at = 1; at < (page.rows || 1); at++) {
+    out.push({ key: `h:${at}`, axis: 'h', at, divider: dividers.find((d) => d.axis === 'h' && d.at === at) || null })
+  }
+  for (let at = 1; at < (page.cols || 1); at++) {
+    out.push({ key: `v:${at}`, axis: 'v', at, divider: dividers.find((d) => d.axis === 'v' && d.at === at) || null })
+  }
+  return out
+}
+
+// Une gouttière vide en pose un séparateur et le sélectionne aussitôt — un
+// clic suffit, la couleur se règle ensuite dans le panneau sous la grille.
+// Une gouttière déjà occupée bascule sa sélection, comme une cellule
+// (`tapSlot`).
+function tapGutter(page: Page, axis: 'h' | 'v', at: number, divider: Divider | null) {
+  if (divider) {
+    selectedDivider.value = selectedDivider.value === divider ? null : divider
+    return
+  }
+  const created: Divider = { axis, at, color: DEFAULT_DIVIDER_COLOR }
+  page.dividers = [...(page.dividers || []), created]
+  selectedDivider.value = created
+}
+
+function removeDivider(page: Page) {
+  page.dividers = (page.dividers || []).filter((divider) => divider !== selectedDivider.value)
+  selectedDivider.value = null
+}
+
+// `CompanionColorPicker` porte un bouton « réinitialiser » qui émet `null` —
+// pertinent pour `block.color` (l'absence laisse l'appli calculer), pas pour
+// un séparateur, purement décoratif, qui a toujours besoin d'une couleur : un
+// `null` y retombe donc sur la couleur par défaut plutôt que de rester sans
+// couleur.
+const dividerColor = computed<string | null>({
+  get: () => selectedDivider.value?.color ?? null,
+  set: (value) => { if (selectedDivider.value) selectedDivider.value.color = value || DEFAULT_DIVIDER_COLOR },
+})
 
 // Cette case peut-elle recevoir l'échange ? Sert à la fois à `tapSlot`
 // (n'agir que si c'est permis) et à la grille (montrer la case où l'échange
@@ -469,9 +614,17 @@ function applyPick(block: Block) {
       selected.value = target.page.cells![target.page.cells!.length - 1]
       break
     }
-    case 'block':
-      if (target.page.blocks) target.page.blocks[target.index] = block
+    case 'block': {
+      // `blockFor` fabrique un bloc neuf, sans `col` : le recopier de l'ancien
+      // évite qu'un simple changement de genre/mode renvoie le composant en
+      // première colonne, sous les yeux de personne.
+      const previous = target.page.blocks?.[target.index]
+      if (target.page.blocks) {
+        target.page.blocks[target.index] =
+          previous?.col !== undefined ? { ...block, col: previous.col } : block
+      }
       break
+    }
     case 'append':
       target.page.blocks = [...(target.page.blocks || []), block]
       break
@@ -555,13 +708,25 @@ function sizeFor(page: Page, cell: Cell): CellSize {
   )
 }
 
+// Le rectangle d'une gouttière, en `%` du conteneur — celui-ci est positionné
+// en absolu par-dessus `.companion-grid`, qui a déjà l'échelle du téléphone
+// (`aspect-ratio`), d'où la conversion directe en pourcentage plutôt qu'une
+// mesure du DOM.
+function styleForGutter(page: Page, axis: 'h' | 'v', at: number, color: string | undefined) {
+  const rect = gutterRect(axis, at, page.rows || 1, page.cols || 1, grid.value)
+  return {
+    left: `${rect.left}%`, top: `${rect.top}%`, width: `${rect.width}%`, height: `${rect.height}%`,
+    backgroundColor: color,
+  }
+}
+
 // Le nom de ce qui est posé : le genre, son paramètre, son mode. La vignette
 // dit déjà à quoi ça ressemble — ce libellé sert à le **nommer**, ce qu'un
 // dessin ne fait pas : c'est lui qu'on relit pour vérifier qu'on a bien mis la
 // puissance normalisée et non la puissance moyenne.
 function labelFor(block: Block): string {
   const parts = [t(`companion.settings.blocks.${block.kind}`)]
-  if (block.kind === 'metric') parts.push(t(`companion.settings.metrics.${block.metric}`))
+  if (block.kind === 'metric') parts.push(block.label?.trim() || t(`companion.settings.metrics.${block.metric}`))
   if (block.kind === 'zones') parts.push(t(`companion.settings.sources.${block.source}`))
   // La série est un texte libre, pas une clé du catalogue : elle se relit
   // telle quelle. Sans elle, deux boutons « Marquer un tour » de séries
@@ -616,6 +781,25 @@ function setBandMetric(band: Band, index: number, value: string) {
   }
 }
 
+// ── la bande de l'encoche ───────────────────────────────────────────────────
+
+function addNotchSet() {
+  const notch = preset.value.notch || (preset.value.notch = [])
+  notch.push({})
+}
+
+function setNotchMetric(set: Notch, side: 'left' | 'right', value: string) {
+  if (value) set[side] = value
+  else delete set[side]
+}
+
+function removeNotchSet(index: number) {
+  const notch = preset.value.notch
+  if (!notch) return
+  notch.splice(index, 1)
+  if (notch.length === 0) preset.value.notch = undefined
+}
+
 // ── les capteurs et les réglages ────────────────────────────────────────────
 
 // Absent vaut activé : on ne stocke que les coupures. Une case décochée écrit
@@ -640,6 +824,62 @@ function setRadar(key: string, value: number | boolean) {
   preset.value.radar = { ...(preset.value.radar || {}), [key]: value }
 }
 
+function batteryValue(key: string, fallback: number): number {
+  const value = preset.value.battery?.[key]
+  return typeof value === 'number' ? value : fallback
+}
+
+function setBattery(key: string, value: number | boolean) {
+  preset.value.battery = { ...(preset.value.battery || {}), [key]: value }
+}
+
+// ── les boutons Di2 ─────────────────────────────────────────────────────────
+//
+// Quatre canaux fixes — seuls 1 et 2 sont câblés sur le matériel testé côté
+// appli, mais 3 et 4 suivent le même format et n'ont pas de raison d'attendre
+// pour être configurables. Une constante locale et non un catalogue serveur,
+// contrairement aux gestes (`catalog.button_gestures`) : c'est une propriété
+// du D-Fly, pas un réglage qui pourrait évoluer sans toucher au code.
+const BUTTON_CHANNELS = ['channel1', 'channel2', 'channel3', 'channel4'] as const
+
+// Seules les pages déjà enregistrées (qui ont donc une clé — voir `Page.key`)
+// peuvent être visées par « Aller à… » : le serveur est ce qui fabrique la
+// clé, une page qui vient d'être ajoutée n'en a pas encore.
+const goToPageTargets = computed(() => preset.value.pages.filter((page) => page.key))
+
+function buttonAction(channel: keyof Buttons, gesture: keyof ButtonChannel): string {
+  return preset.value.buttons?.[channel]?.[gesture] || ''
+}
+
+function setButtonAction(channel: keyof Buttons, gesture: keyof ButtonChannel, value: string) {
+  const buttons: Buttons = { ...(preset.value.buttons || {}) }
+  const channelActions: ButtonChannel = { ...(buttons[channel] || {}) }
+  if (value) channelActions[gesture] = value
+  else delete channelActions[gesture]
+
+  if (Object.keys(channelActions).length > 0) buttons[channel] = channelActions
+  else delete buttons[channel]
+  preset.value.buttons = Object.keys(buttons).length > 0 ? buttons : undefined
+}
+
+function traveledPathValue(key: string, fallback: number): number {
+  const value = preset.value.traveled_path?.[key]
+  return typeof value === 'number' ? value : fallback
+}
+
+function setTraveledPath(key: string, value: number | string) {
+  preset.value.traveled_path = { ...(preset.value.traveled_path || {}), [key]: value }
+}
+
+// Même raison qu'un séparateur (`dividerColor`) : la ligne du trajet parcouru
+// a toujours besoin d'une couleur, un `null` (bouton « réinitialiser » de
+// `CompanionColorPicker`) retombe donc sur la couleur par défaut plutôt que de
+// rester sans couleur.
+const traveledPathColor = computed<string | null>({
+  get: () => (typeof preset.value.traveled_path?.color === 'string' ? preset.value.traveled_path.color : null),
+  set: (value) => setTraveledPath('color', value || DEFAULT_TRAVELED_PATH_COLOR),
+})
+
 // ── enregistrer ─────────────────────────────────────────────────────────────
 
 async function save() {
@@ -654,7 +894,7 @@ async function save() {
         'X-CSRF-Token': csrfToken(),
       },
       credentials: 'same-origin',
-      body: JSON.stringify({ presets }),
+      body: JSON.stringify({ presets, metric_layouts: metricLayouts }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
@@ -663,6 +903,7 @@ async function save() {
     // les montrer ici est la seule occasion de s'en apercevoir.
     const payload = (await res.json()) as CompanionDocument
     presets.splice(0, presets.length, ...payload.presets)
+    metricLayouts.splice(0, metricLayouts.length, ...(payload.metric_layouts || []))
     current.value = Math.min(current.value, presets.length - 1)
     openPage.value = null
     selected.value = null
@@ -759,6 +1000,10 @@ async function save() {
             <span v-if="page.menu" class="badge text-bg-light border">
               <i class="fa-solid fa-ellipsis-vertical me-1" aria-hidden="true"></i>{{ t('companion.settings.behind_menu') }}
             </span>
+            <!-- Le même repère qu'on ira relire dans le menu ⋮ du téléphone :
+                 le voir déjà ici aide à choisir une icône qui distingue
+                 vraiment cette page des pages voisines. -->
+            <i v-if="page.icon" :class="page.icon" class="text-body-secondary" aria-hidden="true"></i>
             <span class="flex-grow-1 text-truncate">{{ page.title || t('companion.settings.page_kinds.map') }}</span>
             <button class="btn btn-sm btn-link p-1" type="button"
                     :disabled="index === 0" @click="movePage(index, -1)">
@@ -795,6 +1040,52 @@ async function save() {
           <div v-if="openPage === index" class="border-top p-2">
             <input v-model="page.title" class="form-control form-control-sm mb-2"
                    :placeholder="t('companion.settings.page_title')">
+
+            <!-- Le repère qui la distingue dans le menu ⋮ du téléphone, où
+                 plusieurs pages du même genre (deux grilles, par exemple) se
+                 ressembleraient sinon trait pour trait. Pas seulement pour les
+                 pages rangées derrière le menu : une page du défilement peut y
+                 être rangée plus tard sans repasser par ici. -->
+            <div class="mb-2">
+              <label class="small mb-1 d-block">{{ t('companion.settings.page_icon_label') }}</label>
+              <div class="cdb-icons">
+                <button type="button" class="cdb-icon-btn"
+                        :class="{ 'cdb-icon-btn--selected': !page.icon }"
+                        :title="t('companion.settings.default_icon')"
+                        @click="setPageIcon(page, undefined)">
+                  {{ t('companion.settings.default_icon') }}
+                </button>
+                <button v-for="ic in catalog.icons" :key="ic" type="button"
+                        class="cdb-icon-btn" :class="{ 'cdb-icon-btn--selected': page.icon === ic }"
+                        @click="setPageIcon(page, ic)">
+                  <i :class="ic" aria-hidden="true"></i>
+                </button>
+              </div>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_icon_help') }}</p>
+            </div>
+
+            <!-- Seulement pour une page déjà rangée derrière le menu : la
+                 condition qui l'en fait ressortir toute seule pendant la
+                 sortie, et si on bascule dessus quand elle devient vraie. -->
+            <div v-if="page.menu" class="mb-2">
+              <label class="small mb-1 d-block">{{ t('companion.settings.menu_condition_label') }}
+                <select class="form-select form-select-sm" :value="page.menu_condition || ''"
+                        @change="setMenuCondition(page, ($event.target as HTMLSelectElement).value)">
+                  <option value="">{{ t('companion.settings.menu_condition_options.none') }}</option>
+                  <option v-for="condition in catalog.menu_conditions" :key="condition" :value="condition">
+                    {{ t(`companion.settings.menu_condition_options.${condition}`) }}
+                  </option>
+                </select>
+              </label>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.menu_condition_help') }}</p>
+              <div v-if="page.menu_condition" class="form-check mt-1">
+                <input v-model="page.menu_auto_open" type="checkbox" class="form-check-input"
+                       :id="`menu-auto-open-${index}`">
+                <label class="form-check-label small" :for="`menu-auto-open-${index}`">
+                  {{ t('companion.settings.menu_auto_open_label') }}
+                </label>
+              </div>
+            </div>
 
             <!-- Une page de tours : la série qu'elle affiche. Un bouton
                  « Marquer un tour » posé ailleurs doit porter la même clé
@@ -849,24 +1140,38 @@ async function save() {
 
               <p class="text-body-secondary small mb-1">{{ t('companion.settings.grid_help') }}</p>
 
-              <div class="companion-grid mb-2"
-                   :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
-                             gridTemplateRows: `repeat(${page.rows}, 1fr)`,
-                             aspectRatio: `${grid.width} / ${grid.height}` }">
-                <!-- `selected` teste `!!slot.cell` d'abord : sans lui, une case
-                     vide (`null`) est « égale » à l'absence de sélection (`null`
-                     aussi), et **toutes** les cases libres s'allument dès qu'on
-                     ne sélectionne rien. -->
-                <button v-for="slot in slots(page)" :key="slot.key" type="button"
-                        class="companion-cell"
-                        :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected,
-                                  'swap-target': swapping && canSwapTo(slot.cell),
-                                  'swap-source': swapping && slot.cell === selected }"
-                        :style="styleFor(page, slot.cell, slot.row, slot.col)"
-                        :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
-                        @click="tapSlot(page, slot.row, slot.col, slot.cell)">
-                  <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block" />
-                  <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
+              <div class="companion-grid-wrap mb-2">
+                <div class="companion-grid"
+                     :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
+                               gridTemplateRows: `repeat(${page.rows}, 1fr)`,
+                               aspectRatio: `${grid.width} / ${grid.height}` }">
+                  <!-- `selected` teste `!!slot.cell` d'abord : sans lui, une case
+                       vide (`null`) est « égale » à l'absence de sélection (`null`
+                       aussi), et **toutes** les cases libres s'allument dès qu'on
+                       ne sélectionne rien. -->
+                  <button v-for="slot in slots(page)" :key="slot.key" type="button"
+                          class="companion-cell"
+                          :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected,
+                                    'swap-target': swapping && canSwapTo(slot.cell),
+                                    'swap-source': swapping && slot.cell === selected }"
+                          :style="styleFor(page, slot.cell, slot.row, slot.col)"
+                          :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
+                          @click="tapSlot(page, slot.row, slot.col, slot.cell)">
+                    <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block"
+                                           :lap-scoped="page.kind === 'laps'" />
+                    <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <!-- Les gouttières, en survol par-dessus la grille : un séparateur
+                     traverse toujours toute la largeur/hauteur, un clic sur sa
+                     gouttière suffit donc à le poser. -->
+                <button v-for="gutter in gutters(page)" :key="gutter.key" type="button"
+                        class="companion-gutter"
+                        :class="[`companion-gutter-${gutter.axis}`,
+                                 { filled: !!gutter.divider, selected: !!gutter.divider && gutter.divider === selectedDivider }]"
+                        :style="styleForGutter(page, gutter.axis, gutter.at, gutter.divider?.color)"
+                        :title="t('companion.settings.divider_hint')"
+                        @click="tapGutter(page, gutter.axis, gutter.at, gutter.divider)">
                 </button>
               </div>
 
@@ -973,15 +1278,38 @@ async function save() {
                   </button>
                 </div>
               </div>
+
+              <div v-if="selectedDivider" class="border rounded p-2 bg-body-tertiary d-flex align-items-center gap-2">
+                <span class="flex-grow-1 small">{{ t('companion.settings.divider_color') }}</span>
+                <CompanionColorPicker v-model="dividerColor" :fallback="DEFAULT_DIVIDER_COLOR"
+                                       :label="t('companion.settings.divider_color')" />
+                <button class="btn btn-sm btn-outline-danger" type="button" @click="removeDivider(page)">
+                  {{ t('companion.settings.remove_divider') }}
+                </button>
+              </div>
             </template>
 
             <!-- Une page qui défile : les composants dans l'ordre où elle les
-                 empile, chacun dessiné tel qu'il paraîtra. -->
+                 empile, chacun dessiné tel qu'il paraîtra. Vaut aussi bien pour
+                 `list` que pour `laps` en liste défilante — même disposition
+                 des deux côtés, seule la série de tours change autour. -->
             <template v-else>
+              <div class="d-flex align-items-center gap-3 mb-2">
+                <label class="small mb-0">{{ t('companion.settings.cols') }}
+                  <input class="form-control form-control-sm d-inline-block ms-1"
+                         style="width: 5rem" type="number" min="1"
+                         :max="catalog.max_list_cols" :value="page.cols || 1"
+                         @change="commitListCols(page, $event.target as HTMLInputElement)">
+                </label>
+                <p v-if="(page.cols || 1) > 1" class="text-body-secondary small mb-0">
+                  {{ t('companion.settings.list_cols_help') }}
+                </p>
+              </div>
+
               <div v-for="(block, i) in page.blocks" :key="i"
                    class="d-flex align-items-center gap-2 mb-2">
                 <div class="companion-block-preview flex-shrink-0">
-                  <CompanionBlockPreview :block="block" />
+                  <CompanionBlockPreview :block="block" :lap-scoped="page.kind === 'laps'" />
                 </div>
                 <span class="flex-grow-1 text-truncate small">{{ labelFor(block) }}</span>
                 <!-- La série du bouton et celle de la page sont deux réglages
@@ -992,6 +1320,18 @@ async function save() {
                    class="fa-solid fa-triangle-exclamation text-warning"
                    :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
                    aria-hidden="true"></i>
+                <!-- Seulement quand la page a plus d'une colonne : à une seule,
+                     la case n'aurait qu'un choix, et l'afficher quand même
+                     ferait chercher un réglage qui ne change jamais rien. -->
+                <select v-if="(page.cols || 1) > 1"
+                        class="form-select form-select-sm" style="width: auto"
+                        :value="block.col || 0"
+                        :aria-label="t('companion.settings.block_col')"
+                        @change="block.col = Number(($event.target as HTMLSelectElement).value)">
+                  <option v-for="c in (page.cols || 1)" :key="c" :value="c - 1">
+                    {{ t('companion.settings.block_col_option', { col: c }) }}
+                  </option>
+                </select>
                 <button class="btn btn-sm btn-outline-secondary" type="button"
                         @click="picker = { at: 'block', page, index: i }">
                   {{ t('companion.settings.change_block') }}
@@ -1050,9 +1390,26 @@ async function save() {
                       :value="band.metrics[slot - 1] || ''"
                       @change="setBandMetric(band, slot - 1, ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
-                <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                  {{ metricLabel(metric) }}
-                </option>
+                <optgroup :label="t('companion.settings.band_actions_group')">
+                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                    {{ bandActionLabel(action) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_radar_group')">
+                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                    {{ bandRadarLabel(radar) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_bell_group')">
+                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                    {{ bandBellLabel(bell) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_metrics_group')">
+                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                    {{ metricLabel(metric) }}
+                  </option>
+                </optgroup>
               </select>
             </div>
           </div>
@@ -1063,6 +1420,74 @@ async function save() {
         </div>
         <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addBand">
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_band') }}
+        </button>
+
+        <!-- La bande de l'encoche -->
+        <h2 class="h6">{{ t('companion.settings.notch') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.notch_help') }}</p>
+
+        <div v-for="(set, index) in preset.notch || []" :key="index"
+             class="d-flex align-items-center gap-2 mb-2">
+          <div class="row g-1 flex-grow-1">
+            <div class="col-6">
+              <select class="form-select form-select-sm" :value="set.left || ''"
+                      @change="setNotchMetric(set, 'left', ($event.target as HTMLSelectElement).value)">
+                <option value="">—</option>
+                <optgroup :label="t('companion.settings.band_actions_group')">
+                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                    {{ bandActionLabel(action) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_radar_group')">
+                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                    {{ bandRadarLabel(radar) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_bell_group')">
+                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                    {{ bandBellLabel(bell) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_metrics_group')">
+                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                    {{ metricLabel(metric) }}
+                  </option>
+                </optgroup>
+              </select>
+            </div>
+            <div class="col-6">
+              <select class="form-select form-select-sm" :value="set.right || ''"
+                      @change="setNotchMetric(set, 'right', ($event.target as HTMLSelectElement).value)">
+                <option value="">—</option>
+                <optgroup :label="t('companion.settings.band_actions_group')">
+                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                    {{ bandActionLabel(action) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_radar_group')">
+                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                    {{ bandRadarLabel(radar) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_bell_group')">
+                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                    {{ bandBellLabel(bell) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_metrics_group')">
+                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                    {{ metricLabel(metric) }}
+                  </option>
+                </optgroup>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-link text-danger p-1" type="button" @click="removeNotchSet(index)">
+            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+          </button>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addNotchSet">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_notch_set') }}
         </button>
 
         <!-- Les capteurs -->
@@ -1081,6 +1506,46 @@ async function save() {
             </div>
           </div>
         </div>
+
+        <!-- Les boutons Di2 -->
+        <h2 class="h6">{{ t('companion.settings.buttons_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.buttons_help') }}</p>
+
+        <div class="row g-2 mb-1">
+          <div v-for="(channel, index) in BUTTON_CHANNELS" :key="channel" class="col-12 col-md-6">
+            <div class="small text-body-secondary mb-1">
+              {{ t('companion.settings.button_channel', { n: index + 1 }) }}
+            </div>
+            <div class="row g-1 mb-3">
+              <div v-for="gesture in catalog.button_gestures" :key="gesture" class="col-4">
+                <label class="form-label small mb-1">
+                  {{ t(`companion.settings.button_gestures.${gesture}`) }}
+                </label>
+                <select class="form-select form-select-sm"
+                        :value="buttonAction(channel, gesture as keyof ButtonChannel)"
+                        @change="setButtonAction(channel, gesture as keyof ButtonChannel,
+                                                  ($event.target as HTMLSelectElement).value)">
+                  <option value="">{{ t('companion.settings.button_action_none') }}</option>
+                  <optgroup :label="t('companion.settings.button_actions_group')">
+                    <option v-for="action in catalog.button_actions" :key="action" :value="action">
+                      {{ buttonActionLabel(action) }}
+                    </option>
+                  </optgroup>
+                  <optgroup v-if="goToPageTargets.length" :label="t('companion.settings.button_go_to_page_group')">
+                    <option v-for="page in goToPageTargets" :key="page.key" :value="`go_to_page:${page.key}`">
+                      {{ pageLabel(page) }}
+                    </option>
+                  </optgroup>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Une page fraîchement ajoutée n'a pas encore de clé (voir `Page.key`) :
+             elle ne peut donc pas encore être visée par « Aller à… ». -->
+        <p v-if="preset.pages.length > goToPageTargets.length" class="text-body-secondary small mb-4">
+          {{ t('companion.settings.button_go_to_page_pending') }}
+        </p>
 
         <!-- Le radar -->
         <h2 class="h6">{{ t('companion.settings.radar_title') }}</h2>
@@ -1133,6 +1598,51 @@ async function save() {
             </div>
           </div>
         </div>
+
+        <!-- Les batteries -->
+        <h2 class="h6">{{ t('companion.settings.battery_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.battery_help') }}</p>
+        <div class="row g-2 align-items-end mb-4">
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">{{ t('companion.settings.battery_threshold') }}</label>
+            <input class="form-control form-control-sm" type="number" min="1" max="100"
+                   :value="batteryValue('threshold_percent', 20)"
+                   @input="setBattery('threshold_percent', Number(($event.target as HTMLInputElement).value))">
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="battery-sounds"
+                     :checked="preset.battery?.sounds !== false"
+                     @change="setBattery('sounds', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="battery-sounds">
+                {{ t('companion.settings.battery_sounds') }}
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Trajet parcouru -->
+        <h2 class="h6">{{ t('companion.settings.traveled_path_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.traveled_path_help') }}</p>
+        <div class="row g-2 align-items-end">
+          <div class="col-6 col-md-3 d-flex align-items-center gap-2">
+            <span class="small">{{ t('companion.settings.traveled_path_color') }}</span>
+            <CompanionColorPicker v-model="traveledPathColor" :fallback="DEFAULT_TRAVELED_PATH_COLOR"
+                                   :label="t('companion.settings.traveled_path_color')" />
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">{{ t('companion.settings.traveled_path_width') }}</label>
+            <input class="form-control form-control-sm" type="number" min="1" step="1"
+                   :value="traveledPathValue('width', 4)"
+                   @input="setTraveledPath('width', Number(($event.target as HTMLInputElement).value))">
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">{{ t('companion.settings.traveled_path_opacity') }}</label>
+            <input class="form-control form-control-sm" type="number" min="0" max="1" step="0.05"
+                   :value="traveledPathValue('opacity', 0.85)"
+                   @input="setTraveledPath('opacity', Number(($event.target as HTMLInputElement).value))">
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1153,8 +1663,9 @@ async function save() {
     <!-- Montée par `v-if` : la dialogue pose son écouteur clavier au montage, et
          une dialogue toujours montée mangerait la touche Échap de l'éditeur. -->
     <CompanionBlockPicker v-if="picker" :block="pickerBlock" :catalog="catalog"
-                          :cell="pickerCell" :known-series="lapSeries"
-                          @choose="applyPick" @close="picker = null" />
+                          :cell="pickerCell" :known-series="lapSeries" :metric-layouts="metricLayouts"
+                          :page-kind="picker.page.kind"
+                          @choose="applyPick" @close="picker = null" @save-layout="onSaveLayout" />
 
     <datalist id="companion-series-list">
       <option v-for="s in lapSeries" :key="s" :value="s" />
@@ -1169,6 +1680,22 @@ async function save() {
    qui n'existe nulle part. La hauteur est fixe et les lignes se partagent la
    place (`1fr`) : ajouter une ligne resserre les cases, exactement comme sur
    l'écran, plutôt que d'allonger un écran qui ne s'allonge pas. */
+/* La grille et ses gouttières partagent le même repère : le wrapper ne fait
+   que la taille de la grille (aucun autre enfant en flux normal), si bien que
+   les gouttières — positionnées en absolu dedans, en `%` — retombent
+   exactement sur les espaces qu'elles doivent colorer. */
+.companion-grid-wrap {
+  position: relative;
+  /* Sans ceci, `position: relative` seul ne crée pas de contexte d'empilement
+     (il en faudrait un `z-index` non `auto`) : le `z-index: -1` d'une
+     gouttière irait alors chercher le contexte d'empilement le plus proche
+     au-dessus — potentiellement bien plus haut dans la page — plutôt que de
+     rester sous les cases de *cette* grille. */
+  isolation: isolate;
+  width: 100%;
+  max-width: 16rem;
+}
+
 .companion-grid {
   display: grid;
   /* Les proportions exactes de `PHONE_GRID` (328 × 598 px logiques, gouttières
@@ -1177,12 +1704,56 @@ async function save() {
      grilles, quel que soit le nombre de lignes et de colonnes. */
   gap: 0.4rem;
   width: 100%;
-  max-width: 16rem;
   /* La hauteur se déduit des proportions du téléphone, posées par `aspectRatio` :
      celles de l'appareil quand il les a annoncées, celles d'un téléphone
      ordinaire sinon. Une hauteur en dur redeviendrait fausse au premier écran
      qui n'a pas ce format. */
   aspect-ratio: 328 / 598;
+  /* Le conteneur occupe tout le wrapper, gouttières comprises — même là où
+     aucune case n'est dessinée (une fusion de 2 colonnes n'a pas de
+     gouttière interne à son propre travers). Sans ceci, cette zone
+     transparente resterait quand même la cible des clics/survols (une boîte
+     HTML capte les événements même sans rien y peindre), et les gouttières
+     dessous — reculées par `z-index: -1` — ne recevraient plus jamais rien.
+     `.companion-cell` republie `auto` pour rester cliquable. */
+  pointer-events: none;
+}
+
+/* Positionnée par `styleForGutter` (`gutterRect`), en `%` du wrapper, à la
+   même géométrie que les cases (`phoneCell`) : les deux se partagent
+   exactement la largeur/hauteur du conteneur, sans jamais se chevaucher. Vide,
+   elle ne se voit qu'au survol — une ligne pointillée discrète, la même
+   invite que la case vide (`+`) — pour ne pas couvrir la grille de traits
+   tant qu'on n'a rien posé.
+
+   `z-index: -1` (et `isolation: isolate` sur le wrapper, juste au-dessus) :
+   un élément positionné se peint après le contenu normal de son empilement,
+   quel que soit son ordre dans le HTML — sans ceci, un séparateur poserait sa
+   couleur *par-dessus* le coin d'une case voisine plutôt que dessous, dès que
+   les deux se frôlent. Même règle que côté appli, où les séparateurs sont
+   peints avant les cellules dans le `Stack` (`DashboardGrid`). */
+.companion-gutter {
+  position: absolute;
+  z-index: -1;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.companion-gutter:not(.filled):hover {
+  background: repeating-linear-gradient(
+    90deg, var(--bs-secondary-color) 0 4px, transparent 4px 8px
+  );
+}
+
+/* `outline-offset` négatif plutôt que positif : la gouttière peint sous les
+   cases (`z-index: -1`), un liseré qui déborderait vers l'extérieur se
+   ferait donc en partie recouvrir par la case voisine. */
+.companion-gutter.selected {
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -1px;
 }
 
 /* Les cases posées portent la vignette du composant : la disposition est exacte,
@@ -1200,6 +1771,10 @@ async function save() {
   padding: 0;
   text-align: center;
   overflow: hidden;
+  /* Rétablit ce que `.companion-grid` vient d'éteindre : la case reste
+     cliquable, seul le conteneur (gouttières comprises) ne doit plus
+     intercepter les clics à la place des gouttières qu'il recouvre. */
+  pointer-events: auto;
   /* La case devient l'unité de mesure de sa vignette : `1cqw` vaut 1 % de sa
      largeur, ce dont `--cbp-em` a besoin pour rendre les proportions du
      téléphone quelle que soit la largeur laissée à la grille. */
@@ -1285,5 +1860,33 @@ async function save() {
   align-items: center;
   justify-content: center;
   font-size: 0.75rem;
+}
+
+/* Même dessin que le sélecteur d'icône d'un composant `metric`
+   (`CompanionBlockPicker.cbpk-icons`) — une seule grille de vignettes, pour
+   qu'apprendre l'un vaille pour l'autre. Dupliqué plutôt que partagé : les
+   deux composants n'ont aujourd'hui rien d'autre en commun qui justifie un
+   fichier de styles à eux deux. */
+.cdb-icons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.cdb-icon-btn {
+  width: 2.2rem;
+  height: 2.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.4rem;
+  background: transparent;
+  font-size: 0.65rem;
+  padding: 0;
+}
+.cdb-icon-btn--selected {
+  border-color: var(--bs-primary);
+  outline: 2px solid var(--bs-primary);
+  outline-offset: -2px;
 }
 </style>

@@ -15,9 +15,22 @@ import { colorForGrade } from './routeHelpers'
 
 export interface Block {
   kind: string
+  // Vestige d'avant ce chantier — un bloc `metric` n'en écrit plus, mais un
+  // document enregistré avant ce chantier peut encore le porter (voir
+  // `metricLayout`, qui le traduit en `layout`). Toujours actif pour les
+  // autres genres de composants (`zones`, `radar`, …), qui gardent leurs
+  // modes.
   mode?: string
   metric?: string
   source?: string
+  // Le capteur visé par un bloc `battery` en mode `compact` — une clé de
+  // `Catalog.battery_sensors`. Absent : le pire pourcentage connu, tous
+  // appareils confondus, le comportement d'avant ce réglage. Sans effet en
+  // mode `list`, qui les liste déjà tous.
+  sensor?: string
+  // Ce que joue un bloc `bell` — 'bell' (sonnette), 'horn' (klaxon) ou
+  // 'booster', voir `CompanionSettings::BELL_SOUNDS`. Absent vaut 'bell'.
+  sound?: string
   // La série de tours qu'un bouton « Marquer un tour » (`mark_lap`) ouvre —
   // absente vaut `'default'`, la seule série que l'export `.fit` de l'appli
   // sait porter (une seule hiérarchie de tours possible dans le format).
@@ -26,11 +39,34 @@ export interface Block {
   // la mesure est une durée (voir `isDurationMetric`). Absent vaut `'hm'`, le
   // seul format que l'appli connaissait avant ce réglage.
   format?: string
-  // Bornes de la jauge à plage libre (mode `gauge` sur une mesure sans zones
-  // d'entraînement — voir `isRangeGaugeMetric`). Absentes, l'appli retombe sur
-  // le chiffre plein cadre, comme avant que ce réglage existe pour ces mesures.
+  // La disposition d'un bloc `metric` — voir `MetricLayout`/`metricLayout`.
+  // Absente sur un document d'avant ce chantier, où c'était `mode` qui
+  // décidait de tout.
+  layout?: MetricLayout
+  // Icône personnalisée, propre à ce bloc — une clé de `Catalog.icons`.
+  // Absente : l'appli garde l'icône par défaut de la mesure (`MetricId.icon`).
+  icon?: string
+  // Libellé personnalisé d'un bloc `metric`, propre à ce bloc — remplace le
+  // nom traduit de la mesure partout où l'appli dessine le jeton `label` de
+  // `layout`. Absent : le nom de la mesure fait foi, comme avant ce réglage.
+  label?: string
+  // `'range'` (bornes réglées ci-dessous) ou `'dynamic'` (plage lue en
+  // roulant) — seulement quand `layout.gauge` est réglé sur une mesure sans
+  // zones d'entraînement éligible aux deux (voir `isRangeGaugeMetric`/
+  // `isDynamicGaugeMetric`). Une mesure éligible à un seul des deux l'impose,
+  // ce champ ne sert alors à rien.
+  gauge_kind?: string
+  // Bornes de la jauge à plage libre (`layout.gauge` réglé, `gauge_kind ===
+  // 'range'`, sur une mesure sans zones d'entraînement — voir
+  // `isRangeGaugeMetric`). Absentes, l'appli retombe sur le chiffre plein
+  // cadre, comme avant que ce réglage existe pour ces mesures.
   min?: number
   max?: number
+  // La fenêtre « roulante » d'un bloc `altitude_profile`, en km à venir depuis
+  // la position courante — seulement quand un tracé est suivi (voir
+  // `sanitize_block`). Absente : le profil entier du tracé, fait/restant,
+  // comportement d'avant ce réglage.
+  window_km?: number
   // Couleur de fond de la carte et de son texte, en `#rrggbb` — valent pour
   // n'importe quel genre de composant, contrairement à `metric`/`source` qui
   // sont propres à un genre. Absentes, l'appli garde son calcul habituel
@@ -39,6 +75,171 @@ export interface Block {
   // lisible dessus (`foregroundOf`), jamais sur du blanc fixe.
   color?: string
   text_color?: string
+  // Seulement dans `blocks` d'une page `list` (`Page.cols`) : la colonne qui
+  // affiche ce bloc, `0` par défaut. Fusionné dans le bloc plutôt qu'une
+  // enveloppe à part comme `Cell` : une page à une seule colonne (le cas
+  // courant) n'a alors rien de plus à savoir lire, et un document d'avant ce
+  // réglage — où aucun bloc n'a `col` — se comporte comme `col: 0` partout.
+  col?: number
+}
+
+// ── La disposition d'un bloc `metric` ───────────────────────────────────────
+//
+// Remplace les cinq anciens `mode` (`big`, `compact`, `zone`, `gauge`,
+// `dynamic_gauge`) par une grille librement composable, à 3 colonnes et
+// jusqu'à `MAX_LAYOUT_ROWS` rangées : chaque élément se pose dans une case
+// `"<rangée>-<colonne>"` (`icon`/`label`/`unit`/`value`), `gauge` — une barre
+// pleine largeur, pas un texte — sur une rangée entière (`"<rangée>"`, sans
+// colonne). Une clé absente = élément masqué ; `value` est la seule
+// obligatoire. Même contrat que `CompanionSettings::LAYOUT_*`/
+// `sanitize_layout_positions` côté Rails — c'est lui qui fait foi, ce fichier
+// ne fait qu'aider l'éditeur à ne pas composer ce que le serveur retirera.
+export type RowHeight = 'small' | 'normal' | 'large'
+
+export interface MetricLayout {
+  icon?: string
+  label?: string
+  unit?: string
+  value: string
+  gauge?: string
+  // Le poids de chaque rangée dans le partage de la hauteur réelle de la
+  // case, ex. `{'1': 'large'}` pour mettre le chiffre plus en évidence que
+  // son étiquette — clé = numéro de rangée, en chaîne (même format que les
+  // positions). Une rangée absente d'ici vaut `'normal'`, jamais écrite pour
+  // rester silencieuse (même contrat que `CompanionSettings::ROW_HEIGHTS`).
+  row_heights?: Record<string, 'small' | 'large'>
+}
+
+export type LayoutToken = 'icon' | 'label' | 'unit' | 'value'
+
+export const LAYOUT_TOKEN_ORDER: LayoutToken[] = ['icon', 'label', 'unit', 'value']
+
+export const MAX_LAYOUT_ROWS = 4
+
+// La disposition qu'un ancien `mode` de bloc `metric` dessinait — même table
+// que `CompanionSettings::LEGACY_LAYOUTS` côté Rails, pour que l'aperçu d'un
+// document enregistré avant ce chantier (jamais rouvert dans l'éditeur
+// depuis) se dessine comme avant, sans que l'utilisateur ait à le retoucher.
+const LEGACY_METRIC_LAYOUTS: Record<string, MetricLayout> = {
+  big: { value: '0-center', unit: '1-center' },
+  compact: { icon: '0-center', value: '1-center', unit: '2-center' },
+  zone: { icon: '0-center', label: '0-center', value: '1-center' },
+  gauge: { value: '0-center', gauge: '1', unit: '2-center' },
+  dynamic_gauge: { value: '0-center', gauge: '1', unit: '2-center' },
+}
+
+// Le repli d'avant `big` : chiffre plein cadre, unité en dessous — même
+// valeur que `CompanionSettings::DEFAULT_METRIC_LAYOUT`.
+export const DEFAULT_METRIC_LAYOUT: MetricLayout = { value: '0-center', unit: '1-center' }
+
+// La disposition d'un bloc `metric`, quelle que soit sa provenance : `layout`
+// s'il en a un, sinon la traduction de son `mode` (document d'avant ce
+// chantier), sinon le repli neutre. C'est elle que l'aperçu et l'éditeur
+// doivent lire — jamais `block.layout`/`block.mode` directement, qui ne
+// couvrent chacun qu'un des deux cas.
+export function metricLayout(block: Block): MetricLayout {
+  if (block.layout) return block.layout
+  if (block.mode && LEGACY_METRIC_LAYOUTS[block.mode]) return LEGACY_METRIC_LAYOUTS[block.mode]
+  return DEFAULT_METRIC_LAYOUT
+}
+
+// L'icône à dessiner pour un bloc `metric` : celle réglée sur le bloc, sinon
+// celle par défaut de la mesure.
+export function metricIcon(block: Block): string {
+  return block.icon || metricSample(block.metric).icon
+}
+
+export interface GridPosition {
+  row: number
+  col: 'left' | 'center' | 'right'
+}
+
+// `undefined`/hors grille rendent `null` plutôt que de lever : ce fichier lit
+// aussi bien un document tout juste composé qu'un document repris tel quel
+// d'avant ce chantier, jamais garanti valide avant d'être passé par
+// l'assainisseur Rails.
+export function parsePosition(value: string | undefined): GridPosition | null {
+  if (!value) return null
+  const [rowPart, col] = value.split('-', 2)
+  const row = Number(rowPart)
+  if (!Number.isInteger(row) || row < 0 || row >= MAX_LAYOUT_ROWS) return null
+  if (col !== 'left' && col !== 'center' && col !== 'right') return null
+  return { row, col }
+}
+
+export function parseGaugeRow(value: string | undefined): number | null {
+  if (!value) return null
+  const row = Number(value)
+  return Number.isInteger(row) && row >= 0 && row < MAX_LAYOUT_ROWS ? row : null
+}
+
+export interface MetricLayoutRow {
+  row: number
+  // Une rangée-jauge n'a pas de colonnes : la barre occupe toute sa largeur.
+  gauge: boolean
+  // Son poids dans le partage de la hauteur réelle de la case — voir
+  // `MetricLayout.row_heights`.
+  height: RowHeight
+  // Toujours les 3 colonnes, y compris vides : c'est ce qui permet à
+  // l'aperçu de réserver 3 tiers égaux (motif « barre d'outils »,
+  // gauche/centre/droite) plutôt que de ne réserver que ce qui est occupé —
+  // sinon une case seule à droite se retrouverait centrée, pas au bord.
+  columns: { col: 'left' | 'center' | 'right'; tokens: LayoutToken[] }[]
+}
+
+// Le poids d'une rangée, en facteur `flex-grow` — même rapport des deux
+// côtés (2 / 4 / 8), et dans les mêmes proportions que `ROW_HEIGHT_SCALE` :
+// une rangée ne reçoit plus de place que si son contenu grandit d'autant,
+// sinon une rangée « petite » à côté d'une « grande » se retrouverait avec un
+// texte à sa taille habituelle dans une case bien plus étroite que ce qu'il
+// lui faut.
+export const ROW_HEIGHT_WEIGHT: Record<RowHeight, number> = { small: 2, normal: 4, large: 8 }
+
+// Le facteur de taille de l'icône, de l'étiquette, de l'unité et du chiffre
+// d'une rangée — même rapport que `RowHeight.scale` côté appli (de « petite »
+// à « grande », le contenu quadruple). Appliqué comme `font-size` de la
+// rangée elle-même plutôt que sur chaque élément : leurs tailles sont déjà en
+// `em`, donc ce `font-size`-là les multiplie toutes d'un coup, en cascade —
+// la même mécanique CSS qui fait déjà fonctionner `--cbp-em`/`tileStyle`.
+export const ROW_HEIGHT_SCALE: Record<RowHeight, number> = { small: 0.5, normal: 1, large: 2 }
+
+// Les rangées effectivement utilisées, dans l'ordre — une rangée sans aucun
+// occupant n'y figure pas (elle ne prend aucune place, ni dans l'appli ni
+// dans l'aperçu). Partagée entre `CompanionBlockPreview` (dessiner) et
+// `CompanionBlockPicker` (savoir quelles cases de la grille d'édition sont
+// déjà prises).
+export function layoutRows(layout: MetricLayout): MetricLayoutRow[] {
+  const rows = new Map<number, { gauge: boolean; columns: Map<string, LayoutToken[]> }>()
+  const ensure = (row: number) => {
+    let entry = rows.get(row)
+    if (!entry) {
+      entry = { gauge: false, columns: new Map() }
+      rows.set(row, entry)
+    }
+    return entry
+  }
+
+  for (const token of LAYOUT_TOKEN_ORDER) {
+    const pos = parsePosition(layout[token])
+    if (!pos) continue
+    const entry = ensure(pos.row)
+    const tokens = entry.columns.get(pos.col) || []
+    tokens.push(token)
+    entry.columns.set(pos.col, tokens)
+  }
+
+  const gaugeRow = parseGaugeRow(layout.gauge)
+  if (gaugeRow != null) ensure(gaugeRow).gauge = true
+
+  return [...rows.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([row, entry]) => ({
+      row,
+      gauge: entry.gauge,
+      height: layout.row_heights?.[String(row)] || 'normal',
+      columns: (['left', 'center', 'right'] as const)
+        .map((col) => ({ col, tokens: entry.columns.get(col) || [] })),
+    }))
 }
 
 // Série de tours que l'appli compagnon remplit toute seule, sur les fronts
@@ -57,16 +258,64 @@ export interface Cell {
   block: Block
 }
 
+// Un séparateur : une ligne colorée qui traverse toute une gouttière de la
+// grille, sans changer la largeur ni la hauteur des cases — `axis: 'h'` sous
+// la ligne `at` (`1..rows-1`), `axis: 'v'` à droite de la colonne `at`
+// (`1..cols-1`). Pas de position/longueur libres : il traverse toujours toute
+// la grille, ce qui suffit à poser un clic sur la gouttière pour le créer.
+// Même contrat que `CompanionSettings.sanitize_dividers` côté Rails et
+// `GridDivider` côté Dart.
+export interface Divider {
+  axis: 'h' | 'v'
+  at: number
+  color: string
+}
+
+// Purement décoratif : contrairement à `block.color`, il n'y a pas de calcul
+// de repli possible pour un séparateur sans couleur — il lui en faut toujours
+// une. Même littéral que `CompanionSettings::DEFAULT_DIVIDER_COLOR` (Rails) et
+// `DEFAULT_DIVIDER_COLOR` (Dart).
+export const DEFAULT_DIVIDER_COLOR = '#9ca3af'
+
+// Couleur du trajet réellement parcouru pour un profil qui n'a jamais touché
+// ce réglage. Même littéral que `CompanionSettings::DEFAULT_TRAVELED_PATH_COLOR`
+// (Rails) et `TraveledPathSettings` (Dart).
+export const DEFAULT_TRAVELED_PATH_COLOR = '#2196f3'
+
 export interface Page {
   kind: 'map' | 'grid' | 'list' | 'laps'
+  // Identifiant stable, fabriqué **par le serveur** à l'enregistrement — voir
+  // `CompanionSettings.page_key` (Rails) et `RidePageSpec.key` (Dart). Absent
+  // sur une page qui n'a encore jamais été enregistrée (nouvelle page, ou
+  // profil dupliqué) : même raison que `Preset.key`, le recopier ici ferait
+  // perdre l'unicité que le serveur garantit. C'est ce qu'un bouton Di2 réglé
+  // en « aller à la page X » vise — l'éditeur ne peut donc proposer une page
+  // comme cible qu'une fois qu'elle en a une, c'est-à-dire après un premier
+  // « Enregistrer ».
+  key?: string
   title?: string
   rows?: number
+  // Colonnes d'une page `grid` (avec `rows`/`cells`), **ou** d'une page `list`
+  // (avec `blocks`, chacun visant la sienne via `Block.col`) — même nom des
+  // deux côtés, deux bornes différentes (`max_grid_side` contre
+  // `max_list_cols`) : `isGridLayout(page)` dit laquelle s'applique.
   cols?: number
   cells?: Cell[]
+  dividers?: Divider[]
   blocks?: Block[]
   // Rangée derrière le menu d'actions plutôt que dans le défilement. Absent vaut
   // « dans le défilement » — voir `canHideBehindMenu`.
   menu?: boolean
+  // Seulement quand `menu` est vrai : fait rejoindre le défilement à cette page,
+  // le temps que la condition dure, plutôt que de l'y ranger en permanence.
+  // Absente ou inconnue : la page reste purement statique derrière le menu,
+  // comme avant ce réglage — voir `RideShellPage._updateConditionalPages` côté
+  // appli.
+  menu_condition?: 'route_active' | 'descending' | 'near_col'
+  // Bascule automatiquement dessus quand la condition devient vraie, plutôt que
+  // de seulement la faire rejoindre le défilement. N'a de sens que si
+  // `menu_condition` est posé.
+  menu_auto_open?: boolean
   // Seulement pour `kind: 'laps'` : la série de tours que cette page affiche
   // (liste déroulante + composants du tour choisi). Absente vaut `'default'`.
   series?: string
@@ -75,10 +324,46 @@ export interface Page {
   // `rows`/`cols`/`cells` comme une page `grid`). Une page `grid` n'a pas
   // besoin de cette clé — son genre le dit déjà.
   layout?: 'grid'
+  // L'icône qui la repère dans le menu ⋮ de l'appli (`DashboardPage._menuFor`,
+  // dépôt voisin) — une classe FontAwesome de `catalog.icons`, même liste
+  // blanche que l'icône d'un composant `metric`. Absente ou inconnue : l'appli
+  // retombe sur l'icône déduite du genre de page (grille ou liste).
+  icon?: string
 }
 
 export interface Band {
   metrics: string[]
+}
+
+// Ce qu'un geste sur un canal du D-Fly déclenche — une chaîne du catalogue
+// `button_actions`, ou `go_to_page:<clé>` (voir `Page.key`). Trois clés fixes
+// et non un `Record<string, string>` : les trois gestes sont ceux que le D-Fly
+// distingue lui-même (`catalog.button_gestures`), pas une liste ouverte.
+export interface ButtonChannel {
+  click?: string
+  double_click?: string
+  long_press?: string
+}
+
+// Ce que les quatre canaux du D-Fly déclenchent, par profil — voir
+// `CompanionSettings.sanitize_buttons` (Rails) et `ButtonSettings` (Dart).
+// Absent (ou un canal absent) laisse l'appli à son comportement par défaut :
+// canal 1 = page précédente, canal 2 = page suivante, rien sur 3 et 4.
+export interface Buttons {
+  channel1?: ButtonChannel
+  channel2?: ButtonChannel
+  channel3?: ButtonChannel
+  channel4?: ButtonChannel
+}
+
+// La bande de l'encoche : une mesure au plus de chaque côté, dans un jeu.
+// `Preset.notch` est une liste de jeux — même forme que `bands`, entre
+// lesquels un glissé fait défiler côté appli. Contrairement à `bands`,
+// l'absence (ou une liste vide) ne retombe jamais sur un contenu par défaut —
+// voir `CompanionSettings.sanitize_notch_sets`.
+export interface Notch {
+  left?: string
+  right?: string
 }
 
 export interface Preset {
@@ -95,25 +380,89 @@ export interface Preset {
   default_for?: string[]
   pages: Page[]
   bands: Band[]
+  notch?: Notch[]
   sensors?: Record<string, boolean>
   radar?: Record<string, number | boolean>
+  // Seuil d'alerte batterie des capteurs BLE de l'appli, et son son — même
+  // forme que `radar`.
+  battery?: Record<string, number | boolean>
   screen?: Record<string, number>
+  // Couleur/largeur/opacité de la ligne du trajet réellement parcouru,
+  // dessinée par l'appli companion — voir `sanitize_traveled_path` (Rails) et
+  // `TraveledPathSettings` (Dart).
+  traveled_path?: Record<string, number | string>
+  buttons?: Buttons
+}
+
+// Une disposition de bloc `metric` enregistrée pour être réutilisée sur une
+// prochaine mesure — un **arrangement**, pas un bloc : ni icône choisie, ni
+// type de jauge, ni min/max, propres à une mesure précise et pas à sa
+// disposition.
+export interface MetricLayoutPreset {
+  key?: string
+  name: string
+  layout: MetricLayout
 }
 
 export interface CompanionDocument {
   v?: number
   presets: Preset[]
+  metric_layouts?: MetricLayoutPreset[]
 }
 
 export interface Catalog {
   page_kinds: string[]
   blocks: Record<string, string[]>
   zone_sources: string[]
+  // Le capteur qu'un bloc `battery` en mode `compact` peut viser — voir
+  // `Block.sensor`.
+  battery_sensors: string[]
   metrics: string[]
+  // Ce qu'une case du bandeau ou de la bande de l'encoche peut porter à la
+  // place d'une mesure — une seule aujourd'hui, `sleep`. À part de `metrics`
+  // et non fondue dedans : une case de bandeau reste d'abord un chiffre à
+  // lire, l'éditeur présente les deux catalogues séparément.
+  band_actions: string[]
+  // Le radar arrière, en case de bandeau ou d'encoche — `radar_distance`,
+  // `radar_count`, `radar_gauge` (voir `CompanionSettings::BAND_RADAR`). Un
+  // troisième catalogue et non un mode de plus dans `band_actions` : ce n'est
+  // ni une mesure ni une commande, l'éditeur lui garde son propre groupe.
+  band_radar: string[]
+  // La sonnette, en case de bandeau ou d'encoche — `bell_bell`, `bell_horn`,
+  // `bell_booster` (voir `CompanionSettings::BAND_BELL`). Même raisonnement
+  // que `band_radar` :
+  // la case porte directement le son choisi, plutôt qu'un `bell` nu dans
+  // `band_actions` suivi d'un réglage qu'une case-chaîne ne peut pas porter.
+  band_bell: string[]
+  // Ce qu'un bloc `bell` peut jouer — voir `CompanionSettings::BELL_SOUNDS`.
+  // Même liste que `band_bell` (sans le préfixe `bell_`) : un bloc de page
+  // choisit son son, une case de bandeau/encoche choisit sa clé directement.
+  bell_sounds: string[]
+  // Les trois gestes que le D-Fly (boutons satellites du Di2) distingue
+  // lui-même — voir `CompanionSettings::BUTTON_GESTURES`. Toujours les mêmes
+  // trois, mais tirés du catalogue plutôt que codés en dur dans l'éditeur :
+  // une seule liste à faire évoluer si l'appli en reconnaît un jour un
+  // quatrième.
+  button_gestures: string[]
+  // Ce qu'un geste sur un canal du D-Fly peut déclencher — voir
+  // `CompanionSettings::BUTTON_ACTIONS`. `go_to_page:<clé>` n'y figure pas :
+  // c'est un jeton composé, construit dans l'éditeur à partir des pages du
+  // profil en cours plutôt que choisi dans ce catalogue-ci (voir
+  // `goToPageTargets` dans `CompanionDashboard.vue`).
+  button_actions: string[]
   sensors: string[]
   activities: string[]
   max_band_metrics: number
   max_grid_side: number
+  // Colonnes au plus pour une page `list` — voir `Page.cols`/`Block.col`.
+  // Borne distincte de `max_grid_side` : une colonne de liste n'a pas de
+  // hauteur à tenir, elle n'a donc besoin d'être ni aussi étroite ni aussi
+  // nombreuse qu'une case de grille.
+  max_list_cols: number
+  icons: string[]
+  // Les conditions qu'une page rangée derrière le menu peut porter pour
+  // rejoindre le défilement toute seule — voir `Page.menu_condition`.
+  menu_conditions: string[]
 }
 
 // ── Derrière le menu, ou dans le défilement ─────────────────────────────────
@@ -208,7 +557,13 @@ export function blockChoices(catalog: Catalog): BlockChoice[] {
 export function blockFor(
   choice: BlockChoice,
   params: {
-    metric?: string; source?: string; series?: string; format?: string; min?: number; max?: number
+    metric?: string; source?: string; sensor?: string; series?: string; format?: string; min?: number; max?: number
+    windowKm?: number; sound?: string
+    layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
+    // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
+    // restent celles du bloc `metric`) : les deux genres se règlent en même
+    // temps dans la dialogue de choix, ce ne peut donc pas être le même état.
+    clockLayout?: MetricLayout; clockIcon?: string
     color?: string | null; textColor?: string | null
   },
 ): Block {
@@ -216,16 +571,32 @@ export function blockFor(
   if (choice.mode) block.mode = choice.mode
   if (choice.kind === 'metric') block.metric = params.metric
   if (choice.kind === 'metric' && isDurationMetric(params.metric)) block.format = params.format || 'hm'
-  // Seulement pour la vignette `gauge` : les autres modes ignorent min/max, et
-  // les y poser laisserait une clé morte que l'assainisseur retirerait — la
-  // même règle que `format`, qui lui s'applique à tous les modes parce que la
-  // durée s'écrit pareil dans chacun d'eux.
-  if (choice.kind === 'metric' && choice.mode === 'gauge' && isRangeGaugeMetric(params.metric)) {
-    block.min = params.min
-    block.max = params.max
+  if (choice.kind === 'metric') block.layout = params.layout || DEFAULT_METRIC_LAYOUT
+  if (choice.kind === 'metric' && params.icon) block.icon = params.icon
+  if (choice.kind === 'metric' && params.label?.trim()) block.label = params.label.trim()
+  if (choice.kind === 'clock') block.layout = params.clockLayout || { value: '0-center' }
+  if (choice.kind === 'clock' && params.clockIcon) block.icon = params.clockIcon
+  // Seulement quand la jauge est effectivement posée, et seulement sur une
+  // plage réglée dans l'éditeur — la dynamique se lit dans la sortie en
+  // cours, poser min/max dessus laisserait une clé morte que l'assainisseur
+  // retirerait.
+  if (choice.kind === 'metric' && params.layout?.gauge) {
+    if (params.gaugeKind) block.gauge_kind = params.gaugeKind
+    if (params.gaugeKind !== 'dynamic' && isRangeGaugeMetric(params.metric)) {
+      block.min = params.min
+      block.max = params.max
+    }
   }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
+  // Absent (`undefined`) plutôt qu'un repli : c'est « tous les appareils
+  // confondus », le comportement d'avant ce réglage — même raisonnement que
+  // `window_km`.
+  if (choice.kind === 'battery' && params.sensor) block.sensor = params.sensor
+  if (choice.kind === 'bell') block.sound = params.sound || 'bell'
   if (choice.kind === 'mark_lap') block.series = params.series || 'default'
+  // Absent (`undefined`) plutôt qu'un repli : c'est le profil entier, pas une
+  // fenêtre à moitié réglée — même raisonnement que `min`/`max` de la jauge.
+  if (choice.kind === 'altitude_profile' && params.windowKm) block.window_km = params.windowKm
   // Contrairement à `metric`/`source`, valent pour n'importe quel genre : le
   // réglage se fait une fois dans la dialogue, pas par groupe.
   if (params.color) block.color = params.color
@@ -305,6 +676,36 @@ export function phoneCell(
   }
 }
 
+export interface GutterRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+// Le rectangle d'une gouttière entière, en pourcentage du conteneur — même
+// géométrie que `phoneCell`/`gridRectFor` (dépôt voisin), mais pour la bande
+// **entre** deux cases plutôt qu'une case. Le conteneur (`.companion-grid`)
+// est déjà calé sur `grid.width`/`grid.height` (`aspect-ratio`), d'où la
+// conversion directe pixel-téléphone → pourcentage plutôt qu'une mesure du
+// DOM.
+export function gutterRect(
+  axis: 'h' | 'v',
+  at: number,
+  rows: number,
+  cols: number,
+  grid: Viewport = PHONE_GRID,
+): GutterRect {
+  if (axis === 'h') {
+    const cellHeight = (grid.height - GRID_GAP * (rows - 1)) / rows
+    const top = at * cellHeight + (at - 1) * GRID_GAP
+    return { left: 0, top: (top / grid.height) * 100, width: 100, height: (GRID_GAP / grid.height) * 100 }
+  }
+  const cellWidth = (grid.width - GRID_GAP * (cols - 1)) / cols
+  const left = at * cellWidth + (at - 1) * GRID_GAP
+  return { top: 0, left: (left / grid.width) * 100, height: 100, width: (GRID_GAP / grid.width) * 100 }
+}
+
 // La ligne de texte, en pixels du téléphone, à laquelle un composant se dessine
 // **avant** mise à l'échelle — la même valeur que `BlockMetrics.natural.lineSize`
 // du dépôt voisin.
@@ -350,6 +751,14 @@ export function zoneCount(source?: string): number {
 // dessinera jamais.
 export interface MetricSample {
   value: string
+  // Le nom de la mesure, ex. « Cardio » — même valeur que `MetricId.name`
+  // côté appli (français en dur, l'appli ne traduit pas ce document — voir
+  // plus bas).
+  name: string
+  // L'unité physique, ex. « bpm » — vide pour les mesures qui n'en ont pas
+  // (une durée, une position de plateau…). Distincte de `name` depuis ce
+  // chantier : avant, un seul champ (`unit`) faisait les deux, tantôt un nom
+  // tantôt une unité selon la mesure.
   unit: string
   // La clé de zone (`z1`…`z7`), pour les seules mesures qui en portent une :
   // l'appli peint alors l'aplat de la zone du moment sous le chiffre.
@@ -361,7 +770,8 @@ export interface MetricSample {
   // appli (`MetricReading.background`, dépôt voisin), aucune mesure n'a
   // besoin des deux.
   background?: string
-  // L'icône du mode compact, transposée de `MetricId.icon` en FontAwesome.
+  // L'icône par défaut de la mesure, transposée de `MetricId.icon` en
+  // FontAwesome — remplacée par `block.icon` quand il est réglé.
   icon: string
   // La même valeur que `value`, non mise en forme — seulement pour les mesures
   // de `RANGE_GAUGE_METRICS`, où la jauge à plage libre en a besoin pour situer
@@ -370,53 +780,102 @@ export interface MetricSample {
   numeric?: number
 }
 
+// **Les noms et unités ne sont pas traduits, et c'est voulu** : ce sont ceux
+// que le téléphone écrira, or l'appli est en français et ne connaît pas
+// d'i18n (`MetricId.name`/`MetricId.unit`, dépôt voisin) — un nom traduit
+// ferait un aperçu que l'écran ne dessinera jamais. Mêmes chaînes des deux
+// côtés, à tenir synchronisées à la main.
 const METRIC_SAMPLES: Record<string, MetricSample> = {
-  duration: { value: '01:12', unit: 'durée', icon: 'fa-regular fa-clock' },
-  moving_time: { value: '01:08', unit: 'en mouvement', icon: 'fa-solid fa-person-biking' },
-  pause_time: { value: '00:04', unit: 'Durée pause', icon: 'fa-regular fa-circle-pause' },
-  distance: { value: '38,42 km', unit: 'distance', icon: 'fa-solid fa-ruler-horizontal', numeric: 38.42 },
-  speed: { value: '32', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 32 },
-  speed_avg: { value: '27 km/h', unit: 'Vitesse moyenne', icon: 'fa-solid fa-gauge-high', numeric: 27 },
-  speed_max: { value: '61', unit: 'km/h max', icon: 'fa-solid fa-gauge-high', numeric: 61 },
-  heart_rate: { value: '154', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
-  hr_zone: { value: 'Z3', unit: 'zone bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
-  hr_avg: { value: '141', unit: 'bpm moy', icon: 'fa-regular fa-heart', numeric: 141 },
-  hr_max: { value: '178', unit: 'bpm max', icon: 'fa-regular fa-heart', numeric: 178 },
-  power: { value: '248', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
-  power_zone: { value: 'Z3', unit: 'zone W', zone: 'z3', icon: 'fa-solid fa-bolt' },
-  power_avg: { value: '212', unit: 'W moy', icon: 'fa-solid fa-bolt', numeric: 212 },
-  power_np: { value: '236', unit: 'W NP', icon: 'fa-solid fa-bolt', numeric: 236 },
-  power_max: { value: '744', unit: 'W max', icon: 'fa-solid fa-bolt', numeric: 744 },
-  cadence: { value: '88', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
-  cadence_avg: { value: '84', unit: 'tr/min moy', icon: 'fa-solid fa-rotate', numeric: 84 },
-  cadence_max: { value: '112', unit: 'tr/min max', icon: 'fa-solid fa-rotate', numeric: 112 },
-  ascent: { value: '640 m', unit: 'D+', icon: 'fa-solid fa-arrow-trend-up', numeric: 640 },
-  altitude: { value: '1204', unit: 'm', icon: 'fa-solid fa-mountain', numeric: 1204 },
+  duration: { value: '01:12', name: 'Durée', unit: '', icon: 'fa-regular fa-clock' },
+  moving_time: { value: '01:08', name: 'Temps en mouvement', unit: '', icon: 'fa-solid fa-person-biking' },
+  pause_time: { value: '00:04', name: 'Durée pause', unit: '', icon: 'fa-regular fa-circle-pause' },
+  distance: {
+    value: '38,42', name: 'Distance', unit: 'km', icon: 'fa-solid fa-ruler-horizontal', numeric: 38.42,
+  },
+  speed: { value: '32', name: 'Vitesse', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 32 },
+  speed_avg: { value: '27', name: 'Vitesse moyenne', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 27 },
+  speed_max: { value: '61', name: 'Vitesse max', unit: 'km/h', icon: 'fa-solid fa-gauge-high', numeric: 61 },
+  heart_rate: { value: '154', name: 'Cardio', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
+  hr_zone: { value: 'Z3', name: 'Zone cardio', unit: 'bpm', zone: 'z3', icon: 'fa-solid fa-heart' },
+  // `background` et non `zone` : ces trois-là restent dans `RANGE_GAUGE_METRICS`
+  // (leur jauge reste la plage min/max, jamais celle des zones du cycliste,
+  // voir `ZONE_METRICS`/`MetricId.zonesOf` côté appli) — `zone` ferait aussi
+  // basculer `metricZoneEligible`/`gaugeKind` sur la jauge de zones. Le fond
+  // est bien tinté par la zone côté appli (`MetricId.read`, `zoneKey` sur la
+  // moyenne/le max), donc l'aperçu doit montrer la même teinte, seulement pas
+  // par ce champ-là. Même z3 que `heart_rate` ci-dessus, pour rester dans la
+  // même vignette plausible.
+  hr_avg: {
+    value: '141', name: 'Cardio moyen', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 141,
+    background: '#E0C000',
+  },
+  hr_max: {
+    value: '178', name: 'Cardio max', unit: 'bpm', icon: 'fa-regular fa-heart', numeric: 178,
+    background: '#E0C000',
+  },
+  power: { value: '248', name: 'Puissance', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
+  power_zone: { value: 'Z3', name: 'Zone de puissance', unit: 'W', zone: 'z3', icon: 'fa-solid fa-bolt' },
+  power_avg: {
+    value: '212', name: 'Puissance moyenne', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 212,
+    background: '#E0C000',
+  },
+  power_np: {
+    value: '236', name: 'Puissance normalisée', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 236,
+    background: '#E0C000',
+  },
+  power_max: {
+    value: '744', name: 'Puissance max', unit: 'W', icon: 'fa-solid fa-bolt', numeric: 744,
+    background: '#E0C000',
+  },
+  // Pas de `numeric` : comme `gears`, la valeur affichée est une paire
+  // (« 48 / 52 »), pas un chiffre unique qu'une jauge pourrait situer — même
+  // raison que son absence de `RANGE_GAUGE_METRICS`.
+  power_balance: { value: '48 / 52', name: 'Équilibre G/D', unit: '%', icon: 'fa-solid fa-scale-balanced' },
+  cadence: { value: '88', name: 'Cadence', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 88 },
+  cadence_avg: { value: '84', name: 'Cadence moyenne', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 84 },
+  cadence_max: { value: '112', name: 'Cadence max', unit: 'tr/min', icon: 'fa-solid fa-rotate', numeric: 112 },
+  ascent: { value: '640', name: 'Dénivelé positif', unit: 'm', icon: 'fa-solid fa-arrow-trend-up', numeric: 640 },
+  altitude: { value: '1204', name: 'Altitude', unit: 'm', icon: 'fa-solid fa-mountain', numeric: 1204 },
   grade: {
-    value: '7', unit: '% pente', background: colorForGrade(7), icon: 'fa-solid fa-arrow-up-right-dots', numeric: 7,
+    value: '7', name: 'Pente', unit: '%', background: colorForGrade(7), icon: 'fa-solid fa-arrow-up-right-dots',
+    numeric: 7,
   },
   grade_avg: {
-    value: '5', unit: '% pente moy', background: colorForGrade(5), icon: 'fa-solid fa-arrow-up-right-dots',
-    numeric: 5,
+    value: '5', name: 'Pente moyenne', unit: '%', background: colorForGrade(5),
+    icon: 'fa-solid fa-arrow-up-right-dots', numeric: 5,
   },
   grade_max: {
-    value: '14', unit: '% pente max', background: colorForGrade(14), icon: 'fa-solid fa-arrow-up-right-dots',
-    numeric: 14,
+    value: '14', name: 'Pente max', unit: '%', background: colorForGrade(14),
+    icon: 'fa-solid fa-arrow-up-right-dots', numeric: 14,
   },
-  calories: { value: '612', unit: 'kcal', icon: 'fa-solid fa-fire', numeric: 612 },
-  calories_per_hour: { value: '510', unit: 'kcal/h', icon: 'fa-solid fa-fire', numeric: 510 },
-  tss: { value: '54', unit: 'TSS', icon: 'fa-solid fa-chart-column', numeric: 54 },
-  gears: { value: '50×15', unit: 'braquet', icon: 'fa-solid fa-gear' },
-  chainring_position: { value: '2', unit: 'plateau', icon: 'fa-solid fa-circle-notch', numeric: 2 },
-  sprocket_position: { value: '5', unit: 'pignon', icon: 'fa-solid fa-record-vinyl', numeric: 5 },
-  gear_ratio: { value: '3,3', unit: 'rapport', icon: 'fa-solid fa-arrows-left-right', numeric: 3.3 },
+  climb_rate: {
+    value: '620', name: 'Vitesse ascensionnelle', unit: 'm/h',
+    icon: 'fa-solid fa-arrow-trend-up', numeric: 620,
+  },
+  climb_rate_avg: {
+    value: '480', name: 'Vitesse ascensionnelle moyenne', unit: 'm/h',
+    icon: 'fa-solid fa-arrow-trend-up', numeric: 480,
+  },
+  climb_rate_max: {
+    value: '1150', name: 'Vitesse ascensionnelle max', unit: 'm/h',
+    icon: 'fa-solid fa-arrow-trend-up', numeric: 1150,
+  },
+  calories: { value: '612', name: 'Calories', unit: 'kcal', icon: 'fa-solid fa-fire', numeric: 612 },
+  calories_per_hour: {
+    value: '510', name: 'Calories par heure', unit: 'kcal/h', icon: 'fa-solid fa-fire', numeric: 510,
+  },
+  tss: { value: '54', name: 'TSS', unit: 'TSS', icon: 'fa-solid fa-chart-column', numeric: 54 },
+  gears: { value: '50×15', name: 'Braquet', unit: '', icon: 'fa-solid fa-gear' },
+  chainring_position: { value: '2', name: 'Plateau', unit: '', icon: 'fa-solid fa-circle-notch', numeric: 2 },
+  sprocket_position: { value: '5', name: 'Pignon', unit: '', icon: 'fa-solid fa-record-vinyl', numeric: 5 },
+  gear_ratio: { value: '3,3', name: 'Rapport', unit: '', icon: 'fa-solid fa-arrows-left-right', numeric: 3.3 },
   route_remaining: {
-    value: '21,40 km', unit: 'Distance restante', icon: 'fa-regular fa-flag', numeric: 21.4,
+    value: '21,40', name: 'Distance restante', unit: 'km', icon: 'fa-regular fa-flag', numeric: 21.4,
   },
   route_remaining_gain: {
-    value: '380', unit: 'D+ restant', icon: 'fa-solid fa-arrow-trend-up', numeric: 380,
+    value: '380', name: 'D+ restant', unit: 'm', icon: 'fa-solid fa-arrow-trend-up', numeric: 380,
   },
-  route_eta: { value: '00:48', unit: 'temps restant', icon: 'fa-regular fa-clock' },
+  route_eta: { value: '00:48', name: 'Temps restant', unit: '', icon: 'fa-regular fa-clock' },
 }
 
 // La même vignette en `HH:MM:SS`, pour le réglage de format des mesures de
@@ -471,6 +930,18 @@ export const LAP_SUMMARY_SAMPLE = [
   { label: 'TSS', value: '24' },
 ]
 
+// Trois appareils plausibles pour la vignette du bloc `battery` : un cardio
+// encore confortable, un Varia sous le seuil par défaut (20 %), et le
+// téléphone lui-même — pour que l'aperçu montre aussi la couleur d'alerte,
+// pas seulement la forme. `kind` sert au mode compact : quand `block.sensor`
+// en vise un, l'aperçu montre son pourcentage plutôt que le pire des trois,
+// pour que choisir un capteur se voie vraiment changer quelque chose.
+export const BATTERY_SAMPLE = [
+  { label: 'Cardio', percent: 62, kind: 'heart_rate' },
+  { label: 'Varia', percent: 14, kind: 'radar' },
+  { label: 'Téléphone', percent: 47, kind: 'phone' },
+]
+
 // Trois cols plausibles pour la vignette : un déjà grimpé (grisé), un en
 // cours (repère plein), un à venir (repère en liseré) — les trois états que
 // `climbStatusOf` distingue côté appli (route_climbs.dart).
@@ -480,11 +951,31 @@ export const CLIMB_LIST_SAMPLE = [
   { label: 'Col 3', figures: '2,3 km · 140 m D+ · 6 % moy', grade: 6, status: 'next' as const },
 ]
 
+// La courbe de puissance, pour la vignette : onze durées, une moyenne
+// plausible et décroissante — c'est la **forme** qui compte ici (un sprint
+// très au-dessus du reste, un plateau aux longues durées), les chiffres eux-
+// mêmes sont inventés comme partout ailleurs dans ce fichier. Les libellés
+// sont ceux que dessine le dépôt voisin (`PowerCurveCard._durationLabel`) :
+// secondes en dessous de la minute, minutes entières au-delà.
+export const POWER_CURVE_SAMPLE = [
+  { duration: '5 s', watts: 850 },
+  { duration: '15 s', watts: 620 },
+  { duration: '30 s', watts: 480 },
+  { duration: '1 min', watts: 380 },
+  { duration: '2 min', watts: 320 },
+  { duration: '5 min', watts: 290 },
+  { duration: '10 min', watts: 265 },
+  { duration: '20 min', watts: 245 },
+  { duration: '30 min', watts: 230 },
+  { duration: '60 min', watts: 205 },
+  { duration: '90 min', watts: 190 },
+]
+
 // Le tiret et pas un chiffre inventé quand la mesure est inconnue de cette
 // version : c'est **exactement** ce que le téléphone affichera d'une mesure
 // qu'il ne sait pas lire, et la règle du dépôt voisin — jamais un zéro.
 export function metricSample(metric: string | undefined, format?: string): MetricSample {
-  const sample = METRIC_SAMPLES[metric || ''] || { value: '—', unit: '', icon: 'fa-solid fa-question' }
+  const sample = METRIC_SAMPLES[metric || ''] || { value: '—', name: '', unit: '', icon: 'fa-solid fa-question' }
   if (format === 'hms' && metric && metric in DURATION_SAMPLES_HMS) {
     return { ...sample, value: DURATION_SAMPLES_HMS[metric] }
   }
@@ -530,6 +1021,7 @@ const RANGE_GAUGE_METRICS = new Set([
   'hr_avg', 'hr_max', 'power_avg', 'power_np', 'power_max',
   'cadence', 'cadence_avg', 'cadence_max',
   'ascent', 'altitude', 'grade', 'grade_avg', 'grade_max',
+  'climb_rate', 'climb_rate_avg', 'climb_rate_max',
   'calories', 'calories_per_hour', 'tss',
   'chainring_position', 'sprocket_position', 'gear_ratio',
   'route_remaining', 'route_remaining_gain',
@@ -586,6 +1078,9 @@ export const METRIC_RANGE_DEFAULTS: Record<string, { min: number; max: number }>
   grade: { min: -15, max: 15 },
   grade_avg: { min: -10, max: 10 },
   grade_max: { min: -20, max: 20 },
+  climb_rate: { min: -500, max: 2000 },
+  climb_rate_avg: { min: 0, max: 1500 },
+  climb_rate_max: { min: 0, max: 2500 },
   calories: { min: 0, max: 3000 },
   calories_per_hour: { min: 0, max: 1000 },
   tss: { min: 0, max: 150 },
@@ -629,12 +1124,6 @@ export function metricDropdownLabel(metric: string, translate: (key: string) => 
 // dialogue de choix s'en sert aussi maintenant.
 export interface BlockShape {
   kind: string
-  metricGauge: boolean
-  metricRangeGauge: boolean
-  metricDynamicGauge: boolean
-  metricCompact: boolean
-  metricZone: string | null
-  metricZoneMode: boolean
   zonesBar: boolean
   zonesLegend: boolean
   averagesCards: boolean
@@ -644,44 +1133,22 @@ export interface BlockShape {
   changeRouteCompact: boolean
   clearRouteCompact: boolean
   routeCompact: boolean
+  sleepCompact: boolean
+  bellCompact: boolean
   navFull: boolean
   radarGauge: boolean
   radarCount: boolean
   radarIcons: boolean
   radarCompact: boolean
+  batteryCompact: boolean
   budgetWeek: boolean
   climbListFull: boolean
+  powerCurveChart: boolean
 }
 
 export function blockShape(block: Block): BlockShape {
-  const zone = block.kind === 'metric' ? metricSample(block.metric).zone : undefined
-
   return {
     kind: block.kind,
-    // La jauge de zones n'existe que pour une mesure qui en a — sans elles,
-    // l'appli retombe sur le chiffre plein cadre plutôt que d'inventer un
-    // maximum.
-    metricGauge: block.kind === 'metric' && block.mode === 'gauge' && !!zone,
-    // La jauge à plage libre : le pendant sans zones, sur un min/max réglé
-    // dans l'éditeur plutôt que sur les seuils du cycliste. Les deux jauges
-    // sont mutuellement exclusives — une mesure zonée ignore min/max même
-    // réglés (documents plus anciens compris), et retombe sur `metricGauge`.
-    metricRangeGauge:
-      block.kind === 'metric' && block.mode === 'gauge' && !zone && block.min != null && block.max != null,
-    // La jauge dynamique : un mode à part entière, pas une variante de
-    // `gauge` — sa plage ne vient ni des zones ni d'un min/max réglé, donc
-    // pas de repli sur `metricGauge`/`metricRangeGauge` à gérer ici. Sans
-    // mesure éligible, la vignette retombe plus bas dans la chaîne (compact,
-    // zone, ou le chiffre plein cadre) — même mécanisme que les deux jauges
-    // ci-dessus sur une mesure qui n'a ni zones ni min/max.
-    metricDynamicGauge: block.kind === 'metric' && block.mode === 'dynamic_gauge' && isDynamicGaugeMetric(block.metric),
-    metricCompact: block.kind === 'metric' && block.mode === 'compact',
-    // C'est elle qui colore l'aplat, du mode `zone` comme du mode `big` : côté
-    // appli, `MetricView` peint le fond dès que la mesure porte une zone.
-    metricZone: zone || null,
-    // Distingue le dessin de `zone` de celui de `big` : même aplat de couleur,
-    // mais l'icône de la mesure (cœur / éclair) se pose devant le chiffre.
-    metricZoneMode: block.kind === 'metric' && block.mode === 'zone',
     // Le mode dit exactement ce qu'on dessine : `bar` les deux, `bar_only` la
     // barre seule, `legend` la légende seule. `lap_zones`/`lap_averages`
     // dessinent la même chose que `zones`/`averages` — seul le titre change
@@ -697,15 +1164,20 @@ export function blockShape(block: Block): BlockShape {
     changeRouteCompact: block.kind === 'change_route' && block.mode === 'compact',
     clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',
     routeCompact: block.kind === 'route' && block.mode === 'compact',
+    sleepCompact: block.kind === 'sleep' && block.mode === 'compact',
+    bellCompact: block.kind === 'bell' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
     radarGauge: block.kind === 'radar' && block.mode === 'gauge',
     radarCount: block.kind === 'radar' && block.mode === 'count',
     radarIcons: block.kind === 'radar' && block.mode === 'icons',
     radarCompact: block.kind === 'radar' && block.mode === 'compact',
+    batteryCompact: block.kind === 'battery' && block.mode === 'compact',
     budgetWeek: block.kind === 'training_budget' && block.mode === 'week',
     // La liste entière, ou une seule ligne (le col en cours / prochain) —
     // même distinction que `navFull` pour `nav_state`.
     climbListFull: block.kind === 'climb_list' && block.mode !== 'compact',
+    // Le tableau (une ligne par durée), ou la même courbe en graphique.
+    powerCurveChart: block.kind === 'power_curve' && block.mode === 'chart',
   }
 }
 
@@ -819,4 +1291,28 @@ export function fitCells(cells: Cell[], rows: number, cols: number): Cell[] {
       row_span: Math.min(cell.row_span, rows - cell.row),
       col_span: Math.min(cell.col_span, cols - cell.col),
     }))
+}
+
+// Les séparateurs qui tiennent encore dans une grille de [rows] × [cols] —
+// pendant de `fitCells` pour les gouttières : une gouttière dont l'indice
+// dépasse `rows - 1` / `cols - 1` une fois la grille rétrécie n'a plus de
+// sens et disparaît, plutôt que de rester accrochée à un bord qui n'existe
+// plus.
+export function fitDividers(dividers: Divider[], rows: number, cols: number): Divider[] {
+  return dividers.filter((divider) => divider.at <= (divider.axis === 'h' ? rows : cols) - 1)
+}
+
+// Ramène la colonne de chaque bloc d'une page `list` dans `0..cols-1`.
+//
+// Appelé quand on réduit le nombre de colonnes. **Ramenée, jamais perdue** :
+// contrairement à l'origine d'une cellule de grille, il y a toujours une
+// colonne la plus proche, et perdre un composant entier pour un mauvais
+// numéro de colonne serait pire qu'un rangement approximatif — même
+// arbitrage que `CompanionSettings.place_list_blocks` (Rails), pour que
+// l'écran et l'enregistrement disent la même chose.
+export function fitListBlocks(blocks: Block[], cols: number): Block[] {
+  return blocks.map((block) => ({
+    ...block,
+    col: Math.min(Math.max(block.col || 0, 0), cols - 1),
+  }))
 }

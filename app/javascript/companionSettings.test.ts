@@ -69,6 +69,7 @@ const catalog: Catalog = {
   page_kinds: ['map', 'grid', 'list'],
   blocks: { metric: ['big', 'compact'], zones: ['bar'], empty: [] },
   zone_sources: ['hr', 'power'],
+  battery_sensors: ['heart_rate', 'power'],
   metrics: ['speed', 'power'],
   band_actions: ['sleep'],
   band_radar: ['radar_distance', 'radar_count', 'radar_gauge'],
@@ -83,6 +84,9 @@ const catalog: Catalog = {
   max_list_cols: 4,
   icons: ['fa-solid fa-heart'],
   menu_conditions: ['route_active', 'descending', 'near_col'],
+  reminder_sounds: ['bell', 'horn'],
+  max_reminders: 12,
+  max_reminder_message_length: 60,
 }
 
 describe('blockChoices', () => {

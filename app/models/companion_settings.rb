@@ -463,6 +463,23 @@ module CompanionSettings
   # réglage, déjà disponible en laissant le champ vide) sans le dire.
   ALTITUDE_PROFILE_WINDOW_KM_RANGE = 1..50
 
+  # Douze rappels par profil au plus — même borne, et même raison, que
+  # `ReminderSpec.maxCount` côté Dart : au-delà, un tableau de bord composé ici
+  # deviendrait un défilé de toasts imprévisible sur la route, pas un jeu de
+  # rappels qu'on suit.
+  MAX_REMINDERS = 12
+
+  # Le texte d'un rappel tient dans une phrase courte lue d'un coup d'œil en
+  # roulant (`ReminderBanner` côté appli), pas un paragraphe — même esprit que
+  # `MAX_DESCRIPTION_LENGTH`, borne plus courte parce que celui-ci s'affiche en
+  # plein écran et en tenant un guidon.
+  MAX_REMINDER_MESSAGE_LENGTH = 60
+
+  # Une minute au plus court (en-deçà, un rappel devient un métronome plutôt
+  # qu'un rappel), six heures au plus long (au-delà, il ne sonnerait jamais sur
+  # l'immense majorité des sorties, autant ne rien régler).
+  REMINDER_INTERVAL_MINUTES_RANGE = 1..360
+
   # Ce que l'éditeur reçoit en props. Sérialisé tel quel dans la page.
   def catalog
     {
@@ -483,7 +500,12 @@ module CompanionSettings
       "max_grid_side" => MAX_GRID_SIDE,
       "max_list_cols" => MAX_LIST_COLS,
       "icons" => ICONS,
-      "menu_conditions" => MENU_CONDITIONS
+      "menu_conditions" => MENU_CONDITIONS,
+      # Même liste que `bell_sounds` : un rappel sonne avec le même son qu'une
+      # sonnette (`ReminderSpec.sound` côté Dart), pas un catalogue à part.
+      "reminder_sounds" => BELL_SOUNDS,
+      "max_reminders" => MAX_REMINDERS,
+      "max_reminder_message_length" => MAX_REMINDER_MESSAGE_LENGTH
     }
   end
 
@@ -585,7 +607,8 @@ module CompanionSettings
       "lighting" => sanitize_lighting(raw["lighting"]),
       "screen" => sanitize_screen(raw["screen"]),
       "traveled_path" => sanitize_traveled_path(raw["traveled_path"]),
-      "buttons" => sanitize_buttons(raw["buttons"], pages.filter_map { |p| p["key"] })
+      "buttons" => sanitize_buttons(raw["buttons"], pages.filter_map { |p| p["key"] }),
+      "reminders" => sanitize_reminders(raw["reminders"])
     }.compact
   end
 
@@ -1295,6 +1318,35 @@ module CompanionSettings
     end
 
     raw if BUTTON_ACTIONS.include?(raw)
+  end
+
+  # Les rappels périodiques — boire, manger, entamer une intervalle. Chacun
+  # doit avoir un intervalle et un message pour survivre : l'un sans l'autre
+  # composerait un toast muet ou qui ne sonne jamais, ni l'un ni l'autre n'est
+  # ce que l'éditeur a demandé. `nil` (et non `[]`) une fois vide : même
+  # convention que `sanitize_bands`/`sanitize_notch_sets`, un tableau vide
+  # écrit resterait indiscernable d'une absence pour un contrat plus ancien.
+  def sanitize_reminders(raw)
+    return nil unless raw.is_a?(Array)
+
+    reminders = raw.filter_map { |entry| sanitize_reminder(entry) }.first(MAX_REMINDERS)
+    reminders.presence
+  end
+
+  def sanitize_reminder(raw)
+    return nil unless raw.is_a?(Hash)
+
+    interval = raw["interval_minutes"]
+    return nil unless interval.is_a?(Numeric) && interval.positive?
+
+    message = raw["message"].to_s.strip[0, MAX_REMINDER_MESSAGE_LENGTH]
+    return nil if message.blank?
+
+    {
+      "interval_minutes" => interval.round.clamp(REMINDER_INTERVAL_MINUTES_RANGE),
+      "message" => message,
+      "sound" => BELL_SOUNDS.include?(raw["sound"]) ? raw["sound"] : BELL_SOUNDS.first
+    }
   end
 
   # Absent vaut **activé** : un profil écrit à la main, ou venu d'une version

@@ -412,6 +412,16 @@ export interface Notch {
   right?: string
 }
 
+// Un rappel périodique — boire, manger, entamer une intervalle — voir
+// `CompanionSettings.sanitize_reminder` (Rails) et `ReminderSpec` (Dart).
+// `sound` reprend `BELL_SOUNDS` : même son qu'une sonnette, pas un catalogue
+// à part, et donc le même flux d'alarme qui perce le mode silencieux.
+export interface Reminder {
+  interval_minutes: number
+  message: string
+  sound: string
+}
+
 export interface Preset {
   key?: string
   name: string
@@ -438,6 +448,7 @@ export interface Preset {
   // `TraveledPathSettings` (Dart).
   traveled_path?: Record<string, number | string>
   buttons?: Buttons
+  reminders?: Reminder[]
 }
 
 // Une disposition de bloc `metric` enregistrée pour être réutilisée sur une
@@ -509,6 +520,12 @@ export interface Catalog {
   // Les conditions qu'une page rangée derrière le menu peut porter pour
   // rejoindre le défilement toute seule — voir `Page.menu_condition`.
   menu_conditions: string[]
+  // Ce qu'un rappel peut jouer — même liste que `bell_sounds` (voir
+  // `CompanionSettings::BELL_SOUNDS`) : un rappel sonne avec le même son
+  // qu'une sonnette, pas un catalogue à part.
+  reminder_sounds: string[]
+  max_reminders: number
+  max_reminder_message_length: number
 }
 
 // ── Derrière le menu, ou dans le défilement ─────────────────────────────────

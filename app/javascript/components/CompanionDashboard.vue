@@ -13,7 +13,7 @@ import {
   swapCells,
   type Band, type Block, type Buttons, type ButtonChannel, type Catalog, type Cell, type CellSize, type Divider,
   type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch, type Page, type Preset,
-  type Viewport,
+  type Reminder, type Viewport,
 } from '../companionSettings'
 
 // L'éditeur des profils de sortie de l'app compagnon.
@@ -833,6 +833,21 @@ function setBattery(key: string, value: number | boolean) {
   preset.value.battery = { ...(preset.value.battery || {}), [key]: value }
 }
 
+// ── les rappels périodiques ─────────────────────────────────────────────────
+
+function addReminder() {
+  const reminders = preset.value.reminders || (preset.value.reminders = [])
+  if (reminders.length >= props.catalog.max_reminders) return
+  reminders.push({ interval_minutes: 30, message: '', sound: props.catalog.reminder_sounds[0] })
+}
+
+function removeReminder(index: number) {
+  const reminders = preset.value.reminders
+  if (!reminders) return
+  reminders.splice(index, 1)
+  if (reminders.length === 0) preset.value.reminders = undefined
+}
+
 // ── les boutons Di2 ─────────────────────────────────────────────────────────
 //
 // Quatre canaux fixes — seuls 1 et 2 sont câblés sur le matériel testé côté
@@ -1620,6 +1635,44 @@ async function save() {
             </div>
           </div>
         </div>
+
+        <!-- Les rappels périodiques -->
+        <h2 class="h6">{{ t('companion.settings.reminders_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.reminders_help') }}</p>
+
+        <div v-for="(reminder, index) in preset.reminders || []" :key="index"
+             class="d-flex align-items-start gap-2 mb-2">
+          <div class="row g-1 flex-grow-1">
+            <div class="col-3">
+              <label class="form-label small mb-1">{{ t('companion.settings.reminder_interval') }}</label>
+              <input class="form-control form-control-sm" type="number" min="1" max="360"
+                     :value="reminder.interval_minutes"
+                     @input="reminder.interval_minutes = Number(($event.target as HTMLInputElement).value)">
+            </div>
+            <div class="col-6">
+              <label class="form-label small mb-1">{{ t('companion.settings.reminder_message') }}</label>
+              <input class="form-control form-control-sm" type="text"
+                     :maxlength="catalog.max_reminder_message_length"
+                     :placeholder="t('companion.settings.reminder_message_placeholder')"
+                     v-model="reminder.message">
+            </div>
+            <div class="col-3">
+              <label class="form-label small mb-1">{{ t('companion.settings.reminder_sound') }}</label>
+              <select class="form-select form-select-sm" v-model="reminder.sound">
+                <option v-for="sound in catalog.reminder_sounds" :key="sound" :value="sound">
+                  {{ t(`companion.settings.bell_sounds.${sound}`) }}
+                </option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-link text-danger p-1 mt-4" type="button" @click="removeReminder(index)">
+            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+          </button>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary mb-4" type="button"
+                :disabled="(preset.reminders || []).length >= catalog.max_reminders" @click="addReminder">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_reminder') }}
+        </button>
 
         <!-- Trajet parcouru -->
         <h2 class="h6">{{ t('companion.settings.traveled_path_title') }}</h2>

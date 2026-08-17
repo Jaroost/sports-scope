@@ -393,6 +393,7 @@ en:
     default_bike: "Default bike"
     set_default: "Set as default"
     wax: "Waxed"
+    km_left: "%{km} km left"
     wax_all: "All chains"
     to_rewax: "Needs wax"
     mark_rewax: "Mark as needing wax"

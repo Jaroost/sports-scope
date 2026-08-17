@@ -393,6 +393,7 @@ fr:
     default_bike: "Vélo par défaut"
     set_default: "Définir par défaut"
     wax: "Chaîne cirée"
+    km_left: "reste %{km} km"
     wax_all: "Toutes les chaînes"
     to_rewax: "À recirer"
     mark_rewax: "Marquer à recirer"

@@ -272,6 +272,10 @@ function barWidth(chain: any) {
 function barLabel(chain: any) {
   return chain.needs_wax ? t('chains.to_rewax') : `${chain.progress_percent}%`
 }
+// Km encore roulables sur cette chaîne avant son seuil de recirage (jamais négatif).
+function kmLeft(chain: any) {
+  return Math.max(0, Math.round(chain.wax_threshold_km - chain.km_since_wax))
+}
 function formatDate(iso: string | null) {
   if (!iso) return t('chains.never_waxed')
   return new Date(iso).toLocaleDateString()
@@ -325,7 +329,7 @@ onBeforeUnmount(() => {
               </span>
             </span>
             <small class="text-muted flex-shrink-0">
-              {{ mountedChain(bike).km_since_wax }} / {{ mountedChain(bike).wax_threshold_km }} km
+              {{ t('chains.km_left', { km: kmLeft(mountedChain(bike)) }) }}
             </small>
           </div>
           <div class="progress" role="progressbar">
@@ -430,7 +434,7 @@ onBeforeUnmount(() => {
                 </span>
               </span>
               <small class="text-muted">
-                {{ chain.km_since_wax }} / {{ chain.wax_threshold_km }} km
+                {{ t('chains.km_left', { km: kmLeft(chain) }) }}
                 · <i class="fa-regular fa-calendar" aria-hidden="true"></i>
                 {{ t('chains.last_waxed') }} {{ formatDate(chain.last_waxed_at) }}
               </small>

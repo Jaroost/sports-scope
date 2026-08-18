@@ -1298,6 +1298,8 @@ fr:
       fastbike_desc: "Accepte les grands axes, reste sur le bitume, tracé direct."
       fastbike-lowtraffic: "Rapide, tranquille"
       fastbike-lowtraffic_desc: "Rapide tout en évitant le gros trafic."
+      fastbike-quiet-paved: "Route bitumée, évite les nationales"
+      fastbike-quiet-paved_desc: "Bitume quasi obligatoire, écarte autant que possible les grands axes au profit des routes secondaires."
       shortest: "Le plus court"
       shortest_desc: "Distance minimale, sans tenir compte du confort."
       gravel: "Gravel"

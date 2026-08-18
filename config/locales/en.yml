@@ -1298,6 +1298,8 @@ en:
       fastbike_desc: "Accepts main roads, stays on tarmac, direct line."
       fastbike-lowtraffic: "Fast, low traffic"
       fastbike-lowtraffic_desc: "Fast while avoiding heavy traffic."
+      fastbike-quiet-paved: "Paved, avoids main roads"
+      fastbike-quiet-paved_desc: "Near-mandatory tarmac, steers away from main roads in favour of secondary ones as much as possible."
       shortest: "Shortest"
       shortest_desc: "Minimal distance, ignores comfort."
       gravel: "Gravel"

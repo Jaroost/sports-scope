@@ -608,6 +608,7 @@ function placePreviewMarker(coords: [number, number]) {
                   <input v-model="sport.map.default_style" class="visually-hidden" type="radio" name="map-style" :value="style.id">
                   <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
                   <span>{{ t(`profile.map.style_${style.id}`) }}</span>
+                  <small class="map-style-desc text-body-secondary">{{ t(`strava.map_style_desc_${style.id}`) }}</small>
                 </label>
               </div>
             </div>
@@ -705,6 +706,7 @@ function placePreviewMarker(coords: [number, number]) {
                       <input v-model="prefs.navigation.default_style" class="visually-hidden" type="radio" name="nav-map-style" :value="style.id">
                       <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
                       <span>{{ t(`profile.map.style_${style.id}`) }}</span>
+                      <small class="map-style-desc text-body-secondary">{{ t(`strava.map_style_desc_${style.id}`) }}</small>
                     </label>
                   </div>
                 </div>
@@ -1124,7 +1126,7 @@ function placePreviewMarker(coords: [number, number]) {
   flex-direction: column;
   align-items: center;
   gap: 0.35rem;
-  min-width: 84px;
+  width: 128px;
   padding: 0.75rem 0.5rem;
   border: 1px solid var(--bs-border-color);
   border-radius: 0.5rem;
@@ -1135,6 +1137,12 @@ function placePreviewMarker(coords: [number, number]) {
 
 .map-style-option i {
   font-size: 1.25rem;
+}
+
+.map-style-desc {
+  font-size: 0.7em;
+  text-align: center;
+  line-height: 1.2;
 }
 
 .map-style-option:hover {

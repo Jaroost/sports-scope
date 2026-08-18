@@ -85,7 +85,7 @@ useDismissOnOutside(() => rootEl.value, () => {
       <span class="d-none d-md-inline">{{ t('strava.map_style_label') }}</span>
       <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
     </button>
-    <ul v-if="isOpen" class="dropdown-menu show mt-1" style="min-width: 9rem; z-index: 10;">
+    <ul v-if="isOpen" class="dropdown-menu show mt-1" style="min-width: 9rem; width: max-content; max-width: min(34rem, 95vw); z-index: 10;">
       <template v-for="(g, gi) in groupedStyles" :key="g.group">
         <li v-if="gi > 0"><hr class="dropdown-divider" /></li>
         <li>
@@ -99,7 +99,10 @@ useDismissOnOutside(() => rootEl.value, () => {
             @click="select(s.id)"
           >
             <i :class="`fa-solid ${s.icon}`" aria-hidden="true"></i>
-            {{ t(`strava.map_style_${s.id}`) }}
+            <span class="text-truncate" style="min-width: 0;">
+              {{ t(`strava.map_style_${s.id}`) }}
+              <small class="text-body-secondary fw-normal" style="font-size: 0.7em;">{{ t(`strava.map_style_desc_${s.id}`) }}</small>
+            </span>
           </button>
         </li>
         <li v-for="c in g.combos" :key="c.id">
@@ -110,7 +113,10 @@ useDismissOnOutside(() => rootEl.value, () => {
             @click="select(c.id)"
           >
             <i :class="`fa-solid ${c.icon}`" aria-hidden="true"></i>
-            {{ t(`strava.map_style_${c.id}`) }}
+            <span class="text-truncate" style="min-width: 0;">
+              {{ t(`strava.map_style_${c.id}`) }}
+              <small class="text-body-secondary fw-normal" style="font-size: 0.7em;">{{ t(`strava.map_style_desc_${c.id}`) }}</small>
+            </span>
           </button>
         </li>
       </template>

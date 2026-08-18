@@ -79,12 +79,14 @@
    fond de carte vit dans un composant enfant → :deep pour l'atteindre. Ciblé au
    contexte de la carte du créateur (MapStyleDropdown est réutilisé ailleurs). */
 .map-controls :deep(.map-ctrl-btn) > i:last-child { margin-left: auto; }
-/* Largeur commune aux trois menus, chevron aligné à droite. Plus compacte sur mobile
-   (libellés courts : « Carte » / « Affichage » / « Mode ») que sur desktop
+/* Largeur commune aux trois menus, chevron aligné à droite. `width` fixe et non
+   `min-width` : sinon seul le bouton au contenu le plus long (« Fond de carte » +
+   icône + drapeau) dépasse le plancher, et les trois désalignent. Plus compacte sur
+   mobile (libellés courts : « Carte » / « Affichage » / « Mode ») que sur desktop
    (« Fond de carte »). */
-.map-controls :deep(.map-ctrl-btn) { min-width: 7.5rem; }
+.map-controls :deep(.map-ctrl-btn) { width: 8.5rem; }
 @media (min-width: 768px) {
-  .map-controls :deep(.map-ctrl-btn) { min-width: 9.5rem; }
+  .map-controls :deep(.map-ctrl-btn) { width: 11rem; }
 }
 .map-ctrl-btn.active,
 .map-ctrl-btn.active:hover,

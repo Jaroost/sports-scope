@@ -25,6 +25,60 @@ export const MAP_STYLES: MapStyle[] = [
 // Ordre des en-têtes de groupe dans le dropdown.
 export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss', 'france', 'austria']
 
+// ─── Couverture géographique approximative des groupes régionaux ─────────────
+// Bbox large [minLng, minLat, maxLng, maxLat], pas les frontières réelles — sert
+// uniquement à avertir que le fond sélectionné risque de s'afficher vide sur le
+// tracé courant (cf. RouteBuilder.vue, notice « style_coverage »). `world` n'a pas
+// d'entrée : couverture mondiale, jamais d'avertissement.
+export const MAP_STYLE_GROUP_BBOX: Partial<Record<MapStyleGroup, [number, number, number, number]>> = {
+  swiss:   [5.9, 45.75, 10.55, 47.95],
+  france:  [-5.2, 41.2, 9.7, 51.2],
+  austria: [9.4, 46.3, 17.3, 49.1],
+}
+
+export function groupForStyle(id: string): MapStyleGroup | undefined {
+  return MAP_STYLES.find((s) => s.id === id)?.group ?? MAP_STYLE_COMBOS.find((c) => c.id === id)?.group
+}
+
+function pointInBbox(lng: number, lat: number, bbox: [number, number, number, number]): boolean {
+  const [minLng, minLat, maxLng, maxLat] = bbox
+  return lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat
+}
+
+// Un tracé est jugé "couvert" dès qu'un seul de ses points tombe dans la bbox — un
+// aller-retour qui franchit la frontière reste donc silencieux, seul un tracé entièrement
+// hors zone déclenche l'avertissement.
+export function styleCoversWaypoints(styleId: string, waypoints: { lng: number; lat: number }[]): boolean {
+  if (waypoints.length === 0) return true
+  const bbox = MAP_STYLE_GROUP_BBOX[groupForStyle(styleId) as MapStyleGroup]
+  if (!bbox) return true
+  return waypoints.some((w) => pointInBbox(w.lng, w.lat, bbox))
+}
+
+// Fond « représentant » de chaque groupe régional, proposé par le bouton de la notice
+// « fond hors zone » (RouteBuilder.vue) — un par pays plutôt que tous les combiner, pour
+// un geste à un seul choix. `cyclosm` (groupe Monde) sert de repli quand le tracé ne
+// tombe dans aucune bbox connue.
+export const MAP_STYLE_GROUP_DEFAULT: Partial<Record<MapStyleGroup, string>> = {
+  swiss:   'swisstopo',
+  france:  'ignplan',
+  austria: 'atbasemap',
+}
+export const DEFAULT_WORLD_STYLE = 'cyclosm'
+
+// Groupe dont la bbox contient le plus de points du tracé — repli sur `undefined` (donc
+// `DEFAULT_WORLD_STYLE`) si aucune bbox n'en contient aucun.
+export function suggestedStyleForWaypoints(waypoints: { lng: number; lat: number }[]): string {
+  let bestGroup: MapStyleGroup | undefined
+  let bestCount = 0
+  for (const group of Object.keys(MAP_STYLE_GROUP_BBOX) as MapStyleGroup[]) {
+    const bbox = MAP_STYLE_GROUP_BBOX[group]!
+    const count = waypoints.filter((w) => pointInBbox(w.lng, w.lat, bbox)).length
+    if (count > bestCount) { bestCount = count; bestGroup = group }
+  }
+  return (bestGroup && MAP_STYLE_GROUP_DEFAULT[bestGroup]) || DEFAULT_WORLD_STYLE
+}
+
 // ─── Entrées composées du menu « fond de carte » ──────────────────────────────
 // Raccourcis « fond + overlay » : leur `id` est virtuel, il n'est jamais persisté —
 // l'état réel reste un fond (`default_style`) plus un overlay actif. Rendues à la fin

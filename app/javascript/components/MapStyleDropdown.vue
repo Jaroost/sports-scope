@@ -2,7 +2,18 @@
 import { computed, ref, useTemplateRef } from 'vue'
 import { useDismissOnOutside } from '../composables/useDismissOnOutside'
 import { t } from '../i18n'
-import { MAP_STYLES, MAP_STYLE_GROUPS, MAP_STYLE_COMBOS } from '../mapStyles'
+import { MAP_STYLES, MAP_STYLE_GROUPS, MAP_STYLE_COMBOS, type MapStyleGroup } from '../mapStyles'
+import { countryFlag } from '../countries'
+
+// Pays sur lequel s'applique le fond, affiché en repère rapide sur chaque entrée — le
+// groupe le dit déjà via l'en-tête, mais celui-ci défile hors champ dès qu'on scrolle.
+// 🌐 pour « Monde » plutôt qu'un drapeau : aucun pays ne le représenterait seul.
+const GROUP_FLAG: Record<MapStyleGroup, string> = {
+  world: '🌐',
+  swiss: countryFlag('ch'),
+  france: countryFlag('fr'),
+  austria: countryFlag('at'),
+}
 
 const props = defineProps({
   modelValue: { type: String, required: true },
@@ -50,6 +61,15 @@ const currentIcon = computed(() =>
     ?? 'fa-map',
 )
 
+// Pays du fond actuellement sélectionné : affiché sur le bouton fermé, là où l'ouverture
+// du menu coûte un geste pour la seule info qu'on cherche souvent — de quel pays est ce
+// fond. `world` en repli : un id inconnu (état transitoire) ne doit pas planter le lookup.
+const currentGroup = computed(() =>
+  combos.value.find(comboActive)?.group
+    ?? MAP_STYLES.find(s => s.id === props.modelValue)?.group
+    ?? 'world',
+)
+
 const internalOpen = ref(false)
 const controlled = computed(() => props.open !== null)
 const isOpen = computed({
@@ -81,6 +101,7 @@ useDismissOnOutside(() => rootEl.value, () => {
       @click="isOpen = !isOpen"
     >
       <i :class="`fa-solid ${currentIcon}`" aria-hidden="true"></i>
+      <span :title="t(`strava.map_style_group_${currentGroup}`)">{{ GROUP_FLAG[currentGroup] }}</span>
       <span v-if="mobileLabel" class="d-md-none">{{ mobileLabel }}</span>
       <span class="d-none d-md-inline">{{ t('strava.map_style_label') }}</span>
       <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
@@ -103,6 +124,7 @@ useDismissOnOutside(() => rootEl.value, () => {
               {{ t(`strava.map_style_${s.id}`) }}
               <small class="map-style-desc fw-normal">{{ t(`strava.map_style_desc_${s.id}`) }}</small>
             </span>
+            <span class="ms-auto" :title="t(`strava.map_style_group_${s.group}`)">{{ GROUP_FLAG[s.group] }}</span>
           </button>
         </li>
         <li v-for="c in g.combos" :key="c.id">
@@ -117,6 +139,7 @@ useDismissOnOutside(() => rootEl.value, () => {
               {{ t(`strava.map_style_${c.id}`) }}
               <small class="map-style-desc fw-normal">{{ t(`strava.map_style_desc_${c.id}`) }}</small>
             </span>
+            <span class="ms-auto" :title="t(`strava.map_style_group_${c.group}`)">{{ GROUP_FLAG[c.group] }}</span>
           </button>
         </li>
       </template>

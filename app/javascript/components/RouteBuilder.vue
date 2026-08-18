@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
-import { mapStyleFor, exportTileInfoFor, MAP_STYLES } from '../mapStyles'
+import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversWaypoints, suggestedStyleForWaypoints } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
@@ -105,8 +105,13 @@ const noMarkersWarn = ref(false)
 const errorDismissed = ref(false)
 const snapDismissed = ref(false)
 const noMarkersDismissed = ref(false)
+const styleCoverageDismissed = ref(false)
 watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
 watch(snapWarnings, () => { snapDismissed.value = false })
+// Fond de carte hors zone : recalculé en direct (pas de "warn" imperatif à rafraîchir
+// comme noMarkersWarn) — replier ne vaut que pour le fond actuel, un nouveau choix
+// mérite un avertissement frais même si l'ancien avait été fermé.
+watch(() => state.mapStyleId, () => { styleCoverageDismissed.value = false })
 
 // Vitesse par défaut du créateur : pour un NOUVEL itinéraire dont la vitesse n'a pas
 // encore été décidée, on préremplit avec la vitesse moyenne réelle du créateur (médiane
@@ -142,6 +147,21 @@ watch(snapWarnings, (list) => {
 const snapVisible = computed(() => snapWarnings.value.length > 0 && !snapDismissed.value)
 const turnVisible = computed(() => turnWarnings.value.length > 0 && showTurnWarning.value)
 const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismissed.value)
+// Bbox approximative (pas les frontières réelles) : seul un tracé entièrement hors zone
+// déclenche l'avertissement — purement informatif, la sauvegarde n'est pas concernée.
+const styleCoverageWarn = computed(() => !styleCoversWaypoints(state.mapStyleId, routeStore.waypoints.value))
+const styleCoverageRegion = computed(() => {
+  const group = groupForStyle(state.mapStyleId)
+  return group ? t(`strava.map_style_group_${group}`) : ''
+})
+const styleCoverageVisible = computed(() => styleCoverageWarn.value && !styleCoverageDismissed.value)
+// Fond proposé par le bouton de la notice : celui du pays où tombe le tracé, ou le
+// repli Monde si aucun groupe régional ne le couvre. Recalculé au fil du tracé, pas
+// figé au premier affichage — un aller-retour qui change de pays doit suivre.
+const styleCoverageSuggestion = computed(() => suggestedStyleForWaypoints(routeStore.waypoints.value))
+function applyStyleCoverageSuggestion() {
+  mapRef.value?.setMapStyle(styleCoverageSuggestion.value)
+}
 
 // Alertes repliées mais toujours d'actualité : elles gardent leurs données, seule leur
 // vue est masquée, et la pastille les rappelle.
@@ -151,6 +171,7 @@ const hiddenNoticeCount = computed(() => {
   if (snapWarnings.value.length && snapDismissed.value) n++
   if (turnWarnings.value.length && !showTurnWarning.value) n++
   if (noMarkersWarn.value && noMarkersDismissed.value) n++
+  if (styleCoverageWarn.value && styleCoverageDismissed.value) n++
   return n
 })
 
@@ -158,6 +179,7 @@ function reopenNotices() {
   errorDismissed.value = false
   snapDismissed.value = false
   noMarkersDismissed.value = false
+  styleCoverageDismissed.value = false
   if (turnWarnings.value.length) showTurnWarning.value = true
 }
 const exportStyleId = ref('')
@@ -2467,6 +2489,24 @@ onBeforeUnmount(() => {
                       <button type="button" class="map-notice-chip" @click="startMarkerMode">
                         <i class="fa-solid fa-signs-post" aria-hidden="true"></i>
                         {{ t('routes.no_markers_warning_add') }}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Fond de carte hors zone : le fond sélectionné (Suisse/France/Autriche)
+                       ne couvre probablement pas le tracé actuel, qui risque de s'afficher vide. -->
+                  <div v-if="styleCoverageVisible" key="style-coverage" class="map-notice map-notice--warning" role="status">
+                    <div class="map-notice-header">
+                      <i class="fa-solid fa-earth-europe" aria-hidden="true"></i>
+                      <strong class="flex-grow-1">{{ t('routes.style_coverage_warning_title') }}</strong>
+                      <button type="button" class="btn-close btn-close-sm" @click="styleCoverageDismissed = true"
+                        :aria-label="t('routes.style_coverage_warning_dismiss')"></button>
+                    </div>
+                    <p class="map-notice-body">{{ t('routes.style_coverage_warning_body', { region: styleCoverageRegion }) }}</p>
+                    <div class="map-notice-chips">
+                      <button type="button" class="map-notice-chip" @click="applyStyleCoverageSuggestion">
+                        <i class="fa-solid fa-map" aria-hidden="true"></i>
+                        {{ t('routes.style_coverage_warning_apply', { style: t(`strava.map_style_${styleCoverageSuggestion}`) }) }}
                       </button>
                     </div>
                   </div>

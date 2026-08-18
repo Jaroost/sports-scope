@@ -101,7 +101,7 @@ useDismissOnOutside(() => rootEl.value, () => {
             <i :class="`fa-solid ${s.icon}`" aria-hidden="true"></i>
             <span class="text-truncate" style="min-width: 0;">
               {{ t(`strava.map_style_${s.id}`) }}
-              <small class="text-body-secondary fw-normal" style="font-size: 0.7em;">{{ t(`strava.map_style_desc_${s.id}`) }}</small>
+              <small class="map-style-desc fw-normal">{{ t(`strava.map_style_desc_${s.id}`) }}</small>
             </span>
           </button>
         </li>
@@ -115,7 +115,7 @@ useDismissOnOutside(() => rootEl.value, () => {
             <i :class="`fa-solid ${c.icon}`" aria-hidden="true"></i>
             <span class="text-truncate" style="min-width: 0;">
               {{ t(`strava.map_style_${c.id}`) }}
-              <small class="text-body-secondary fw-normal" style="font-size: 0.7em;">{{ t(`strava.map_style_desc_${c.id}`) }}</small>
+              <small class="map-style-desc fw-normal">{{ t(`strava.map_style_desc_${c.id}`) }}</small>
             </span>
           </button>
         </li>
@@ -123,3 +123,16 @@ useDismissOnOutside(() => rootEl.value, () => {
     </ul>
   </div>
 </template>
+
+<style scoped>
+.map-style-desc {
+  font-size: 0.7em;
+  color: var(--bs-secondary-color);
+}
+
+/* Le fond actif (.dropdown-item.active) est en aplat bleu plein — le gris de la
+   description n'y ressort plus assez, d'où le blanc forcé ici plutôt qu'hérité. */
+.dropdown-item.active .map-style-desc {
+  color: #fff;
+}
+</style>

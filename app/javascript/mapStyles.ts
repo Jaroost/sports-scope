@@ -1,4 +1,4 @@
-export type MapStyleGroup = 'world' | 'swiss' | 'france'
+export type MapStyleGroup = 'world' | 'swiss' | 'france' | 'austria'
 
 export interface MapStyle {
   id: string
@@ -17,10 +17,13 @@ export const MAP_STYLES: MapStyle[] = [
   { id: 'swissimage', icon: 'fa-satellite',        group: 'swiss' },
   { id: 'ignplan',    icon: 'fa-map-location-dot', group: 'france' },
   { id: 'ignortho',   icon: 'fa-satellite',        group: 'france' },
+  { id: 'atbasemap',  icon: 'fa-map',              group: 'austria' },
+  { id: 'atgrau',     icon: 'fa-circle-half-stroke', group: 'austria' },
+  { id: 'atortho',    icon: 'fa-satellite',        group: 'austria' },
 ]
 
 // Ordre des en-têtes de groupe dans le dropdown.
-export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss', 'france']
+export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss', 'france', 'austria']
 
 // ─── Entrées composées du menu « fond de carte » ──────────────────────────────
 // Raccourcis « fond + overlay » : leur `id` est virtuel, il n'est jamais persisté —
@@ -280,6 +283,9 @@ export const EXPORT_TILE_INFO: Record<string, ExportTileInfo> = {
   liberty:    { maxzoom: 16, tileSize: 512 },
   ignplan:    { maxzoom: 19, tileSize: 256 },
   ignortho:   { maxzoom: 19, tileSize: 256 },
+  atbasemap:  { maxzoom: 19, tileSize: 256 },
+  atgrau:     { maxzoom: 19, tileSize: 256 },
+  atortho:    { maxzoom: 19, tileSize: 256 },
 }
 export function exportTileInfoFor(id: string): ExportTileInfo {
   return EXPORT_TILE_INFO[id] ?? { maxzoom: 17, tileSize: 256 }
@@ -296,6 +302,9 @@ export function mapStyleFor(id: string): string | object {
   if (id === 'swissimage') return swissImageStyle()
   if (id === 'ignplan')    return ignPlanStyle()
   if (id === 'ignortho')   return ignOrthoStyle()
+  if (id === 'atbasemap')  return atBasemapStyle()
+  if (id === 'atgrau')     return atGrauStyle()
+  if (id === 'atortho')    return atOrthoStyle()
   return cyclOsmStyle()
 }
 
@@ -472,5 +481,71 @@ export function ignOrthoStyle(): object {
       },
     },
     layers: [{ id: 'ignortho-base', type: 'raster', source: 'ignortho-raster' }],
+  }
+}
+
+// ─── Autriche — basemap.at ─────────────────────────────────────────────────
+// Fond officiel autrichien (BEV / Land Austria / Ville de Vienne), gratuit et sans
+// clé, licence CC-BY. Vérifié en direct (tuiles servies, 200) — contrairement à la
+// carte IGN classique française, pas d'équivalent "SCAN25" gratuit ici non plus ;
+// `topo` (OpenTopoMap, groupe Monde) reste la seule couche à courbes de niveau.
+//
+// Ordre de tuile inversé par rapport aux autres sources de ce fichier : le service
+// attend `{TileMatrix}/{TileRow}/{TileCol}`, donc `{z}/{y}/{x}` et non `{z}/{x}/{y}`.
+const AT_ATTRIBUTION =
+  '© <a href="https://basemap.at" target="_blank" rel="noopener">basemap.at</a>'
+
+function atTileUrl(layer: string, ext: 'png' | 'jpeg'): string {
+  return `https://maps.wien.gv.at/basemap/${layer}/normal/google3857/{z}/{y}/{x}.${ext}`
+}
+
+export function atBasemapStyle(): object {
+  return {
+    version: 8,
+    glyphs: GLYPHS_URL,
+    sources: {
+      'atbasemap-raster': {
+        type: 'raster',
+        tiles: [atTileUrl('geolandbasemap', 'png')],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: AT_ATTRIBUTION,
+      },
+    },
+    layers: [{ id: 'atbasemap-base', type: 'raster', source: 'atbasemap-raster' }],
+  }
+}
+
+export function atGrauStyle(): object {
+  return {
+    version: 8,
+    glyphs: GLYPHS_URL,
+    sources: {
+      'atgrau-raster': {
+        type: 'raster',
+        tiles: [atTileUrl('bmapgrau', 'png')],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: AT_ATTRIBUTION,
+      },
+    },
+    layers: [{ id: 'atgrau-base', type: 'raster', source: 'atgrau-raster' }],
+  }
+}
+
+export function atOrthoStyle(): object {
+  return {
+    version: 8,
+    glyphs: GLYPHS_URL,
+    sources: {
+      'atortho-raster': {
+        type: 'raster',
+        tiles: [atTileUrl('bmaporthofoto30cm', 'jpeg')],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: AT_ATTRIBUTION,
+      },
+    },
+    layers: [{ id: 'atortho-base', type: 'raster', source: 'atortho-raster' }],
   }
 }

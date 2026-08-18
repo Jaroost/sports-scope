@@ -10,7 +10,7 @@
 import { isProfileValidForSport, catalogDefaultForSport } from './brouter'
 import { csrfToken } from './csrf'
 
-export type MapStyleId = 'cyclosm' | 'topo' | 'swisstopo' | 'swissgrau' | 'swissimage' | 'liberty' | 'ignplan' | 'ignortho'
+export type MapStyleId = 'cyclosm' | 'topo' | 'swisstopo' | 'swissgrau' | 'swissimage' | 'liberty' | 'ignplan' | 'ignortho' | 'atbasemap' | 'atgrau' | 'atortho'
 export type Sport = 'cycling' | 'mtb' | 'hiking'
 
 export const SPORTS: Sport[] = ['cycling', 'mtb', 'hiking']

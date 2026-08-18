@@ -1277,7 +1277,7 @@ fr:
     no_markers_warning_add: "Ajouter un repère"
     no_markers_warning_body: "Quand vous partagez cet itinéraire, seuls le parcours et les repères (départ, arrivée, parking) sont affichés par défaut. Ajoutez des repères pour aider vos destinataires à s'orienter."
     style_coverage_warning_title: "Fond de carte hors zone"
-    style_coverage_warning_body: "Le fond « %{region} » sélectionné ne couvre probablement pas ce tracé et risque de s'afficher vide ici."
+    style_coverage_warning_body: "Le fond « %{region} » sélectionné ne couvre probablement pas cette zone et risque de s'afficher vide."
     style_coverage_warning_apply: "Passer sur « %{style} »"
     style_coverage_warning_dismiss: "Fermer"
     no_cycling_here: "Sens interdit à vélo (détour cyclable)"

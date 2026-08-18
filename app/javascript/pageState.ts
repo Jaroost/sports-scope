@@ -115,6 +115,12 @@ export class RouteBuilderState extends MapPageState {
   showStatsSidebar = true
   showElevationChart = true
   overlays: string[] = []
+  // Centre et zoom de la vue courante de la carte, tenus à jour par RouteBuilderMap
+  // (moveend) — servent à juger si le fond sélectionné couvre ce qui est réellement
+  // affiché, pas seulement le tracé (cf. styleCoverageWarn, RouteBuilder.vue). `null`
+  // avant le premier rendu de la carte. Jamais persistés : un instantané de la session.
+  viewCenter: { lng: number; lat: number } | null = null
+  viewZoom: number | null = null
 
   // Vue en lecture seule (lien de partage) : les calques y sont forcés à un rendu
   // « invité » (repères + pentes seuls). Ces réglages ne doivent PAS atterrir dans la

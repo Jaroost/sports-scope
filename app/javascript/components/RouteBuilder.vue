@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
 import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
-import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversWaypoints, suggestedStyleForWaypoints } from '../mapStyles'
+import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, COVERAGE_WARN_MIN_ZOOM } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
@@ -147,18 +147,27 @@ watch(snapWarnings, (list) => {
 const snapVisible = computed(() => snapWarnings.value.length > 0 && !snapDismissed.value)
 const turnVisible = computed(() => turnWarnings.value.length > 0 && showTurnWarning.value)
 const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismissed.value)
-// Bbox approximative (pas les frontières réelles) : seul un tracé entièrement hors zone
-// déclenche l'avertissement — purement informatif, la sauvegarde n'est pas concernée.
-const styleCoverageWarn = computed(() => !styleCoversWaypoints(state.mapStyleId, routeStore.waypoints.value))
+// Ce qui compte, c'est ce qui est RÉELLEMENT à l'écran — le centre de la vue courante,
+// pas le tracé (un tracé suisse dont on s'est éloigné en Autriche pour vérifier un
+// détour n'a pas à alerter, c'est la vue autrichienne qui doit couvrir). Bbox
+// approximative (pas les frontières réelles), et bornée par COVERAGE_WARN_MIN_ZOOM :
+// vérifié en direct sur les trois services, une vue dézoomée reste servie (pas vide)
+// bien au-delà de la bbox du pays — en dessous de ce zoom, la comparer donnerait un
+// faux positif. Purement informatif, la sauvegarde n'est pas concernée.
+const styleCoverageWarn = computed(() => {
+  if (state.viewZoom !== null && state.viewZoom < COVERAGE_WARN_MIN_ZOOM) return false
+  const c = state.viewCenter
+  return !!c && !styleCoversPoint(state.mapStyleId, c.lng, c.lat)
+})
 const styleCoverageRegion = computed(() => {
   const group = groupForStyle(state.mapStyleId)
   return group ? t(`strava.map_style_group_${group}`) : ''
 })
 const styleCoverageVisible = computed(() => styleCoverageWarn.value && !styleCoverageDismissed.value)
-// Fond proposé par le bouton de la notice : celui du pays où tombe le tracé, ou le
-// repli Monde si aucun groupe régional ne le couvre. Recalculé au fil du tracé, pas
-// figé au premier affichage — un aller-retour qui change de pays doit suivre.
-const styleCoverageSuggestion = computed(() => suggestedStyleForWaypoints(routeStore.waypoints.value))
+// Fond proposé par le bouton de la notice : celui du pays où tombe la vue courante, ou
+// le repli Monde si aucun groupe régional ne la couvre. Recalculé au fil du pan, pas
+// figé au premier affichage.
+const styleCoverageSuggestion = computed(() => suggestedStyleForPoint(state.viewCenter))
 function applyStyleCoverageSuggestion() {
   mapRef.value?.setMapStyle(styleCoverageSuggestion.value)
 }

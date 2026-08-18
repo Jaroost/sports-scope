@@ -354,6 +354,8 @@ async function initMap() {
   await import('maplibre-gl/dist/maplibre-gl.css')
   _maplibregl = maplibregl
   const { center, zoom } = getInitialView(!!routeStore.currentId.value)
+  props.state.viewCenter = { lng: center[0], lat: center[1] }
+  props.state.viewZoom = zoom
   mapInstance = new maplibregl.Map({
     container: mapEl.value,
     style: mapStyleFor(props.state.mapStyleId) as any,
@@ -507,6 +509,13 @@ async function initMap() {
       // Le chevauchement des marqueurs de points ne dépend que de la caméra : on le
       // réévalue quand elle s'immobilise (cf. regroupWaypointMarkers).
       mapInstance.on('moveend', regroupWaypointMarkers)
+      // Centre et zoom de la vue courante, tenus à jour pour la notice « fond hors zone »
+      // (cf. styleCoverageWarn, COVERAGE_WARN_MIN_ZOOM dans mapStyles.ts).
+      mapInstance.on('moveend', () => {
+        const c = mapInstance.getCenter()
+        props.state.viewCenter = { lng: c.lng, lat: c.lat }
+        props.state.viewZoom = mapInstance.getZoom()
+      })
       // Facteur d'échelle des marqueurs, publié pour le CSS ET pour les groupes de
       // marqueurs, qui le réappliquent après chaque repositionnement (cf. mapMarkerGroup).
       const applyMarkerScale = () => {

@@ -30,10 +30,23 @@ export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss', 'france', 'a
 // uniquement à avertir que le fond sélectionné risque de s'afficher vide sur le
 // tracé courant (cf. RouteBuilder.vue, notice « style_coverage »). `world` n'a pas
 // d'entrée : couverture mondiale, jamais d'avertissement.
-export const MAP_STYLE_GROUP_BBOX: Partial<Record<MapStyleGroup, [number, number, number, number]>> = {
-  swiss:   [5.9, 45.75, 10.55, 47.95],
-  france:  [-5.2, 41.2, 9.7, 51.2],
-  austria: [9.4, 46.3, 17.3, 49.1],
+//
+// Un seul rectangle par pays échoue près de la frontière franco-suisse : elle n'est pas
+// verticale, donc tout `maxLng` assez large pour couvrir la Haute-Savoie (Chamonix,
+// 6.87°) engloutit aussi le Plateau suisse (Sion 7.36°, Berne 7.45°, jusqu'à Zurich
+// 8.54°) — vérifié en direct, Sion ressortait « couvert » par le fond France. La France
+// prend donc deux rectangles disjoints en longitude : le gros du pays à l'ouest, la
+// bande alsacienne (Mulhouse/Colmar/Strasbourg) séparée au nord-est, sans qu'aucun des
+// deux n'ait besoin d'atteindre la Suisse. Genève/Lausanne (juste à l'ouest d'Annecy/
+// Chamonix, presque à la même longitude) restent un angle mort assumé : aucun rectangle
+// ne peut les distinguer de leur voisin français sans couper aussi la vraie frontière.
+export const MAP_STYLE_GROUP_BBOX: Partial<Record<MapStyleGroup, [number, number, number, number][]>> = {
+  swiss: [[5.9, 45.75, 10.55, 47.95]],
+  france: [
+    [-5.2, 41.2, 7.1, 51.2],   // le pays, hors bande alsacienne (voir ci-dessous)
+    [6.7, 47.55, 8.3, 49.2],   // Alsace : au nord-est du rectangle principal
+  ],
+  austria: [[9.4, 46.3, 17.3, 49.1]],
 }
 
 export function groupForStyle(id: string): MapStyleGroup | undefined {
@@ -45,20 +58,30 @@ function pointInBbox(lng: number, lat: number, bbox: [number, number, number, nu
   return lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat
 }
 
-// Un tracé est jugé "couvert" dès qu'un seul de ses points tombe dans la bbox — un
-// aller-retour qui franchit la frontière reste donc silencieux, seul un tracé entièrement
-// hors zone déclenche l'avertissement.
-export function styleCoversWaypoints(styleId: string, waypoints: { lng: number; lat: number }[]): boolean {
-  if (waypoints.length === 0) return true
-  const bbox = MAP_STYLE_GROUP_BBOX[groupForStyle(styleId) as MapStyleGroup]
-  if (!bbox) return true
-  return waypoints.some((w) => pointInBbox(w.lng, w.lat, bbox))
+function pointInAnyBbox(lng: number, lat: number, bboxes: [number, number, number, number][]): boolean {
+  return bboxes.some((bbox) => pointInBbox(lng, lat, bbox))
+}
+
+// En dessous de ce zoom, les trois services (WMTS geo.admin.ch, Géoplateforme IGN,
+// basemap.at) servent quand même des tuiles hors de leur pays — vérifié en direct : à
+// Paris, `swisstopo` reste servi jusqu'à z6 et `basemap.at` jusqu'à z4 ; à Vienne, le plan
+// IGN reste servi jusqu'à z8. Comparer à une bbox fixe en dessous de ce seuil déclenche
+// donc un faux positif (l'avertissement apparaît alors que rien n'est réellement vide à
+// l'écran) — la marge dépend en plus de la distance à la frontière, donc pas de seuil
+// exact possible sans interroger le serveur à chaque geste. z9 reste sous le zoom
+// d'édition normal d'un itinéraire (z12+), donc sans effet là où l'avertissement compte
+// réellement.
+export const COVERAGE_WARN_MIN_ZOOM = 9
+
+export function styleCoversPoint(styleId: string, lng: number, lat: number): boolean {
+  const bboxes = MAP_STYLE_GROUP_BBOX[groupForStyle(styleId) as MapStyleGroup]
+  return !bboxes || pointInAnyBbox(lng, lat, bboxes)
 }
 
 // Fond « représentant » de chaque groupe régional, proposé par le bouton de la notice
 // « fond hors zone » (RouteBuilder.vue) — un par pays plutôt que tous les combiner, pour
-// un geste à un seul choix. `cyclosm` (groupe Monde) sert de repli quand le tracé ne
-// tombe dans aucune bbox connue.
+// un geste à un seul choix. `cyclosm` (groupe Monde) sert de repli quand la vue ne tombe
+// dans aucune bbox connue.
 export const MAP_STYLE_GROUP_DEFAULT: Partial<Record<MapStyleGroup, string>> = {
   swiss:   'swisstopo',
   france:  'ignplan',
@@ -66,17 +89,13 @@ export const MAP_STYLE_GROUP_DEFAULT: Partial<Record<MapStyleGroup, string>> = {
 }
 export const DEFAULT_WORLD_STYLE = 'cyclosm'
 
-// Groupe dont la bbox contient le plus de points du tracé — repli sur `undefined` (donc
-// `DEFAULT_WORLD_STYLE`) si aucune bbox n'en contient aucun.
-export function suggestedStyleForWaypoints(waypoints: { lng: number; lat: number }[]): string {
-  let bestGroup: MapStyleGroup | undefined
-  let bestCount = 0
-  for (const group of Object.keys(MAP_STYLE_GROUP_BBOX) as MapStyleGroup[]) {
-    const bbox = MAP_STYLE_GROUP_BBOX[group]!
-    const count = waypoints.filter((w) => pointInBbox(w.lng, w.lat, bbox)).length
-    if (count > bestCount) { bestCount = count; bestGroup = group }
-  }
-  return (bestGroup && MAP_STYLE_GROUP_DEFAULT[bestGroup]) || DEFAULT_WORLD_STYLE
+// Groupe dont la bbox contient le centre de la vue courante — repli sur `DEFAULT_WORLD_STYLE`
+// si `point` est nul (carte pas encore rendue) ou hors de toute bbox connue.
+export function suggestedStyleForPoint(point: { lng: number; lat: number } | null): string {
+  if (!point) return DEFAULT_WORLD_STYLE
+  const group = (Object.keys(MAP_STYLE_GROUP_BBOX) as MapStyleGroup[])
+    .find((g) => pointInAnyBbox(point.lng, point.lat, MAP_STYLE_GROUP_BBOX[g]!))
+  return (group && MAP_STYLE_GROUP_DEFAULT[group]) || DEFAULT_WORLD_STYLE
 }
 
 // ─── Entrées composées du menu « fond de carte » ──────────────────────────────

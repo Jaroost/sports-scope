@@ -514,6 +514,7 @@ en:
     overlay_group_world: "Layers — World"
     overlay_group_swiss: "Layers — Switzerland"
     overlay_paths: "Roads and paths"
+    overlay_labels: "Street names"
     overlay_veloland: "Cycling routes (SwitzerlandMobility)"
     overlay_mountainbikeland: "Mountain bike routes"
     overlay_wanderland: "Hiking routes"

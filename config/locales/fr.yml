@@ -514,6 +514,7 @@ fr:
     overlay_group_world: "Couches — Monde"
     overlay_group_swiss: "Couches — Suisse"
     overlay_paths: "Routes et chemins"
+    overlay_labels: "Noms des rues"
     overlay_veloland: "Itinéraires cyclables (SuisseMobile)"
     overlay_mountainbikeland: "Itinéraires VTT"
     overlay_wanderland: "Itinéraires de randonnée"

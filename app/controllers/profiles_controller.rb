@@ -46,7 +46,7 @@ class ProfilesController < ApplicationController
   EVENT_DISTANCE_RANGE = (1..1000) # km — d'un critérium à une longue distance
 
   ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
-  ALLOWED_OVERLAYS = %w[paths veloland mountainbikeland wanderland wanderwege].freeze
+  ALLOWED_OVERLAYS = %w[paths labels veloland mountainbikeland wanderland wanderwege].freeze
   ALLOWED_SPORTS = User::SPORTS
 
   # Profils BRouter proposés par sport (miroir du catalogue front brouter.ts /

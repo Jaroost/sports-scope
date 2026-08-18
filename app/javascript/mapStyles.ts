@@ -67,6 +67,7 @@ export interface MapOverlay {
 
 export const MAP_OVERLAYS: MapOverlay[] = [
   { id: 'paths',            icon: 'fa-road',          group: 'world', kind: 'vector' },
+  { id: 'labels',           icon: 'fa-font',          group: 'world', kind: 'vector' },
   { id: 'veloland',         icon: 'fa-bicycle',       group: 'swiss', kind: 'wmts', layer: 'ch.astra.veloland' },
   { id: 'mountainbikeland', icon: 'fa-person-biking', group: 'swiss', kind: 'wmts', layer: 'ch.astra.mountainbikeland' },
   { id: 'wanderland',       icon: 'fa-person-hiking', group: 'swiss', kind: 'wmts', layer: 'ch.astra.wanderland' },
@@ -124,6 +125,7 @@ export interface OverlayLayerSpec {
 }
 
 export function overlayLayers(overlay: MapOverlay): OverlayLayerSpec[] {
+  if (overlay.id === 'labels') return streetNameLabelLayers(overlay.id)
   if (overlay.kind === 'vector') return pathsOverlayLayers(overlay.id)
   return [{ id: overlayLayerId(overlay.id), opacityProp: 'raster-opacity', spec: { type: 'raster' } }]
 }
@@ -183,29 +185,83 @@ function pathsOverlayLayers(id: string): OverlayLayerSpec[] {
     line('path', PATH_CLASSES, {
       'line-color': '#ffffff', 'line-width': widthExpr(), 'line-dasharray': [1.4, 1.2],
     }, 'butt'),
-    {
-      id: overlayLayerId(id, 'label'),
-      opacityProp: 'text-opacity',
-      spec: {
-        type: 'symbol',
-        'source-layer': 'transportation_name',
-        minzoom: 13,
-        filter: IS_LINE,
-        layout: {
-          'symbol-placement': 'line',
-          'symbol-spacing': 250,
-          'text-field': ['get', 'name'],
-          'text-font': ['Noto Sans Regular'],
-          'text-size': 11,
-          'text-max-angle': 30,
-        },
-        paint: {
-          'text-color': '#ffffff',
-          'text-halo-color': 'rgba(0,0,0,0.8)',
-          'text-halo-width': 1.4,
-        },
+    nameLabelLayer(id),
+  ]
+}
+
+// Couche symbole des libellés de routes/chemins (transportation_name), en tête de
+// `pathsOverlayLayers` — blanc sur liseré sombre comme le tracé qu'elle nomme, pensée
+// pour l'imagerie satellite (seul fond où cet overlay s'utilise, via le raccourci
+// « Satellite + chemins »).
+function nameLabelLayer(id: string): OverlayLayerSpec {
+  return {
+    id: overlayLayerId(id, 'label'),
+    opacityProp: 'text-opacity',
+    spec: {
+      type: 'symbol',
+      'source-layer': 'transportation_name',
+      minzoom: 13,
+      filter: IS_LINE,
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 250,
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Regular'],
+        'text-size': 11,
+        'text-max-angle': 30,
+      },
+      paint: {
+        'text-color': '#ffffff',
+        'text-halo-color': 'rgba(0,0,0,0.8)',
+        'text-halo-width': 1.4,
       },
     },
+  }
+}
+
+// ─── Overlay « noms des rues » (mondial) ──────────────────────────────────────
+// Étagée par classe/zoom comme le fait tout style de fond digne de ce nom (cf. le style
+// `liberty`, dont ces paliers sont directement inspirés) : sans ça, motorway et service
+// partagent la même densité dès le zoom minimal et le texte sature l'écran. Fond
+// sombre/halo clair — l'inverse de `nameLabelLayer` — car ce fond-ci est du texte SEUL,
+// posé sur des fonds pour l'essentiel clairs (cyclosm, topo, swissgrau…) : un
+// remplissage blanc y serait invisible sans un halo si épais qu'il mange le glyphe
+// (lettres qui « pâtent »), surtout sur les voies courbes où les glyphes tournent d'un
+// caractère à l'autre et où les halos adjacents se recouvrent.
+const LABEL_MAJOR_CLASSES = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary']
+const LABEL_MINOR_CLASSES = ['minor', 'service', 'track']
+const LABEL_PATH_CLASSES = ['path', 'pedestrian']
+
+function streetNameLabelLayers(id: string): OverlayLayerSpec[] {
+  const tier = (suffix: string, classes: string[], minzoom: number): OverlayLayerSpec => ({
+    id: overlayLayerId(id, `label-${suffix}`),
+    opacityProp: 'text-opacity',
+    spec: {
+      type: 'symbol',
+      'source-layer': 'transportation_name',
+      minzoom,
+      filter: ['all', IS_LINE, ['match', ['get', 'class'], classes, true, false]],
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 300,
+        'text-field': ['get', 'name'],
+        'text-font': ['Noto Sans Bold'],
+        'text-size': 17,
+        'text-max-angle': 30,
+      },
+      paint: {
+        'text-color': '#ffffff',
+        'text-halo-color': '#000000',
+        'text-halo-width': 0.8,
+        'text-halo-blur': 0
+      },
+    },
+  })
+
+  return [
+    tier('major', LABEL_MAJOR_CLASSES, 12),
+    tier('minor', LABEL_MINOR_CLASSES, 15),
+    tier('path', LABEL_PATH_CLASSES, 16),
   ]
 }
 

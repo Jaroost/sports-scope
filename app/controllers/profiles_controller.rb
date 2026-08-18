@@ -45,7 +45,7 @@ class ProfilesController < ApplicationController
   ALLOWED_EVENT_INTENSITIES = %w[easy tempo race].freeze
   EVENT_DISTANCE_RANGE = (1..1000) # km — d'un critérium à une longue distance
 
-  ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty].freeze
+  ALLOWED_MAP_STYLES = %w[cyclosm topo swisstopo swissgrau swissimage liberty ignplan ignortho].freeze
   ALLOWED_OVERLAYS = %w[paths labels veloland mountainbikeland wanderland wanderwege].freeze
   ALLOWED_SPORTS = User::SPORTS
 

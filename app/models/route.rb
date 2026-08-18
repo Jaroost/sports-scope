@@ -7,7 +7,7 @@ class Route < ApplicationRecord
   # Fonds de carte proposés à l'auteur pour son lien de partage — doit rester aligné
   # sur MAP_STYLES (app/javascript/mapStyles.ts). `nil` (aucune consigne) reste la
   # valeur par défaut : le destinataire voit alors son propre fond.
-  SHARE_MAP_STYLES = %w[cyclosm topo liberty swissgrau swisstopo swissimage].freeze
+  SHARE_MAP_STYLES = %w[cyclosm topo liberty swissgrau swisstopo swissimage ignplan ignortho].freeze
 
   belongs_to :user
   # Traces d'ouverture par d'autres utilisateurs (via lien partagé) — purgées avec l'itinéraire.

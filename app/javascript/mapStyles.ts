@@ -1,4 +1,4 @@
-export type MapStyleGroup = 'world' | 'swiss'
+export type MapStyleGroup = 'world' | 'swiss' | 'france'
 
 export interface MapStyle {
   id: string
@@ -15,10 +15,12 @@ export const MAP_STYLES: MapStyle[] = [
   { id: 'swissgrau',  icon: 'fa-circle-half-stroke', group: 'swiss' },
   { id: 'swisstopo',  icon: 'fa-flag-checkered',   group: 'swiss' },
   { id: 'swissimage', icon: 'fa-satellite',        group: 'swiss' },
+  { id: 'ignplan',    icon: 'fa-map-location-dot', group: 'france' },
+  { id: 'ignortho',   icon: 'fa-satellite',        group: 'france' },
 ]
 
 // Ordre des en-têtes de groupe dans le dropdown.
-export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss']
+export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss', 'france']
 
 // ─── Entrées composées du menu « fond de carte » ──────────────────────────────
 // Raccourcis « fond + overlay » : leur `id` est virtuel, il n'est jamais persisté —
@@ -276,6 +278,8 @@ export const EXPORT_TILE_INFO: Record<string, ExportTileInfo> = {
   swissgrau:  { maxzoom: 18, tileSize: 256 },
   swissimage: { maxzoom: 18, tileSize: 256 },
   liberty:    { maxzoom: 16, tileSize: 512 },
+  ignplan:    { maxzoom: 19, tileSize: 256 },
+  ignortho:   { maxzoom: 19, tileSize: 256 },
 }
 export function exportTileInfoFor(id: string): ExportTileInfo {
   return EXPORT_TILE_INFO[id] ?? { maxzoom: 17, tileSize: 256 }
@@ -290,6 +294,8 @@ export function mapStyleFor(id: string): string | object {
   if (id === 'swisstopo')  return swissTopoStyle()
   if (id === 'swissgrau')  return swissGrauStyle()
   if (id === 'swissimage') return swissImageStyle()
+  if (id === 'ignplan')    return ignPlanStyle()
+  if (id === 'ignortho')   return ignOrthoStyle()
   return cyclOsmStyle()
 }
 
@@ -421,5 +427,50 @@ export function swissTopoStyle(): object {
         paint: { 'raster-opacity': 0.9 },
       },
     ],
+  }
+}
+
+// ─── France — Géoplateforme IGN ────────────────────────────────────────────
+// data.geopf.fr a remplacé wxs.ign.fr (obsolète depuis janvier 2024) : les couches
+// grand public (plan, orthophotos) y sont servies en WMTS sans clé API, contrairement
+// à l'ancien service qui exigeait une clé même pour les fonds « découverte ».
+const IGN_ATTRIBUTION =
+  '© <a href="https://www.geoportail.gouv.fr" target="_blank" rel="noopener">IGN</a>'
+
+export function ignPlanStyle(): object {
+  return {
+    version: 8,
+    glyphs: GLYPHS_URL,
+    sources: {
+      'ignplan-raster': {
+        type: 'raster',
+        tiles: [
+          'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: IGN_ATTRIBUTION,
+      },
+    },
+    layers: [{ id: 'ignplan-base', type: 'raster', source: 'ignplan-raster' }],
+  }
+}
+
+export function ignOrthoStyle(): object {
+  return {
+    version: 8,
+    glyphs: GLYPHS_URL,
+    sources: {
+      'ignortho-raster': {
+        type: 'raster',
+        tiles: [
+          'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&FORMAT=image/jpeg&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+        ],
+        tileSize: 256,
+        maxzoom: 19,
+        attribution: IGN_ATTRIBUTION,
+      },
+    },
+    layers: [{ id: 'ignortho-base', type: 'raster', source: 'ignortho-raster' }],
   }
 }

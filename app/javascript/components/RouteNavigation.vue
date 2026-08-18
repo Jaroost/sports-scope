@@ -58,7 +58,7 @@ import { useControlsHide } from '../composables/useControlsHide'
 import { useRevealGesture } from '../composables/useRevealGesture'
 import { useTrackOpacityDrag } from '../composables/useTrackOpacityDrag'
 import { useSleepHold } from '../composables/useSleepHold'
-import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX } from '../navConstants'
+import { MIN_MOVE_M, MIN_SPEED_MS, MAX_EXTRAP_S, MAX_SPEED_MS, BEARING_SMOOTH, BEARING_EPS, TURN_CHAIN_GAP_M, TURN_CHAIN_MAX } from '../navConstants'
 import { useOfflineMaps } from '../composables/useOfflineMaps'
 import { usePoiBrowse } from '../composables/usePoiBrowse'
 import { useNavToast } from '../composables/useNavToast'
@@ -2317,10 +2317,21 @@ function publishNavState() {
 }
 
 function onPosition(pos: GeolocationPosition) {
+  const here: LngLat = [pos.coords.longitude, pos.coords.latitude]
+
+  // Saut de récepteur : Android peut réinjecter brièvement une position réelle
+  // par-dessus un GPS mocké (cas de test), et le navigateur nous la remonte comme
+  // n'importe quel fix. Ignoré tel quel — position, tracé, virages, tout continue
+  // sur le dernier fix de confiance — plutôt que de faire sauter la carte sur un
+  // point qu'on sait aberrant.
+  if (lastPos && lastFixTime) {
+    const dt = (pos.timestamp - lastFixTime) / 1000
+    if (dt > 0 && haversine(lastPos, here) / dt > MAX_SPEED_MS) return
+  }
+
   gpsError.value = null
   hasFix.value = true
   bumpPosTick()
-  const here: LngLat = [pos.coords.longitude, pos.coords.latitude]
 
   if (hasRoute.value) {
     onPositionRoute(pos, here)

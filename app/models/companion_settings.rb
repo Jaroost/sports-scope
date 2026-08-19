@@ -1403,7 +1403,11 @@ module CompanionSettings
     return nil unless raw.is_a?(Hash)
 
     {
-      "sounds" => raw["sounds"] != false
+      "sounds" => raw["sounds"] != false,
+      # Repli inverse de `sounds` : c'est l'affichage replié (pastille) qui est
+      # le comportement d'avant ce réglage, absent doit donc rester replié et
+      # non l'ouvrir en grand.
+      "expanded_by_default" => raw["expanded_by_default"] == true
     }
   end
 

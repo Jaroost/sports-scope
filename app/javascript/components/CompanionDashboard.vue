@@ -1663,6 +1663,16 @@ async function save() {
               </label>
             </div>
           </div>
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="climb-expanded"
+                     :checked="preset.climb?.expanded_by_default === true"
+                     @change="setClimb('expanded_by_default', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="climb-expanded">
+                {{ t('companion.settings.climb_expanded') }}
+              </label>
+            </div>
+          </div>
         </div>
 
         <!-- Les rappels périodiques -->

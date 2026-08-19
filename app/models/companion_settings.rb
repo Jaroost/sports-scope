@@ -604,6 +604,7 @@ module CompanionSettings
       "sensors" => sanitize_sensors(raw["sensors"]),
       "radar" => sanitize_radar(raw["radar"]),
       "battery" => sanitize_battery(raw["battery"]),
+      "climb" => sanitize_climb(raw["climb"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
       "screen" => sanitize_screen(raw["screen"]),
       "traveled_path" => sanitize_traveled_path(raw["traveled_path"]),
@@ -1391,6 +1392,17 @@ module CompanionSettings
 
     {
       "threshold_percent" => positive(raw["threshold_percent"], 20).clamp(1, 100),
+      "sounds" => raw["sounds"] != false
+    }
+  end
+
+  # Les tonalités de début/fin de col. Même repli que `sanitize_radar` : absent
+  # vaut activé, un profil venu d'une version antérieure du contrat ne doit
+  # pas perdre le son en silence.
+  def sanitize_climb(raw)
+    return nil unless raw.is_a?(Hash)
+
+    {
       "sounds" => raw["sounds"] != false
     }
   end

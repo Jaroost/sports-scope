@@ -442,6 +442,8 @@ export interface Preset {
   // Seuil d'alerte batterie des capteurs BLE de l'appli, et son son — même
   // forme que `radar`.
   battery?: Record<string, number | boolean>
+  // Tonalités de début/fin de col — même forme que `battery`.
+  climb?: Record<string, boolean>
   screen?: Record<string, number>
   // Couleur/largeur/opacité de la ligne du trajet réellement parcouru,
   // dessinée par l'appli companion — voir `sanitize_traveled_path` (Rails) et

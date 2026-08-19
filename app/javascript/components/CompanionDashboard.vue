@@ -833,6 +833,10 @@ function setBattery(key: string, value: number | boolean) {
   preset.value.battery = { ...(preset.value.battery || {}), [key]: value }
 }
 
+function setClimb(key: string, value: boolean) {
+  preset.value.climb = { ...(preset.value.climb || {}), [key]: value }
+}
+
 // ── les rappels périodiques ─────────────────────────────────────────────────
 
 function addReminder() {
@@ -1640,6 +1644,22 @@ async function save() {
                      @change="setBattery('sounds', ($event.target as HTMLInputElement).checked)">
               <label class="form-check-label small" for="battery-sounds">
                 {{ t('companion.settings.battery_sounds') }}
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Les cols -->
+        <h2 class="h6">{{ t('companion.settings.climb_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.climb_help') }}</p>
+        <div class="row g-2 align-items-end mb-4">
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="climb-sounds"
+                     :checked="preset.climb?.sounds !== false"
+                     @change="setClimb('sounds', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="climb-sounds">
+                {{ t('companion.settings.climb_sounds') }}
               </label>
             </div>
           </div>

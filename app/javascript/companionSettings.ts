@@ -1423,3 +1423,47 @@ export function fitListBlocks(blocks: Block[], cols: number): Block[] {
     return rest
   })
 }
+
+// Un tronçon de page `list`/`laps`-liste dans l'ordre du document : soit un
+// groupe de colonnes classique, soit un bloc `full_width` seul sur sa ligne
+// — de quoi dessiner l'aperçu de la page dans l'éditeur (`CompanionDashboard.vue`).
+// Même traversée que `CompanionSettings.place_list_blocks` côté Rails et que
+// `listSegmentsOf` (`lib/dashboard/list_layout.dart`) côté Dart — les trois
+// doivent s'accorder sur où tombent les ruptures.
+export type ListSegment =
+  | { kind: 'columns'; columns: Block[][] }
+  | { kind: 'full_width'; block: Block }
+
+// Regroupe les blocs d'une page `list` en tronçons affichables : un bloc
+// reste par défaut dans la colonne du précédent (première colonne au départ
+// et après chaque tronçon `full_width`), `new_column` avance d'une colonne
+// (avec retour à la première après la dernière, ignoré si `cols <= 1`), et
+// `full_width` clôt le groupe de colonnes en cours (s'il n'est pas vide) pour
+// poser son propre tronçon avant de reprendre en première colonne.
+export function listSegments(blocks: Block[], cols: number): ListSegment[] {
+  const segments: ListSegment[] = []
+  let columns: Block[][] = Array.from({ length: cols }, () => [])
+  let col = 0
+  let hasContent = false
+
+  const flushColumns = () => {
+    if (hasContent) segments.push({ kind: 'columns', columns })
+    columns = Array.from({ length: cols }, () => [])
+    col = 0
+    hasContent = false
+  }
+
+  for (const block of blocks) {
+    if (block.full_width) {
+      flushColumns()
+      segments.push({ kind: 'full_width', block })
+      continue
+    }
+    if (block.new_column && cols > 1) col = (col + 1) % cols
+    columns[col].push(block)
+    hasContent = true
+  }
+  flushColumns()
+
+  return segments
+}

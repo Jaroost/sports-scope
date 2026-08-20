@@ -8,7 +8,7 @@ import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
   canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR, DEFAULT_METRIC_LAYOUT,
   DEFAULT_TRAVELED_PATH_COLOR, fitCells,
-  fitDividers, fitListBlocks, gridSideOf, gutterRect, isGridLayout,
+  fitDividers, fitListBlocks, gridSideOf, gutterRect, isGridLayout, listSegments,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
   type Band, type Block, type Buttons, type ButtonChannel, type Catalog, type Cell, type CellSize, type Divider,
@@ -1358,6 +1358,30 @@ async function save() {
                 </p>
               </div>
 
+              <!-- L'aperçu : la même traversée que `DashboardListBody` côté
+                   appli (`listSegments`), en schéma plutôt qu'en rendu exact —
+                   une page qui défile n'a pas de largeur de téléphone à
+                   simuler comme une grille. Seulement à plus d'une colonne :
+                   à une seule, la liste ci-dessous en dessous dit déjà tout. -->
+              <div v-if="(page.cols || 1) > 1"
+                   class="companion-list-preview d-flex flex-column gap-1 border rounded p-2 mb-3 bg-body-tertiary">
+                <template v-for="(segment, si) in listSegments(page.blocks || [], page.cols || 1)" :key="si">
+                  <div v-if="segment.kind === 'full_width'"
+                       class="companion-list-preview-chip companion-list-preview-chip--full text-truncate">
+                    {{ labelFor(segment.block) }}
+                  </div>
+                  <div v-else-if="segment.kind === 'columns'" class="d-flex gap-1 align-items-stretch">
+                    <div v-for="(column, ci) in segment.columns" :key="ci"
+                         class="d-flex flex-column gap-1 flex-fill" style="min-width: 0">
+                      <div v-for="(block, bi) in column" :key="bi"
+                           class="companion-list-preview-chip text-truncate">
+                        {{ labelFor(block) }}
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
               <div v-for="(block, i) in page.blocks" :key="i"
                    class="d-flex align-items-center gap-2 mb-2">
                 <div class="companion-block-preview flex-shrink-0">
@@ -1934,6 +1958,21 @@ async function save() {
 }
 .companion-block-preview :deep(.cbp) {
   font-size: 0.42rem;
+}
+
+/* Un schéma, pas un rendu : un simple libellé par bloc suffit à montrer où
+   tombent les ruptures, `CompanionBlockPreview` resterait illisible étalé
+   sur une fraction de colonne. Bordure à gauche plus marquée sur un bloc
+   `full_width` pour le distinguer d'une colonne au premier coup d'œil. */
+.companion-list-preview-chip {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.25rem;
+  background: var(--bs-body-bg);
+}
+.companion-list-preview-chip--full {
+  border-left: 3px solid var(--bs-primary);
 }
 
 /* Assez large pour deux chiffres entre ses boutons, et pas plus : les deux

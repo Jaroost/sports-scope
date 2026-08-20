@@ -405,8 +405,18 @@ export interface Page {
   icon?: string
 }
 
+// La case « marquer un tour » du bandeau ou de l'encoche — seule case à
+// porter un réglage libre (série + label) plutôt qu'un simple jeton de
+// catalogue, voir `CompanionSettings.sanitize_band_lap_slot` (Rails) et
+// `BandMarkLapSlot` (Dart, `ride_preset.dart`).
+export interface BandMarkLapSlot {
+  kind: 'mark_lap'
+  series: string
+  label?: string
+}
+
 export interface Band {
-  metrics: string[]
+  metrics: (string | BandMarkLapSlot)[]
 }
 
 // Ce qu'un geste sur un canal du D-Fly déclenche — une chaîne du catalogue
@@ -436,8 +446,8 @@ export interface Buttons {
 // l'absence (ou une liste vide) ne retombe jamais sur un contenu par défaut —
 // voir `CompanionSettings.sanitize_notch_sets`.
 export interface Notch {
-  left?: string
-  right?: string
+  left?: string | BandMarkLapSlot
+  right?: string | BandMarkLapSlot
 }
 
 // Un rappel périodique — boire, manger, entamer une intervalle — voir
@@ -525,6 +535,12 @@ export interface Catalog {
   // Même liste que `band_bell` (sans le préfixe `bell_`) : un bloc de page
   // choisit son son, une case de bandeau/encoche choisit sa clé directement.
   bell_sounds: string[]
+  // Marquer un tour, en case de bandeau ou d'encoche — voir `BandMarkLapSlot`
+  // et `CompanionSettings::BAND_MARK_LAP`. Un seul token (`'mark_lap'`)
+  // aujourd'hui, mais un catalogue à part comme `band_radar`/`band_bell` : la
+  // case porte un réglage (série + label) qu'une simple chaîne ne peut pas
+  // porter.
+  band_mark_lap: string[]
   // Les trois gestes que le D-Fly (boutons satellites du Di2) distingue
   // lui-même — voir `CompanionSettings::BUTTON_GESTURES`. Toujours les mêmes
   // trois, mais tirés du catalogue plutôt que codés en dur dans l'éditeur :

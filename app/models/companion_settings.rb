@@ -263,6 +263,13 @@ module CompanionSettings
   BAND_RADAR_MODES = %w[distance count gauge].freeze
   BAND_RADAR = BAND_RADAR_MODES.map { |mode| "radar_#{mode}" }.freeze
 
+  # Marquer un tour, en case de bandeau ou d'encoche — un seul token
+  # aujourd'hui, mais un catalogue à part comme `BAND_RADAR`/`BAND_BELL` et
+  # non fondu dans `BAND_ACTIONS` : contrairement à `sleep`, cette case porte
+  # un réglage (série + label), qu'une case-string ne peut pas porter — voir
+  # `sanitize_band_lap_slot` et `BandMarkLapSlot` côté Dart (`ride_preset.dart`).
+  BAND_MARK_LAP = %w[mark_lap].freeze
+
   # Les trois gestes que le D-Fly (boutons satellites du Di2) sait distinguer
   # lui-même dans la trame — voir `Di2ButtonGesturePolicy` côté Dart. Un clic
   # bref ne peut pas encore devenir un double-clic ni un appui long, le D-Fly
@@ -498,6 +505,12 @@ module CompanionSettings
   # libellé de bloc — borne bien plus courte que `MAX_METRIC_LABEL_LENGTH`.
   MAX_SECONDARY_LABEL_LENGTH = 6
 
+  # Le label personnalisé d'une case « marquer un tour » du bandeau/encoche —
+  # une case bien plus petite qu'un bloc `metric` de grille, mais un peu plus
+  # large qu'une annotation de coin (elle n'a pas de chiffre à côté d'elle
+  # pour donner le contexte).
+  MAX_BAND_LAP_LABEL_LENGTH = 10
+
   # La fenêtre roulante d'un bloc `altitude_profile` (`window_km`) : sous la
   # borne basse, la fenêtre serait plus étroite que le pas d'échantillonnage
   # du profil côté appli et n'afficherait presque rien ; au-delà de la haute,
@@ -542,6 +555,7 @@ module CompanionSettings
       "band_actions" => BAND_ACTIONS,
       "band_radar" => BAND_RADAR,
       "band_bell" => BAND_BELL,
+      "band_mark_lap" => BAND_MARK_LAP,
       "bell_sounds" => BELL_SOUNDS,
       "button_gestures" => BUTTON_GESTURES,
       "button_actions" => BUTTON_ACTIONS,
@@ -1318,7 +1332,7 @@ module CompanionSettings
       # l'éditeur se retrouverait toujours en bout de jeu.
       metrics = raw_array(band.is_a?(Hash) ? band["metrics"] : band)
                 .first(MAX_BAND_METRICS)
-                .map { |metric| metric if band_slot?(metric) }
+                .map { |metric| sanitize_band_entry(metric) }
       metrics.all?(&:nil?) ? nil : { "metrics" => metrics }
     end
   end
@@ -1345,14 +1359,34 @@ module CompanionSettings
   end
 
   def sanitize_notch_metric(raw)
-    raw if band_slot?(raw)
+    sanitize_band_entry(raw)
   end
 
   # Une case de bandeau ou de bande de l'encoche : une mesure, une commande
-  # (`BAND_ACTIONS`), un son de sonnette (`BAND_BELL`) ou un mode de radar
-  # (`BAND_RADAR`).
+  # (`BAND_ACTIONS`), un son de sonnette (`BAND_BELL`), un mode de radar
+  # (`BAND_RADAR`) — toutes des chaînes — ou un objet « marquer un tour »
+  # (`BAND_MARK_LAP`, seule case qui porte un réglage libre, voir
+  # `sanitize_band_lap_slot`).
   def band_slot?(raw)
     METRICS.include?(raw) || BAND_ACTIONS.include?(raw) || BAND_BELL.include?(raw) || BAND_RADAR.include?(raw)
+  end
+
+  def sanitize_band_entry(raw)
+    return raw if band_slot?(raw)
+
+    sanitize_band_lap_slot(raw)
+  end
+
+  # `mark_lap` est la seule case de bandeau/encoche à porter un réglage libre
+  # (série + label) : les autres se contentent d'une chaîne (voir
+  # `band_slot?`), celle-ci est donc le seul objet toléré dans ces tableaux —
+  # `nil` pour tout objet dont le `kind` n'est pas reconnu, même repli qu'une
+  # chaîne inconnue de `band_slot?`.
+  def sanitize_band_lap_slot(raw)
+    return nil unless raw.is_a?(Hash) && raw["kind"] == "mark_lap"
+
+    label = raw["label"].to_s.strip[0, MAX_BAND_LAP_LABEL_LENGTH]
+    { "kind" => "mark_lap", "series" => sanitize_series(raw["series"]), "label" => label.presence }.compact
   end
 
   # Ce que les quatre canaux du D-Fly déclenchent, par profil de sortie — voir

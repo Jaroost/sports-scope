@@ -1726,6 +1726,8 @@ en:
       band_actions_group: "Controls"
       band_radar_group: "Radar"
       band_bell_group: "Bell"
+      band_lap_group: "Start a lap"
+      band_lap_label: "Custom label"
       sensors_title: "Sensors"
       sensors_help: "What this profile goes looking for. A disabled sensor is not disconnected: if it is already connected it keeps measuring. Without GPS the app asks for neither a foreground service nor a position — distance and elevation then show a dash."
       buttons_title: "Di2 buttons"

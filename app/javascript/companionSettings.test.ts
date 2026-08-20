@@ -74,6 +74,7 @@ const catalog: Catalog = {
   band_actions: ['sleep'],
   band_radar: ['radar_distance', 'radar_count', 'radar_gauge'],
   band_bell: ['bell_bell', 'bell_horn'],
+  band_mark_lap: ['mark_lap'],
   bell_sounds: ['bell', 'horn'],
   button_gestures: ['click', 'double_click', 'long_press'],
   button_actions: ['next_page', 'previous_page', 'bell', 'horn', 'start_lap', 'sleep', 'wake'],

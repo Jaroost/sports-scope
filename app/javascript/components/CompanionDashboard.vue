@@ -11,9 +11,9 @@ import {
   fitDividers, fitListBlocks, gridSideOf, gutterRect, isGridLayout, listSegments,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
-  type Band, type Block, type Buttons, type ButtonChannel, type Catalog, type Cell, type CellSize, type Divider,
-  type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch, type Page, type Preset,
-  type Reminder, type Viewport,
+  type Band, type BandMarkLapSlot, type Block, type Buttons, type ButtonChannel, type Catalog, type Cell,
+  type CellSize, type Divider, type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch,
+  type Page, type Preset, type Reminder, type Viewport,
 } from '../companionSettings'
 
 // L'éditeur des profils de sortie de l'app compagnon.
@@ -153,10 +153,21 @@ const lapSeries = computed(() => {
   const collect = (block?: Block) => {
     if (block?.kind === 'mark_lap') keys.add(block.series || 'default')
   }
+  // Une case de bandeau/encoche « marquer un tour » (`BandMarkLapSlot`) porte
+  // aussi une série, au même titre qu'un bouton `mark_lap` de page — mêmes
+  // suggestions des deux côtés.
+  const collectSlot = (slot?: string | BandMarkLapSlot) => {
+    if (typeof slot === 'object') keys.add(slot.series || 'default')
+  }
   preset.value.pages.forEach((page) => {
     if (page.kind === 'laps') keys.add(page.series || 'default')
     page.blocks?.forEach(collect)
     page.cells?.forEach((cell) => collect(cell.block))
+  })
+  preset.value.bands.forEach((band) => band.metrics.forEach(collectSlot))
+  ;(preset.value.notch || []).forEach((set) => {
+    collectSlot(set.left)
+    collectSlot(set.right)
   })
   return [...keys]
 })
@@ -194,6 +205,19 @@ function bandRadarLabel(key: string): string {
 function bandBellLabel(key: string): string {
   const sound = key.slice('bell_'.length)
   return `${t('companion.settings.blocks.bell')} · ${t(`companion.settings.bell_sounds.${sound}`)}`
+}
+
+// Ce que porte un `<select>` de case de bandeau/encoche : le jeton simple
+// (chaîne) tel quel, ou le `kind` de l'objet « marquer un tour » — c'est ce
+// qui sélectionne l'option correspondante dans le menu déroulant.
+function bandSlotKind(value?: string | BandMarkLapSlot): string {
+  return typeof value === 'object' ? value.kind : (value || '')
+}
+
+// L'objet « marquer un tour » d'une case, ou `null` — ce qui commande
+// l'affichage des champs série/label sous le `<select>`.
+function bandLapSlot(value?: string | BandMarkLapSlot): BandMarkLapSlot | null {
+  return typeof value === 'object' ? value : null
 }
 
 // Le libellé d'une action de bouton Di2 (`catalog.button_actions`) — sa
@@ -804,7 +828,7 @@ function addBand() {
   preset.value.bands.push({ metrics: ['duration', 'distance', 'speed', 'power'] })
 }
 
-function setBandMetric(band: Band, index: number, value: string) {
+function setBandMetric(band: Band, index: number, value: string | BandMarkLapSlot) {
   // Écrit en place plutôt que de retirer la case : un `splice` décalerait
   // tout ce qui suit vers la gauche, et une case vidée au milieu se
   // retrouverait toujours en bout de jeu. Seules les cases vides en fin de
@@ -816,6 +840,23 @@ function setBandMetric(band: Band, index: number, value: string) {
   }
 }
 
+// Ce que choisit le `<select>` d'une case : soit un jeton simple (mesure,
+// commande, radar, sonnette), soit `'mark_lap'` — auquel cas la case devient
+// l'objet réglable (série + label) plutôt que la chaîne elle-même.
+function setBandSlotKind(band: Band, index: number, value: string) {
+  setBandMetric(band, index, value === 'mark_lap' ? { kind: 'mark_lap', series: 'default' } : value)
+}
+
+function setBandLapSeries(band: Band, index: number, value: string) {
+  const slot = band.metrics[index]
+  if (typeof slot === 'object') slot.series = value
+}
+
+function setBandLapLabel(band: Band, index: number, value: string) {
+  const slot = band.metrics[index]
+  if (typeof slot === 'object') slot.label = value || undefined
+}
+
 // ── la bande de l'encoche ───────────────────────────────────────────────────
 
 function addNotchSet() {
@@ -823,9 +864,24 @@ function addNotchSet() {
   notch.push({})
 }
 
-function setNotchMetric(set: Notch, side: 'left' | 'right', value: string) {
+function setNotchMetric(set: Notch, side: 'left' | 'right', value: string | BandMarkLapSlot) {
   if (value) set[side] = value
   else delete set[side]
+}
+
+// Même rôle que `setBandSlotKind`, côté encoche.
+function setNotchSlotKind(set: Notch, side: 'left' | 'right', value: string) {
+  setNotchMetric(set, side, value === 'mark_lap' ? { kind: 'mark_lap', series: 'default' } : value)
+}
+
+function setNotchLapSeries(set: Notch, side: 'left' | 'right', value: string) {
+  const slot = set[side]
+  if (typeof slot === 'object') slot.series = value
+}
+
+function setNotchLapLabel(set: Notch, side: 'left' | 'right', value: string) {
+  const slot = set[side]
+  if (typeof slot === 'object') slot.label = value || undefined
 }
 
 function removeNotchSet(index: number) {
@@ -1492,8 +1548,8 @@ async function save() {
           <div class="row g-1 flex-grow-1">
             <div v-for="slot in catalog.max_band_metrics" :key="slot" class="col-6 col-sm-3">
               <select class="form-select form-select-sm"
-                      :value="band.metrics[slot - 1] || ''"
-                      @change="setBandMetric(band, slot - 1, ($event.target as HTMLSelectElement).value)">
+                      :value="bandSlotKind(band.metrics[slot - 1])"
+                      @change="setBandSlotKind(band, slot - 1, ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
                 <optgroup :label="t('companion.settings.band_actions_group')">
                   <option v-for="action in catalog.band_actions" :key="action" :value="action">
@@ -1510,12 +1566,27 @@ async function save() {
                     {{ bandBellLabel(bell) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_lap_group')">
+                  <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
+                    {{ bandActionLabel(lap) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">
                   <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
                     {{ metricLabel(metric) }}
                   </option>
                 </optgroup>
               </select>
+              <div v-if="bandLapSlot(band.metrics[slot - 1])" class="d-flex gap-1 mt-1">
+                <input class="form-control form-control-sm" style="min-width: 0"
+                       :value="bandLapSlot(band.metrics[slot - 1])!.series"
+                       @change="setBandLapSeries(band, slot - 1, ($event.target as HTMLInputElement).value)"
+                       list="band-lap-series-list" :placeholder="t('companion.settings.lap_series')">
+                <input class="form-control form-control-sm" style="min-width: 0"
+                       :value="bandLapSlot(band.metrics[slot - 1])!.label || ''"
+                       @change="setBandLapLabel(band, slot - 1, ($event.target as HTMLInputElement).value)"
+                       maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
+              </div>
             </div>
           </div>
           <button class="btn btn-sm btn-link text-danger p-1" type="button"
@@ -1526,6 +1597,12 @@ async function save() {
         <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addBand">
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_band') }}
         </button>
+        <!-- Suggestions de série pour les champs texte des cases « marquer un
+             tour » ci-dessus et ci-dessous (encoche) — mêmes clés que
+             `lapSeries`. -->
+        <datalist id="band-lap-series-list">
+          <option v-for="series in lapSeries" :key="series" :value="series"></option>
+        </datalist>
 
         <!-- La bande de l'encoche -->
         <h2 class="h6">{{ t('companion.settings.notch') }}</h2>
@@ -1535,8 +1612,8 @@ async function save() {
              class="d-flex align-items-center gap-2 mb-2">
           <div class="row g-1 flex-grow-1">
             <div class="col-6">
-              <select class="form-select form-select-sm" :value="set.left || ''"
-                      @change="setNotchMetric(set, 'left', ($event.target as HTMLSelectElement).value)">
+              <select class="form-select form-select-sm" :value="bandSlotKind(set.left)"
+                      @change="setNotchSlotKind(set, 'left', ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
                 <optgroup :label="t('companion.settings.band_actions_group')">
                   <option v-for="action in catalog.band_actions" :key="action" :value="action">
@@ -1553,16 +1630,31 @@ async function save() {
                     {{ bandBellLabel(bell) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_lap_group')">
+                  <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
+                    {{ bandActionLabel(lap) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">
                   <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
                     {{ metricLabel(metric) }}
                   </option>
                 </optgroup>
               </select>
+              <div v-if="bandLapSlot(set.left)" class="d-flex gap-1 mt-1">
+                <input class="form-control form-control-sm" style="min-width: 0"
+                       :value="bandLapSlot(set.left)!.series"
+                       @change="setNotchLapSeries(set, 'left', ($event.target as HTMLInputElement).value)"
+                       list="band-lap-series-list" :placeholder="t('companion.settings.lap_series')">
+                <input class="form-control form-control-sm" style="min-width: 0"
+                       :value="bandLapSlot(set.left)!.label || ''"
+                       @change="setNotchLapLabel(set, 'left', ($event.target as HTMLInputElement).value)"
+                       maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
+              </div>
             </div>
             <div class="col-6">
-              <select class="form-select form-select-sm" :value="set.right || ''"
-                      @change="setNotchMetric(set, 'right', ($event.target as HTMLSelectElement).value)">
+              <select class="form-select form-select-sm" :value="bandSlotKind(set.right)"
+                      @change="setNotchSlotKind(set, 'right', ($event.target as HTMLSelectElement).value)">
                 <option value="">—</option>
                 <optgroup :label="t('companion.settings.band_actions_group')">
                   <option v-for="action in catalog.band_actions" :key="action" :value="action">
@@ -1579,12 +1671,27 @@ async function save() {
                     {{ bandBellLabel(bell) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_lap_group')">
+                  <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
+                    {{ bandActionLabel(lap) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_metrics_group')">
                   <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
                     {{ metricLabel(metric) }}
                   </option>
                 </optgroup>
               </select>
+              <div v-if="bandLapSlot(set.right)" class="d-flex gap-1 mt-1">
+                <input class="form-control form-control-sm" style="min-width: 0"
+                       :value="bandLapSlot(set.right)!.series"
+                       @change="setNotchLapSeries(set, 'right', ($event.target as HTMLInputElement).value)"
+                       list="band-lap-series-list" :placeholder="t('companion.settings.lap_series')">
+                <input class="form-control form-control-sm" style="min-width: 0"
+                       :value="bandLapSlot(set.right)!.label || ''"
+                       @change="setNotchLapLabel(set, 'right', ($event.target as HTMLInputElement).value)"
+                       maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
+              </div>
             </div>
           </div>
           <button class="btn btn-sm btn-link text-danger p-1" type="button" @click="removeNotchSet(index)">

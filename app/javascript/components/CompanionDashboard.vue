@@ -388,6 +388,17 @@ function removePage(index: number) {
   selected.value = null
 }
 
+// Sans clé : le serveur en fabriquera une à l'enregistrement (`page_key`),
+// comme pour un profil dupliqué (`duplicatePreset`) — la recopier ici ferait
+// viser la même page à deux boutons « Aller à… » à la fois.
+function duplicatePage(index: number) {
+  const copy = structuredClone(toRaw(preset.value.pages[index])) as Page
+  delete copy.key
+  preset.value.pages.splice(index + 1, 0, copy)
+  openPage.value = index + 1
+  selected.value = null
+}
+
 function togglePage(index: number) {
   openPage.value = openPage.value === index ? null : index
   selected.value = null
@@ -1082,6 +1093,15 @@ async function save() {
             <button v-if="page.kind !== 'map'" class="btn btn-sm btn-outline-secondary"
                     type="button" @click="togglePage(index)">
               {{ t('companion.settings.edit') }}
+            </button>
+            <!-- Pas pour la carte : il ne peut jamais y en avoir deux (voir
+                 `hasMap` sur le bouton « Ajouter »), une copie disparaîtrait
+                 donc en silence au premier « Enregistrer ». -->
+            <button v-if="page.kind !== 'map'" class="btn btn-sm btn-link p-1" type="button"
+                    :title="t('companion.settings.duplicate')"
+                    :aria-label="t('companion.settings.duplicate')"
+                    @click="duplicatePage(index)">
+              <i class="fa-regular fa-copy" aria-hidden="true"></i>
             </button>
             <button class="btn btn-sm btn-link text-danger p-1" type="button"
                     @click="removePage(index)">

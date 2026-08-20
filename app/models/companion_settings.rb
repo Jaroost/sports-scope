@@ -175,6 +175,16 @@ module CompanionSettings
     # de navigation ni du GPS : un profil de home-trainer avec capteur de
     # puissance la reçoit tout autant qu'une sortie sur route.
     "power_curve" => %w[table chart],
+    # La tendance cardio ou puissance dans le temps (`source`, même catalogue
+    # que `zones`) : aire colorée par zone sous la courbe, toute la sortie ou
+    # seulement les `window_s` dernières secondes (voir `sanitize_block`).
+    # Comme `power_curve`, la donnée ne vient pas d'ici — c'est l'appli qui la
+    # calcule à partir de son propre capteur — et elle ne dépend d'aucune page
+    # de navigation ni du GPS : un profil de home-trainer la reçoit tout
+    # autant qu'une sortie sur route. Un seul mode, même raison que
+    # `climb_profile`/`weather_forecast` : le graphique remplit toute la
+    # case, rien à faire varier selon la case.
+    "metric_trend" => [],
     # L'heure courante. Seul composant, avec `training_budget`/`climb_list`, à
     # ne rien vérifier au-delà du mode générique — pas de mesure ni de source
     # à valider, comme `radar`/`recording`.
@@ -470,6 +480,15 @@ module CompanionSettings
   # elle vaudrait autant que le profil entier (comportement d'avant ce
   # réglage, déjà disponible en laissant le champ vide) sans le dire.
   ALTITUDE_PROFILE_WINDOW_KM_RANGE = 1..50
+
+  # La fenêtre récente d'un bloc `metric_trend` (`window_s`), en secondes. Sous
+  # la borne basse, la fenêtre serait plus courte que le pas d'échantillonnage
+  # utile pour voir une forme ; au-delà de la haute (1 h), elle n'a plus rien
+  # d'une vue « récente » — c'est déjà ce que montre le repli sans fenêtre
+  # (toute la sortie), et c'est aussi la largeur de la fenêtre glissante que
+  # garde l'appli côté téléphone (`RideMetricTrack.recentWindowS`, dépôt
+  # voisin) : au-delà, il n'y aurait de toute façon plus rien à afficher.
+  METRIC_TREND_WINDOW_S_RANGE = 30..3600
 
   # Douze rappels par profil au plus — même borne, et même raison, que
   # `ReminderSpec.maxCount` côté Dart : au-delà, un tableau de bord composé ici
@@ -1060,6 +1079,15 @@ module CompanionSettings
       block["layout"] = layout
     when "zones", "lap_zones"
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
+    when "metric_trend"
+      block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
+      # Absent (`nil`) plutôt qu'un repli : c'est toute la sortie, le
+      # comportement par défaut, pas une fenêtre à moitié devinée — même
+      # raisonnement que `window_km` sur `altitude_profile`.
+      window_s = raw["window_s"]
+      if window_s.is_a?(Numeric) && window_s.positive?
+        block["window_s"] = window_s.round.clamp(METRIC_TREND_WINDOW_S_RANGE)
+      end
     when "mark_lap"
       block["series"] = sanitize_series(raw["series"])
     when "bell"

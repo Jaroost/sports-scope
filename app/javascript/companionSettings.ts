@@ -79,6 +79,10 @@ export interface Block {
   // `sanitize_block`). Absente : le profil entier du tracé, fait/restant,
   // comportement d'avant ce réglage.
   window_km?: number
+  // La fenêtre récente d'un bloc `metric_trend`, en secondes — voir
+  // `sanitize_block`. Absente : toute la sortie, rééchantillonnée côté
+  // appli, comportement par défaut.
+  window_s?: number
   // Couleur de fond de la carte et de son texte, en `#rrggbb` — valent pour
   // n'importe quel genre de composant, contrairement à `metric`/`source` qui
   // sont propres à un genre. Absentes, l'appli garde son calcul habituel
@@ -627,7 +631,7 @@ export function blockFor(
   choice: BlockChoice,
   params: {
     metric?: string; source?: string; sensor?: string; series?: string; format?: string; min?: number; max?: number
-    windowKm?: number; sound?: string
+    windowKm?: number; windowS?: number; sound?: string
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
     // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
@@ -663,7 +667,9 @@ export function blockFor(
     if (params.gaugeColorMode) block.gauge_color_mode = params.gaugeColorMode
     if (params.gaugeColor) block.gauge_color = params.gaugeColor
   }
-  if (choice.kind === 'zones' || choice.kind === 'lap_zones') block.source = params.source
+  if (choice.kind === 'zones' || choice.kind === 'lap_zones' || choice.kind === 'metric_trend') {
+    block.source = params.source
+  }
   // Absent (`undefined`) plutôt qu'un repli : c'est « tous les appareils
   // confondus », le comportement d'avant ce réglage — même raisonnement que
   // `window_km`.
@@ -673,6 +679,8 @@ export function blockFor(
   // Absent (`undefined`) plutôt qu'un repli : c'est le profil entier, pas une
   // fenêtre à moitié réglée — même raisonnement que `min`/`max` de la jauge.
   if (choice.kind === 'altitude_profile' && params.windowKm) block.window_km = params.windowKm
+  // Même raisonnement, en secondes : absent vaut toute la sortie.
+  if (choice.kind === 'metric_trend' && params.windowS) block.window_s = params.windowS
   // Contrairement à `metric`/`source`, valent pour n'importe quel genre : le
   // réglage se fait une fois dans la dialogue, pas par groupe.
   if (params.color) block.color = params.color
@@ -1059,6 +1067,43 @@ export const POWER_CURVE_SAMPLE = [
   { duration: '30 min', watts: 230 },
   { duration: '60 min', watts: 205 },
   { duration: '90 min', watts: 190 },
+]
+
+// La tendance cardio/puissance dans le temps, pour la vignette : une sortie
+// qui monte en Z1/Z2, tient un plateau en Z3/Z4, pique une fois avant de
+// redescendre — assez pour montrer que l'aire change de couleur d'un
+// segment à l'autre. La puissance seule atteint Z6 (cardio, trop lent, ne
+// distingue jamais l'anaérobie du VO2max — voir `zone_colors.dart`).
+// Chiffres plausibles et faux comme `POWER_CURVE_SAMPLE`, la forme seule
+// compte ici.
+export const METRIC_TREND_HR_SAMPLE = [
+  { value: 92, zone: 'z1' },
+  { value: 108, zone: 'z2' },
+  { value: 122, zone: 'z2' },
+  { value: 138, zone: 'z3' },
+  { value: 148, zone: 'z3' },
+  { value: 156, zone: 'z4' },
+  { value: 168, zone: 'z5' },
+  { value: 172, zone: 'z5' },
+  { value: 160, zone: 'z4' },
+  { value: 150, zone: 'z3' },
+  { value: 140, zone: 'z3' },
+  { value: 130, zone: 'z2' },
+]
+
+export const METRIC_TREND_POWER_SAMPLE = [
+  { value: 90, zone: 'z1' },
+  { value: 160, zone: 'z2' },
+  { value: 200, zone: 'z3' },
+  { value: 240, zone: 'z3' },
+  { value: 260, zone: 'z4' },
+  { value: 310, zone: 'z5' },
+  { value: 380, zone: 'z6' },
+  { value: 340, zone: 'z5' },
+  { value: 270, zone: 'z4' },
+  { value: 230, zone: 'z3' },
+  { value: 190, zone: 'z2' },
+  { value: 150, zone: 'z2' },
 ]
 
 // Le tiret et pas un chiffre inventé quand la mesure est inconnue de cette

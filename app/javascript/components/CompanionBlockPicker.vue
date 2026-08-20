@@ -87,6 +87,9 @@ const format = ref(props.block?.format || 'hm')
 // du tracé, comportement d'avant ce réglage, plutôt qu'une fenêtre choisie
 // pour personne.
 const windowKm = ref<number>(props.block?.window_km || 0)
+// La fenêtre récente d'un bloc `metric_trend` — même repli que `windowKm` :
+// vide vaut toute la sortie, le comportement par défaut.
+const windowS = ref<number>(props.block?.window_s || 0)
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
 //
@@ -520,6 +523,7 @@ const groups = computed(() => {
             gaugeColorMode: gaugeColorModeChoice.value, gaugeColor: gaugeColorChoice.value ?? undefined,
             clockLayout: clockLayout.value, clockIcon: clockIconChoice.value,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
+            windowS: windowS.value || undefined,
             color: color.value, textColor: textColor.value,
           }),
           label: labelOf(choice),
@@ -744,7 +748,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               />
             </label>
 
-            <label v-if="group.kind === 'zones' || group.kind === 'lap_zones'" class="cbpk-param small">
+            <label
+              v-if="group.kind === 'zones' || group.kind === 'lap_zones' || group.kind === 'metric_trend'"
+              class="cbpk-param small"
+            >
               {{ t('companion.settings.source') }}
               <select v-model="source" class="form-select form-select-sm">
                 <option v-for="s in catalog.zone_sources" :key="s" :value="s">
@@ -794,6 +801,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 class="form-control form-control-sm"
               >
             </label>
+
+            <label v-if="group.kind === 'metric_trend'" class="cbpk-param small">
+              {{ t('companion.settings.metric_trend_window_s') }}
+              <input
+                v-model.number="windowS"
+                type="number"
+                min="30"
+                max="3600"
+                step="30"
+                :placeholder="t('companion.settings.metric_trend_window_s_placeholder')"
+                class="form-control form-control-sm"
+              >
+            </label>
           </div>
 
           <p v-if="group.kind === 'battery'" class="text-body-secondary small mb-2">
@@ -810,6 +830,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
           <p v-if="group.kind === 'altitude_profile'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.altitude_window_km_hint') }}
+          </p>
+
+          <p v-if="group.kind === 'metric_trend'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.metric_trend_window_s_hint') }}
           </p>
 
           <!-- L'éditeur de disposition d'un bloc `metric` : une grille à 3

@@ -31,6 +31,8 @@ import {
   CLIMB_LIST_SAMPLE,
   DYNAMIC_GAUGE_PREVIEW_FRACTION,
   LAP_SUMMARY_SAMPLE,
+  METRIC_TREND_HR_SAMPLE,
+  METRIC_TREND_POWER_SAMPLE,
   POWER_CURVE_SAMPLE,
   RANGE_GAUGE_COLOR,
   RANGE_GAUGE_SEGMENTS,
@@ -575,6 +577,44 @@ const powerCurvePoints = computed(() => {
   }))
 })
 const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p.x},${p.y}`).join(' '))
+
+// ── Tendance cardio/puissance ────────────────────────────────────────────────
+//
+// Même dessin que `MetricTrendGraph` (dépôt voisin,
+// `ride/widgets/metric_trend_graph.dart`) : un trapèze par segment, coloré
+// par la zone de son point de départ — fac-similé au même titre que le reste
+// de ce fichier, `ZONE_COLORS` tient lieu de la même table côté appli
+// (`zoneColorOf`). La courbe elle-même est tracée par-dessus, en liseré noir
+// puis trait blanc, pour rester lisible aussi bien sur un aplat sombre (Z1
+// bleu) que clair (Z3 jaune) — même parade que côté appli.
+const metricTrendTitle = computed(() => (props.block.source === 'power' ? 'Tendance puissance' : 'Tendance cardio'))
+const metricTrendSample = computed(() =>
+  props.block.source === 'power' ? METRIC_TREND_POWER_SAMPLE : METRIC_TREND_HR_SAMPLE)
+
+const metricTrendPoints = computed(() => {
+  const sample = metricTrendSample.value
+  const values = sample.map((p) => p.value)
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min || 1
+  return sample.map((p, i) => ({
+    x: (i / (sample.length - 1)) * 100,
+    y: 96 - ((p.value - min) / span) * 88,
+    zone: p.zone,
+  }))
+})
+const metricTrendPolyline = computed(() => metricTrendPoints.value.map((p) => `${p.x},${p.y}`).join(' '))
+const metricTrendSegments = computed(() => {
+  const pts = metricTrendPoints.value
+  const segments: { d: string; color: string }[] = []
+  for (let i = 0; i < pts.length - 1; i++) {
+    segments.push({
+      d: `M${pts[i].x},${pts[i].y} L${pts[i + 1].x},${pts[i + 1].y} L${pts[i + 1].x},100 L${pts[i].x},100 Z`,
+      color: ZONE_COLORS[pts[i].zone],
+    })
+  }
+  return segments
+})
 </script>
 
 <template>
@@ -1238,6 +1278,37 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
       </div>
     </template>
 
+    <!-- Tendance -- cardio ou puissance dans le temps, toute la sortie ou une
+         fenêtre récente (`window_s`) : même dessin dans les deux cas, seule
+         la portée change, et l'éditeur n'a pas de sortie en cours pour
+         montrer la différence. -------------------------------------------- -->
+    <div v-else-if="block.kind === 'metric_trend'" class="cbp-card cbp-metric-trend" :style="overrideStyle">
+      <div class="cbp-title">{{ metricTrendTitle }}</div>
+      <div class="cbp-metric-trend-graph">
+        <svg class="cbp-metric-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <path v-for="(seg, i) in metricTrendSegments" :key="i" :d="seg.d" :fill="seg.color" />
+          <polyline
+            :points="metricTrendPolyline"
+            fill="none"
+            stroke="rgba(0, 0, 0, 0.55)"
+            stroke-width="3"
+            stroke-linejoin="round"
+            stroke-linecap="round"
+            vector-effect="non-scaling-stroke"
+          />
+          <polyline
+            :points="metricTrendPolyline"
+            fill="none"
+            stroke="#fff"
+            stroke-width="1.4"
+            stroke-linejoin="round"
+            stroke-linecap="round"
+            vector-effect="non-scaling-stroke"
+          />
+        </svg>
+      </div>
+    </div>
+
     <!-- Horloge ---------------------------------------------------------
          Même grille qu'une mesure (`rows`, `layoutRows(metricLayout(block))`
          — générique, ne teste jamais `kind`, donc réutilisable telle quelle),
@@ -1570,6 +1641,28 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
   margin-top: 0.5em;
 }
 .cbp-power-curve-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 0.5em;
+  background: #14161a;
+}
+
+/* Même fond sombre que la courbe de puissance ci-dessus : c'est lui qui rend
+   les aplats de zone saturés (`ZONE_COLORS`) lisibles, même raison que le
+   fond des cartes du tableau de bord (#1F2226, `BlockCard.background`). */
+.cbp-metric-trend {
+  display: flex;
+  flex-direction: column;
+}
+.cbp-metric-trend-graph {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  margin-top: 0.5em;
+}
+.cbp-metric-trend-svg {
   position: absolute;
   inset: 0;
   width: 100%;

@@ -1695,6 +1695,9 @@ en:
       altitude_window_km: "Rolling window (km)"
       altitude_window_km_placeholder: "Whole profile"
       altitude_window_km_hint: "On a followed route, shows only the next few kilometres, sliding forward as you ride — leave blank for the whole route profile."
+      metric_trend_window_s: "Recent window (s)"
+      metric_trend_window_s_placeholder: "Whole ride"
+      metric_trend_window_s_hint: "Shows only the last few seconds, at full resolution — leave blank for the whole ride, resampled to fit the graph."
       default_icon: "Default icon"
       block_color: "Background"
       block_text_color: "Text"
@@ -1798,6 +1801,7 @@ en:
         climb_profile: "Climb profile"
         altitude_profile: "Altitude profile"
         power_curve: "Power curve"
+        metric_trend: "Trend"
         clock: "Clock"
         empty: "Empty cell"
       modes:

@@ -1261,6 +1261,31 @@ export const RANGE_GAUGE_SEGMENTS = 5
 // d'action, mais éclairci pour rester lisible sur les cases éteintes.
 export const RANGE_GAUGE_COLOR = '#26A69A'
 
+// Les deux bornes du dégradé d'une jauge à plage (libre ou dynamique) *sans*
+// zone d'entraînement en mode couleur `auto` — bleu au minimum, violet au
+// maximum, pour qu'une mesure comme la vitesse porte quand même une couleur
+// qui bouge avec elle, comme le fait déjà une jauge de zones (`ZONE_COLORS`)
+// — voir `gaugeGradientColor`. Une jauge de zones garde elle sa couleur de
+// zone en mode `auto`, ce dégradé ne la concerne pas. Même paire que
+// `_gaugeGradientFrom`/`_gaugeGradientTo` côté Dart (`metric_view.dart`).
+export const GAUGE_AUTO_GRADIENT_FROM = '#2196F3'
+export const GAUGE_AUTO_GRADIENT_TO = '#673AB7'
+
+// Interpolation linéaire canal par canal entre les deux bornes du dégradé —
+// `fraction` bornée à 0–1 : au-delà, on sortirait du dégradé plutôt que de
+// rester à sa couleur terminale.
+export function gaugeGradientColor(fraction: number): string {
+  const f = Math.min(Math.max(fraction, 0), 1)
+  const from = GAUGE_AUTO_GRADIENT_FROM
+  const to = GAUGE_AUTO_GRADIENT_TO
+  const channel = (offset: number) => {
+    const a = parseInt(from.slice(offset, offset + 2), 16)
+    const b = parseInt(to.slice(offset, offset + 2), 16)
+    return Math.round(a + (b - a) * f).toString(16).padStart(2, '0')
+  }
+  return `#${channel(1)}${channel(3)}${channel(5)}`
+}
+
 // La forme du remplissage d'une jauge — voir `Block.gauge_fill`. Même
 // contrat que `CompanionSettings::GAUGE_FILLS` côté Rails.
 export const GAUGE_FILLS = ['segments', 'full'] as const

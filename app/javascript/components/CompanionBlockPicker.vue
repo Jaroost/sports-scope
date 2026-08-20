@@ -758,6 +758,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 <option value="auto">{{ t('companion.settings.gauge_color_modes.auto') }}</option>
               </select>
             </label>
+            <p
+              v-if="group.kind === 'metric' && !!currentLayout.gauge && gaugeColorModeChoice === 'auto'"
+              class="small text-body-secondary mb-2"
+            >
+              {{
+                metricZoneEligible
+                  ? t('companion.settings.gauge_color_mode_hint_zone')
+                  : t('companion.settings.gauge_color_mode_hint_gradient')
+              }}
+            </p>
 
             <label
               v-if="group.kind === 'metric' && !!currentLayout.gauge && gaugeColorModeChoice === 'fixed'"

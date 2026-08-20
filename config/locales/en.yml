@@ -1700,6 +1700,8 @@ en:
       gauge_fill: "Fill"
       gauge_segments: "Number of segments"
       gauge_color_mode: "Color"
+      gauge_color_mode_hint_zone: "Follows the current zone's color."
+      gauge_color_mode_hint_gradient: "Blue-to-purple gradient based on the position between the minimum and maximum."
       gauge_color: "Fixed color"
       gauge_thickness: "Thickness"
       altitude_window_km: "Rolling window (km)"
@@ -1846,7 +1848,7 @@ en:
         full: "Full"
       gauge_color_modes:
         fixed: "Fixed"
-        auto: "Automatic (by zone)"
+        auto: "Automatic"
       gauge_thicknesses:
         small: "Thin"
         normal: "Normal"

@@ -1700,6 +1700,8 @@ fr:
       gauge_fill: "Remplissage"
       gauge_segments: "Nombre de tronçons"
       gauge_color_mode: "Couleur"
+      gauge_color_mode_hint_zone: "Reprend la couleur de la zone en cours."
+      gauge_color_mode_hint_gradient: "Dégradé bleu → violet selon la position entre le minimum et le maximum."
       gauge_color: "Couleur fixe"
       gauge_thickness: "Épaisseur"
       altitude_window_km: "Fenêtre roulante (km)"
@@ -1846,7 +1848,7 @@ fr:
         full: "Pleine"
       gauge_color_modes:
         fixed: "Fixe"
-        auto: "Automatique (par zone)"
+        auto: "Automatique"
       gauge_thicknesses:
         small: "Fine"
         normal: "Normale"

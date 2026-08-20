@@ -354,10 +354,18 @@ module CompanionSettings
   # c'est `gauge_fill: "full"` qu'il faut poser.
   GAUGE_SEGMENTS_RANGE = (2..10).freeze
 
-  # Couleur fixe (`gauge_color`) ou couleur de la zone du moment. `nil` côté
-  # document retombe sur le repli d'avant ce réglage : automatique pour une
-  # jauge de zones (chaque tronçon garde la couleur de sa propre zone), fixe
-  # sinon.
+  # Couleur fixe (`gauge_color`) ou couleur automatique. `nil` côté document
+  # retombe sur le repli d'avant ce réglage : automatique pour une jauge de
+  # zones (chaque tronçon garde la couleur de sa propre zone), fixe sinon.
+  #
+  # « Automatique » n'a pas le même calcul selon la nature de la jauge — ni
+  # l'un ni l'autre ne se lit dans le document, c'est l'appli/le site qui
+  # tranchent au rendu (`gaugeGradientColor`/`_gaugeGradientColor` côté
+  # site/appli) : la couleur de la zone du moment pour une jauge de zones
+  # (comme avant ce réglage), un dégradé bleu → violet sur la position pour
+  # une jauge à plage (libre ou dynamique) sans zone — une mesure comme la
+  # vitesse, qui n'a pas de teinte propre à s'y raccrocher, en gagne une qui
+  # bouge quand même avec elle.
   GAUGE_COLOR_MODES = %w[fixed auto].freeze
 
   # L'épaisseur d'une jauge (tronçons ou barre continue) — même esprit que

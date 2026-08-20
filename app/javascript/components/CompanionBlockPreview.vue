@@ -30,21 +30,22 @@ import {
   BUDGET_SAMPLE,
   CLIMB_LIST_SAMPLE,
   DYNAMIC_GAUGE_PREVIEW_FRACTION,
+  GAUGE_THICKNESS_SCALE,
   LAP_SUMMARY_SAMPLE,
   METRIC_TREND_HR_SAMPLE,
   METRIC_TREND_POWER_SAMPLE,
   POWER_CURVE_SAMPLE,
   RANGE_GAUGE_COLOR,
   RANGE_GAUGE_SEGMENTS,
+  ROW_HEIGHT_SCALE,
+  ROW_HEIGHT_WEIGHT,
+  SECONDARY_SIZE_SCALE,
   blockShape,
+  gaugeGradientColor,
   layoutRows,
   metricIcon,
   metricLayout,
   metricSample,
-  GAUGE_THICKNESS_SCALE,
-  ROW_HEIGHT_SCALE,
-  ROW_HEIGHT_WEIGHT,
-  SECONDARY_SIZE_SCALE,
   type Block,
 } from '../companionSettings'
 import { colorForGrade, formatDistancePrecise } from '../routeHelpers'
@@ -383,13 +384,23 @@ const useZoneLadder = computed(() => (
     && gaugeColorMode.value === 'auto'
 ))
 
+// Une jauge à plage (libre ou dynamique) sans zone, en couleur `auto` : pas
+// de teinte propre à s'y raccrocher (contrairement aux zones), donc un
+// dégradé bleu → violet sur la position plutôt qu'un accent unique — voir
+// `gaugeGradientColor`. Sert aussi bien au remplissage continu (une seule
+// couleur, `gaugeColor`) qu'aux tronçons, qui en deviennent alors un ladder
+// (`resolvedGaugeCells`), comme la jauge de zones l'est déjà nativement.
+const useAutoGradient = computed(() => gaugeColorMode.value === 'auto' && gaugeKind.value !== 'zone')
+
 // La couleur unique d'un remplissage qui n'est pas le ladder de zones — fixe
-// (`gauge_color`, repli `RANGE_GAUGE_COLOR`) ou celle de la zone du moment
-// avec le même repli si la mesure n'en a pas.
+// (`gauge_color`, repli `RANGE_GAUGE_COLOR`), celle de la zone du moment avec
+// le même repli si la mesure n'en a pas, ou le dégradé à la position
+// courante pour une jauge à plage en `auto`.
 const gaugeColor = computed(() => {
   const fallback = props.block.gauge_color || RANGE_GAUGE_COLOR
   if (gaugeColorMode.value === 'fixed') return fallback
-  return (metricZone.value && ZONE_COLORS[metricZone.value]) || fallback
+  if (gaugeKind.value === 'zone') return (metricZone.value && ZONE_COLORS[metricZone.value]) || fallback
+  return gaugeGradientColor(gaugeFraction.value ?? 0)
 })
 
 // Le nombre de tronçons d'un remplissage segmenté qui n'est pas le ladder de
@@ -401,13 +412,18 @@ const gaugeSegmentCount = computed(
 )
 
 // Les paliers à dessiner pour la rangée-jauge quand elle n'est ni le ladder
-// de zones ni une barre continue — une seule couleur, tous les paliers
-// allumés confondus, sur `gaugeFraction`.
+// de zones ni une barre continue — une seule couleur pour tous les paliers
+// allumés (`gaugeColor`), sauf en dégradé (`useAutoGradient`) où chaque
+// palier porte sa propre couleur selon sa position, qu'il soit allumé ou
+// non — un ladder bleu → violet, comme la jauge de zones en est déjà un.
 const resolvedGaugeCells = computed(() => {
   const count = gaugeSegmentCount.value
   const fraction = gaugeFraction.value
   const lit = fraction == null ? -1 : Math.round(fraction * count)
-  return Array.from({ length: count }, (_, i) => ({ lit: i < lit, color: gaugeColor.value }))
+  return Array.from({ length: count }, (_, i) => ({
+    lit: i < lit,
+    color: useAutoGradient.value ? gaugeGradientColor((i + 1) / count) : gaugeColor.value,
+  }))
 })
 
 // Les paliers à dessiner pour la rangée-jauge, quelle que soit sa nature —

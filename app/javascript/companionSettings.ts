@@ -87,12 +87,16 @@ export interface Block {
   // lisible dessus (`foregroundOf`), jamais sur du blanc fixe.
   color?: string
   text_color?: string
-  // Seulement dans `blocks` d'une page `list` (`Page.cols`) : la colonne qui
-  // affiche ce bloc, `0` par défaut. Fusionné dans le bloc plutôt qu'une
-  // enveloppe à part comme `Cell` : une page à une seule colonne (le cas
-  // courant) n'a alors rien de plus à savoir lire, et un document d'avant ce
-  // réglage — où aucun bloc n'a `col` — se comporte comme `col: 0` partout.
-  col?: number
+  // Seulement dans `blocks` d'une page `list` (`Page.cols`) : un bloc reste
+  // par défaut dans la colonne de celui qui le précède (première colonne
+  // pour le tout premier), ces deux clés ne marquent que les ruptures.
+  // `new_column` passe à la colonne suivante (retour à la première après la
+  // dernière) ; `full_width` occupe toute la largeur et fait repartir la
+  // suite en première colonne. Incompatibles : `full_width` l'emporte,
+  // `new_column` n'a plus de sens sur un bloc qui rompt déjà le flux à lui
+  // seul (voir `place_list_blocks` côté Rails et `listSegments` plus bas).
+  new_column?: boolean
+  full_width?: boolean
 }
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
@@ -1405,17 +1409,17 @@ export function fitDividers(dividers: Divider[], rows: number, cols: number): Di
   return dividers.filter((divider) => divider.at <= (divider.axis === 'h' ? rows : cols) - 1)
 }
 
-// Ramène la colonne de chaque bloc d'une page `list` dans `0..cols-1`.
-//
-// Appelé quand on réduit le nombre de colonnes. **Ramenée, jamais perdue** :
-// contrairement à l'origine d'une cellule de grille, il y a toujours une
-// colonne la plus proche, et perdre un composant entier pour un mauvais
-// numéro de colonne serait pire qu'un rangement approximatif — même
+// Retire les ruptures (`new_column`, `full_width`) devenues sans effet quand
+// une page `list` retombe à une seule colonne — rien à côté de quoi rompre.
+// Rien à ramener dans une plage comme avant : un flux n'a pas d'index à
+// recaler, une rupture s'arrête juste à un point qui n'existe plus — même
 // arbitrage que `CompanionSettings.place_list_blocks` (Rails), pour que
 // l'écran et l'enregistrement disent la même chose.
 export function fitListBlocks(blocks: Block[], cols: number): Block[] {
-  return blocks.map((block) => ({
-    ...block,
-    col: Math.min(Math.max(block.col || 0, 0), cols - 1),
-  }))
+  if (cols > 1) return blocks
+  return blocks.map((block) => {
+    if (!block.new_column && !block.full_width) return block
+    const { new_column: _new_column, full_width: _full_width, ...rest } = block
+    return rest
+  })
 }

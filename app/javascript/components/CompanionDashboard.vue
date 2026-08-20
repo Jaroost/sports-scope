@@ -467,13 +467,34 @@ function repaint(input: HTMLInputElement, value: number) {
 
 // Le nombre de colonnes d'une page `list` — même piège que `commitSide` (voir
 // son commentaire) : validé à la sortie du champ, jamais à la frappe. Réduire
-// ramène chaque bloc dans les colonnes qui restent (`fitListBlocks`) plutôt
-// que de les y perdre, même arbitrage que l'assainisseur.
+// retire les `new_column` devenus sans effet (`fitListBlocks`) plutôt que de
+// laisser une rupture muette dans le document, même arbitrage que
+// l'assainisseur.
 function commitListCols(page: Page, input: HTMLInputElement) {
   const cols = Math.min(gridSideOf(input.value), props.catalog.max_list_cols)
   page.cols = cols
   page.blocks = fitListBlocks(page.blocks || [], cols)
   repaint(input, cols)
+}
+
+// Les deux ruptures d'un bloc de liste sont mutuellement exclusives (voir
+// `place_list_blocks` côté Rails, qui fait de toute façon gagner `full_width`)
+// — les boutons les gardent donc exclusives dans l'éditeur aussi, plutôt que
+// de laisser cocher les deux et résoudre le conflit sans le montrer.
+function toggleNewColumn(block: Block) {
+  if (block.new_column) delete block.new_column
+  else {
+    block.new_column = true
+    delete block.full_width
+  }
+}
+
+function toggleFullWidth(block: Block) {
+  if (block.full_width) delete block.full_width
+  else {
+    block.full_width = true
+    delete block.new_column
+  }
 }
 
 // Ce qu'on dessine : une entrée par case de la grille, en sautant celles qu'une
@@ -615,13 +636,16 @@ function applyPick(block: Block) {
       break
     }
     case 'block': {
-      // `blockFor` fabrique un bloc neuf, sans `col` : le recopier de l'ancien
-      // évite qu'un simple changement de genre/mode renvoie le composant en
-      // première colonne, sous les yeux de personne.
+      // `blockFor` fabrique un bloc neuf, sans rupture : la recopier de
+      // l'ancien évite qu'un simple changement de genre/mode déplace le
+      // composant dans le flux des colonnes, sous les yeux de personne.
       const previous = target.page.blocks?.[target.index]
       if (target.page.blocks) {
-        target.page.blocks[target.index] =
-          previous?.col !== undefined ? { ...block, col: previous.col } : block
+        target.page.blocks[target.index] = previous?.new_column
+          ? { ...block, new_column: true }
+          : previous?.full_width
+            ? { ...block, full_width: true }
+            : block
       }
       break
     }
@@ -1348,18 +1372,27 @@ async function save() {
                    class="fa-solid fa-triangle-exclamation text-warning"
                    :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
                    aria-hidden="true"></i>
-                <!-- Seulement quand la page a plus d'une colonne : à une seule,
-                     la case n'aurait qu'un choix, et l'afficher quand même
-                     ferait chercher un réglage qui ne change jamais rien. -->
-                <select v-if="(page.cols || 1) > 1"
-                        class="form-select form-select-sm" style="width: auto"
-                        :value="block.col || 0"
-                        :aria-label="t('companion.settings.block_col')"
-                        @change="block.col = Number(($event.target as HTMLSelectElement).value)">
-                  <option v-for="c in (page.cols || 1)" :key="c" :value="c - 1">
-                    {{ t('companion.settings.block_col_option', { col: c }) }}
-                  </option>
-                </select>
+                <!-- Seulement quand la page a plus d'une colonne : à une
+                     seule, les deux ruptures n'auraient rien à côté de quoi
+                     rompre, et les afficher quand même ferait chercher un
+                     réglage qui ne change jamais rien. Un bloc reste sinon
+                     par défaut dans la colonne du précédent — ces deux
+                     boutons ne marquent que les ruptures. -->
+                <template v-if="(page.cols || 1) > 1">
+                  <button class="btn btn-sm btn-outline-secondary" type="button"
+                          :class="{ active: block.new_column }"
+                          :disabled="!!block.full_width"
+                          :title="t('companion.settings.block_new_column')"
+                          @click="toggleNewColumn(block)">
+                    <i class="fa-solid fa-arrow-right-to-bracket" aria-hidden="true"></i>
+                  </button>
+                  <button class="btn btn-sm btn-outline-secondary" type="button"
+                          :class="{ active: block.full_width }"
+                          :title="t('companion.settings.block_full_width')"
+                          @click="toggleFullWidth(block)">
+                    <i class="fa-solid fa-arrows-left-right" aria-hidden="true"></i>
+                  </button>
+                </template>
                 <button class="btn btn-sm btn-outline-secondary" type="button"
                         @click="picker = { at: 'block', page, index: i }">
                   {{ t('companion.settings.change_block') }}

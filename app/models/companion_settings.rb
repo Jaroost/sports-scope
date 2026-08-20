@@ -852,20 +852,31 @@ module CompanionSettings
 
   # Les blocs d'une page `list`, ou d'une page `laps` en liste défilante
   # (`sanitize_lap_blocks`) — même géométrie dans les deux cas, seul ce que la
-  # série de tours ajoute autour diffère. Chacun avec sa colonne, `col` fusionné
-  # directement dans le bloc assaini plutôt qu'une enveloppe à part comme
-  # `place_cells`/`Cell` : une entrée reste le bloc, avec une clé de plus, donc
-  # un document d'avant ce réglage (aucune entrée n'a `col`) se lit sans
-  # distinguer un ancien format d'un nouveau — toutes deux tombent sur `col`
-  # absent, ramené à 0.
+  # série de tours ajoute autour diffère.
+  #
+  # Pas de position absolue (un ancien `col` par bloc obligeait à en choisir
+  # une pour chacun, y compris ceux qui devaient juste suivre le précédent) :
+  # un bloc reste par défaut dans la colonne de celui qui le précède, et ne
+  # porte une clé que sur les points de rupture — `new_column` pour passer à
+  # la colonne suivante (avec retour à la première après la dernière),
+  # `full_width` pour occuper toute la largeur et repartir en première
+  # colonne ensuite. La plupart des blocs n'ont donc rien à régler. Les deux
+  # sont incompatibles : `full_width` l'emporte, `new_column` n'a plus de
+  # sens sur un bloc qui rompt déjà le flux à lui seul. Sur une page à une
+  # seule colonne, les deux sont sans effet (rien à côté de quoi rompre) —
+  # dans les trois cas la clé est simplement omise plutôt qu'écrite sans
+  # effet.
   #
   # Pas de ligne ni d'étendue comme `place_cells` : une liste n'a pas de hauteur
   # à tenir, chaque colonne empile ses blocs dans l'ordre du document et peut
   # déborder — aucun recouvrement n'est donc possible, contrairement à une
-  # grille. `col` est **ramené** dans `0..cols-1` plutôt que rejeté :
-  # contrairement à l'origine d'une cellule de grille, il y a toujours une
-  # colonne la plus proche, et perdre un composant entier pour un mauvais
-  # numéro de colonne serait pire qu'un rangement approximatif.
+  # grille.
+  #
+  # Un document d'avant ce réglage porte encore l'ancien `col` par bloc :
+  # `sanitize_block` ne le connaît pas, la clé disparaît donc à
+  # l'assainissement comme n'importe quelle clé inconnue, et tous ses blocs
+  # retombent en première colonne, dans l'ordre où ils étaient déjà —
+  # dégradé (l'arrangement en colonnes se perd), jamais un bloc effacé.
   def place_list_blocks(raw, cols)
     return [] unless raw.is_a?(Array)
 
@@ -874,8 +885,15 @@ module CompanionSettings
 
       block = sanitize_block(entry)
       next nil if block.nil?
+      next block unless cols > 1
 
-      block.merge("col" => entry["col"].to_i.clamp(0, cols - 1))
+      if entry["full_width"] == true
+        block.merge("full_width" => true)
+      elsif entry["new_column"] == true
+        block.merge("new_column" => true)
+      else
+        block
+      end
     end
   end
 

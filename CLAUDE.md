@@ -314,22 +314,44 @@ et un bilan ouvert par-dessus la carte se serait lu « il y est déjà, rien à 
 Une page `list` — ou une page `laps` en liste défilante, la même disposition
 une fois le tour choisi (`sanitize_lap_blocks`, `LapBlocksLayout` côté Dart)
 — peut se répartir en 1 à 4 colonnes (`Page.cols`, `MAX_LIST_COLS`) plutôt
-qu'une seule pile pleine largeur — chaque composant vise la sienne
-(`Block.col`, `0` par défaut). Contrairement à une grille, une colonne n'a
+qu'une seule pile pleine largeur. Contrairement à une grille, une colonne n'a
 pas de hauteur à tenir : elle empile ses blocs dans l'ordre du document et
 peut déborder, c'est toute la page qui défile alors d'un bloc, colonnes
 comprises.
 
-`col` est **fusionné dans le bloc lui-même** (`place_list_blocks`) plutôt que
-dans une enveloppe à part comme `Cell` (`{row, col, row_span, col_span,
-block}`) : une entrée reste le bloc, avec une clé de plus, et un document
-d'avant ce réglage — où aucun bloc n'a `col` — se lit sans qu'il faille
-distinguer un ancien format d'un nouveau, l'absence valant `0` des deux
-côtés. Même arbitrage que les cellules de grille sur un point, l'inverse sur
-l'autre : la colonne d'un bloc est **ramenée** dans `0..cols-1` plutôt que
-rejetée — contrairement à l'origine d'une cellule, il y a toujours une
-colonne la plus proche, et perdre un composant entier pour un mauvais numéro
-de colonne serait pire qu'un rangement approximatif.
+**Pas de position absolue par bloc.** Un premier réglage donnait à chaque
+bloc une colonne cible (`col: 0..cols-1`) — lourd à composer : la plupart des
+blocs devaient juste suivre le précédent, et choisir un index pour chacun
+revenait à répondre à une question qui ne se posait presque jamais. Un bloc
+reste donc par défaut dans la colonne de celui qui le précède (première
+colonne pour le tout premier), et ne porte une clé que sur les points de
+rupture (`place_list_blocks` côté Rails, `listSegmentsOf` — `lib/dashboard/
+list_layout.dart` — côté Dart, doivent s'accorder sur où elles tombent) :
+
+- `new_column` passe à la colonne suivante, avec retour à la première après
+  la dernière ;
+- `full_width` occupe toute la largeur, clôt le groupe de colonnes en cours
+  et fait repartir la suite en première colonne — le composant qui « fusionne
+  sur toutes les colonnes ».
+
+Les deux sont incompatibles (`full_width` l'emporte) et sans effet sur une
+page à une seule colonne — dans les deux cas la clé est alors simplement
+omise plutôt qu'écrite sans effet, des deux côtés (`fitListBlocks` côté TS
+fait le même ménage quand `cols` retombe à 1 dans l'éditeur).
+
+Ces clés sont **fusionnées dans le bloc lui-même** plutôt que dans une
+enveloppe à part comme `Cell` (`{row, col, row_span, col_span, block}`) :
+une entrée reste le bloc, avec une clé de plus. Un document d'avant ce
+réglage porte encore l'ancien `col` par bloc : ni `sanitize_block` (Rails)
+ni `DashboardBlock.parse` (Dart) ne le connaissent, il disparaît donc comme
+n'importe quelle clé inconnue et tous ses blocs retombent en première
+colonne, dans l'ordre où ils étaient déjà — dégradé (l'arrangement en
+colonnes se perd), jamais un bloc effacé.
+
+Le rendu (`DashboardListBody`, partagé entre `DashboardPage` et
+`LapListPage`, dépôt voisin) traverse les blocs une fois pour les regrouper
+en tronçons — un groupe de colonnes classique, ou un bloc `full_width` seul
+sur sa ligne — puis dessine chaque tronçon.
 
 ### Pourquoi un assainisseur ici alors que l'appli en a déjà un
 

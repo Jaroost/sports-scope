@@ -360,6 +360,13 @@ module CompanionSettings
   # sinon.
   GAUGE_COLOR_MODES = %w[fixed auto].freeze
 
+  # L'épaisseur d'une jauge (tronçons ou barre continue) — même esprit que
+  # `ROW_HEIGHTS` : un multiplicateur de la hauteur naturelle, pas une valeur
+  # en pixels. `"normal"` n'y figure pas, c'est le repli d'avant ce réglage
+  # (`BlockMetrics.natural.barHeight`/`.cbp-gauge-cell` côté appli et site),
+  # jamais écrit pour une jauge qui ne l'a pas touché.
+  GAUGE_THICKNESSES = %w[small large].freeze
+
   # ── Disposition d'un bloc `metric` ──────────────────────────────────────────
   #
   # Remplace les cinq anciens `mode` (`big`, `compact`, `zone`, `gauge`,
@@ -469,6 +476,15 @@ module CompanionSettings
   # porter — même esprit que `MAX_BAND_METRICS` : au-delà, les chiffres
   # deviennent illisibles d'un coup d'œil en roulant.
   MAX_SECONDARY_METRICS = 4
+
+  # Le facteur de taille d'une annotation de coin — même esprit que
+  # `ROW_HEIGHTS`, mais sur l'annotation elle-même plutôt que sur toute sa
+  # rangée : c'est ce qui permet un grand chiffre au centre flanqué
+  # d'annotations moyennes plutôt que minuscules, sans grossir aussi le
+  # chiffre principal. `"small"` n'y figure pas : c'est le comportement
+  # d'avant ce réglage (minuscule à dessein) et la valeur par défaut d'une
+  # annotation sans `size`, jamais écrite pour rester silencieuse.
+  SECONDARY_SIZES = %w[normal large].freeze
 
   # Un repère de coin (« MOY », « MAX »…) tient collé au chiffre, pas un
   # libellé de bloc — borne bien plus courte que `MAX_METRIC_LABEL_LENGTH`.
@@ -1068,6 +1084,9 @@ module CompanionSettings
 
         gauge_color = sanitize_hex_color(raw["gauge_color"])
         block["gauge_color"] = gauge_color if gauge_color
+
+        thickness = raw["gauge_thickness"]
+        block["gauge_thickness"] = thickness if GAUGE_THICKNESSES.include?(thickness)
       end
     when "clock"
       # Réglable comme un bloc `metric` (icône, étiquette, disposition), mais
@@ -1180,7 +1199,8 @@ module CompanionSettings
 
       claimed << pos
       label = entry["label"].to_s.strip[0, MAX_SECONDARY_LABEL_LENGTH]
-      { "metric" => entry["metric"], "position" => pos, "label" => label.presence }.compact
+      size = entry["size"] if SECONDARY_SIZES.include?(entry["size"])
+      { "metric" => entry["metric"], "position" => pos, "label" => label.presence, "size" => size }.compact
     end
   end
 

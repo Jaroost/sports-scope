@@ -1677,6 +1677,15 @@ en:
       secondary_label_placeholder: "e.g. AVG"
       secondary_add: "Add"
       secondary_add_hint: "Tap an empty grid cell to place it there."
+      secondary_size: "Size"
+      secondary_sizes:
+        small: "Small"
+        small_short: "S"
+        normal: "Normal"
+        normal_short: "N"
+        large: "Large"
+        large_short: "L"
+      secondary_remove: "Remove"
       metric_lap_scope_hint: "On a Laps page, this metric reads the lap shown, not the whole ride: duration, distance, elevation gain, averages, calories and TSS are computed from the moment the lap opened. An instantaneous metric (heart rate, cadence, power, current speed…) stays whatever it is right now, whichever lap you're viewing."
       mode: "Display"
       source: "Source"
@@ -1692,6 +1701,7 @@ en:
       gauge_segments: "Number of segments"
       gauge_color_mode: "Color"
       gauge_color: "Fixed color"
+      gauge_thickness: "Thickness"
       altitude_window_km: "Rolling window (km)"
       altitude_window_km_placeholder: "Whole profile"
       altitude_window_km_hint: "On a followed route, shows only the next few kilometres, sliding forward as you ride — leave blank for the whole route profile."
@@ -1837,6 +1847,10 @@ en:
       gauge_color_modes:
         fixed: "Fixed"
         auto: "Automatic (by zone)"
+      gauge_thicknesses:
+        small: "Thin"
+        normal: "Normal"
+        large: "Thick"
       layout_tokens:
         icon: "Icon"
         label: "Label"

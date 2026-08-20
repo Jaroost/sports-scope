@@ -41,8 +41,10 @@ import {
   metricIcon,
   metricLayout,
   metricSample,
+  GAUGE_THICKNESS_SCALE,
   ROW_HEIGHT_SCALE,
   ROW_HEIGHT_WEIGHT,
+  SECONDARY_SIZE_SCALE,
   type Block,
 } from '../companionSettings'
 import { colorForGrade, formatDistancePrecise } from '../routeHelpers'
@@ -349,6 +351,10 @@ const gaugeColorMode = computed<'fixed' | 'auto'>(() => {
   return gaugeKind.value === 'zone' ? 'auto' : 'fixed'
 })
 
+// Le multiplicateur de l'épaisseur naturelle — tronçons et barre continue
+// s'y ajustent toutes les deux (voir `GAUGE_THICKNESS_SCALE`).
+const gaugeThicknessScale = computed(() => GAUGE_THICKNESS_SCALE[props.block.gauge_thickness || 'normal'])
+
 // La fraction 0–1 atteinte, quelle que soit la nature de la jauge — sert à la
 // fois à la barre continue et au nombre de tronçons allumés d'un remplissage
 // à couleur unique. `null` (mesure sans échantillon numérique, min/max pas
@@ -631,7 +637,11 @@ const metricTrendSegments = computed(() => {
              occupe une rangée, elle en est la seule occupante (voir
              l'assainisseur), donc pas de colonnes à dessiner ici. -->
         <div v-if="row.gauge" class="cbp-metric-gauge-row">
-          <div v-if="gaugeFill === 'full'" class="cbp-dyngauge-track">
+          <div
+            v-if="gaugeFill === 'full'"
+            class="cbp-dyngauge-track"
+            :style="{ height: `${1.6 * gaugeThicknessScale}em`, borderRadius: `${0.3 * gaugeThicknessScale}em` }"
+          >
             <span
               class="cbp-dyngauge-fill"
               :style="{ width: `${(gaugeFraction ?? 0) * 100}%`, background: gaugeColor }"
@@ -642,7 +652,11 @@ const metricTrendSegments = computed(() => {
               v-for="(cell, i) in litGaugeCells"
               :key="i"
               class="cbp-gauge-cell"
-              :style="{ background: cell.lit ? cell.color : 'rgba(255,255,255,0.12)' }"
+              :style="{
+                height: `${0.6 * gaugeThicknessScale}em`,
+                borderRadius: `${0.15 * gaugeThicknessScale}em`,
+                background: cell.lit ? cell.color : 'rgba(255,255,255,0.12)',
+              }"
             ></span>
           </div>
         </div>
@@ -663,7 +677,11 @@ const metricTrendSegments = computed(() => {
               <span v-else-if="token === 'unit'" class="cbp-metric-unit">{{ sample.unit }}</span>
               <span v-else class="cbp-big" :class="{ 'cbp-big--gauge': gaugeKind }">{{ sample.value }}</span>
             </template>
-            <span v-if="col.secondary" class="cbp-metric-secondary">
+            <span
+              v-if="col.secondary"
+              class="cbp-metric-secondary"
+              :style="{ fontSize: `${SECONDARY_SIZE_SCALE[col.secondary.size || 'small']}em` }"
+            >
               <span v-if="secondaryCaption(col.secondary)" class="cbp-metric-secondary-label">
                 {{ secondaryCaption(col.secondary) }}
               </span>
@@ -1749,11 +1767,13 @@ const metricTrendSegments = computed(() => {
   text-transform: uppercase;
   white-space: nowrap;
 }
-/* Une annotation de coin reste minuscule à dessein : c'est un repère à côté
-   du chiffre principal, pas une seconde carte dans la carte — pas d'icône ni
-   d'unité, contrairement aux jetons classiques. */
+/* Une annotation de coin reste petite à dessein : c'est un repère à côté du
+   chiffre principal, pas une seconde carte dans la carte — pas d'icône ni
+   d'unité, contrairement aux jetons classiques. `font-size` posé en ligne
+   (`SECONDARY_SIZE_SCALE[slot.size]`) — 0.7/1.1/1.6em selon la taille réglée
+   sur l'annotation, `.cbp-metric-secondary-label` suit en cascade via son
+   propre `em`. */
 .cbp-metric-secondary {
-  font-size: 0.7em;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -1772,23 +1792,24 @@ const metricTrendSegments = computed(() => {
   gap: 0.15em;
   width: 100%;
 }
+/* `height`/`border-radius` posés en ligne (`gaugeThicknessScale` ×
+   0.6em/0.15em) — voir `Block.gauge_thickness`. */
 .cbp-gauge-cell {
   flex: 1;
-  height: 0.6em;
-  border-radius: 0.15em;
 }
 
 /* Le remplissage de la jauge dynamique : une piste continue, pas des
    paliers — la plage y est une vraie progression (min/max de la sortie, ou
    vers l'arrivée), pas des seuils entre lesquels un dégradé mentirait. Plus
-   épaisse que `.cbp-gauge-cell` : c'est elle qui porte l'information ici,
-   pas des paliers à côté d'un chiffre déjà lisible seul — même hauteur que
-   `.cbp-bar`, les deux valant `BlockMetrics.natural.barHeight` côté appli. */
+   épaisse que `.cbp-gauge-cell` à épaisseur égale : c'est elle qui porte
+   l'information ici, pas des paliers à côté d'un chiffre déjà lisible seul —
+   même hauteur naturelle que `.cbp-bar`, les deux valant
+   `BlockMetrics.natural.barHeight` côté appli avant tout réglage
+   d'épaisseur. `height`/`border-radius` posés en ligne (`gaugeThicknessScale`
+   × 1.6em/0.3em) — voir `Block.gauge_thickness`. */
 .cbp-dyngauge-track {
   position: relative;
   width: 100%;
-  height: 1.6em;
-  border-radius: 0.3em;
   background: rgba(255, 255, 255, 0.12);
   overflow: hidden;
 }

@@ -74,6 +74,10 @@ export interface Block {
   gauge_segments?: number
   gauge_color_mode?: string
   gauge_color?: string
+  // L'épaisseur de la jauge (tronçons ou barre continue) — voir
+  // `GAUGE_THICKNESSES`. Absente vaut `'normal'`, la hauteur d'avant ce
+  // réglage, jamais écrite pour rester silencieuse.
+  gauge_thickness?: 'small' | 'large'
   // La fenêtre « roulante » d'un bloc `altitude_profile`, en km à venir depuis
   // la position courante — seulement quand un tracé est suivi (voir
   // `sanitize_block`). Absente : le profil entier du tracé, fait/restant,
@@ -140,7 +144,23 @@ export interface SecondaryMetricSlot {
   metric: string
   position: string
   label?: string
+  // Sa propre taille, indépendante de `row_heights` : c'est elle qui permet
+  // un grand chiffre au centre flanqué d'annotations moyennes plutôt que
+  // minuscules, sans grossir aussi le chiffre principal de la rangée.
+  // Absente vaut `'small'` (minuscule, comportement d'avant ce réglage),
+  // jamais écrite pour rester silencieuse — même contrat que
+  // `CompanionSettings::SECONDARY_SIZES` côté Rails.
+  size?: 'normal' | 'large'
 }
+
+export type SecondaryMetricSize = 'small' | 'normal' | 'large'
+
+// Le facteur de taille d'une annotation de coin, en `em` (relatif à la carte,
+// même base que `.cbp-big`) — voir `SecondaryMetricSlot.size`. `small` est le
+// dessin d'avant ce réglage (minuscule à dessein, pas une seconde carte dans
+// la carte) ; dans les mêmes proportions que `SecondaryMetricSize.factor`
+// côté Dart.
+export const SECONDARY_SIZE_SCALE: Record<SecondaryMetricSize, number> = { small: 0.7, normal: 1.1, large: 1.6 }
 
 export type LayoutToken = 'icon' | 'label' | 'unit' | 'value'
 
@@ -634,6 +654,7 @@ export function blockFor(
     windowKm?: number; windowS?: number; sound?: string
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
+    gaugeThickness?: GaugeThickness
     // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
     // restent celles du bloc `metric`) : les deux genres se règlent en même
     // temps dans la dialogue de choix, ce ne peut donc pas être le même état.
@@ -666,6 +687,7 @@ export function blockFor(
     if (params.gaugeSegments) block.gauge_segments = params.gaugeSegments
     if (params.gaugeColorMode) block.gauge_color_mode = params.gaugeColorMode
     if (params.gaugeColor) block.gauge_color = params.gaugeColor
+    if (params.gaugeThickness && params.gaugeThickness !== 'normal') block.gauge_thickness = params.gaugeThickness
   }
   if (choice.kind === 'zones' || choice.kind === 'lap_zones' || choice.kind === 'metric_trend') {
     block.source = params.source
@@ -1255,6 +1277,19 @@ export const GAUGE_SEGMENTS_MAX = 10
 // Même contrat que `CompanionSettings::GAUGE_COLOR_MODES` côté Rails.
 export const GAUGE_COLOR_MODES = ['fixed', 'auto'] as const
 export type GaugeColorMode = (typeof GAUGE_COLOR_MODES)[number]
+
+// L'épaisseur d'une jauge — voir `Block.gauge_thickness`. `'normal'` n'a pas
+// de valeur écrite côté document (voir `blockFor`), mais figure ici pour que
+// l'éditeur ait une valeur à présélectionner.
+export const GAUGE_THICKNESSES = ['small', 'normal', 'large'] as const
+export type GaugeThickness = (typeof GAUGE_THICKNESSES)[number]
+
+// Le multiplicateur de la hauteur naturelle d'une jauge — tronçons
+// (`.cbp-gauge-cell`) et barre continue (`.cbp-dyngauge-track`/`.cbp-bar`)
+// s'y ajustent toutes les deux du même facteur, pour rester la même jauge à
+// une épaisseur près plutôt que deux dessins différents. Dans les mêmes
+// proportions que `GaugeThickness.factor` côté Dart.
+export const GAUGE_THICKNESS_SCALE: Record<GaugeThickness, number> = { small: 0.65, normal: 1, large: 1.5 }
 
 const METRIC_LABEL_OVERRIDES: Record<string, string> = {
   ascent: 'D+',

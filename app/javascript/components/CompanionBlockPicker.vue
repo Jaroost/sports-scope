@@ -34,7 +34,8 @@ import {
   MAX_SECONDARY_METRICS, METRIC_RANGE_DEFAULTS, metricDropdownLabel, metricLayout, metricSample,
   NATURAL_LINE_SIZE, previewScale, RANGE_GAUGE_COLOR, RANGE_GAUGE_SEGMENTS,
   type Block, type BlockChoice, type Catalog, type CellSize, type GaugeColorMode, type GaugeFill,
-  type LayoutToken, type MetricLayout, type MetricLayoutPreset, type RowHeight, type SecondaryMetricSlot,
+  type GaugeThickness, type LayoutToken, type MetricLayout, type MetricLayoutPreset, type RowHeight,
+  type SecondaryMetricSize, type SecondaryMetricSlot,
 } from '../companionSettings'
 
 const props = defineProps<{
@@ -304,6 +305,24 @@ function removeSecondarySlot(slot: SecondaryMetricSlot) {
   layout.value = { ...layout.value, secondary: next.length ? next : undefined }
 }
 
+// Sa taille — `'small'` quand `size` est absent (jamais écrit dans ce cas,
+// voir `setSecondarySize`), même repli que `rowHeightAt`.
+function secondarySizeOf(slot: SecondaryMetricSlot): SecondaryMetricSize {
+  return slot.size || 'small'
+}
+
+function setSecondarySize(slot: SecondaryMetricSlot, size: SecondaryMetricSize) {
+  const next = (currentLayout.value.secondary || []).map((entry) => {
+    if (entry.position !== slot.position) return entry
+    if (size === 'small') {
+      const { size: _drop, ...rest } = entry
+      return rest
+    }
+    return { ...entry, size }
+  })
+  layout.value = { ...layout.value, secondary: next }
+}
+
 // Une rangée de plus que la plus haute utilisée, dans la limite du plafond —
 // toujours une case vide où poser le prochain élément, sans bouton
 // « + » séparé : elle apparaît d'elle-même, et disparaît de la même façon
@@ -471,6 +490,7 @@ const gaugeColorModeChoice = ref<GaugeColorMode>(
 // c'est ce qui laisse alors l'appli sur `_defaultColor` plutôt que d'y écrire
 // la couleur par défaut en dur.
 const gaugeColorChoice = ref<string | null>(props.block?.gauge_color || null)
+const gaugeThicknessChoice = ref<GaugeThickness>(props.block?.gauge_thickness || 'normal')
 
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec le bandeau du bas (`CompanionDashboard.vue`) — voir
@@ -521,6 +541,7 @@ const groups = computed(() => {
             gaugeKind: effectiveGaugeKind.value || undefined,
             gaugeFill: gaugeFillChoice.value, gaugeSegments: gaugeSegmentsChoice.value,
             gaugeColorMode: gaugeColorModeChoice.value, gaugeColor: gaugeColorChoice.value ?? undefined,
+            gaugeThickness: gaugeThicknessChoice.value,
             clockLayout: clockLayout.value, clockIcon: clockIconChoice.value,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             windowS: windowS.value || undefined,
@@ -748,6 +769,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               />
             </label>
 
+            <label v-if="group.kind === 'metric' && !!currentLayout.gauge" class="cbpk-param small">
+              {{ t('companion.settings.gauge_thickness') }}
+              <select v-model="gaugeThicknessChoice" class="form-select form-select-sm">
+                <option v-for="th in (['small', 'normal', 'large'] as GaugeThickness[])" :key="th" :value="th">
+                  {{ t(`companion.settings.gauge_thicknesses.${th}`) }}
+                </option>
+              </select>
+            </label>
+
             <label
               v-if="group.kind === 'zones' || group.kind === 'lap_zones' || group.kind === 'metric_trend'"
               class="cbpk-param small"
@@ -951,16 +981,31 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 {{ t('companion.settings.secondary_values') }}
               </p>
 
-              <div v-if="currentLayout.secondary?.length" class="cbpk-palette mb-2">
-                <button
-                  v-for="slot in currentLayout.secondary"
-                  :key="slot.position"
-                  type="button"
-                  class="cbpk-chip cbpk-chip--placed"
-                  @click="removeSecondarySlot(slot)"
-                >
-                  {{ slot.label || metricLabel(slot.metric) }} ✕
-                </button>
+              <div v-if="currentLayout.secondary?.length" class="cbpk-secondary-list mb-2">
+                <div v-for="slot in currentLayout.secondary" :key="slot.position" class="cbpk-secondary-item">
+                  <span class="cbpk-chip cbpk-chip--placed">{{ slot.label || metricLabel(slot.metric) }}</span>
+                  <div class="cbpk-row-heights" role="group" :aria-label="t('companion.settings.secondary_size')">
+                    <button
+                      v-for="s in (['small', 'normal', 'large'] as const)"
+                      :key="s"
+                      type="button"
+                      class="cbpk-row-height-btn"
+                      :class="{ 'cbpk-row-height-btn--selected': secondarySizeOf(slot) === s }"
+                      :title="t(`companion.settings.secondary_sizes.${s}`)"
+                      @click="setSecondarySize(slot, s)"
+                    >
+                      {{ t(`companion.settings.secondary_sizes.${s}_short`) }}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    class="cbpk-secondary-remove"
+                    :aria-label="t('companion.settings.secondary_remove')"
+                    @click="removeSecondarySlot(slot)"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
               <div class="cbpk-secondary-form">
@@ -1353,6 +1398,35 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   border-color: var(--bs-primary);
   outline: 2px solid var(--bs-primary);
   outline-offset: -2px;
+}
+
+/* Une annotation déjà posée, avec sa propre taille à côté — même disposition
+   que `.cbpk-row-heights` à côté d'une rangée de la grille : un poids réglé
+   sur l'élément lui-même, pas un des tiers qu'il occupe. */
+.cbpk-secondary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.cbpk-secondary-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cbpk-secondary-item .cbpk-chip--placed {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cbpk-secondary-remove {
+  flex: none;
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.3rem;
+  background: transparent;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.75rem;
 }
 
 .cbpk-secondary-form {

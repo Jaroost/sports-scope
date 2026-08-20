@@ -828,6 +828,18 @@ function addBand() {
   preset.value.bands.push({ metrics: ['duration', 'distance', 'speed', 'power'] })
 }
 
+function moveBand(index: number, delta: number) {
+  const target = index + delta
+  if (target < 0 || target >= preset.value.bands.length) return
+  const [band] = preset.value.bands.splice(index, 1)
+  preset.value.bands.splice(target, 0, band)
+}
+
+function duplicateBand(index: number) {
+  const copy = structuredClone(toRaw(preset.value.bands[index])) as Band
+  preset.value.bands.splice(index + 1, 0, copy)
+}
+
 function setBandMetric(band: Band, index: number, value: string | BandMarkLapSlot) {
   // Écrit en place plutôt que de retirer la case : un `splice` décalerait
   // tout ce qui suit vers la gauche, et une case vidée au milieu se
@@ -889,6 +901,22 @@ function removeNotchSet(index: number) {
   if (!notch) return
   notch.splice(index, 1)
   if (notch.length === 0) preset.value.notch = undefined
+}
+
+function moveNotchSet(index: number, delta: number) {
+  const notch = preset.value.notch
+  if (!notch) return
+  const target = index + delta
+  if (target < 0 || target >= notch.length) return
+  const [set] = notch.splice(index, 1)
+  notch.splice(target, 0, set)
+}
+
+function duplicateNotchSet(index: number) {
+  const notch = preset.value.notch
+  if (!notch) return
+  const copy = structuredClone(toRaw(notch[index])) as Notch
+  notch.splice(index + 1, 0, copy)
 }
 
 // ── les capteurs et les réglages ────────────────────────────────────────────
@@ -1589,6 +1617,20 @@ async function save() {
               </div>
             </div>
           </div>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :disabled="index === 0" @click="moveBand(index, -1)">
+            <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :disabled="index === preset.bands.length - 1" @click="moveBand(index, 1)">
+            <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :title="t('companion.settings.duplicate')"
+                  :aria-label="t('companion.settings.duplicate')"
+                  @click="duplicateBand(index)">
+            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+          </button>
           <button class="btn btn-sm btn-link text-danger p-1" type="button"
                   :disabled="preset.bands.length <= 1" @click="preset.bands.splice(index, 1)">
             <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
@@ -1694,6 +1736,20 @@ async function save() {
               </div>
             </div>
           </div>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :disabled="index === 0" @click="moveNotchSet(index, -1)">
+            <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :disabled="index === (preset.notch || []).length - 1" @click="moveNotchSet(index, 1)">
+            <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :title="t('companion.settings.duplicate')"
+                  :aria-label="t('companion.settings.duplicate')"
+                  @click="duplicateNotchSet(index)">
+            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+          </button>
           <button class="btn btn-sm btn-link text-danger p-1" type="button" @click="removeNotchSet(index)">
             <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
           </button>

@@ -1792,6 +1792,7 @@ en:
         precip_radar: "Precipitation"
         precip_forecast: "Incoming rain"
         weather_forecast: "Weather forecast"
+        weather_compact: "Weather (compact)"
         training_budget: "Training budget"
         climb_list: "Route climbs"
         climb_profile: "Climb profile"

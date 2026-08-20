@@ -214,6 +214,47 @@ function weatherBarHeight(mm: number) {
   return Math.min(1, mm / WEATHER_PRECIP_MAX_MM) * (WEATHER_CHART_HEIGHT * WEATHER_BAR_AREA_FRACTION)
 }
 
+// Le bloc "météo" compact (`weather_compact`) : les mêmes trois séries que
+// `weather_forecast`, réduites à leur valeur "maintenant" (index 0) et une
+// flèche de tendance vers +6h (index 6) — pas de graphique, la case qui
+// n'a la place que de trois chiffres. Mêmes seuils que côté appli
+// (`weather_compact_block.dart`) : un écart sous le seuil reste "stable",
+// sans quoi un bruit de mesure ferait clignoter la flèche.
+const WEATHER_COMPACT_LATER_INDEX = 6
+const WEATHER_COMPACT_TREND_ICON = { up: 'fa-arrow-trend-up', down: 'fa-arrow-trend-down', flat: 'fa-minus' }
+
+function weatherCompactTrend(now: number, later: number, threshold: number): 'up' | 'down' | 'flat' {
+  const delta = later - now
+  if (delta > threshold) return 'up'
+  if (delta < -threshold) return 'down'
+  return 'flat'
+}
+
+const weatherCompactRows = computed(() => {
+  const { temperature, windSpeed, precipitation } = WEATHER_FORECAST_SAMPLE
+  const later = WEATHER_COMPACT_LATER_INDEX
+  return [
+    {
+      label: 'Température',
+      value: `${Math.round(temperature[0])}°C`,
+      color: '#ff8a3d',
+      trend: weatherCompactTrend(temperature[0], temperature[later], 1.0),
+    },
+    {
+      label: 'Vent',
+      value: `${Math.round(windSpeed[0])} km/h`,
+      color: '#8fd3ff',
+      trend: weatherCompactTrend(windSpeed[0], windSpeed[later], 3.0),
+    },
+    {
+      label: 'Pluie',
+      value: `${precipitation[0].toFixed(1)} mm/h`,
+      color: '#2e6fd6',
+      trend: weatherCompactTrend(precipitation[0], precipitation[later], 0.2),
+    },
+  ].map((row) => ({ ...row, icon: WEATHER_COMPACT_TREND_ICON[row.trend] }))
+})
+
 const sample = computed(() => metricSample(props.block.metric, props.block.format))
 const icon = computed(() => metricIcon(props.block))
 
@@ -943,6 +984,23 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
         <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #ff8a3d"></span>Température</span>
         <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #8fd3ff"></span>Vent</span>
         <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #2e6fd6"></span>Précipitations</span>
+      </div>
+    </div>
+
+    <!-- Météo compacte -------------------------------------------------------
+         Les mêmes valeurs Open-Meteo que `weather_forecast` (maintenant et
+         +6h), condensées en trois chiffres avec une flèche de tendance plutôt
+         qu'un graphique — pour la case qui n'a pas la place de l'un mais peut
+         encore dire trois chiffres. Un seul mode, mêmes raisons que
+         `weather_forecast` : rien à faire varier dans l'éditeur, pas de
+         capteur pour en tirer une vraie prévision. -->
+    <div v-else-if="block.kind === 'weather_compact'" class="cbp-card cbp-weather-compact" :style="overrideStyle">
+      <div class="cbp-title">Météo</div>
+      <div v-for="row in weatherCompactRows" :key="row.label" class="cbp-weather-compact-row">
+        <span class="cbp-dot" :style="{ background: row.color }"></span>
+        <span class="cbp-weather-compact-label">{{ row.label }}</span>
+        <span class="cbp-weather-compact-value">{{ row.value }}</span>
+        <i :class="['fa-solid', row.icon, 'cbp-weather-compact-trend']" aria-hidden="true"></i>
       </div>
     </div>
 
@@ -1915,6 +1973,39 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
 .cbp-weather-legend-item .cbp-dot {
   width: 0.6em;
   height: 0.6em;
+}
+
+/* Météo compacte : trois lignes centrées verticalement, taille naturelle —
+   contrairement à "Prévisions météo" juste au-dessus, rien ici ne profite
+   d'une case généreuse (pas de graphique à étirer), donc pas de `flex: 1`. */
+.cbp-weather-compact {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+}
+.cbp-weather-compact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  margin-top: 0.5em;
+}
+.cbp-weather-compact-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85em;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cbp-weather-compact-value {
+  font-size: 1em;
+  font-weight: 600;
+}
+.cbp-weather-compact-trend {
+  font-size: 0.85em;
+  color: rgba(255, 255, 255, 0.75);
 }
 
 /* Budget de charge : le chiffre, sa barre, son contexte. Le chiffre est plus gros

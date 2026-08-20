@@ -120,6 +120,14 @@ module CompanionSettings
     # navigation — un profil de home-trainer sans capteur GPS affichera
     # simplement l'état vide.
     "weather_forecast" => [],
+    # Les mêmes valeurs météo que `weather_forecast`, en compact : température,
+    # vent et pluie tels que maintenant, chacun avec une flèche de tendance à
+    # 6h plutôt qu'un graphique — pour la case qui n'a pas la place de l'un
+    # mais peut encore dire trois chiffres. Un genre à part et non un mode de
+    # plus sur `weather_forecast`, même choix que `precip_radar`/
+    # `precip_forecast` déjà deux genres pour une même donnée GPS. Un seul
+    # mode, même raisonnement que les autres blocs météo pour le reste.
+    "weather_compact" => [],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.

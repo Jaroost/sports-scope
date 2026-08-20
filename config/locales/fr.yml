@@ -1792,6 +1792,7 @@ fr:
         precip_radar: "Précipitations"
         precip_forecast: "Orage qui arrive"
         weather_forecast: "Prévisions météo"
+        weather_compact: "Météo (compact)"
         training_budget: "Budget de charge"
         climb_list: "Cols du tracé"
         climb_profile: "Profil du col"

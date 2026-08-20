@@ -8,12 +8,6 @@
 // ─── Suivi GPS ────────────────────────────────────────────────────────────────
 export const MIN_MOVE_M = 4       // déplacement requis pour recalculer un cap
 export const MIN_SPEED_MS = 0.8   // en dessous, on garde le cap précédent
-// Vitesse implausible pour un cycliste (144 km/h) : au-delà, le fix est un saut de
-// récepteur (p. ex. Android qui réinjecte brièvement une position réseau réelle
-// par-dessus un GPS mocké pendant un test) et non un déplacement réel — voir
-// sports-scope-companion, RideRecorder._maxStepMps, même seuil pour rester cohérent
-// entre l'appli et cette page.
-export const MAX_SPEED_MS = 40
 
 // ─── Extrapolation / boucle d'animation ───────────────────────────────────────
 export const MAX_EXTRAP_S = 2.5   // on cesse d'extrapoler si les fixes s'arrêtent

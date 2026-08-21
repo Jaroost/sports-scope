@@ -293,10 +293,11 @@ module CompanionSettings
   # Le tronçon d'entraînement en cours, en case de bandeau ou d'encoche —
   # `segment` (nom + icône), `remaining` (temps restant), `combo` (icône +
   # temps restant, les deux fondus pour la case qui n'a la place que pour un
-  # seul texte) ou `line` (icône + nom + temps restant, tout sur une seule
-  # ligne). Préfixées `workout_` comme `BAND_RADAR` l'est `radar_` — voir
-  # `BandWorkoutSlot` côté Dart (`ride_preset.dart`).
-  BAND_WORKOUT_MODES = %w[segment remaining combo line].freeze
+  # seul texte), `line` (icône + nom + temps restant, tout sur une seule
+  # ligne) ou `icon` (l'icône seule, sans texte). Préfixées `workout_` comme
+  # `BAND_RADAR` l'est `radar_` — voir `BandWorkoutSlot` côté Dart
+  # (`ride_preset.dart`).
+  BAND_WORKOUT_MODES = %w[segment remaining combo line icon].freeze
   BAND_WORKOUT = BAND_WORKOUT_MODES.map { |mode| "workout_#{mode}" }.freeze
 
   # Marquer un tour, en case de bandeau ou d'encoche — un seul token

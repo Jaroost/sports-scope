@@ -1793,6 +1793,7 @@ en:
         remaining: "Time remaining"
         combo: "Time remaining (segment icon)"
         line: "Segment + time remaining"
+        icon: "Icon only"
       band_bell_group: "Bell"
       band_lap_group: "Start a lap"
       band_lap_label: "Custom label"

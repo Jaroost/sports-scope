@@ -1793,6 +1793,7 @@ fr:
         remaining: "Temps restant"
         combo: "Temps restant (icône du tronçon)"
         line: "Tronçon + temps restant"
+        icon: "Icône seule"
       band_bell_group: "Sonnette"
       band_lap_group: "Démarrer un tour"
       band_lap_label: "Label personnalisé"

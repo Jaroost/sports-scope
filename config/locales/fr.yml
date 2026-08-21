@@ -1833,6 +1833,7 @@ fr:
       climb_expanded: "Graphique déployé par défaut"
       workout_title: "Entraînement"
       workout_help: "Repères visuels du tronçon en cours d'un programme d'entraînement, en plus des sons."
+      weather_group_title: "Météo"
       workout_badge: "Pastille du tronçon en cours"
       workout_popup: "Popup au changement de tronçon"
       reminders_title: "Rappels"

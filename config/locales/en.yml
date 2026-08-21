@@ -1833,6 +1833,7 @@ en:
       climb_expanded: "Graph expanded by default"
       workout_title: "Training"
       workout_help: "Visual cues for the current segment of a training program, on top of the sounds."
+      weather_group_title: "Weather"
       workout_badge: "Current segment badge"
       workout_popup: "Popup on segment change"
       reminders_title: "Reminders"

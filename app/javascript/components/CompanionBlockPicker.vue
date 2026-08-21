@@ -519,23 +519,37 @@ interface Tile {
   label: string
 }
 
-// Trois genres qui partagent une même section de la dialogue plutôt que
+// Des genres qui partagent une même section de la dialogue plutôt que
 // chacun la sienne : le tronçon en cours, le temps restant et les deux
-// fondus racontent tous les trois le même programme d'entraînement — les
-// séparer en trois en-têtes identiques (« Entraînement ») n'aiderait
-// personne à les comparer. Une table plutôt qu'un `if` de plus dans
-// `groups` : un futur genre `workout_*` n'a qu'à y ajouter sa ligne.
+// fondus racontent tous les trois le même programme d'entraînement ;
+// précipitations, orage qui arrive, prévisions météo et météo compact
+// racontent tous les quatre la même météo. Les séparer en en-têtes répétés
+// (« Entraînement », « Météo ») n'aiderait personne à les comparer. Une
+// table plutôt qu'un `if` de plus dans `groups` : un futur genre `workout_*`
+// ou météo n'a qu'à y ajouter sa ligne.
 const GROUPED_KINDS: Record<string, string> = {
   workout_segment: 'workout',
   workout_remaining: 'workout',
   workout_status: 'workout',
+  precip_radar: 'weather',
+  precip_forecast: 'weather',
+  weather_forecast: 'weather',
+  weather_compact: 'weather',
 }
 
-// Le titre d'une section — celui du genre pour une section ordinaire, ou un
-// libellé propre pour une section fondue (`GROUPED_KINDS`), qui n'est pas un
-// genre du catalogue et n'a donc pas de `companion.settings.blocks.<kind>`.
+// Le libellé propre à chaque section fondue (`GROUPED_KINDS`) — ce ne sont
+// pas des genres du catalogue, elles n'ont donc pas de
+// `companion.settings.blocks.<kind>` à lire.
+const GROUP_LABELS: Record<string, string> = {
+  workout: 'companion.settings.workout_title',
+  weather: 'companion.settings.weather_group_title',
+}
+
+// Le titre d'une section — celui du genre pour une section ordinaire, ou le
+// libellé propre d'une section fondue (`GROUP_LABELS`).
 function groupLabel(kind: string): string {
-  return kind === 'workout' ? t('companion.settings.workout_title') : t(`companion.settings.blocks.${kind}`)
+  const key = GROUP_LABELS[kind]
+  return key ? t(key) : t(`companion.settings.blocks.${kind}`)
 }
 
 // Les vignettes, regroupées par genre — l'ordre est celui du catalogue, donc

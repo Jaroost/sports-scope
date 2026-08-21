@@ -1747,6 +1747,7 @@ fr:
         bell: "Sonnette"
         booster: "Booster"
         horn: "Klaxon"
+        horn2: "Klaxon 2"
         start_lap: "Marquer un tour"
         sleep: "Mettre en veille"
         wake: "Sortir de veille"
@@ -1881,6 +1882,7 @@ fr:
         bell: "Sonnette"
         booster: "Booster"
         horn: "Klaxon (caravane du Tour)"
+        horn2: "Klaxon 2"
       sensors:
         gps: "GPS"
         barometer: "Baromètre"

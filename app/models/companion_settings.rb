@@ -243,9 +243,10 @@ module CompanionSettings
   # plus reconnaissable dans le vent qu'une tonalité pure, précisément parce
   # que ce n'est PAS le son des autres alertes de l'appli (radar, virages),
   # qui doivent rester identifiables sans confusion possible. `booster` est
-  # le plus long des trois (~6 s) — le minuteur de secours côté appli
-  # (`BellPlayer`, `bell_player.dart`) est calé dessus.
-  BELL_SOUNDS = %w[bell horn booster].freeze
+  # le plus long (~6 s) — le minuteur de secours côté appli (`BellPlayer`,
+  # `bell_player.dart`) est calé dessus. `horn2` est une variante du klaxon
+  # (~4,8 s, sous le même minuteur).
+  BELL_SOUNDS = %w[bell horn booster horn2].freeze
 
   # `bell`, en case de bandeau ou d'encoche — même raisonnement que
   # `BAND_RADAR` pour `radar` : la case porte directement le son choisi
@@ -278,9 +279,10 @@ module CompanionSettings
 
   # Ce qu'un geste sur un canal du D-Fly peut déclencher — jetons de chaîne
   # plutôt qu'une liste de composants (`BLOCKS`) : ce ne sont pas des mesures à
-  # poser sur une page, et trois d'entre elles (`bell`/`horn`/`booster`)
-  # recoupent déjà `BELL_SOUNDS` sous un autre nom, la sonnette n'ayant pas de
-  # réglage à part ici comme elle en a un sur un bloc `bell`. `go_to_page:<clé>`
+  # poser sur une page, et quatre d'entre elles (`bell`/`horn`/`booster`/
+  # `horn2`) recoupent déjà `BELL_SOUNDS` sous un autre nom, la sonnette
+  # n'ayant pas de réglage à part ici comme elle en a un sur un bloc `bell`.
+  # `go_to_page:<clé>`
   # n'y figure pas : c'est un jeton composé, dont la partie variable est une
   # clé de page et pas un choix fixe de ce catalogue — voir
   # `sanitize_button_action`, seul endroit qui la valide. Même contrat que
@@ -292,7 +294,7 @@ module CompanionSettings
   # (« un bouton pour la veille ») n'a pas besoin de deux gestes ou de deux
   # canaux distincts. Les trois cohabitent : `sleep`/`wake` restent utiles à
   # qui veut deux boutons séparés (un par geste, par exemple).
-  BUTTON_ACTIONS = %w[next_page previous_page bell horn booster start_lap sleep wake toggle_sleep].freeze
+  BUTTON_ACTIONS = %w[next_page previous_page bell horn booster horn2 start_lap sleep wake toggle_sleep].freeze
 
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.

@@ -679,27 +679,37 @@ export function blockFor(
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
     gaugeThickness?: GaugeThickness
-    // Disposition/icône du bloc `clock` — séparées de `layout`/`icon` (qui
-    // restent celles du bloc `metric`) : les deux genres se règlent en même
-    // temps dans la dialogue de choix, ce ne peut donc pas être le même état.
-    clockLayout?: MetricLayout; clockIcon?: string
     color?: string | null; textColor?: string | null
   },
 ): Block {
   const block: Block = { kind: choice.kind }
   if (choice.mode) block.mode = choice.mode
-  if (choice.kind === 'metric') block.metric = params.metric
-  if (choice.kind === 'metric' && isDurationMetric(params.metric)) block.format = params.format || 'hm'
+
+  // « Horloge » vit dans le même menu déroulant que `duration` (voir
+  // `CompanionBlockPicker.vue`, `primaryMetricChoices`) et partage tout son
+  // éditeur de disposition — mais ce n'est pas une mesure : elle persiste
+  // `kind: 'clock'`, comme avant que les deux genres partagent cet éditeur.
+  const isClock = choice.kind === 'metric' && params.metric === 'clock'
+
+  if (isClock) {
+    block.kind = 'clock'
+    block.mode = params.format || 'hm'
+  } else if (choice.kind === 'metric') {
+    block.metric = params.metric
+    if (isDurationMetric(params.metric)) block.format = params.format || 'hm'
+    if (params.label?.trim()) block.label = params.label.trim()
+  }
+  // La disposition et l'icône restent communes aux deux : même éditeur,
+  // même état (`layout`/`iconChoice` côté `CompanionBlockPicker.vue`).
   if (choice.kind === 'metric') block.layout = params.layout || DEFAULT_METRIC_LAYOUT
   if (choice.kind === 'metric' && params.icon) block.icon = params.icon
-  if (choice.kind === 'metric' && params.label?.trim()) block.label = params.label.trim()
-  if (choice.kind === 'clock') block.layout = params.clockLayout || { value: '0-center' }
-  if (choice.kind === 'clock' && params.clockIcon) block.icon = params.clockIcon
   // Seulement quand la jauge est effectivement posée, et seulement sur une
   // plage réglée dans l'éditeur — la dynamique se lit dans la sortie en
   // cours, poser min/max dessus laisserait une clé morte que l'assainisseur
-  // retirerait.
-  if (choice.kind === 'metric' && params.layout?.gauge) {
+  // retirerait. Jamais pour l'horloge : `gaugeEligible` (côté éditeur) exclut
+  // déjà `clock` de la palette de jetons, `params.layout.gauge` n'y est donc
+  // normalement jamais réglé — la garde reste explicite plutôt qu'implicite.
+  if (!isClock && choice.kind === 'metric' && params.layout?.gauge) {
     if (params.gaugeKind) block.gauge_kind = params.gaugeKind
     if (params.gaugeKind !== 'dynamic' && isRangeGaugeMetric(params.metric)) {
       block.min = params.min
@@ -916,6 +926,12 @@ export interface MetricSample {
 // ferait un aperçu que l'écran ne dessinera jamais. Mêmes chaînes des deux
 // côtés, à tenir synchronisées à la main.
 const METRIC_SAMPLES: Record<string, MetricSample> = {
+  // Pas une mesure de `METRICS` : « Horloge » est composée depuis le même
+  // menu déroulant que `duration` (voir `CompanionBlockPicker.vue`,
+  // `primaryMetricChoices`), mais persiste `kind: 'clock'` et non
+  // `kind: 'metric', metric: 'clock'` (voir `blockFor`). Cette entrée ne sert
+  // qu'à donner à l'éditeur une icône et un chiffre plausibles.
+  clock: { value: '14:32', name: 'Horloge', unit: '', icon: 'fa-regular fa-clock' },
   duration: { value: '01:12', name: 'Durée', unit: '', icon: 'fa-regular fa-clock' },
   moving_time: { value: '01:08', name: 'Temps en mouvement', unit: '', icon: 'fa-solid fa-person-biking' },
   pause_time: { value: '00:04', name: 'Durée pause', unit: '', icon: 'fa-regular fa-circle-pause' },

@@ -74,7 +74,10 @@ const emit = defineEmits<{
   saveLayout: [preset: { name: string; layout: MetricLayout }]
 }>()
 
-const metric = ref(props.block?.metric || props.catalog.metrics[0])
+// « Horloge » n'a pas de `Block.metric` propre (elle persiste `kind: 'clock'`,
+// voir `blockFor`) : c'est ce `kind` qui la distingue ici, pour présélectionner
+// « Horloge » dans le menu déroulant en rouvrant un composant déjà posé.
+const metric = ref(props.block?.kind === 'clock' ? 'clock' : (props.block?.metric || props.catalog.metrics[0]))
 const source = ref(props.block?.source || props.catalog.zone_sources[0])
 // Vide plutôt qu'un premier jeton par défaut, contrairement à `source` : « tous
 // les appareils confondus » est un choix à part entière (le comportement
@@ -82,7 +85,12 @@ const source = ref(props.block?.source || props.catalog.zone_sources[0])
 const sensor = ref<string>(props.block?.sensor || '')
 const sound = ref(props.block?.sound || props.catalog.bell_sounds[0])
 const series = ref(props.block?.series || 'default')
-const format = ref(props.block?.format || 'hm')
+// L'horloge n'a pas de `Block.format` (elle garde `mode`, comme avant que les
+// deux genres partagent cet éditeur — voir `blockFor`) : ce même bouton
+// HH:MM/HH:MM:SS lit donc l'un ou l'autre selon ce qui est réellement édité.
+const format = ref(
+  props.block?.kind === 'clock' ? (props.block?.mode || 'hm') : (props.block?.format || 'hm'),
+)
 // La fenêtre roulante d'un bloc `altitude_profile` — vide par défaut (`0` ne
 // sort jamais du composant, voir plus bas et `blockFor`) : le profil entier
 // du tracé, comportement d'avant ce réglage, plutôt qu'une fenêtre choisie
@@ -102,7 +110,9 @@ const windowS = ref<number>(props.block?.window_s || 0)
 // choisie n'y a pas droit — c'est elle que l'aperçu et la vignette doivent
 // lire, pour ne jamais promettre ce que l'assainisseur retirerait.
 const layout = ref<MetricLayout>(
-  props.block?.kind === 'metric' ? metricLayout(props.block) : { ...DEFAULT_METRIC_LAYOUT },
+  props.block?.kind === 'metric' || props.block?.kind === 'clock'
+    ? metricLayout(props.block)
+    : { ...DEFAULT_METRIC_LAYOUT },
 )
 const iconChoice = ref<string | undefined>(props.block?.icon)
 const labelChoice = ref<string>(props.block?.label || '')
@@ -125,85 +135,13 @@ const newSecondaryMetric = ref<string>(props.catalog.metrics[0])
 const newSecondaryLabel = ref<string>('')
 const pendingSecondary = ref<{ metric: string; label?: string } | null>(null)
 
-// ── La disposition d'un bloc `clock` ────────────────────────────────────────
-//
-// Un état à part, pas partagé avec `layout`/`iconChoice` ci-dessus : les
-// groupes « Une mesure » et « Horloge » sont tous deux visibles dans la même
-// boîte de dialogue défilante (`groups`, plus bas), donc partager l'état
-// ferait que modifier l'un modifierait l'autre sous les yeux. Plus courte que
-// son équivalent `metric` : une horloge n'a que 3 jetons possibles, jamais
-// d'unité ni de jauge — pas de `hasUnit`/`gaugeEligible` à calculer.
-const clockLayout = ref<MetricLayout>(
-  props.block?.kind === 'clock' ? metricLayout(props.block) : { value: '0-center' },
-)
-const clockIconChoice = ref<string | undefined>(
-  props.block?.kind === 'clock' ? props.block?.icon : undefined,
-)
-const clockSelectedToken = ref<'icon' | 'label' | 'value' | null>(null)
-const clockPaletteTokens: ('icon' | 'label' | 'value')[] = ['value', 'icon', 'label']
-
-function clockTokensAt(row: number, col: 'left' | 'center' | 'right'): ('icon' | 'label' | 'value')[] {
-  return (['icon', 'label', 'value'] as const).filter((token) => {
-    const pos = clockLayout.value[token]
-    if (!pos) return false
-    const [r, c] = pos.split('-')
-    return Number(r) === row && c === col
-  })
-}
-
-const clockHighestUsedRow = computed(() => {
-  const rows: number[] = []
-  for (const token of ['icon', 'label', 'value'] as const) {
-    const pos = clockLayout.value[token]
-    if (pos) rows.push(Number(pos.split('-')[0]))
-  }
-  return rows.length ? Math.max(...rows) : 0
-})
-const clockVisibleRowCount = computed(() => Math.min(clockHighestUsedRow.value + 2, MAX_LAYOUT_ROWS))
-
-// Même règle que `placeToken` : le chiffre est toujours au moins quelque
-// part, jamais retirable — seuls icône/étiquette le sont.
-function placeClockToken(token: 'icon' | 'label' | 'value', row: number, col: 'left' | 'center' | 'right') {
-  const next: MetricLayout = { ...clockLayout.value, [token]: `${row}-${col}` }
-  if (!next.value) next.value = '0-center'
-  clockLayout.value = next
-}
-
-function removeClockToken(token: 'icon' | 'label') {
-  const next: MetricLayout = { ...clockLayout.value }
-  delete next[token]
-  clockLayout.value = next
-}
-
-function onClockCellClick(row: number, col: 'left' | 'center' | 'right') {
-  if (clockSelectedToken.value) {
-    placeClockToken(clockSelectedToken.value, row, col)
-    clockSelectedToken.value = null
-    return
-  }
-  for (const token of clockTokensAt(row, col)) {
-    if (token !== 'value') removeClockToken(token)
-  }
-}
-
-function toggleClockToken(token: 'icon' | 'label' | 'value') {
-  clockSelectedToken.value = clockSelectedToken.value === token ? null : token
-}
-
-function isClockPlaced(token: 'icon' | 'label' | 'value'): boolean {
-  return !!clockLayout.value[token]
-}
-
-function clockRowHeightAt(row: number): RowHeight {
-  return clockLayout.value.row_heights?.[String(row)] || 'normal'
-}
-
-function setClockRowHeight(row: number, height: RowHeight) {
-  const heights = { ...clockLayout.value.row_heights }
-  if (height === 'normal') delete heights[String(row)]
-  else heights[String(row)] = height
-  clockLayout.value = { ...clockLayout.value, row_heights: Object.keys(heights).length ? heights : undefined }
-}
+// « Horloge » (voir `primaryMetricChoices` plus bas) : ni zone, ni jauge, ni
+// unité, ni étiquette personnalisée — `metricZoneEligible`/`rangeEligible`/
+// `dynamicEligible`/`hasUnit` le sont déjà naturellement (aucune entrée
+// `METRIC_SAMPLES.clock.zone`/`.unit`, `clock` absente de `RANGE_GAUGE_METRICS`/
+// `DYNAMIC_GAUGE_METRICS`), ne reste que le libellé et les annotations de coin
+// à masquer explicitement plus bas dans le gabarit.
+const isClockMetric = computed(() => metric.value === 'clock')
 
 const metricZoneEligible = computed(() => !!metricSample(metric.value).zone)
 const rangeEligible = computed(() => isRangeGaugeMetric(metric.value))
@@ -494,17 +432,32 @@ const gaugeThicknessChoice = ref<GaugeThickness>(props.block?.gauge_thickness ||
 
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec le bandeau du bas (`CompanionDashboard.vue`) — voir
-// `metricDropdownLabel` dans `companionSettings.ts`.
+// `metricDropdownLabel` dans `companionSettings.ts`. « Horloge » n'est pas une
+// mesure du catalogue (voir `primaryMetricChoices`) : son libellé vient de
+// `blocks.clock`, celui qui nommait déjà son ancienne section.
 function metricLabel(metric: string): string {
-  return metricDropdownLabel(metric, t)
+  return metric === 'clock' ? t('companion.settings.blocks.clock') : metricDropdownLabel(metric, t)
 }
 
 // Le catalogue liste les mesures dans l'ordre du serveur ; la dialogue les
 // propose triées par libellé affiché, pour qu'on les retrouve sans connaître
-// cet ordre-là par cœur.
+// cet ordre-là par cœur. Sert aussi le choix d'une mesure secondaire
+// (`newSecondaryMetric`) — jamais « Horloge » ici : elle n'a pas de `MetricId`,
+// `sanitize_secondary_slots` la retirerait en silence à l'enregistrement.
 const sortedMetrics = computed(() => (
   [...props.catalog.metrics].sort((a, b) => metricLabel(a).localeCompare(metricLabel(b)))
 ))
+
+// La même liste, avec « Horloge » en plus — seulement pour le menu déroulant
+// « Mesure » en tête du groupe « Une mesure » : c'est elle qui choisit,
+// désormais, entre une vraie mesure et l'horloge (voir `blockFor`, qui
+// distingue les deux au moment d'enregistrer). Absente d'une page tour, comme
+// avant que « Horloge » ait sa propre section (voir l'ancien filtre de
+// `groups`) : l'appli l'ignore déjà silencieusement sur une page `laps`.
+const primaryMetricChoices = computed(() => {
+  const metrics = props.pageKind === 'laps' ? props.catalog.metrics : [...props.catalog.metrics, 'clock']
+  return [...metrics].sort((a, b) => metricLabel(a).localeCompare(metricLabel(b)))
+})
 
 // Le nom d'une vignette : celui du mode, ou celui du genre quand il n'en a pas.
 function labelOf(choice: BlockChoice): string {
@@ -562,10 +515,11 @@ const groups = computed(() => {
   const tilesByGroup = new Map<string, Tile[]>()
 
   Object.keys(props.catalog.blocks)
-    // Une horloge posée sur une page tour n'aurait jamais d'effet — l'appli
-    // l'ignore déjà silencieusement (voir la doc de `pageKind`) — donc pas de
-    // quoi la proposer là et laisser croire qu'elle s'affichera.
-    .filter((kind) => !(kind === 'clock' && props.pageKind === 'laps'))
+    // « Horloge » n'a plus sa propre section : elle se compose depuis le
+    // menu déroulant du groupe « Une mesure », comme `duration` (voir
+    // `primaryMetricChoices`, `blockFor`) — jamais une entrée à part ici,
+    // sinon les deux chemins la proposeraient chacun la sienne.
+    .filter((kind) => kind !== 'clock')
     .forEach((kind) => {
       const groupKind = GROUPED_KINDS[kind] || kind
       if (!tilesByGroup.has(groupKind)) {
@@ -585,7 +539,6 @@ const groups = computed(() => {
             gaugeFill: gaugeFillChoice.value, gaugeSegments: gaugeSegmentsChoice.value,
             gaugeColorMode: gaugeColorModeChoice.value, gaugeColor: gaugeColorChoice.value ?? undefined,
             gaugeThickness: gaugeThicknessChoice.value,
-            clockLayout: clockLayout.value, clockIcon: clockIconChoice.value,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             windowS: windowS.value || undefined,
             color: color.value, textColor: textColor.value,
@@ -726,13 +679,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <label v-if="group.kind === 'metric'" class="cbpk-param small">
               {{ t('companion.settings.metric') }}
               <select v-model="metric" class="form-select form-select-sm">
-                <option v-for="m in sortedMetrics" :key="m" :value="m">
+                <option v-for="m in primaryMetricChoices" :key="m" :value="m">
                   {{ metricLabel(m) }}
                 </option>
               </select>
             </label>
 
-            <label v-if="group.kind === 'metric'" class="cbpk-param small">
+            <!-- Pas d'étiquette personnalisée pour l'horloge : elle affiche
+                 toujours « HORLOGE » (voir `ClockCard` côté appli), ce champ
+                 n'aurait aucun effet. -->
+            <label v-if="group.kind === 'metric' && !isClockMetric" class="cbpk-param small">
               {{ t('companion.settings.metric_label') }}
               <input
                 v-model="labelChoice"
@@ -743,7 +699,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               >
             </label>
 
-            <label v-if="group.kind === 'metric' && isDurationMetric(metric)" class="cbpk-param small">
+            <label v-if="group.kind === 'metric' && (isDurationMetric(metric) || isClockMetric)" class="cbpk-param small">
               {{ t('companion.settings.duration_format') }}
               <select v-model="format" class="form-select form-select-sm">
                 <option value="hm">{{ t('companion.settings.duration_formats.hm') }}</option>
@@ -1030,8 +986,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <!-- Les annotations de coin : une mesure dérivée (min/moyenne/max)
                  plus petite que le chiffre principal, avec son propre repère.
                  « Ajouter » met la mesure choisie en main comme un jeton de
-                 palette — un tap sur une case libre la pose ensuite. -->
-            <div class="cbpk-secondary">
+                 palette — un tap sur une case libre la pose ensuite. Pas pour
+                 l'horloge : `ClockCard` ne les dessine pas, même famille que
+                 l'étiquette personnalisée ci-dessus. -->
+            <div v-if="!isClockMetric" class="cbpk-secondary">
               <p class="cbpk-secondary-title small text-body-secondary mb-1">
                 {{ t('companion.settings.secondary_values') }}
               </p>
@@ -1094,89 +1052,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <button type="button" class="btn btn-sm btn-outline-secondary" @click="saveLayoutPreset">
               {{ t('companion.settings.metric_layouts.save') }}
             </button>
-          </div>
-
-          <!-- L'éditeur de disposition d'un bloc `clock` : la même grille
-               qu'un bloc `metric`, mais seulement 3 jetons (icône, étiquette,
-               chiffre) — jamais d'unité ni de jauge, donc pas de ligne « +
-               jauge » dans la grille ni de disposition enregistrée à charger
-               (`metricLayouts` est propre aux blocs `metric`). -->
-          <div v-if="group.kind === 'clock'" class="cbpk-layout">
-            <div class="cbpk-grid">
-              <div v-for="row in clockVisibleRowCount" :key="row - 1" class="cbpk-grid-row">
-                <button
-                  v-for="col in (['left', 'center', 'right'] as const)"
-                  :key="col"
-                  type="button"
-                  class="cbpk-grid-cell"
-                  @click="onClockCellClick(row - 1, col)"
-                >
-                  <template v-for="token in clockTokensAt(row - 1, col)" :key="token">
-                    <i
-                      v-if="token === 'icon'"
-                      class="cbpk-grid-icon"
-                      :class="clockIconChoice || 'fa-regular fa-clock'"
-                      aria-hidden="true"
-                    ></i>
-                    <span v-else class="cbpk-grid-token">
-                      {{ t(`companion.settings.layout_tokens.${token}`) }}
-                    </span>
-                  </template>
-                </button>
-
-                <div class="cbpk-row-heights" role="group" :aria-label="t('companion.settings.row_height')">
-                  <button
-                    v-for="h in (['small', 'normal', 'large'] as const)"
-                    :key="h"
-                    type="button"
-                    class="cbpk-row-height-btn"
-                    :class="{ 'cbpk-row-height-btn--selected': clockRowHeightAt(row - 1) === h }"
-                    :title="t(`companion.settings.row_heights.${h}`)"
-                    @click="setClockRowHeight(row - 1, h)"
-                  >
-                    {{ t(`companion.settings.row_heights.${h}_short`) }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div class="cbpk-palette">
-              <button
-                v-for="token in clockPaletteTokens"
-                :key="token"
-                type="button"
-                class="cbpk-chip"
-                :class="{
-                  'cbpk-chip--selected': clockSelectedToken === token,
-                  'cbpk-chip--placed': isClockPlaced(token),
-                }"
-                @click="toggleClockToken(token)"
-              >
-                {{ t(`companion.settings.layout_tokens.${token}`) }}
-              </button>
-            </div>
-
-            <div v-if="clockLayout.icon" class="cbpk-icons">
-              <button
-                type="button"
-                class="cbpk-icon-btn"
-                :class="{ 'cbpk-icon-btn--selected': !clockIconChoice }"
-                :title="t('companion.settings.default_icon')"
-                @click="clockIconChoice = undefined"
-              >
-                {{ t('companion.settings.default_icon') }}
-              </button>
-              <button
-                v-for="ic in catalog.icons"
-                :key="ic"
-                type="button"
-                class="cbpk-icon-btn"
-                :class="{ 'cbpk-icon-btn--selected': clockIconChoice === ic }"
-                @click="clockIconChoice = ic"
-              >
-                <i :class="ic" aria-hidden="true"></i>
-              </button>
-            </div>
           </div>
 
           <div class="cbpk-tiles">

@@ -1143,12 +1143,17 @@ module CompanionSettings
         block["gauge_thickness"] = thickness if GAUGE_THICKNESSES.include?(thickness)
       end
     when "clock"
-      # Réglable comme un bloc `metric` (icône, étiquette, disposition), mais
-      # jamais d'unité ni de jauge : une horloge n'a ni l'une ni l'autre.
+      # Réglable comme un bloc `metric` (icône, disposition — même éditeur
+      # côté site, `CompanionBlockPicker.vue`), mais jamais d'unité, de jauge
+      # ou d'annotation de coin : une horloge n'a ni les deux premières, et
+      # `ClockCard` (dépôt companion) ne dessine pas la troisième — sans ce
+      # retrait, une disposition composée pour une mesure puis basculée sur
+      # « Horloge » dans le même éditeur garderait une clé sans aucun effet.
       block["icon"] = raw["icon"] if ICONS.include?(raw["icon"])
       layout = sanitize_layout_positions(raw["layout"], nil)
       layout.delete("unit")
       layout.delete("gauge")
+      layout.delete("secondary")
       block["layout"] = layout
     when "zones", "lap_zones"
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"

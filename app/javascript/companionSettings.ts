@@ -1081,9 +1081,10 @@ export const BUDGET_SAMPLE = {
 
 // Le bilan d'un tour, pour la vignette : cinq lignes, exactement celles que
 // dessine `LapSummaryCard` (dépôt voisin) — durée, distance, D+, calories,
-// TSS *du tour*, jamais de la sortie entière.
+// TSS *du tour*, jamais de la sortie entière. La durée est en HH:MM:SS,
+// comme `formatDurationHms` côté appli.
 export const LAP_SUMMARY_SAMPLE = [
-  { label: 'Durée', value: '00:18' },
+  { label: 'Durée', value: '00:18:24' },
   { label: 'Distance', value: '5,2 km' },
   { label: 'D+', value: '142 m' },
   { label: 'Calories', value: '210' },

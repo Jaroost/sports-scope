@@ -519,17 +519,46 @@ interface Tile {
   label: string
 }
 
+// Trois genres qui partagent une même section de la dialogue plutôt que
+// chacun la sienne : le tronçon en cours, le temps restant et les deux
+// fondus racontent tous les trois le même programme d'entraînement — les
+// séparer en trois en-têtes identiques (« Entraînement ») n'aiderait
+// personne à les comparer. Une table plutôt qu'un `if` de plus dans
+// `groups` : un futur genre `workout_*` n'a qu'à y ajouter sa ligne.
+const GROUPED_KINDS: Record<string, string> = {
+  workout_segment: 'workout',
+  workout_remaining: 'workout',
+  workout_status: 'workout',
+}
+
+// Le titre d'une section — celui du genre pour une section ordinaire, ou un
+// libellé propre pour une section fondue (`GROUPED_KINDS`), qui n'est pas un
+// genre du catalogue et n'a donc pas de `companion.settings.blocks.<kind>`.
+function groupLabel(kind: string): string {
+  return kind === 'workout' ? t('companion.settings.workout_title') : t(`companion.settings.blocks.${kind}`)
+}
+
 // Les vignettes, regroupées par genre — l'ordre est celui du catalogue, donc
-// celui du serveur, qui est aussi l'ordre d'affichage des libellés.
+// celui du serveur, qui est aussi l'ordre d'affichage des libellés. Une
+// section fondue (`GROUPED_KINDS`) se place au rang de son premier genre.
 const groups = computed(() => {
   const choices = blockChoices(props.catalog)
 
-  return Object.keys(props.catalog.blocks)
+  const order: string[] = []
+  const tilesByGroup = new Map<string, Tile[]>()
+
+  Object.keys(props.catalog.blocks)
     // Une horloge posée sur une page tour n'aurait jamais d'effet — l'appli
     // l'ignore déjà silencieusement (voir la doc de `pageKind`) — donc pas de
     // quoi la proposer là et laisser croire qu'elle s'affichera.
     .filter((kind) => !(kind === 'clock' && props.pageKind === 'laps'))
-    .map((kind) => {
+    .forEach((kind) => {
+      const groupKind = GROUPED_KINDS[kind] || kind
+      if (!tilesByGroup.has(groupKind)) {
+        tilesByGroup.set(groupKind, [])
+        order.push(groupKind)
+      }
+
       const tiles = choices
         .filter((choice) => choice.kind === kind)
         .map((choice) => ({
@@ -550,8 +579,10 @@ const groups = computed(() => {
           label: labelOf(choice),
         })) as Tile[]
 
-      return { kind, tiles }
+      tilesByGroup.get(groupKind)!.push(...tiles)
     })
+
+  return order.map((kind) => ({ kind, tiles: tilesByGroup.get(kind)! }))
 })
 
 // Ce que la case fait comme place dans la tuile.
@@ -674,7 +705,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
         <section v-for="group in groups" :key="group.kind" class="cbpk-group">
           <div class="cbpk-group-head">
-            <h3 class="h6 mb-0">{{ t(`companion.settings.blocks.${group.kind}`) }}</h3>
+            <h3 class="h6 mb-0">{{ groupLabel(group.kind) }}</h3>
 
             <!-- Le paramètre du genre, en tête de son groupe : les vignettes
                  en dessous le dessinent aussitôt. -->

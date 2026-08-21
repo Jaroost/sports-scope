@@ -702,7 +702,7 @@ module CompanionSettings
       "battery" => sanitize_battery(raw["battery"]),
       "climb" => sanitize_climb(raw["climb"]),
       "workout" => sanitize_workout(raw["workout"]),
-      "laps" => sanitize_laps(raw["laps"]),
+      "laps" => sanitize_lap_toast(raw["laps"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
       "screen" => sanitize_screen(raw["screen"]),
       "traveled_path" => sanitize_traveled_path(raw["traveled_path"]),
@@ -1603,7 +1603,7 @@ module CompanionSettings
   # puisse le couper ; ce toast est un ajout, un profil qui n'a jamais touché
   # ce réglage doit garder l'écran exactement tel qu'il était avant qu'il
   # existe — même logique que `sanitize_notch_sets`/`sanitize_reminders`.
-  def sanitize_laps(raw)
+  def sanitize_lap_toast(raw)
     return nil unless raw.is_a?(Hash)
 
     {

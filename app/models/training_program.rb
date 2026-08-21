@@ -3,6 +3,9 @@ class TrainingProgram < ApplicationRecord
   # companion (~/dev/sports-scope-companion) — aucun nouveau son n'est ajouté ici,
   # l'éditeur ne fait que choisir parmi ceux que l'appli sait déjà jouer.
   SOUNDS = %w[start end bell horn horn2 booster].freeze
+  # Catalogue fermé — miroir de MILESTONE_ICONS (trainingProgramStore.ts). Purement
+  # visuel côté éditeur pour l'instant, pas (encore) consommé par l'appli companion.
+  ICONS = %w[warmup sprint effort recovery climb cooldown interval hydration alert finish].freeze
   MAX_NAME_LEN = 80
   MAX_SEGMENT_NAME_LEN = 60
   MAX_MILESTONES = 200
@@ -48,6 +51,11 @@ class TrainingProgram < ApplicationRecord
       sound = m["sound"]
       unless sound.nil? || TrainingProgram::SOUNDS.include?(sound)
         errors.add(:milestones, "sound must be one of #{TrainingProgram::SOUNDS.join(', ')}")
+      end
+
+      icon = m["icon"]
+      unless icon.nil? || TrainingProgram::ICONS.include?(icon)
+        errors.add(:milestones, "icon must be one of #{TrainingProgram::ICONS.join(', ')}")
       end
     end
   end

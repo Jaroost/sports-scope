@@ -90,8 +90,10 @@ class TrainingProgramsController < ApplicationController
       next unless offset.is_a?(Numeric) && offset >= 0
       sound = (h["sound"] || h[:sound]).presence
       sound = nil unless sound.nil? || TrainingProgram::SOUNDS.include?(sound.to_s)
+      icon = (h["icon"] || h[:icon]).presence
+      icon = nil unless icon.nil? || TrainingProgram::ICONS.include?(icon.to_s)
       segment_name = (h["segment_name"] || h[:segment_name]).to_s.strip.first(TrainingProgram::MAX_SEGMENT_NAME_LEN)
-      { "offset_seconds" => offset.to_i, "sound" => sound, "segment_name" => segment_name }
+      { "offset_seconds" => offset.to_i, "sound" => sound, "segment_name" => segment_name, "icon" => icon }
     end
     cleaned.sort_by { |m| m["offset_seconds"] }
   end

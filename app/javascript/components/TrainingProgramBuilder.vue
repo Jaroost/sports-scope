@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, useTemplateRef, toRaw } from 'vue'
 import { t } from '../i18n'
-import { trainingProgramStore, openingMilestone, SOUNDS, MAX_MILESTONES } from '../stores/trainingProgramStore'
+import { trainingProgramStore, openingMilestone, SOUNDS, MILESTONE_ICONS, MAX_MILESTONES } from '../stores/trainingProgramStore'
 import type { Milestone, Sound } from '../stores/trainingProgramStore'
 import { csrfToken } from '../csrf'
 
@@ -18,6 +18,41 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const milestones = trainingProgramStore.milestones
 const previewAudio = useTemplateRef<HTMLAudioElement>('previewAudio')
+
+// Sélection multiple pour répéter un bloc (ex. effort/repos d'un fractionné) — par
+// référence d'objet et non par index : `normalize()` retrie le tableau après chaque
+// modif, un index se périmerait.
+const selected = ref<Set<Milestone>>(new Set())
+const repeatCount = ref(2)
+
+function isSelected(milestone: Milestone): boolean {
+  return selected.value.has(milestone)
+}
+
+function toggleSelected(milestone: Milestone) {
+  const next = new Set(selected.value)
+  if (next.has(milestone)) next.delete(milestone)
+  else next.add(milestone)
+  selected.value = next
+}
+
+// Indices (dans l'ordre chronologique courant) des jalons sélectionnés.
+function selectedIndices(): number[] {
+  return milestones.value
+    .map((m, i) => (selected.value.has(m) ? i : -1))
+    .filter((i) => i >= 0)
+}
+
+// Répéter suppose une sélection contiguë suivie d'au moins un jalon : ce jalon
+// suivant sert de clôture (cf. repeatSelected) et doit déjà exister.
+const canRepeatSelected = computed(() => {
+  const indices = selectedIndices()
+  if (indices.length === 0) return false
+  for (let k = 1; k < indices.length; k++) {
+    if (indices[k] !== indices[k - 1] + 1) return false
+  }
+  return indices[indices.length - 1] + 1 < milestones.value.length
+})
 
 const durationSeconds = computed(() => milestones.value[milestones.value.length - 1]?.offsetSeconds ?? 0)
 
@@ -54,16 +89,44 @@ function normalize() {
   milestones.value = arr
 }
 
+// Champ "temps absolu" : fixe directement la position du jalon depuis le début.
 function onTimeChange(milestone: Milestone, event: Event) {
   const parsed = parseTime((event.target as HTMLInputElement).value)
   if (parsed != null) milestone.offsetSeconds = Math.max(0, parsed)
   normalize()
 }
 
+// Champ "durée depuis le jalon précédent" : les deux champs pointent vers le même
+// offsetSeconds, juste affiché différemment — modifier l'un met l'autre à jour.
+function deltaSeconds(index: number): number {
+  return milestones.value[index].offsetSeconds - milestones.value[index - 1].offsetSeconds
+}
+
+function onDeltaChange(index: number, event: Event) {
+  const parsed = parseTime((event.target as HTMLInputElement).value)
+  if (parsed != null) milestones.value[index].offsetSeconds = milestones.value[index - 1].offsetSeconds + Math.max(0, parsed)
+  normalize()
+}
+
+function iconClass(icon: string): string {
+  return MILESTONE_ICONS.find((i) => i.key === icon)?.icon ?? ''
+}
+
 function addMilestone() {
   if (milestones.value.length >= MAX_MILESTONES) return
   const last = milestones.value[milestones.value.length - 1]
-  milestones.value.push({ offsetSeconds: (last?.offsetSeconds ?? 0) + 60, sound: null, segmentName: '' })
+  milestones.value.push({ offsetSeconds: (last?.offsetSeconds ?? 0) + 60, sound: null, segmentName: '', icon: null })
+}
+
+// Insère un jalon vide entre le jalon `index - 1` et le jalon `index` (ex. un
+// rappel de boisson au milieu d'un long tronçon), à mi-chemin des deux.
+function insertMilestoneBefore(index: number) {
+  if (milestones.value.length >= MAX_MILESTONES) return
+  const prev = milestones.value[index - 1]
+  const curr = milestones.value[index]
+  const mid = prev.offsetSeconds + Math.max(1, Math.round((curr.offsetSeconds - prev.offsetSeconds) / 2))
+  milestones.value.splice(index, 0, { offsetSeconds: mid, sound: null, segmentName: '', icon: null })
+  normalize()
 }
 
 function duplicateMilestone(index: number) {
@@ -74,9 +137,49 @@ function duplicateMilestone(index: number) {
   normalize()
 }
 
+// Répète un bloc contigu (ex. effort + repos d'un fractionné) `repeatCount` fois
+// au total. Le jalon qui suit immédiatement la sélection sert de clôture : c'est
+// lui qui donne la durée du dernier segment sélectionné (celle d'un jalon n'est
+// jamais que l'écart jusqu'au suivant), donc il n'est jamais dupliqué — seulement
+// repoussé, avec tout ce qui vient après lui, pour laisser la place aux copies.
+// Sans ce jalon de clôture, dupliquer le bloc perdrait la durée de son dernier
+// segment (d'où `canRepeatSelected`, qui exige sa présence).
+function repeatSelected() {
+  if (!canRepeatSelected.value) return
+  const times = Math.max(2, Math.floor(repeatCount.value) || 2)
+  const indices = selectedIndices()
+  const closingIndex = indices[indices.length - 1] + 1
+  const repeats = times - 1
+  if (milestones.value.length + indices.length * repeats > MAX_MILESTONES) return
+
+  const cycleLength = milestones.value[closingIndex].offsetSeconds - milestones.value[indices[0]].offsetSeconds
+  if (cycleLength <= 0) return
+
+  const body = indices.map((i) => milestones.value[i])
+  const copies: Milestone[] = []
+  for (let k = 1; k <= repeats; k++) {
+    for (const m of body) {
+      const copy = structuredClone(toRaw(m)) as Milestone
+      copy.offsetSeconds = m.offsetSeconds + k * cycleLength
+      copies.push(copy)
+    }
+  }
+
+  const shift = repeats * cycleLength
+  milestones.value.forEach((m, i) => { if (i >= closingIndex) m.offsetSeconds += shift })
+  milestones.value.splice(closingIndex, 0, ...copies)
+  normalize()
+  selected.value = new Set()
+}
+
 function removeMilestone(index: number) {
   if (index === 0) return // le jalon d'ouverture (0:00) n'est jamais supprimable
-  milestones.value.splice(index, 1)
+  const [removed] = milestones.value.splice(index, 1)
+  if (selected.value.has(removed)) {
+    const next = new Set(selected.value)
+    next.delete(removed)
+    selected.value = next
+  }
 }
 
 function soundUrl(sound: Sound): string {
@@ -108,8 +211,10 @@ async function fetchProgram(id: number) {
           offsetSeconds: Number(m.offset_seconds) || 0,
           sound: m.sound ?? null,
           segmentName: m.segment_name || '',
+          icon: m.icon ?? null,
         }))
       : [openingMilestone()]
+    selected.value = new Set()
   } catch (e: any) {
     trainingProgramStore.error.value = e.message
   }
@@ -131,6 +236,7 @@ async function save() {
         offset_seconds: m.offsetSeconds,
         sound: m.sound,
         segment_name: m.segmentName.trim(),
+        icon: m.icon,
       })),
     })
     const url = trainingProgramStore.isEditMode.value
@@ -196,18 +302,62 @@ onMounted(() => {
       {{ t('training_programs.duration', { duration: formatTime(durationSeconds) }) }}
     </p>
 
+    <div v-if="selected.size > 0" class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+      <div class="d-flex align-items-center gap-1">
+        <label class="small mb-0" for="tp-repeat-count">{{ t('training_programs.repeat_label') }}</label>
+        <input id="tp-repeat-count" v-model.number="repeatCount" type="number" min="2" max="50"
+               class="form-control form-control-sm" style="width: 4.5rem">
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!canRepeatSelected" @click="repeatSelected">
+        <i class="fa-solid fa-repeat me-1" aria-hidden="true"></i>{{ t('training_programs.repeat_selected') }}
+      </button>
+      <button type="button" class="btn btn-sm btn-link text-body-secondary" @click="selected = new Set()">
+        {{ t('training_programs.clear_selection') }}
+      </button>
+      <span v-if="!canRepeatSelected" class="small text-body-secondary">{{ t('training_programs.repeat_hint') }}</span>
+    </div>
+
     <div class="tp-timeline">
-      <div v-for="(milestone, index) in milestones" :key="index" class="tp-milestone card mb-3">
-        <div class="card-body d-flex align-items-start gap-2 flex-wrap">
-          <div class="tp-time">
-            <label class="form-label small mb-1">{{ index === 0 ? '0:00' : '' }}</label>
-            <input v-if="index !== 0" type="text" class="form-control form-control-sm tp-time-input"
+      <template v-for="(milestone, index) in milestones" :key="index">
+        <div v-if="index !== 0" class="tp-connector d-flex align-items-center gap-1">
+          <i class="fa-solid fa-arrow-down-long text-body-secondary" aria-hidden="true"></i>
+          <input type="text" class="form-control form-control-sm tp-time-input"
+                 :title="t('training_programs.time_delta_hint')"
+                 :value="formatTime(deltaSeconds(index))" @change="onDeltaChange(index, $event)">
+          <button type="button" class="btn btn-sm btn-link p-1" :disabled="milestones.length >= MAX_MILESTONES"
+                  :title="t('training_programs.insert_milestone')" :aria-label="t('training_programs.insert_milestone')"
+                  @click="insertMilestoneBefore(index)">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="tp-milestone card mb-3" :class="{ 'tp-milestone-selected': isSelected(milestone) }">
+          <div class="card-body d-flex align-items-start gap-2 flex-wrap">
+          <div class="form-check mt-1">
+            <input type="checkbox" class="form-check-input" :checked="isSelected(milestone)"
+                   :aria-label="t('training_programs.select_milestone')"
+                   @change="toggleSelected(milestone)">
+          </div>
+
+          <div v-if="index === 0" class="tp-time">
+            <label class="form-label small mb-1">0:00</label>
+          </div>
+          <div v-else class="tp-time">
+            <input type="text" class="form-control form-control-sm tp-time-input"
+                   :title="t('training_programs.time_absolute_hint')"
                    :value="formatTime(milestone.offsetSeconds)" @change="onTimeChange(milestone, $event)">
           </div>
 
           <div class="flex-grow-1" style="min-width: 12rem">
             <input v-model="milestone.segmentName" type="text" class="form-control form-control-sm"
                    :placeholder="t('training_programs.segment_name_placeholder')" maxlength="60">
+          </div>
+
+          <div class="d-flex align-items-center gap-1">
+            <i v-if="milestone.icon" class="fa-solid tp-icon-preview" :class="iconClass(milestone.icon)" aria-hidden="true"></i>
+            <select v-model="milestone.icon" class="form-select form-select-sm" style="width: auto">
+              <option :value="null">{{ t('training_programs.icon_none') }}</option>
+              <option v-for="icon in MILESTONE_ICONS" :key="icon.key" :value="icon.key">{{ t(`training_programs.icon_${icon.key}`) }}</option>
+            </select>
           </div>
 
           <div class="d-flex align-items-center gap-1">
@@ -235,7 +385,8 @@ onMounted(() => {
             </button>
           </div>
         </div>
-      </div>
+        </div>
+      </template>
     </div>
 
     <button type="button" class="btn btn-outline-secondary" :disabled="milestones.length >= MAX_MILESTONES" @click="addMilestone">
@@ -263,6 +414,10 @@ onMounted(() => {
 .tp-milestone {
   position: relative;
 }
+.tp-milestone-selected {
+  border-color: var(--bs-warning);
+  box-shadow: 0 0 0 1px var(--bs-warning);
+}
 .tp-milestone::before {
   content: '';
   position: absolute;
@@ -273,11 +428,22 @@ onMounted(() => {
   border-radius: 50%;
   background: var(--bs-warning);
 }
+.tp-connector {
+  margin: -0.25rem 0 0.75rem 0.1rem;
+}
+.tp-connector i {
+  width: 0.9rem;
+  text-align: center;
+}
 .tp-time {
-  width: 4.5rem;
   flex-shrink: 0;
 }
 .tp-time-input {
-  width: 4.5rem;
+  width: 3.5rem;
+}
+.tp-icon-preview {
+  width: 1.5rem;
+  text-align: center;
+  color: var(--bs-warning);
 }
 </style>

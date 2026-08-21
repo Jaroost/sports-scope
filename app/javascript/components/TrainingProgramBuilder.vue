@@ -103,9 +103,18 @@ function deltaSeconds(index: number): number {
   return milestones.value[index].offsetSeconds - milestones.value[index - 1].offsetSeconds
 }
 
+// Changer la durée d'un tronçon ne doit pas déplacer les jalons suivants dans le
+// temps absolu sans les décaler : leur propre durée (l'écart à leur voisin) est
+// ce que l'utilisateur a réellement composé pour eux, et doit rester intacte —
+// c'est le temps absolu qui doit céder, pas les durées des tronçons suivants.
 function onDeltaChange(index: number, event: Event) {
   const parsed = parseTime((event.target as HTMLInputElement).value)
-  if (parsed != null) milestones.value[index].offsetSeconds = milestones.value[index - 1].offsetSeconds + Math.max(0, parsed)
+  if (parsed == null) return
+  const milestone = milestones.value[index]
+  const shift = milestones.value[index - 1].offsetSeconds + Math.max(0, parsed) - milestone.offsetSeconds
+  for (let i = index; i < milestones.value.length; i++) {
+    milestones.value[i].offsetSeconds += shift
+  }
   normalize()
 }
 

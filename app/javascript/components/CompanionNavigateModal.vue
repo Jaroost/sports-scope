@@ -20,14 +20,26 @@ interface PresetOption {
   default_for?: string[]
 }
 
+interface TrainingProgramOption {
+  id: number
+  name: string
+  share_token: string
+}
+
 const show = ref(false)
 const presets = ref<PresetOption[]>([])
 const selectedKey = ref('')
 const record = ref(false)
 const shareToken = ref('')
+// Programme d'entraînement optionnel à coupler à la navigation (?workout=<token>) —
+// faire le HIIT tout en suivant un tracé. Absent (chaîne vide) : lien de route seul.
+const trainingPrograms = ref<TrainingProgramOption[]>([])
+const selectedWorkoutToken = ref('')
 
 function plainHref(): string {
-  return `sportsscope://navigate/${shareToken.value}`
+  const url = new URL(`sportsscope://navigate/${shareToken.value}`)
+  if (selectedWorkoutToken.value) url.searchParams.set('workout', selectedWorkoutToken.value)
+  return url.toString()
 }
 
 async function openPlain(): Promise<void> {
@@ -40,6 +52,8 @@ async function openPlain(): Promise<void> {
 // type (`defaultPresetKey`) — le choix reste modifiable dans la modale.
 async function open(token: string, activity?: string | null): Promise<void> {
   shareToken.value = token
+  selectedWorkoutToken.value = ''
+  fetchTrainingPrograms()
 
   try {
     const res = await fetch('/api/companion_settings', {
@@ -64,6 +78,19 @@ async function open(token: string, activity?: string | null): Promise<void> {
   selectedKey.value = defaultPresetKey(presets.value, activity) ?? presets.value[0].key
   record.value = false
   show.value = true
+}
+
+// Best-effort : une erreur laisse simplement le sélecteur vide (pas de programme
+// à coupler), jamais bloquant pour l'ouverture de la navigation elle-même.
+async function fetchTrainingPrograms(): Promise<void> {
+  try {
+    const res = await fetch('/api/training_programs', { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+    if (!res.ok) throw new Error('unavailable')
+    const data = (await res.json()) as { training_programs?: TrainingProgramOption[] }
+    trainingPrograms.value = data.training_programs ?? []
+  } catch {
+    trainingPrograms.value = []
+  }
 }
 
 function close(): void {
@@ -117,6 +144,15 @@ defineExpose({ open })
                 </label>
               </div>
               <p class="small text-muted mb-0 mt-1">{{ t('routes.summary.navigate_app_record_hint') }}</p>
+            </div>
+            <div v-if="trainingPrograms.length">
+              <label class="form-label small fw-semibold mb-1 d-block" for="companion-nav-workout">
+                {{ t('training_programs.combine_with_route') }}
+              </label>
+              <select id="companion-nav-workout" v-model="selectedWorkoutToken" class="form-select form-select-sm">
+                <option value="">{{ t('training_programs.combine_none') }}</option>
+                <option v-for="p in trainingPrograms" :key="p.id" :value="p.share_token">{{ p.name }}</option>
+              </select>
             </div>
           </div>
           <div class="modal-footer-companion-nav d-flex justify-content-end gap-2">

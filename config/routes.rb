@@ -6,6 +6,9 @@ Rails.application.routes.draw do
     get "/activities/:id", to: "activities#show", as: :activity, constraints: { id: /\d+/ }
     get "/imported_activities/:id", to: "activities#show_imported", as: :imported_activity, constraints: { id: /\d+/ }
     get "/routes", to: "pages#routes_index", as: :routes_index
+    get "/training_programs", to: "pages#training_programs_index", as: :training_programs_index
+    get "/training_programs/new", to: "pages#training_program_builder", as: :new_training_program
+    get "/training_programs/:id/edit", to: "pages#training_program_builder", as: :edit_training_program, constraints: { id: /\d+/ }
     # Navigation unifiée : démarre en navigation libre (carte + GPS + vitesse) et peut
     # charger un itinéraire à la volée. Publique (aucun login requis).
     get "/navigate", to: "pages#free_navigation", as: :free_navigate
@@ -158,6 +161,16 @@ Rails.application.routes.draw do
   delete "/api/routes/:id", to: "routes#destroy", constraints: { id: /\d+/ }
   get "/api/routes/:id/gpx", to: "routes#export_gpx", constraints: { id: /\d+/ }
   post "/api/routes/:id/duplicate", to: "routes#duplicate", constraints: { id: /\d+/ }
+
+  # Training programs builder (JSON CRUD consumed by Vue components) — same shape
+  # as the route builder API above, minus GPX/carte (a program has no track).
+  get "/api/training_programs", to: "training_programs#index"
+  post "/api/training_programs", to: "training_programs#create"
+  get "/api/training_programs/shared/:token", to: "training_programs#shared"
+  get "/api/training_programs/:id", to: "training_programs#show", constraints: { id: /\d+/ }
+  patch "/api/training_programs/:id", to: "training_programs#update", constraints: { id: /\d+/ }
+  delete "/api/training_programs/:id", to: "training_programs#destroy", constraints: { id: /\d+/ }
+  post "/api/training_programs/:id/duplicate", to: "training_programs#duplicate", constraints: { id: /\d+/ }
 
   # Saved points of interest (JSON consumed by Vue components) — global to the user,
   # rendered in the route builder and in navigation.

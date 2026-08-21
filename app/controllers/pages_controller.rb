@@ -18,6 +18,15 @@ class PagesController < ApplicationController
     require_login!
   end
 
+  def training_programs_index
+    require_login!
+  end
+
+  def training_program_builder
+    require_login!
+    @training_program_id = params[:id]
+  end
+
   def chains
     require_login!
   end

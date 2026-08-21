@@ -19,6 +19,8 @@ import ResumeNavigation from './components/ResumeNavigation.vue'
 import SharedRoutePreviewMap from './components/SharedRoutePreviewMap.vue'
 import CompanionDashboard from './components/CompanionDashboard.vue'
 import CompanionNavigateAction from './components/CompanionNavigateAction.vue'
+import TrainingProgramsList from './components/TrainingProgramsList.vue'
+import TrainingProgramBuilder from './components/TrainingProgramBuilder.vue'
 
 const registry: Record<string, Component> = {
   HelloStrava,
@@ -41,6 +43,8 @@ const registry: Record<string, Component> = {
   SharedRoutePreviewMap,
   CompanionDashboard,
   CompanionNavigateAction,
+  TrainingProgramsList,
+  TrainingProgramBuilder,
 }
 
 export function mountVueIslands(): void {

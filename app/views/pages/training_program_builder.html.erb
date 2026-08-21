@@ -1,0 +1,2 @@
+<% content_for :title, @training_program_id.present? ? t("training_programs.edit_title") : t("training_programs.builder_title") %>
+<div data-vue-component="TrainingProgramBuilder" data-vue-props='<%= { trainingProgramId: @training_program_id }.to_json %>'></div>

@@ -214,7 +214,7 @@ class User < ApplicationRecord
   # clés autorisées : la définition (chemin, icône, libellé) vit côté vue (NavbarHelper)
   # et côté éditeur (UserProfile.vue). Ajouter un menu : une clé ici + l'entrée
   # correspondante dans NavbarHelper::NAVBAR_ITEM_DEFS et UserProfile.vue.
-  NAVBAR_ITEM_KEYS = %w[dashboard performance routes new_route free_navigate chains].freeze
+  NAVBAR_ITEM_KEYS = %w[dashboard performance routes new_route free_navigate chains training_programs].freeze
 
   # Assainit/normalise un tableau d'items de navbar reçu (front ou base) : ne garde que
   # les clés connues, dédoublonnées, dans l'ordre reçu, en coercant `visible` et `home`
@@ -247,6 +247,7 @@ class User < ApplicationRecord
 
   has_many :chart_layouts, dependent: :destroy
   has_many :routes, dependent: :destroy
+  has_many :training_programs, dependent: :destroy
   # Itinéraires d'autrui ouverts via un lien partagé (cf. OpenedRoute).
   has_many :opened_routes, dependent: :destroy
   has_many :pois, dependent: :destroy

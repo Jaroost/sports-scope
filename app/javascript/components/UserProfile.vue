@@ -142,6 +142,7 @@ const NAVBAR_ICONS: Record<string, string> = {
   new_route: 'fa-map-location-dot',
   free_navigate: 'fa-location-crosshairs',
   chains: 'fa-link',
+  training_programs: 'fa-stopwatch',
 }
 
 function navIcon(key: string): string {

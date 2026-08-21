@@ -149,6 +149,13 @@ module CompanionSettings
     # companion. "Terminé" une fois le dernier jalon dépassé, tiret sans
     # programme actif.
     "workout_remaining" => [],
+    # `workout_segment` et `workout_remaining` fondus dans une seule carte —
+    # le tronçon en cours *et* le temps restant, pour une page qui n'a la
+    # place que d'une case mais veut les deux informations plutôt que choisir
+    # entre elles. Même source, même repli. `full` les garde sur deux lignes
+    # (chacune son titre), `line` les fond sur une seule — icône, nom, temps
+    # restant.
+    "workout_status" => %w[full line],
     # La liste des cols du tracé (D+, longueur, pente moyenne), avec un repère
     # « en cours / prochain » que l'appli calcule elle-même à partir de la
     # distance déjà parcourue (cf. companionBridge.ts::companionRouteClimbs).
@@ -275,6 +282,15 @@ module CompanionSettings
   # Dart (`ride_preset.dart`).
   BAND_RADAR_MODES = %w[distance count gauge].freeze
   BAND_RADAR = BAND_RADAR_MODES.map { |mode| "radar_#{mode}" }.freeze
+
+  # Le tronçon d'entraînement en cours, en case de bandeau ou d'encoche —
+  # `segment` (nom + icône), `remaining` (temps restant), `combo` (icône +
+  # temps restant, les deux fondus pour la case qui n'a la place que pour un
+  # seul texte) ou `line` (icône + nom + temps restant, tout sur une seule
+  # ligne). Préfixées `workout_` comme `BAND_RADAR` l'est `radar_` — voir
+  # `BandWorkoutSlot` côté Dart (`ride_preset.dart`).
+  BAND_WORKOUT_MODES = %w[segment remaining combo line].freeze
+  BAND_WORKOUT = BAND_WORKOUT_MODES.map { |mode| "workout_#{mode}" }.freeze
 
   # Marquer un tour, en case de bandeau ou d'encoche — un seul token
   # aujourd'hui, mais un catalogue à part comme `BAND_RADAR`/`BAND_BELL` et
@@ -568,6 +584,7 @@ module CompanionSettings
       "metrics" => METRICS,
       "band_actions" => BAND_ACTIONS,
       "band_radar" => BAND_RADAR,
+      "band_workout" => BAND_WORKOUT,
       "band_bell" => BAND_BELL,
       "band_mark_lap" => BAND_MARK_LAP,
       "bell_sounds" => BELL_SOUNDS,
@@ -1379,11 +1396,13 @@ module CompanionSettings
 
   # Une case de bandeau ou de bande de l'encoche : une mesure, une commande
   # (`BAND_ACTIONS`), un son de sonnette (`BAND_BELL`), un mode de radar
-  # (`BAND_RADAR`) — toutes des chaînes — ou un objet « marquer un tour »
+  # (`BAND_RADAR`), un habillage du tronçon d'entraînement en cours
+  # (`BAND_WORKOUT`) — toutes des chaînes — ou un objet « marquer un tour »
   # (`BAND_MARK_LAP`, seule case qui porte un réglage libre, voir
   # `sanitize_band_lap_slot`).
   def band_slot?(raw)
-    METRICS.include?(raw) || BAND_ACTIONS.include?(raw) || BAND_BELL.include?(raw) || BAND_RADAR.include?(raw)
+    METRICS.include?(raw) || BAND_ACTIONS.include?(raw) || BAND_BELL.include?(raw) ||
+      BAND_RADAR.include?(raw) || BAND_WORKOUT.include?(raw)
   end
 
   def sanitize_band_entry(raw)
@@ -1545,7 +1564,8 @@ module CompanionSettings
   # La pastille de tronçon en cours (haut d'écran) et le popup de changement
   # de tronçon (2-3 s au centre) — les deux seuls repères visuels d'un
   # programme d'entraînement en dehors des sons (`WorkoutCuePlayer`) et des
-  # blocs qu'on peut poser sur une page (`workout_segment`/`workout_remaining`).
+  # blocs qu'on peut poser sur une page (`workout_segment`/`workout_remaining`/
+  # `workout_status`) et les cases de bandeau/encoche (`BAND_WORKOUT`).
   # Absent vaut activé pour les deux, même logique que `sanitize_climb`.
   def sanitize_workout(raw)
     return nil unless raw.is_a?(Hash)

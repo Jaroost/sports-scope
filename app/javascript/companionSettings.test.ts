@@ -73,6 +73,7 @@ const catalog: Catalog = {
   metrics: ['speed', 'power'],
   band_actions: ['sleep'],
   band_radar: ['radar_distance', 'radar_count', 'radar_gauge'],
+  band_workout: ['workout_segment', 'workout_remaining', 'workout_combo', 'workout_line'],
   band_bell: ['bell_bell', 'bell_horn'],
   band_mark_lap: ['mark_lap'],
   bell_sounds: ['bell', 'horn'],

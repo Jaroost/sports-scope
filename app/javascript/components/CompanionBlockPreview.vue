@@ -1164,6 +1164,28 @@ const metricTrendSegments = computed(() => {
       </div>
     </div>
 
+    <!-- Tronçon en cours + temps restant --------------------------------------
+         `workout_segment`/`workout_remaining` fondus : les deux lignes
+         (`full`) ou une seule (`line`) plutôt qu'un choix entre les deux
+         composants. -->
+    <div v-else-if="block.kind === 'workout_status' && !shape.workoutStatusLine" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-workout-row">
+        <i class="fa-solid fa-mountain cbp-workout-icon" aria-hidden="true"></i>
+        <span class="cbp-workout-figure">Montée</span>
+      </div>
+      <div class="cbp-workout-row">
+        <i class="fa-solid fa-stopwatch cbp-workout-icon" aria-hidden="true"></i>
+        <span class="cbp-workout-figure">4:32</span>
+      </div>
+    </div>
+    <div v-else-if="block.kind === 'workout_status'" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-workout-line">
+        <i class="fa-solid fa-mountain cbp-workout-icon" aria-hidden="true"></i>
+        <span class="cbp-workout-line-name">Montée</span>
+        <span class="cbp-workout-line-figure">4:32</span>
+      </div>
+    </div>
+
     <!-- Sélecteur de tour ---------------------------------------------------
          La liste déroulante qui choisit le tour affiché par les autres
          composants de la page — plaçable comme eux, voir `LapSelectorBlock`
@@ -2225,6 +2247,29 @@ const metricTrendSegments = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 500;
+}
+
+/* `workout_status` en mode `line` : icône, nom (cède la place en premier),
+   temps restant — jamais tronqué. */
+.cbp-workout-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.cbp-workout-line-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.3em;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cbp-workout-line-figure {
+  flex: none;
+  font-size: 1.3em;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .cbp-budget-bar {

@@ -528,6 +528,11 @@ export interface Catalog {
   // troisième catalogue et non un mode de plus dans `band_actions` : ce n'est
   // ni une mesure ni une commande, l'éditeur lui garde son propre groupe.
   band_radar: string[]
+  // Le tronçon d'entraînement en cours, en case de bandeau ou d'encoche —
+  // `workout_segment`, `workout_remaining`, `workout_combo` (voir
+  // `CompanionSettings::BAND_WORKOUT`). Même raisonnement que `band_radar` :
+  // un troisième catalogue à part, pas un mode de plus dans `band_actions`.
+  band_workout: string[]
   // La sonnette, en case de bandeau ou d'encoche — `bell_bell`, `bell_horn`,
   // `bell_booster` (voir `CompanionSettings::BAND_BELL`). Même raisonnement
   // que `band_radar` :
@@ -1375,6 +1380,7 @@ export interface BlockShape {
   budgetWeek: boolean
   climbListFull: boolean
   powerCurveChart: boolean
+  workoutStatusLine: boolean
 }
 
 export function blockShape(block: Block): BlockShape {
@@ -1409,6 +1415,9 @@ export function blockShape(block: Block): BlockShape {
     climbListFull: block.kind === 'climb_list' && block.mode !== 'compact',
     // Le tableau (une ligne par durée), ou la même courbe en graphique.
     powerCurveChart: block.kind === 'power_curve' && block.mode === 'chart',
+    // Le tronçon et le temps restant sur deux lignes (`full`, par défaut),
+    // ou fondus sur une seule (`line`) — même distinction que `navFull`.
+    workoutStatusLine: block.kind === 'workout_status' && block.mode === 'line',
   }
 }
 

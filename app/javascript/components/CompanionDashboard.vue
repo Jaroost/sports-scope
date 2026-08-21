@@ -200,6 +200,16 @@ function bandRadarLabel(key: string): string {
   return `${t('companion.settings.blocks.radar')} · ${t(`companion.settings.modes.${mode}`)}`
 }
 
+// Le libellé d'un habillage de case du tronçon d'entraînement en cours
+// (`workout_segment`) — sa propre table plutôt que le format
+// `bandRadarLabel` : les trois habillages (`segment`/`remaining`/`combo`)
+// n'ont pas de mode de composant de page équivalent à réutiliser, `combo`
+// n'existant que dans une case de bandeau/encoche.
+function bandWorkoutLabel(key: string): string {
+  const mode = key.slice('workout_'.length)
+  return t(`companion.settings.band_workout.${mode}`)
+}
+
 // Le libellé d'un son de sonnette de case (`bell_horn`) — même format que
 // `bandRadarLabel` : le nom du composant puis le son choisi.
 function bandBellLabel(key: string): string {
@@ -1593,6 +1603,11 @@ async function save() {
                     {{ bandRadarLabel(radar) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_workout_group')">
+                  <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
+                    {{ bandWorkoutLabel(workout) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_bell_group')">
                   <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
                     {{ bandBellLabel(bell) }}
@@ -1671,6 +1686,11 @@ async function save() {
                     {{ bandRadarLabel(radar) }}
                   </option>
                 </optgroup>
+                <optgroup :label="t('companion.settings.band_workout_group')">
+                  <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
+                    {{ bandWorkoutLabel(workout) }}
+                  </option>
+                </optgroup>
                 <optgroup :label="t('companion.settings.band_bell_group')">
                   <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
                     {{ bandBellLabel(bell) }}
@@ -1710,6 +1730,11 @@ async function save() {
                 <optgroup :label="t('companion.settings.band_radar_group')">
                   <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
                     {{ bandRadarLabel(radar) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_workout_group')">
+                  <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
+                    {{ bandWorkoutLabel(workout) }}
                   </option>
                 </optgroup>
                 <optgroup :label="t('companion.settings.band_bell_group')">

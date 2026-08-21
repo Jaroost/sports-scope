@@ -482,6 +482,9 @@ export interface Preset {
   battery?: Record<string, number | boolean>
   // Tonalités de début/fin de col — même forme que `battery`.
   climb?: Record<string, boolean>
+  // Pastille de tronçon (haut d'écran) et popup de changement de tronçon —
+  // même forme que `climb`.
+  workout?: Record<string, boolean>
   screen?: Record<string, number>
   // Couleur/largeur/opacité de la ligne du trajet réellement parcouru,
   // dessinée par l'appli companion — voir `sanitize_traveled_path` (Rails) et

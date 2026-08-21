@@ -684,6 +684,7 @@ module CompanionSettings
       "radar" => sanitize_radar(raw["radar"]),
       "battery" => sanitize_battery(raw["battery"]),
       "climb" => sanitize_climb(raw["climb"]),
+      "workout" => sanitize_workout(raw["workout"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
       "screen" => sanitize_screen(raw["screen"]),
       "traveled_path" => sanitize_traveled_path(raw["traveled_path"]),
@@ -1538,6 +1539,20 @@ module CompanionSettings
       # le comportement d'avant ce réglage, absent doit donc rester replié et
       # non l'ouvrir en grand.
       "expanded_by_default" => raw["expanded_by_default"] == true
+    }
+  end
+
+  # La pastille de tronçon en cours (haut d'écran) et le popup de changement
+  # de tronçon (2-3 s au centre) — les deux seuls repères visuels d'un
+  # programme d'entraînement en dehors des sons (`WorkoutCuePlayer`) et des
+  # blocs qu'on peut poser sur une page (`workout_segment`/`workout_remaining`).
+  # Absent vaut activé pour les deux, même logique que `sanitize_climb`.
+  def sanitize_workout(raw)
+    return nil unless raw.is_a?(Hash)
+
+    {
+      "badge" => raw["badge"] != false,
+      "popup" => raw["popup"] != false
     }
   end
 

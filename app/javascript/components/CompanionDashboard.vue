@@ -956,6 +956,10 @@ function setClimb(key: string, value: boolean) {
   preset.value.climb = { ...(preset.value.climb || {}), [key]: value }
 }
 
+function setWorkout(key: string, value: boolean) {
+  preset.value.workout = { ...(preset.value.workout || {}), [key]: value }
+}
+
 // ── les rappels périodiques ─────────────────────────────────────────────────
 
 function addReminder() {
@@ -1910,6 +1914,32 @@ async function save() {
                      @change="setClimb('expanded_by_default', ($event.target as HTMLInputElement).checked)">
               <label class="form-check-label small" for="climb-expanded">
                 {{ t('companion.settings.climb_expanded') }}
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- L'entraînement -->
+        <h2 class="h6">{{ t('companion.settings.workout_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.workout_help') }}</p>
+        <div class="row g-2 align-items-end mb-4">
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="workout-badge"
+                     :checked="preset.workout?.badge !== false"
+                     @change="setWorkout('badge', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="workout-badge">
+                {{ t('companion.settings.workout_badge') }}
+              </label>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="workout-popup"
+                     :checked="preset.workout?.popup !== false"
+                     @change="setWorkout('popup', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="workout-popup">
+                {{ t('companion.settings.workout_popup') }}
               </label>
             </div>
           </div>

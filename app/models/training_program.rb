@@ -2,7 +2,7 @@ class TrainingProgram < ApplicationRecord
   # Catalogue fermé : ce sont exactement les fichiers `assets/sounds/*.wav` du dépôt
   # companion (~/dev/sports-scope-companion) — aucun nouveau son n'est ajouté ici,
   # l'éditeur ne fait que choisir parmi ceux que l'appli sait déjà jouer.
-  SOUNDS = %w[start end bell horn horn2 booster].freeze
+  SOUNDS = %w[start end end2 end3 bell horn horn2 booster].freeze
   # Catalogue fermé — miroir de MILESTONE_ICONS (trainingProgramStore.ts). Purement
   # visuel côté éditeur pour l'instant, pas (encore) consommé par l'appli companion.
   ICONS = %w[warmup sprint effort recovery climb cooldown interval hydration alert finish].freeze

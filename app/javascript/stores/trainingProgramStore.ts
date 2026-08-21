@@ -2,7 +2,7 @@ import { ref, computed } from 'vue'
 
 // Catalogue fermé — miroir de TrainingProgram::SOUNDS (training_program.rb) et des
 // fichiers `assets/sounds/*.wav` du dépôt companion. `null` = pas de son (jalon à 0).
-export const SOUNDS = ['start', 'end', 'bell', 'horn', 'horn2', 'booster'] as const
+export const SOUNDS = ['start', 'end', 'end2', 'end3', 'bell', 'horn', 'horn2', 'booster'] as const
 export type Sound = typeof SOUNDS[number]
 
 // Catalogue fermé — miroir de TrainingProgram::ICONS (training_program.rb). Purement

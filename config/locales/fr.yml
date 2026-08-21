@@ -1435,6 +1435,8 @@ fr:
     sound_none: "Aucun son"
     sound_start: "Départ"
     sound_end: "Fin"
+    sound_end2: "Fin 2"
+    sound_end3: "Fin 3"
     sound_bell: "Cloche"
     sound_horn: "Klaxon"
     sound_horn2: "Klaxon 2"

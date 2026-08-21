@@ -1435,6 +1435,8 @@ en:
     sound_none: "No sound"
     sound_start: "Start"
     sound_end: "End"
+    sound_end2: "End 2"
+    sound_end3: "End 3"
     sound_bell: "Bell"
     sound_horn: "Horn"
     sound_horn2: "Horn 2"

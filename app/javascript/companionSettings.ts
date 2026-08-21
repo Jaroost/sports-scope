@@ -529,9 +529,9 @@ export interface Catalog {
   battery_sensors: string[]
   metrics: string[]
   // Ce qu'une case du bandeau ou de la bande de l'encoche peut porter à la
-  // place d'une mesure — une seule aujourd'hui, `sleep`. À part de `metrics`
-  // et non fondue dedans : une case de bandeau reste d'abord un chiffre à
-  // lire, l'éditeur présente les deux catalogues séparément.
+  // place d'une mesure — `sleep`, `toggle_workout`. À part de `metrics` et
+  // non fondue dedans : une case de bandeau reste d'abord un chiffre à lire,
+  // l'éditeur présente les deux catalogues séparément.
   band_actions: string[]
   // Le radar arrière, en case de bandeau ou d'encoche — `radar_distance`,
   // `radar_count`, `radar_gauge` (voir `CompanionSettings::BAND_RADAR`). Un
@@ -1409,6 +1409,7 @@ export interface BlockShape {
   changeRouteCompact: boolean
   clearRouteCompact: boolean
   routeCompact: boolean
+  toggleWorkoutCompact: boolean
   sleepCompact: boolean
   bellCompact: boolean
   navFull: boolean
@@ -1447,6 +1448,7 @@ export function blockShape(block: Block): BlockShape {
     changeRouteCompact: block.kind === 'change_route' && block.mode === 'compact',
     clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',
     routeCompact: block.kind === 'route' && block.mode === 'compact',
+    toggleWorkoutCompact: block.kind === 'toggle_workout' && block.mode === 'compact',
     sleepCompact: block.kind === 'sleep' && block.mode === 'compact',
     bellCompact: block.kind === 'bell' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',

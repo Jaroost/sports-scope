@@ -1885,6 +1885,7 @@ en:
         change_route: "Change route"
         clear_route: "Clear route"
         route: "Route"
+        toggle_workout: "Workout"
         sleep: "Put to sleep"
         bell: "Bell"
         nav_state: "Navigation state"

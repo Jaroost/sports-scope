@@ -871,6 +871,27 @@ const metricTrendSegments = computed(() => {
       </div>
     </template>
 
+    <!-- Entraînement (démarrer ou retirer) -----------------------------------
+         Un seul bouton pour les deux gestes de « Démarrer un entraînement »
+         et « Arrêter l'entraînement » : c'est l'état de l'enregistrement qui
+         décide lequel des deux il pose, côté appli (`RideRecorder.
+         activeWorkout`). Même limite que `route` : l'aperçu ne connaît pas
+         cet état à la composition — il montre donc le geste qui démarre un
+         programme, celui qu'on obtient hors sortie enregistrée. -->
+    <template v-else-if="block.kind === 'toggle_workout'">
+      <div v-if="shape.toggleWorkoutCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
+          <i class="fa-solid fa-person-running" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button" :style="overrideStyle">
+          <i class="fa-solid fa-person-running" aria-hidden="true"></i>
+          Choisir un entraînement
+        </span>
+      </div>
+    </template>
+
     <!-- Mettre en veille ----------------------------------------------------
          Met la carte en veille depuis une page de données qui ne l'a pas
          sous les yeux : ce bouton demande le même geste qu'un appui long sur

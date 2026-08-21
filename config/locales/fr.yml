@@ -1885,6 +1885,7 @@ fr:
         change_route: "Changer d'itinéraire"
         clear_route: "Retirer l'itinéraire"
         route: "Itinéraire"
+        toggle_workout: "Entraînement"
         sleep: "Mettre en veille"
         bell: "Sonnette"
         nav_state: "État de navigation"

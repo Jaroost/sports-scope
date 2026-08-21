@@ -74,6 +74,17 @@ module CompanionSettings
     # commandes séparées plutôt qu'à leur place : un profil déjà composé avec
     # `change_route`/`clear_route` ne doit rien perdre à l'enregistrement.
     "route" => %w[full compact],
+    # Un seul bouton pour démarrer/changer un programme d'entraînement, ou le
+    # détacher : c'est l'état de l'enregistrement qui décide côté appli lequel
+    # des deux gestes il pose (`RideRecorder.activeWorkout`) — même principe
+    # que `route` pour la navigation, mais sans les deux commandes séparées à
+    # côté : rien n'existait avant ce bloc, pas de profil à qui ne rien faire
+    # perdre. Posable même sans carte (le menu ⋮ propose déjà les deux gestes
+    # sur home-trainer) et en case de bandeau/encoche (`BAND_ACTIONS`), pas
+    # seulement sur une page. L'aperçu ne connaît pas l'état de la sortie à la
+    # composition, même limite que `route` : il montre toujours le geste qui
+    # démarre un programme.
+    "toggle_workout" => %w[full compact],
     # Met la carte en veille depuis une page de données — voile noir et
     # rétroéclairage à 1 %, exactement comme un appui long sur la carte.
     # L'appli ramène le cycliste sur la carte puis demande la veille au
@@ -261,7 +272,13 @@ module CompanionSettings
   # son, voir `BELL_SOUNDS`) — même raison que `radar`, sorti dans son propre
   # `BAND_RADAR` plutôt que fondu ici, pour la même faute qu'aurait porté un
   # `"bell"` sans dire lequel des deux sons il joue.
-  BAND_ACTIONS = %w[sleep].freeze
+  #
+  # `toggle_workout` n'est pas préfixé `workout_`, contrairement aux cinq
+  # habillages de `BAND_WORKOUT` : ce n'est pas un habillage du tronçon en
+  # cours mais un bouton, comme `sleep` — et un préfixe `workout_` le ferait
+  # happer par `BandSlot.parse` (dépôt companion) comme un mode inconnu de
+  # `BAND_WORKOUT` plutôt que comme une commande.
+  BAND_ACTIONS = %w[sleep toggle_workout].freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`

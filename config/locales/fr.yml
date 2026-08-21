@@ -1747,6 +1747,10 @@ fr:
       metric_lap_scope_hint: "Sur une page Tours, cette mesure lit le tour affiché et non la sortie entière : durée, distance, dénivelé, moyennes, calories, TSS s'y calculent depuis l'ouverture du tour. Une mesure instantanée (cardio, cadence, puissance, vitesse du moment…) reste celle de maintenant, quel que soit le tour consulté."
       mode: "Affichage"
       source: "Source"
+      workout_target: "Tronçon"
+      workout_targets:
+        current: "En cours"
+        next: "Suivant"
       battery_sensor: "Capteur"
       battery_sensor_any: "Tous les appareils"
       battery_sensor_hint: "Le pire pourcentage connu ne porte alors que sur ce capteur-là — utile pour surveiller le capteur de puissance sans qu'une ceinture cardio oubliée sur la table prenne le dessus, ou pour garder l'œil sur la batterie du téléphone une fois l'écran passé en plein immersif. Sans effet en affichage détaillé, qui liste déjà tous les appareils."

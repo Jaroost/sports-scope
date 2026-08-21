@@ -105,6 +105,11 @@ export interface Block {
   // seul (voir `place_list_blocks` côté Rails et `listSegments` plus bas).
   new_column?: boolean
   full_width?: boolean
+  // Seulement pour `workout_segment`/`workout_remaining`/`workout_status` —
+  // bascule sur le tronçon qui suivra celui en cours plutôt que sur le
+  // tronçon en cours (voir `sanitize_block`). Absent vaut `false`, le
+  // comportement d'avant ce réglage.
+  upcoming?: boolean
 }
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
@@ -687,6 +692,7 @@ export function blockFor(
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
     gaugeThickness?: GaugeThickness
+    upcoming?: boolean
     color?: string | null; textColor?: string | null
   },
 ): Block {
@@ -745,6 +751,15 @@ export function blockFor(
   if (choice.kind === 'altitude_profile' && params.windowKm) block.window_km = params.windowKm
   // Même raisonnement, en secondes : absent vaut toute la sortie.
   if (choice.kind === 'metric_trend' && params.windowS) block.window_s = params.windowS
+  // Absent (`undefined`) vaut « tronçon en cours » — même raisonnement que
+  // `window_km`/`window_s` : jamais écrit pour rester silencieux tant que ce
+  // n'est pas le choix explicite de l'éditeur.
+  if (
+    (choice.kind === 'workout_segment' || choice.kind === 'workout_remaining' || choice.kind === 'workout_status') &&
+    params.upcoming
+  ) {
+    block.upcoming = true
+  }
   // Contrairement à `metric`/`source`, valent pour n'importe quel genre : le
   // réglage se fait une fois dans la dialogue, pas par groupe.
   if (params.color) block.color = params.color
@@ -1406,6 +1421,12 @@ export interface BlockShape {
   climbListFull: boolean
   powerCurveChart: boolean
   workoutStatusLine: boolean
+  // Le tronçon qui suivra celui en cours, plutôt que le tronçon en cours —
+  // voir `Block.upcoming`. Change le nom/l'icône affichés (`workout_segment`,
+  // `workout_status`) et, sur `workout_remaining`, la nature du chiffre : la
+  // durée du tronçon à venir plutôt qu'un compte à rebours vers son départ
+  // (voir `TrainingProgram.nextSegmentDurationAt` côté companion).
+  workoutUpcoming: boolean
 }
 
 export function blockShape(block: Block): BlockShape {
@@ -1443,6 +1464,9 @@ export function blockShape(block: Block): BlockShape {
     // Le tronçon et le temps restant sur deux lignes (`full`, par défaut),
     // ou fondus sur une seule (`line`) — même distinction que `navFull`.
     workoutStatusLine: block.kind === 'workout_status' && block.mode === 'line',
+    workoutUpcoming:
+      (block.kind === 'workout_segment' || block.kind === 'workout_remaining' || block.kind === 'workout_status') &&
+      block.upcoming === true,
   }
 }
 

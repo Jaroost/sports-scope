@@ -1146,21 +1146,23 @@ const metricTrendSegments = computed(() => {
     <!-- Tronçon en cours ------------------------------------------------------
          Nom + icône du jalon franchi le plus récemment (TrainingProgram
          milestones) — dérivé, rien à régler au-delà de couleur/texte, comme
-         `nav_state`/`training_budget`. -->
+         `nav_state`/`training_budget`. `upcoming` (`shape.workoutUpcoming`)
+         montre le jalon suivant à la place, un aperçu plutôt que le tronçon
+         en cours. -->
     <div v-else-if="block.kind === 'workout_segment'" class="cbp-card" :style="overrideStyle">
-      <div class="cbp-title">Tronçon</div>
+      <div class="cbp-title">{{ shape.workoutUpcoming ? 'Suivant' : 'Tronçon' }}</div>
       <div class="cbp-workout-row">
         <i class="fa-solid fa-mountain cbp-workout-icon" aria-hidden="true"></i>
-        <span class="cbp-workout-figure">Montée</span>
+        <span class="cbp-workout-figure">{{ shape.workoutUpcoming ? 'Sprint' : 'Montée' }}</span>
       </div>
     </div>
 
     <!-- Temps restant du tronçon ------------------------------------------- -->
     <div v-else-if="block.kind === 'workout_remaining'" class="cbp-card" :style="overrideStyle">
-      <div class="cbp-title">Restant</div>
+      <div class="cbp-title">{{ shape.workoutUpcoming ? 'Durée à venir' : 'Restant' }}</div>
       <div class="cbp-workout-row">
         <i class="fa-solid fa-stopwatch cbp-workout-icon" aria-hidden="true"></i>
-        <span class="cbp-workout-figure">4:32</span>
+        <span class="cbp-workout-figure">{{ shape.workoutUpcoming ? '2:00' : '4:32' }}</span>
       </div>
     </div>
 
@@ -1171,18 +1173,18 @@ const metricTrendSegments = computed(() => {
     <div v-else-if="block.kind === 'workout_status' && !shape.workoutStatusLine" class="cbp-card" :style="overrideStyle">
       <div class="cbp-workout-row">
         <i class="fa-solid fa-mountain cbp-workout-icon" aria-hidden="true"></i>
-        <span class="cbp-workout-figure">Montée</span>
+        <span class="cbp-workout-figure">{{ shape.workoutUpcoming ? 'Sprint' : 'Montée' }}</span>
       </div>
       <div class="cbp-workout-row">
         <i class="fa-solid fa-stopwatch cbp-workout-icon" aria-hidden="true"></i>
-        <span class="cbp-workout-figure">4:32</span>
+        <span class="cbp-workout-figure">{{ shape.workoutUpcoming ? '2:00' : '4:32' }}</span>
       </div>
     </div>
     <div v-else-if="block.kind === 'workout_status'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-workout-line">
         <i class="fa-solid fa-mountain cbp-workout-icon" aria-hidden="true"></i>
-        <span class="cbp-workout-line-name">Montée</span>
-        <span class="cbp-workout-line-figure">4:32</span>
+        <span class="cbp-workout-line-name">{{ shape.workoutUpcoming ? 'Sprint' : 'Montée' }}</span>
+        <span class="cbp-workout-line-figure">{{ shape.workoutUpcoming ? '2:00' : '4:32' }}</span>
       </div>
     </div>
 

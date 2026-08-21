@@ -143,11 +143,18 @@ module CompanionSettings
     # régler au-delà de couleur/texte : le contenu vient entièrement du
     # programme actif, comme `nav_state`/`sleep`. Sans programme actif, l'appli
     # affiche un tiret plutôt que de faire disparaître le bloc.
+    #
+    # `upcoming` (voir `sanitize_block`) bascule les trois genres `workout_*`
+    # sur le jalon qui suit celui en cours (`TrainingProgram.nextMilestoneAt`
+    # côté companion) plutôt que sur le jalon en cours — un aperçu de ce qui
+    # arrive, posable à côté du tronçon en cours plutôt qu'à sa place.
     "workout_segment" => [],
     # Le temps restant avant le prochain jalon du programme actif — même
     # source que `workout_segment`, `TrainingProgram.remainingAt` côté
     # companion. "Terminé" une fois le dernier jalon dépassé, tiret sans
-    # programme actif.
+    # programme actif. En aperçu (`upcoming`), c'est la durée du tronçon qui
+    # suivra (`TrainingProgram.nextSegmentDurationAt`) et non un compte à
+    # rebours : ce tronçon n'a pas encore commencé, rien n'est encore décompté.
     "workout_remaining" => [],
     # `workout_segment` et `workout_remaining` fondus dans une seule carte —
     # le tronçon en cours *et* le temps restant, pour une page qui n'a la
@@ -1185,6 +1192,11 @@ module CompanionSettings
       # Sans effet en mode `list`, réglable quand même : rien n'empêche de
       # choisir le capteur avant le mode dans l'éditeur.
       block["sensor"] = raw["sensor"] if BATTERY_SENSORS.include?(raw["sensor"])
+    when "workout_segment", "workout_remaining", "workout_status"
+      # Absent (`nil`) vaut « tronçon en cours », le comportement d'avant ce
+      # réglage — même raisonnement que `window_km`. `true` bascule sur le
+      # tronçon qui suivra, pour l'annoncer en aperçu avant qu'il ne commence.
+      block["upcoming"] = true if raw["upcoming"] == true
     end
 
     color = sanitize_hex_color(raw["color"])

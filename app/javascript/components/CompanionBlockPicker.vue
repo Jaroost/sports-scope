@@ -99,6 +99,10 @@ const windowKm = ref<number>(props.block?.window_km || 0)
 // La fenêtre récente d'un bloc `metric_trend` — même repli que `windowKm` :
 // vide vaut toute la sortie, le comportement par défaut.
 const windowS = ref<number>(props.block?.window_s || 0)
+// Le tronçon en cours ou celui qui suivra, pour les trois genres `workout_*`
+// — même repli que `windowKm`/`windowS` : la valeur d'avant ce réglage
+// (`'current'`) plutôt qu'un aperçu deviné pour personne.
+const workoutTarget = ref<'current' | 'next'>(props.block?.upcoming ? 'next' : 'current')
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
 //
@@ -541,6 +545,7 @@ const groups = computed(() => {
             gaugeThickness: gaugeThicknessChoice.value,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             windowS: windowS.value || undefined,
+            upcoming: workoutTarget.value === 'next',
             color: color.value, textColor: textColor.value,
           }),
           label: labelOf(choice),
@@ -854,6 +859,14 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 :placeholder="t('companion.settings.metric_trend_window_s_placeholder')"
                 class="form-control form-control-sm"
               >
+            </label>
+
+            <label v-if="group.kind === 'workout'" class="cbpk-param small">
+              {{ t('companion.settings.workout_target') }}
+              <select v-model="workoutTarget" class="form-select form-select-sm">
+                <option value="current">{{ t('companion.settings.workout_targets.current') }}</option>
+                <option value="next">{{ t('companion.settings.workout_targets.next') }}</option>
+              </select>
             </label>
           </div>
 

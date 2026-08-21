@@ -1968,6 +1968,16 @@ async function save() {
               </label>
             </div>
           </div>
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="workout-sounds"
+                     :checked="preset.workout?.sounds !== false"
+                     @change="setWorkout('sounds', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="workout-sounds">
+                {{ t('companion.settings.workout_sounds') }}
+              </label>
+            </div>
+          </div>
         </div>
 
         <!-- Les rappels périodiques -->

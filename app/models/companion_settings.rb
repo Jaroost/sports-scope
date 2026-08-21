@@ -1566,18 +1566,19 @@ module CompanionSettings
     }
   end
 
-  # La pastille de tronçon en cours (haut d'écran) et le popup de changement
-  # de tronçon (2-3 s au centre) — les deux seuls repères visuels d'un
-  # programme d'entraînement en dehors des sons (`WorkoutCuePlayer`) et des
-  # blocs qu'on peut poser sur une page (`workout_segment`/`workout_remaining`/
-  # `workout_status`) et les cases de bandeau/encoche (`BAND_WORKOUT`).
-  # Absent vaut activé pour les deux, même logique que `sanitize_climb`.
+  # La pastille de tronçon en cours (haut d'écran), le popup de changement de
+  # tronçon (2-3 s au centre) et les tonalités de jalon (`WorkoutCuePlayer`) —
+  # les seuls repères d'un programme d'entraînement en dehors des blocs qu'on
+  # peut poser sur une page (`workout_segment`/`workout_remaining`/
+  # `workout_status`) et des cases de bandeau/encoche (`BAND_WORKOUT`).
+  # Absent vaut activé pour les trois, même logique que `sanitize_climb`.
   def sanitize_workout(raw)
     return nil unless raw.is_a?(Hash)
 
     {
       "badge" => raw["badge"] != false,
-      "popup" => raw["popup"] != false
+      "popup" => raw["popup"] != false,
+      "sounds" => raw["sounds"] != false
     }
   end
 

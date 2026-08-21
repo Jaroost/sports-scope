@@ -1836,6 +1836,7 @@ fr:
       weather_group_title: "Météo"
       workout_badge: "Pastille du tronçon en cours"
       workout_popup: "Popup au changement de tronçon"
+      workout_sounds: "Tonalités"
       reminders_title: "Rappels"
       reminders_help: "Un grand toast sonore, à intervalle régulier, pour ce qu'aucun capteur ne peut rappeler tout seul — boire, manger, entamer une intervalle. Compté sur le temps effectivement roulé : une pause n'avance pas le compte."
       reminder_interval: "Toutes les (min)"

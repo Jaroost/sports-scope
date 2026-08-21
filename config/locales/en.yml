@@ -1836,6 +1836,7 @@ en:
       weather_group_title: "Weather"
       workout_badge: "Current segment badge"
       workout_popup: "Popup on segment change"
+      workout_sounds: "Sounds"
       reminders_title: "Reminders"
       reminders_help: "A big, loud toast at a regular interval, for anything no sensor can remind you of on its own — drink, eat, start an interval. Counted on time actually spent riding: a break doesn't advance the count."
       reminder_interval: "Every (min)"

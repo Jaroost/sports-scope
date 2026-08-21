@@ -300,6 +300,17 @@ module CompanionSettings
   BAND_WORKOUT_MODES = %w[segment remaining combo line icon].freeze
   BAND_WORKOUT = BAND_WORKOUT_MODES.map { |mode| "workout_#{mode}" }.freeze
 
+  # Les mêmes cinq habillages, mais pour le tronçon qui suivra celui en
+  # cours plutôt que le tronçon en cours — même bascule que `upcoming` sur
+  # les composants de page (`workout_segment`/`workout_remaining`/
+  # `workout_status`), mais une case de bandeau/encoche est une chaîne nue
+  # sans place pour un réglage : d'où un jeu de tokens dupliqué plutôt qu'un
+  # booléen porté par la case. Préfixées `workout_next_`, vérifiées avant
+  # `workout_` dans `BandSlot.parse` côté Dart (le préfixe le plus long
+  # d'abord, sans quoi `workout_next_segment` serait pris pour un
+  # `workout_` de mode inconnu).
+  BAND_WORKOUT_NEXT = BAND_WORKOUT_MODES.map { |mode| "workout_next_#{mode}" }.freeze
+
   # Marquer un tour, en case de bandeau ou d'encoche — un seul token
   # aujourd'hui, mais un catalogue à part comme `BAND_RADAR`/`BAND_BELL` et
   # non fondu dans `BAND_ACTIONS` : contrairement à `sleep`, cette case porte
@@ -592,7 +603,7 @@ module CompanionSettings
       "metrics" => METRICS,
       "band_actions" => BAND_ACTIONS,
       "band_radar" => BAND_RADAR,
-      "band_workout" => BAND_WORKOUT,
+      "band_workout" => BAND_WORKOUT + BAND_WORKOUT_NEXT,
       "band_bell" => BAND_BELL,
       "band_mark_lap" => BAND_MARK_LAP,
       "bell_sounds" => BELL_SOUNDS,
@@ -1415,13 +1426,13 @@ module CompanionSettings
 
   # Une case de bandeau ou de bande de l'encoche : une mesure, une commande
   # (`BAND_ACTIONS`), un son de sonnette (`BAND_BELL`), un mode de radar
-  # (`BAND_RADAR`), un habillage du tronçon d'entraînement en cours
-  # (`BAND_WORKOUT`) — toutes des chaînes — ou un objet « marquer un tour »
-  # (`BAND_MARK_LAP`, seule case qui porte un réglage libre, voir
-  # `sanitize_band_lap_slot`).
+  # (`BAND_RADAR`), un habillage du tronçon d'entraînement en cours ou du
+  # tronçon suivant (`BAND_WORKOUT`/`BAND_WORKOUT_NEXT`) — toutes des
+  # chaînes — ou un objet « marquer un tour » (`BAND_MARK_LAP`, seule case
+  # qui porte un réglage libre, voir `sanitize_band_lap_slot`).
   def band_slot?(raw)
     METRICS.include?(raw) || BAND_ACTIONS.include?(raw) || BAND_BELL.include?(raw) ||
-      BAND_RADAR.include?(raw) || BAND_WORKOUT.include?(raw)
+      BAND_RADAR.include?(raw) || BAND_WORKOUT.include?(raw) || BAND_WORKOUT_NEXT.include?(raw)
   end
 
   def sanitize_band_entry(raw)

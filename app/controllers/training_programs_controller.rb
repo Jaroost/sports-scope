@@ -92,8 +92,22 @@ class TrainingProgramsController < ApplicationController
       sound = nil unless sound.nil? || TrainingProgram::SOUNDS.include?(sound.to_s)
       icon = (h["icon"] || h[:icon]).presence
       icon = nil unless icon.nil? || TrainingProgram::ICONS.include?(icon.to_s)
+      cue_timing = (h["cue_timing"] || h[:cue_timing]).presence
+      cue_timing = nil unless cue_timing.nil? || TrainingProgram::CUE_TIMINGS.include?(cue_timing.to_s)
+      color = (h["color"] || h[:color]).presence&.to_s&.strip&.downcase
+      color = nil unless color.nil? || color.match?(TrainingProgram::HEX_COLOR)
+      text_color = (h["text_color"] || h[:text_color]).presence&.to_s&.strip&.downcase
+      text_color = nil unless text_color.nil? || text_color.match?(TrainingProgram::HEX_COLOR)
       segment_name = (h["segment_name"] || h[:segment_name]).to_s.strip.first(TrainingProgram::MAX_SEGMENT_NAME_LEN)
-      { "offset_seconds" => offset.to_i, "sound" => sound, "segment_name" => segment_name, "icon" => icon }
+      {
+        "offset_seconds" => offset.to_i,
+        "sound" => sound,
+        "segment_name" => segment_name,
+        "icon" => icon,
+        "cue_timing" => cue_timing,
+        "color" => color,
+        "text_color" => text_color,
+      }
     end
     cleaned.sort_by { |m| m["offset_seconds"] }
   end

@@ -137,6 +137,18 @@ module CompanionSettings
     # le téléphone. D'où son état vide, qu'aucun autre composant n'a — un profil de
     # home-trainer sans WebView n'en recevra jamais, et il doit le dire.
     "training_budget" => %w[day week],
+    # Le nom du tronçon d'entraînement en cours, avec son icône — dérivés du
+    # jalon franchi le plus récemment (TrainingProgram#milestones, dépôt
+    # companion `WorkoutMilestone`/`TrainingProgram.milestoneAt`). Rien à
+    # régler au-delà de couleur/texte : le contenu vient entièrement du
+    # programme actif, comme `nav_state`/`sleep`. Sans programme actif, l'appli
+    # affiche un tiret plutôt que de faire disparaître le bloc.
+    "workout_segment" => [],
+    # Le temps restant avant le prochain jalon du programme actif — même
+    # source que `workout_segment`, `TrainingProgram.remainingAt` côté
+    # companion. "Terminé" une fois le dernier jalon dépassé, tiret sans
+    # programme actif.
+    "workout_remaining" => [],
     # La liste des cols du tracé (D+, longueur, pente moyenne), avec un repère
     # « en cours / prochain » que l'appli calcule elle-même à partir de la
     # distance déjà parcourue (cf. companionBridge.ts::companionRouteClimbs).

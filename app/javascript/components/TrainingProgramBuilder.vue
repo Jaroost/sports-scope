@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, useTemplateRef, toRaw } from 'vue'
 import { t } from '../i18n'
-import { trainingProgramStore, openingMilestone, SOUNDS, MILESTONE_ICONS, MAX_MILESTONES } from '../stores/trainingProgramStore'
+import { trainingProgramStore, openingMilestone, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, MAX_MILESTONES } from '../stores/trainingProgramStore'
 import type { Milestone, Sound } from '../stores/trainingProgramStore'
 import { csrfToken } from '../csrf'
+import CompanionColorPicker from './CompanionColorPicker.vue'
 
 const props = defineProps({
   trainingProgramId: { type: [String, Number], default: null },
@@ -115,7 +116,15 @@ function iconClass(icon: string): string {
 function addMilestone() {
   if (milestones.value.length >= MAX_MILESTONES) return
   const last = milestones.value[milestones.value.length - 1]
-  milestones.value.push({ offsetSeconds: (last?.offsetSeconds ?? 0) + 60, sound: null, segmentName: '', icon: null })
+  milestones.value.push({
+    offsetSeconds: (last?.offsetSeconds ?? 0) + 60,
+    sound: null,
+    segmentName: '',
+    icon: null,
+    cueTiming: null,
+    color: null,
+    textColor: null,
+  })
 }
 
 // Insère un jalon vide entre le jalon `index - 1` et le jalon `index` (ex. un
@@ -125,7 +134,15 @@ function insertMilestoneBefore(index: number) {
   const prev = milestones.value[index - 1]
   const curr = milestones.value[index]
   const mid = prev.offsetSeconds + Math.max(1, Math.round((curr.offsetSeconds - prev.offsetSeconds) / 2))
-  milestones.value.splice(index, 0, { offsetSeconds: mid, sound: null, segmentName: '', icon: null })
+  milestones.value.splice(index, 0, {
+    offsetSeconds: mid,
+    sound: null,
+    segmentName: '',
+    icon: null,
+    cueTiming: null,
+    color: null,
+    textColor: null,
+  })
   normalize()
 }
 
@@ -212,6 +229,9 @@ async function fetchProgram(id: number) {
           sound: m.sound ?? null,
           segmentName: m.segment_name || '',
           icon: m.icon ?? null,
+          cueTiming: m.cue_timing ?? null,
+          color: m.color ?? null,
+          textColor: m.text_color ?? null,
         }))
       : [openingMilestone()]
     selected.value = new Set()
@@ -237,6 +257,9 @@ async function save() {
         sound: m.sound,
         segment_name: m.segmentName.trim(),
         icon: m.icon,
+        cue_timing: m.cueTiming,
+        color: m.color,
+        text_color: m.textColor,
       })),
     })
     const url = trainingProgramStore.isEditMode.value
@@ -330,7 +353,8 @@ onMounted(() => {
             <i class="fa-solid fa-plus" aria-hidden="true"></i>
           </button>
         </div>
-        <div class="tp-milestone card mb-3" :class="{ 'tp-milestone-selected': isSelected(milestone) }">
+        <div class="tp-milestone card mb-3" :class="{ 'tp-milestone-selected': isSelected(milestone) }"
+             :style="milestone.color ? { '--tp-dot-color': milestone.color } : {}">
           <div class="card-body d-flex align-items-start gap-2 flex-wrap">
           <div class="form-check mt-1">
             <input type="checkbox" class="form-check-input" :checked="isSelected(milestone)"
@@ -370,6 +394,17 @@ onMounted(() => {
                     @click="playSound(milestone.sound)">
               <i class="fa-solid fa-play" aria-hidden="true"></i>
             </button>
+          </div>
+
+          <div v-if="index !== 0 && milestone.sound" class="d-flex align-items-center gap-1">
+            <select v-model="milestone.cueTiming" class="form-select form-select-sm" style="width: auto">
+              <option v-for="timing in CUE_TIMINGS" :key="timing" :value="timing">{{ t(`training_programs.cue_timing_${timing}`) }}</option>
+            </select>
+          </div>
+
+          <div class="d-flex align-items-center gap-1">
+            <CompanionColorPicker v-model="milestone.color" fallback="#6c757d" :label="t('training_programs.segment_color')" />
+            <CompanionColorPicker v-model="milestone.textColor" fallback="#ffffff" :label="t('training_programs.segment_text_color')" />
           </div>
 
           <div class="d-flex gap-1 ms-auto">
@@ -426,7 +461,7 @@ onMounted(() => {
   width: 0.65rem;
   height: 0.65rem;
   border-radius: 50%;
-  background: var(--bs-warning);
+  background: var(--tp-dot-color, var(--bs-warning));
 }
 .tp-connector {
   margin: -0.25rem 0 0.75rem 0.1rem;

@@ -21,11 +21,21 @@ export const MILESTONE_ICONS = [
 ] as const
 export type MilestoneIcon = typeof MILESTONE_ICONS[number]['key']
 
+// Catalogue fermé — miroir de TrainingProgram::CUE_TIMINGS (training_program.rb).
+// `before` (par défaut, absent inclus) : le son démarre en avance pour se terminer
+// pile au départ du jalon (WorkoutCuePolicy, dépôt companion). `at` : le son part
+// au franchissement lui-même.
+export const CUE_TIMINGS = ['before', 'at'] as const
+export type CueTiming = typeof CUE_TIMINGS[number]
+
 export interface Milestone {
   offsetSeconds: number
   sound: Sound | null
   segmentName: string
   icon: MilestoneIcon | null
+  cueTiming: CueTiming | null
+  color: string | null
+  textColor: string | null
 }
 
 export const MAX_MILESTONES = 200
@@ -33,7 +43,15 @@ export const MAX_MILESTONES = 200
 // Jalon d'ouverture obligatoire : porte le nom du premier tronçon, jamais de son
 // (rien ne l'annonce, la sortie vient tout juste de démarrer).
 export function openingMilestone(): Milestone {
-  return { offsetSeconds: 0, sound: null, segmentName: '', icon: null }
+  return {
+    offsetSeconds: 0,
+    sound: null,
+    segmentName: '',
+    icon: null,
+    cueTiming: null,
+    color: null,
+    textColor: null,
+  }
 }
 
 class TrainingProgramStore {

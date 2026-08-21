@@ -1143,6 +1143,27 @@ const metricTrendSegments = computed(() => {
       </div>
     </div>
 
+    <!-- Tronçon en cours ------------------------------------------------------
+         Nom + icône du jalon franchi le plus récemment (TrainingProgram
+         milestones) — dérivé, rien à régler au-delà de couleur/texte, comme
+         `nav_state`/`training_budget`. -->
+    <div v-else-if="block.kind === 'workout_segment'" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-title">Tronçon</div>
+      <div class="cbp-workout-row">
+        <i class="fa-solid fa-mountain cbp-workout-icon" aria-hidden="true"></i>
+        <span class="cbp-workout-figure">Montée</span>
+      </div>
+    </div>
+
+    <!-- Temps restant du tronçon ------------------------------------------- -->
+    <div v-else-if="block.kind === 'workout_remaining'" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-title">Restant</div>
+      <div class="cbp-workout-row">
+        <i class="fa-solid fa-stopwatch cbp-workout-icon" aria-hidden="true"></i>
+        <span class="cbp-workout-figure">4:32</span>
+      </div>
+    </div>
+
     <!-- Sélecteur de tour ---------------------------------------------------
          La liste déroulante qui choisit le tour affiché par les autres
          composants de la page — plaçable comme eux, voir `LapSelectorBlock`
@@ -2181,6 +2202,29 @@ const metricTrendSegments = computed(() => {
   font-size: 0.9em;
   opacity: 0.6;
   white-space: nowrap;
+}
+
+/* Tronçon en cours / temps restant : icône + figure, même gabarit que le
+   chiffre du budget de charge (`cbp-budget-figure`) mais sous un nom propre —
+   ce ne sont pas les mêmes données. */
+.cbp-workout-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin-top: 0.3em;
+}
+.cbp-workout-icon {
+  flex: none;
+  opacity: 0.85;
+  font-size: 1.3em;
+}
+.cbp-workout-figure {
+  font-size: 1.6em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
 }
 
 .cbp-budget-bar {

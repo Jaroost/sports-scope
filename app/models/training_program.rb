@@ -6,6 +6,12 @@ class TrainingProgram < ApplicationRecord
   # Catalogue fermé — miroir de MILESTONE_ICONS (trainingProgramStore.ts). Purement
   # visuel côté éditeur pour l'instant, pas (encore) consommé par l'appli companion.
   ICONS = %w[warmup sprint effort recovery climb cooldown interval hydration alert finish].freeze
+  # `before` (par défaut, absent inclus) : le son démarre en avance pour se terminer
+  # pile au départ du jalon (WorkoutCuePolicy, dépôt companion). `at` : ancien
+  # comportement, le son part au franchissement lui-même — utile pour un simple
+  # repère qui n'a rien à annoncer à l'avance.
+  CUE_TIMINGS = %w[before at].freeze
+  HEX_COLOR = /\A#[0-9a-fA-F]{6}\z/
   MAX_NAME_LEN = 80
   MAX_SEGMENT_NAME_LEN = 60
   MAX_MILESTONES = 200
@@ -56,6 +62,21 @@ class TrainingProgram < ApplicationRecord
       icon = m["icon"]
       unless icon.nil? || TrainingProgram::ICONS.include?(icon)
         errors.add(:milestones, "icon must be one of #{TrainingProgram::ICONS.join(', ')}")
+      end
+
+      cue_timing = m["cue_timing"]
+      unless cue_timing.nil? || TrainingProgram::CUE_TIMINGS.include?(cue_timing)
+        errors.add(:milestones, "cue_timing must be one of #{TrainingProgram::CUE_TIMINGS.join(', ')}")
+      end
+
+      color = m["color"]
+      unless color.nil? || color.match?(HEX_COLOR)
+        errors.add(:milestones, "color must be a #rrggbb hex value")
+      end
+
+      text_color = m["text_color"]
+      unless text_color.nil? || text_color.match?(HEX_COLOR)
+        errors.add(:milestones, "text_color must be a #rrggbb hex value")
       end
     end
   end

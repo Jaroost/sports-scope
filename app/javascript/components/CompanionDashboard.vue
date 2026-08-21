@@ -979,6 +979,10 @@ function setWorkout(key: string, value: boolean) {
   preset.value.workout = { ...(preset.value.workout || {}), [key]: value }
 }
 
+function setLaps(key: string, value: boolean) {
+  preset.value.laps = { ...(preset.value.laps || {}), [key]: value }
+}
+
 // ── les rappels périodiques ─────────────────────────────────────────────────
 
 function addReminder() {
@@ -2025,6 +2029,22 @@ async function save() {
                      @change="setWorkout('sounds', ($event.target as HTMLInputElement).checked)">
               <label class="form-check-label small" for="workout-sounds">
                 {{ t('companion.settings.workout_sounds') }}
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Les tours -->
+        <h2 class="h6">{{ t('companion.settings.laps_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.laps_help') }}</p>
+        <div class="row g-2 align-items-end mb-4">
+          <div class="col-6 col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="laps-toast"
+                     :checked="preset.laps?.toast === true"
+                     @change="setLaps('toast', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="laps-toast">
+                {{ t('companion.settings.laps_toast') }}
               </label>
             </div>
           </div>

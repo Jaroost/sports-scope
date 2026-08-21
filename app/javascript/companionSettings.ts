@@ -487,6 +487,9 @@ export interface Preset {
   // Pastille de tronçon (haut d'écran) et popup de changement de tronçon —
   // même forme que `climb`.
   workout?: Record<string, boolean>
+  // Le toast d'ouverture de tour (bandeau/encoche/page, Di2, col — pas
+  // `workout`, qui a déjà `workout.popup`) — voir `sanitize_laps` (Rails).
+  laps?: Record<string, boolean>
   screen?: Record<string, number>
   // Couleur/largeur/opacité de la ligne du trajet réellement parcouru,
   // dessinée par l'appli companion — voir `sanitize_traveled_path` (Rails) et

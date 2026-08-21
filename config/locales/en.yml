@@ -1695,7 +1695,7 @@ en:
       page_laps: "Laps"
       lap_series: "Lap series"
       lap_series_help: "Laps in the same series follow one another; several series run in parallel without closing one another — a “Mark lap” button placed elsewhere must carry the same series to feed this page."
-      lap_series_cols_hint: "“cols” is a special series: the app opens a lap on it by itself, at the start and end of every climb, without needing a “Mark lap” button anywhere."
+      lap_series_cols_hint: "“cols” is a special series: the app opens a lap on it by itself, at the start and end of every climb, without needing a “Mark lap” button anywhere. “workout” is another one: the training tracker opens a lap on it by itself for every block of the ongoing workout."
       lap_layout: "Layout"
       lap_series_mismatch: "This button's series doesn't match the one this page shows (\"%{series}\"): it will mark a lap elsewhere, without changing anything shown here."
       edit: "Edit"

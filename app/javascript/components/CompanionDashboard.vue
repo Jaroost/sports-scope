@@ -169,6 +169,15 @@ const lapSeries = computed(() => {
     collectSlot(set.left)
     collectSlot(set.right)
   })
+  // Un bouton Di2 « marquer un tour » (`start_lap:<série>`) porte la même
+  // série libre — mêmes suggestions que les autres endroits qui en tapent une.
+  const buttons = preset.value.buttons
+  BUTTON_CHANNELS.forEach((channel) => {
+    Object.values(buttons?.[channel] || {}).forEach((action) => {
+      const series = buttonActionLapSeries(action)
+      if (series !== null) keys.add(series)
+    })
+  })
   return [...keys]
 })
 
@@ -1023,6 +1032,41 @@ function setButtonAction(channel: keyof Buttons, gesture: keyof ButtonChannel, v
   preset.value.buttons = Object.keys(buttons).length > 0 ? buttons : undefined
 }
 
+// `start_lap` (seul, ou `start_lap:<série>`) est le seul token de
+// `button_actions` à porter un réglage libre — même raison que
+// `BandMarkLapSlot` porte sa `series` à part d'un simple jeton. `null` pour
+// tout autre choix (dont l'absence) : c'est ce qui décide si le champ série
+// apparaît sous le menu déroulant.
+function buttonActionLapSeries(action: string): string | null {
+  if (action === 'start_lap') return 'default'
+  if (action.startsWith('start_lap:')) return action.slice('start_lap:'.length) || 'default'
+  return null
+}
+
+// Le menu déroulant n'a qu'une option `start_lap` (sans série) : un choix
+// `start_lap:<série>` doit donc s'y reconnaître comme ce même choix, sous
+// peine de retomber visuellement sur « aucune action » dès qu'une série est
+// tapée dans le champ à part.
+function buttonActionKind(action: string): string {
+  return buttonActionLapSeries(action) !== null ? 'start_lap' : action
+}
+
+function setButtonActionLapSeries(channel: keyof Buttons, gesture: keyof ButtonChannel, series: string) {
+  setButtonAction(channel, gesture, `start_lap:${series || 'default'}`)
+}
+
+// Choix dans le menu déroulant (`buttonActionKind`, valeurs de base) — préserve
+// la série déjà tapée si elle y en avait une, plutôt que de la perdre au
+// moindre aller-retour sur `start_lap` dans le menu.
+function setButtonActionKind(channel: keyof Buttons, gesture: keyof ButtonChannel, kind: string) {
+  if (kind !== 'start_lap') {
+    setButtonAction(channel, gesture, kind)
+    return
+  }
+  const series = buttonActionLapSeries(buttonAction(channel, gesture))
+  setButtonAction(channel, gesture, `start_lap:${series || 'default'}`)
+}
+
 function traveledPathValue(key: string, fallback: number): number {
   const value = preset.value.traveled_path?.[key]
   return typeof value === 'number' ? value : fallback
@@ -1819,9 +1863,9 @@ async function save() {
                   {{ t(`companion.settings.button_gestures.${gesture}`) }}
                 </label>
                 <select class="form-select form-select-sm"
-                        :value="buttonAction(channel, gesture as keyof ButtonChannel)"
-                        @change="setButtonAction(channel, gesture as keyof ButtonChannel,
-                                                  ($event.target as HTMLSelectElement).value)">
+                        :value="buttonActionKind(buttonAction(channel, gesture as keyof ButtonChannel))"
+                        @change="setButtonActionKind(channel, gesture as keyof ButtonChannel,
+                                                      ($event.target as HTMLSelectElement).value)">
                   <option value="">{{ t('companion.settings.button_action_none') }}</option>
                   <optgroup :label="t('companion.settings.button_actions_group')">
                     <option v-for="action in catalog.button_actions" :key="action" :value="action">
@@ -1834,6 +1878,12 @@ async function save() {
                     </option>
                   </optgroup>
                 </select>
+                <input v-if="buttonActionLapSeries(buttonAction(channel, gesture as keyof ButtonChannel)) !== null"
+                       class="form-control form-control-sm mt-1"
+                       :value="buttonActionLapSeries(buttonAction(channel, gesture as keyof ButtonChannel))"
+                       @change="setButtonActionLapSeries(channel, gesture as keyof ButtonChannel,
+                                                          ($event.target as HTMLInputElement).value)"
+                       list="band-lap-series-list" :placeholder="t('companion.settings.lap_series')">
               </div>
             </div>
           </div>

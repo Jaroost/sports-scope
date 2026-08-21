@@ -1455,14 +1455,20 @@ module CompanionSettings
     gestures.presence
   end
 
-  # `go_to_page:<clé>` est le seul jeton composé (voir `BUTTON_ACTIONS`) : il ne
-  # tient que si la clé désigne une page qui existe réellement dans **ce**
-  # profil-ci, une fois assaini — c'est ce qui rend l'éditeur honnête, même
-  # raison que `sanitize_default_for` ne garde que des types d'itinéraire
-  # connus. Une clé qui ne correspond à aucune page (page supprimée depuis,
-  # faute de frappe dans un document composé à la main) est silencieusement
+  # `go_to_page:<clé>` et `start_lap:<série>` sont les deux jetons composés
+  # (voir `BUTTON_ACTIONS`). Le premier ne tient que si la clé désigne une
+  # page qui existe réellement dans **ce** profil-ci, une fois assaini —
+  # c'est ce qui rend l'éditeur honnête, même raison que
+  # `sanitize_default_for` ne garde que des types d'itinéraire connus. Une
+  # clé qui ne correspond à aucune page (page supprimée depuis, faute de
+  # frappe dans un document composé à la main) est silencieusement
   # abandonnée plutôt que de laisser partir un bouton qui ne fera jamais rien
   # sans qu'on le sache.
+  #
+  # `start_lap:<série>` n'a pas ce problème : une série est un texte libre
+  # (`sanitize_series`, même repli `'default'` que `MarkLapBlock`), jamais
+  # invalide — `start_lap` seul reste accepté (série `'default'`) pour un
+  # profil composé avant ce réglage.
   def sanitize_button_action(raw, page_keys)
     return nil unless raw.is_a?(String)
 
@@ -1471,6 +1477,11 @@ module CompanionSettings
       return "go_to_page:#{target}" if page_keys.include?(target)
 
       return nil
+    end
+
+    if raw.start_with?("start_lap:")
+      series = sanitize_series(raw.delete_prefix("start_lap:"))
+      return "start_lap:#{series}"
     end
 
     raw if BUTTON_ACTIONS.include?(raw)

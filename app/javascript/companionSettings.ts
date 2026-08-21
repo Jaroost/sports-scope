@@ -420,8 +420,10 @@ export interface Band {
 }
 
 // Ce qu'un geste sur un canal du D-Fly déclenche — une chaîne du catalogue
-// `button_actions`, ou `go_to_page:<clé>` (voir `Page.key`). Trois clés fixes
-// et non un `Record<string, string>` : les trois gestes sont ceux que le D-Fly
+// `button_actions`, ou un jeton composé : `go_to_page:<clé>` (voir `Page.key`)
+// ou `start_lap:<série>` (voir `CompanionSettings.sanitize_button_action`,
+// Rails, et `ButtonAction.parse`, Dart). Trois clés fixes et non un
+// `Record<string, string>` : les trois gestes sont ceux que le D-Fly
 // distingue lui-même (`catalog.button_gestures`), pas une liste ouverte.
 export interface ButtonChannel {
   click?: string
@@ -559,7 +561,10 @@ export interface Catalog {
   // `CompanionSettings::BUTTON_ACTIONS`. `go_to_page:<clé>` n'y figure pas :
   // c'est un jeton composé, construit dans l'éditeur à partir des pages du
   // profil en cours plutôt que choisi dans ce catalogue-ci (voir
-  // `goToPageTargets` dans `CompanionDashboard.vue`).
+  // `goToPageTargets` dans `CompanionDashboard.vue`). `start_lap`, lui, y
+  // figure toujours : c'est le jeton de base (série `'default'`), auquel
+  // l'éditeur ajoute `:<série>` via un champ à part (`lapSeries`), même
+  // principe que la case de bandeau « marquer un tour ».
   button_actions: string[]
   sensors: string[]
   activities: string[]

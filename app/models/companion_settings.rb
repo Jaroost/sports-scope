@@ -293,7 +293,13 @@ module CompanionSettings
   # `BLOCKS["route"]` posé sur une page (c'est l'état de la navigation qui
   # décide lequel des deux gestes il pose, même principe que `toggle_workout`
   # pour l'entraînement), ici en case de bandeau/encoche.
-  BAND_ACTIONS = %w[sleep toggle_workout leave_ride route].freeze
+  #
+  # `toggle_pause` suspend/reprend l'enregistrement — même bouton combiné que
+  # `toggle_workout`, ici c'est `RideRecorder.state` côté appli qui tranche.
+  # Pas de bouton d'arrêt à côté : une case de bandeau/encoche n'est pas
+  # l'endroit pour clore la sortie, ça reste un geste de l'écran des capteurs
+  # (voir `RecordingControl`/`RecordingBlock` pour le bouton de page, à part).
+  BAND_ACTIONS = %w[sleep toggle_workout leave_ride route toggle_pause].freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`
@@ -373,7 +379,13 @@ module CompanionSettings
   # (« un bouton pour la veille ») n'a pas besoin de deux gestes ou de deux
   # canaux distincts. Les trois cohabitent : `sleep`/`wake` restent utiles à
   # qui veut deux boutons séparés (un par geste, par exemple).
-  BUTTON_ACTIONS = %w[next_page previous_page bell horn booster horn2 start_lap sleep wake toggle_sleep].freeze
+  #
+  # `toggle_pause` suspend/reprend l'enregistrement, même principe que
+  # `toggle_sleep` — un seul bouton, c'est `RideRecorder.state` côté appli qui
+  # décide lequel des deux gestes il pose (`TogglePauseAction`, `ride_preset.dart`).
+  BUTTON_ACTIONS = %w[
+    next_page previous_page bell horn booster horn2 start_lap sleep wake toggle_sleep toggle_pause
+  ].freeze
 
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.

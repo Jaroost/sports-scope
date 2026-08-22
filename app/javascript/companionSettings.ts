@@ -390,7 +390,13 @@ export interface Page {
   // Absente ou inconnue : la page reste purement statique derrière le menu,
   // comme avant ce réglage — voir `RideShellPage._updateConditionalPages` côté
   // appli.
-  menu_condition?: 'route_active' | 'descending' | 'near_col'
+  menu_condition?: 'route_active' | 'descending' | 'near_col' | 'workout_active' | 'lap_named'
+  // Seulement pour `menu_condition: 'lap_named'` : le nom comparé au dernier
+  // tour ouvert, toutes séries confondues (`RideRecorder.lapStarted` côté
+  // appli). Sans nom exploitable, `sanitize_menu_condition` côté site retombe
+  // sur « pas de condition » plutôt que de laisser matcher une comparaison à
+  // vide.
+  menu_condition_lap_name?: string
   // Bascule automatiquement dessus quand la condition devient vraie, plutôt que
   // de seulement la faire rejoindre le défilement. N'a de sens que si
   // `menu_condition` est posé.

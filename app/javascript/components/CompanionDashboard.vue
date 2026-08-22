@@ -466,10 +466,21 @@ function toggleMenuPage(page: Page) {
 function setMenuCondition(page: Page, value: string) {
   if (props.catalog.menu_conditions.includes(value)) {
     page.menu_condition = value as Page['menu_condition']
+    if (page.menu_condition !== 'lap_named') delete page.menu_condition_lap_name
   } else {
     delete page.menu_condition
+    delete page.menu_condition_lap_name
     delete page.menu_auto_open
   }
+}
+
+// Le nom comparé au dernier tour ouvert par la condition `lap_named` — même
+// règle que `menu`/`menu_condition` ci-dessus : effacé et non mis à une
+// valeur creuse.
+function setMenuConditionLapName(page: Page, value: string) {
+  const trimmed = value.trim()
+  if (trimmed) page.menu_condition_lap_name = trimmed
+  else delete page.menu_condition_lap_name
 }
 
 // L'icône qui repère la page dans le menu ⋮ de l'appli — voir `Page.icon`.
@@ -1296,6 +1307,12 @@ async function save() {
                 </select>
               </label>
               <p class="text-body-secondary small mb-0">{{ t('companion.settings.menu_condition_help') }}</p>
+              <div v-if="page.menu_condition === 'lap_named'" class="mt-1">
+                <input class="form-control form-control-sm"
+                       :value="page.menu_condition_lap_name || ''"
+                       @change="setMenuConditionLapName(page, ($event.target as HTMLInputElement).value)"
+                       maxlength="10" :placeholder="t('companion.settings.menu_condition_lap_name_placeholder')">
+              </div>
               <div v-if="page.menu_condition" class="form-check mt-1">
                 <input v-model="page.menu_auto_open" type="checkbox" class="form-check-input"
                        :id="`menu-auto-open-${index}`">

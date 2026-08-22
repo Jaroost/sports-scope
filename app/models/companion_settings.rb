@@ -245,7 +245,7 @@ module CompanionSettings
   # Les conditions de sortie qu'une page rangée derrière le menu peut porter pour
   # rejoindre le défilement toute seule (`menu_condition`) — voir `menu_flag` et
   # `RideShellPage._updateConditionalPages` côté appli, qui les évalue en roulant.
-  MENU_CONDITIONS = %w[route_active descending near_col].freeze
+  MENU_CONDITIONS = %w[route_active descending near_col workout_active lap_named].freeze
 
   # Les mesures affichables. Exactement les clés de `MetricId` côté Dart, dans le
   # même ordre : c'est la liste que l'éditeur déroule.
@@ -856,9 +856,24 @@ module CompanionSettings
 
   # La condition qui fait rejoindre le défilement à une page rangée derrière le
   # menu, ou `nil` — absente ou inconnue, la page reste purement statique, comme
-  # avant que ce réglage existe.
-  def sanitize_menu_condition(raw)
-    raw if MENU_CONDITIONS.include?(raw)
+  # avant que ce réglage existe. `lap_named` sans nom exploitable
+  # (`sanitize_menu_condition_lap_name`) retombe sur le même `nil` : une
+  # comparaison à vide matcherait le tour 0 ouvert d'office au départ (voir
+  # `RideRecorder.start` côté appli), ce qu'aucune condition existante ne fait.
+  def sanitize_menu_condition(page)
+    raw = page["menu_condition"]
+    return nil unless MENU_CONDITIONS.include?(raw)
+    return nil if raw == "lap_named" && sanitize_menu_condition_lap_name(page).nil?
+
+    raw
+  end
+
+  # Le nom comparé au dernier tour ouvert, toutes séries confondues
+  # (`RideRecorder.lapStarted` côté appli) — même borne que le label libre
+  # d'une case « marquer un tour » (`MAX_BAND_LAP_LABEL_LENGTH`), puisque
+  # c'est exactement ce texte-là qui finit sur `RideLap.label`.
+  def sanitize_menu_condition_lap_name(page)
+    page["menu_condition_lap_name"].to_s.strip[0, MAX_BAND_LAP_LABEL_LENGTH].presence
   end
 
   # Une page rangée derrière le menu doit rester joignable.
@@ -881,7 +896,7 @@ module CompanionSettings
     return pages if index.nil?
 
     pages.each_with_index.map do |page, i|
-      i == index ? page.except("menu", "menu_condition", "menu_auto_open") : page
+      i == index ? page.except("menu", "menu_condition", "menu_condition_lap_name", "menu_auto_open") : page
     end
   end
 
@@ -897,12 +912,14 @@ module CompanionSettings
 
     dividers = sanitize_dividers(page["dividers"], rows, cols)
     menu = menu_flag(page)
-    condition = menu && sanitize_menu_condition(page["menu_condition"])
+    condition = menu && sanitize_menu_condition(page)
+    lap_name = condition == "lap_named" && sanitize_menu_condition_lap_name(page)
     title = page["title"].to_s.presence || "Mesures"
 
     { "kind" => "grid", "key" => page_key(page, title, key_seen), "title" => title,
       "rows" => rows, "cols" => cols, "cells" => cells, "dividers" => dividers.presence,
       "menu" => menu, "menu_condition" => condition,
+      "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page) }.compact
   end
@@ -975,11 +992,13 @@ module CompanionSettings
     return nil if blocks.empty?
 
     menu = menu_flag(page)
-    condition = menu && sanitize_menu_condition(page["menu_condition"])
+    condition = menu && sanitize_menu_condition(page)
+    lap_name = condition == "lap_named" && sanitize_menu_condition_lap_name(page)
     title = page["title"].to_s.presence || "Sortie"
 
     { "kind" => "list", "key" => page_key(page, title, key_seen), "title" => title,
       "blocks" => blocks, "cols" => cols, "menu" => menu, "menu_condition" => condition,
+      "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page) }.compact
   end
@@ -1055,12 +1074,14 @@ module CompanionSettings
     return nil if layout.nil?
 
     menu = menu_flag(page)
-    condition = menu && sanitize_menu_condition(page["menu_condition"])
+    condition = menu && sanitize_menu_condition(page)
+    lap_name = condition == "lap_named" && sanitize_menu_condition_lap_name(page)
     title = page["title"].to_s.presence || "Tours"
 
     { "kind" => "laps", "key" => page_key(page, title, key_seen), "title" => title,
       "series" => sanitize_series(page["series"]),
       "menu" => menu, "menu_condition" => condition,
+      "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page) }.merge(layout).compact
   end

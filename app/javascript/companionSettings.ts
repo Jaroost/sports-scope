@@ -1337,27 +1337,39 @@ export const RANGE_GAUGE_SEGMENTS = 5
 // d'action, mais éclairci pour rester lisible sur les cases éteintes.
 export const RANGE_GAUGE_COLOR = '#26A69A'
 
-// Les deux bornes du dégradé d'une jauge à plage (libre ou dynamique) *sans*
-// zone d'entraînement en mode couleur `auto` — bleu au minimum, violet au
-// maximum, pour qu'une mesure comme la vitesse porte quand même une couleur
-// qui bouge avec elle, comme le fait déjà une jauge de zones (`ZONE_COLORS`)
-// — voir `gaugeGradientColor`. Une jauge de zones garde elle sa couleur de
-// zone en mode `auto`, ce dégradé ne la concerne pas. Même paire que
-// `_gaugeGradientFrom`/`_gaugeGradientTo` côté Dart (`metric_view.dart`).
-export const GAUGE_AUTO_GRADIENT_FROM = '#2196F3'
-export const GAUGE_AUTO_GRADIENT_TO = '#673AB7'
+// Les paliers du dégradé d'une jauge à plage (libre ou dynamique) *sans* zone
+// d'entraînement en mode couleur `auto` — repris de `ZONE_COLORS` (z1 à z6,
+// cf. `CompanionBlockPreview.vue` et `ui/zone_colors.dart`) plutôt que d'une
+// paire de bornes à soi, pour qu'une mesure comme la vitesse porte quand même
+// le même code couleur qu'une jauge de zones : un simple bleu → violet se
+// traversait par un mauve terne au milieu, invisible au soleil. Une jauge de
+// zones garde elle sa couleur de zone en mode `auto`, ce dégradé ne la
+// concerne pas. Même liste que `_gaugeGradientStops` côté Dart
+// (`metric_view.dart`).
+export const GAUGE_AUTO_GRADIENT_STOPS = [
+  '#2E6FD6', // bleu, comme z1
+  '#2E9E4F', // vert, comme z2
+  '#E0C000', // jaune, comme z3
+  '#E8760C', // orange, comme z4
+  '#D32F2F', // rouge, comme z5
+  '#8E24AA', // violet, comme z6
+]
 
-// Interpolation linéaire canal par canal entre les deux bornes du dégradé —
-// `fraction` bornée à 0–1 : au-delà, on sortirait du dégradé plutôt que de
-// rester à sa couleur terminale.
+// Interpolation linéaire par tronçon, canal par canal, entre les paliers de
+// `GAUGE_AUTO_GRADIENT_STOPS` — `fraction` bornée à 0–1 : au-delà, on
+// sortirait du dégradé plutôt que de rester à sa couleur terminale.
 export function gaugeGradientColor(fraction: number): string {
-  const f = Math.min(Math.max(fraction, 0), 1)
-  const from = GAUGE_AUTO_GRADIENT_FROM
-  const to = GAUGE_AUTO_GRADIENT_TO
+  const stops = GAUGE_AUTO_GRADIENT_STOPS
+  const segments = stops.length - 1
+  const scaled = Math.min(Math.max(fraction, 0), 1) * segments
+  const index = Math.min(Math.floor(scaled), segments - 1)
+  const t = scaled - index
+  const from = stops[index]
+  const to = stops[index + 1]
   const channel = (offset: number) => {
     const a = parseInt(from.slice(offset, offset + 2), 16)
     const b = parseInt(to.slice(offset, offset + 2), 16)
-    return Math.round(a + (b - a) * f).toString(16).padStart(2, '0')
+    return Math.round(a + (b - a) * t).toString(16).padStart(2, '0')
   }
   return `#${channel(1)}${channel(3)}${channel(5)}`
 }

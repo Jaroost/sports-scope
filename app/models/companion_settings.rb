@@ -92,6 +92,13 @@ module CompanionSettings
     # long, `toggleScreenOffManual`. Rien à sanitizer au-delà du mode, même
     # raison que `recording`/`change_route` : un bouton, pas une mesure.
     "sleep" => %w[full compact],
+    # Quitter la sortie et retrouver l'accueil — même geste que « Revenir à
+    # l'accueil » dans le menu ⋮ (`DashboardPage.onLeaveRide`), posé
+    # directement sur une page plutôt que rangé dedans. Le menu ⋮ n'en devient
+    # pas moins le chemin garanti pour sortir : ce bouton n'est qu'un raccourci
+    # de plus, jamais retiré du menu. Rien à sanitizer au-delà du mode, même
+    # raison que `sleep`/`clear_route` : un bouton, pas une mesure.
+    "leave_ride" => %w[full compact],
     # Fait sonner fort le téléphone (son + vibration), pour le retrouver dans
     # un sac ou une poche — l'appli choisit un flux audio d'alarme plutôt que
     # média, pour traverser le mode silencieux comme le ferait un réveil. Le
@@ -278,7 +285,10 @@ module CompanionSettings
   # cours mais un bouton, comme `sleep` — et un préfixe `workout_` le ferait
   # happer par `BandSlot.parse` (dépôt companion) comme un mode inconnu de
   # `BAND_WORKOUT` plutôt que comme une commande.
-  BAND_ACTIONS = %w[sleep toggle_workout].freeze
+  #
+  # `leave_ride` quitte la sortie — même bouton que `BLOCKS["leave_ride"]`
+  # posé sur une page, ici en case de bandeau/encoche.
+  BAND_ACTIONS = %w[sleep toggle_workout leave_ride].freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`
@@ -844,6 +854,16 @@ module CompanionSettings
     true if page["menu"] == true
   end
 
+  # Un bouton « Revenir à l'accueil » dans l'en-tête de cette page, à côté du
+  # menu ⋮ — voir `BLOCKS["leave_ride"]` pour le même geste posé comme
+  # composant. N'enlève rien au menu ⋮, qui reste le chemin garanti pour
+  # sortir d'une sortie (voir `DashboardPage`, dépôt voisin) : ce booléen n'en
+  # ajoute qu'un raccourci de plus. Même repli qu'`menu_flag` — absent vaut
+  # « pas de bouton », des deux côtés.
+  def leave_button_flag(page)
+    true if page["leave_button"] == true
+  end
+
   # L'icône choisie dans l'éditeur pour repérer cette page dans le menu ⋮ du
   # dépôt voisin (`DashboardPage._menuFor`) — `nil` quand la clé est absente ou
   # inconnue, et l'appli retombe alors sur l'icône déduite du genre de page
@@ -921,7 +941,7 @@ module CompanionSettings
       "menu" => menu, "menu_condition" => condition,
       "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
-      "icon" => sanitize_page_icon(page) }.compact
+      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page) }.compact
   end
 
   # Les séparateurs qui tiennent dans la grille : une ligne (`"h"`) ou une colonne
@@ -1000,7 +1020,7 @@ module CompanionSettings
       "blocks" => blocks, "cols" => cols, "menu" => menu, "menu_condition" => condition,
       "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
-      "icon" => sanitize_page_icon(page) }.compact
+      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page) }.compact
   end
 
   # Les blocs d'une page `list`, ou d'une page `laps` en liste défilante
@@ -1083,7 +1103,7 @@ module CompanionSettings
       "menu" => menu, "menu_condition" => condition,
       "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
-      "icon" => sanitize_page_icon(page) }.merge(layout).compact
+      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page) }.merge(layout).compact
   end
 
   def sanitize_lap_blocks(page)

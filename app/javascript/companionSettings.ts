@@ -414,6 +414,12 @@ export interface Page {
   // blanche que l'icône d'un composant `metric`. Absente ou inconnue : l'appli
   // retombe sur l'icône déduite du genre de page (grille ou liste).
   icon?: string
+  // Un bouton « Revenir à l'accueil » dans l'en-tête de cette page, à côté du
+  // menu ⋮ — même geste que `BLOCKS["leave_ride"]` posé comme composant, ou
+  // que l'entrée du menu ⋮ lui-même (`DashboardPage.onLeaveRide`, dépôt
+  // voisin), qui reste toujours là quel que soit ce réglage. Absent vaut
+  // « pas de bouton », comportement d'avant ce réglage.
+  leave_button?: boolean
 }
 
 // La case « marquer un tour » du bandeau ou de l'encoche — seule case à
@@ -1417,6 +1423,7 @@ export interface BlockShape {
   routeCompact: boolean
   toggleWorkoutCompact: boolean
   sleepCompact: boolean
+  leaveRideCompact: boolean
   bellCompact: boolean
   navFull: boolean
   radarGauge: boolean
@@ -1456,6 +1463,7 @@ export function blockShape(block: Block): BlockShape {
     routeCompact: block.kind === 'route' && block.mode === 'compact',
     toggleWorkoutCompact: block.kind === 'toggle_workout' && block.mode === 'compact',
     sleepCompact: block.kind === 'sleep' && block.mode === 'compact',
+    leaveRideCompact: block.kind === 'leave_ride' && block.mode === 'compact',
     bellCompact: block.kind === 'bell' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
     radarGauge: block.kind === 'radar' && block.mode === 'gauge',

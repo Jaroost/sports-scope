@@ -491,6 +491,13 @@ function setPageIcon(page: Page, icon: string | undefined) {
   else delete page.icon
 }
 
+// Le bouton « Revenir à l'accueil » de l'en-tête — voir `Page.leave_button`.
+// Effacée et non mise à `false`, même règle que `menu`/`icon` ci-dessus.
+function toggleLeaveButton(page: Page) {
+  if (page.leave_button) delete page.leave_button
+  else page.leave_button = true
+}
+
 // Combien de pages restent à faire défiler. Sert à dire, sous la liste, ce que le
 // cycliste trouvera au glissé et ce qu'il devra aller chercher.
 const swipeCount = computed(
@@ -1291,6 +1298,18 @@ async function save() {
                 </button>
               </div>
               <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_icon_help') }}</p>
+            </div>
+
+            <!-- Un raccourci de plus pour sortir, jamais le seul : le menu ⋮
+                 garde toujours « Revenir à l'accueil », que cette case soit
+                 cochée ou non. -->
+            <div class="mb-2 form-check">
+              <input :id="`leave-button-${index}`" type="checkbox" class="form-check-input"
+                     :checked="!!page.leave_button" @change="toggleLeaveButton(page)">
+              <label class="form-check-label small" :for="`leave-button-${index}`">
+                {{ t('companion.settings.page_leave_button_label') }}
+              </label>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_leave_button_help') }}</p>
             </div>
 
             <!-- Seulement pour une page déjà rangée derrière le menu : la

@@ -911,6 +911,24 @@ const metricTrendSegments = computed(() => {
       </div>
     </template>
 
+    <!-- Revenir à l'accueil --------------------------------------------------
+         Quitte la sortie, même geste que « Revenir à l'accueil » dans le menu
+         ⋮ — celui-ci reste toujours là, ce bouton n'en est qu'un raccourci de
+         plus. -->
+    <template v-else-if="block.kind === 'leave_ride'">
+      <div v-if="shape.leaveRideCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
+          <i class="fa-solid fa-house" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button" :style="overrideStyle">
+          <i class="fa-solid fa-house" aria-hidden="true"></i>
+          Revenir à l'accueil
+        </span>
+      </div>
+    </template>
+
     <!-- Sonnette --------------------------------------------------------------
          Fait sonner fort le téléphone (son + vibration), pour le retrouver
          dans un sac ou une poche — même famille de bouton que « Mettre en

@@ -288,7 +288,12 @@ module CompanionSettings
   #
   # `leave_ride` quitte la sortie — même bouton que `BLOCKS["leave_ride"]`
   # posé sur une page, ici en case de bandeau/encoche.
-  BAND_ACTIONS = %w[sleep toggle_workout leave_ride].freeze
+  #
+  # `route` change/retire l'itinéraire suivi — même bouton combiné que
+  # `BLOCKS["route"]` posé sur une page (c'est l'état de la navigation qui
+  # décide lequel des deux gestes il pose, même principe que `toggle_workout`
+  # pour l'entraînement), ici en case de bandeau/encoche.
+  BAND_ACTIONS = %w[sleep toggle_workout leave_ride route].freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`

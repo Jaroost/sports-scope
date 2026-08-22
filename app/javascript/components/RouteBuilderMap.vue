@@ -1466,6 +1466,10 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
       <i class="fa-solid fa-pen" aria-hidden="true"></i>
       <span>${escapeHtml(t('routes.marker_edit_label'))}</span>
     </button>
+    <button type="button" class="place-popup-link place-popup-link--address">
+      <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
+      <span>${escapeHtml(t('routes.marker_edit_address'))}</span>
+    </button>
     <button type="button" class="place-popup-link place-popup-link--delete">
       <i class="fa-solid fa-trash" aria-hidden="true"></i>
       <span>${escapeHtml(t('routes.marker_delete'))}</span>
@@ -1492,6 +1496,18 @@ function showRouteMarkerPopup(marker: { kind: string; lng: number; lat: number; 
     const cur = routeStore.markers.value[idx]
     const { label: _oldLabel, ...rest } = cur
     routeStore.markers.value[idx] = clean ? { ...rest, label: clean } : rest
+    installRouteMarkers()
+  })
+  wrap.querySelector('.place-popup-link--address')?.addEventListener('click', () => {
+    const address = window.prompt(t('routes.marker_address'), marker.address || '')
+    if (address == null) return
+    const idx = routeStore.markers.value.indexOf(marker as any)
+    closeRouteMarkerPopup()
+    if (idx < 0) return
+    const clean = address.trim()
+    const cur = routeStore.markers.value[idx]
+    const { address: _oldAddress, ...rest } = cur
+    routeStore.markers.value[idx] = clean ? { ...rest, address: clean } : rest
     installRouteMarkers()
   })
   wrap.querySelector('.place-popup-link--delete')?.addEventListener('click', () => {

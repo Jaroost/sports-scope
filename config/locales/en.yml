@@ -1392,6 +1392,8 @@ en:
     layer_elevation_chart: "Elevation profile"
     marker_label: "Label (optional)"
     marker_edit_label: "Edit label"
+    marker_address: "Address"
+    marker_edit_address: "Edit address"
     marker_delete: "Delete marker"
     marker_start: "Start"
     marker_finish: "Finish"

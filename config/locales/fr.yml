@@ -1392,6 +1392,8 @@ fr:
     layer_elevation_chart: "Profil altimétrique"
     marker_label: "Libellé (facultatif)"
     marker_edit_label: "Modifier le libellé"
+    marker_address: "Adresse"
+    marker_edit_address: "Modifier l'adresse"
     marker_delete: "Supprimer le repère"
     marker_start: "Départ"
     marker_finish: "Arrivée"

@@ -52,7 +52,7 @@ class ProfilesController < ApplicationController
   # Profils BRouter proposés par sport (miroir du catalogue front brouter.ts /
   # PROFILES_BY_SPORT). Un profil n'est accepté que s'il est proposé pour son sport.
   ALLOWED_ROUTE_PROFILES = {
-    "cycling" => %w[trekking fastbike fastbike-lowtraffic shortest],
+    "cycling" => %w[trekking-paved trekking fastbike fastbike-lowtraffic fastbike-quiet-paved shortest],
     "mtb" => %w[gravel trekking shortest],
     "hiking" => %w[hiking-mountain trekking shortest],
   }.freeze

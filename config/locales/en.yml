@@ -1914,6 +1914,7 @@ en:
         altitude_profile: "Altitude profile"
         power_curve: "Power curve"
         metric_trend: "Trend"
+        lap_metric_trend: "Trend (lap)"
         clock: "Clock"
         empty: "Empty cell"
       modes:

@@ -795,7 +795,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             </label>
 
             <label
-              v-if="group.kind === 'zones' || group.kind === 'lap_zones' || group.kind === 'metric_trend'"
+              v-if="group.kind === 'zones' || group.kind === 'lap_zones' ||
+                group.kind === 'metric_trend' || group.kind === 'lap_metric_trend'"
               class="cbpk-param small"
             >
               {{ t('companion.settings.source') }}

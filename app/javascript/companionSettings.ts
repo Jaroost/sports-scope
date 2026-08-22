@@ -749,7 +749,10 @@ export function blockFor(
     if (params.gaugeColor) block.gauge_color = params.gaugeColor
     if (params.gaugeThickness && params.gaugeThickness !== 'normal') block.gauge_thickness = params.gaugeThickness
   }
-  if (choice.kind === 'zones' || choice.kind === 'lap_zones' || choice.kind === 'metric_trend') {
+  if (
+    choice.kind === 'zones' || choice.kind === 'lap_zones' ||
+    choice.kind === 'metric_trend' || choice.kind === 'lap_metric_trend'
+  ) {
     block.source = params.source
   }
   // Absent (`undefined`) plutôt qu'un repli : c'est « tous les appareils

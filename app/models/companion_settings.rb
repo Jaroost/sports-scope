@@ -229,6 +229,13 @@ module CompanionSettings
     # `climb_profile`/`weather_forecast` : le graphique remplit toute la
     # case, rien à faire varier selon la case.
     "metric_trend" => [],
+    # La même tendance, mais bornée au tour choisi sur une page `laps` plutôt
+    # qu'à la sortie entière — même famille que `lap_zones`/`lap_averages` :
+    # une classe/un genre à part plutôt qu'un repli de plus sur `metric_trend`,
+    # parce qu'elle n'a de sens que sur une page qui porte un tour sélectionné.
+    # Pas de `window_s` ici : le tour ouvert *est* la fenêtre, il n'y en a pas
+    # d'autre à régler.
+    "lap_metric_trend" => [],
     # L'heure courante. Seul composant, avec `training_budget`/`climb_list`, à
     # ne rien vérifier au-delà du mode générique — pas de mesure ni de source
     # à valider, comme `radar`/`recording`.
@@ -1252,14 +1259,18 @@ module CompanionSettings
       block["layout"] = layout
     when "zones", "lap_zones"
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
-    when "metric_trend"
+    when "metric_trend", "lap_metric_trend"
       block["source"] = ZONE_SOURCES.include?(raw["source"]) ? raw["source"] : "hr"
-      # Absent (`nil`) plutôt qu'un repli : c'est toute la sortie, le
-      # comportement par défaut, pas une fenêtre à moitié devinée — même
-      # raisonnement que `window_km` sur `altitude_profile`.
-      window_s = raw["window_s"]
-      if window_s.is_a?(Numeric) && window_s.positive?
-        block["window_s"] = window_s.round.clamp(METRIC_TREND_WINDOW_S_RANGE)
+      # Seulement `metric_trend` : `lap_metric_trend` n'a pas de fenêtre à
+      # régler, le tour choisi en tient déjà lieu.
+      if kind == "metric_trend"
+        # Absent (`nil`) plutôt qu'un repli : c'est toute la sortie, le
+        # comportement par défaut, pas une fenêtre à moitié devinée — même
+        # raisonnement que `window_km` sur `altitude_profile`.
+        window_s = raw["window_s"]
+        if window_s.is_a?(Numeric) && window_s.positive?
+          block["window_s"] = window_s.round.clamp(METRIC_TREND_WINDOW_S_RANGE)
+        end
       end
     when "mark_lap"
       block["series"] = sanitize_series(raw["series"])

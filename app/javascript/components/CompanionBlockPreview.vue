@@ -609,7 +609,8 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
 // (`zoneColorOf`). La courbe elle-même est tracée par-dessus, en liseré noir
 // puis trait blanc, pour rester lisible aussi bien sur un aplat sombre (Z1
 // bleu) que clair (Z3 jaune) — même parade que côté appli.
-const metricTrendTitle = computed(() => (props.block.source === 'power' ? 'Tendance puissance' : 'Tendance cardio'))
+const metricTrendTitle = computed(() =>
+  lapScope.value + (props.block.source === 'power' ? 'Tendance puissance' : 'Tendance cardio'))
 const metricTrendSample = computed(() =>
   props.block.source === 'power' ? METRIC_TREND_POWER_SAMPLE : METRIC_TREND_HR_SAMPLE)
 
@@ -1396,11 +1397,15 @@ const metricTrendSegments = computed(() => {
       </div>
     </template>
 
-    <!-- Tendance -- cardio ou puissance dans le temps, toute la sortie ou une
-         fenêtre récente (`window_s`) : même dessin dans les deux cas, seule
-         la portée change, et l'éditeur n'a pas de sortie en cours pour
-         montrer la différence. -------------------------------------------- -->
-    <div v-else-if="block.kind === 'metric_trend'" class="cbp-card cbp-metric-trend" :style="overrideStyle">
+    <!-- Tendance -- cardio ou puissance dans le temps, toute la sortie, une
+         fenêtre récente (`window_s`) ou le tour choisi (`lap_metric_trend`) :
+         même dessin dans les trois cas, seule la portée change, et l'éditeur
+         n'a pas de sortie en cours pour montrer la différence. ------------- -->
+    <div
+      v-else-if="block.kind === 'metric_trend' || block.kind === 'lap_metric_trend'"
+      class="cbp-card cbp-metric-trend"
+      :style="overrideStyle"
+    >
       <div class="cbp-title">{{ metricTrendTitle }}</div>
       <div class="cbp-metric-trend-graph">
         <svg class="cbp-metric-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -1491,7 +1496,8 @@ const metricTrendSegments = computed(() => {
 /* Le badge « Ce tour » d'une mesure posée sur une page Tours — voir la doc de
    `showLapBadge`. Un coin plutôt qu'un titre : une mesure `metric` n'a pas
    forcément de rangée d'étiquette dans sa disposition, contrairement à
-   `lap_zones`/`lap_averages` qui préfixent la leur (`lapScope`). */
+   `lap_zones`/`lap_averages`/`lap_metric_trend` qui préfixent la leur
+   (`lapScope`). */
 .cbp-lap-badge {
   position: absolute;
   top: 0.35em;

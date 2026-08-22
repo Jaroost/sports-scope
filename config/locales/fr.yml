@@ -1914,6 +1914,7 @@ fr:
         altitude_profile: "Profil d'altitude"
         power_curve: "Courbe de puissance"
         metric_trend: "Tendance"
+        lap_metric_trend: "Tendance (tour)"
         clock: "Horloge"
         empty: "Case vide"
       modes:

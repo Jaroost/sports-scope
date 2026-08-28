@@ -23,7 +23,7 @@ import RoutePickerModal from './RoutePickerModal.vue'
 //     sortie → seul le premier passe vert ; un plan ajouté après la sortie reste orange.
 // Une sortie réelle attachée à un jour : de quoi l'afficher, l'icôner (par sport) et
 // lier vers sa page.
-interface DoneActivity { source: string; external_id: string; name: string; tss: number; activity_type?: string | null }
+interface DoneActivity { source: string; external_id: string; name: string; tss: number; source_tss?: string; activity_type?: string | null }
 interface DayDone { tss: number; count: number; at: string | null; activities?: DoneActivity[] }
 // `fluid` : grille responsive « auto-fit » — au lieu des 7 colonnes fixes, les jours se
 // mettent en ligne côte à côte tant qu'ils tiennent (largeur minimale garantie par
@@ -78,6 +78,18 @@ function doneTssFor(iso: string): number | null {
 // générique par les activités elles-mêmes, cliquables).
 function activitiesFor(iso: string): DoneActivity[] {
   return props.doneByDay[iso]?.activities ?? []
+}
+
+// Pastille TSS reprise telle quelle de la liste d'activités (`.tss-badge`,
+// application.scss) : la couleur dit COMMENT le TSS a été calculé — gris = durée ×
+// intensité type du sport, rouge = cardio seul, vert = puissance (cf.
+// TrainingLoad#activity_tss). Pour le vélo, une sortie passe de rouge/gris à vert
+// dès que ses streams détaillés sont téléchargés (puissance normalisée).
+function tssSource(a: DoneActivity): 'power' | 'hr' | 'estimated' {
+  return a.source_tss === 'power' || a.source_tss === 'hr' ? a.source_tss : 'estimated'
+}
+function tssHint(a: DoneActivity): string {
+  return t(`strava.tss_hint_${tssSource(a)}`)
 }
 
 // Lien vers la page d'une activité (Strava ou importée), en respectant le préfixe de
@@ -464,6 +476,7 @@ async function moveToDay(iso: string) {
                 :key="`${act.source}-${act.external_id}`"
                 type="button"
                 class="planner-done-mark planner-done-mark-btn"
+                :class="`planner-done-mark--${tssSource(act)}`"
                 :title="t('performance.load.week.view_activity')"
                 @click="openDoneDetail(d.iso)"
               >
@@ -472,8 +485,15 @@ async function moveToDay(iso: string) {
                   <i :class="`fa-solid ${activityIcon(act.activity_type)} planner-done-icon`" aria-hidden="true"></i>
                   <span class="planner-done-name">{{ act.name }}</span>
                 </div>
-                <!-- TSS réalisé sur sa propre ligne, comme le TSS estimé des plans. -->
-                <span class="planner-done-tss planner-done-tss-line">{{ Math.round(act.tss) }} TSS</span>
+                <!-- TSS réalisé : pastille couleur = source du calcul (comme la liste d'activités). -->
+                <span
+                  class="planner-done-tss-line tss-badge tss-badge--sm"
+                  :class="`tss-badge--${tssSource(act)}`"
+                  :title="tssHint(act)"
+                >
+                  <span class="tss-value">{{ Math.round(act.tss) }}</span>
+                  <span class="tss-unit">{{ t('strava.tss_label') }}</span>
+                </span>
               </button>
               <!-- Repli : sortie enregistrée mais activité non détaillée (données partielles). -->
               <div v-if="!activitiesFor(d.iso).length" class="planner-done-mark" :title="t('performance.load.week.day_tss')">
@@ -530,7 +550,14 @@ async function moveToDay(iso: string) {
               >
                 <i :class="`fa-solid ${activityIcon(act.activity_type)} planner-detail-icon`" aria-hidden="true"></i>
                 <span class="planner-detail-name">{{ act.name }}</span>
-                <span class="planner-detail-tss">{{ Math.round(act.tss) }} TSS</span>
+                <span
+                  class="planner-detail-tss tss-badge tss-badge--sm"
+                  :class="`tss-badge--${tssSource(act)}`"
+                  :title="tssHint(act)"
+                >
+                  <span class="tss-value">{{ Math.round(act.tss) }}</span>
+                  <span class="tss-unit">{{ t('strava.tss_label') }}</span>
+                </span>
                 <i class="fa-solid fa-arrow-up-right-from-square planner-detail-go" aria-hidden="true"></i>
               </a>
             </div>
@@ -615,7 +642,14 @@ async function moveToDay(iso: string) {
             >
               <i :class="`fa-solid ${activityIcon(act.activity_type)} planner-detail-icon`" aria-hidden="true"></i>
               <span class="planner-detail-name">{{ act.name }}</span>
-              <span class="planner-detail-tss">{{ Math.round(act.tss) }} TSS</span>
+              <span
+                class="planner-detail-tss tss-badge tss-badge--sm"
+                :class="`tss-badge--${tssSource(act)}`"
+                :title="tssHint(act)"
+              >
+                <span class="tss-value">{{ Math.round(act.tss) }}</span>
+                <span class="tss-unit">{{ t('strava.tss_label') }}</span>
+              </span>
               <i class="fa-solid fa-arrow-up-right-from-square planner-detail-go" aria-hidden="true"></i>
             </a>
           </div>
@@ -723,6 +757,16 @@ async function moveToDay(iso: string) {
 }
 /* La largeur le permet : nom complet, plus de troncature. */
 .week-planner.is-vertical .planner-plan-name {
+  overflow: visible;
+  white-space: normal;
+}
+/* Idem pour les sorties réelles : sur téléphone un nom d'itinéraire tient rarement
+   sur une ligne — on le laisse passer à la ligne plutôt que déborder de la carte.
+   `min-width: 0` sur la pastille elle-même pour qu'elle accepte de rétrécir. */
+.week-planner.is-vertical .planner-done-mark {
+  min-width: 0;
+}
+.week-planner.is-vertical .planner-done-name {
   overflow: visible;
   white-space: normal;
 }
@@ -905,6 +949,34 @@ async function moveToDay(iso: string) {
 .planner-done-mark-btn:focus-visible {
   background: rgba(25, 135, 84, 0.34);
 }
+/* Fond de la pastille teinté selon la SOURCE du TSS, comme la pastille chiffrée :
+   gris = durée × intensité type du sport, rouge = cardio seul, vert = puissance.
+   La barre latérale gauche reste verte — elle dit « sortie enregistrée ce jour-là »,
+   indépendamment de la façon dont le TSS a été calculé. */
+.planner-done-mark--power {
+  background: rgba(25, 135, 84, 0.2);
+  color: #146c43;
+}
+.planner-done-mark--power:hover,
+.planner-done-mark--power:focus-visible {
+  background: rgba(25, 135, 84, 0.32);
+}
+.planner-done-mark--hr {
+  background: rgba(220, 53, 69, 0.15);
+  color: #b02a37;
+}
+.planner-done-mark--hr:hover,
+.planner-done-mark--hr:focus-visible {
+  background: rgba(220, 53, 69, 0.26);
+}
+.planner-done-mark--estimated {
+  background: rgba(108, 117, 125, 0.16);
+  color: #495057;
+}
+.planner-done-mark--estimated:hover,
+.planner-done-mark--estimated:focus-visible {
+  background: rgba(108, 117, 125, 0.28);
+}
 /* Ligne principale de la pastille sortie : icône du sport + nom de l'activité. */
 .planner-done-main {
   display: flex;
@@ -922,11 +994,11 @@ async function moveToDay(iso: string) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* TSS réalisé rejeté sous le nom, aligné à droite (miroir de planner-plan-tss-est). */
+/* Pastille TSS réalisé rejetée sous le nom, alignée à droite (miroir de
+   planner-plan-tss-est). La couleur/typo vient de `.tss-badge` (application.scss). */
 .planner-done-tss-line {
   align-self: flex-end;
   margin-left: 0;
-  font-size: 0.65rem;
 }
 /* ── Dialogue « sorties du jour » ─────────────────────────────────────────────── */
 .planner-detail-backdrop {
@@ -991,10 +1063,9 @@ async function moveToDay(iso: string) {
   white-space: nowrap;
   font-weight: 600;
 }
+/* Pastille TSS d'une ligne de détail : couleur/typo depuis `.tss-badge`. */
 .planner-detail-tss {
   flex: 0 0 auto;
-  font-weight: 700;
-  color: #146c43;
 }
 .planner-detail-go {
   flex: 0 0 auto;

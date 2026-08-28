@@ -256,6 +256,20 @@ body.fullscreen-page {
   color: #dc3545;
 }
 
+// Version compacte : mêmes couleurs, texte réduit. Pour les cases serrées du
+// calendrier (WeekPlanner) et ses listes de sorties.
+.tss-badge--sm {
+  padding: 0.05rem 0.4rem;
+
+  .tss-value {
+    font-size: 0.72rem;
+  }
+
+  .tss-unit {
+    font-size: 0.5rem;
+  }
+}
+
 .home-button{
   width: 250px;
 }

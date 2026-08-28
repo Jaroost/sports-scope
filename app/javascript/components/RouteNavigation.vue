@@ -786,6 +786,26 @@ function applyTraveledPathData() {
 }
 watch(companionStore.traveledPathPoints, applyTraveledPathData)
 
+// Boussole verrouillée côté appli compagnon (pastille au liseré blanc, geste
+// volontaire pour la rando sous couvert où la course GPS ne dit rien). Le cap
+// forcé est déjà prioritaire dans updateBearing(), MAIS updateBearing ne tourne
+// qu'au fix GPS — sous couvert / à l'arrêt les fix s'espacent et la flèche se
+// fige alors que le téléphone, lui, continue de tourner. On applique donc le cap
+// dès qu'il arrive (l'appli le pousse ~5 Hz tant qu'il est forcé), sans attendre
+// le GPS. Comme le reste du pont, ce comportement lie les deux dépôts.
+watch([companionStore.headingForced, companionStore.headingDeg], ([forced, deg]) => {
+  if (forced && deg != null) {
+    currentBearing = deg
+    extrapBearing = currentBearing
+  }
+  // GPS_INTERPOLATION est false : startAnimation() rend UNE frame, qui
+  // ré-oriente la flèche (toujours) et la carte (seulement en mode suivi — carte
+  // déplacée à la main => flèche seule, « Recentrer » réactive la rotation). Au
+  // relâchement du forçage on rend aussi une frame ; le prochain fix GPS reprend
+  // ensuite la main via updateBearing (course GPS), inchangé.
+  startAnimation()
+})
+
 // ─── Édition de l'itinéraire en séance ─────────────────────────────────────────
 // Points d'ancrage (waypoints) de l'itinéraire chargé : source de vérité de l'édition.
 // Présents pour un itinéraire chargé depuis la liste / un lien partagé ; vides pour une

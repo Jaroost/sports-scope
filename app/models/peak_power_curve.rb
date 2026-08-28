@@ -15,6 +15,14 @@ module PeakPowerCurve
     mean_max(streams, 'watts')
   end
 
+  # Δt maximal retenu entre deux échantillons : au-delà on est sur une pause /
+  # coupure d'enregistrement (auto-pause, arrêt), pas sur une cadence
+  # d'échantillonnage. Même garde-fou que `ZoneDistribution::MAX_GAP`, et pour la
+  # même raison : sans lui, un arrêt de 9 min au milieu d'une fenêtre de 20 min
+  # compte comme 0 W et dilue la moyenne — un « meilleur 20 min » qui n'a jamais
+  # eu lieu. En le bornant, la fenêtre glissante se mesure en temps ROULÉ.
+  MAX_GAP = 10
+
   # Courbe mean-max générique : pour chaque durée, la meilleure moyenne du flux
   # `key` tenue sur une fenêtre de cette longueur. `watts` en donne la courbe de
   # puissance ; `heartrate` la même chose pour la FC (cf. `LthrEstimator`).
@@ -23,7 +31,9 @@ module PeakPowerCurve
   #
   # On intègre la grandeur dans le temps (E[i] = Σ v·Δt) puis on balaie en deux
   # pointeurs : une cadence d'échantillonnage irrégulière ou une pause ne fausse
-  # donc pas la moyenne, contrairement à une moyenne d'échantillons.
+  # donc pas la moyenne, contrairement à une moyenne d'échantillons. Chaque Δt est
+  # borné à `MAX_GAP` : les pauses sont effacées de l'axe du temps (fenêtre ET
+  # intégrale), la courbe est donc « en temps roulé ».
   def mean_max(streams, key, durations = DURATIONS)
     return {} unless streams.is_a?(Hash)
 
@@ -34,16 +44,19 @@ module PeakPowerCurve
     n = [times.length, values.length].min
     return {} if n < 2
 
-    # Cumulative integral: E[i] = Σ values[k] * (time[k+1] - time[k])
+    # Temps roulé cumulé (`elapsed`) et intégrale d'énergie, sur le même Δt borné :
+    # E[i] = Σ values[k]·min(Δt, MAX_GAP). Les deux doivent ignorer les mêmes secondes.
+    elapsed = Array.new(n, 0.0)
     energy = Array.new(n, 0.0)
     (1...n).each do |i|
-      dt = times[i].to_f - times[i - 1].to_f
+      dt = (times[i].to_f - times[i - 1].to_f).clamp(0.0, MAX_GAP.to_f)
       v  = values[i - 1]
       vv = v.is_a?(Numeric) && v.finite? ? v.to_f : 0.0
-      energy[i] = energy[i - 1] + vv * [dt, 0].max
+      elapsed[i] = elapsed[i - 1] + dt
+      energy[i]  = energy[i - 1] + vv * dt
     end
 
-    total_span = times[n - 1].to_f - times[0].to_f
+    total_span = elapsed[n - 1]
     out = {}
     durations.each do |d|
       break if d > total_span
@@ -51,10 +64,10 @@ module PeakPowerCurve
       best = nil
       j = 0
       (0...n).each do |i|
-        j += 1 while j < n && (times[j].to_f - times[i].to_f) < d
+        j += 1 while j < n && (elapsed[j] - elapsed[i]) < d
         break if j >= n
 
-        dt = times[j].to_f - times[i].to_f
+        dt = elapsed[j] - elapsed[i]
         next if dt <= 0
 
         avg = (energy[j] - energy[i]) / dt

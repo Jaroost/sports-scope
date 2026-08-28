@@ -225,10 +225,12 @@ class StravaController < ApplicationController
     render json: { cached_at: strava_cached_at, run: nil, pending: 0 }
   end
 
-  # POST /strava/refresh — « Tout rafraîchir » : résumés récents + gear + (ré)enfile
-  # le téléchargement des streams manquants, en un seul appel. Renvoie l'état du run
-  # de backfill (suivi de progression) + les compteurs de sync (`synced`/`created`/
-  # `total`, mêmes sémantiques que #sync) pour les widgets qui affichent les nouveautés.
+  # POST /strava/refresh — « Tout rafraîchir » : resync complet des résumés (élague
+  # les activités supprimées côté Strava) + gear + recalcul des métriques dérivées
+  # (rafraîchit FTP / records & volumes / charge) + (ré)enfile le téléchargement des
+  # streams manquants, en un seul appel. Renvoie l'état du run de backfill (suivi de
+  # progression) + les compteurs de sync (`synced`/`created`/`total`/`recomputed`,
+  # mêmes sémantiques que #sync) pour les widgets qui affichent les nouveautés.
   def refresh
     before = current_user.strava_activities.count
     result = StravaRefreshService.new(current_user).refresh_all
@@ -236,6 +238,7 @@ class StravaController < ApplicationController
     body = result[:run] ? backfill_json(result[:run]) : { cached_at: strava_cached_at, run: nil, pending: 0 }
     render json: body.merge(
       synced: result[:synced],
+      recomputed: result[:recomputed],
       created: [total - before, 0].max,
       total: total,
       device_backfill: device_backfill_json(result[:device_run])

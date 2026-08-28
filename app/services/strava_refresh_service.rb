@@ -14,15 +14,31 @@ class StravaRefreshService
     @user = user
   end
 
-  # « Tout rafraîchir » : résumés récents + gear + (ré)enfile le backfill des
-  # streams manquants. Renvoie un rapport { synced:, run: } (run = StravaBackfillRun
-  # ou nil si rien à télécharger).
+  # « Tout rafraîchir » : resync COMPLET des résumés (repagine tout l'historique,
+  # donc élague les activités supprimées côté Strava — sinon un record « fantôme »
+  # reste à vie, cf. `StravaSyncService`), gear, recalcul des métriques dérivées
+  # des streams déjà stockés (courbe de puissance, NP, histogrammes…), puis
+  # (ré)enfile les backfills de masse. Le recalcul des dérivées rafraîchit du même
+  # coup FTP / records & volumes / charge : leurs caches sont clés sur
+  # `UserActivities.data_version` (COUNT + MAX(updated_at)), que l'élagage comme un
+  # `save!` de dérivée modifié font bouger.
+  # Renvoie un rapport { synced:, recomputed:, run:, device_run: }.
   def refresh_all
-    synced = sync_summaries
+    synced = sync_summaries(full: true)
     sync_gear
+    recomputed = recompute_derivations
     device_run = enqueue_device_backfill
     enqueue_photos_backfill
-    { synced: synced, run: enqueue_streams_backfill, device_run: device_run }
+    { synced: synced, recomputed: recomputed, run: enqueue_streams_backfill, device_run: device_run }
+  end
+
+  # Recalcule les métriques dérivées des streams (`Activityable::STREAM_DERIVATIONS`)
+  # pour les seules activités de l'utilisateur, à partir des streams DÉJÀ stockés
+  # (aucun appel Strava). Local et rapide (~5 s pour ~300 sorties) : inline plutôt
+  # qu'en job, contrairement aux backfills qui, eux, tapent l'API Strava. Renvoie
+  # le nombre d'activités dont au moins une dérivée a changé.
+  def recompute_derivations
+    ActivityDerivationsBackfill.call(user: @user)[:updated]
   end
 
   # Résumés d'activités. `full` : true = repagine tout l'historique, false =

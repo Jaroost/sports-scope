@@ -18,13 +18,18 @@ module ActivityDerivationsBackfill
   #   • updated   — au moins une dérivée recalculée et enregistrée
   #   • unchanged — déjà à jour (rien à écrire)
   #   • scanned   — lignes porteuses de streams examinées
-  def call(batch_size: BATCH_SIZE)
+  #
+  # `user:` restreint le recalcul aux activités de cet utilisateur (« Tout
+  # rafraîchir ») ; nil = toute la base (backfill de masse après un déploiement).
+  def call(batch_size: BATCH_SIZE, user: nil)
     updated = 0
     unchanged = 0
     scanned = 0
 
     [StravaActivity, ImportedActivity].each do |klass|
-      klass.with_streams.find_each(batch_size: batch_size) do |activity|
+      scope = klass.with_streams
+      scope = scope.where(user_id: user.id) if user
+      scope.find_each(batch_size: batch_size) do |activity|
         scanned += 1
         activity.recompute_derivations! ? (updated += 1) : (unchanged += 1)
       end

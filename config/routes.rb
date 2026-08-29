@@ -88,6 +88,7 @@ Rails.application.routes.draw do
   get "/strava/activities", to: "strava#activities", as: :strava_activities
   post "/strava/sync", to: "strava#sync", as: :strava_sync
   post "/strava/refresh", to: "strava#refresh", as: :strava_refresh
+  post "/strava/recompute", to: "strava#recompute", as: :strava_recompute
   get "/strava/backfill", to: "strava#backfill_status", as: :strava_backfill
   post "/strava/backfill", to: "strava#backfill"
   get "/strava/activities/:id", to: "strava#show", as: :strava_activity, constraints: { id: /\d+/ }

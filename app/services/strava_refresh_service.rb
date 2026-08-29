@@ -8,28 +8,42 @@
 #   • sync_gear      — vélos (gear) quand une activité référence un vélo inconnu
 #   • enqueue_streams_backfill — téléchargement de masse des streams manquants (job)
 #
-# Et un raccourci `refresh_all` = « Tout rafraîchir » : enchaîne les trois.
+# Et deux points d'entrée pour les boutons de l'accueil (POST /strava/refresh et
+# POST /strava/recompute), séparés depuis que « Tout rafraîchir » est scindé :
+#   • refresh_activities — resync des résumés + gear + (ré)enfile les backfills
+#   • recompute_derivations — recalcul des stats & seuils (FTP, records, charge)
+# Le bouton unique du tableau de bord (`StravaBackfill.vue`) enchaîne les deux
+# appels côté front.
 class StravaRefreshService
+  # Cadence du resync COMPLET (repagination de tout l'historique). L'incrémental —
+  # quasi instantané — ne voit jamais assez de l'historique pour distinguer une
+  # activité supprimée côté Strava d'une « pas encore récupérée » : seul le full
+  # élague les suppressions. On ne le paie donc qu'une fois par période, pas à
+  # chaque clic (un full ~10 s vs. un incrémental ~0,3 s pour ~300 sorties). Une
+  # suppression met au plus cette période à quitter le miroir local ; le bouton
+  # « Tout rafraîchir » du tableau de bord (`force_full:`) en force un tout de suite.
+  FULL_SYNC_EVERY = 7.days
+
   def initialize(user)
     @user = user
   end
 
-  # « Tout rafraîchir » : resync COMPLET des résumés (repagine tout l'historique,
-  # donc élague les activités supprimées côté Strava — sinon un record « fantôme »
-  # reste à vie, cf. `StravaSyncService`), gear, recalcul des métriques dérivées
-  # des streams déjà stockés (courbe de puissance, NP, histogrammes…), puis
-  # (ré)enfile les backfills de masse. Le recalcul des dérivées rafraîchit du même
-  # coup FTP / records & volumes / charge : leurs caches sont clés sur
-  # `UserActivities.data_version` (COUNT + MAX(updated_at)), que l'élagage comme un
-  # `save!` de dérivée modifié font bouger.
-  # Renvoie un rapport { synced:, recomputed:, run:, device_run: }.
-  def refresh_all
-    synced = sync_summaries(full: true)
+  # « Rafraîchir les activités » : resync des résumés (incrémental, sauf full dû —
+  # cf. FULL_SYNC_EVERY — qui élague en plus les activités supprimées côté Strava),
+  # gear, puis (ré)enfile les backfills de masse (streams / matériel / photos). NE
+  # recalcule PAS les dérivées : c'est le rôle de `recompute_derivations`, déclenché
+  # séparément. Note : quand le full tourne, l'élagage d'une activité supprimée
+  # bouge `UserActivities.data_version` (COUNT), donc les caches FTP / records /
+  # charge s'invalident naturellement ; ce que `recompute_derivations` ajoute, c'est
+  # le recalcul des métriques issues des streams déjà stockés.
+  # `force_full:` — repagine tout maintenant quoi qu'il arrive.
+  # Renvoie un rapport { synced:, run:, device_run: }.
+  def refresh_activities(force_full: false)
+    synced = sync_summaries(full: force_full || full_sync_due?)
     sync_gear
-    recomputed = recompute_derivations
     device_run = enqueue_device_backfill
     enqueue_photos_backfill
-    { synced: synced, recomputed: recomputed, run: enqueue_streams_backfill, device_run: device_run }
+    { synced: synced, run: enqueue_streams_backfill, device_run: device_run }
   end
 
   # Recalcule les métriques dérivées des streams (`Activityable::STREAM_DERIVATIONS`)
@@ -43,10 +57,14 @@ class StravaRefreshService
 
   # Résumés d'activités. `full` : true = repagine tout l'historique, false =
   # incrémental. Par défaut, full uniquement au tout premier passage (table vide).
+  # Quand un full tourne, on horodate `strava_full_synced_at` : c'est ce que lit
+  # `full_sync_due?` pour espacer les full de `refresh_activities`.
   # Renvoie le nombre de résumés créés/mis à jour.
   def sync_summaries(full: nil)
     full = @user.strava_activities.none? if full.nil?
-    StravaSyncService.new(@user).call(full: full)
+    count = StravaSyncService.new(@user).call(full: full)
+    @user.update_column(:strava_full_synced_at, Time.current) if full
+    count
   end
 
   # Résout les vélos Strava (gear) en base. `force: true` resync systématiquement ;
@@ -123,6 +141,14 @@ class StravaRefreshService
   end
 
   private
+
+  # Un full est dû si on n'en a jamais fait (`strava_full_synced_at` nil — inclut
+  # le tout premier passage, table vide) ou si le dernier remonte à plus de
+  # `FULL_SYNC_EVERY`.
+  def full_sync_due?
+    last = @user.strava_full_synced_at
+    last.nil? || last < FULL_SYNC_EVERY.ago
+  end
 
   # Un matériel n'apparaît ni ne change de nom souvent : on ne résout les `/gear/:id`
   # (une requête Strava par matériel) que quand une activité référence un `gear_id`

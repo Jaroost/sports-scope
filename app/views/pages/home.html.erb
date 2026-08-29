@@ -11,11 +11,13 @@
   </div>
 
   <% if user_signed_in? %>
-    <%# Rangée d'actions. « Tout rafraîchir » : synchronise résumés + vélos + streams et
-        notifie les widgets ci-dessous (via un événement window) de se recharger — sans
-        Strava lié, il n'y a rien à synchroniser. « Reprendre la navigation » : l'îlot ne
-        s'affiche que s'il trouve une séance en cours dans le localStorage (invisible
-        côté serveur), d'où un montage inconditionnel. %>
+    <%# Rangée d'actions. L'îlot RefreshAll porte deux boutons : « Rafraîchir les
+        activités » (résumés + vélos + backfills streams) et « Recalculer stats &
+        seuils » (FTP, records, charge) ; chacun notifie les widgets ci-dessous (via
+        un événement window) de se recharger — sans Strava lié, il n'y a rien à
+        synchroniser. « Reprendre la navigation » : l'îlot ne s'affiche que s'il
+        trouve une séance en cours dans le localStorage (invisible côté serveur),
+        d'où un montage inconditionnel. %>
     <div class="mb-4 d-flex flex-wrap justify-content-center align-items-center gap-2">
       <% if current_user.strava_linked? %>
         <div data-vue-component="RefreshAll"></div>

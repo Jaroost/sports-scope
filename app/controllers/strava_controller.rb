@@ -225,26 +225,38 @@ class StravaController < ApplicationController
     render json: { cached_at: strava_cached_at, run: nil, pending: 0 }
   end
 
-  # POST /strava/refresh — « Tout rafraîchir » : resync complet des résumés (élague
-  # les activités supprimées côté Strava) + gear + recalcul des métriques dérivées
-  # (rafraîchit FTP / records & volumes / charge) + (ré)enfile le téléchargement des
-  # streams manquants, en un seul appel. Renvoie l'état du run de backfill (suivi de
-  # progression) + les compteurs de sync (`synced`/`created`/`total`/`recomputed`,
-  # mêmes sémantiques que #sync) pour les widgets qui affichent les nouveautés.
+  # POST /strava/refresh — « Rafraîchir les activités » : resync des résumés
+  # (incrémental, sauf full périodique qui élague les activités supprimées côté
+  # Strava) + gear + (ré)enfile le téléchargement des streams / matériel / photos
+  # manquants. NE recalcule PAS les stats & seuils : c'est #recompute, déclenché
+  # par l'autre bouton. `?full=1` force la repagination complète tout de suite
+  # (bouton « Tout rafraîchir » du tableau de bord). Renvoie l'état du run de
+  # backfill (suivi de progression) + les compteurs de sync
+  # (`synced`/`created`/`total`, mêmes sémantiques que #sync).
   def refresh
     before = current_user.strava_activities.count
-    result = StravaRefreshService.new(current_user).refresh_all
+    result = StravaRefreshService.new(current_user).refresh_activities(force_full: params[:full].present?)
     total = current_user.strava_activities.count
     body = result[:run] ? backfill_json(result[:run]) : { cached_at: strava_cached_at, run: nil, pending: 0 }
     render json: body.merge(
       synced: result[:synced],
-      recomputed: result[:recomputed],
       created: [total - before, 0].max,
       total: total,
       device_backfill: device_backfill_json(result[:device_run])
     )
   rescue StravaSyncService::StravaApiError, StravaGearSyncService::StravaApiError => e
     render json: { error: e.message }, status: :bad_gateway
+  end
+
+  # POST /strava/recompute — « Recalculer les stats & seuils » : recalcul des
+  # métriques dérivées des streams DÉJÀ stockés (courbe de puissance, NP,
+  # histogrammes…), ce qui rafraîchit du même coup FTP / records & volumes / charge
+  # (leurs caches sont clés sur `UserActivities.data_version`, que le `save!` d'une
+  # dérivée modifiée fait bouger). Aucun appel Strava, local et rapide (~5 s pour
+  # ~300 sorties) — inline. Renvoie le nombre d'activités dont une dérivée a changé.
+  def recompute
+    updated = StravaRefreshService.new(current_user).recompute_derivations
+    render json: { recomputed: updated }
   end
 
   # GET /strava/backfill — état du run le plus récent (pour le suivi de progression).

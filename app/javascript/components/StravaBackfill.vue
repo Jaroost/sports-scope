@@ -15,9 +15,14 @@ interface BackfillRun {
 }
 
 // Statut : lecture via GET /strava/backfill (partie téléchargement des streams) ;
-// « Tout rafraîchir » : POST /strava/refresh (résumés + gear + backfill des streams).
+// « Tout rafraîchir » : POST /strava/refresh (résumés + gear + backfill des streams)
+// PUIS POST /strava/recompute (stats & seuils) — les deux moitiés de l'ancien
+// bouton unifié, que l'accueil expose désormais séparément.
 const STATUS_ENDPOINT = '/strava/backfill'
-const REFRESH_ENDPOINT = '/strava/refresh'
+// `?full=1` : ici on force la repagination complète (élague les activités
+// supprimées côté Strava) — l'accueil, lui, reste incrémental et rapide.
+const REFRESH_ENDPOINT = '/strava/refresh?full=1'
+const RECOMPUTE_ENDPOINT = '/strava/recompute'
 const POLL_MS = 3000
 
 // Réponse de POST /strava/refresh : le statut du backfill (comme GET /strava/backfill)
@@ -102,6 +107,14 @@ async function refreshAll() {
     const payload = (await res.json()) as RefreshPayload
     applyPayload(payload)
     error.value = null
+    // Second temps : recalcul des stats & seuils (FTP, records, charge) à partir
+    // des données déjà stockées. Endpoint séparé depuis la scission du bouton ;
+    // ici on enchaîne les deux pour garder « Tout rafraîchir » complet.
+    await fetch(RECOMPUTE_ENDPOINT, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    })
     // Les widgets du tableau de bord sont des îlots séparés qui ne réagissent pas à
     // cette synchro : si elle a ramené de nouvelles activités, seul un rechargement
     // les fait apparaître. Le bouton reste désactivé, la page part.

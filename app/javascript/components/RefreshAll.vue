@@ -4,25 +4,36 @@ import { t } from '../i18n'
 import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
 import { csrfToken } from '../csrf'
 
-// Bouton unique « Tout rafraîchir » de la page d'accueil. Déclenche le refresh
-// unifié (résumés + vélos + téléchargement des streams en tâche de fond) puis
-// notifie les widgets d'accueil — îlots Vue séparés, sans état partagé — via un
-// événement `window` pour qu'ils rechargent leurs données.
+// Deux boutons de la page d'accueil, issus de la scission de « Tout rafraîchir » :
+//   • « Rafraîchir les activités » → POST /strava/refresh (résumés + vélos +
+//     téléchargement des streams / matériel / photos en tâche de fond)
+//   • « Recalculer stats & seuils » → POST /strava/recompute (FTP, records &
+//     volumes, charge — recalcul à partir des données déjà téléchargées)
+// Chacun notifie ensuite les widgets d'accueil — îlots Vue séparés, sans état
+// partagé — via un événement `window` pour qu'ils rechargent leurs données.
 
 type DeviceBackfill = { status: string; total: number; done: number; pending: number }
 
-const syncing = ref(false)
+const activitiesSyncing = ref(false)
+const statsSyncing = ref(false)
 const msg = ref<string | null>(null)
 // Tonalité du message : succès (données à jour / nouveautés), info (backfill du
 // matériel d'enregistrement encore en cours en arrière-plan) ou erreur.
 const tone = ref<'success' | 'info' | 'error'>('success')
 let msgTimer: ReturnType<typeof setTimeout> | null = null
 
-async function refreshAll() {
-  if (syncing.value) return
-  syncing.value = true
+function showMessage(text: string, nextTone: 'success' | 'info' | 'error') {
+  tone.value = nextTone
+  msg.value = text
+  if (msgTimer) clearTimeout(msgTimer)
+  // Le message « en cours » (backfill du matériel) reste un peu plus longtemps.
+  msgTimer = setTimeout(() => { msg.value = null }, nextTone === 'info' ? 12000 : 6000)
+}
+
+async function refreshActivities() {
+  if (activitiesSyncing.value) return
+  activitiesSyncing.value = true
   msg.value = null
-  tone.value = 'success'
   try {
     const res = await fetch('/strava/refresh', {
       method: 'POST',
@@ -38,20 +49,39 @@ async function refreshAll() {
     // « données à jour », qui ne vaut que pour les résumés.
     const device = payload.device_backfill
     if (device && device.pending > 0) {
-      tone.value = 'info'
-      msg.value = t('strava.refresh_all_device', { done: device.done, total: device.total })
+      showMessage(t('strava.refresh_all_device', { done: device.done, total: device.total }), 'info')
     } else {
-      tone.value = 'success'
-      msg.value = created > 0 ? t('strava.refresh_all_new', { count: created }) : t('strava.refresh_all_synced')
+      showMessage(created > 0 ? t('strava.refresh_all_new', { count: created }) : t('strava.refresh_all_synced'), 'success')
     }
   } catch {
-    tone.value = 'error'
-    msg.value = t('strava.refresh_all_error')
+    showMessage(t('strava.refresh_all_error'), 'error')
   } finally {
-    syncing.value = false
-    if (msgTimer) clearTimeout(msgTimer)
-    // Le message « en cours » reste un peu plus longtemps : le backfill dure.
-    msgTimer = setTimeout(() => { msg.value = null }, tone.value === 'info' ? 12000 : 6000)
+    activitiesSyncing.value = false
+  }
+}
+
+async function recomputeStats() {
+  if (statsSyncing.value) return
+  statsSyncing.value = true
+  msg.value = null
+  try {
+    const res = await fetch('/strava/recompute', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const payload = (await res.json()) as { recomputed?: number }
+    const changed = payload.recomputed ?? 0
+    window.dispatchEvent(new CustomEvent(STRAVA_REFRESHED_EVENT, { detail: payload }))
+    showMessage(
+      changed > 0 ? t('strava.refresh_stats_changed', { count: changed }) : t('strava.refresh_stats_unchanged'),
+      'success',
+    )
+  } catch {
+    showMessage(t('strava.refresh_stats_error'), 'error')
+  } finally {
+    statsSyncing.value = false
   }
 }
 
@@ -63,16 +93,27 @@ onUnmounted(() => { if (msgTimer) clearTimeout(msgTimer) })
     <button
       type="button"
       class="btn btn-outline-warning d-flex align-items-center gap-2"
-      :disabled="syncing"
-      @click="refreshAll"
+      :disabled="activitiesSyncing"
+      @click="refreshActivities"
     >
-      <span v-if="syncing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+      <span v-if="activitiesSyncing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
       <i v-else class="fa-solid fa-rotate" aria-hidden="true"></i>
-      <span>{{ syncing ? t('strava.refresh_all_syncing') : t('strava.refresh_all_button') }}</span>
+      <span>{{ activitiesSyncing ? t('strava.refresh_all_syncing') : t('strava.refresh_activities_button') }}</span>
+    </button>
+    <button
+      type="button"
+      class="btn btn-outline-warning d-flex align-items-center gap-2"
+      :disabled="statsSyncing"
+      :title="t('strava.refresh_stats_help')"
+      @click="recomputeStats"
+    >
+      <span v-if="statsSyncing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+      <i v-else class="fa-solid fa-calculator" aria-hidden="true"></i>
+      <span>{{ statsSyncing ? t('strava.refresh_stats_syncing') : t('strava.refresh_stats_button') }}</span>
     </button>
     <small
       v-if="msg"
-      class="d-flex align-items-center gap-1"
+      class="d-flex align-items-center gap-1 w-100 justify-content-center"
       :class="tone === 'error' ? 'text-danger' : tone === 'info' ? 'text-info' : 'text-success'"
     >
       <i

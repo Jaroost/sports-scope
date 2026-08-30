@@ -483,6 +483,11 @@ export interface Reminder {
   interval_minutes: number
   message: string
   sound: string
+  // Nombre de déclenchements par sortie. Absent vaut illimité (le rappel se
+  // répète tant qu'on roule) ; `1` compose une tâche à faire une fois — p. ex.
+  // « calibrer le capteur » à la 30ᵉ minute. Voir `REMINDER_COUNT_RANGE`
+  // (Rails) et `ReminderSpec.count` (Dart).
+  count?: number
 }
 
 export interface Preset {
@@ -616,6 +621,7 @@ export interface Catalog {
   reminder_sounds: string[]
   max_reminders: number
   max_reminder_message_length: number
+  max_reminder_count: number
 }
 
 // ── Derrière le menu, ou dans le défilement ─────────────────────────────────

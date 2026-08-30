@@ -1163,6 +1163,19 @@ function removeReminder(index: number) {
   if (reminders.length === 0) preset.value.reminders = undefined
 }
 
+// Le nombre de fois qu'un rappel sonne dans la sortie. Vide (ou < 1) = illimité :
+// on retire alors la clé plutôt que d'écrire un `count` que l'assainisseur
+// (`CompanionSettings.sanitize_reminder`) jetterait de toute façon — un rappel
+// « boire » ordinaire n'en porte pas.
+function setReminderCount(reminder: Reminder, raw: string) {
+  const n = Math.round(Number(raw))
+  if (!raw || !Number.isFinite(n) || n < 1) {
+    delete reminder.count
+    return
+  }
+  reminder.count = Math.min(n, props.catalog.max_reminder_count)
+}
+
 // ── les boutons Di2 ─────────────────────────────────────────────────────────
 //
 // Quatre canaux fixes — seuls 1 et 2 sont câblés sur le matériel testé côté
@@ -2439,13 +2452,21 @@ async function save() {
         <div v-for="(reminder, index) in preset.reminders || []" :key="index"
              class="d-flex align-items-start gap-2 mb-2">
           <div class="row g-1 flex-grow-1">
-            <div class="col-3">
+            <div class="col-2">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_interval') }}</label>
               <input class="form-control form-control-sm" type="number" min="1" max="360"
                      :value="reminder.interval_minutes"
                      @input="reminder.interval_minutes = Number(($event.target as HTMLInputElement).value)">
             </div>
-            <div class="col-6">
+            <div class="col-2">
+              <label class="form-label small mb-1">{{ t('companion.settings.reminder_count') }}</label>
+              <input class="form-control form-control-sm" type="number" min="1"
+                     :max="catalog.max_reminder_count"
+                     :placeholder="t('companion.settings.reminder_count_unlimited')"
+                     :value="reminder.count ?? ''"
+                     @input="setReminderCount(reminder, ($event.target as HTMLInputElement).value)">
+            </div>
+            <div class="col-5">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_message') }}</label>
               <input class="form-control form-control-sm" type="text"
                      :maxlength="catalog.max_reminder_message_length"

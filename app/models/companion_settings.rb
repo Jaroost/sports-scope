@@ -697,6 +697,15 @@ module CompanionSettings
   # l'immense majorité des sorties, autant ne rien régler).
   REMINDER_INTERVAL_MINUTES_RANGE = 1..360
 
+  # Nombre de déclenchements par sortie pour un rappel qui n'est pas censé se
+  # répéter indéfiniment — « calibrer le capteur » se compose alors avec un
+  # intervalle de 30 min et un compte de 1 : il sonne une fois, à la 30ᵉ
+  # minute roulée, puis plus jamais. Absent (`count` non écrit) vaut
+  # **illimité** : c'est le comportement d'avant ce réglage, et un profil
+  # écrit à la main ne doit pas se retrouver muet. Vingt au plus : au-delà,
+  # autant ne pas borner.
+  REMINDER_COUNT_RANGE = 1..20
+
   # Ce que l'éditeur reçoit en props. Sérialisé tel quel dans la page.
   def catalog
     {
@@ -724,7 +733,8 @@ module CompanionSettings
       # sonnette (`ReminderSpec.sound` côté Dart), pas un catalogue à part.
       "reminder_sounds" => BELL_SOUNDS,
       "max_reminders" => MAX_REMINDERS,
-      "max_reminder_message_length" => MAX_REMINDER_MESSAGE_LENGTH
+      "max_reminder_message_length" => MAX_REMINDER_MESSAGE_LENGTH,
+      "max_reminder_count" => REMINDER_COUNT_RANGE.max
     }
   end
 
@@ -1671,8 +1681,9 @@ module CompanionSettings
     raw if BUTTON_ACTIONS.include?(raw)
   end
 
-  # Les rappels périodiques — boire, manger, entamer une intervalle. Chacun
-  # doit avoir un intervalle et un message pour survivre : l'un sans l'autre
+  # Les rappels périodiques — boire, manger, entamer une intervalle, ou une
+  # tâche à faire une seule fois dans la sortie (`count`). Chacun doit avoir
+  # un intervalle et un message pour survivre : l'un sans l'autre
   # composerait un toast muet ou qui ne sonne jamais, ni l'un ni l'autre n'est
   # ce que l'éditeur a demandé. `nil` (et non `[]`) une fois vide : même
   # convention que `sanitize_bands`/`sanitize_notch_sets`, un tableau vide
@@ -1693,11 +1704,19 @@ module CompanionSettings
     message = raw["message"].to_s.strip[0, MAX_REMINDER_MESSAGE_LENGTH]
     return nil if message.blank?
 
-    {
+    reminder = {
       "interval_minutes" => interval.round.clamp(REMINDER_INTERVAL_MINUTES_RANGE),
       "message" => message,
       "sound" => BELL_SOUNDS.include?(raw["sound"]) ? raw["sound"] : BELL_SOUNDS.first
     }
+
+    # `count` n'est écrit que s'il borne vraiment quelque chose : absent vaut
+    # illimité des deux côtés (`ReminderSpec.count` nul côté Dart), une valeur
+    # nulle ou négative ne dit rien d'autre et disparaît donc.
+    count = raw["count"]
+    reminder["count"] = count.round.clamp(REMINDER_COUNT_RANGE) if count.is_a?(Numeric) && count.positive?
+
+    reminder
   end
 
   # Absent vaut **activé** : un profil écrit à la main, ou venu d'une version

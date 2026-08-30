@@ -89,6 +89,7 @@ const catalog: Catalog = {
   reminder_sounds: ['bell', 'horn'],
   max_reminders: 12,
   max_reminder_message_length: 60,
+  max_reminder_count: 20,
 }
 
 describe('blockChoices', () => {

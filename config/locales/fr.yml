@@ -2083,6 +2083,7 @@ fr:
         large: "Grande"
         large_short: "G"
       configure_layout: "Configurer la disposition"
+      configure_page: "Configurer la page"
       metric_layouts:
         load: "Partir d'une disposition enregistrée"
         load_placeholder: "Disposition neutre"

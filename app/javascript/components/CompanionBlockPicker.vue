@@ -855,14 +855,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
           <!-- Ce que le composant montre, et d'où il tient sa donnée — une
                phrase sous l'en-tête du groupe. Les hints plus bas restent pour
-               les pièges propres à un réglage. -->
-          <p v-if="blockHelp(group.kind)" class="text-body-secondary small mb-2">
+               les pièges propres à un réglage. Pour `metric`, cette phrase
+               générique passe *sous* la section mesure (après le descriptif de
+               la mesure choisie), au plus près de « Configurer la disposition »
+               qu'elle évoque. -->
+          <p v-if="blockHelp(group.kind) && group.kind !== 'metric'" class="text-body-secondary small mb-2">
             {{ blockHelp(group.kind) }}
           </p>
 
-          <p v-if="group.kind === 'metric' && metricHelp" class="text-body-secondary small mb-2">
-            {{ metricHelp }}
-          </p>
+          <template v-if="group.kind === 'metric'">
+            <p v-if="metricHelp" class="text-body-secondary small mb-2">
+              {{ metricHelp }}
+            </p>
+            <p v-if="blockHelp('metric')" class="text-body-secondary small mb-2">
+              {{ blockHelp('metric') }}
+            </p>
+          </template>
 
           <p v-if="group.kind === 'lap_delta'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.lap_delta_hint') }}

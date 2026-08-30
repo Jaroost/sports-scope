@@ -2083,6 +2083,7 @@ en:
         large: "Large"
         large_short: "L"
       configure_layout: "Configure layout"
+      configure_page: "Configure page"
       metric_layouts:
         load: "Start from a saved layout"
         load_placeholder: "Neutral layout"

@@ -73,6 +73,12 @@ const current = ref(0)
 const openPage = ref<number | null>(null)
 const selected = ref<Cell | null>(null)
 
+// Les réglages de page (nom, icône, nombre de lignes/colonnes) repliés
+// derrière un bouton : à l'ouverture d'une page, on veut composer son
+// contenu, pas la renommer. Remis à `false` à chaque changement de page
+// ouverte (`togglePage`).
+const showPageConfig = ref(false)
+
 // La gouttière sélectionnée — jamais en même temps qu'une cellule : les deux
 // panneaux de réglage (couleur du séparateur / étendue de la cellule)
 // prendraient sinon la même place sous la grille.
@@ -445,6 +451,7 @@ function duplicatePage(index: number) {
 function togglePage(index: number) {
   openPage.value = openPage.value === index ? null : index
   selected.value = null
+  showPageConfig.value = false
 }
 
 // Ranger une page derrière le menu, ou la rendre au défilement.
@@ -692,6 +699,18 @@ function tapSlot(page: Page, row: number, col: number, cell: Cell | null) {
   // celle-ci demandait de deviner ce qu'on voulait, puis de la corriger dans un
   // panneau plus bas — deux gestes pour un choix qu'on n'avait pas fait.
   picker.value = { at: 'slot', page, row, col }
+}
+
+// Double clic / double tap sur une case posée : on ouvre directement la
+// dialogue pour changer le composant, sans passer par le bouton « Changer »
+// du panneau. Le double clic arrive après deux `@click` (sélectionne puis
+// dé-sélectionne) : on rétablit donc la sélection avant d'ouvrir. Sans effet
+// pendant un échange ou sur une case vide (le simple clic y ouvre déjà la
+// dialogue).
+function dblTapSlot(page: Page, cell: Cell | null) {
+  if (swapping.value || !cell) return
+  selected.value = cell
+  picker.value = { at: 'cell', page, cell }
 }
 
 // Le composant sorti de la dialogue, posé là où on l'a demandée.
@@ -1228,7 +1247,7 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.pages_help') }}</p>
 
         <div v-for="(page, index) in preset.pages" :key="index" class="border rounded mb-2">
-          <div class="d-flex align-items-center gap-2 p-2">
+          <div class="d-flex align-items-center flex-wrap gap-2 p-2">
             <span class="badge text-bg-secondary">{{ t(`companion.settings.page_kinds.${page.kind}`) }}</span>
             <!-- Là où elle se trouve, et pas seulement le fait qu'elle soit
                  rangée : « Menu » à côté du genre est le seul endroit où l'on
@@ -1240,119 +1259,142 @@ async function save() {
                  le voir déjà ici aide à choisir une icône qui distingue
                  vraiment cette page des pages voisines. -->
             <i v-if="page.icon" :class="page.icon" class="text-body-secondary" aria-hidden="true"></i>
-            <span class="flex-grow-1 text-truncate">{{ page.title || t('companion.settings.page_kinds.map') }}</span>
-            <button class="btn btn-sm btn-link p-1" type="button"
-                    :disabled="index === 0" @click="movePage(index, -1)">
-              <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
-            </button>
-            <button class="btn btn-sm btn-link p-1" type="button"
-                    :disabled="index === preset.pages.length - 1" @click="movePage(index, 1)">
-              <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
-            </button>
-            <!-- Le bouton s'éteint sur la dernière page du défilement : tout
-                 ranger derrière le menu ne laisserait aucune page où l'ouvrir. -->
-            <button v-if="page.kind !== 'map'" class="btn btn-sm btn-link p-1"
-                    type="button" :disabled="!canHideBehindMenu(page, preset.pages)"
-                    :title="page.menu
-                      ? t('companion.settings.show_in_swipe')
-                      : t('companion.settings.hide_behind_menu')"
-                    :aria-label="page.menu
-                      ? t('companion.settings.show_in_swipe')
-                      : t('companion.settings.hide_behind_menu')"
-                    @click="toggleMenuPage(page)">
-              <i :class="page.menu ? 'fa-solid fa-eye' : 'fa-solid fa-ellipsis-vertical'"
-                 aria-hidden="true"></i>
-            </button>
-            <button v-if="page.kind !== 'map'" class="btn btn-sm btn-outline-secondary"
-                    type="button" @click="togglePage(index)">
-              {{ t('companion.settings.edit') }}
-            </button>
-            <!-- Pas pour la carte : il ne peut jamais y en avoir deux (voir
-                 `hasMap` sur le bouton « Ajouter »), une copie disparaîtrait
-                 donc en silence au premier « Enregistrer ». -->
-            <button v-if="page.kind !== 'map'" class="btn btn-sm btn-link p-1" type="button"
-                    :title="t('companion.settings.duplicate')"
-                    :aria-label="t('companion.settings.duplicate')"
-                    @click="duplicatePage(index)">
-              <i class="fa-regular fa-copy" aria-hidden="true"></i>
-            </button>
-            <button class="btn btn-sm btn-link text-danger p-1" type="button"
-                    @click="removePage(index)">
-              <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-            </button>
+            <span class="flex-grow-1 text-truncate" style="min-width: 5rem">
+              {{ page.title || t('companion.settings.page_kinds.map') }}
+            </span>
+            <!-- Les actions groupées et poussées à droite (`ms-auto`) : sur un
+                 écran étroit, le groupe passe entier sous le titre au lieu de
+                 déborder l'en-tête bouton par bouton. -->
+            <div class="d-flex align-items-center gap-1 ms-auto">
+              <button class="btn btn-sm btn-link p-1" type="button"
+                      :disabled="index === 0" @click="movePage(index, -1)">
+                <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+              </button>
+              <button class="btn btn-sm btn-link p-1" type="button"
+                      :disabled="index === preset.pages.length - 1" @click="movePage(index, 1)">
+                <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+              </button>
+              <!-- Le bouton s'éteint sur la dernière page du défilement : tout
+                   ranger derrière le menu ne laisserait aucune page où l'ouvrir. -->
+              <button v-if="page.kind !== 'map'" class="btn btn-sm btn-link p-1"
+                      type="button" :disabled="!canHideBehindMenu(page, preset.pages)"
+                      :title="page.menu
+                        ? t('companion.settings.show_in_swipe')
+                        : t('companion.settings.hide_behind_menu')"
+                      :aria-label="page.menu
+                        ? t('companion.settings.show_in_swipe')
+                        : t('companion.settings.hide_behind_menu')"
+                      @click="toggleMenuPage(page)">
+                <i :class="page.menu ? 'fa-solid fa-eye' : 'fa-solid fa-ellipsis-vertical'"
+                   aria-hidden="true"></i>
+              </button>
+              <button v-if="page.kind !== 'map'" class="btn btn-sm btn-outline-secondary"
+                      type="button" @click="togglePage(index)">
+                {{ t('companion.settings.edit') }}
+              </button>
+              <!-- Pas pour la carte : il ne peut jamais y en avoir deux (voir
+                   `hasMap` sur le bouton « Ajouter »), une copie disparaîtrait
+                   donc en silence au premier « Enregistrer ». -->
+              <button v-if="page.kind !== 'map'" class="btn btn-sm btn-link p-1" type="button"
+                      :title="t('companion.settings.duplicate')"
+                      :aria-label="t('companion.settings.duplicate')"
+                      @click="duplicatePage(index)">
+                <i class="fa-regular fa-copy" aria-hidden="true"></i>
+              </button>
+              <button class="btn btn-sm btn-link text-danger p-1" type="button"
+                      @click="removePage(index)">
+                <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+              </button>
+            </div>
           </div>
 
           <div v-if="openPage === index" class="border-top p-2">
-            <input v-model="page.title" class="form-control form-control-sm mb-2"
-                   :placeholder="t('companion.settings.page_title')">
+            <!-- Réglages de page repliés ici pour alléger le panneau : nom,
+                 icône, bouton retour, condition de retour au défilement +
+                 bascule auto, et (plus bas, même `v-if`) le nombre de lignes /
+                 colonnes. À l'ouverture on voit d'abord l'aperçu, pas une pile
+                 de champs. -->
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary mb-2 d-inline-flex align-items-center gap-2"
+                    :class="{ active: showPageConfig }"
+                    :aria-expanded="showPageConfig"
+                    @click="showPageConfig = !showPageConfig">
+              <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+              {{ t('companion.settings.configure_page') }}
+            </button>
 
-            <!-- Le repère qui la distingue dans le menu ⋮ du téléphone, où
-                 plusieurs pages du même genre (deux grilles, par exemple) se
-                 ressembleraient sinon trait pour trait. Pas seulement pour les
-                 pages rangées derrière le menu : une page du défilement peut y
-                 être rangée plus tard sans repasser par ici. -->
-            <div class="mb-2">
-              <label class="small mb-1 d-block">{{ t('companion.settings.page_icon_label') }}</label>
-              <div class="cdb-icons">
-                <!-- « Icône par défaut » : on dessine l'icône déduite du genre
-                     de page (celle que l'appli prendra faute de choix), pas son
-                     libellé — qui débordait de la case. Le point dans le coin
-                     et l'infobulle disent que c'est le choix qui suit le genre. -->
-                <button type="button" class="cdb-icon-btn cdb-icon-btn--default"
-                        :class="{ 'cdb-icon-btn--selected': !page.icon }"
-                        :title="t('companion.settings.default_icon')"
-                        @click="setPageIcon(page, undefined)">
-                  <i :class="pageDefaultIcon(page)" aria-hidden="true"></i>
-                </button>
-                <button v-for="ic in catalog.icons" :key="ic" type="button"
-                        class="cdb-icon-btn" :class="{ 'cdb-icon-btn--selected': page.icon === ic }"
-                        @click="setPageIcon(page, ic)">
-                  <i :class="ic" aria-hidden="true"></i>
-                </button>
+            <template v-if="showPageConfig">
+              <input v-model="page.title" class="form-control form-control-sm mb-2"
+                     :placeholder="t('companion.settings.page_title')">
+
+              <!-- Le repère qui la distingue dans le menu ⋮ du téléphone, où
+                   plusieurs pages du même genre (deux grilles, par exemple) se
+                   ressembleraient sinon trait pour trait. Pas seulement pour les
+                   pages rangées derrière le menu : une page du défilement peut y
+                   être rangée plus tard sans repasser par ici. -->
+              <div class="mb-2">
+                <label class="small mb-1 d-block">{{ t('companion.settings.page_icon_label') }}</label>
+                <div class="cdb-icons">
+                  <!-- « Icône par défaut » : on dessine l'icône déduite du genre
+                       de page (celle que l'appli prendra faute de choix), pas son
+                       libellé — qui débordait de la case. Le point dans le coin
+                       et l'infobulle disent que c'est le choix qui suit le genre. -->
+                  <button type="button" class="cdb-icon-btn cdb-icon-btn--default"
+                          :class="{ 'cdb-icon-btn--selected': !page.icon }"
+                          :title="t('companion.settings.default_icon')"
+                          @click="setPageIcon(page, undefined)">
+                    <i :class="pageDefaultIcon(page)" aria-hidden="true"></i>
+                  </button>
+                  <button v-for="ic in catalog.icons" :key="ic" type="button"
+                          class="cdb-icon-btn" :class="{ 'cdb-icon-btn--selected': page.icon === ic }"
+                          @click="setPageIcon(page, ic)">
+                    <i :class="ic" aria-hidden="true"></i>
+                  </button>
+                </div>
+                <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_icon_help') }}</p>
               </div>
-              <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_icon_help') }}</p>
-            </div>
 
-            <!-- Un raccourci de plus pour sortir, jamais le seul : le menu ⋮
-                 garde toujours « Revenir à l'accueil », que cette case soit
-                 cochée ou non. -->
-            <div class="mb-2 form-check">
-              <input :id="`leave-button-${index}`" type="checkbox" class="form-check-input"
-                     :checked="!!page.leave_button" @change="toggleLeaveButton(page)">
-              <label class="form-check-label small" :for="`leave-button-${index}`">
-                {{ t('companion.settings.page_leave_button_label') }}
-              </label>
-              <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_leave_button_help') }}</p>
-            </div>
-
-            <!-- Seulement pour une page déjà rangée derrière le menu : la
-                 condition qui l'en fait ressortir toute seule pendant la
-                 sortie, et si on bascule dessus quand elle devient vraie. -->
-            <div v-if="page.menu" class="mb-2">
-              <label class="small mb-1 d-block">{{ t('companion.settings.menu_condition_label') }}
-                <select class="form-select form-select-sm" :value="page.menu_condition || ''"
-                        @change="setMenuCondition(page, ($event.target as HTMLSelectElement).value)">
-                  <option value="">{{ t('companion.settings.menu_condition_options.none') }}</option>
-                  <option v-for="condition in catalog.menu_conditions" :key="condition" :value="condition">
-                    {{ t(`companion.settings.menu_condition_options.${condition}`) }}
-                  </option>
-                </select>
-              </label>
-              <p class="text-body-secondary small mb-0">{{ t('companion.settings.menu_condition_help') }}</p>
-              <div v-if="page.menu_condition === 'lap_named'" class="mt-1">
-                <input class="form-control form-control-sm"
-                       :value="page.menu_condition_lap_name || ''"
-                       @change="setMenuConditionLapName(page, ($event.target as HTMLInputElement).value)"
-                       maxlength="10" :placeholder="t('companion.settings.menu_condition_lap_name_placeholder')">
-              </div>
-              <div v-if="page.menu_condition" class="form-check mt-1">
-                <input v-model="page.menu_auto_open" type="checkbox" class="form-check-input"
-                       :id="`menu-auto-open-${index}`">
-                <label class="form-check-label small" :for="`menu-auto-open-${index}`">
-                  {{ t('companion.settings.menu_auto_open_label') }}
+              <!-- Un raccourci de plus pour sortir, jamais le seul : le menu ⋮
+                   garde toujours « Revenir à l'accueil », que cette case soit
+                   cochée ou non. -->
+              <div class="mb-2 form-check">
+                <input :id="`leave-button-${index}`" type="checkbox" class="form-check-input"
+                       :checked="!!page.leave_button" @change="toggleLeaveButton(page)">
+                <label class="form-check-label small" :for="`leave-button-${index}`">
+                  {{ t('companion.settings.page_leave_button_label') }}
                 </label>
+                <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_leave_button_help') }}</p>
               </div>
-            </div>
+
+              <!-- Seulement pour une page déjà rangée derrière le menu : la
+                   condition qui l'en fait ressortir toute seule pendant la
+                   sortie, et si on bascule dessus quand elle devient vraie. -->
+              <div v-if="page.menu" class="mb-2">
+                <label class="small mb-1 d-block">{{ t('companion.settings.menu_condition_label') }}
+                  <select class="form-select form-select-sm" :value="page.menu_condition || ''"
+                          @change="setMenuCondition(page, ($event.target as HTMLSelectElement).value)">
+                    <option value="">{{ t('companion.settings.menu_condition_options.none') }}</option>
+                    <option v-for="condition in catalog.menu_conditions" :key="condition" :value="condition">
+                      {{ t(`companion.settings.menu_condition_options.${condition}`) }}
+                    </option>
+                  </select>
+                </label>
+                <p class="text-body-secondary small mb-0">{{ t('companion.settings.menu_condition_help') }}</p>
+                <div v-if="page.menu_condition === 'lap_named'" class="mt-1">
+                  <input class="form-control form-control-sm"
+                         :value="page.menu_condition_lap_name || ''"
+                         @change="setMenuConditionLapName(page, ($event.target as HTMLInputElement).value)"
+                         maxlength="10" :placeholder="t('companion.settings.menu_condition_lap_name_placeholder')">
+                </div>
+                <div v-if="page.menu_condition" class="form-check mt-1">
+                  <input v-model="page.menu_auto_open" type="checkbox" class="form-check-input"
+                         :id="`menu-auto-open-${index}`">
+                  <label class="form-check-label small" :for="`menu-auto-open-${index}`">
+                    {{ t('companion.settings.menu_auto_open_label') }}
+                  </label>
+                </div>
+              </div>
+            </template>
 
             <!-- Une page de tours : la série qu'elle affiche. Un bouton
                  « Marquer un tour » posé ailleurs doit porter la même clé
@@ -1387,7 +1429,7 @@ async function save() {
 
             <!-- Une grille -->
             <template v-if="isGridLayout(page)">
-              <div class="d-flex align-items-center gap-3 mb-2">
+              <div v-if="showPageConfig" class="d-flex align-items-center gap-3 mb-2">
                 <!-- `change` et non `input` : la saisie n'est validée qu'une fois
                      le champ quitté (ou Entrée), sinon effacer pour retaper
                      rétrécit la grille à une ligne au passage. -->
@@ -1407,6 +1449,12 @@ async function save() {
 
               <p class="text-body-secondary small mb-1">{{ t('companion.settings.grid_help') }}</p>
 
+              <!-- Sur PC : l'aperçu à gauche, le panneau de réglages de la case
+                   (déplacer, étendues, changer, échanger, retirer) à sa droite
+                   plutôt qu'en dessous, où il obligeait à faire l'aller-retour
+                   des yeux. Sous 768 px, `.companion-grid-edit` redevient un
+                   simple bloc : tout se réempile comme avant. -->
+              <div class="companion-grid-edit">
               <div class="companion-grid-wrap mb-2">
                 <div class="companion-grid"
                      :style="{ gridTemplateColumns: `repeat(${page.cols}, 1fr)`,
@@ -1420,10 +1468,12 @@ async function save() {
                           class="companion-cell"
                           :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected,
                                     'swap-target': swapping && canSwapTo(slot.cell),
-                                    'swap-source': swapping && slot.cell === selected }"
+                                    'swap-source': swapping && slot.cell === selected,
+                                    'cell-muted': !!selected && !swapping && !!slot.cell && slot.cell !== selected }"
                           :style="styleFor(page, slot.cell, slot.row, slot.col)"
                           :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
-                          @click="tapSlot(page, slot.row, slot.col, slot.cell)">
+                          @click="tapSlot(page, slot.row, slot.col, slot.cell)"
+                          @dblclick="dblTapSlot(page, slot.cell)">
                     <CompanionBlockPreview v-if="slot.cell" :block="slot.cell.block"
                                            :lap-scoped="page.kind === 'laps'" />
                     <i v-else class="fa-solid fa-plus text-body-secondary" aria-hidden="true"></i>
@@ -1442,9 +1492,11 @@ async function save() {
                 </button>
               </div>
 
-              <!-- Le mode échange s'annonce sous la grille : c'est la seule
-                   phrase qui dit ce que touchent maintenant les cases, y
-                   compris celles restées ternes (pas de cible valable). -->
+              <div class="companion-grid-edit-side">
+              <!-- Le mode échange s'annonce à côté de la grille (sous elle sur
+                   téléphone) : c'est la seule phrase qui dit ce que touchent
+                   maintenant les cases, y compris celles restées ternes (pas de
+                   cible valable). -->
               <p v-if="swapping" class="text-primary small mb-2">
                 <i class="fa-solid fa-right-left me-1" aria-hidden="true"></i>{{ t('companion.settings.swap_hint') }}
               </p>
@@ -1459,22 +1511,30 @@ async function save() {
                   : t('companion.settings.scale_assumed', { width: grid.width, height: grid.height }) }}
               </p>
 
-              <div v-if="selected" class="border rounded p-2 bg-body-tertiary">
-                <div class="d-flex align-items-center gap-2">
-                  <span class="flex-grow-1 text-truncate small">{{ labelFor(selected.block) }}</span>
-                  <i v-if="lapSeriesMismatch(page, selected.block)"
-                     class="fa-solid fa-triangle-exclamation text-warning"
-                     :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
-                     aria-hidden="true"></i>
-                  <button class="btn btn-sm btn-outline-secondary" type="button"
-                          @click="picker = { at: 'cell', page, cell: selected }">
-                    {{ t('companion.settings.change_block') }}
-                  </button>
-                  <button class="btn btn-sm btn-outline-secondary" type="button"
-                          :class="{ active: swapping }"
-                          @click="swapping = !swapping">
-                    <i class="fa-solid fa-right-left me-1" aria-hidden="true"></i>{{ t('companion.settings.swap_cell') }}
-                  </button>
+              <div v-if="selected" class="border border-primary rounded p-2 bg-body-tertiary">
+                <!-- `flex-wrap` + groupe de boutons : sur un écran étroit,
+                     « Changer »/« Échanger » passent sous le nom du composant
+                     au lieu de le tronquer sur la même ligne. -->
+                <div class="d-flex align-items-center flex-wrap gap-2">
+                  <i class="fa-solid fa-up-down-left-right text-primary" aria-hidden="true"></i>
+                  <span class="flex-grow-1 text-truncate small fw-semibold" style="min-width: 8rem">
+                    {{ labelFor(selected.block) }}
+                  </span>
+                  <div class="d-flex align-items-center gap-2 ms-auto">
+                    <i v-if="lapSeriesMismatch(page, selected.block)"
+                       class="fa-solid fa-triangle-exclamation text-warning"
+                       :title="t('companion.settings.lap_series_mismatch', { series: page.series || 'default' })"
+                       aria-hidden="true"></i>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            @click="picker = { at: 'cell', page, cell: selected }">
+                      {{ t('companion.settings.change_block') }}
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            :class="{ active: swapping }"
+                            @click="swapping = !swapping">
+                      <i class="fa-solid fa-right-left me-1" aria-hidden="true"></i>{{ t('companion.settings.swap_cell') }}
+                    </button>
+                  </div>
                 </div>
                 <!-- L'étendue au pas : le « + » s'éteint dès que la voisine ou le
                      bord de la grille est atteint, si bien que la place libre se
@@ -1554,6 +1614,8 @@ async function save() {
                   {{ t('companion.settings.remove_divider') }}
                 </button>
               </div>
+              </div><!-- /.companion-grid-edit-side -->
+              </div><!-- /.companion-grid-edit -->
             </template>
 
             <!-- Une page qui défile : les composants dans l'ordre où elle les
@@ -1561,7 +1623,7 @@ async function save() {
                  `list` que pour `laps` en liste défilante — même disposition
                  des deux côtés, seule la série de tours change autour. -->
             <template v-else>
-              <div class="d-flex align-items-center gap-3 mb-2">
+              <div v-if="showPageConfig" class="d-flex align-items-center gap-3 mb-2">
                 <label class="small mb-0">{{ t('companion.settings.cols') }}
                   <input class="form-control form-control-sm d-inline-block ms-1"
                          style="width: 5rem" type="number" min="1"
@@ -1599,7 +1661,11 @@ async function save() {
 
               <div v-for="(block, i) in page.blocks" :key="i"
                    class="d-flex align-items-center gap-2 mb-2">
-                <div class="companion-block-preview flex-shrink-0">
+                <!-- Double clic / double tap sur l'aperçu : ouvre la dialogue de
+                     changement, comme le bouton « Changer » de la ligne (qui
+                     reste le chemin au clavier). -->
+                <div class="companion-block-preview flex-shrink-0"
+                     @dblclick="picker = { at: 'block', page, index: i }">
                   <CompanionBlockPreview :block="block" :lap-scoped="page.kind === 'laps'" />
                 </div>
                 <span class="flex-grow-1 text-truncate small">{{ labelFor(block) }}</span>
@@ -2212,6 +2278,24 @@ async function save() {
   max-width: 16rem;
 }
 
+/* PC : aperçu à gauche, réglages de la case à droite. Sous 768 px, bloc
+   normal — l'aperçu puis les réglages, empilés comme avant. */
+@media (min-width: 768px) {
+  .companion-grid-edit {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.25rem;
+  }
+  .companion-grid-edit > .companion-grid-wrap {
+    flex: 0 0 auto;
+  }
+  .companion-grid-edit-side {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 34rem;
+  }
+}
+
 .companion-grid {
   display: grid;
   /* Les proportions exactes de `PHONE_GRID` (328 × 598 px logiques, gouttières
@@ -2299,6 +2383,12 @@ async function save() {
 
 .companion-cell.filled {
   border-style: solid;
+  cursor: pointer;
+}
+
+/* Aperçu d'un bloc de liste : double clic pour changer le composant. */
+.companion-block-preview {
+  cursor: pointer;
 }
 
 /* La vignette se met à l'échelle par sa `font-size` : dans une case de grille,
@@ -2349,9 +2439,19 @@ async function save() {
   width: 8rem;
 }
 
+/* La case sélectionnée : un anneau épais *vers l'extérieur* (dans la gouttière,
+   au-dessus des voisines grâce au `z-index`) plus un halo, là où un simple
+   liseré de 2 px en retrait se perdait sur une vignette déjà colorée et
+   bordée. Les autres cases posées s'estompent (`.cell-muted`) : la
+   sélectionnée reste la seule en pleine couleur, quelle que soit sa taille. */
 .companion-cell.selected {
-  outline: 2px solid var(--bs-primary);
-  outline-offset: -2px;
+  outline: 3px solid var(--bs-primary);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 5px rgba(13, 110, 253, 0.3);
+  z-index: 3;
+}
+.companion-cell.cell-muted {
+  opacity: 0.38;
 }
 
 /* Pendant un échange : la case qu'on va quitter reste marquée mais s'efface un
@@ -2359,14 +2459,16 @@ async function save() {
    tirets — les autres restent ternes, pour que la limite se voie sans avoir à
    la tenter (même règle que `spanLimit`/`canMove`). */
 .companion-cell.swap-source {
-  outline: 2px solid var(--bs-primary);
-  outline-offset: -2px;
+  outline: 3px solid var(--bs-primary);
+  outline-offset: 2px;
   opacity: 0.5;
+  z-index: 3;
 }
 
 .companion-cell.swap-target {
   outline: 2px dashed var(--bs-primary);
-  outline-offset: -2px;
+  outline-offset: 2px;
+  z-index: 2;
   cursor: pointer;
 }
 

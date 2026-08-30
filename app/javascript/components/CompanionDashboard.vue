@@ -86,6 +86,42 @@ const showPageConfig = ref(false)
 // pas encore de nom (`addPreset`).
 const showPresetConfig = ref(false)
 
+// Les grandes sections de l'éditeur (pages, bandeau, capteurs, radar…),
+// repliées par défaut : on déplie celle qu'on vient régler puis on la
+// referme, plutôt qu'une seule page à faire défiler sur toute sa hauteur. Un
+// objet indexé par clé de section plutôt qu'un `ref` booléen par section —
+// une douzaine à tenir, et le même gabarit d'en-tête pour chacune. Tout
+// remis à `false` au changement de profil (`select`).
+const SECTIONS = [
+  'pages', 'notch', 'bands', 'sensors', 'buttons', 'radar', 'battery',
+  'climb', 'workout', 'laps', 'reminders', 'traveled_path',
+] as const
+const openSections = reactive<Record<string, boolean>>(
+  Object.fromEntries(SECTIONS.map((name) => [name, false])),
+)
+function toggleSection(name: string) {
+  openSections[name] = !openSections[name]
+}
+
+// Une icône par section, pour la repérer d'un coup d'œil dans la liste des
+// en-têtes repliés. Purement décoratives (classes FontAwesome libres, pas la
+// liste blanche `catalog.icons` de l'appli) : elles ne voyagent pas dans le
+// document.
+const SECTION_ICONS: Record<string, string> = {
+  pages: 'fa-solid fa-layer-group',
+  notch: 'fa-solid fa-mobile-screen',
+  bands: 'fa-solid fa-table-columns',
+  sensors: 'fa-solid fa-tower-broadcast',
+  buttons: 'fa-solid fa-hand-pointer',
+  radar: 'fa-solid fa-car-rear',
+  battery: 'fa-solid fa-battery-half',
+  climb: 'fa-solid fa-mountain',
+  workout: 'fa-solid fa-dumbbell',
+  laps: 'fa-solid fa-stopwatch',
+  reminders: 'fa-solid fa-bell',
+  traveled_path: 'fa-solid fa-route',
+}
+
 // La gouttière sélectionnée — jamais en même temps qu'une cellule : les deux
 // panneaux de réglage (couleur du séparateur / étendue de la cellule)
 // prendraient sinon la même place sous la grille.
@@ -157,6 +193,36 @@ const hasMap = computed(() => preset.value.pages.some((page) => page.kind === 'm
 // profil a une carte, maison sinon) — recopiée à la main comme les vignettes
 // du picker. Le bouton « par défaut » la dessine, comme pour l'icône de page.
 const presetDefaultIcon = computed(() => (hasMap.value ? 'fa-solid fa-map' : 'fa-solid fa-house'))
+
+// Le compteur affiché dans l'en-tête d'une section repliée, pour lire d'un
+// coup d'œil ce qu'elle contient sans l'ouvrir : nombre de pages, de jeux du
+// bandeau/de l'encoche, de rappels, de raccourcis Di2 réglés, capteurs actifs
+// sur le total, et seuil d'alerte batterie. `null` pour les sections sans
+// quantité parlante (radar, cols, entraînement, tours, trajet).
+function sectionBadge(name: string): string | null {
+  switch (name) {
+    case 'pages':
+      return String(preset.value.pages.length)
+    case 'notch':
+      return String((preset.value.notch || []).length)
+    case 'bands':
+      return String(preset.value.bands.length)
+    case 'sensors': {
+      const on = props.catalog.sensors.filter((sensor) => sensorOn(sensor)).length
+      return `${on}/${props.catalog.sensors.length}`
+    }
+    case 'buttons': {
+      const channels = Object.values(preset.value.buttons || {})
+      return String(channels.reduce<number>((sum, ch) => sum + Object.keys(ch || {}).length, 0))
+    }
+    case 'reminders':
+      return String((preset.value.reminders || []).length)
+    case 'battery':
+      return `${batteryValue('threshold_percent', 20)} %`
+    default:
+      return null
+  }
+}
 
 // Les séries de tours déjà posées dans ce profil — pages `laps` et boutons
 // `mark_lap`, où qu'ils soient (liste, grille). Suggérées dans les deux
@@ -279,6 +345,7 @@ function select(index: number) {
   openPage.value = null
   selected.value = null
   showPresetConfig.value = false
+  SECTIONS.forEach((name) => { openSections[name] = false })
 }
 
 function addPreset() {
@@ -1326,8 +1393,17 @@ async function save() {
           </div>
         </template>
 
-        <!-- Les pages -->
-        <h2 class="h6">{{ t('companion.settings.pages') }}</h2>
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.pages"
+                  @click="toggleSection('pages')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.pages }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.pages" aria-hidden="true"></i>
+            {{ t('companion.settings.pages') }}
+            <span v-if="sectionBadge('pages')" class="cdb-sec-count">{{ sectionBadge('pages') }}</span>
+          </button>
+        </h2>
+        <div v-if="openSections.pages" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.pages_help') }}</p>
 
         <div v-for="(page, index) in preset.pages" :key="index" class="border rounded mb-2">
@@ -1835,8 +1911,19 @@ async function save() {
           }) }}
         </p>
 
-        <!-- La bande de l'encoche -->
-        <h2 class="h6">{{ t('companion.settings.notch') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.notch"
+                  @click="toggleSection('notch')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.notch }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.notch" aria-hidden="true"></i>
+            {{ t('companion.settings.notch') }}
+            <span v-if="sectionBadge('notch')" class="cdb-sec-count">{{ sectionBadge('notch') }}</span>
+          </button>
+        </h2>
+        <div v-if="openSections.notch" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.notch_help') }}</p>
 
         <div v-for="(set, index) in preset.notch || []" :key="index"
@@ -1957,8 +2044,19 @@ async function save() {
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_notch_set') }}
         </button>
 
-        <!-- Le bandeau -->
-        <h2 class="h6">{{ t('companion.settings.bands') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.bands"
+                  @click="toggleSection('bands')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.bands }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.bands" aria-hidden="true"></i>
+            {{ t('companion.settings.bands') }}
+            <span v-if="sectionBadge('bands')" class="cdb-sec-count">{{ sectionBadge('bands') }}</span>
+          </button>
+        </h2>
+        <div v-if="openSections.bands" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.bands_help') }}</p>
 
         <div v-for="(band, index) in preset.bands" :key="index"
@@ -2034,15 +2132,20 @@ async function save() {
         <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addBand">
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_band') }}
         </button>
-        <!-- Suggestions de série pour les champs texte des cases « marquer un
-             tour » du bandeau et de l'encoche ci-dessus — mêmes clés que
-             `lapSeries`. -->
-        <datalist id="band-lap-series-list">
-          <option v-for="series in lapSeries" :key="series" :value="series"></option>
-        </datalist>
 
-        <!-- Les capteurs -->
-        <h2 class="h6">{{ t('companion.settings.sensors_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.sensors"
+                  @click="toggleSection('sensors')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.sensors }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.sensors" aria-hidden="true"></i>
+            {{ t('companion.settings.sensors_title') }}
+            <span v-if="sectionBadge('sensors')" class="cdb-sec-count">{{ sectionBadge('sensors') }}</span>
+          </button>
+        </h2>
+        <div v-if="openSections.sensors" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.sensors_help') }}</p>
 
         <div class="row g-2 mb-4">
@@ -2058,8 +2161,19 @@ async function save() {
           </div>
         </div>
 
-        <!-- Les boutons Di2 -->
-        <h2 class="h6">{{ t('companion.settings.buttons_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.buttons"
+                  @click="toggleSection('buttons')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.buttons }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.buttons" aria-hidden="true"></i>
+            {{ t('companion.settings.buttons_title') }}
+            <span v-if="sectionBadge('buttons')" class="cdb-sec-count">{{ sectionBadge('buttons') }}</span>
+          </button>
+        </h2>
+        <div v-if="openSections.buttons" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.buttons_help') }}</p>
 
         <div class="row g-2 mb-1">
@@ -2104,8 +2218,18 @@ async function save() {
           {{ t('companion.settings.button_go_to_page_pending') }}
         </p>
 
-        <!-- Le radar -->
-        <h2 class="h6">{{ t('companion.settings.radar_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.radar"
+                  @click="toggleSection('radar')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.radar }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.radar" aria-hidden="true"></i>
+            {{ t('companion.settings.radar_title') }}
+          </button>
+        </h2>
+        <div v-if="openSections.radar" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.radar_overlay_help') }}</p>
         <div class="row g-2 align-items-end">
           <div class="col-6 col-md-3">
@@ -2156,8 +2280,19 @@ async function save() {
           </div>
         </div>
 
-        <!-- Les batteries -->
-        <h2 class="h6">{{ t('companion.settings.battery_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.battery"
+                  @click="toggleSection('battery')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.battery }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.battery" aria-hidden="true"></i>
+            {{ t('companion.settings.battery_title') }}
+            <span v-if="sectionBadge('battery')" class="cdb-sec-count">{{ sectionBadge('battery') }}</span>
+          </button>
+        </h2>
+        <div v-if="openSections.battery" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.battery_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
           <div class="col-6 col-md-3">
@@ -2178,8 +2313,18 @@ async function save() {
           </div>
         </div>
 
-        <!-- Les cols -->
-        <h2 class="h6">{{ t('companion.settings.climb_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.climb"
+                  @click="toggleSection('climb')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.climb }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.climb" aria-hidden="true"></i>
+            {{ t('companion.settings.climb_title') }}
+          </button>
+        </h2>
+        <div v-if="openSections.climb" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.climb_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
           <div class="col-6 col-md-3">
@@ -2204,8 +2349,18 @@ async function save() {
           </div>
         </div>
 
-        <!-- L'entraînement -->
-        <h2 class="h6">{{ t('companion.settings.workout_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.workout"
+                  @click="toggleSection('workout')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.workout }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.workout" aria-hidden="true"></i>
+            {{ t('companion.settings.workout_title') }}
+          </button>
+        </h2>
+        <div v-if="openSections.workout" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.workout_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
           <div class="col-6 col-md-3">
@@ -2240,8 +2395,18 @@ async function save() {
           </div>
         </div>
 
-        <!-- Les tours -->
-        <h2 class="h6">{{ t('companion.settings.laps_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.laps"
+                  @click="toggleSection('laps')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.laps }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.laps" aria-hidden="true"></i>
+            {{ t('companion.settings.laps_title') }}
+          </button>
+        </h2>
+        <div v-if="openSections.laps" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.laps_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
           <div class="col-6 col-md-3">
@@ -2256,8 +2421,19 @@ async function save() {
           </div>
         </div>
 
-        <!-- Les rappels périodiques -->
-        <h2 class="h6">{{ t('companion.settings.reminders_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.reminders"
+                  @click="toggleSection('reminders')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.reminders }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.reminders" aria-hidden="true"></i>
+            {{ t('companion.settings.reminders_title') }}
+            <span v-if="sectionBadge('reminders')" class="cdb-sec-count">{{ sectionBadge('reminders') }}</span>
+          </button>
+        </h2>
+        <div v-if="openSections.reminders" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.reminders_help') }}</p>
 
         <div v-for="(reminder, index) in preset.reminders || []" :key="index"
@@ -2294,8 +2470,18 @@ async function save() {
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_reminder') }}
         </button>
 
-        <!-- Trajet parcouru -->
-        <h2 class="h6">{{ t('companion.settings.traveled_path_title') }}</h2>
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.traveled_path"
+                  @click="toggleSection('traveled_path')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.traveled_path }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.traveled_path" aria-hidden="true"></i>
+            {{ t('companion.settings.traveled_path_title') }}
+          </button>
+        </h2>
+        <div v-if="openSections.traveled_path" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.traveled_path_help') }}</p>
         <div class="row g-2 align-items-end">
           <div class="col-6 col-md-3 d-flex align-items-center gap-2">
@@ -2315,6 +2501,7 @@ async function save() {
                    :value="traveledPathValue('opacity', 0.85)"
                    @input="setTraveledPath('opacity', Number(($event.target as HTMLInputElement).value))">
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -2343,10 +2530,64 @@ async function save() {
     <datalist id="companion-series-list">
       <option v-for="s in lapSeries" :key="s" :value="s" />
     </datalist>
+
+    <!-- Suggestions de série pour les cases « marquer un tour » du bandeau et
+         de l'encoche — hors des sections repliables pour rester joignable même
+         quand la section est fermée. Mêmes clés que `lapSeries`. -->
+    <datalist id="band-lap-series-list">
+      <option v-for="series in lapSeries" :key="series" :value="series"></option>
+    </datalist>
   </div>
 </template>
 
 <style scoped>
+/* En-tête de section repliable : une ligne pleine largeur qu'on tape pour
+   déplier, le chevron tourne quand c'est ouvert. Le `<h2 class="h6">` garde le
+   style de titre, le bouton n'hérite que de la mise en page. */
+.cdb-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.65rem 0;
+  border: 0;
+  border-top: 1px solid var(--bs-border-color);
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.cdb-sec-caret {
+  font-size: 0.7em;
+  color: var(--bs-secondary-color);
+  transition: transform 0.15s ease;
+}
+.cdb-sec-caret--open {
+  transform: rotate(90deg);
+}
+.cdb-sec-icon {
+  width: 1.1em;
+  text-align: center;
+  color: var(--bs-secondary-color);
+}
+/* La pastille de compteur, poussée au bout de l'en-tête : nombre de pages, de
+   jeux, de rappels… lisible section fermée. */
+.cdb-sec-count {
+  margin-left: auto;
+  min-width: 1.6rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  text-align: center;
+}
+.cdb-sec-body {
+  padding: 0.25rem 0 0.5rem;
+}
+
 /* Aux proportions de l'écran du téléphone, et non à la largeur de la page :
    étalée sur 60 rem, une grille de 2 × 2 donnait des cases en bandeau là où le
    cycliste en aura des carrés debout — on composait donc pour une mise en page

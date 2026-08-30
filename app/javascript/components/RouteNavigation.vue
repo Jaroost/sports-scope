@@ -15,7 +15,7 @@ import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../nav
 import type { Waypoint } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, buildCompanionClimbProfile, buildCompanionRouteClimbs,
-  buildCompanionRouteProfile, profileYAt, buildTurnChain,
+  buildCompanionRouteProfile, buildCompanionPois, profileYAt, buildTurnChain,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
   INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep, navStateFor,
   resyncOnTurn, turnLabel, turnsNearTap, turnIcon,
@@ -39,6 +39,7 @@ import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import {
   companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, companionRouteProfile,
+  companionPois, registerPoiFilterHandler,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
@@ -254,6 +255,11 @@ const pois = useNavPois({
   // sans le remplacer. N'apparaît que lorsqu'un itinéraire est chargé.
   onInsertVia: (place) => insertViaIntoRoute(place.lng, place.lat),
   hasRoute: () => hasRoute.value,
+  // Recherche POI qui suit la position en roulant (navigation libre uniquement) :
+  // sur un tracé, la recherche unique au chargement couvre déjà la bbox entière,
+  // et la feuille « POI à proximité » de l'appli trie ce jeu-là par distance à la
+  // volée — pas besoin de le réduire à une bulle autour du cycliste.
+  followAround: () => !hasRoute.value,
 })
 const { POI_CATS, poiVisible, poiCounts, loading: poiLoading } = pois
 // Toast transitoire (résultat de recherche POI, reroutage, reset, sauvegarde d'édition…),
@@ -269,6 +275,39 @@ async function searchPois(opts: { center?: [number, number] } = {}) {
   const key = res.count === 1 ? 'routes.poi_search_found_one' : 'routes.poi_search_found_other'
   showPoiToast(true, t(key, { count: res.count }))
 }
+
+// ─── POI poussés à l'appli mobile ─────────────────────────────────────────────
+// L'appli affiche les POI visibles dans sa feuille « POI à proximité », triés et
+// fléchés depuis sa propre position, et pilote les catégories via sa feuille de
+// filtre (le panneau web NavControlsPanel étant masqué dans l'appli). Silencieux
+// hors appli (companionPois court-circuite sans le canal).
+function publishCompanionPois() {
+  companionPois(buildCompanionPois(pois.visiblePlaces.value, lastPos, { ...poiVisible }))
+}
+// Le jeu affiché change (nouvelle recherche « autour de moi », bascule de filtre,
+// retrait du tracé → liste vide) → on republie. companionPois dédoublonne.
+watch(pois.visiblePlaces, publishCompanionPois)
+
+// Sur un tracé, le jeu ne change pas en roulant mais son tri par distance et son
+// plafond (les N plus proches) doivent suivre le cycliste : on republie à débit
+// réduit depuis la boucle GPS. companionPois dédoublonne — tant que les plus
+// proches ne se réordonnent pas, rien ne part.
+let lastPoisPublishAt = 0
+function maybeRepublishCompanionPois() {
+  if (!appOwnsChrome) return
+  const now = performance.now()
+  if (now - lastPoisPublishAt < 15_000) return
+  lastPoisPublishAt = now
+  publishCompanionPois()
+}
+
+// Filtre POI choisi dans l'appli : applique les catégories et republie aussitôt
+// (sans attendre le prochain flush du watcher, pour un retour immédiat).
+registerPoiFilterHandler((visibleKeys) => {
+  pois.setFilter(visibleKeys)
+  publishCompanionPois()
+})
+onBeforeUnmount(() => registerPoiFilterHandler(null))
 
 // ─── Parcours des POI ──────────────────────────────────────────────────────────
 // Enchaîne les POI visibles en volant de l'un à l'autre (cf. usePoiBrowse) : consomme les
@@ -2352,6 +2391,8 @@ function onPosition(pos: GeolocationPosition) {
   // silencieuse, throttlée dans le composable. Sur un tracé, la recherche au
   // chargement couvre déjà tout l'itinéraire — maybeFollowAround est alors inerte.
   void pois.maybeFollowAround(here)
+  // Rafraîchit le tri/plafond des POI poussés à l'appli (débit réduit).
+  maybeRepublishCompanionPois()
 
   // Notification de proximité d'un POI (bandeau du bas), en mode itinéraire comme libre.
   updatePoiProximity(here)

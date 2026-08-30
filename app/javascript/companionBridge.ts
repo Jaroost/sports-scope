@@ -8,6 +8,7 @@ import {
 import type {
   CompanionClimbProfile,
   CompanionNavState,
+  CompanionPois,
   CompanionRouteClimbs,
   CompanionRouteProfile,
 } from './navHelpers'
@@ -158,6 +159,39 @@ export function companionRouteProfile(profile: CompanionRouteProfile): void {
   channel()?.postMessage(JSON.stringify(profile))
 }
 
+// Dernier jeu de POI publié : le jeu est stable tant qu'on n'a ni re-cherché ni
+// touché au filtre, inutile de le renvoyer à chaque tic.
+let lastPoisJson = ''
+
+// Publie les POI visibles autour du cycliste (voir buildCompanionPois). Émis à
+// chaque changement du jeu affiché — nouvelle recherche « autour de moi »,
+// bascule de filtre — et vidé (pois: []) au retrait du tracé, pour que l'appli
+// n'affiche pas les POI d'un endroit qu'on a quitté. Silencieux hors appli,
+// comme companionRouteClimbs.
+export function companionPois(payload: CompanionPois): void {
+  const target = channel()
+  if (!target) return
+  const json = JSON.stringify(payload)
+  if (json === lastPoisJson) return
+  lastPoisJson = json
+  target.postMessage(json)
+}
+
+// ─── Filtre POI : commande venue de l'appli ──────────────────────────────────
+//
+// Le panneau de séance qui pilote d'ordinaire les catégories de POI
+// (NavControlsPanel) est masqué dans l'appli (`appOwnsChrome`). L'appli a sa
+// propre feuille de filtre et pousse ici la liste des catégories à afficher ;
+// RouteNavigation.vue la relaie à useNavPois. Même modèle que
+// registerSleepHandlers : valable tant que la page de navigation est montée,
+// `null` au démontage.
+type PoiFilterHandler = (visibleKeys: string[]) => void
+let poiFilterHandler: PoiFilterHandler | null = null
+
+export function registerPoiFilterHandler(handler: PoiFilterHandler | null): void {
+  poiFilterHandler = handler
+}
+
 // Une page web ne peut pas savoir si l'appli est installée : au mieux on sait
 // qu'elle *pourrait* l'être. On se limite donc à Android, et on ne propose rien
 // quand on tourne déjà dans l'appli, où le lien n'aurait aucun sens.
@@ -273,6 +307,9 @@ export function installCompanionBridge(): void {
   // gardé aucun contexte, elle attend un état complet.
   lastNavJson = ''
   lastNavAt = 0
+  // Idem pour les POI : après un rechargement, le prochain jeu doit repartir même
+  // s'il est identique à celui d'avant (l'appli n'a rien gardé).
+  lastPoisJson = ''
 
   const target = window as unknown as {
     sportsScopeCompanion?: {
@@ -283,6 +320,7 @@ export function installCompanionBridge(): void {
       offlineRemove(): void
       sleepEnter(): void
       sleepExit(): void
+      setPoiFilter(visibleKeys: string[]): void
     }
   }
 
@@ -320,6 +358,17 @@ export function installCompanionBridge(): void {
     offlineRemove() { offlineHandlers?.remove() },
     sleepEnter() { sleepHandlers?.enter() },
     sleepExit() { sleepHandlers?.exit() },
+    // Liste des clés de catégorie à afficher (poiCategories.ts). Une valeur
+    // malformée ne doit jamais casser la navigation : on filtre et on ignore.
+    setPoiFilter(visibleKeys: string[]) {
+      try {
+        if (Array.isArray(visibleKeys)) {
+          poiFilterHandler?.(visibleKeys.filter((k) => typeof k === 'string'))
+        }
+      } catch {
+        // Filtre inexploitable : la page garde ses catégories courantes.
+      }
+    },
   }
 
   // On annonce que le pont est prêt : l'appli répond par un état complet, sans

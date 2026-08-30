@@ -322,6 +322,18 @@ export function useNavPois(deps: {
     applyPoiVisibility()
   }
 
+  // Fixe d'un coup les catégories visibles (feuille de filtre de l'appli — voir
+  // registerPoiFilterHandler). `visibleKeys` est la liste des catégories à
+  // montrer ; toutes les autres du registre passent masquées. Referme le popup si
+  // sa catégorie vient d'être masquée, comme togglePoi.
+  function setFilter(visibleKeys: string[]) {
+    const show = new Set(visibleKeys)
+    for (const cat of POI_CATS) poiVisible[cat.key] = show.has(cat.key)
+    const activeKey = activePlaceEl?.dataset.poiKey
+    if (activeKey && !poiVisible[activeKey]) closePlacePopup()
+    applyPoiVisibility()
+  }
+
   // Met les marqueurs POI à l'échelle du zoom (échelle plus douce que le tracé). La
   // boîte se redimensionne directement, l'icône en police suit. Appelée à l'install
   // et par la boucle de rendu de l'appelant (au changement de zoom).
@@ -429,6 +441,7 @@ export function useNavPois(deps: {
     loading,
     fetchPlaces,
     maybeFollowAround,
+    setFilter,
     nearestVisiblePoi,
     visiblePlaces,
     openPlacePopup,

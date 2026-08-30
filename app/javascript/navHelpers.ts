@@ -1,7 +1,7 @@
 // Helpers purs de la navigation (RouteNavigation.vue). Aucune dépendance à l'état
 // réactif ni à MapLibre : tout est passé en paramètre, pour rester testable et
 // réutilisable par les sous-composants (NavTurnBanner, NavClimbCard, NavScreenOff…).
-import { colorForGrade, gradeForIndex } from './routeHelpers'
+import { colorForGrade, gradeForIndex, haversine } from './routeHelpers'
 import type { Climb, LngLat, Maneuver, TurnPoint } from './routeHelpers'
 import { ARRIVAL_M, ARRIVAL_APPROACH_M } from './navConstants'
 
@@ -811,6 +811,52 @@ export function buildCompanionRouteClimbs(
         segmentGrades,
       }
     }),
+  }
+}
+
+// ─── POI poussés à l'application mobile ───────────────────────────────────────
+
+// Un POI ponctuel, réduit à ce dont l'appli a besoin pour le lister (icône via
+// `type` → registre, distance et cap calculés côté Dart depuis le GPS de l'appli).
+export interface CompanionPoiPoint { name: string; type: string; lat: number; lng: number }
+
+// Les POI visibles autour du cycliste, poussés à l'appli à chaque changement du
+// jeu affiché (nouvelle recherche « autour de moi », bascule de filtre, retrait
+// du tracé → liste vide). L'appli les affiche dans sa feuille « POI à proximité »,
+// triés et fléchés depuis sa propre position — d'où l'envoi de `filter` aussi :
+// la feuille doit partir des cases réellement actives sur la page (celles des
+// préférences du compte), pas d'un défaut.
+export interface CompanionPois {
+  type: 'pois'
+  filter: Record<string, boolean>
+  pois: CompanionPoiPoint[]
+}
+
+// Plafond du nombre de POI envoyés : au-delà, la feuille de l'appli devient
+// illisible et la charge utile grossit pour rien. On garde les plus proches.
+export const COMPANION_POIS_MAX = 120
+
+// Construit le message `pois`. Pur : trie les POI par distance à `from` (position
+// courante) quand elle est connue, plafonne, et ne garde que les champs utiles.
+export function buildCompanionPois(
+  places: CompanionPoiPoint[],
+  from: LngLat | null,
+  filter: Record<string, boolean>,
+): CompanionPois {
+  const sorted = from
+    ? [...places].sort(
+        (a, b) => haversine(from, [a.lng, a.lat]) - haversine(from, [b.lng, b.lat]),
+      )
+    : places
+  return {
+    type: 'pois',
+    filter: { ...filter },
+    pois: sorted.slice(0, COMPANION_POIS_MAX).map((p) => ({
+      name: p.name,
+      type: p.type,
+      lat: p.lat,
+      lng: p.lng,
+    })),
   }
 }
 

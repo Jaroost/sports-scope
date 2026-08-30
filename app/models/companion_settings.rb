@@ -812,6 +812,9 @@ module CompanionSettings
       # inconnu retombe sur le défaut : composer une longue description ne doit
       # pas faire perdre le profil, juste sa fin.
       "description" => raw["description"].to_s.strip[0, MAX_DESCRIPTION_LENGTH].presence,
+      # L'icône qui repère ce profil dans le sélecteur de départ de l'appli —
+      # voir `sanitize_preset_icon`.
+      "icon" => sanitize_preset_icon(raw),
       # Les types d'itinéraire pour lesquels ce profil est proposé. Absent vaut
       # « aucun type particulier » : un profil qui n'a jamais touché à ce réglage
       # continue de se proposer partout, comme avant que la fonctionnalité existe.
@@ -949,6 +952,16 @@ module CompanionSettings
   # jour des deux côtés.
   def sanitize_page_icon(page)
     page["icon"] if ICONS.include?(page["icon"])
+  end
+
+  # L'icône choisie dans l'éditeur pour repérer ce profil dans le sélecteur de
+  # départ de l'appli (`preset_picker.dart`, `main.dart` du dépôt voisin) —
+  # `nil` quand la clé est absente ou inconnue, et l'appli retombe alors sur
+  # son repère par défaut (carte si le profil en a une, maison sinon), comme
+  # avant ce réglage. Même liste blanche que les icônes de page et de
+  # composant (`ICONS`).
+  def sanitize_preset_icon(raw)
+    raw["icon"] if ICONS.include?(raw["icon"])
   end
 
   # La condition qui fait rejoindre le défilement à une page rangée derrière le

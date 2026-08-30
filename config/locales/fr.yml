@@ -1676,6 +1676,8 @@ fr:
       name: "Nom du profil"
       description: "Description"
       description_placeholder: "Ce qui aide à choisir, affiché dans l'appli au départ"
+      preset_icon_label: "Icône du profil"
+      preset_icon_help: "Repère ce profil dans le sélecteur de départ de l'appli, où plusieurs profils se ressembleraient sinon. « Icône par défaut » affiche une carte si le profil en a une, une maison sinon."
       activities_title: "Types d'itinéraire"
       activities_help: "Les types d'itinéraire pour lesquels ce profil est proposé. Un profil peut convenir à plusieurs types ; un type n'a qu'un seul profil par défaut, présélectionné au lancement d'une navigation."
       default_for: "Profil par défaut — %{sport}"
@@ -2084,6 +2086,7 @@ fr:
         large_short: "G"
       configure_layout: "Configurer la disposition"
       configure_page: "Configurer la page"
+      configure_preset: "Configurer le profil"
       metric_layouts:
         load: "Partir d'une disposition enregistrée"
         load_placeholder: "Disposition neutre"

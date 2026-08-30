@@ -79,6 +79,13 @@ const selected = ref<Cell | null>(null)
 // ouverte (`togglePage`).
 const showPageConfig = ref(false)
 
+// Idem pour les réglages d'identité du profil (nom, description, icône, types
+// d'itinéraire) : à l'ouverture de l'éditeur on compose d'abord les pages et
+// le bandeau, on ne renomme pas le profil. Remis à `false` à chaque
+// changement de profil (`select`), forcé à `true` sur un profil neuf qui n'a
+// pas encore de nom (`addPreset`).
+const showPresetConfig = ref(false)
+
 // La gouttière sélectionnée — jamais en même temps qu'une cellule : les deux
 // panneaux de réglage (couleur du séparateur / étendue de la cellule)
 // prendraient sinon la même place sous la grille.
@@ -144,6 +151,12 @@ let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const preset = computed(() => presets[current.value])
 const hasMap = computed(() => preset.value.pages.some((page) => page.kind === 'map'))
+
+// L'icône que l'appli affiche faute de choix explicite dans le sélecteur de
+// départ (`preset_picker.dart`, `main.dart` du dépôt voisin : carte si le
+// profil a une carte, maison sinon) — recopiée à la main comme les vignettes
+// du picker. Le bouton « par défaut » la dessine, comme pour l'icône de page.
+const presetDefaultIcon = computed(() => (hasMap.value ? 'fa-solid fa-map' : 'fa-solid fa-house'))
 
 // Les séries de tours déjà posées dans ce profil — pages `laps` et boutons
 // `mark_lap`, où qu'ils soient (liste, grille). Suggérées dans les deux
@@ -265,6 +278,7 @@ function select(index: number) {
   current.value = index
   openPage.value = null
   selected.value = null
+  showPresetConfig.value = false
 }
 
 function addPreset() {
@@ -291,6 +305,10 @@ function addPreset() {
     ],
   })
   select(presets.length - 1)
+  // Un profil neuf n'a pas encore de nom : on ouvre d'emblée ses réglages
+  // d'identité, sinon « Nouveau profil » resterait tel quel sans qu'on voie où
+  // le changer.
+  showPresetConfig.value = true
 }
 
 function duplicatePreset() {
@@ -305,6 +323,14 @@ function duplicatePreset() {
 function removePreset() {
   presets.splice(current.value, 1)
   select(Math.max(0, current.value - 1))
+}
+
+// L'icône qui repère ce profil dans le sélecteur de départ de l'appli — voir
+// `Preset.icon`. Effacée et non mise à une valeur creuse quand on choisit
+// « par défaut », même règle que l'icône de page (`setPageIcon`).
+function setPresetIcon(icon: string | undefined) {
+  if (icon) preset.value.icon = icon
+  else delete preset.value.icon
 }
 
 // ── les types d'itinéraire ──────────────────────────────────────────────────
@@ -862,6 +888,23 @@ function labelFor(block: Block): string {
   return parts.join(' · ')
 }
 
+// La phrase qui dit ce que le composant montre et d'où il tient sa donnée —
+// la même que la dialogue de choix affiche sous l'en-tête de son groupe
+// (`companion.settings.block_help`). Reprise dans le panneau de réglage de la
+// case pour l'avoir sous les yeux pendant qu'on règle sa place et son étendue,
+// pas seulement au moment de le choisir. Pour un chiffre unique, c'est l'aide
+// de *sa* mesure qu'on veut ici — pas celle du genre, qui parle de « la mesure
+// choisie ci-dessus » et n'a de sens que dans la dialogue. `''` tant qu'aucune
+// clé n'existe (masquée).
+function blockDescription(block: Block): string {
+  if (block.kind === 'metric') {
+    return block.metric && block.metric !== 'clock'
+      ? t(`companion.settings.metric_help.${block.metric}`, { defaultValue: '' })
+      : ''
+  }
+  return t(`companion.settings.block_help.${block.kind}`, { defaultValue: '' })
+}
+
 // Un bouton « Marquer un tour » posé sur une page Tours dont la série ne
 // correspond pas à celle de la page : il marque bien un tour, mais pas dans
 // la liste que cette page affiche — deux réglages indépendants de l'éditeur
@@ -1181,7 +1224,7 @@ async function save() {
       <li v-for="(item, index) in presets" :key="index" class="nav-item">
         <button class="nav-link" :class="{ active: index === current }"
                 type="button" @click="select(index)">
-          {{ item.name }}
+          <i v-if="item.icon" :class="item.icon" class="me-1" aria-hidden="true"></i>{{ item.name }}
         </button>
       </li>
       <li class="nav-item">
@@ -1193,54 +1236,95 @@ async function save() {
 
     <div v-if="preset" class="card mb-3">
       <div class="card-body">
-        <div class="mb-2">
-          <label class="form-label small mb-1">{{ t('companion.settings.name') }}</label>
-          <input v-model="preset.name" class="form-control" type="text">
-        </div>
-        <div class="mb-2">
-          <label class="form-label small mb-1">{{ t('companion.settings.description') }}</label>
-          <input v-model="preset.description" class="form-control" type="text" maxlength="140"
-                 :placeholder="t('companion.settings.description_placeholder')">
-        </div>
-        <div class="mb-3">
-          <label class="form-label small mb-1">{{ t('companion.settings.activities_title') }}</label>
-          <p class="text-body-secondary small mb-2">{{ t('companion.settings.activities_help') }}</p>
-          <div class="d-flex flex-column gap-1">
-            <div v-for="activity in catalog.activities" :key="activity"
-                 class="d-flex align-items-center gap-2">
-              <div class="form-check mb-0">
-                <input class="form-check-input" type="checkbox" :id="`activity-${activity}`"
-                       :checked="presetHasActivity(activity)"
-                       @change="toggleActivity(activity, ($event.target as HTMLInputElement).checked)">
-                <label class="form-check-label small" :for="`activity-${activity}`">
-                  {{ t(`routes.wt_sport_${activity}`) }}
-                </label>
-              </div>
-              <!-- L'étoile n'apparaît qu'une fois le type lié : marquer un
-                   défaut pour un type que ce profil ne propose même pas ne
-                   voudrait rien dire. -->
-              <button v-if="presetHasActivity(activity)" type="button"
-                      class="btn btn-sm btn-link p-0"
-                      :class="isDefaultForActivity(activity) ? 'text-warning' : 'text-body-secondary'"
-                      :title="t('companion.settings.default_for', { sport: t(`routes.wt_sport_${activity}`) })"
-                      :aria-label="t('companion.settings.default_for', { sport: t(`routes.wt_sport_${activity}`) })"
-                      @click="toggleDefaultForActivity(activity)">
-                <i :class="isDefaultForActivity(activity) ? 'fa-solid fa-star' : 'fa-regular fa-star'"
-                   aria-hidden="true"></i>
-              </button>
-            </div>
+        <!-- Nom, description, icône et types d'itinéraire repliés derrière un
+             bouton, même parti pris que les réglages d'une page
+             (`showPageConfig`) : ce sont les traits d'identité du profil, on
+             les fixe une fois puis on compose les pages et le bandeau. Les
+             pastilles du sélecteur en haut redisent déjà le nom et l'icône
+             pendant qu'on travaille. -->
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+          <button type="button"
+                  class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-2"
+                  :class="{ active: showPresetConfig }"
+                  :aria-expanded="showPresetConfig"
+                  @click="showPresetConfig = !showPresetConfig">
+            <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+            {{ t('companion.settings.configure_preset') }}
+          </button>
+          <div class="d-flex gap-2 ms-auto">
+            <button class="btn btn-sm btn-outline-secondary" type="button" @click="duplicatePreset">
+              <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>{{ t('companion.settings.duplicate') }}
+            </button>
+            <button class="btn btn-sm btn-outline-danger" type="button"
+                    :disabled="presets.length <= 1" @click="removePreset">
+              <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+            </button>
           </div>
         </div>
 
-        <div class="d-flex gap-2 mb-3">
-          <button class="btn btn-outline-secondary" type="button" @click="duplicatePreset">
-            <i class="fa-regular fa-copy me-1" aria-hidden="true"></i>{{ t('companion.settings.duplicate') }}
-          </button>
-          <button class="btn btn-outline-danger" type="button"
-                  :disabled="presets.length <= 1" @click="removePreset">
-            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-          </button>
-        </div>
+        <template v-if="showPresetConfig">
+          <div class="mb-2">
+            <label class="form-label small mb-1">{{ t('companion.settings.name') }}</label>
+            <input v-model="preset.name" class="form-control" type="text">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small mb-1">{{ t('companion.settings.description') }}</label>
+            <input v-model="preset.description" class="form-control" type="text" maxlength="140"
+                   :placeholder="t('companion.settings.description_placeholder')">
+          </div>
+
+          <!-- L'icône qui voyage avec le profil : l'appli la montre dans son
+               sélecteur de départ, où plusieurs profils se ressembleraient sinon.
+               « Icône par défaut » dessine le repère que l'appli prendra faute de
+               choix (carte si le profil a une carte, maison sinon). -->
+          <div class="mb-3">
+            <label class="form-label small mb-1">{{ t('companion.settings.preset_icon_label') }}</label>
+            <div class="cdb-icons">
+              <button type="button" class="cdb-icon-btn cdb-icon-btn--default"
+                      :class="{ 'cdb-icon-btn--selected': !preset.icon }"
+                      :title="t('companion.settings.default_icon')"
+                      @click="setPresetIcon(undefined)">
+                <i :class="presetDefaultIcon" aria-hidden="true"></i>
+              </button>
+              <button v-for="ic in catalog.icons" :key="ic" type="button"
+                      class="cdb-icon-btn" :class="{ 'cdb-icon-btn--selected': preset.icon === ic }"
+                      @click="setPresetIcon(ic)">
+                <i :class="ic" aria-hidden="true"></i>
+              </button>
+            </div>
+            <p class="text-body-secondary small mb-0">{{ t('companion.settings.preset_icon_help') }}</p>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label small mb-1">{{ t('companion.settings.activities_title') }}</label>
+            <p class="text-body-secondary small mb-2">{{ t('companion.settings.activities_help') }}</p>
+            <div class="d-flex flex-column gap-1">
+              <div v-for="activity in catalog.activities" :key="activity"
+                   class="d-flex align-items-center gap-2">
+                <div class="form-check mb-0">
+                  <input class="form-check-input" type="checkbox" :id="`activity-${activity}`"
+                         :checked="presetHasActivity(activity)"
+                         @change="toggleActivity(activity, ($event.target as HTMLInputElement).checked)">
+                  <label class="form-check-label small" :for="`activity-${activity}`">
+                    {{ t(`routes.wt_sport_${activity}`) }}
+                  </label>
+                </div>
+                <!-- L'étoile n'apparaît qu'une fois le type lié : marquer un
+                     défaut pour un type que ce profil ne propose même pas ne
+                     voudrait rien dire. -->
+                <button v-if="presetHasActivity(activity)" type="button"
+                        class="btn btn-sm btn-link p-0"
+                        :class="isDefaultForActivity(activity) ? 'text-warning' : 'text-body-secondary'"
+                        :title="t('companion.settings.default_for', { sport: t(`routes.wt_sport_${activity}`) })"
+                        :aria-label="t('companion.settings.default_for', { sport: t(`routes.wt_sport_${activity}`) })"
+                        @click="toggleDefaultForActivity(activity)">
+                  <i :class="isDefaultForActivity(activity) ? 'fa-solid fa-star' : 'fa-regular fa-star'"
+                     aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
 
         <!-- Les pages -->
         <h2 class="h6">{{ t('companion.settings.pages') }}</h2>
@@ -1536,6 +1620,13 @@ async function save() {
                     </button>
                   </div>
                 </div>
+                <!-- Ce que ce composant montre, en une phrase : la même aide que
+                     la dialogue de choix, gardée sous les yeux pendant qu'on
+                     règle sa place et son étendue. -->
+                <p v-if="blockDescription(selected.block)"
+                   class="text-body-secondary small mb-0 mt-2">
+                  {{ blockDescription(selected.block) }}
+                </p>
                 <!-- L'étendue au pas : le « + » s'éteint dès que la voisine ou le
                      bord de la grille est atteint, si bien que la place libre se
                      voit sans avoir à la calculer. -->
@@ -1744,90 +1835,6 @@ async function save() {
           }) }}
         </p>
 
-        <!-- Le bandeau -->
-        <h2 class="h6">{{ t('companion.settings.bands') }}</h2>
-        <p class="text-body-secondary small">{{ t('companion.settings.bands_help') }}</p>
-
-        <div v-for="(band, index) in preset.bands" :key="index"
-             class="d-flex align-items-center gap-2 mb-2">
-          <div class="row g-1 flex-grow-1">
-            <div v-for="slot in catalog.max_band_metrics" :key="slot" class="col-6 col-sm-3">
-              <select class="form-select form-select-sm"
-                      :value="bandSlotKind(band.metrics[slot - 1])"
-                      @change="setBandSlotKind(band, slot - 1, ($event.target as HTMLSelectElement).value)">
-                <option value="">—</option>
-                <optgroup :label="t('companion.settings.band_actions_group')">
-                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
-                    {{ bandActionLabel(action) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_radar_group')">
-                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
-                    {{ bandRadarLabel(radar) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_workout_group')">
-                  <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
-                    {{ bandWorkoutLabel(workout) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_bell_group')">
-                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
-                    {{ bandBellLabel(bell) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_lap_group')">
-                  <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
-                    {{ bandActionLabel(lap) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_metrics_group')">
-                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                    {{ metricLabel(metric) }}
-                  </option>
-                </optgroup>
-              </select>
-              <div v-if="bandLapSlot(band.metrics[slot - 1])" class="d-flex gap-1 mt-1">
-                <input class="form-control form-control-sm" style="min-width: 0"
-                       :value="bandLapSlot(band.metrics[slot - 1])!.series"
-                       @change="setBandLapSeries(band, slot - 1, ($event.target as HTMLInputElement).value)"
-                       list="band-lap-series-list" :placeholder="t('companion.settings.lap_series')">
-                <input class="form-control form-control-sm" style="min-width: 0"
-                       :value="bandLapSlot(band.metrics[slot - 1])!.label || ''"
-                       @change="setBandLapLabel(band, slot - 1, ($event.target as HTMLInputElement).value)"
-                       maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
-              </div>
-            </div>
-          </div>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :disabled="index === 0" @click="moveBand(index, -1)">
-            <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :disabled="index === preset.bands.length - 1" @click="moveBand(index, 1)">
-            <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :title="t('companion.settings.duplicate')"
-                  :aria-label="t('companion.settings.duplicate')"
-                  @click="duplicateBand(index)">
-            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn-sm btn-link text-danger p-1" type="button"
-                  :disabled="preset.bands.length <= 1" @click="preset.bands.splice(index, 1)">
-            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-          </button>
-        </div>
-        <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addBand">
-          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_band') }}
-        </button>
-        <!-- Suggestions de série pour les champs texte des cases « marquer un
-             tour » ci-dessus et ci-dessous (encoche) — mêmes clés que
-             `lapSeries`. -->
-        <datalist id="band-lap-series-list">
-          <option v-for="series in lapSeries" :key="series" :value="series"></option>
-        </datalist>
-
         <!-- La bande de l'encoche -->
         <h2 class="h6">{{ t('companion.settings.notch') }}</h2>
         <p class="text-body-secondary small">{{ t('companion.settings.notch_help') }}</p>
@@ -1949,6 +1956,90 @@ async function save() {
         <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addNotchSet">
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_notch_set') }}
         </button>
+
+        <!-- Le bandeau -->
+        <h2 class="h6">{{ t('companion.settings.bands') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.bands_help') }}</p>
+
+        <div v-for="(band, index) in preset.bands" :key="index"
+             class="d-flex align-items-center gap-2 mb-2">
+          <div class="row g-1 flex-grow-1">
+            <div v-for="slot in catalog.max_band_metrics" :key="slot" class="col-6 col-sm-3">
+              <select class="form-select form-select-sm"
+                      :value="bandSlotKind(band.metrics[slot - 1])"
+                      @change="setBandSlotKind(band, slot - 1, ($event.target as HTMLSelectElement).value)">
+                <option value="">—</option>
+                <optgroup :label="t('companion.settings.band_actions_group')">
+                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                    {{ bandActionLabel(action) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_radar_group')">
+                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                    {{ bandRadarLabel(radar) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_workout_group')">
+                  <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
+                    {{ bandWorkoutLabel(workout) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_bell_group')">
+                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                    {{ bandBellLabel(bell) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_lap_group')">
+                  <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
+                    {{ bandActionLabel(lap) }}
+                  </option>
+                </optgroup>
+                <optgroup :label="t('companion.settings.band_metrics_group')">
+                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                    {{ metricLabel(metric) }}
+                  </option>
+                </optgroup>
+              </select>
+              <div v-if="bandLapSlot(band.metrics[slot - 1])" class="d-flex gap-1 mt-1">
+                <input class="form-control form-control-sm" style="min-width: 0"
+                       :value="bandLapSlot(band.metrics[slot - 1])!.series"
+                       @change="setBandLapSeries(band, slot - 1, ($event.target as HTMLInputElement).value)"
+                       list="band-lap-series-list" :placeholder="t('companion.settings.lap_series')">
+                <input class="form-control form-control-sm" style="min-width: 0"
+                       :value="bandLapSlot(band.metrics[slot - 1])!.label || ''"
+                       @change="setBandLapLabel(band, slot - 1, ($event.target as HTMLInputElement).value)"
+                       maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :disabled="index === 0" @click="moveBand(index, -1)">
+            <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :disabled="index === preset.bands.length - 1" @click="moveBand(index, 1)">
+            <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-sm btn-link p-1" type="button"
+                  :title="t('companion.settings.duplicate')"
+                  :aria-label="t('companion.settings.duplicate')"
+                  @click="duplicateBand(index)">
+            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+          </button>
+          <button class="btn btn-sm btn-link text-danger p-1" type="button"
+                  :disabled="preset.bands.length <= 1" @click="preset.bands.splice(index, 1)">
+            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+          </button>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addBand">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_band') }}
+        </button>
+        <!-- Suggestions de série pour les champs texte des cases « marquer un
+             tour » du bandeau et de l'encoche ci-dessus — mêmes clés que
+             `lapSeries`. -->
+        <datalist id="band-lap-series-list">
+          <option v-for="series in lapSeries" :key="series" :value="series"></option>
+        </datalist>
 
         <!-- Les capteurs -->
         <h2 class="h6">{{ t('companion.settings.sensors_title') }}</h2>

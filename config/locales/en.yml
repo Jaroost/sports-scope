@@ -1676,6 +1676,8 @@ en:
       name: "Profile name"
       description: "Description"
       description_placeholder: "What helps pick this one, shown in the app before you start"
+      preset_icon_label: "Profile icon"
+      preset_icon_help: "Marks this profile in the app's start picker, where several profiles would otherwise look alike. \"Default icon\" shows a map if the profile has one, a house otherwise."
       activities_title: "Route types"
       activities_help: "The route types this profile is offered for. A profile can suit several types; a type has only one default profile, preselected when starting a navigation."
       default_for: "Default profile — %{sport}"
@@ -2084,6 +2086,7 @@ en:
         large_short: "L"
       configure_layout: "Configure layout"
       configure_page: "Configure page"
+      configure_preset: "Configure profile"
       metric_layouts:
         load: "Start from a saved layout"
         load_placeholder: "Neutral layout"

@@ -489,6 +489,11 @@ export interface Preset {
   key?: string
   name: string
   description?: string
+  // Icône qui repère ce profil dans le sélecteur de départ de l'appli — une
+  // clé de `Catalog.icons`. Absente : l'appli garde son repère par défaut
+  // (carte si le profil en a une, maison sinon). Voir `sanitize_preset_icon`
+  // (Rails) et `preset_picker.dart` (Dart).
+  icon?: string
   // Les types d'itinéraire pour lesquels ce profil est proposé. Absent vaut
   // « tous » : un profil qui n'a jamais touché à ce réglage continue de se
   // proposer partout, comme avant que la fonctionnalité existe.

@@ -1836,6 +1836,8 @@ fr:
         booster: "Booster"
         horn: "Klaxon"
         horn2: "Klaxon 2"
+        horn3: "Klaxon 3"
+        horn4: "Klaxon 4"
         start_lap: "Marquer un tour"
         sleep: "Mettre en veille"
         wake: "Sortir de veille"
@@ -1989,6 +1991,8 @@ fr:
         booster: "Booster"
         horn: "Klaxon (caravane du Tour)"
         horn2: "Klaxon 2"
+        horn3: "Klaxon 3"
+        horn4: "Klaxon 4"
       sensors:
         gps: "GPS"
         barometer: "Baromètre"

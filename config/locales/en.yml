@@ -1836,6 +1836,8 @@ en:
         booster: "Booster"
         horn: "Horn"
         horn2: "Horn 2"
+        horn3: "Horn 3"
+        horn4: "Horn 4"
         start_lap: "Mark a lap"
         sleep: "Sleep"
         wake: "Wake"
@@ -1989,6 +1991,8 @@ en:
         booster: "Booster"
         horn: "Horn (Tour de France caravan)"
         horn2: "Horn 2"
+        horn3: "Horn 3"
+        horn4: "Horn 4"
       sensors:
         gps: "GPS"
         barometer: "Barometer"

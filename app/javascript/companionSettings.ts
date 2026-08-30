@@ -1104,6 +1104,12 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
   efficiency_factor: { value: '1,82', name: 'Facteur d\'efficacité', unit: '', icon: 'fa-solid fa-chart-line' },
   variability_index: { value: '1,06', name: 'Indice de variabilité', unit: '', icon: 'fa-solid fa-chart-line' },
   decoupling: { value: '+4,2', name: 'Découplage aérobie', unit: '%', icon: 'fa-solid fa-chart-line' },
+  // Réserve W′ en kJ, avec jauge dynamique 0 → W′₀ (voir
+  // `DYNAMIC_GAUGE_METRICS`). `numeric` sert à situer le curseur de la
+  // vignette.
+  wprime_balance: {
+    value: '14,8', name: 'Réserve W′', unit: 'kJ', icon: 'fa-solid fa-battery-half', numeric: 14.8,
+  },
 }
 
 // La même vignette en `HH:MM:SS`, pour le réglage de format des mesures de
@@ -1306,7 +1312,9 @@ export function isRangeGaugeMetric(metric: string | undefined): boolean {
 // l'itinéraire chargé (distance, durée) — voir `MetricId.liveRangeOf` côté
 // appli. D'où l'absence de `min`/`max` sur le bloc : rien à régler ici,
 // contrairement à `RANGE_GAUGE_METRICS`.
-const DYNAMIC_GAUGE_METRICS = new Set(['cadence', 'heart_rate', 'power', 'speed', 'grade', 'distance', 'duration'])
+const DYNAMIC_GAUGE_METRICS = new Set([
+  'cadence', 'heart_rate', 'power', 'speed', 'grade', 'distance', 'duration', 'wprime_balance',
+])
 
 export function isDynamicGaugeMetric(metric: string | undefined): boolean {
   return !!metric && DYNAMIC_GAUGE_METRICS.has(metric)
@@ -1323,6 +1331,7 @@ export const DYNAMIC_GAUGE_PREVIEW_FRACTION: Record<string, number> = {
   grade: 0.7,
   distance: 0.4,
   duration: 0.3,
+  wprime_balance: 0.62,
 }
 
 // Le min/max proposé au premier réglage — un point de départ plausible plutôt

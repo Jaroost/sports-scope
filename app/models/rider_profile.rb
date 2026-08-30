@@ -42,6 +42,14 @@ module RiderProfile
       # seuil déduit. Même vocabulaire que `ftp.source`.
       lthr_source: lthr.dig(:current, :source),
       weight_kg: ftp[:weight_kg],
+      # Modèle de puissance critique : CP (W) et capacité anaérobie W′ (J),
+      # pour le W′ balance affiché en roulant (`WPrimeBalance` côté appli).
+      # `nil` quand la courbe puissance-durée n'a pas assez de points pour
+      # l'ajustement — l'appli retombe alors sur la FTP comme CP et une W′ par
+      # défaut. Pris sur l'estimation `auto` (jamais sur une FTP manuelle, qui
+      # n'a pas de W′ associée).
+      cp: ftp.dig(:auto, :cp),
+      w_prime: ftp.dig(:auto, :w_prime),
       power_zones: bounds(ZoneDistribution::POWER_ZONES, watts),
       hr_zones: bounds(ZoneDistribution::HR_ZONES, bpm)
     }

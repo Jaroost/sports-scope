@@ -299,6 +299,7 @@ module CompanionSettings
     chainring_position sprocket_position gear_ratio
     route_remaining route_remaining_gain route_eta route_arrival_time
     daylight_remaining efficiency_factor variability_index decoupling
+    wprime_balance
   ].freeze
 
   # Les commandes qu'une case du bandeau ou de la bande de l'encoche peut
@@ -459,7 +460,9 @@ module CompanionSettings
   # dans la sortie en cours (le min/max observé pour cadence/cardio/
   # puissance/vitesse/pente, la progression vers l'itinéraire chargé pour
   # distance/durée) — voir `MetricId.liveRangeOf` côté appli.
-  DYNAMIC_GAUGE_METRICS = %w[cadence heart_rate power speed grade distance duration].freeze
+  DYNAMIC_GAUGE_METRICS = %w[
+    cadence heart_rate power speed grade distance duration wprime_balance
+  ].freeze
 
   # Les mesures qui portent une zone d'entraînement (cardio, puissance) — la
   # jauge d'un bloc `metric` posé sur l'une d'elles est toujours celle des zones

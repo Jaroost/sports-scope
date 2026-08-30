@@ -492,6 +492,7 @@ const GROUPED_KINDS: Record<string, string> = {
   precip_forecast: 'weather',
   weather_forecast: 'weather',
   weather_compact: 'weather',
+  wind: 'weather',
 }
 
 // Le libellé propre à chaque section fondue (`GROUPED_KINDS`) — ce ne sont

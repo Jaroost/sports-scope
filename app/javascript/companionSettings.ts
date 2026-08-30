@@ -1074,6 +1074,15 @@ const METRIC_SAMPLES: Record<string, MetricSample> = {
     value: '380', name: 'D+ restant', unit: 'm', icon: 'fa-solid fa-arrow-trend-up', numeric: 380,
   },
   route_eta: { value: '00:48', name: 'Temps restant', unit: '', icon: 'fa-regular fa-clock' },
+  // Une horloge murale, pas un compte à rebours — d'où `14:32` et non `00:48`.
+  route_arrival_time: { value: '15:42', name: 'Heure d\'arrivée', unit: '', icon: 'fa-regular fa-clock' },
+  daylight_remaining: { value: '02:14', name: 'Lumière du jour restante', unit: '', icon: 'fa-solid fa-sun' },
+  // Des ratios sans unité (watts par battement, puissance normalisée sur
+  // moyenne) — pas de `numeric` : ils ne sont pas éligibles aux jauges
+  // (`RANGE_GAUGE_METRICS`/`DYNAMIC_GAUGE_METRICS`), comme `gears`.
+  efficiency_factor: { value: '1,82', name: 'Facteur d\'efficacité', unit: '', icon: 'fa-solid fa-chart-line' },
+  variability_index: { value: '1,06', name: 'Indice de variabilité', unit: '', icon: 'fa-solid fa-chart-line' },
+  decoupling: { value: '+4,2', name: 'Découplage aérobie', unit: '%', icon: 'fa-solid fa-chart-line' },
 }
 
 // La même vignette en `HH:MM:SS`, pour le réglage de format des mesures de
@@ -1084,6 +1093,7 @@ const DURATION_SAMPLES_HMS: Record<string, string> = {
   moving_time: '01:08:32',
   pause_time: '00:04:15',
   route_eta: '00:48:20',
+  daylight_remaining: '02:14:30',
 }
 
 // Les quatre mesures du bloc « Moyennes », et leurs trois chiffres — les mêmes
@@ -1236,7 +1246,7 @@ const DI2_METRICS = new Set(['gears', 'chainring_position', 'sprocket_position',
 // Les mesures de durée, seules à proposer le réglage HH:MM / HH:MM:SS dans
 // la dialogue de choix — même liste que `CompanionSettings::DURATION_METRICS`
 // côté serveur.
-const DURATION_METRICS = new Set(['duration', 'moving_time', 'pause_time', 'route_eta'])
+const DURATION_METRICS = new Set(['duration', 'moving_time', 'pause_time', 'route_eta', 'daylight_remaining'])
 
 export function isDurationMetric(metric: string | undefined): boolean {
   return !!metric && DURATION_METRICS.has(metric)

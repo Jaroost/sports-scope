@@ -19,7 +19,7 @@ class WeatherForecastController < ApplicationController
     # Arrondie à 2 décimales (~1 km), même raisonnement que
     # PrecipitationForecastController : regrouper sous la même clé de cache
     # les cyclistes proches plutôt que refaire l'appel à chaque position exacte.
-    cache_key = "weather_forecast:v1:#{lat.round(2)}:#{lng.round(2)}"
+    cache_key = "weather_forecast:v2:#{lat.round(2)}:#{lng.round(2)}"
     steps = Rails.cache.fetch(cache_key, expires_in: CACHE_TTL) do
       WeatherForecastService.new(lat: lat, lng: lng).call
     end

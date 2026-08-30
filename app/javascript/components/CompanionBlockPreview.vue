@@ -1118,6 +1118,19 @@ const metricTrendSegments = computed(() => {
       </div>
     </div>
 
+    <!-- Vent -------------------------------------------------------------
+         Vitesse et direction du vent (même source Open-Meteo que
+         `weather_forecast`) projetées sur le cap GPS du téléphone : la
+         composante de face ou de dos, et une flèche 8 directions relative au
+         déplacement (« haut » = vent arrière). Sans cap frais côté appli, le
+         bloc se rabat sur la seule vitesse absolue. Valeurs inventées ici,
+         comme les autres blocs météo. -->
+    <div v-else-if="block.kind === 'wind'" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-title">Vent</div>
+      <div class="cbp-line">↘ De face · 14 km/h</div>
+      <div class="cbp-line">Vent 22 km/h</div>
+    </div>
+
     <!-- Budget de charge -------------------------------------------------- -->
     <div v-else-if="block.kind === 'training_budget'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title cbp-budget-title">

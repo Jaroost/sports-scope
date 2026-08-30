@@ -19,9 +19,10 @@ class WeatherForecastService
     @lng = lng.to_f
   end
 
-  # Renvoie [{ time:, temperature:, wind_speed:, precipitation: }, ...] (heures
-  # UTC, °C, km/h, mm), dans l'ordre chronologique en partant de maintenant, ou
-  # nil si indisponible.
+  # Renvoie [{ time:, temperature:, wind_speed:, wind_direction:,
+  # precipitation: }, ...] (heures UTC, °C, km/h, degrés d'où vient le vent,
+  # mm), dans l'ordre chronologique en partant de maintenant, ou nil si
+  # indisponible.
   def call
     return nil unless valid_inputs?
 
@@ -44,7 +45,7 @@ class WeatherForecastService
     params = {
       latitude: @lat.round(4),
       longitude: @lng.round(4),
-      hourly: 'temperature_2m,wind_speed_10m,precipitation',
+      hourly: 'temperature_2m,wind_speed_10m,wind_direction_10m,precipitation',
       forecast_hours: STEPS,
       timezone: 'GMT'
     }
@@ -64,6 +65,7 @@ class WeatherForecastService
     times = hourly['time']
     temperature = hourly['temperature_2m']
     wind_speed = hourly['wind_speed_10m']
+    wind_direction = hourly['wind_direction_10m']
     precipitation = hourly['precipitation']
     return nil if times.blank? || temperature.blank? || wind_speed.blank? || precipitation.blank?
 
@@ -72,6 +74,10 @@ class WeatherForecastService
         time: "#{time}Z",
         temperature: (temperature[i] || 0).to_f.round(1),
         wind_speed: (wind_speed[i] || 0).to_f.round(1),
+        # Degrés d'où vient le vent. `nil` plutôt que 0 si Open-Meteo l'omet :
+        # 0 est une vraie valeur (vent du nord), l'app doit pouvoir distinguer
+        # « absente » et « du nord » pour se rabattre sur la vitesse seule.
+        wind_direction: wind_direction && wind_direction[i]&.to_f&.round,
         precipitation: (precipitation[i] || 0).to_f.round(2)
       }
     end

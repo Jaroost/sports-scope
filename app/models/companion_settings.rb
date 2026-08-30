@@ -146,6 +146,15 @@ module CompanionSettings
     # `precip_forecast` déjà deux genres pour une même donnée GPS. Un seul
     # mode, même raisonnement que les autres blocs météo pour le reste.
     "weather_compact" => [],
+    # Le vent projeté sur le cap : sa composante de face (ou de dos) et un
+    # repère de direction relative au déplacement. Même source de vent que
+    # `weather_forecast` (proxy Open-Meteo, `WeatherForecastService`) — donc
+    # même repli GPS — croisée avec le cap de l'enregistreur du téléphone. Un
+    # genre à part et non un mode des blocs météo, même choix que
+    # `precip_radar`/`precip_forecast` : il répond à « est-ce que je me bats
+    # contre le vent, là, maintenant ? », pas à « quel temps fait-il ». Un
+    # seul mode : deux lignes de texte, rien à faire varier selon la case.
+    "wind" => [],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.
@@ -272,7 +281,8 @@ module CompanionSettings
     climb_rate climb_rate_avg climb_rate_max
     calories calories_per_hour tss gears
     chainring_position sprocket_position gear_ratio
-    route_remaining route_remaining_gain route_eta
+    route_remaining route_remaining_gain route_eta route_arrival_time
+    daylight_remaining efficiency_factor variability_index decoupling
   ].freeze
 
   # Les commandes qu'une case du bandeau ou de la bande de l'encoche peut
@@ -397,7 +407,7 @@ module CompanionSettings
 
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.
-  DURATION_METRICS = %w[duration moving_time pause_time route_eta].freeze
+  DURATION_METRICS = %w[duration moving_time pause_time route_eta daylight_remaining].freeze
 
   # `hm` en tête : c'est le comportement de l'appli avant ce réglage, donc le
   # repli d'un document déjà existant ou malformé.

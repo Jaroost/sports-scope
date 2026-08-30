@@ -568,9 +568,11 @@ module CompanionSettings
 
   # La liste blanche d'icônes personnalisables — voir `sanitize_block`. Mêmes
   # classes FontAwesome que celles déjà utilisées comme icône par défaut d'une
-  # mesure (`METRIC_SAMPLES` côté site), plus une quinzaine de génériques.
-  # `fa-solid fa-question` n'y est pas : réservée au repli « mesure inconnue »
-  # de l'aperçu, elle ne doit jamais devenir un choix.
+  # mesure (`METRIC_SAMPLES` côté site), plus une quinzaine de génériques et
+  # quelques icônes de sport (vélo, course, rando) utiles pour repérer une page
+  # dans le menu ⋮. `fa-solid fa-question` n'y est pas : réservée au repli
+  # « mesure inconnue » de l'aperçu, elle ne doit jamais devenir un choix.
+  # Toute entrée doit aussi exister dans `companionIcons` (dépôt companion).
   ICONS = %w[
     fa-regular\ fa-clock fa-solid\ fa-person-biking fa-regular\ fa-circle-pause
     fa-solid\ fa-ruler-horizontal fa-solid\ fa-gauge-high fa-solid\ fa-heart
@@ -582,6 +584,7 @@ module CompanionSettings
     fa-solid\ fa-bell fa-solid\ fa-compass fa-solid\ fa-wind fa-solid\ fa-snowflake
     fa-solid\ fa-sun fa-solid\ fa-moon fa-solid\ fa-droplet fa-solid\ fa-battery-full
     fa-solid\ fa-trophy fa-solid\ fa-route fa-solid\ fa-bicycle fa-solid\ fa-map
+    fa-solid\ fa-person-running fa-solid\ fa-person-hiking
   ].freeze
 
   SENSORS = %w[gps barometer light compass radar power heart_rate cadence gears].freeze

@@ -491,6 +491,15 @@ function setPageIcon(page: Page, icon: string | undefined) {
   else delete page.icon
 }
 
+// L'icône que l'appli déduit du genre de page faute de choix explicite
+// (`dashboard_page.dart`, menu ⋮ : `grid_view` pour une grille, `view_agenda`
+// sinon) — recopiée à la main comme les vignettes du picker. Le bouton
+// « par défaut » la dessine, au lieu d'afficher son libellé qui débordait
+// de la case.
+function pageDefaultIcon(page: Page): string {
+  return isGridLayout(page) ? 'fa-solid fa-table-cells-large' : 'fa-solid fa-list'
+}
+
 // Le bouton « Revenir à l'accueil » de l'en-tête — voir `Page.leave_button`.
 // Effacée et non mise à `false`, même règle que `menu`/`icon` ci-dessus.
 function toggleLeaveButton(page: Page) {
@@ -1285,11 +1294,15 @@ async function save() {
             <div class="mb-2">
               <label class="small mb-1 d-block">{{ t('companion.settings.page_icon_label') }}</label>
               <div class="cdb-icons">
-                <button type="button" class="cdb-icon-btn"
+                <!-- « Icône par défaut » : on dessine l'icône déduite du genre
+                     de page (celle que l'appli prendra faute de choix), pas son
+                     libellé — qui débordait de la case. Le point dans le coin
+                     et l'infobulle disent que c'est le choix qui suit le genre. -->
+                <button type="button" class="cdb-icon-btn cdb-icon-btn--default"
                         :class="{ 'cdb-icon-btn--selected': !page.icon }"
                         :title="t('companion.settings.default_icon')"
                         @click="setPageIcon(page, undefined)">
-                  {{ t('companion.settings.default_icon') }}
+                  <i :class="pageDefaultIcon(page)" aria-hidden="true"></i>
                 </button>
                 <button v-for="ic in catalog.icons" :key="ic" type="button"
                         class="cdb-icon-btn" :class="{ 'cdb-icon-btn--selected': page.icon === ic }"
@@ -2391,6 +2404,7 @@ async function save() {
   gap: 0.35rem;
 }
 .cdb-icon-btn {
+  position: relative;
   width: 2.2rem;
   height: 2.2rem;
   display: flex;
@@ -2399,12 +2413,24 @@ async function save() {
   border: 1px solid var(--bs-border-color);
   border-radius: 0.4rem;
   background: transparent;
-  font-size: 0.65rem;
+  font-size: 1rem;
   padding: 0;
 }
 .cdb-icon-btn--selected {
   border-color: var(--bs-primary);
   outline: 2px solid var(--bs-primary);
   outline-offset: -2px;
+}
+/* Le bouton « suit le genre de page » : même traitement que les autres, un
+   point dans le coin pour le distinguer d'un choix explicite de la même icône. */
+.cdb-icon-btn--default::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--bs-primary);
 }
 </style>

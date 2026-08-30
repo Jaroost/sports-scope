@@ -128,6 +128,12 @@ const iconChoice = ref<string | undefined>(props.block?.icon)
 const labelChoice = ref<string>(props.block?.label || '')
 const gaugeKindChoice = ref<string>(props.block?.gauge_kind || 'range')
 
+// L'éditeur de disposition (grille, palette, jauge, annotations, enregistrer)
+// est replié derrière un bouton « Configurer » : on choisit une mesure et,
+// si besoin, une disposition enregistrée sans jamais le déplier. Il ne sert
+// qu'à *composer* une disposition, ce qui reste l'exception.
+const showLayoutEditor = ref(false)
+
 // Le jeton de palette actuellement « en main » — un tap sur une case de la
 // grille l'y pose, sans glisser-déposer. `null` : un tap sur une case
 // occupée la libère à la place.
@@ -704,120 +710,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <h3 class="h6 mb-0">{{ groupLabel(group.kind) }}</h3>
 
             <!-- Le paramètre du genre, en tête de son groupe : les vignettes
-                 en dessous le dessinent aussitôt. -->
-            <label v-if="group.kind === 'metric'" class="cbpk-param small">
-              {{ t('companion.settings.metric') }}
-              <select v-model="metric" class="form-select form-select-sm">
-                <option v-for="m in primaryMetricChoices" :key="m" :value="m">
-                  {{ metricLabel(m) }}
-                </option>
-              </select>
-            </label>
-
-            <!-- Pas d'étiquette personnalisée pour l'horloge : elle affiche
-                 toujours « HORLOGE » (voir `ClockCard` côté appli), ce champ
-                 n'aurait aucun effet. -->
-            <label v-if="group.kind === 'metric' && !isClockMetric" class="cbpk-param small">
-              {{ t('companion.settings.metric_label') }}
-              <input
-                v-model="labelChoice"
-                type="text"
-                class="form-control form-control-sm"
-                :placeholder="metricLabel(metric)"
-                maxlength="24"
-              >
-            </label>
-
-            <label v-if="group.kind === 'metric' && (isDurationMetric(metric) || isClockMetric)" class="cbpk-param small">
-              {{ t('companion.settings.duration_format') }}
-              <select v-model="format" class="form-select form-select-sm">
-                <option value="hm">{{ t('companion.settings.duration_formats.hm') }}</option>
-                <option value="hms">{{ t('companion.settings.duration_formats.hms') }}</option>
-              </select>
-            </label>
-
-            <label
-              v-if="group.kind === 'metric' && !!currentLayout.gauge && rangeEligible && dynamicEligible && !metricZoneEligible"
-              class="cbpk-param small"
-            >
-              {{ t('companion.settings.gauge_kind') }}
-              <select v-model="gaugeKindChoice" class="form-select form-select-sm">
-                <option value="range">{{ t('companion.settings.gauge_kinds.range') }}</option>
-                <option value="dynamic">{{ t('companion.settings.gauge_kinds.dynamic') }}</option>
-              </select>
-            </label>
-
-            <div
-              v-if="group.kind === 'metric' && !!currentLayout.gauge && effectiveGaugeKind === 'range'"
-              class="cbpk-param small cbpk-param-range"
-            >
-              <label class="cbpk-range-field">
-                {{ t('companion.settings.range_min') }}
-                <input v-model.number="min" type="number" class="form-control form-control-sm">
-              </label>
-              <label class="cbpk-range-field">
-                {{ t('companion.settings.range_max') }}
-                <input v-model.number="max" type="number" class="form-control form-control-sm">
-              </label>
-            </div>
-
-            <label v-if="group.kind === 'metric' && !!currentLayout.gauge" class="cbpk-param small">
-              {{ t('companion.settings.gauge_fill') }}
-              <select v-model="gaugeFillChoice" class="form-select form-select-sm">
-                <option value="segments">{{ t('companion.settings.gauge_fills.segments') }}</option>
-                <option value="full">{{ t('companion.settings.gauge_fills.full') }}</option>
-              </select>
-            </label>
-
-            <label
-              v-if="group.kind === 'metric' && !!currentLayout.gauge && gaugeFillChoice === 'segments'"
-              class="cbpk-param small"
-            >
-              {{ t('companion.settings.gauge_segments') }}
-              <input
-                v-model.number="gaugeSegmentsChoice" type="number"
-                :min="GAUGE_SEGMENTS_MIN" :max="GAUGE_SEGMENTS_MAX"
-                class="form-control form-control-sm"
-              >
-            </label>
-
-            <label v-if="group.kind === 'metric' && !!currentLayout.gauge" class="cbpk-param small">
-              {{ t('companion.settings.gauge_color_mode') }}
-              <select v-model="gaugeColorModeChoice" class="form-select form-select-sm">
-                <option value="fixed">{{ t('companion.settings.gauge_color_modes.fixed') }}</option>
-                <option value="auto">{{ t('companion.settings.gauge_color_modes.auto') }}</option>
-              </select>
-            </label>
-            <p
-              v-if="group.kind === 'metric' && !!currentLayout.gauge && gaugeColorModeChoice === 'auto'"
-              class="small text-body-secondary mb-2"
-            >
-              {{
-                metricZoneEligible
-                  ? t('companion.settings.gauge_color_mode_hint_zone')
-                  : t('companion.settings.gauge_color_mode_hint_gradient')
-              }}
-            </p>
-
-            <label
-              v-if="group.kind === 'metric' && !!currentLayout.gauge && gaugeColorModeChoice === 'fixed'"
-              class="cbpk-color-field small"
-            >
-              {{ t('companion.settings.gauge_color') }}
-              <CompanionColorPicker
-                v-model="gaugeColorChoice" :fallback="RANGE_GAUGE_COLOR" :label="t('companion.settings.gauge_color')"
-              />
-            </label>
-
-            <label v-if="group.kind === 'metric' && !!currentLayout.gauge" class="cbpk-param small">
-              {{ t('companion.settings.gauge_thickness') }}
-              <select v-model="gaugeThicknessChoice" class="form-select form-select-sm">
-                <option v-for="th in (['small', 'normal', 'large'] as GaugeThickness[])" :key="th" :value="th">
-                  {{ t(`companion.settings.gauge_thicknesses.${th}`) }}
-                </option>
-              </select>
-            </label>
-
+                 en dessous le dessinent aussitôt. `metric` est le seul genre qui
+                 en a plusieurs : ils sont sortis d'ici (voir `.cbpk-metric-params`
+                 et `.cbpk-gauge-params` plus bas), où ils s'entassaient sur
+                 trois lignes dès qu'une jauge était posée. -->
             <label
               v-if="group.kind === 'zones' || group.kind === 'lap_zones' ||
                 group.kind === 'metric_trend' || group.kind === 'lap_metric_trend'"
@@ -920,6 +816,43 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             </template>
           </div>
 
+          <!-- Les réglages propres à la mesure : la mesure elle-même, son
+               libellé, son format. Une grille de champs étiquetés (libellé
+               au-dessus du contrôle) plutôt que la file de `.cbpk-param` qui
+               débordait de l'en-tête du groupe. Les réglages de la jauge, eux,
+               sont descendus près d'elle (`.cbpk-gauge-params`). -->
+          <div v-if="group.kind === 'metric'" class="cbpk-metric-params">
+            <label class="cbpk-field small">
+              {{ t('companion.settings.metric') }}
+              <select v-model="metric" class="form-select form-select-sm">
+                <option v-for="m in primaryMetricChoices" :key="m" :value="m">
+                  {{ metricLabel(m) }}
+                </option>
+              </select>
+            </label>
+
+            <!-- Pas d'étiquette personnalisée pour l'horloge : elle affiche
+                 toujours « HORLOGE » (voir `ClockCard` côté appli). -->
+            <label v-if="!isClockMetric" class="cbpk-field small">
+              {{ t('companion.settings.metric_label') }}
+              <input
+                v-model="labelChoice"
+                type="text"
+                class="form-control form-control-sm"
+                :placeholder="metricLabel(metric)"
+                maxlength="24"
+              >
+            </label>
+
+            <label v-if="isDurationMetric(metric) || isClockMetric" class="cbpk-field small">
+              {{ t('companion.settings.duration_format') }}
+              <select v-model="format" class="form-select form-select-sm">
+                <option value="hm">{{ t('companion.settings.duration_formats.hm') }}</option>
+                <option value="hms">{{ t('companion.settings.duration_formats.hms') }}</option>
+              </select>
+            </label>
+          </div>
+
           <!-- Ce que le composant montre, et d'où il tient sa donnée — une
                phrase sous l'en-tête du groupe. Les hints plus bas restent pour
                les pièges propres à un réglage. -->
@@ -961,18 +894,38 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
           <!-- L'éditeur de disposition d'un bloc `metric` : une grille à 3
                colonnes et jusqu'à `MAX_LAYOUT_ROWS` rangées, chaque case
-               recevant un jeton de la palette d'en dessous. -->
-          <div v-if="group.kind === 'metric'" class="cbpk-layout">
-            <label v-if="metricLayouts?.length" class="cbpk-param small cbpk-layout-presets">
-              {{ t('companion.settings.metric_layouts.load') }}
-              <select class="form-select form-select-sm" @change="onLoadPreset($event)">
-                <option value="">{{ t('companion.settings.metric_layouts.load_placeholder') }}</option>
-                <option v-for="preset in metricLayouts" :key="preset.key" :value="preset.key">
-                  {{ preset.name }}
-                </option>
-              </select>
-            </label>
+               recevant un jeton de la palette d'en dessous. Replié derrière
+               « Configurer » — seul le choix d'une disposition enregistrée
+               reste toujours à portée. -->
+          <div
+            v-if="group.kind === 'metric'"
+            class="cbpk-layout"
+            :class="{ 'cbpk-layout--open': showLayoutEditor }"
+          >
+            <div class="cbpk-layout-bar">
+              <label v-if="metricLayouts?.length" class="cbpk-field small cbpk-layout-presets">
+                {{ t('companion.settings.metric_layouts.load') }}
+                <select class="form-select form-select-sm" @change="onLoadPreset($event)">
+                  <option value="">{{ t('companion.settings.metric_layouts.load_placeholder') }}</option>
+                  <option v-for="preset in metricLayouts" :key="preset.key" :value="preset.key">
+                    {{ preset.name }}
+                  </option>
+                </select>
+              </label>
 
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary cbpk-configure-btn"
+                :class="{ 'cbpk-configure-btn--open': showLayoutEditor }"
+                :aria-expanded="showLayoutEditor"
+                @click="showLayoutEditor = !showLayoutEditor"
+              >
+                <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                {{ t('companion.settings.configure_layout') }}
+              </button>
+            </div>
+
+            <template v-if="showLayoutEditor">
             <div class="cbpk-grid">
               <div v-for="row in visibleRowCount" :key="row - 1" class="cbpk-grid-row">
                 <button
@@ -1027,6 +980,85 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </div>
             </div>
 
+            <!-- Les réglages de la jauge, sous la grille plutôt que dans
+                 l'en-tête du groupe : ils n'apparaissent qu'une fois le jeton
+                 « Jauge » posé, et le panneau se lit d'un coup au lieu de se
+                 disperser au milieu des autres champs. -->
+            <div v-if="!!currentLayout.gauge" class="cbpk-gauge-params">
+              <p class="cbpk-subhead">{{ t('companion.settings.layout_tokens.gauge') }}</p>
+
+              <label
+                v-if="rangeEligible && dynamicEligible && !metricZoneEligible"
+                class="cbpk-field small"
+              >
+                {{ t('companion.settings.gauge_kind') }}
+                <select v-model="gaugeKindChoice" class="form-select form-select-sm">
+                  <option value="range">{{ t('companion.settings.gauge_kinds.range') }}</option>
+                  <option value="dynamic">{{ t('companion.settings.gauge_kinds.dynamic') }}</option>
+                </select>
+              </label>
+
+              <template v-if="effectiveGaugeKind === 'range'">
+                <label class="cbpk-field small">
+                  {{ t('companion.settings.range_min') }}
+                  <input v-model.number="min" type="number" class="form-control form-control-sm">
+                </label>
+                <label class="cbpk-field small">
+                  {{ t('companion.settings.range_max') }}
+                  <input v-model.number="max" type="number" class="form-control form-control-sm">
+                </label>
+              </template>
+
+              <label class="cbpk-field small">
+                {{ t('companion.settings.gauge_fill') }}
+                <select v-model="gaugeFillChoice" class="form-select form-select-sm">
+                  <option value="segments">{{ t('companion.settings.gauge_fills.segments') }}</option>
+                  <option value="full">{{ t('companion.settings.gauge_fills.full') }}</option>
+                </select>
+              </label>
+
+              <label v-if="gaugeFillChoice === 'segments'" class="cbpk-field small">
+                {{ t('companion.settings.gauge_segments') }}
+                <input
+                  v-model.number="gaugeSegmentsChoice" type="number"
+                  :min="GAUGE_SEGMENTS_MIN" :max="GAUGE_SEGMENTS_MAX"
+                  class="form-control form-control-sm"
+                >
+              </label>
+
+              <label class="cbpk-field small">
+                {{ t('companion.settings.gauge_color_mode') }}
+                <select v-model="gaugeColorModeChoice" class="form-select form-select-sm">
+                  <option value="fixed">{{ t('companion.settings.gauge_color_modes.fixed') }}</option>
+                  <option value="auto">{{ t('companion.settings.gauge_color_modes.auto') }}</option>
+                </select>
+              </label>
+
+              <label v-if="gaugeColorModeChoice === 'fixed'" class="cbpk-field small">
+                {{ t('companion.settings.gauge_color') }}
+                <CompanionColorPicker
+                  v-model="gaugeColorChoice" :fallback="RANGE_GAUGE_COLOR" :label="t('companion.settings.gauge_color')"
+                />
+              </label>
+
+              <label class="cbpk-field small">
+                {{ t('companion.settings.gauge_thickness') }}
+                <select v-model="gaugeThicknessChoice" class="form-select form-select-sm">
+                  <option v-for="th in (['small', 'normal', 'large'] as GaugeThickness[])" :key="th" :value="th">
+                    {{ t(`companion.settings.gauge_thicknesses.${th}`) }}
+                  </option>
+                </select>
+              </label>
+
+              <p v-if="gaugeColorModeChoice === 'auto'" class="cbpk-gauge-hint small text-body-secondary">
+                {{
+                  metricZoneEligible
+                    ? t('companion.settings.gauge_color_mode_hint_zone')
+                    : t('companion.settings.gauge_color_mode_hint_gradient')
+                }}
+              </p>
+            </div>
+
             <div class="cbpk-palette">
               <button
                 v-for="token in paletteTokens"
@@ -1044,14 +1076,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             </div>
 
             <div v-if="currentLayout.icon" class="cbpk-icons">
+              <!-- « Icône par défaut » : on dessine l'icône réelle de la mesure
+                   (celle que l'appli prendra faute de choix), pas son libellé —
+                   qui débordait de la case. Le point dans le coin (`--default`)
+                   et l'infobulle disent que c'est le choix qui suit la mesure. -->
               <button
                 type="button"
-                class="cbpk-icon-btn"
+                class="cbpk-icon-btn cbpk-icon-btn--default"
                 :class="{ 'cbpk-icon-btn--selected': !iconChoice }"
                 :title="t('companion.settings.default_icon')"
                 @click="iconChoice = undefined"
               >
-                {{ t('companion.settings.default_icon') }}
+                <i :class="metricSample(metric).icon" aria-hidden="true"></i>
               </button>
               <button
                 v-for="ic in catalog.icons"
@@ -1134,6 +1170,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             <button type="button" class="btn btn-sm btn-outline-secondary" @click="saveLayoutPreset">
               {{ t('companion.settings.metric_layouts.save') }}
             </button>
+            </template>
           </div>
 
           <div class="cbpk-tiles">
@@ -1247,18 +1284,51 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .cbpk-param select {
   width: auto;
 }
-/* Deux champs plutôt qu'un select : chacun garde son propre libellé au lieu
-   de se disputer celui du conteneur. */
-.cbpk-param-range {
-  gap: 0.75rem;
+/* Les réglages de la mesure et de la jauge : une grille de champs étiquetés
+   (libellé au-dessus du contrôle), là où l'en-tête du groupe les alignait à la
+   file jusqu'à déborder sur trois lignes. Une seule règle pour les deux : même
+   forme de champ, seul le cadre change. */
+.cbpk-metric-params,
+.cbpk-gauge-params {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem 0.75rem;
+  align-items: start;
 }
-.cbpk-range-field {
+.cbpk-metric-params {
+  margin-bottom: 0.7rem;
+}
+/* La jauge : un cadre teinté comme sa barre dans la grille (`.cbpk-grid-gauge`),
+   pour qu'on voie d'un coup que ce panneau va avec le jeton qu'on vient de poser. */
+.cbpk-gauge-params {
+  padding: 0.6rem;
+  border: 1px solid var(--bs-primary-border-subtle, rgba(13, 110, 253, 0.4));
+  border-radius: 0.4rem;
+  background: var(--bs-primary-bg-subtle, rgba(13, 110, 253, 0.08));
+}
+.cbpk-field {
   display: flex;
-  align-items: center;
-  gap: 0.4rem;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0;
+  color: var(--bs-secondary-color);
 }
-.cbpk-range-field input {
-  width: 4.5rem;
+.cbpk-field input,
+.cbpk-field select {
+  width: 100%;
+}
+.cbpk-subhead {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--bs-secondary-color);
+}
+.cbpk-gauge-hint {
+  grid-column: 1 / -1;
+  margin: 0;
 }
 
 .cbpk-colors {
@@ -1275,18 +1345,44 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 }
 
 /* L'éditeur de disposition d'un bloc `metric` : la grille, la palette de
-   jetons, la grille d'icônes — dans cet ordre, celui où on les utilise. */
+   jetons, la grille d'icônes — dans cet ordre, celui où on les utilise. Le
+   cadre n'entoure le contenu déplié que quand il est ouvert : replié, il ne
+   reste que la barre (disposition enregistrée + « Configurer »), sans boîte
+   autour d'un unique bouton. */
 .cbpk-layout {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
   margin-bottom: 0.8rem;
+}
+.cbpk-layout--open {
   padding: 0.6rem;
   border: 1px solid var(--bs-border-color);
   border-radius: 0.5rem;
 }
+/* La barre toujours visible de l'éditeur : le choix d'une disposition
+   enregistrée à gauche, le bouton « Configurer » à droite. Le reste de
+   `.cbpk-layout` ne se déplie qu'au clic. */
+.cbpk-layout-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
 .cbpk-layout-presets {
+  flex: 1 1 14rem;
   margin-left: 0;
+}
+.cbpk-configure-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.cbpk-configure-btn--open {
+  background: var(--bs-secondary-bg, #e9ecef);
+  border-color: var(--bs-secondary-color, #6c757d);
 }
 
 .cbpk-grid {
@@ -1395,6 +1491,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   gap: 0.35rem;
 }
 .cbpk-icon-btn {
+  position: relative;
   width: 2.2rem;
   height: 2.2rem;
   display: flex;
@@ -1403,13 +1500,25 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   border: 1px solid var(--bs-border-color);
   border-radius: 0.4rem;
   background: transparent;
-  font-size: 0.65rem;
+  font-size: 1rem;
   padding: 0;
 }
 .cbpk-icon-btn--selected {
   border-color: var(--bs-primary);
   outline: 2px solid var(--bs-primary);
   outline-offset: -2px;
+}
+/* Le bouton « suit la mesure » : même icône que la valeur par défaut, un point
+   dans le coin pour le distinguer d'un choix explicite de la même icône. */
+.cbpk-icon-btn--default::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--bs-primary);
 }
 
 /* Une annotation déjà posée, avec sa propre taille à côté — même disposition

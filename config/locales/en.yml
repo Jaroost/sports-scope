@@ -2082,6 +2082,7 @@ en:
         normal_short: "N"
         large: "Large"
         large_short: "L"
+      configure_layout: "Configure layout"
       metric_layouts:
         load: "Start from a saved layout"
         load_placeholder: "Neutral layout"

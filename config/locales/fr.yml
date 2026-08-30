@@ -2082,6 +2082,7 @@ fr:
         normal_short: "N"
         large: "Grande"
         large_short: "G"
+      configure_layout: "Configurer la disposition"
       metric_layouts:
         load: "Partir d'une disposition enregistrée"
         load_placeholder: "Disposition neutre"

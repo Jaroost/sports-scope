@@ -39,8 +39,13 @@ export function useNavPois(deps: {
   // remplacer. Le bouton n'apparaît que quand un tracé est chargé (hasRoute).
   onInsertVia?: (place: NavPlace) => void
   hasRoute?: () => boolean
+  // Optionnel : vrai quand la recherche POI doit suivre la position en roulant
+  // (`maybeFollowAround`). Par défaut, seulement en navigation libre : sur un
+  // tracé, la recherche unique au chargement couvre déjà tout l'itinéraire.
+  followAround?: () => boolean
 }) {
   const { getMap, getMaplibre, getGeometry, zoomWidthScale, onNavigateTo, onInsertVia, hasRoute } = deps
+  const followAround = deps.followAround ?? (() => !hasRoute?.())
 
   // Catégories de POI ponctuels affichables en navigation (eau, restos, points de
   // vue…). Le panneau de séance permet de les masquer/afficher ; l'état initial vient
@@ -54,6 +59,14 @@ export function useNavPois(deps: {
   // Recherche Overpass en cours : pilote le retour visuel (spinner) du bouton
   // « chercher autour de moi » du panneau de séance.
   const loading = ref(false)
+
+  // Suivi de la position en roulant (`maybeFollowAround`) : dernier centre de
+  // recherche « autour de moi » et son horodatage. On ne relance un fetch que
+  // lorsque le coureur s'est éloigné de ce centre, et jamais plus d'une fois
+  // par FOLLOW_MIN_INTERVAL_MS.
+  let followCenter: LngLat | null = null
+  let followAt = 0
+  const FOLLOW_MIN_INTERVAL_MS = 20_000
 
   // Nombre de lieux trouvés par catégorie lors de la dernière recherche aboutie
   // (clé de catégorie → compte, 0 inclus). Affiché à côté de chaque catégorie dans le
@@ -169,6 +182,28 @@ export function useNavPois(deps: {
     } catch { /* réseau / serveur Overpass */ return { ok: false } } finally {
       loading.value = false
     }
+  }
+
+  // Relance une recherche « autour de moi » centrée sur la position courante quand
+  // le coureur s'est suffisamment éloigné du dernier centre de recherche. Appelée à
+  // chaque fix GPS : best-effort, silencieuse (pas de toast), throttlée en temps et
+  // en distance pour ne déclencher un fetch qu'occasionnellement.
+  //
+  // Par défaut active seulement en navigation libre : sur un tracé, `fetchPlaces()`
+  // au chargement couvre déjà la bbox de tout l'itinéraire. La première recherche
+  // part dès le premier fix (followCenter nul), sans attendre un déplacement.
+  async function maybeFollowAround(pos: LngLat) {
+    if (!followAround() || loading.value) return
+    const now = Date.now()
+    if (now - followAt < FOLLOW_MIN_INTERVAL_MS) return
+    // Seuil de déplacement : la moitié du rayon de détection (plancher 500 m). En
+    // deçà, la recherche précédente couvre encore l'entour immédiat.
+    const radiusM = userPreferences().points_of_interest.radius_m
+    const moveThresholdM = Math.max(500, radiusM / 2)
+    if (followCenter && haversine(followCenter, pos) < moveThresholdM) return
+    followCenter = pos
+    followAt = now
+    await fetchPlaces({ center: pos })
   }
 
   // Remplace les POI Overpass et redessine tous les marqueurs (Overpass + sauvegardés).
@@ -393,6 +428,7 @@ export function useNavPois(deps: {
     poiCounts,
     loading,
     fetchPlaces,
+    maybeFollowAround,
     nearestVisiblePoi,
     visiblePlaces,
     openPlacePopup,

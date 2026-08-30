@@ -2348,6 +2348,11 @@ function onPosition(pos: GeolocationPosition) {
     onPositionFree(pos, here)
   }
 
+  // Recherche POI qui suit la position en roulant (navigation libre) : best-effort,
+  // silencieuse, throttlée dans le composable. Sur un tracé, la recherche au
+  // chargement couvre déjà tout l'itinéraire — maybeFollowAround est alors inerte.
+  void pois.maybeFollowAround(here)
+
   // Notification de proximité d'un POI (bandeau du bas), en mode itinéraire comme libre.
   updatePoiProximity(here)
 

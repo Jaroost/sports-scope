@@ -59,6 +59,14 @@ module CompanionSettings
     # seul mode — rien à faire varier, contrairement à `mark_lap` qui a une
     # icône seule à proposer en cellule étroite.
     "lap_selector" => [],
+    # Le tour en cours comparé au tour précédent de la série manuelle
+    # (`default`) : écart de vitesse, de puissance et de cardio moyens.
+    # Contrairement aux quatre blocs `lap_*` ci-dessus, il ne lit pas un tour
+    # *sélectionné* — il prend toujours les deux derniers tours ouverts, où
+    # qu'il soit posé (pas réservé à une page `laps`). Un seul mode : trois
+    # lignes, rien à faire varier. Sans bouton « Marquer un tour » pour ouvrir
+    # des tours, il affiche son état vide côté appli.
+    "lap_delta" => [],
     "averages" => %w[cards list],
     "recording" => %w[full compact],
     "mark_lap" => %w[full compact],
@@ -155,6 +163,14 @@ module CompanionSettings
     # contre le vent, là, maintenant ? », pas à « quel temps fait-il ». Un
     # seul mode : deux lignes de texte, rien à faire varier selon la case.
     "wind" => [],
+    # Un minuteur de ravitaillement : compte à rebours avant la prochaine
+    # prise (cadence `interval_min` calée sur le temps écoulé, elle se
+    # réenclenche seule), cible de glucides `carbs_g_per_h` et total conseillé
+    # depuis le départ. Ne lit aucun capteur — seulement l'horloge de
+    # l'enregistreur. Les deux réglages sont portés par le bloc (voir
+    # `sanitize_block`), pas par le compte : c'est cosmétique et propre au
+    # profil, contrairement à l'objectif d'entraînement de `training_budget`.
+    "fueling" => [],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.
@@ -637,6 +653,17 @@ module CompanionSettings
   # garde l'appli côté téléphone (`RideMetricTrack.recentWindowS`, dépôt
   # voisin) : au-delà, il n'y aurait de toute façon plus rien à afficher.
   METRIC_TREND_WINDOW_S_RANGE = 30..3600
+
+  # Les deux réglages d'un bloc `fueling` — toujours écrits (avec ces défauts
+  # si absents ou hors bornes), contrairement à `window_km`/`window_s` : le
+  # bloc n'a aucun comportement « par défaut » utile sans eux. Mêmes défauts
+  # que `FuelingBlock.defaultCarbsPerHour`/`defaultIntervalMin` côté appli.
+  # Fourchette glucides : d'une sortie tranquille (~30 g/h) à la course avec
+  # glucides multi-transporteurs (90-120 g/h). Intervalle en minutes.
+  FUELING_CARBS_G_PER_H_RANGE = 20..120
+  FUELING_INTERVAL_MIN_RANGE = 5..60
+  DEFAULT_FUELING_CARBS_G_PER_H = 60
+  DEFAULT_FUELING_INTERVAL_MIN = 20
 
   # Douze rappels par profil au plus — même borne, et même raison, que
   # `ReminderSpec.maxCount` côté Dart : au-delà, un tableau de bord composé ici
@@ -1306,6 +1333,13 @@ module CompanionSettings
       # réglage — même raisonnement que `window_km`. `true` bascule sur le
       # tronçon qui suivra, pour l'annoncer en aperçu avant qu'il ne commence.
       block["upcoming"] = true if raw["upcoming"] == true
+    when "fueling"
+      carbs = raw["carbs_g_per_h"]
+      block["carbs_g_per_h"] =
+        carbs.is_a?(Numeric) ? carbs.round.clamp(FUELING_CARBS_G_PER_H_RANGE) : DEFAULT_FUELING_CARBS_G_PER_H
+      interval = raw["interval_min"]
+      block["interval_min"] =
+        interval.is_a?(Numeric) ? interval.round.clamp(FUELING_INTERVAL_MIN_RANGE) : DEFAULT_FUELING_INTERVAL_MIN
     end
 
     color = sanitize_hex_color(raw["color"])

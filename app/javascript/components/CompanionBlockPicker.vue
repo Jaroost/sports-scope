@@ -31,6 +31,7 @@ import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
   blockChoices, blockFor, isChoiceOf, isDurationMetric, isDynamicGaugeMetric, isRangeGaugeMetric,
   DEFAULT_METRIC_LAYOUT, GAUGE_SEGMENTS_MAX, GAUGE_SEGMENTS_MIN, LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS,
+  FUELING_CARBS_RANGE, FUELING_DEFAULTS, FUELING_INTERVAL_RANGE,
   MAX_SECONDARY_METRICS, METRIC_RANGE_DEFAULTS, metricDropdownLabel, metricLayout, metricSample,
   NATURAL_LINE_SIZE, previewScale, RANGE_GAUGE_COLOR, RANGE_GAUGE_SEGMENTS,
   type Block, type BlockChoice, type Catalog, type CellSize, type GaugeColorMode, type GaugeFill,
@@ -99,6 +100,11 @@ const windowKm = ref<number>(props.block?.window_km || 0)
 // La fenêtre récente d'un bloc `metric_trend` — même repli que `windowKm` :
 // vide vaut toute la sortie, le comportement par défaut.
 const windowS = ref<number>(props.block?.window_s || 0)
+// Les deux réglages d'un bloc `fueling` — toujours présents, contrairement à
+// `windowKm`/`windowS` : le bloc n'a pas de comportement utile sans eux, d'où
+// un repli sur `FUELING_DEFAULTS` plutôt que sur « vide ».
+const carbsPerHour = ref<number>(props.block?.carbs_g_per_h ?? FUELING_DEFAULTS.carbs_g_per_h)
+const intervalMin = ref<number>(props.block?.interval_min ?? FUELING_DEFAULTS.interval_min)
 // Le tronçon en cours ou celui qui suivra, pour les trois genres `workout_*`
 // — même repli que `windowKm`/`windowS` : la valeur d'avant ce réglage
 // (`'current'`) plutôt qu'un aperçu deviné pour personne.
@@ -546,6 +552,7 @@ const groups = computed(() => {
             gaugeThickness: gaugeThicknessChoice.value,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             windowS: windowS.value || undefined,
+            carbsPerHour: carbsPerHour.value, intervalMin: intervalMin.value,
             upcoming: workoutTarget.value === 'next',
             color: color.value, textColor: textColor.value,
           }),
@@ -870,7 +877,40 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 <option value="next">{{ t('companion.settings.workout_targets.next') }}</option>
               </select>
             </label>
+
+            <template v-if="group.kind === 'fueling'">
+              <label class="cbpk-param small">
+                {{ t('companion.settings.fueling_carbs') }}
+                <input
+                  v-model.number="carbsPerHour"
+                  type="number"
+                  :min="FUELING_CARBS_RANGE.min"
+                  :max="FUELING_CARBS_RANGE.max"
+                  step="5"
+                  class="form-control form-control-sm"
+                >
+              </label>
+              <label class="cbpk-param small">
+                {{ t('companion.settings.fueling_interval') }}
+                <input
+                  v-model.number="intervalMin"
+                  type="number"
+                  :min="FUELING_INTERVAL_RANGE.min"
+                  :max="FUELING_INTERVAL_RANGE.max"
+                  step="5"
+                  class="form-control form-control-sm"
+                >
+              </label>
+            </template>
           </div>
+
+          <p v-if="group.kind === 'lap_delta'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.lap_delta_hint') }}
+          </p>
+
+          <p v-if="group.kind === 'fueling'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.fueling_hint') }}
+          </p>
 
           <p v-if="group.kind === 'battery'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.battery_sensor_hint') }}

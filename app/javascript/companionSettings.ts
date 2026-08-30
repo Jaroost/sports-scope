@@ -110,6 +110,12 @@ export interface Block {
   // tronçon en cours (voir `sanitize_block`). Absent vaut `false`, le
   // comportement d'avant ce réglage.
   upcoming?: boolean
+  // Les deux réglages d'un bloc `fueling` — toujours écrits (avec les défauts
+  // de `FUELING_DEFAULTS` si l'éditeur ne les touche pas), contrairement à
+  // `window_km`/`window_s` : le bloc ne fait rien d'utile sans eux. Bornés
+  // par `sanitize_block` côté Rails (`FUELING_*_RANGE`).
+  carbs_g_per_h?: number
+  interval_min?: number
 }
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
@@ -669,6 +675,13 @@ export function defaultPresetKey(
   return presets[0]?.key
 }
 
+// Les valeurs par défaut d'un bloc `fueling` — mêmes chiffres que
+// `CompanionSettings::DEFAULT_FUELING_*` côté Rails et `FuelingBlock.default*`
+// côté appli.
+export const FUELING_DEFAULTS = { carbs_g_per_h: 60, interval_min: 20 }
+export const FUELING_CARBS_RANGE = { min: 20, max: 120 }
+export const FUELING_INTERVAL_RANGE = { min: 5, max: 60 }
+
 // ── Choisir un composant ────────────────────────────────────────────────────
 //
 // Le catalogue dit « ce genre accepte ces modes » ; la dialogue de choix, elle,
@@ -701,6 +714,7 @@ export function blockFor(
   params: {
     metric?: string; source?: string; sensor?: string; series?: string; format?: string; min?: number; max?: number
     windowKm?: number; windowS?: number; sound?: string
+    carbsPerHour?: number; intervalMin?: number
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
     gaugeThickness?: GaugeThickness
@@ -766,6 +780,13 @@ export function blockFor(
   if (choice.kind === 'altitude_profile' && params.windowKm) block.window_km = params.windowKm
   // Même raisonnement, en secondes : absent vaut toute la sortie.
   if (choice.kind === 'metric_trend' && params.windowS) block.window_s = params.windowS
+  // Toujours écrits, contrairement à `window_km`/`window_s` : le bloc `fueling`
+  // ne fait rien d'utile sans eux — l'assainisseur borne, il ne les fabrique
+  // que si absents (`FUELING_DEFAULTS`).
+  if (choice.kind === 'fueling') {
+    block.carbs_g_per_h = params.carbsPerHour ?? FUELING_DEFAULTS.carbs_g_per_h
+    block.interval_min = params.intervalMin ?? FUELING_DEFAULTS.interval_min
+  }
   // Absent (`undefined`) vaut « tronçon en cours » — même raisonnement que
   // `window_km`/`window_s` : jamais écrit pour rester silencieux tant que ce
   // n'est pas le choix explicite de l'éditeur.

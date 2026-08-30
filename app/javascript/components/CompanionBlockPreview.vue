@@ -1131,6 +1131,30 @@ const metricTrendSegments = computed(() => {
       <div class="cbp-line">Vent 22 km/h</div>
     </div>
 
+    <!-- Tour vs précédent ------------------------------------------------
+         Les deux derniers tours de la série manuelle : écart de vitesse, de
+         puissance et de cardio moyens (valeur du tour · écart signé au
+         précédent). Pas de tour sélectionné, contrairement aux blocs `lap_*`.
+         Valeurs inventées ici. -->
+    <div v-else-if="block.kind === 'lap_delta'" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-title">Tour vs précédent</div>
+      <div class="cbp-stat"><span>Vitesse</span><b>28,4 (+1,2)</b></div>
+      <div class="cbp-stat"><span>Puissance</span><b>241 (−6)</b></div>
+      <div class="cbp-stat"><span>Cardio</span><b>156 (+3)</b></div>
+    </div>
+
+    <!-- Ravitaillement -------------------------------------------------------
+         Compte à rebours avant la prochaine prise (cadence réglée, calée sur
+         le temps écoulé), cible de glucides par heure et total conseillé
+         depuis le départ. La cible reflète le réglage ; le reste est inventé
+         (pas d'horloge de sortie dans l'éditeur). -->
+    <div v-else-if="block.kind === 'fueling'" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-title">Ravitaillement</div>
+      <div class="cbp-stat"><span>Prochaine prise</span><b>08:20</b></div>
+      <div class="cbp-stat"><span>Cible</span><b>{{ block.carbs_g_per_h ?? 60 }} g/h</b></div>
+      <div class="cbp-stat"><span>Conseillé</span><b>~45 g</b></div>
+    </div>
+
     <!-- Budget de charge -------------------------------------------------- -->
     <div v-else-if="block.kind === 'training_budget'" class="cbp-card" :style="overrideStyle">
       <div class="cbp-title cbp-budget-title">

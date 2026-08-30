@@ -334,6 +334,25 @@ export function useNavPois(deps: {
     applyPoiVisibility()
   }
 
+  // Recadre la carte sur un POI et rouvre son popup (tap depuis la feuille « POI
+  // à proximité » de l'appli). Retrouve le POI rendu le plus proche des
+  // coordonnées — tolérance large car les valeurs ont fait l'aller-retour JSON —
+  // et, à défaut, vole quand même au point. L'appelant a détaché la caméra
+  // avant (following = false), sinon la boucle de suivi ramènerait sur le
+  // coureur au tic suivant.
+  function focusPoi(lng: number, lat: number) {
+    const map = getMap()
+    if (!map) return
+    let best: NavPlace | null = null
+    let bestD = Infinity
+    for (const p of [...places.value, ...routePlaces.value, ...savedPlaces.value, ...routeMarkers.value]) {
+      const d = haversine([lng, lat], [p.lng, p.lat])
+      if (d < bestD) { bestD = d; best = p }
+    }
+    map.flyTo({ center: [lng, lat], zoom: Math.max(map.getZoom(), 15.5), duration: 700 })
+    if (best && bestD < 30) openPlacePopup(best)
+  }
+
   // Met les marqueurs POI à l'échelle du zoom (échelle plus douce que le tracé). La
   // boîte se redimensionne directement, l'icône en police suit. Appelée à l'install
   // et par la boucle de rendu de l'appelant (au changement de zoom).
@@ -442,6 +461,7 @@ export function useNavPois(deps: {
     fetchPlaces,
     maybeFollowAround,
     setFilter,
+    focusPoi,
     nearestVisiblePoi,
     visiblePlaces,
     openPlacePopup,

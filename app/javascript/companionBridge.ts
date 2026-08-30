@@ -177,19 +177,23 @@ export function companionPois(payload: CompanionPois): void {
   target.postMessage(json)
 }
 
-// ─── Filtre POI : commande venue de l'appli ──────────────────────────────────
+// ─── POI : commandes venues de l'appli ───────────────────────────────────────
 //
 // Le panneau de séance qui pilote d'ordinaire les catégories de POI
 // (NavControlsPanel) est masqué dans l'appli (`appOwnsChrome`). L'appli a sa
-// propre feuille de filtre et pousse ici la liste des catégories à afficher ;
-// RouteNavigation.vue la relaie à useNavPois. Même modèle que
-// registerSleepHandlers : valable tant que la page de navigation est montée,
-// `null` au démontage.
-type PoiFilterHandler = (visibleKeys: string[]) => void
-let poiFilterHandler: PoiFilterHandler | null = null
+// propre feuille « POI à proximité » d'où elle : (1) pousse la liste des
+// catégories à afficher, (2) demande de recadrer la carte sur un POI et d'ouvrir
+// son popup. RouteNavigation.vue relaie l'une à useNavPois et l'autre à sa
+// caméra. Même modèle que registerSleepHandlers : valable tant que la page de
+// navigation est montée, `null` au démontage.
+interface PoiBridgeHandlers {
+  setFilter(visibleKeys: string[]): void
+  focus(lat: number, lng: number): void
+}
+let poiHandlers: PoiBridgeHandlers | null = null
 
-export function registerPoiFilterHandler(handler: PoiFilterHandler | null): void {
-  poiFilterHandler = handler
+export function registerPoiHandlers(handlers: PoiBridgeHandlers | null): void {
+  poiHandlers = handlers
 }
 
 // Une page web ne peut pas savoir si l'appli est installée : au mieux on sait
@@ -321,6 +325,7 @@ export function installCompanionBridge(): void {
       sleepEnter(): void
       sleepExit(): void
       setPoiFilter(visibleKeys: string[]): void
+      focusPoi(lat: number, lng: number): void
     }
   }
 
@@ -363,10 +368,20 @@ export function installCompanionBridge(): void {
     setPoiFilter(visibleKeys: string[]) {
       try {
         if (Array.isArray(visibleKeys)) {
-          poiFilterHandler?.(visibleKeys.filter((k) => typeof k === 'string'))
+          poiHandlers?.setFilter(visibleKeys.filter((k) => typeof k === 'string'))
         }
       } catch {
         // Filtre inexploitable : la page garde ses catégories courantes.
+      }
+    },
+    // Recadre la carte sur un POI et rouvre son popup (tap dans la feuille).
+    focusPoi(lat: number, lng: number) {
+      try {
+        if (typeof lat === 'number' && typeof lng === 'number') {
+          poiHandlers?.focus(lat, lng)
+        }
+      } catch {
+        // Coordonnées inexploitables : rien à recadrer.
       }
     },
   }

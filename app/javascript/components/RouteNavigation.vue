@@ -39,7 +39,7 @@ import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import {
   companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, companionRouteProfile,
-  companionPois, registerPoiFilterHandler,
+  companionPois, registerPoiHandlers,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
@@ -301,13 +301,23 @@ function maybeRepublishCompanionPois() {
   publishCompanionPois()
 }
 
-// Filtre POI choisi dans l'appli : applique les catégories et republie aussitôt
-// (sans attendre le prochain flush du watcher, pour un retour immédiat).
-registerPoiFilterHandler((visibleKeys) => {
-  pois.setFilter(visibleKeys)
-  publishCompanionPois()
+registerPoiHandlers({
+  // Filtre choisi dans l'appli : applique les catégories et republie aussitôt
+  // (sans attendre le prochain flush du watcher, pour un retour immédiat).
+  setFilter: (visibleKeys) => {
+    pois.setFilter(visibleKeys)
+    publishCompanionPois()
+  },
+  // Tap sur un POI de la feuille : on détache la caméra (sinon la boucle de
+  // suivi ramènerait sur le coureur au tic suivant) puis on recadre dessus. Le
+  // bouton « Recentrer » réapparaît alors pour reprendre le suivi.
+  focus: (lat, lng) => {
+    following.value = false
+    cameraUnlocked.value = true
+    pois.focusPoi(lng, lat)
+  },
 })
-onBeforeUnmount(() => registerPoiFilterHandler(null))
+onBeforeUnmount(() => registerPoiHandlers(null))
 
 // ─── Parcours des POI ──────────────────────────────────────────────────────────
 // Enchaîne les POI visibles en volant de l'un à l'autre (cf. usePoiBrowse) : consomme les

@@ -212,6 +212,15 @@ module CompanionSettings
     # Comme `training_budget`, ça vient de la page de navigation : un profil
     # de home-trainer sans WebView n'en recevra jamais.
     "climb_list" => %w[full compact],
+    # Les ravitaillements à venir SUR LE TRACÉ (eau, ravito, boulangerie), avec
+    # leur distance le long du parcours. Le site projette chaque POI sur la
+    # polyligne (`buildCompanionResupply`, `navHelpers.ts`) et ne garde que
+    # ceux qui tombent devant et à moins de ~150 m du tracé — c'est ce qui le
+    # distingue de la feuille « POI à proximité » de l'appli, qui fléchit
+    # depuis la position sans savoir où va le tracé. Comme `climb_list`, ça
+    # vient de la page : rien sur home-trainer. `list` toute la liste,
+    # `compact` le prochain seulement.
+    "resupply" => %w[list compact],
     # Le profil gradué du col en cours, en graphique (D+ restant, pente colorée,
     # curseur de progression) — même dessin que la carte dépliée sur la carte de
     # l'appli (tap du badge de col), posable comme un bloc de page ordinaire.

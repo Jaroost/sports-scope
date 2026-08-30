@@ -15,7 +15,7 @@ import { rejoinIndexAhead, viasAhead, detourAnchors, spliceDetour } from '../nav
 import type { Waypoint } from '../navRoute'
 import {
   textColorOn, moveLngLat, buildClimbProfile, buildCompanionClimbProfile, buildCompanionRouteClimbs,
-  buildCompanionRouteProfile, buildCompanionPois, profileYAt, buildTurnChain,
+  buildCompanionRouteProfile, buildCompanionPois, buildCompanionResupply, profileYAt, buildTurnChain,
   smoothEtaSpeed, arrivalStep, INITIAL_ARRIVAL_STATE, turnBanner, turnAlertStep,
   INITIAL_TURN_ALERT_STATE, TURN_PASSED_M, revealZoomStep, navStateFor,
   resyncOnTurn, turnLabel, turnsNearTap, turnIcon,
@@ -39,7 +39,7 @@ import NavPlaceSearch from './NavPlaceSearch.vue'
 import NavRoutePicker from './NavRoutePicker.vue'
 import {
   companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, companionRouteProfile,
-  companionPois, registerPoiHandlers,
+  companionPois, companionResupply, registerPoiHandlers,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
@@ -283,6 +283,11 @@ async function searchPois(opts: { center?: [number, number] } = {}) {
 // hors appli (companionPois court-circuite sans le canal).
 function publishCompanionPois() {
   companionPois(buildCompanionPois(pois.visiblePlaces.value, lastPos, { ...poiVisible }))
+  // Les ravitaillements *sur le tracé* : même jeu de POI, mais projeté sur la
+  // polyligne pour ne garder que ceux qui tombent devant, avec leur distance
+  // le long du tracé. Vide hors tracé (geometry < 2), `companionResupply`
+  // dédoublonne comme `companionPois`.
+  companionResupply(buildCompanionResupply(pois.visiblePlaces.value, geometry, cumDistM, snapDistAlongM))
 }
 // Le jeu affiché change (nouvelle recherche « autour de moi », bascule de filtre,
 // retrait du tracé → liste vide) → on republie. companionPois dédoublonne.
@@ -1539,6 +1544,7 @@ function unloadRoute() {
   routeClimbNames = []
   companionRouteClimbs(buildCompanionRouteClimbs([], [], []))
   companionRouteProfile(buildCompanionRouteProfile([], []))
+  companionResupply(buildCompanionResupply([], [], [], 0))
   // Un `startIdx` est un indice dans CE tracé : le prochain trajet chargé peut,
   // par pure coïncidence, ouvrir un col au même indice numérique. Sans ce reset,
   // le cache le prendrait pour « déjà affiché » et ne republierait jamais son

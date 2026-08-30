@@ -1307,6 +1307,23 @@ const metricTrendSegments = computed(() => {
       </div>
     </div>
 
+    <!-- Ravitos sur le tracé -----------------------------------------------
+         Les POI eau / ravito / boulangerie projetés sur la polyligne du tracé
+         (côté site), triés par distance à venir — pas à vol d'oiseau comme la
+         feuille « POI à proximité » de l'appli. `compact` : le prochain seul.
+         Valeurs inventées ici. -->
+    <div v-else-if="block.kind === 'resupply'" class="cbp-card" :style="overrideStyle">
+      <div class="cbp-title">{{ shape.resupplyCompact ? 'Prochain ravito' : 'Ravitos sur le tracé' }}</div>
+      <template v-if="shape.resupplyCompact">
+        <div class="cbp-line">Eau · 2,4 km</div>
+      </template>
+      <template v-else>
+        <div class="cbp-line">Eau · 2,4 km</div>
+        <div class="cbp-line">Boulangerie · 8,1 km (+40 m)</div>
+        <div class="cbp-line">Ravito · 14,6 km</div>
+      </template>
+    </div>
+
     <!-- Profil du col ---------------------------------------------------
          Le graphique gradué complet du col en cours (D+ restant, pente
          colorée, curseur de progression) — même dessin que la carte de col

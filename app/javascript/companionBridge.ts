@@ -9,6 +9,7 @@ import type {
   CompanionClimbProfile,
   CompanionNavState,
   CompanionPois,
+  CompanionResupply,
   CompanionRouteClimbs,
   CompanionRouteProfile,
 } from './navHelpers'
@@ -174,6 +175,24 @@ export function companionPois(payload: CompanionPois): void {
   const json = JSON.stringify(payload)
   if (json === lastPoisJson) return
   lastPoisJson = json
+  target.postMessage(json)
+}
+
+// Dernier jeu de ravitaillements publié — même dédoublonnage que
+// `companionPois` : sur un tracé chargé, `buildCompanionResupply` ne change
+// qu'à mesure qu'on avance (les `remainingM` diminuent) ou que le jeu de POI
+// bouge, et on l'appelle au même rythme.
+let lastResupplyJson = ''
+
+// Publie les ravitaillements à venir SUR LE TRACÉ (voir `buildCompanionResupply`).
+// Émis au même rythme que `companionPois` — jeu de POI qui change, position qui
+// avance (débit réduit), retrait du tracé → liste vide. Silencieux hors appli.
+export function companionResupply(payload: CompanionResupply): void {
+  const target = channel()
+  if (!target) return
+  const json = JSON.stringify(payload)
+  if (json === lastResupplyJson) return
+  lastResupplyJson = json
   target.postMessage(json)
 }
 

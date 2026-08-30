@@ -1,8 +1,8 @@
 // Helpers purs de la navigation (RouteNavigation.vue). Aucune dépendance à l'état
 // réactif ni à MapLibre : tout est passé en paramètre, pour rester testable et
 // réutilisable par les sous-composants (NavTurnBanner, NavClimbCard, NavScreenOff…).
-import { colorForGrade, gradeForIndex, haversine } from './routeHelpers'
-import type { Climb, LngLat, Maneuver, TurnPoint } from './routeHelpers'
+import { colorForGrade, gradeForIndex, haversine, nearestGeomIndex, projectOnRoute } from './routeHelpers'
+import type { Climb, Coord, LngLat, Maneuver, TurnPoint } from './routeHelpers'
 import { ARRIVAL_M, ARRIVAL_APPROACH_M } from './navConstants'
 
 // ─── Types partagés des overlays de navigation ─────────────────────────────────
@@ -858,6 +858,72 @@ export function buildCompanionPois(
       lng: p.lng,
     })),
   }
+}
+
+// ─── Ravitaillements sur le tracé, poussés à l'appli ─────────────────────────
+
+// Les serverTypes de POI qui comptent comme un ravitaillement — de quoi refaire
+// les bidons ou les poches. Sous-ensemble des catégories de `poiCategories.ts`
+// (`NavPlace.type` = premier `serverType` de la catégorie).
+export const RESUPPLY_TYPES = new Set(['water', 'food', 'bakery'])
+
+// Un arrêt possible : de quoi le nommer et dire dans combien de kilomètres il
+// tombe. `remainingM` est mesuré LE LONG DU TRACÉ (pas à vol d'oiseau), depuis
+// la position courante — c'est ce qui distingue ce composant de la feuille
+// « POI à proximité », qui fléchi depuis la position sans savoir où va le
+// tracé. `detourM` est l'écart entre le POI et le tracé (à faire en plus).
+export interface CompanionResupplyStop {
+  name: string
+  type: string
+  remainingM: number
+  detourM: number
+}
+
+export interface CompanionResupply {
+  type: 'resupply'
+  stops: CompanionResupplyStop[]
+}
+
+// Au-delà de ce couloir, un POI n'est plus « sur le tracé » mais « dans le
+// coin » — c'est déjà ce que montre la feuille POI. 150 m laisse passer une
+// fontaine en bord de route ou une station avec parking.
+export const RESUPPLY_CORRIDOR_M = 150
+// Plus long ne se lit pas d'un coup d'œil en roulant.
+export const RESUPPLY_MAX = 8
+
+// Construit le message `resupply` : projette chaque POI de ravitaillement sur
+// la polyligne du tracé, ne garde que ceux qui tombent DEVANT (`distAlongM >
+// hereM`) et dans le couloir, trie par distance à venir, plafonne. Pur.
+// `places` est déjà filtré par les cases actives (`visiblePlaces`), donc pas
+// de filtre à repasser ici.
+export function buildCompanionResupply(
+  places: CompanionPoiPoint[],
+  geometry: Coord[],
+  cumDistM: number[],
+  hereM: number,
+): CompanionResupply {
+  if (geometry.length < 2 || cumDistM.length !== geometry.length) {
+    return { type: 'resupply', stops: [] }
+  }
+
+  const stops: CompanionResupplyStop[] = []
+  for (const place of places) {
+    if (!RESUPPLY_TYPES.has(place.type)) continue
+    const p: LngLat = [place.lng, place.lat]
+    const { idx } = nearestGeomIndex(p, geometry)
+    const { point, distAlongM } = projectOnRoute(p, geometry, cumDistM, idx)
+    if (distAlongM <= hereM) continue
+    const detourM = haversine(p, point)
+    if (detourM > RESUPPLY_CORRIDOR_M) continue
+    stops.push({
+      name: place.name,
+      type: place.type,
+      remainingM: Math.round(distAlongM - hereM),
+      detourM: Math.round(detourM),
+    })
+  }
+  stops.sort((a, b) => a.remainingM - b.remainingM)
+  return { type: 'resupply', stops: stops.slice(0, RESUPPLY_MAX) }
 }
 
 // ─── Débug ────────────────────────────────────────────────────────────────────

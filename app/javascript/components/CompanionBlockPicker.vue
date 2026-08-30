@@ -449,6 +449,22 @@ function metricLabel(metric: string): string {
   return metric === 'clock' ? t('companion.settings.blocks.clock') : metricDropdownLabel(metric, t)
 }
 
+// L'aide affichée sous l'en-tête d'un groupe : une phrase qui dit ce que le
+// composant montre et d'où il tient sa donnée. `''` (masquée) tant que la clé
+// n'existe pas — tous les genres ne l'ont pas encore. Les sections fondues
+// (`GROUPED_KINDS` : `weather`, `workout`) ont leur propre clé.
+function blockHelp(kind: string): string {
+  return t(`companion.settings.block_help.${kind}`, { defaultValue: '' })
+}
+
+// La même chose pour une mesure, en tête du groupe « Une mesure » : une phrase
+// pour chaque mesure du catalogue (`companion.settings.metric_help`), de quoi
+// composer sans connaître le vocabulaire. `''` pour l'horloge, qui n'est pas
+// une mesure.
+const metricHelp = computed(() =>
+  isClockMetric.value ? '' : t(`companion.settings.metric_help.${metric.value}`, { defaultValue: '' }),
+)
+
 // Le catalogue liste les mesures dans l'ordre du serveur ; la dialogue les
 // propose triées par libellé affiché, pour qu'on les retrouve sans connaître
 // cet ordre-là par cœur. Sert aussi le choix d'une mesure secondaire
@@ -903,6 +919,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </label>
             </template>
           </div>
+
+          <!-- Ce que le composant montre, et d'où il tient sa donnée — une
+               phrase sous l'en-tête du groupe. Les hints plus bas restent pour
+               les pièges propres à un réglage. -->
+          <p v-if="blockHelp(group.kind)" class="text-body-secondary small mb-2">
+            {{ blockHelp(group.kind) }}
+          </p>
+
+          <p v-if="group.kind === 'metric' && metricHelp" class="text-body-secondary small mb-2">
+            {{ metricHelp }}
+          </p>
 
           <p v-if="group.kind === 'lap_delta'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.lap_delta_hint') }}

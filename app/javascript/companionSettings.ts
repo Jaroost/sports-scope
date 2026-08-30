@@ -1488,6 +1488,7 @@ export interface BlockShape {
   batteryCompact: boolean
   budgetWeek: boolean
   climbListFull: boolean
+  resupplyCompact: boolean
   powerCurveChart: boolean
   workoutStatusLine: boolean
   // Le tronçon qui suivra celui en cours, plutôt que le tronçon en cours —
@@ -1530,6 +1531,9 @@ export function blockShape(block: Block): BlockShape {
     // La liste entière, ou une seule ligne (le col en cours / prochain) —
     // même distinction que `navFull` pour `nav_state`.
     climbListFull: block.kind === 'climb_list' && block.mode !== 'compact',
+    // La liste des prochains ravitos, ou le prochain seul — même distinction
+    // que `climbListFull`.
+    resupplyCompact: block.kind === 'resupply' && block.mode === 'compact',
     // Le tableau (une ligne par durée), ou la même courbe en graphique.
     powerCurveChart: block.kind === 'power_curve' && block.mode === 'chart',
     // Le tronçon et le temps restant sur deux lignes (`full`, par défaut),

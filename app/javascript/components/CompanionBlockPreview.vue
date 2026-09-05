@@ -652,6 +652,10 @@ const powerCurvePolyline = computed(() => powerCurvePoints.value.map((p) => `${p
 // bleu) que clair (Z3 jaune) — même parade que côté appli.
 const metricTrendTitle = computed(() =>
   lapScope.value + (props.block.source === 'power' ? 'Tendance puissance' : 'Tendance cardio'))
+// L'icône du mode `compact` : mêmes couples mesure/icône que `METRICS`
+// (`power`/`heart_rate` — `companionSettings.ts`), pas un choix propre à cette
+// vignette.
+const metricTrendIcon = computed(() => (props.block.source === 'power' ? 'fa-bolt' : 'fa-heart'))
 const metricTrendSample = computed(() =>
   props.block.source === 'power' ? METRIC_TREND_POWER_SAMPLE : METRIC_TREND_HR_SAMPLE)
 
@@ -1495,14 +1499,23 @@ const metricTrendSegments = computed(() => {
     <!-- Tendance -- cardio ou puissance dans le temps, toute la sortie, une
          fenêtre récente (`window_s`) ou le tour choisi (`lap_metric_trend`) :
          même dessin dans les trois cas, seule la portée change, et l'éditeur
-         n'a pas de sortie en cours pour montrer la différence. ------------- -->
+         n'a pas de sortie en cours pour montrer la différence. `compact`
+         retire le titre — la courbe seule remplit toute la case — et pose
+         l'icône de la mesure en surimpression, en haut à gauche, à la place
+         du mot qu'on vient de gagner en place. ------------------------- -->
     <div
       v-else-if="block.kind === 'metric_trend' || block.kind === 'lap_metric_trend'"
       class="cbp-card cbp-metric-trend"
       :style="overrideStyle"
     >
-      <div class="cbp-title">{{ metricTrendTitle }}</div>
+      <div v-if="block.mode !== 'compact'" class="cbp-title">{{ metricTrendTitle }}</div>
       <div class="cbp-metric-trend-graph">
+        <i
+          v-if="block.mode === 'compact'"
+          class="fa-solid cbp-metric-trend-icon"
+          :class="metricTrendIcon"
+          aria-hidden="true"
+        ></i>
         <svg class="cbp-metric-trend-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
           <path v-for="(seg, i) in metricTrendSegments" :key="i" :d="seg.d" :fill="seg.color" />
           <polyline
@@ -1879,6 +1892,10 @@ const metricTrendSegments = computed(() => {
   position: relative;
   flex: 1;
   min-height: 0;
+}
+/* Seulement quand un titre précède : en mode `compact`, sans titre, la
+   courbe part du bord de la carte et en occupe donc toute la hauteur. */
+.cbp-title + .cbp-metric-trend-graph {
   margin-top: 0.5em;
 }
 .cbp-metric-trend-svg {
@@ -1888,6 +1905,22 @@ const metricTrendSegments = computed(() => {
   height: 100%;
   border-radius: 0.5em;
   background: #14161a;
+}
+/* L'icône du mode `compact`, en surimpression du graphique — même halo sombre
+   que les libellés d'échelle du dessin côté appli (`MetricTrendGraph`), pour
+   rester lisible aussi bien sur un aplat clair (Z3 jaune) que sombre (Z1
+   bleu). */
+.cbp-metric-trend-icon {
+  position: absolute;
+  top: 0.35em;
+  left: 0.35em;
+  z-index: 1;
+  padding: 0.3em;
+  border-radius: 0.35em;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  font-size: 0.8em;
+  line-height: 1;
 }
 
 /* Le chiffre aussi grand que la case le permet — c'est ce qu'on lit à 30 km/h

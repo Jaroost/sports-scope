@@ -259,17 +259,18 @@ module CompanionSettings
     # Comme `power_curve`, la donnée ne vient pas d'ici — c'est l'appli qui la
     # calcule à partir de son propre capteur — et elle ne dépend d'aucune page
     # de navigation ni du GPS : un profil de home-trainer la reçoit tout
-    # autant qu'une sortie sur route. Un seul mode, même raison que
-    # `climb_profile`/`weather_forecast` : le graphique remplit toute la
-    # case, rien à faire varier selon la case.
-    "metric_trend" => [],
+    # autant qu'une sortie sur route. `chart` le dessin d'origine (titre puis
+    # courbe), `compact` sans titre — la courbe seule remplit toute la case,
+    # avec juste l'icône de la mesure (cœur/éclair) en surimpression en haut
+    # à gauche pour gagner la place du titre.
+    "metric_trend" => %w[chart compact],
     # La même tendance, mais bornée au tour choisi sur une page `laps` plutôt
     # qu'à la sortie entière — même famille que `lap_zones`/`lap_averages` :
     # une classe/un genre à part plutôt qu'un repli de plus sur `metric_trend`,
     # parce qu'elle n'a de sens que sur une page qui porte un tour sélectionné.
     # Pas de `window_s` ici : le tour ouvert *est* la fenêtre, il n'y en a pas
-    # d'autre à régler.
-    "lap_metric_trend" => [],
+    # d'autre à régler. Mêmes modes que `metric_trend`.
+    "lap_metric_trend" => %w[chart compact],
     # L'heure courante. Seul composant, avec `training_budget`/`climb_list`, à
     # ne rien vérifier au-delà du mode générique — pas de mesure ni de source
     # à valider, comme `radar`/`recording`.

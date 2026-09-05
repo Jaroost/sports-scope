@@ -722,6 +722,15 @@ module CompanionSettings
   # autant ne pas borner.
   REMINDER_COUNT_RANGE = 1..20
 
+  # Retarde le premier déclenchement — « manger toutes les heures, à partir
+  # d'1h30 » se compose alors avec un intervalle de 60 min et ce réglage à 90 :
+  # le premier rappel tombe pile à 1h30, puis un toutes les heures. Absent (0)
+  # vaut le comportement d'avant ce réglage : le premier rappel tombe au bout
+  # d'un intervalle, comme n'importe quel rappel sans ce réglage. Dix heures au
+  # plus long : au-delà, la sortie elle-même est déjà une exception, autant
+  # régler l'intervalle plutôt que le départ.
+  REMINDER_START_AFTER_MINUTES_RANGE = 0..600
+
   # Ce que l'éditeur reçoit en props. Sérialisé tel quel dans la page.
   def catalog
     {
@@ -750,7 +759,8 @@ module CompanionSettings
       "reminder_sounds" => BELL_SOUNDS,
       "max_reminders" => MAX_REMINDERS,
       "max_reminder_message_length" => MAX_REMINDER_MESSAGE_LENGTH,
-      "max_reminder_count" => REMINDER_COUNT_RANGE.max
+      "max_reminder_count" => REMINDER_COUNT_RANGE.max,
+      "max_reminder_start_after_minutes" => REMINDER_START_AFTER_MINUTES_RANGE.max
     }
   end
 
@@ -1792,6 +1802,13 @@ module CompanionSettings
     # nulle ou négative ne dit rien d'autre et disparaît donc.
     count = raw["count"]
     reminder["count"] = count.round.clamp(REMINDER_COUNT_RANGE) if count.is_a?(Numeric) && count.positive?
+
+    # Même convention que `count` : absent (ou nul/négatif) vaut pas de délai,
+    # le comportement d'avant ce réglage, et ne s'écrit donc pas.
+    start_after = raw["start_after_minutes"]
+    if start_after.is_a?(Numeric) && start_after.positive?
+      reminder["start_after_minutes"] = start_after.round.clamp(REMINDER_START_AFTER_MINUTES_RANGE)
+    end
 
     reminder
   end

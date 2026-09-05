@@ -509,6 +509,12 @@ export interface Reminder {
   // « calibrer le capteur » à la 30ᵉ minute. Voir `REMINDER_COUNT_RANGE`
   // (Rails) et `ReminderSpec.count` (Dart).
   count?: number
+  // Retarde le premier déclenchement : « manger toutes les heures, à partir
+  // d'1h30 » se compose avec `interval_minutes: 60` et ceci à `90` — le
+  // premier rappel tombe pile à 1h30, puis un toutes les heures. Absent (ou 0)
+  // vaut pas de délai. Voir `REMINDER_START_AFTER_MINUTES_RANGE` (Rails) et
+  // `ReminderSpec.startAfterMinutes` (Dart).
+  start_after_minutes?: number
 }
 
 export interface Preset {
@@ -643,6 +649,7 @@ export interface Catalog {
   max_reminders: number
   max_reminder_message_length: number
   max_reminder_count: number
+  max_reminder_start_after_minutes: number
 }
 
 // ── Derrière le menu, ou dans le défilement ─────────────────────────────────

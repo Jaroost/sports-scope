@@ -1176,6 +1176,18 @@ function setReminderCount(reminder: Reminder, raw: string) {
   reminder.count = Math.min(n, props.catalog.max_reminder_count)
 }
 
+// Le délai avant le tout premier rappel. 0 (ou vide) = pas de délai, même
+// convention que `count` : on retire alors la clé plutôt que d'écrire un
+// `start_after_minutes` que l'assainisseur jetterait de toute façon.
+function setReminderStartAfter(reminder: Reminder, raw: string) {
+  const n = Math.round(Number(raw))
+  if (!raw || !Number.isFinite(n) || n < 1) {
+    delete reminder.start_after_minutes
+    return
+  }
+  reminder.start_after_minutes = Math.min(n, props.catalog.max_reminder_start_after_minutes)
+}
+
 // ── les boutons Di2 ─────────────────────────────────────────────────────────
 //
 // Quatre canaux fixes — seuls 1 et 2 sont câblés sur le matériel testé côté
@@ -2459,6 +2471,14 @@ async function save() {
                      @input="reminder.interval_minutes = Number(($event.target as HTMLInputElement).value)">
             </div>
             <div class="col-2">
+              <label class="form-label small mb-1">{{ t('companion.settings.reminder_start_after') }}</label>
+              <input class="form-control form-control-sm" type="number" min="0"
+                     :max="catalog.max_reminder_start_after_minutes"
+                     :placeholder="t('companion.settings.reminder_start_after_none')"
+                     :value="reminder.start_after_minutes ?? ''"
+                     @input="setReminderStartAfter(reminder, ($event.target as HTMLInputElement).value)">
+            </div>
+            <div class="col-2">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_count') }}</label>
               <input class="form-control form-control-sm" type="number" min="1"
                      :max="catalog.max_reminder_count"
@@ -2466,14 +2486,14 @@ async function save() {
                      :value="reminder.count ?? ''"
                      @input="setReminderCount(reminder, ($event.target as HTMLInputElement).value)">
             </div>
-            <div class="col-5">
+            <div class="col-4">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_message') }}</label>
               <input class="form-control form-control-sm" type="text"
                      :maxlength="catalog.max_reminder_message_length"
                      :placeholder="t('companion.settings.reminder_message_placeholder')"
                      v-model="reminder.message">
             </div>
-            <div class="col-3">
+            <div class="col-2">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_sound') }}</label>
               <select class="form-select form-select-sm" v-model="reminder.sound">
                 <option v-for="sound in catalog.reminder_sounds" :key="sound" :value="sound">

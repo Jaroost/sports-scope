@@ -119,7 +119,7 @@ function submitWax(chain: any) {
   run(() => api(`/api/parts/${chain.id}/wax`, 'POST', { waxed_at: date, scope }))
 }
 
-// ── Montage (rotation) ──────────────────────────────────────────────────────────
+// ── Montage / démontage (rotation) ───────────────────────────────────────────────
 function startMount(chain: any) {
   openMount.value = chain.id
   mountDate.value = nowStr()
@@ -128,6 +128,18 @@ function submitMount(bike: any, chain: any) {
   const date = mountDate.value
   openMount.value = null
   run(() => api(`/api/bikes/${bike.id}/mount`, 'POST', { part_id: chain.id, mounted_at: date }))
+}
+
+const openUnmount = ref<number | null>(null)
+const unmountDate = ref(nowStr())
+function startUnmount(chain: any) {
+  openUnmount.value = chain.id
+  unmountDate.value = nowStr()
+}
+function submitUnmount(chain: any) {
+  const date = unmountDate.value
+  openUnmount.value = null
+  run(() => api(`/api/parts/${chain.id}/unmount`, 'POST', { unmounted_at: date }))
 }
 
 // ── Seuil ───────────────────────────────────────────────────────────────────────
@@ -157,10 +169,34 @@ function submitNotes(chain: any) {
 function addChain(bike: any) {
   run(() => api(`/api/bikes/${bike.id}/parts`, 'POST', { part_type_id: bike.chain_part_type_id }))
 }
-function removeChain(bike: any, chain: any) {
+// Retire une chaîne de la rotation active sans effacer son historique — la
+// dernière chaîne active du vélo ne peut pas être mise au rebut (le serveur
+// refuse aussi, ceci évite juste l'appel).
+function discardChain(bike: any, chain: any) {
   if (bike.chains.length <= 1) return
-  if (!window.confirm(t('chains.delete_confirm'))) return
-  run(() => api(`/api/parts/${chain.id}`, 'DELETE'))
+  if (!window.confirm(t('parts.discard_confirm'))) return
+  run(() => api(`/api/parts/${chain.id}/discard`, 'POST'))
+}
+function restoreChain(chain: any) {
+  run(() => api(`/api/parts/${chain.id}/restore`, 'POST'))
+}
+async function removeChain(bike: any, chain: any) {
+  if (!window.confirm(t('parts.delete_confirm'))) return
+  error.value = null
+  try {
+    await api(`/api/parts/${chain.id}`, 'DELETE')
+    const b = bikes.value.find((x) => x.id === bike.id)
+    if (b) b.discarded_chains = (b.discarded_chains || []).filter((c: any) => c.id !== chain.id)
+  } catch (e: any) {
+    error.value = e.message
+  }
+}
+
+const expandedDiscardedChains = ref<Set<number>>(new Set())
+function toggleDiscardedChains(bikeId: number) {
+  const s = expandedDiscardedChains.value
+  if (s.has(bikeId)) s.delete(bikeId)
+  else s.add(bikeId)
 }
 // Une chaîne est « à recirer » soit parce qu'elle a dépassé son seuil de km, soit
 // parce que l'utilisateur l'a marquée comme telle (bruit, pluie, remontage…).
@@ -483,6 +519,15 @@ onBeforeUnmount(() => {
               >
                 <i class="fa-solid fa-rotate me-1" aria-hidden="true"></i>{{ t('chains.mount') }}
               </button>
+              <button
+                v-else
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                :title="t('parts.unmount')"
+                @click="startUnmount(chain)"
+              >
+                <i class="fa-solid fa-eject me-1" aria-hidden="true"></i>{{ t('parts.unmount') }}
+              </button>
               <button type="button" class="btn btn-sm btn-outline-secondary" @click="startSeuil(chain)">
                 <i class="fa-solid fa-sliders me-1" aria-hidden="true"></i>{{ t('chains.threshold') }}
               </button>
@@ -492,10 +537,11 @@ onBeforeUnmount(() => {
               <button
                 v-if="bike.chains.length > 1"
                 type="button"
-                class="btn btn-sm btn-outline-danger"
-                @click="removeChain(bike, chain)"
+                class="btn btn-sm btn-outline-warning"
+                :title="t('parts.discard')"
+                @click="discardChain(bike, chain)"
               >
-                <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                <i class="fa-solid fa-box-archive" aria-hidden="true"></i>
               </button>
             </div>
 
@@ -546,6 +592,17 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
+            <!-- Formulaire démontage -->
+            <div v-if="openUnmount === chain.id" class="d-flex align-items-center gap-2 flex-wrap mt-2">
+              <input v-model="unmountDate" type="datetime-local" class="form-control form-control-sm" style="width: auto" />
+              <button type="button" class="btn btn-sm btn-success" @click="submitUnmount(chain)">
+                <i class="fa-solid fa-check" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" @click="openUnmount = null">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+
             <!-- Formulaire seuil -->
             <div v-if="editSeuil === chain.id" class="d-flex align-items-center gap-2 flex-wrap mt-2">
               <input
@@ -569,6 +626,57 @@ onBeforeUnmount(() => {
             <button type="button" class="btn btn-sm btn-outline-secondary" @click="addChain(bike)">
               <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('chains.add_chain') }}
             </button>
+          </div>
+
+          <div v-if="bike.discarded_chains?.length" class="mt-1">
+            <button
+              type="button"
+              class="btn btn-sm btn-link text-muted text-decoration-none ps-0"
+              @click="toggleDiscardedChains(bike.id)"
+            >
+              <i
+                class="fa-solid me-1"
+                :class="expandedDiscardedChains.has(bike.id) ? 'fa-chevron-down' : 'fa-chevron-right'"
+                aria-hidden="true"
+              ></i>
+              {{ t('parts.discarded_section') }} ({{ bike.discarded_chains.length }})
+            </button>
+
+            <div v-if="expandedDiscardedChains.has(bike.id)" class="d-flex flex-column gap-2 mt-2">
+              <div
+                v-for="chain in bike.discarded_chains"
+                :key="chain.id"
+                class="discarded-row d-flex justify-content-between align-items-center gap-2 flex-wrap"
+              >
+                <div class="min-width-0">
+                  <span class="text-muted text-decoration-line-through">{{ chain.name }}</span>
+                  <small class="text-muted d-block">
+                    {{ chain.km_since_mount }} km · {{ t('parts.discarded_on') }} {{ formatDate(chain.discarded_at) }}
+                  </small>
+                  <small v-if="chain.notes" class="text-muted d-block text-break">
+                    <i class="fa-regular fa-note-sticky me-1" aria-hidden="true"></i>{{ chain.notes }}
+                  </small>
+                </div>
+                <div class="d-flex gap-2 flex-shrink-0">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-success"
+                    :title="t('parts.restore')"
+                    @click="restoreChain(chain)"
+                  >
+                    <i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-outline-danger"
+                    :title="t('parts.delete')"
+                    @click="removeChain(bike, chain)"
+                  >
+                    <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
           </template>
         </div>
@@ -629,5 +737,9 @@ onBeforeUnmount(() => {
 }
 .min-width-0 {
   min-width: 0;
+}
+.discarded-row {
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--bs-border-color, #dee2e6);
 }
 </style>

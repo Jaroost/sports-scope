@@ -213,6 +213,9 @@ Rails.application.routes.draw do
   patch  "/api/parts/:id", to: "parts#update", constraints: { id: /\d+/ }
   delete "/api/parts/:id", to: "parts#destroy", constraints: { id: /\d+/ }
   post   "/api/parts/:id/wax", to: "parts#wax", constraints: { id: /\d+/ }
+  post   "/api/parts/:id/unmount", to: "parts#unmount", constraints: { id: /\d+/ }
+  post   "/api/parts/:id/discard", to: "parts#discard", constraints: { id: /\d+/ }
+  post   "/api/parts/:id/restore", to: "parts#restore", constraints: { id: /\d+/ }
   get    "/api/part_types", to: "part_types#index"
   post   "/api/part_types", to: "part_types#create"
   patch  "/api/part_types/:id", to: "part_types#update", constraints: { id: /\d+/ }

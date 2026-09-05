@@ -2,9 +2,10 @@
 # depuis son montage (usure totale), et — pour une chaîne — depuis son dernier
 # cirage. Lecture seule, recalculé à la demande.
 #
-# Rotation : à un instant donné, une seule pièce d'un type donné est montée. On
-# reconstruit les intervalles de montage depuis `part_mounts` (triés par pièce) et
-# on n'attribue à une pièce que les km des sorties tombant dans SES intervalles.
+# Chaque PartMount porte désormais son propre intervalle [mounted_at, unmounted_at)
+# (unmounted_at nil = toujours monté) : on n'attribue à une pièce que les km des
+# sorties tombant dans SES intervalles. Plusieurs pièces d'un même type peuvent
+# avoir un intervalle ouvert en même temps (cf. PartType#allow_multiple_mounted).
 #
 # Activités d'un vélo :
 # - sorties Strava dont le `gear_id` correspond au vélo ;
@@ -66,11 +67,15 @@ class PartWearService
     ((km_since_wax(chain) / threshold) * 100).round
   end
 
-  def mounted_part_id(part_type_id)
-    @mounts.reverse_each do |mount|
-      return mount.part_id if mount.part.part_type_id == part_type_id
-    end
-    nil
+  # La pièce a-t-elle un montage actuellement ouvert (unmounted_at nil) ?
+  def mounted?(part)
+    @mounts.any? { |m| m.part_id == part.id && m.unmounted_at.nil? }
+  end
+
+  # Ids des pièces d'un type actuellement montées (peut en renvoyer plusieurs si
+  # le type autorise les montages multiples).
+  def mounted_part_ids(part_type_id)
+    @mounts.select { |m| m.unmounted_at.nil? && m.part.part_type_id == part_type_id }.map(&:part_id).uniq
   end
 
   # Date du montage le plus récent de cette pièce (nil si jamais montée).
@@ -80,16 +85,10 @@ class PartWearService
 
   private
 
-  # Intervalles [mounted_at, next_mount_at) pendant lesquels `part` était monté
-  # (le dernier segment est ouvert : end_at = nil). Un montage plus récent d'une
-  # AUTRE pièce du même type ferme le segment en cours de `part`.
+  # Intervalles [mounted_at, unmounted_at) de cette pièce (unmounted_at nil = segment
+  # ouvert), directement portés par ses propres part_mounts.
   def segments_for(part)
-    same_type_mounts = @mounts.select { |m| m.part.part_type_id == part.part_type_id }
-    same_type_mounts.each_with_index.filter_map do |mount, i|
-      next unless mount.part_id == part.id
-
-      [mount.mounted_at, same_type_mounts[i + 1]&.mounted_at]
-    end
+    @mounts.select { |m| m.part_id == part.id }.map { |m| [m.mounted_at, m.unmounted_at] }
   end
 
   def load_activities

@@ -15,13 +15,6 @@ class Bike < ApplicationRecord
 
   validates :name, presence: true, length: { maximum: MAX_NAME_LEN }
 
-  # Pièce actuellement montée pour un type donné = celle du part_mount le plus
-  # récent parmi les pièces de ce type.
-  def mounted_part(part_type_id)
-    part_mounts.joins(:part).where(parts: { part_type_id: part_type_id })
-               .order(:mounted_at, :id).last&.part
-  end
-
   # Garantit qu'un vélo a au moins une chaîne + son montage initial.
   def ensure_chain!
     chain_type = PartType.find_by!(key: "chain")

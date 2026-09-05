@@ -23,16 +23,42 @@ class PartsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
-  # DELETE /api/parts/:id — refuse de supprimer la dernière chaîne du vélo (les
-  # autres types sont un suivi optionnel, toujours supprimables).
+  # DELETE /api/parts/:id — efface définitivement la pièce (plus d'historique). Voir
+  # #discard pour la mettre au rebut en gardant son historique. Refuse d'effacer la
+  # dernière chaîne active du vélo (les autres types sont un suivi optionnel,
+  # toujours supprimables).
   def destroy
-    if @part.chain_part? && @part.bike.parts.joins(:part_type).where(part_types: { key: "chain" }).count <= 1
-      return render json: { error: "cannot_delete_last" }, status: :unprocessable_entity
-    end
+    return render json: { error: "cannot_delete_last" }, status: :unprocessable_entity if last_active_chain?
 
     bike = @part.bike
     @part.destroy
     render json: { bike: serialize_bike(bike) }
+  end
+
+  # POST /api/parts/:id/discard — met la pièce au rebut (usée, cassée…) : son
+  # historique reste consultable, mais elle ne peut plus être (re)montée. Referme
+  # aussi son montage en cours s'il y en a un. Refuse pour la dernière chaîne
+  # active du vélo (même garde que #destroy).
+  def discard
+    return render json: { error: "cannot_delete_last" }, status: :unprocessable_entity if last_active_chain?
+
+    discarded_at = parse_time(params[:discarded_at]) || Time.current
+    return render json: { error: "future_date" }, status: :unprocessable_entity if discarded_at > 1.day.from_now
+
+    @part.part_mounts.where(unmounted_at: nil).update_all(unmounted_at: discarded_at)
+    @part.update!(discarded_at: discarded_at)
+    render json: { bike: serialize_bike(@part.bike) }
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
+  # POST /api/parts/:id/restore — annule la mise au rebut (la pièce redevient
+  # montable, mais reste démontée : un montage explicite reste nécessaire).
+  def restore
+    @part.update!(discarded_at: nil)
+    render json: { bike: serialize_bike(@part.bike) }
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
   end
 
   # POST /api/parts/:id/wax — marque la chaîne cirée (date par défaut = aujourd'hui,
@@ -52,7 +78,31 @@ class PartsController < ApplicationController
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
+  # POST /api/parts/:id/unmount — referme le montage en cours de la pièce (date par
+  # défaut = maintenant, ajustable au passé), sans forcément la remplacer. Sans
+  # effet si la pièce n'est pas montée.
+  def unmount
+    unmounted_at = parse_time(params[:unmounted_at]) || Time.current
+    return render json: { error: "future_date" }, status: :unprocessable_entity if unmounted_at > 1.day.from_now
+
+    open_mount = @part.part_mounts.where(unmounted_at: nil).order(:mounted_at).last
+    open_mount&.update!(unmounted_at: unmounted_at)
+    render json: { bike: serialize_bike(@part.bike) }
+  rescue ActiveRecord::RecordInvalid => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  end
+
   private
+
+  # Vrai si @part est une chaîne et la seule chaîne encore active (non mise au
+  # rebut) du vélo — la retirer (destroy ou discard) laisserait le vélo sans
+  # chaîne montable, ce qu'aucune vue du tableau de bord ne prévoit.
+  def last_active_chain?
+    return false unless @part.chain_part?
+
+    @part.bike.parts.joins(:part_type)
+         .where(part_types: { key: "chain" }, discarded_at: nil).count <= 1
+  end
 
   def set_part
     @part = Part.joins(:bike).where(bikes: { user_id: current_user.id }).find_by(id: params[:id])

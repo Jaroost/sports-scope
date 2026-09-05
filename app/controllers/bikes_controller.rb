@@ -77,17 +77,28 @@ class BikesController < ApplicationController
   end
 
   # POST /api/bikes/:id/mount — déclare quelle pièce est désormais montée
-  # (date par défaut = maintenant, ajustable au passé).
+  # (date par défaut = maintenant, ajustable au passé). Pour un type qui n'autorise
+  # pas les montages multiples (PartType#allow_multiple_mounted), referme d'abord
+  # les autres montages ouverts du même type — sinon (pneu, roue, plaquette/disque
+  # de frein…) plusieurs pièces du même type peuvent rester montées ensemble.
   def mount
     bike = current_user.bikes.find_by(id: params[:id])
     return head :not_found unless bike
 
     part = bike.parts.find_by(id: params[:part_id])
     return head :not_found unless part
+    return render json: { error: "discarded" }, status: :unprocessable_entity if part.discarded?
+    return render json: { bike: serialize_bike(bike) } if bike.part_mounts.exists?(part_id: part.id, unmounted_at: nil)
 
     mounted_at = parse_time(params[:mounted_at]) || Time.current
     return render json: { error: "future_date" }, status: :unprocessable_entity if mounted_at > 1.day.from_now
 
+    unless part.part_type.allow_multiple_mounted
+      bike.part_mounts.joins(:part)
+          .where(parts: { part_type_id: part.part_type_id }, unmounted_at: nil)
+          .where.not(part_id: part.id)
+          .update_all(unmounted_at: mounted_at)
+    end
     bike.part_mounts.create!(part: part, mounted_at: mounted_at)
     render json: { bike: serialize_bike(bike) }, status: :created
   rescue ActiveRecord::RecordInvalid => e

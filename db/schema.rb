@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_05_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_05_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -103,6 +103,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_140000) do
     t.datetime "created_at", null: false
     t.datetime "mounted_at", null: false
     t.bigint "part_id", null: false
+    t.datetime "unmounted_at"
     t.datetime "updated_at", null: false
     t.index ["bike_id", "mounted_at"], name: "index_part_mounts_on_bike_id_and_mounted_at"
     t.index ["bike_id"], name: "index_part_mounts_on_bike_id"
@@ -110,6 +111,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_140000) do
   end
 
   create_table "part_types", force: :cascade do |t|
+    t.boolean "allow_multiple_mounted", default: false, null: false
     t.datetime "created_at", null: false
     t.integer "default_wear_threshold_km", null: false
     t.string "key"
@@ -123,6 +125,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_140000) do
   create_table "parts", force: :cascade do |t|
     t.bigint "bike_id", null: false
     t.datetime "created_at", null: false
+    t.datetime "discarded_at"
     t.datetime "last_waxed_at"
     t.string "name", null: false
     t.boolean "needs_wax", default: false, null: false

@@ -13,21 +13,26 @@ class PartTypesController < ApplicationController
   def create
     part_type = current_user.part_types.create!(
       name: params[:name].to_s.strip.first(PartType::MAX_NAME_LEN),
-      default_wear_threshold_km: params[:default_wear_threshold_km].to_i
+      default_wear_threshold_km: params[:default_wear_threshold_km].to_i,
+      allow_multiple_mounted: ActiveModel::Type::Boolean.new.cast(params[:allow_multiple_mounted])
     )
     render json: { part_type: serialize_part_type(part_type) }, status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
-  # PATCH /api/part_types/:id — renommer / changer le seuil par défaut d'un type
-  # custom. Les types globaux ne sont pas modifiables.
+  # PATCH /api/part_types/:id — renommer / changer le seuil par défaut ou
+  # l'autorisation de montages multiples d'un type custom. Les types globaux ne
+  # sont pas modifiables.
   def update
     part_type = current_user.part_types.find_by(id: params[:id])
     return head :not_found unless part_type
 
     part_type.name = params[:name].to_s.strip.first(PartType::MAX_NAME_LEN) if params[:name].present?
     part_type.default_wear_threshold_km = params[:default_wear_threshold_km].to_i if params.key?(:default_wear_threshold_km)
+    if params.key?(:allow_multiple_mounted)
+      part_type.allow_multiple_mounted = ActiveModel::Type::Boolean.new.cast(params[:allow_multiple_mounted])
+    end
     part_type.save!
     render json: { part_type: serialize_part_type(part_type) }
   rescue ActiveRecord::RecordInvalid => e
@@ -53,7 +58,8 @@ class PartTypesController < ApplicationController
       name: part_type.name,
       icon: part_type.icon,
       builtin: part_type.builtin?,
-      default_wear_threshold_km: part_type.default_wear_threshold_km
+      default_wear_threshold_km: part_type.default_wear_threshold_km,
+      allow_multiple_mounted: part_type.allow_multiple_mounted
     }
   end
 end

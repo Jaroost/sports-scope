@@ -3,6 +3,10 @@
 # PartType). Chaque pièce a son propre seuil d'usure en km. La chaîne a en plus son
 # propre suivi de cirage (seuil + date de dernier cirage) : on cire chaîne par
 # chaîne (avec une option « toutes les chaînes du vélo » côté UI).
+#
+# `discarded_at` : la pièce est mise au rebut (usée, cassée…) sans être effacée —
+# son historique de montage et ses km restent consultables. Une pièce au rebut ne
+# peut plus être (re)montée (cf. PartsController#discard/#restore).
 class Part < ApplicationRecord
   MAX_NAME_LEN = 40
   MAX_NOTES_LEN = 500
@@ -17,4 +21,5 @@ class Part < ApplicationRecord
   validates :notes, length: { maximum: MAX_NOTES_LEN }
 
   def chain_part? = part_type.key == "chain"
+  def discarded? = discarded_at.present?
 end

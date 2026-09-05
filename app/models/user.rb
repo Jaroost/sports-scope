@@ -94,6 +94,7 @@ class User < ApplicationRecord
       "show_water" => true,
       "show_food" => false,
       "show_viewpoints" => false,
+      "show_cols" => true,
       "show_toilets" => false,
       "show_picnic" => false,
       "show_parking" => false,

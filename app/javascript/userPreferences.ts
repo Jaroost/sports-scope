@@ -89,6 +89,7 @@ export interface UserPreferences {
     show_water: boolean
     show_food: boolean
     show_viewpoints: boolean
+    show_cols: boolean
     show_toilets: boolean
     show_picnic: boolean
     show_parking: boolean
@@ -156,6 +157,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     show_water: true,
     show_food: false,
     show_viewpoints: false,
+    show_cols: true,
     show_toilets: false,
     show_picnic: false,
     show_parking: false,

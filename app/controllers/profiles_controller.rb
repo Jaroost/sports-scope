@@ -116,6 +116,7 @@ class ProfilesController < ApplicationController
         "show_water" => to_bool(poi[:show_water], true),
         "show_food" => to_bool(poi[:show_food], false),
         "show_viewpoints" => to_bool(poi[:show_viewpoints], false),
+        "show_cols" => to_bool(poi[:show_cols], true),
         "show_toilets" => to_bool(poi[:show_toilets], false),
         "show_picnic" => to_bool(poi[:show_picnic], false),
         "show_parking" => to_bool(poi[:show_parking], false),

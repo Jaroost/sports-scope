@@ -44,6 +44,7 @@ export const POI_CATEGORIES: PoiCategory[] = [
   { key: 'water',       prefField: 'show_water',      serverTypes: ['water'],     icon: 'fa-faucet-drip', color: '#2563eb', point: true,  labelKey: 'water' },
   { key: 'food',        prefField: 'show_food',       serverTypes: ['food'],      icon: 'fa-utensils',    color: '#dc2626', point: true,  labelKey: 'food' },
   { key: 'viewpoints',  prefField: 'show_viewpoints', serverTypes: ['viewpoint'], icon: 'fa-binoculars',  color: '#7c3aed', point: true,  labelKey: 'viewpoints' },
+  { key: 'cols',        prefField: 'show_cols',       serverTypes: ['col'],       icon: 'fa-mountain',    color: '#b91c1c', point: true,  labelKey: 'cols' },
   { key: 'picnic',      prefField: 'show_picnic',     serverTypes: ['picnic'],    icon: 'fa-tree',        color: '#15803d', point: true,  labelKey: 'picnic' },
   { key: 'toilets',     prefField: 'show_toilets',    serverTypes: ['toilets'],   icon: 'fa-restroom',    color: '#0891b2', point: true,  labelKey: 'toilets' },
   { key: 'parking',     prefField: 'show_parking',    serverTypes: ['parking'],   icon: 'fa-square-parking', color: '#1d4ed8', point: true, labelKey: 'parking' },

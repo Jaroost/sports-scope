@@ -770,7 +770,7 @@ module CompanionSettings
   # tout ce chantier, et un unique profil par défaut ne le montrerait pas. Le
   # sélecteur de départ ne s'affiche d'ailleurs qu'à partir de deux.
   def defaults
-    { "v" => VERSION, "presets" => [ road, mtb, trainer ] }
+    { "v" => VERSION, "presets" => [ road, mtb, trainer ], "col_detection" => true }
   end
 
   # Le document d'un utilisateur, ou les profils par défaut.
@@ -783,7 +783,10 @@ module CompanionSettings
     stored = user.companion_settings
     return defaults if stored.blank? || stored["presets"].blank?
 
-    stored
+    # Un document antérieur à `col_detection` n'a pas la clé : la fabriquer plutôt
+    # que de la lire comme désactivée par absence — même logique indulgente que le
+    # reste de l'assainisseur.
+    stored.key?("col_detection") ? stored : stored.merge("col_detection" => true)
   end
 
   # ── L'assainisseur ──────────────────────────────────────────────────────────
@@ -821,8 +824,12 @@ module CompanionSettings
     return defaults if cleaned.empty?
 
     metric_layouts = sanitize_metric_layouts(document.is_a?(Hash) ? document["metric_layouts"] : nil)
+    # Toujours présente (jamais dépendante de `.compact`) : une valeur à `false` ne
+    # doit pas disparaître comme le ferait un `nil` optionnel.
+    col_detection = document.is_a?(Hash) ? !!document["col_detection"] : true
 
-    { "v" => VERSION, "presets" => cleaned, "metric_layouts" => metric_layouts.presence }.compact
+    { "v" => VERSION, "presets" => cleaned, "metric_layouts" => metric_layouts.presence,
+      "col_detection" => col_detection }.compact
   end
 
   def sanitize_preset(raw, index, seen, default_seen)

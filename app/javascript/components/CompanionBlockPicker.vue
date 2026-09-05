@@ -29,8 +29,8 @@ import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
-  blockChoices, blockFor, defaultGaugeThresholds, isChoiceOf, isDurationMetric, isDynamicGaugeMetric,
-  isRangeGaugeMetric,
+  blockChoices, blockFor, defaultGaugeThresholds, gaugeThresholdBandIndex, gaugeThresholdColor, isChoiceOf,
+  isDurationMetric, isDynamicGaugeMetric, isRangeGaugeMetric,
   DEFAULT_METRIC_LAYOUT, GAUGE_SEGMENTS_MAX, GAUGE_SEGMENTS_MIN, GAUGE_THRESHOLD_COUNT_RANGE,
   LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS,
   FUELING_CARBS_RANGE, FUELING_DEFAULTS, FUELING_INTERVAL_RANGE,
@@ -510,6 +510,30 @@ const thresholdsEnabled = computed<boolean>({
     gaugeColorModeChoice.value = enabled ? 'thresholds' : (metricZoneEligible.value ? 'auto' : 'fixed')
   },
 })
+
+// Un chiffre pour vérifier la règle composée, sans attendre de la retrouver
+// en pleine sortie sur le téléphone : on tape une valeur plausible, la
+// pastille et la tranche répondent tout de suite — même calcul que l'appli
+// (`gaugeThresholdColor`/`gaugeThresholdBandIndex`, `companionSettings.ts`).
+// `null` tant que rien n'est saisi, pas une valeur par défaut : une pastille
+// vide dit plus clairement « pas encore testé » qu'une couleur qui pourrait
+// passer pour un résultat.
+const thresholdTestValue = ref<number | null>(null)
+const thresholdTestColor = computed(
+  () => gaugeThresholdColor(thresholdTestValue.value, gaugeThresholdsChoice.value, gaugeThresholdColorsChoice.value),
+)
+const thresholdTestBandIndex = computed(
+  () => gaugeThresholdBandIndex(thresholdTestValue.value, gaugeThresholdsChoice.value),
+)
+
+// Pas `v-model.number` : sur un champ vidé, ce modificateur retombe sur la
+// chaîne vide plutôt que sur `null` (rien à convertir), et `''` passerait
+// les comparaisons de `gaugeThresholdBandIndex` comme un `0` — une pastille
+// grise se lirait alors comme une vraie tranche.
+function onThresholdTestInput(e: Event) {
+  const raw = (e.target as HTMLInputElement).value
+  thresholdTestValue.value = raw === '' ? null : Number(raw)
+}
 
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec le bandeau du bas (`CompanionDashboard.vue`) — voir
@@ -1103,6 +1127,32 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 >
                   {{ t('companion.settings.gauge_threshold_add') }}
                 </button>
+
+                <!-- Vérifier la règle composée sans attendre de la retrouver
+                     en pleine sortie : une valeur tapée ici répond tout de
+                     suite avec la même couleur que l'appli calculerait. -->
+                <div class="cbpk-threshold-test">
+                  <label class="cbpk-field small">
+                    {{ t('companion.settings.gauge_threshold_test_value') }}
+                    <input
+                      :value="thresholdTestValue ?? ''" type="number"
+                      class="form-control form-control-sm cbpk-threshold-input"
+                      @input="onThresholdTestInput"
+                    >
+                  </label>
+                  <span
+                    class="cbpk-threshold-test-swatch"
+                    :style="{ background: thresholdTestColor || undefined }"
+                  ></span>
+                  <span class="small text-body-secondary">
+                    {{
+                      thresholdTestColor
+                        ? t('companion.settings.gauge_threshold_test_result', { band: (thresholdTestBandIndex ?? 0) + 1 })
+                        : t('companion.settings.gauge_threshold_test_empty')
+                    }}
+                  </span>
+                </div>
+
                 <p class="cbpk-gauge-hint small text-body-secondary">
                   {{
                     currentLayout.gauge
@@ -1497,6 +1547,31 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   width: 1.1rem;
   height: 1.1rem;
   margin: 0;
+}
+/* Tester une valeur : le champ garde la forme `.cbpk-field` (libellé
+   au-dessus), la pastille et le texte de résultat s'alignent à sa hauteur. */
+.cbpk-threshold-test {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.cbpk-threshold-test-swatch {
+  display: inline-block;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--bs-border-color);
+  /* Un damier discret tant qu'aucune couleur n'est posée dessus (`background`
+     transparent) — comme un canal alpha vide, plutôt qu'un carré qui se
+     confondrait avec le fond de la dialogue. */
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.25) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.25) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.25) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.25) 75%);
+  background-size: 0.6rem 0.6rem;
+  background-position: 0 0, 0 0.3rem, 0.3rem -0.3rem, -0.3rem 0;
 }
 
 .cbpk-colors {

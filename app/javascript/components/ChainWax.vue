@@ -593,7 +593,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <p v-if="chain.notes && openNotes !== chain.id" class="text-muted small mb-0 mt-2 text-break">
+            <p v-if="chain.notes && openNotes !== chain.id" class="text-muted small mb-0 mt-2 text-break notes-text">
               <i class="fa-regular fa-note-sticky me-1" aria-hidden="true"></i>{{ chain.notes }}
             </p>
 
@@ -701,7 +701,7 @@ onBeforeUnmount(() => {
                   <small class="text-muted d-block">
                     {{ chain.km_since_mount }} km · {{ t('parts.discarded_on') }} {{ formatDate(chain.discarded_at) }}
                   </small>
-                  <small v-if="chain.notes" class="text-muted d-block text-break">
+                  <small v-if="chain.notes" class="text-muted d-block text-break notes-text">
                     <i class="fa-regular fa-note-sticky me-1" aria-hidden="true"></i>{{ chain.notes }}
                   </small>
                 </div>
@@ -789,5 +789,8 @@ onBeforeUnmount(() => {
 .discarded-row {
   padding: 0.5rem 0;
   border-top: 1px solid var(--bs-border-color, #dee2e6);
+}
+.notes-text {
+  white-space: pre-wrap;
 }
 </style>

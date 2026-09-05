@@ -361,7 +361,7 @@ onBeforeUnmount(() => {
                     {{ formatDate(part.mounted_at) }}
                   </small>
 
-                  <p v-if="part.notes && openNotes !== part.id" class="text-muted small mb-2 text-break">
+                  <p v-if="part.notes && openNotes !== part.id" class="text-muted small mb-2 text-break notes-text">
                     <i class="fa-regular fa-note-sticky me-1" aria-hidden="true"></i>{{ part.notes }}
                   </p>
 
@@ -493,7 +493,7 @@ onBeforeUnmount(() => {
                   <small class="text-muted d-block">
                     {{ part.km_since_mount }} km · {{ t('parts.discarded_on') }} {{ formatDate(part.discarded_at) }}
                   </small>
-                  <small v-if="part.notes" class="text-muted d-block text-break">
+                  <small v-if="part.notes" class="text-muted d-block text-break notes-text">
                     <i class="fa-regular fa-note-sticky me-1" aria-hidden="true"></i>{{ part.notes }}
                   </small>
                 </div>
@@ -599,5 +599,8 @@ onBeforeUnmount(() => {
 }
 .min-width-0 {
   min-width: 0;
+}
+.notes-text {
+  white-space: pre-wrap;
 }
 </style>

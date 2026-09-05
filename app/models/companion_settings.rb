@@ -500,6 +500,14 @@ module CompanionSettings
   # c'est `gauge_fill: "full"` qu'il faut poser.
   GAUGE_SEGMENTS_RANGE = (2..10).freeze
 
+  # Combien de jalons une jauge `gauge_color_mode: "thresholds"` peut porter.
+  # En dessous, un seul jalon découpe déjà deux tranches — c'est le minimum
+  # pour que "entre 2 jalons" veuille dire quelque chose ; en dessous de ça,
+  # `"fixed"` fait la même chose avec moins de réglages. Au-delà, même
+  # plafond que `GAUGE_SEGMENTS_RANGE` : une tranche de plus devient un pixel
+  # illisible sur une carte compagnon.
+  GAUGE_THRESHOLD_COUNT_RANGE = (1..8).freeze
+
   # Couleur fixe (`gauge_color`) ou couleur automatique. `nil` côté document
   # retombe sur le repli d'avant ce réglage : automatique pour une jauge de
   # zones (chaque tronçon garde la couleur de sa propre zone), fixe sinon.
@@ -512,7 +520,14 @@ module CompanionSettings
   # une jauge à plage (libre ou dynamique) sans zone — une mesure comme la
   # vitesse, qui n'a pas de teinte propre à s'y raccrocher, en gagne une qui
   # bouge quand même avec elle.
-  GAUGE_COLOR_MODES = %w[fixed auto].freeze
+  #
+  # Un troisième mode, `thresholds`, s'y ajoute pour une jauge à plage (libre
+  # ou dynamique) sans zone : les tranches ne viennent alors ni du cycliste ni
+  # d'un dégradé automatique, mais de jalons choisis dans l'éditeur (`80, 85,
+  # 95, 100` pour la cadence, une couleur entre chaque) — voir
+  # `sanitize_gauge_thresholds`/`GAUGE_THRESHOLD_COUNT_RANGE`. Sans objet pour
+  # une jauge de zones, qui a déjà sa propre tranche courante.
+  GAUGE_COLOR_MODES = %w[fixed auto thresholds].freeze
 
   # L'épaisseur d'une jauge (tronçons ou barre continue) — même esprit que
   # `ROW_HEIGHTS` : un multiplicateur de la hauteur naturelle, pas une valeur
@@ -1297,6 +1312,24 @@ module CompanionSettings
         end
       end
 
+      # Le fond par tranches ne tinte pas que la barre : il tinte la carte
+      # elle-même (`MetricView._paint` côté appli), donc n'a pas besoin d'une
+      # jauge posée pour avoir un sens — contrairement à `gauge_fill`/
+      # `gauge_segments`/`gauge_color`/`gauge_thickness` plus bas, de purs
+      # réglages de la barre. Sans objet pour une jauge de zones (cardio,
+      # puissance) : elle a déjà sa propre tranche courante — même garde que
+      # côté éditeur (`CompanionBlockPicker.vue`, le bouton n'apparaît pas
+      # pour ces mesures-là).
+      color_mode = GAUGE_COLOR_MODES.include?(raw["gauge_color_mode"]) ? raw["gauge_color_mode"] : nil
+      if color_mode == "thresholds" && !zone_metric && (eligible_range || eligible_dynamic)
+        bands = sanitize_gauge_thresholds(raw["gauge_thresholds"], raw["gauge_threshold_colors"])
+        if bands
+          block["gauge_thresholds"] = bands[:thresholds]
+          block["gauge_threshold_colors"] = bands[:colors]
+          block["gauge_color_mode"] = "thresholds"
+        end
+      end
+
       # La forme et la couleur de la barre — contrairement à `gauge_kind`,
       # ça s'applique aussi à une jauge de zones : `gauge_fill`/
       # `gauge_color_mode` explicites y cassent la correspondance
@@ -1311,11 +1344,15 @@ module CompanionSettings
         segments = raw["gauge_segments"]
         block["gauge_segments"] = segments.to_i.clamp(GAUGE_SEGMENTS_RANGE) if segments.is_a?(Numeric)
 
-        color_mode = GAUGE_COLOR_MODES.include?(raw["gauge_color_mode"]) ? raw["gauge_color_mode"] : nil
-        block["gauge_color_mode"] = color_mode if color_mode
+        # Sans effet si le bloc ci-dessus a déjà posé `"thresholds"` : la
+        # barre suit alors les mêmes tranches que le fond, pas une couleur
+        # fixe/automatique en plus.
+        if color_mode && color_mode != "thresholds"
+          block["gauge_color_mode"] = color_mode
 
-        gauge_color = sanitize_hex_color(raw["gauge_color"])
-        block["gauge_color"] = gauge_color if gauge_color
+          gauge_color = sanitize_hex_color(raw["gauge_color"])
+          block["gauge_color"] = gauge_color if gauge_color
+        end
 
         thickness = raw["gauge_thickness"]
         block["gauge_thickness"] = thickness if GAUGE_THICKNESSES.include?(thickness)
@@ -1554,6 +1591,25 @@ module CompanionSettings
     return nil unless value.is_a?(String)
 
     value.strip.downcase[/\A#[0-9a-f]{6}\z/]
+  end
+
+  # Les jalons et les couleurs d'une jauge à tranches personnalisées
+  # (`gauge_color_mode: "thresholds"`) — un jalon par frontière entre deux
+  # tranches, une couleur de plus que de jalons (la première tranche n'a pas
+  # de frontière basse, la dernière pas de frontière haute). `nil` sur tout
+  # le reste : des jalons non numériques ou en double, ou des couleurs qui ne
+  # comptent pas le bon nombre, ne dessineraient pas la règle composée dans
+  # l'éditeur — mieux vaut retomber sur le rendu d'avant ce mode que sur des
+  # tranches inventées.
+  def sanitize_gauge_thresholds(raw_thresholds, raw_colors)
+    thresholds = raw_array(raw_thresholds).select { |v| v.is_a?(Numeric) }.map(&:to_f).sort.uniq
+    return nil unless GAUGE_THRESHOLD_COUNT_RANGE.include?(thresholds.size)
+
+    needed = thresholds.size + 1
+    colors = raw_array(raw_colors).first(needed).map { |c| sanitize_hex_color(c) }
+    return nil if colors.size != needed || colors.any?(&:nil?)
+
+    { thresholds: thresholds, colors: colors }
   end
 
   def sanitize_bands(raw)

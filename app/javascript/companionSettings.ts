@@ -74,6 +74,14 @@ export interface Block {
   gauge_segments?: number
   gauge_color_mode?: string
   gauge_color?: string
+  // Seuils et couleurs d'une jauge à tranches personnalisées
+  // (`gauge_color_mode === 'thresholds'`) — voir `sanitize_gauge_thresholds`
+  // côté Rails. `gauge_thresholds` trié, `gauge_threshold_colors` compte
+  // toujours un élément de plus (une couleur par tranche). Absents sur tout
+  // le reste, y compris `gauge_color_mode !== 'thresholds'` : l'appli
+  // retombe alors sur le rendu fixe/automatique habituel.
+  gauge_thresholds?: number[]
+  gauge_threshold_colors?: string[]
   // L'épaisseur de la jauge (tronçons ou barre continue) — voir
   // `GAUGE_THICKNESSES`. Absente vaut `'normal'`, la hauteur d'avant ce
   // réglage, jamais écrite pour rester silencieuse.
@@ -728,6 +736,7 @@ export function blockFor(
     carbsPerHour?: number; intervalMin?: number
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
+    gaugeThresholds?: number[]; gaugeThresholdColors?: string[]
     gaugeThickness?: GaugeThickness
     upcoming?: boolean
     color?: string | null; textColor?: string | null
@@ -754,6 +763,21 @@ export function blockFor(
   // même état (`layout`/`iconChoice` côté `CompanionBlockPicker.vue`).
   if (choice.kind === 'metric') block.layout = params.layout || DEFAULT_METRIC_LAYOUT
   if (choice.kind === 'metric' && params.icon) block.icon = params.icon
+  // Le fond par tranches ne tinte pas que la barre : il tinte la carte
+  // elle-même (voir `MetricView._paint` côté appli), donc n'a pas besoin
+  // qu'une jauge soit posée pour avoir un sens — contrairement à
+  // `gauge_kind`/`gauge_fill`/`gauge_segments`/`gauge_color`/
+  // `gauge_thickness` plus bas, de purs réglages de la barre. Jamais pour
+  // l'horloge ni pour une mesure sans plage : mêmes gardes que la jauge.
+  if (
+    !isClock && choice.kind === 'metric' && params.gaugeColorMode === 'thresholds'
+    && (isRangeGaugeMetric(params.metric) || isDynamicGaugeMetric(params.metric))
+    && params.gaugeThresholds?.length && params.gaugeThresholdColors?.length
+  ) {
+    block.gauge_color_mode = 'thresholds'
+    block.gauge_thresholds = params.gaugeThresholds
+    block.gauge_threshold_colors = params.gaugeThresholdColors
+  }
   // Seulement quand la jauge est effectivement posée, et seulement sur une
   // plage réglée dans l'éditeur — la dynamique se lit dans la sortie en
   // cours, poser min/max dessus laisserait une clé morte que l'assainisseur
@@ -767,11 +791,15 @@ export function blockFor(
       block.max = params.max
     }
     // La forme et la couleur de la barre — contrairement à `gauge_kind`,
-    // ça s'applique aussi à une jauge de zones (cardio, puissance).
+    // ça s'applique aussi à une jauge de zones (cardio, puissance). Sans
+    // effet si le bloc ci-dessus a déjà posé `gauge_color_mode: 'thresholds'`
+    // : la barre suit alors les mêmes tranches que le fond.
     if (params.gaugeFill) block.gauge_fill = params.gaugeFill
     if (params.gaugeSegments) block.gauge_segments = params.gaugeSegments
-    if (params.gaugeColorMode) block.gauge_color_mode = params.gaugeColorMode
-    if (params.gaugeColor) block.gauge_color = params.gaugeColor
+    if (params.gaugeColorMode && params.gaugeColorMode !== 'thresholds') {
+      block.gauge_color_mode = params.gaugeColorMode
+      if (params.gaugeColor) block.gauge_color = params.gaugeColor
+    }
     if (params.gaugeThickness && params.gaugeThickness !== 'normal') block.gauge_thickness = params.gaugeThickness
   }
   if (
@@ -1440,10 +1468,59 @@ export type GaugeFill = (typeof GAUGE_FILLS)[number]
 export const GAUGE_SEGMENTS_MIN = 2
 export const GAUGE_SEGMENTS_MAX = 10
 
-// Couleur fixe ou couleur de la zone du moment — voir `Block.gauge_color_mode`.
-// Même contrat que `CompanionSettings::GAUGE_COLOR_MODES` côté Rails.
-export const GAUGE_COLOR_MODES = ['fixed', 'auto'] as const
+// Couleur fixe, couleur de la zone du moment, ou tranches définies dans
+// l'éditeur — voir `Block.gauge_color_mode`. Même contrat que
+// `CompanionSettings::GAUGE_COLOR_MODES` côté Rails.
+export const GAUGE_COLOR_MODES = ['fixed', 'auto', 'thresholds'] as const
 export type GaugeColorMode = (typeof GAUGE_COLOR_MODES)[number]
+
+// Combien de jalons une jauge à tranches personnalisées peut porter — même
+// borne que `CompanionSettings::GAUGE_THRESHOLD_COUNT_RANGE` côté Rails. En
+// dessous, une seule tranche n'a rien à découper (c'est `'fixed'` qu'il faut
+// poser) ; au-delà, sur une barre d'environ 220 px, une tranche devient un
+// pixel illisible en roulant — même plafond que `GAUGE_SEGMENTS_MAX`.
+export const GAUGE_THRESHOLD_COUNT_RANGE = { min: 1, max: 8 } as const
+
+// Le point de départ proposé au premier passage en mode `thresholds` : deux
+// jalons au tiers et aux deux tiers de la plage par défaut de la mesure
+// (`METRIC_RANGE_DEFAULTS`), trois tranches vert/jaune/rouge — le dégradé le
+// plus lisible au premier coup d'œil, à affiner ensuite.
+export function defaultGaugeThresholds(metric: string): { thresholds: number[]; colors: string[] } {
+  const { min, max } = METRIC_RANGE_DEFAULTS[metric] || { min: 0, max: 100 }
+  const span = max - min
+  const round = (v: number) => Math.round(v * 10) / 10
+  return {
+    thresholds: [round(min + span / 3), round(min + (2 * span) / 3)],
+    colors: ['#2E9E4F', '#E0C000', '#D32F2F'],
+  }
+}
+
+// La tranche dans laquelle tombe `value` parmi `thresholds` (triés) : combien
+// de jalons lui sont inférieurs ou égaux. `null` sans valeur — aucune tranche
+// n'est alors retenue, plutôt que d'en deviner une. Même calcul que
+// `MetricView._thresholdBandIndex` côté appli.
+export function gaugeThresholdBandIndex(value: number | null | undefined, thresholds: number[]): number | null {
+  if (value == null) return null
+  let index = 0
+  for (const t of thresholds) {
+    if (value >= t) index += 1
+    else break
+  }
+  return index
+}
+
+// La couleur de cette tranche — `null` si `thresholds`/`colors` manquent, ne
+// sont pas de la forme attendue (une couleur de plus que de jalons), ou si
+// `value` est inconnue.
+export function gaugeThresholdColor(
+  value: number | null | undefined,
+  thresholds: number[] | undefined,
+  colors: string[] | undefined,
+): string | null {
+  if (!thresholds?.length || !colors || colors.length !== thresholds.length + 1) return null
+  const index = gaugeThresholdBandIndex(value, thresholds)
+  return index == null ? null : colors[index] ?? null
+}
 
 // L'épaisseur d'une jauge — voir `Block.gauge_thickness`. `'normal'` n'a pas
 // de valeur écrite côté document (voir `blockFor`), mais figure ici pour que

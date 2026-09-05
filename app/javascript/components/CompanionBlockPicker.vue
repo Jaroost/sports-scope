@@ -29,8 +29,10 @@ import { t } from '../i18n'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
-  blockChoices, blockFor, isChoiceOf, isDurationMetric, isDynamicGaugeMetric, isRangeGaugeMetric,
-  DEFAULT_METRIC_LAYOUT, GAUGE_SEGMENTS_MAX, GAUGE_SEGMENTS_MIN, LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS,
+  blockChoices, blockFor, defaultGaugeThresholds, isChoiceOf, isDurationMetric, isDynamicGaugeMetric,
+  isRangeGaugeMetric,
+  DEFAULT_METRIC_LAYOUT, GAUGE_SEGMENTS_MAX, GAUGE_SEGMENTS_MIN, GAUGE_THRESHOLD_COUNT_RANGE,
+  LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS,
   FUELING_CARBS_RANGE, FUELING_DEFAULTS, FUELING_INTERVAL_RANGE,
   MAX_SECONDARY_METRICS, METRIC_RANGE_DEFAULTS, metricDropdownLabel, metricLayout, metricSample,
   NATURAL_LINE_SIZE, previewScale, RANGE_GAUGE_COLOR, RANGE_GAUGE_SEGMENTS,
@@ -446,6 +448,69 @@ const gaugeColorModeChoice = ref<GaugeColorMode>(
 const gaugeColorChoice = ref<string | null>(props.block?.gauge_color || null)
 const gaugeThicknessChoice = ref<GaugeThickness>(props.block?.gauge_thickness || 'normal')
 
+// Les jalons d'une jauge à tranches personnalisées (`gauge_color_mode ===
+// 'thresholds'`) : ceux du composant en cours d'édition s'ils sont de la
+// forme attendue (une couleur de plus que de jalons), sinon un point de
+// départ plausible (`defaultGaugeThresholds`) — même repli que min/max, mais
+// jamais réinitialisé au changement de mesure : contrairement à une plage,
+// des jalons choisis (« 80, 85, 95, 100 » pour la cadence) n'ont pas de sens
+// mis à l'échelle sur une autre mesure.
+function initialThresholdsFor(m: string): { thresholds: number[]; colors: string[] } {
+  if (
+    props.block?.gauge_thresholds?.length
+    && props.block?.gauge_threshold_colors?.length === props.block.gauge_thresholds.length + 1
+  ) {
+    return { thresholds: [...props.block.gauge_thresholds], colors: [...props.block.gauge_threshold_colors] }
+  }
+  return defaultGaugeThresholds(m)
+}
+const gaugeThresholdsChoice = ref<number[]>(initialThresholdsFor(metric.value).thresholds)
+const gaugeThresholdColorsChoice = ref<string[]>(initialThresholdsFor(metric.value).colors)
+
+function addThreshold() {
+  if (gaugeThresholdsChoice.value.length >= GAUGE_THRESHOLD_COUNT_RANGE.max) return
+  const { min: rMin, max: rMax } = rangeDefaultsFor(metric.value)
+  const last = gaugeThresholdsChoice.value[gaugeThresholdsChoice.value.length - 1]
+  const next = last != null ? last + (rMax - rMin) / 10 : (rMin + rMax) / 2
+  gaugeThresholdsChoice.value = [...gaugeThresholdsChoice.value, next]
+  // Fusionne la nouvelle tranche dans la couleur de la dernière plutôt que
+  // d'en inventer une : on affine ensuite au lieu de composer une couleur au
+  // hasard.
+  gaugeThresholdColorsChoice.value = [
+    ...gaugeThresholdColorsChoice.value,
+    gaugeThresholdColorsChoice.value[gaugeThresholdColorsChoice.value.length - 1],
+  ]
+}
+
+function removeThreshold(index: number) {
+  if (gaugeThresholdsChoice.value.length <= GAUGE_THRESHOLD_COUNT_RANGE.min) return
+  gaugeThresholdsChoice.value = gaugeThresholdsChoice.value.filter((_, i) => i !== index)
+  // La tranche retirée fusionne avec celle qui la précède : on garde une
+  // couleur de plus que de jalons, jamais l'inverse.
+  gaugeThresholdColorsChoice.value = gaugeThresholdColorsChoice.value.filter((_, i) => i !== index + 1)
+}
+
+function setThresholdColor(index: number, value: string | null) {
+  const next = [...gaugeThresholdColorsChoice.value]
+  next[index] = value || RANGE_GAUGE_COLOR
+  gaugeThresholdColorsChoice.value = next
+}
+
+// Le fond par tranches n'a pas besoin d'une jauge posée : il tinte la carte
+// elle-même (voir `MetricView._paint` côté appli), indépendamment de la
+// barre — contrairement à `gaugeFillChoice`/`gaugeSegmentsChoice`/
+// `gaugeColorChoice`, purs réglages de la barre. D'où ce bouton à part,
+// plutôt qu'une troisième option dans le menu du panneau « Jauge » : le
+// composer ne devrait pas être conditionné à poser un jeton qu'on ne veut
+// pas forcément. Repli à la désactivation : le même que celui d'avant ce
+// réglage (`gaugeColorModeChoice`, plus haut).
+const thresholdsEnabled = computed<boolean>({
+  get: () => gaugeColorModeChoice.value === 'thresholds',
+  set: (enabled) => {
+    gaugeColorModeChoice.value = enabled ? 'thresholds' : (metricZoneEligible.value ? 'auto' : 'fixed')
+  },
+})
+
 // Le libellé de liste déroulante (préfixe Di2, raccourcis de durée) est
 // partagé avec le bandeau du bas (`CompanionDashboard.vue`) — voir
 // `metricDropdownLabel` dans `companionSettings.ts`. « Horloge » n'est pas une
@@ -571,6 +636,7 @@ const groups = computed(() => {
             gaugeKind: effectiveGaugeKind.value || undefined,
             gaugeFill: gaugeFillChoice.value, gaugeSegments: gaugeSegmentsChoice.value,
             gaugeColorMode: gaugeColorModeChoice.value, gaugeColor: gaugeColorChoice.value ?? undefined,
+            gaugeThresholds: gaugeThresholdsChoice.value, gaugeThresholdColors: gaugeThresholdColorsChoice.value,
             gaugeThickness: gaugeThicknessChoice.value,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             windowS: windowS.value || undefined,
@@ -988,6 +1054,65 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </div>
             </div>
 
+            <!-- Le fond par tranches : indépendant du jeton « Jauge », il tinte
+                 la carte elle-même (voir le commentaire de `thresholdsEnabled`)
+                 — proposé dès que la mesure s'y prête, jauge posée ou non. -->
+            <div v-if="!metricZoneEligible && (rangeEligible || dynamicEligible)" class="cbpk-gauge-params">
+              <p class="cbpk-subhead">{{ t('companion.settings.gauge_background') }}</p>
+
+              <label class="cbpk-field small cbpk-threshold-toggle">
+                <input v-model="thresholdsEnabled" type="checkbox" class="form-check-input">
+                {{ t('companion.settings.gauge_thresholds_enable') }}
+              </label>
+
+              <!-- Les jalons : une couleur, puis une paire jalon/couleur par
+                   tranche suivante — la couleur d'une tranche se règle
+                   toujours à sa droite, dans l'ordre croissant des valeurs. -->
+              <div v-if="thresholdsEnabled" class="cbpk-thresholds">
+                <div class="cbpk-threshold-row">
+                  <CompanionColorPicker
+                    :model-value="gaugeThresholdColorsChoice[0]" :fallback="RANGE_GAUGE_COLOR"
+                    :label="t('companion.settings.gauge_threshold_band_color')"
+                    @update:model-value="(v) => setThresholdColor(0, v)"
+                  />
+                </div>
+                <div v-for="(_, i) in gaugeThresholdsChoice" :key="i" class="cbpk-threshold-row">
+                  <input
+                    v-model.number="gaugeThresholdsChoice[i]" type="number"
+                    class="form-control form-control-sm cbpk-threshold-input"
+                    :aria-label="t('companion.settings.gauge_threshold_value')"
+                  >
+                  <button
+                    v-if="gaugeThresholdsChoice.length > GAUGE_THRESHOLD_COUNT_RANGE.min"
+                    type="button" class="btn btn-sm btn-outline-danger cbpk-threshold-remove"
+                    :aria-label="t('companion.settings.gauge_threshold_remove')"
+                    @click="removeThreshold(i)"
+                  >
+                    &times;
+                  </button>
+                  <CompanionColorPicker
+                    :model-value="gaugeThresholdColorsChoice[i + 1]" :fallback="RANGE_GAUGE_COLOR"
+                    :label="t('companion.settings.gauge_threshold_band_color')"
+                    @update:model-value="(v) => setThresholdColor(i + 1, v)"
+                  />
+                </div>
+                <button
+                  type="button" class="btn btn-sm btn-outline-secondary"
+                  :disabled="gaugeThresholdsChoice.length >= GAUGE_THRESHOLD_COUNT_RANGE.max"
+                  @click="addThreshold"
+                >
+                  {{ t('companion.settings.gauge_threshold_add') }}
+                </button>
+                <p class="cbpk-gauge-hint small text-body-secondary">
+                  {{
+                    currentLayout.gauge
+                      ? t('companion.settings.gauge_thresholds_hint_with_gauge')
+                      : t('companion.settings.gauge_thresholds_hint')
+                  }}
+                </p>
+              </div>
+            </div>
+
             <!-- Les réglages de la jauge, sous la grille plutôt que dans
                  l'en-tête du groupe : ils n'apparaissent qu'une fois le jeton
                  « Jauge » posé, et le panneau se lit d'un coup au lieu de se
@@ -1017,7 +1142,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 </label>
               </template>
 
-              <label class="cbpk-field small">
+              <label v-if="gaugeColorModeChoice !== 'thresholds'" class="cbpk-field small">
                 {{ t('companion.settings.gauge_fill') }}
                 <select v-model="gaugeFillChoice" class="form-select form-select-sm">
                   <option value="segments">{{ t('companion.settings.gauge_fills.segments') }}</option>
@@ -1025,7 +1150,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 </select>
               </label>
 
-              <label v-if="gaugeFillChoice === 'segments'" class="cbpk-field small">
+              <label v-if="gaugeFillChoice === 'segments' && gaugeColorModeChoice !== 'thresholds'" class="cbpk-field small">
                 {{ t('companion.settings.gauge_segments') }}
                 <input
                   v-model.number="gaugeSegmentsChoice" type="number"
@@ -1034,7 +1159,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 >
               </label>
 
-              <label class="cbpk-field small">
+              <label v-if="!thresholdsEnabled" class="cbpk-field small">
                 {{ t('companion.settings.gauge_color_mode') }}
                 <select v-model="gaugeColorModeChoice" class="form-select form-select-sm">
                   <option value="fixed">{{ t('companion.settings.gauge_color_modes.fixed') }}</option>
@@ -1042,7 +1167,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 </select>
               </label>
 
-              <label v-if="gaugeColorModeChoice === 'fixed'" class="cbpk-field small">
+              <label v-if="gaugeColorModeChoice === 'fixed' && !thresholdsEnabled" class="cbpk-field small">
                 {{ t('companion.settings.gauge_color') }}
                 <CompanionColorPicker
                   v-model="gaugeColorChoice" :fallback="RANGE_GAUGE_COLOR" :label="t('companion.settings.gauge_color')"
@@ -1336,6 +1461,41 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 }
 .cbpk-gauge-hint {
   grid-column: 1 / -1;
+  margin: 0;
+}
+/* Les jalons d'une jauge à tranches : une ligne par jalon (couleur de la
+   tranche qui précède, valeur, retrait), dans l'ordre croissant — pleine
+   largeur du panneau, comme `.cbpk-gauge-hint`. */
+.cbpk-thresholds {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.cbpk-threshold-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.cbpk-threshold-input {
+  width: 6rem;
+}
+.cbpk-threshold-remove {
+  line-height: 1;
+  padding: 0.15rem 0.5rem;
+}
+/* Le bouton qui active le fond par tranches : une case à cocher sur la même
+   ligne que son libellé, contrairement à `.cbpk-field` (libellé au-dessus du
+   contrôle) qui n'a pas de sens pour une case à cocher. */
+.cbpk-threshold-toggle {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+}
+.cbpk-threshold-toggle .form-check-input {
+  width: 1.1rem;
+  height: 1.1rem;
   margin: 0;
 }
 

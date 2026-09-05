@@ -42,6 +42,7 @@ import {
   SECONDARY_SIZE_SCALE,
   blockShape,
   gaugeGradientColor,
+  gaugeThresholdBandIndex,
   layoutRows,
   metricIcon,
   metricLayout,
@@ -304,15 +305,40 @@ const gaugeKind = computed<'zone' | 'range' | 'dynamic' | null>(() => {
   return props.block.gauge_kind === 'dynamic' ? 'dynamic' : 'range'
 })
 
+// La tranche d'une jauge à seuils personnalisés (`gauge_color_mode ===
+// 'thresholds'`, voir `CompanionBlockPicker.vue`) dans laquelle tombe la
+// valeur de l'aperçu — `null` sans les deux tableaux, ou sur une mesure à
+// zones d'entraînement (elle garde son ladder physiologique, voir
+// `gaugeColorMode` plus bas). Même calcul que `MetricView._thresholdBandIndex`
+// côté appli.
+const gaugeThresholds = computed(() => props.block.gauge_thresholds || [])
+const gaugeThresholdColors = computed(() => props.block.gauge_threshold_colors || [])
+const hasThresholdBands = computed(() => (
+  props.block.gauge_color_mode === 'thresholds'
+    && !metricZone.value
+    && gaugeThresholdColors.value.length === gaugeThresholds.value.length + 1
+    && gaugeThresholds.value.length > 0
+))
+const thresholdBandIndex = computed(() => (
+  hasThresholdBands.value ? gaugeThresholdBandIndex(sample.value.numeric, gaugeThresholds.value) : null
+))
+const thresholdBandColor = computed(() => (
+  thresholdBandIndex.value == null ? null : gaugeThresholdColors.value[thresholdBandIndex.value] || null
+))
+
 // La pente, sur sa couleur de tranche de difficulté plutôt que sur une zone
 // d'entraînement (`MetricSample.background`, mutuellement exclusif avec
-// `metricZone` — même règle que `MetricReading.background` côté appli).
+// `metricZone` — même règle que `MetricReading.background` côté appli). Un
+// choix explicite de tranches personnalisées l'emporte sur les deux : c'est
+// la même priorité que `color` (fond réglé dans l'éditeur) sur le fond
+// sémantique habituel.
 const metricBackground = computed(
-  () => overrideBg.value || sample.value.background
+  () => overrideBg.value || thresholdBandColor.value || sample.value.background
     || (metricZone.value ? ZONE_COLORS[metricZone.value] : null),
 )
 const metricInk = computed(() => {
   if (overrideInk.value) return overrideInk.value
+  if (thresholdBandColor.value) return textColorOn(thresholdBandColor.value)
   if (sample.value.background) return textColorOn(sample.value.background)
   return metricZone.value && DARK_INK.has(metricZone.value) ? '#000' : '#fff'
 })
@@ -346,9 +372,9 @@ const gaugeFill = computed<'segments' | 'full'>(() => {
   if (raw === 'segments' || raw === 'full') return raw
   return gaugeKind.value === 'dynamic' ? 'full' : 'segments'
 })
-const gaugeColorMode = computed<'fixed' | 'auto'>(() => {
+const gaugeColorMode = computed<'fixed' | 'auto' | 'thresholds'>(() => {
   const raw = props.block.gauge_color_mode
-  if (raw === 'fixed' || raw === 'auto') return raw
+  if (raw === 'fixed' || raw === 'auto' || raw === 'thresholds') return raw
   return gaugeKind.value === 'zone' ? 'auto' : 'fixed'
 })
 
@@ -426,10 +452,25 @@ const resolvedGaugeCells = computed(() => {
   }))
 })
 
+// Le ladder d'une jauge à tranches personnalisées : une couleur par tranche,
+// allumées jusqu'à celle du moment — même dessin que `gaugeCells` (zones),
+// mais sur les seuils choisis dans l'éditeur plutôt que sur les zones du
+// cycliste. Toujours en tronçons, quel que soit `gauge_fill` : une barre
+// continue n'aurait qu'une seule couleur à montrer, perdant les tranches
+// voisines que la barre existe justement pour situer.
+const thresholdGaugeCells = computed(() => {
+  const index = thresholdBandIndex.value
+  return gaugeThresholdColors.value.map((color, i) => ({ lit: index != null && i <= index, color }))
+})
+
 // Les paliers à dessiner pour la rangée-jauge, quelle que soit sa nature —
 // pour que le template n'ait qu'une seule boucle à écrire, pas un `v-if` de
 // plus par nature de jauge.
-const litGaugeCells = computed(() => (useZoneLadder.value ? gaugeCells.value : resolvedGaugeCells.value))
+const litGaugeCells = computed(() => {
+  if (useZoneLadder.value) return gaugeCells.value
+  if (hasThresholdBands.value) return thresholdGaugeCells.value
+  return resolvedGaugeCells.value
+})
 
 // « Ce tour — » en préfixe côté `lap_zones`/`lap_averages` : même dessin que
 // `zones`/`averages`, seul ce qu'on mesure change — depuis l'ouverture du
@@ -655,7 +696,7 @@ const metricTrendSegments = computed(() => {
              l'assainisseur), donc pas de colonnes à dessiner ici. -->
         <div v-if="row.gauge" class="cbp-metric-gauge-row">
           <div
-            v-if="gaugeFill === 'full'"
+            v-if="gaugeFill === 'full' && !hasThresholdBands"
             class="cbp-dyngauge-track"
             :style="{ height: `${1.6 * gaugeThicknessScale}em`, borderRadius: `${0.3 * gaugeThicknessScale}em` }"
           >

@@ -5,6 +5,7 @@
 # chaîne (avec une option « toutes les chaînes du vélo » côté UI).
 class Part < ApplicationRecord
   MAX_NAME_LEN = 40
+  MAX_NOTES_LEN = 500
 
   belongs_to :bike
   belongs_to :part_type
@@ -13,6 +14,7 @@ class Part < ApplicationRecord
   validates :name, presence: true, length: { maximum: MAX_NAME_LEN }
   validates :wear_threshold_km, numericality: { greater_than: 0 }
   validates :wax_threshold_km, numericality: { greater_than: 0 }, allow_nil: true
+  validates :notes, length: { maximum: MAX_NOTES_LEN }
 
   def chain_part? = part_type.key == "chain"
 end

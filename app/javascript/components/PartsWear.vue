@@ -182,6 +182,19 @@ function submitSeuil(part: any) {
   run(() => api(`/api/parts/${part.id}`, 'PATCH', { wear_threshold_km: km }))
 }
 
+// ── Notes ───────────────────────────────────────────────────────────────────────
+const openNotes = ref<number | null>(null)
+const notesValue = ref('')
+function startNotes(part: any) {
+  openNotes.value = part.id
+  notesValue.value = part.notes || ''
+}
+function submitNotes(part: any) {
+  const notes = notesValue.value.trim()
+  openNotes.value = null
+  run(() => api(`/api/parts/${part.id}`, 'PATCH', { notes }))
+}
+
 async function removePart(bike: any, part: any) {
   if (!window.confirm(t('parts.delete_confirm'))) return
   error.value = null
@@ -275,9 +288,33 @@ onBeforeUnmount(() => {
               <button type="button" class="btn btn-sm btn-outline-secondary" @click="startSeuil(part)">
                 <i class="fa-solid fa-sliders me-1" aria-hidden="true"></i>{{ t('parts.threshold') }}
               </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" @click="startNotes(part)">
+                <i class="fa-solid fa-note-sticky me-1" aria-hidden="true"></i>{{ t('parts.notes') }}
+              </button>
               <button type="button" class="btn btn-sm btn-outline-danger" @click="removePart(bike, part)">
                 <i class="fa-solid fa-trash" aria-hidden="true"></i>
               </button>
+            </div>
+
+            <p v-if="part.notes && openNotes !== part.id" class="text-muted small mb-0 mt-2 text-break">
+              <i class="fa-regular fa-note-sticky me-1" aria-hidden="true"></i>{{ part.notes }}
+            </p>
+
+            <div v-if="openNotes === part.id" class="d-flex flex-column gap-2 mt-2">
+              <textarea
+                v-model="notesValue"
+                class="form-control form-control-sm"
+                rows="2"
+                :placeholder="t('parts.notes_placeholder')"
+              ></textarea>
+              <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-success" @click="submitNotes(part)">
+                  <i class="fa-solid fa-check me-1" aria-hidden="true"></i>{{ t('parts.save') }}
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="openNotes = null">
+                  {{ t('parts.cancel') }}
+                </button>
+              </div>
             </div>
 
             <div v-if="openMount === part.id" class="d-flex align-items-center gap-2 flex-wrap mt-2">

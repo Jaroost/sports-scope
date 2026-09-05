@@ -40,7 +40,8 @@ module BikeSerialization
       km_since_mount: wear.km_since_mount(part),
       wear_progress_percent: wear.wear_progress_percent(part),
       mounted: part.id == mounted_id,
-      mounted_at: wear.last_mounted_at(part)&.iso8601
+      mounted_at: wear.last_mounted_at(part)&.iso8601,
+      notes: part.notes
     }
     return base unless part.chain_part?
 

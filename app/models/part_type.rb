@@ -1,9 +1,10 @@
 # Catalogue des types de pièce trackables sur un vélo. Les types globaux (`key`
 # renseignée, `user_id` nil) sont pré-remplis en migration (pneu, roue, pédalier,
-# cassette, chaîne, frein hydraulique) et partagés par tous les utilisateurs ; leur
-# libellé/icône viennent du code (BUILTIN_ICONS + i18n `parts.types.<key>`), jamais
-# de `name`. Un type custom (`key` nil) appartient à un seul utilisateur, avec un
-# `name` libre tapé par lui — renommer ce type se répercute sur toutes ses pièces.
+# cassette, chaîne, frein hydraulique, plaquette et disque de frein) et partagés
+# par tous les utilisateurs ; leur libellé/icône viennent du code (BUILTIN_ICONS +
+# i18n `parts.types.<key>`), jamais de `name`. Un type custom (`key` nil)
+# appartient à un seul utilisateur, avec un `name` libre tapé par lui — renommer
+# ce type se répercute sur toutes ses pièces.
 class PartType < ApplicationRecord
   MAX_NAME_LEN = 40
 
@@ -13,7 +14,9 @@ class PartType < ApplicationRecord
     "crankset" => "fa-gear",
     "cassette" => "fa-layer-group",
     "chain" => "fa-link",
-    "hydraulic_brake" => "fa-hand"
+    "hydraulic_brake" => "fa-hand",
+    "brake_pad" => "fa-square",
+    "brake_disc" => "fa-compact-disc"
   }.freeze
   CUSTOM_ICON = "fa-gear".freeze
 

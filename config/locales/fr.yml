@@ -435,6 +435,10 @@ fr:
     new_type: "+ Nouveau type…"
     new_type_name: "Nom du nouveau type"
     name_placeholder: "Nom (optionnel)"
+    notes: "Notes"
+    notes_placeholder: "Ajouter une note (usure constatée, marque, taille…)"
+    no_notes: "Aucune note"
+    save: "Enregistrer"
     types:
       tire: "Pneu"
       wheel: "Roue"
@@ -442,6 +446,8 @@ fr:
       cassette: "Cassette"
       chain: "Chaîne"
       hydraulic_brake: "Frein hydraulique"
+      brake_pad: "Plaquette de frein"
+      brake_disc: "Disque de frein"
   auth:
     signed_in: "Bienvenue !"
     login_first: "Veuillez vous connecter d'abord."

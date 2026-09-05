@@ -435,6 +435,10 @@ en:
     new_type: "+ New type…"
     new_type_name: "New type name"
     name_placeholder: "Name (optional)"
+    notes: "Notes"
+    notes_placeholder: "Add a note (wear observed, brand, size…)"
+    no_notes: "No notes"
+    save: "Save"
     types:
       tire: "Tire"
       wheel: "Wheel"
@@ -442,6 +446,8 @@ en:
       cassette: "Cassette"
       chain: "Chain"
       hydraulic_brake: "Hydraulic brake"
+      brake_pad: "Brake pad"
+      brake_disc: "Brake disc"
   auth:
     signed_in: "Welcome!"
     login_first: "Please sign in first."

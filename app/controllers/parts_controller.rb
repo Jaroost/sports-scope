@@ -7,10 +7,11 @@ class PartsController < ApplicationController
   before_action :require_login!
   before_action :set_part
 
-  # PATCH /api/parts/:id — renommer / changer le seuil d'usure / (chaîne
-  # uniquement) changer le seuil de cirage ou marquer « à recirer ».
+  # PATCH /api/parts/:id — renommer / changer le seuil d'usure / éditer les notes /
+  # (chaîne uniquement) changer le seuil de cirage ou marquer « à recirer ».
   def update
     @part.name = params[:name].to_s.strip.first(Part::MAX_NAME_LEN) if params[:name].present?
+    @part.notes = params[:notes].to_s.strip.first(Part::MAX_NOTES_LEN) if params.key?(:notes)
     @part.wear_threshold_km = params[:wear_threshold_km].to_i if params.key?(:wear_threshold_km)
     if @part.chain_part?
       @part.wax_threshold_km = params[:wax_threshold_km].to_i if params.key?(:wax_threshold_km)

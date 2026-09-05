@@ -141,6 +141,19 @@ function submitSeuil(chain: any) {
   run(() => api(`/api/parts/${chain.id}`, 'PATCH', { wax_threshold_km: km }))
 }
 
+// ── Notes ───────────────────────────────────────────────────────────────────────
+const openNotes = ref<number | null>(null)
+const notesValue = ref('')
+function startNotes(chain: any) {
+  openNotes.value = chain.id
+  notesValue.value = chain.notes || ''
+}
+function submitNotes(chain: any) {
+  const notes = notesValue.value.trim()
+  openNotes.value = null
+  run(() => api(`/api/parts/${chain.id}`, 'PATCH', { notes }))
+}
+
 function addChain(bike: any) {
   run(() => api(`/api/bikes/${bike.id}/parts`, 'POST', { part_type_id: bike.chain_part_type_id }))
 }
@@ -473,6 +486,9 @@ onBeforeUnmount(() => {
               <button type="button" class="btn btn-sm btn-outline-secondary" @click="startSeuil(chain)">
                 <i class="fa-solid fa-sliders me-1" aria-hidden="true"></i>{{ t('chains.threshold') }}
               </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" @click="startNotes(chain)">
+                <i class="fa-solid fa-note-sticky me-1" aria-hidden="true"></i>{{ t('parts.notes') }}
+              </button>
               <button
                 v-if="bike.chains.length > 1"
                 type="button"
@@ -481,6 +497,27 @@ onBeforeUnmount(() => {
               >
                 <i class="fa-solid fa-trash" aria-hidden="true"></i>
               </button>
+            </div>
+
+            <p v-if="chain.notes && openNotes !== chain.id" class="text-muted small mb-0 mt-2 text-break">
+              <i class="fa-regular fa-note-sticky me-1" aria-hidden="true"></i>{{ chain.notes }}
+            </p>
+
+            <div v-if="openNotes === chain.id" class="d-flex flex-column gap-2 mt-2">
+              <textarea
+                v-model="notesValue"
+                class="form-control form-control-sm"
+                rows="2"
+                :placeholder="t('parts.notes_placeholder')"
+              ></textarea>
+              <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-success" @click="submitNotes(chain)">
+                  <i class="fa-solid fa-check me-1" aria-hidden="true"></i>{{ t('parts.save') }}
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @click="openNotes = null">
+                  {{ t('parts.cancel') }}
+                </button>
+              </div>
             </div>
 
             <!-- Formulaire cirage -->

@@ -428,6 +428,7 @@ en:
     empty: "No parts tracked on this bike yet."
     mounted: "Mounted"
     mount: "Mount"
+    rename: "Rename"
     threshold: "Threshold"
     never_mounted: "never mounted"
     delete: "Delete permanently"

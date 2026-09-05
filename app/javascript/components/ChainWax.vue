@@ -142,6 +142,20 @@ function submitUnmount(chain: any) {
   run(() => api(`/api/parts/${chain.id}/unmount`, 'POST', { unmounted_at: date }))
 }
 
+// ── Renommer ────────────────────────────────────────────────────────────────────
+const editName = ref<number | null>(null)
+const nameValue = ref('')
+function startEditName(chain: any) {
+  editName.value = chain.id
+  nameValue.value = chain.name
+}
+function submitEditName(chain: any) {
+  const name = nameValue.value.trim()
+  if (!name) return
+  editName.value = null
+  run(() => api(`/api/parts/${chain.id}`, 'PATCH', { name }))
+}
+
 // ── Seuil ───────────────────────────────────────────────────────────────────────
 function startSeuil(chain: any) {
   editSeuil.value = chain.id
@@ -302,6 +316,16 @@ const compactBikes = computed(() =>
 // Page /chains : vélos par défaut d'abord, puis ceux avec chaîne cirée.
 const rank = (b: any) => (b.is_default ? 0 : 2) + (b.uses_wax !== false ? 0 : 1)
 const sortedBikes = computed(() => [...bikes.value].sort((a, b) => rank(a) - rank(b)))
+
+const byName = (a: any, b: any) => a.name.localeCompare(b.name)
+// Montée d'abord, puis ordre alphabétique.
+const byMountedThenName = (a: any, b: any) => (a.mounted === b.mounted ? byName(a, b) : a.mounted ? -1 : 1)
+function sortedChains(bike: any) {
+  return [...bike.chains].sort(byMountedThenName)
+}
+function sortedDiscardedChains(bike: any) {
+  return [...(bike.discarded_chains || [])].sort(byName)
+}
 
 // null tant que la modale de montage n'a pas été ouverte (aucun vélo sélectionné).
 function mountedChain(bike: any) {
@@ -471,10 +495,34 @@ onBeforeUnmount(() => {
             <i class="fa-regular fa-circle-xmark" aria-hidden="true"></i>{{ t('chains.no_wax_note') }}
           </p>
           <template v-else>
-          <div v-for="chain in bike.chains" :key="chain.id" class="chain-row">
-            <div class="d-flex justify-content-between align-items-baseline mb-1 flex-wrap gap-2">
+          <div v-for="chain in sortedChains(bike)" :key="chain.id" class="chain-row">
+            <div v-if="editName === chain.id" class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+              <input
+                v-model="nameValue"
+                type="text"
+                class="form-control form-control-sm"
+                style="width: auto"
+                @keyup.enter="submitEditName(chain)"
+                @keyup.esc="editName = null"
+              />
+              <button type="button" class="btn btn-sm btn-success" @click="submitEditName(chain)">
+                <i class="fa-solid fa-check" aria-hidden="true"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" @click="editName = null">
+                <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div v-else class="d-flex justify-content-between align-items-baseline mb-1 flex-wrap gap-2">
               <span class="fw-semibold d-flex align-items-center gap-2">
                 {{ chain.name }}
+                <button
+                  type="button"
+                  class="btn btn-sm btn-link text-muted p-0"
+                  :title="t('parts.rename')"
+                  @click="startEditName(chain)"
+                >
+                  <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                </button>
                 <span v-if="chain.id === bike.mounted_chain_id" class="badge bg-success-subtle text-success">
                   <i class="fa-solid fa-check me-1" aria-hidden="true"></i>{{ t('chains.mounted') }}
                 </span>
@@ -644,7 +692,7 @@ onBeforeUnmount(() => {
 
             <div v-if="expandedDiscardedChains.has(bike.id)" class="d-flex flex-column gap-2 mt-2">
               <div
-                v-for="chain in bike.discarded_chains"
+                v-for="chain in sortedDiscardedChains(bike)"
                 :key="chain.id"
                 class="discarded-row d-flex justify-content-between align-items-center gap-2 flex-wrap"
               >

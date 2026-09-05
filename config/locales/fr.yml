@@ -428,6 +428,7 @@ fr:
     empty: "Aucun composant suivi sur ce vélo pour l'instant."
     mounted: "Montée"
     mount: "Monter"
+    rename: "Renommer"
     threshold: "Seuil"
     never_mounted: "jamais montée"
     delete: "Supprimer définitivement"

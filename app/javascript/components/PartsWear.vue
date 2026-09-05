@@ -104,11 +104,14 @@ function groupsFor(bike: any) {
   }
   return [...byType.values()].sort((a, b) => typeLabel(a.partType).localeCompare(typeLabel(b.partType)))
 }
+const byName = (a: any, b: any) => a.name.localeCompare(b.name)
+// Montées d'abord, puis ordre alphabétique.
+const byMountedThenName = (a: any, b: any) => (a.mounted === b.mounted ? byName(a, b) : a.mounted ? -1 : 1)
 function activeParts(group: { parts: any[] }) {
-  return group.parts.filter((p: any) => !p.discarded_at)
+  return group.parts.filter((p: any) => !p.discarded_at).sort(byMountedThenName)
 }
 function discardedParts(group: { parts: any[] }) {
-  return group.parts.filter((p: any) => p.discarded_at)
+  return group.parts.filter((p: any) => p.discarded_at).sort(byName)
 }
 
 const expandedDiscarded = reactive<Record<number, boolean>>({})
@@ -200,6 +203,20 @@ function submitUnmount(part: any) {
   const date = unmountDate.value
   openUnmount.value = null
   run(() => api(`/api/parts/${part.id}/unmount`, 'POST', { unmounted_at: date }))
+}
+
+// ── Renommer ────────────────────────────────────────────────────────────────────
+const editName = ref<number | null>(null)
+const nameValue = ref('')
+function startEditName(part: any) {
+  editName.value = part.id
+  nameValue.value = part.name
+}
+function submitEditName(part: any) {
+  const name = nameValue.value.trim()
+  if (!name) return
+  editName.value = null
+  run(() => api(`/api/parts/${part.id}`, 'PATCH', { name }))
 }
 
 // ── Seuil ───────────────────────────────────────────────────────────────────────
@@ -299,8 +316,33 @@ onBeforeUnmount(() => {
             <div v-for="part in activeParts(group)" :key="part.id" class="col">
               <div class="card h-100 part-card" :class="{ 'border-success': part.mounted }">
                 <div class="card-body d-flex flex-column">
-                  <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
-                    <h4 class="h6 mb-0 text-break">{{ part.name }}</h4>
+                  <div v-if="editName === part.id" class="d-flex align-items-center gap-2 mb-2">
+                    <input
+                      v-model="nameValue"
+                      type="text"
+                      class="form-control form-control-sm"
+                      @keyup.enter="submitEditName(part)"
+                      @keyup.esc="editName = null"
+                    />
+                    <button type="button" class="btn btn-sm btn-success" @click="submitEditName(part)">
+                      <i class="fa-solid fa-check" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @click="editName = null">
+                      <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                  <div v-else class="d-flex justify-content-between align-items-start gap-2 mb-2">
+                    <h4 class="h6 mb-0 text-break d-flex align-items-center gap-2">
+                      {{ part.name }}
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-link text-muted p-0"
+                        :title="t('parts.rename')"
+                        @click="startEditName(part)"
+                      >
+                        <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                      </button>
+                    </h4>
                     <span v-if="part.mounted" class="badge bg-success-subtle text-success flex-shrink-0">
                       <i class="fa-solid fa-check me-1" aria-hidden="true"></i>{{ t('parts.mounted') }}
                     </span>

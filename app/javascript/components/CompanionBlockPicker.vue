@@ -448,6 +448,15 @@ const gaugeColorModeChoice = ref<GaugeColorMode>(
 const gaugeColorChoice = ref<string | null>(props.block?.gauge_color || null)
 const gaugeThicknessChoice = ref<GaugeThickness>(props.block?.gauge_thickness || 'normal')
 
+// Le graphique de fond : indépendant de la jauge (voir `sanitize_block` côté
+// Rails), disponible pour n'importe quelle mesure. `backgroundChartEnabled`
+// pilote la présence de `background_chart_window` dans le bloc émis — même
+// contrat que `thresholdsEnabled` plus bas pour `gauge_color_mode`.
+const backgroundChartEnabled = ref<boolean>(props.block?.background_chart_window != null)
+const backgroundChartWindowChoice = ref<number>(props.block?.background_chart_window || 0)
+const backgroundChartColorChoice = ref<string | null>(props.block?.background_chart_color || null)
+const backgroundChartLineColorChoice = ref<string | null>(props.block?.background_chart_line_color || '#FFFFFF')
+
 // Les jalons d'une jauge à tranches personnalisées (`gauge_color_mode ===
 // 'thresholds'`) : ceux du composant en cours d'édition s'ils sont de la
 // forme attendue (une couleur de plus que de jalons), sinon un point de
@@ -662,6 +671,9 @@ const groups = computed(() => {
             gaugeColorMode: gaugeColorModeChoice.value, gaugeColor: gaugeColorChoice.value ?? undefined,
             gaugeThresholds: gaugeThresholdsChoice.value, gaugeThresholdColors: gaugeThresholdColorsChoice.value,
             gaugeThickness: gaugeThicknessChoice.value,
+            backgroundChartWindow: backgroundChartEnabled.value ? backgroundChartWindowChoice.value : undefined,
+            backgroundChartColor: backgroundChartColorChoice.value ?? undefined,
+            backgroundChartLineColor: backgroundChartLineColorChoice.value ?? undefined,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             windowS: windowS.value || undefined,
             carbsPerHour: carbsPerHour.value, intervalMin: intervalMin.value,
@@ -1078,91 +1090,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </div>
             </div>
 
-            <!-- Le fond par tranches : indépendant du jeton « Jauge », il tinte
-                 la carte elle-même (voir le commentaire de `thresholdsEnabled`)
-                 — proposé dès que la mesure s'y prête, jauge posée ou non. -->
-            <div v-if="!metricZoneEligible && (rangeEligible || dynamicEligible)" class="cbpk-gauge-params">
-              <p class="cbpk-subhead">{{ t('companion.settings.gauge_background') }}</p>
-
-              <label class="cbpk-field small cbpk-threshold-toggle">
-                <input v-model="thresholdsEnabled" type="checkbox" class="form-check-input">
-                {{ t('companion.settings.gauge_thresholds_enable') }}
-              </label>
-
-              <!-- Les jalons : une couleur, puis une paire jalon/couleur par
-                   tranche suivante — la couleur d'une tranche se règle
-                   toujours à sa droite, dans l'ordre croissant des valeurs. -->
-              <div v-if="thresholdsEnabled" class="cbpk-thresholds">
-                <div class="cbpk-threshold-row">
-                  <CompanionColorPicker
-                    :model-value="gaugeThresholdColorsChoice[0]" :fallback="RANGE_GAUGE_COLOR"
-                    :label="t('companion.settings.gauge_threshold_band_color')"
-                    @update:model-value="(v) => setThresholdColor(0, v)"
-                  />
-                </div>
-                <div v-for="(_, i) in gaugeThresholdsChoice" :key="i" class="cbpk-threshold-row">
-                  <input
-                    v-model.number="gaugeThresholdsChoice[i]" type="number"
-                    class="form-control form-control-sm cbpk-threshold-input"
-                    :aria-label="t('companion.settings.gauge_threshold_value')"
-                  >
-                  <button
-                    v-if="gaugeThresholdsChoice.length > GAUGE_THRESHOLD_COUNT_RANGE.min"
-                    type="button" class="btn btn-sm btn-outline-danger cbpk-threshold-remove"
-                    :aria-label="t('companion.settings.gauge_threshold_remove')"
-                    @click="removeThreshold(i)"
-                  >
-                    &times;
-                  </button>
-                  <CompanionColorPicker
-                    :model-value="gaugeThresholdColorsChoice[i + 1]" :fallback="RANGE_GAUGE_COLOR"
-                    :label="t('companion.settings.gauge_threshold_band_color')"
-                    @update:model-value="(v) => setThresholdColor(i + 1, v)"
-                  />
-                </div>
-                <button
-                  type="button" class="btn btn-sm btn-outline-secondary"
-                  :disabled="gaugeThresholdsChoice.length >= GAUGE_THRESHOLD_COUNT_RANGE.max"
-                  @click="addThreshold"
-                >
-                  {{ t('companion.settings.gauge_threshold_add') }}
-                </button>
-
-                <!-- Vérifier la règle composée sans attendre de la retrouver
-                     en pleine sortie : une valeur tapée ici répond tout de
-                     suite avec la même couleur que l'appli calculerait. -->
-                <div class="cbpk-threshold-test">
-                  <label class="cbpk-field small">
-                    {{ t('companion.settings.gauge_threshold_test_value') }}
-                    <input
-                      :value="thresholdTestValue ?? ''" type="number"
-                      class="form-control form-control-sm cbpk-threshold-input"
-                      @input="onThresholdTestInput"
-                    >
-                  </label>
-                  <span
-                    class="cbpk-threshold-test-swatch"
-                    :style="{ background: thresholdTestColor || undefined }"
-                  ></span>
-                  <span class="small text-body-secondary">
-                    {{
-                      thresholdTestColor
-                        ? t('companion.settings.gauge_threshold_test_result', { band: (thresholdTestBandIndex ?? 0) + 1 })
-                        : t('companion.settings.gauge_threshold_test_empty')
-                    }}
-                  </span>
-                </div>
-
-                <p class="cbpk-gauge-hint small text-body-secondary">
-                  {{
-                    currentLayout.gauge
-                      ? t('companion.settings.gauge_thresholds_hint_with_gauge')
-                      : t('companion.settings.gauge_thresholds_hint')
-                  }}
-                </p>
-              </div>
-            </div>
-
             <!-- Les réglages de la jauge, sous la grille plutôt que dans
                  l'en-tête du groupe : ils n'apparaissent qu'une fois le jeton
                  « Jauge » posé, et le panneau se lit d'un coup au lieu de se
@@ -1282,6 +1209,134 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               >
                 <i :class="ic" aria-hidden="true"></i>
               </button>
+            </div>
+
+            <!-- Le fond par tranches : indépendant du jeton « Jauge », il tinte
+                 la carte elle-même (voir le commentaire de `thresholdsEnabled`)
+                 — proposé dès que la mesure s'y prête, jauge posée ou non. -->
+            <div v-if="!metricZoneEligible && (rangeEligible || dynamicEligible)" class="cbpk-gauge-params">
+              <p class="cbpk-subhead">{{ t('companion.settings.gauge_background') }}</p>
+
+              <label class="cbpk-field small cbpk-threshold-toggle">
+                <input v-model="thresholdsEnabled" type="checkbox" class="form-check-input">
+                {{ t('companion.settings.gauge_thresholds_enable') }}
+              </label>
+
+              <!-- Les jalons : une couleur, puis une paire jalon/couleur par
+                   tranche suivante — la couleur d'une tranche se règle
+                   toujours à sa droite, dans l'ordre croissant des valeurs. -->
+              <div v-if="thresholdsEnabled" class="cbpk-thresholds">
+                <div class="cbpk-threshold-row">
+                  <CompanionColorPicker
+                    :model-value="gaugeThresholdColorsChoice[0]" :fallback="RANGE_GAUGE_COLOR"
+                    :label="t('companion.settings.gauge_threshold_band_color')"
+                    @update:model-value="(v) => setThresholdColor(0, v)"
+                  />
+                </div>
+                <div v-for="(_, i) in gaugeThresholdsChoice" :key="i" class="cbpk-threshold-row">
+                  <input
+                    v-model.number="gaugeThresholdsChoice[i]" type="number"
+                    class="form-control form-control-sm cbpk-threshold-input"
+                    :aria-label="t('companion.settings.gauge_threshold_value')"
+                  >
+                  <button
+                    v-if="gaugeThresholdsChoice.length > GAUGE_THRESHOLD_COUNT_RANGE.min"
+                    type="button" class="btn btn-sm btn-outline-danger cbpk-threshold-remove"
+                    :aria-label="t('companion.settings.gauge_threshold_remove')"
+                    @click="removeThreshold(i)"
+                  >
+                    &times;
+                  </button>
+                  <CompanionColorPicker
+                    :model-value="gaugeThresholdColorsChoice[i + 1]" :fallback="RANGE_GAUGE_COLOR"
+                    :label="t('companion.settings.gauge_threshold_band_color')"
+                    @update:model-value="(v) => setThresholdColor(i + 1, v)"
+                  />
+                </div>
+                <button
+                  type="button" class="btn btn-sm btn-outline-secondary"
+                  :disabled="gaugeThresholdsChoice.length >= GAUGE_THRESHOLD_COUNT_RANGE.max"
+                  @click="addThreshold"
+                >
+                  {{ t('companion.settings.gauge_threshold_add') }}
+                </button>
+
+                <!-- Vérifier la règle composée sans attendre de la retrouver
+                     en pleine sortie : une valeur tapée ici répond tout de
+                     suite avec la même couleur que l'appli calculerait. -->
+                <div class="cbpk-threshold-test">
+                  <label class="cbpk-field small">
+                    {{ t('companion.settings.gauge_threshold_test_value') }}
+                    <input
+                      :value="thresholdTestValue ?? ''" type="number"
+                      class="form-control form-control-sm cbpk-threshold-input"
+                      @input="onThresholdTestInput"
+                    >
+                  </label>
+                  <span
+                    class="cbpk-threshold-test-swatch"
+                    :style="{ background: thresholdTestColor || undefined }"
+                  ></span>
+                  <span class="small text-body-secondary">
+                    {{
+                      thresholdTestColor
+                        ? t('companion.settings.gauge_threshold_test_result', { band: (thresholdTestBandIndex ?? 0) + 1 })
+                        : t('companion.settings.gauge_threshold_test_empty')
+                    }}
+                  </span>
+                </div>
+
+                <p class="cbpk-gauge-hint small text-body-secondary">
+                  {{
+                    currentLayout.gauge
+                      ? t('companion.settings.gauge_thresholds_hint_with_gauge')
+                      : t('companion.settings.gauge_thresholds_hint')
+                  }}
+                </p>
+              </div>
+            </div>
+
+            <!-- Le graphique de fond : une aire de l'historique de la valeur,
+                 plein cadre, indépendante de la jauge (voir `sanitize_block`
+                 côté Rails et `MetricView._paint` côté appli) — proposé pour
+                 n'importe quelle mesure, pas seulement celles éligibles à une
+                 jauge, contrairement au panneau `.cbpk-gauge-params`
+                 ci-dessus. -->
+            <div v-if="!isClockMetric" class="cbpk-gauge-params">
+              <p class="cbpk-subhead">{{ t('companion.settings.background_chart_enable') }}</p>
+
+              <label class="cbpk-field small cbpk-threshold-toggle">
+                <input v-model="backgroundChartEnabled" type="checkbox" class="form-check-input">
+                {{ t('companion.settings.background_chart_toggle') }}
+              </label>
+
+              <template v-if="backgroundChartEnabled">
+                <label class="cbpk-field small">
+                  {{ t('companion.settings.background_chart_window') }}
+                  <input
+                    v-model.number="backgroundChartWindowChoice"
+                    type="number"
+                    min="0"
+                    class="form-control form-control-sm"
+                  >
+                </label>
+
+                <label class="cbpk-field small">
+                  {{ t('companion.settings.background_chart_color') }}
+                  <CompanionColorPicker
+                    v-model="backgroundChartColorChoice" :fallback="RANGE_GAUGE_COLOR"
+                    :label="t('companion.settings.background_chart_color')"
+                  />
+                </label>
+
+                <label class="cbpk-field small">
+                  {{ t('companion.settings.background_chart_line_color') }}
+                  <CompanionColorPicker
+                    v-model="backgroundChartLineColorChoice" fallback="#FFFFFF"
+                    :label="t('companion.settings.background_chart_line_color')"
+                  />
+                </label>
+              </template>
             </div>
 
             <!-- Les annotations de coin : une mesure dérivée (min/moyenne/max)

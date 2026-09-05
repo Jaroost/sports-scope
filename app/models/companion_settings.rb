@@ -1358,6 +1358,26 @@ module CompanionSettings
         thickness = raw["gauge_thickness"]
         block["gauge_thickness"] = thickness if GAUGE_THICKNESSES.include?(thickness)
       end
+
+      # Le graphique de fond : une aire de l'historique de la valeur, sur
+      # toute la sortie (`0`) ou une fenêtre glissante de N secondes. Vaut
+      # pour n'importe quelle mesure, contrairement aux réglages de jauge
+      # ci-dessus — pas de garde `zone_metric`/`eligible_range` ici.
+      # `background_chart_color` ne sert que si la mesure n'a par ailleurs
+      # aucune couleur de fond définie (ni zone, ni tranches) — voir
+      # `MetricView._paint` côté appli. `background_chart_line_color` teinte
+      # le tracé de la courbe, indépendamment de l'aire ; l'appli retombe sur
+      # le blanc si absente.
+      window = raw["background_chart_window"]
+      if window.is_a?(Numeric) && window >= 0
+        block["background_chart_window"] = window.to_i
+
+        color = sanitize_hex_color(raw["background_chart_color"])
+        block["background_chart_color"] = color if color
+
+        line_color = sanitize_hex_color(raw["background_chart_line_color"])
+        block["background_chart_line_color"] = line_color if line_color
+      end
     when "clock"
       # Réglable comme un bloc `metric` (icône, disposition — même éditeur
       # côté site, `CompanionBlockPicker.vue`), mais jamais d'unité, de jauge

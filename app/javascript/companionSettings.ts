@@ -86,6 +86,19 @@ export interface Block {
   // `GAUGE_THICKNESSES`. Absente vaut `'normal'`, la hauteur d'avant ce
   // réglage, jamais écrite pour rester silencieuse.
   gauge_thickness?: 'small' | 'large'
+  // Graphique de fond d'un bloc `metric` : une aire de l'historique de la
+  // valeur, plein cadre, fond transparent — voir `sanitize_block` côté
+  // Rails et `MetricView._paint` côté appli. Absent : pas de graphique,
+  // comportement d'avant ce réglage. `0` : toute la sortie ; `> 0` : les N
+  // dernières secondes.
+  background_chart_window?: number
+  // Couleur de l'aire sous la courbe, utilisée seulement si la mesure n'a
+  // par ailleurs aucune couleur de fond définie (ni zone, ni tranches) —
+  // sinon cette dernière prime. Absente : repli fixe côté appli.
+  background_chart_color?: string
+  // Couleur du tracé de la courbe, indépendante de `background_chart_color`.
+  // Absente : blanc, côté appli comme côté éditeur.
+  background_chart_line_color?: string
   // La fenêtre « roulante » d'un bloc `altitude_profile`, en km à venir depuis
   // la position courante — seulement quand un tracé est suivi (voir
   // `sanitize_block`). Absente : le profil entier du tracé, fait/restant,
@@ -738,6 +751,7 @@ export function blockFor(
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
     gaugeThresholds?: number[]; gaugeThresholdColors?: string[]
     gaugeThickness?: GaugeThickness
+    backgroundChartWindow?: number; backgroundChartColor?: string; backgroundChartLineColor?: string
     upcoming?: boolean
     color?: string | null; textColor?: string | null
   },
@@ -801,6 +815,13 @@ export function blockFor(
       if (params.gaugeColor) block.gauge_color = params.gaugeColor
     }
     if (params.gaugeThickness && params.gaugeThickness !== 'normal') block.gauge_thickness = params.gaugeThickness
+  }
+  // Le graphique de fond, indépendant de la jauge (voir `sanitize_block`
+  // côté Rails) : vaut pour n'importe quelle mesure, jamais pour l'horloge.
+  if (!isClock && choice.kind === 'metric' && params.backgroundChartWindow != null) {
+    block.background_chart_window = params.backgroundChartWindow
+    if (params.backgroundChartColor) block.background_chart_color = params.backgroundChartColor
+    if (params.backgroundChartLineColor) block.background_chart_line_color = params.backgroundChartLineColor
   }
   if (
     choice.kind === 'zones' || choice.kind === 'lap_zones' ||

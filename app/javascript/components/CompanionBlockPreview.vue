@@ -683,6 +683,47 @@ const metricTrendSegments = computed(() => {
   }
   return segments
 })
+
+// ── Graphique de fond ────────────────────────────────────────────────────────
+//
+// Fac-similé statique (une vague plausible, pas de vraie sortie dans
+// l'éditeur) — même dessin que la tendance ci-dessus (aire + liseré noir/trait
+// coloré), mais une seule couleur d'aplat, pas une bande par zone : voir
+// `MetricView._paint` côté appli, `background_chart_window` n'existe que sur
+// un bloc `metric`. Quand actif, le fond *plat* de la case (`.cbp-metric`)
+// retombe sur `overrideBg`/le gris par défaut — jamais la couleur de zone/
+// tranche, qui passe alors dans l'aire du graphique à la place.
+const BACKGROUND_CHART_SAMPLE = [40, 58, 50, 72, 64, 82, 60, 74, 66, 78]
+const hasBackgroundChart = computed(() => (
+  props.block.kind === 'metric' && props.block.background_chart_window != null
+))
+const backgroundChartPoints = computed(() => {
+  const values = BACKGROUND_CHART_SAMPLE
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min || 1
+  return values.map((v, i) => ({
+    x: (i / (values.length - 1)) * 100,
+    y: 96 - ((v - min) / span) * 88,
+  }))
+})
+const backgroundChartPolyline = computed(() => backgroundChartPoints.value.map((p) => `${p.x},${p.y}`).join(' '))
+const backgroundChartAreaPath = computed(() => {
+  const pts = backgroundChartPoints.value
+  if (!pts.length) return ''
+  const line = pts.map((p) => `${p.x},${p.y}`).join(' L')
+  return `M${line} L${pts[pts.length - 1].x},100 L${pts[0].x},100 Z`
+})
+// La couleur de l'aire suit la définition de fond de la mesure (zone,
+// tranches) si elle est paramétrée pour cette mesure, sinon la couleur
+// choisie pour ce graphique — même ordre que `metricBackground` plus haut,
+// moins `overrideBg` qui va désormais au fond plat de la case.
+const backgroundChartAreaColor = computed(() => (
+  thresholdBandColor.value || sample.value.background
+    || (metricZone.value ? ZONE_COLORS[metricZone.value] : null)
+    || props.block.background_chart_color || RANGE_GAUGE_COLOR
+))
+const backgroundChartLineColor = computed(() => props.block.background_chart_line_color || '#FFFFFF')
 </script>
 
 <template>
@@ -691,8 +732,35 @@ const metricTrendSegments = computed(() => {
     <div
       v-if="block.kind === 'metric'"
       class="cbp-card cbp-metric"
-      :style="{ background: metricBackground || undefined, color: metricInk }"
+      :style="{ background: (hasBackgroundChart ? overrideBg : metricBackground) || undefined, color: metricInk }"
     >
+      <svg
+        v-if="hasBackgroundChart"
+        class="cbp-metric-bgchart"
+        viewBox="0 0 100 100"
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <path :d="backgroundChartAreaPath" :fill="backgroundChartAreaColor" />
+        <polyline
+          :points="backgroundChartPolyline"
+          fill="none"
+          stroke="rgba(0, 0, 0, 0.55)"
+          stroke-width="3"
+          stroke-linejoin="round"
+          stroke-linecap="round"
+          vector-effect="non-scaling-stroke"
+        />
+        <polyline
+          :points="backgroundChartPolyline"
+          fill="none"
+          :stroke="backgroundChartLineColor"
+          stroke-width="1.4"
+          stroke-linejoin="round"
+          stroke-linecap="round"
+          vector-effect="non-scaling-stroke"
+        />
+      </svg>
       <span v-if="showLapBadge" class="cbp-lap-badge">Ce tour</span>
       <template v-for="row in rows" :key="row.row">
         <!-- La jauge est une barre pleine largeur, pas un texte : dès qu'elle
@@ -1947,6 +2015,28 @@ const metricTrendSegments = computed(() => {
   flex-direction: column;
   gap: 0.4em;
   text-align: center;
+  /* Isole la pile locale : sans ça, le `z-index` négatif du graphique de fond
+     ci-dessous chercherait un contexte d'empilement plus haut (potentiellement
+     la page entière), au lieu de rester sous le seul contenu de cette carte. */
+  isolation: isolate;
+}
+/* Le graphique de fond : plein cadre (bord à bord de la case, pas seulement
+   la zone de contenu), derrière tout le reste — même z-index implicite que
+   `.cbp-lap-badge`/le contenu, qui suivent dans le flux normal au-dessus
+   d'un élément en position absolue qui les précède dans le DOM. Fond du
+   `<svg>` transparent : seul `path`/`polyline` peignent, le fond *plat* de
+   `.cbp-metric` (réglé en ligne quand le graphique est actif) reste visible
+   partout ailleurs. */
+.cbp-metric-bgchart {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  /* Un élément positionné peint après le contenu statique de la carte (badge,
+     rangées) quel que soit son ordre dans le DOM, `z-index: auto` compris —
+     sans ce négatif, le graphique recouvrirait le texte au lieu de rester
+     dessous. */
+  z-index: -1;
 }
 /* Le motif « barre d'outils » : gauche et droite ne prennent que la place que
    réclame leur contenu (`flex: 0 1 auto`, la valeur par défaut — elles

@@ -11,7 +11,8 @@ import {
   fitDividers, fitListBlocks, gridSideOf, gutterRect, isGridLayout, listSegments,
   maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
-  type Band, type BandMarkLapSlot, type Block, type Buttons, type ButtonChannel, type Catalog, type Cell,
+  type Band, type BandMarkLapSlot, type BandSlotValue, type Block, type Buttons, type ButtonChannel, type Catalog,
+  type Cell,
   type CellSize, type Divider, type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch,
   type Page, type Preset, type Reminder, type Viewport,
 } from '../companionSettings'
@@ -241,8 +242,8 @@ const lapSeries = computed(() => {
   // Une case de bandeau/encoche « marquer un tour » (`BandMarkLapSlot`) porte
   // aussi une série, au même titre qu'un bouton `mark_lap` de page — mêmes
   // suggestions des deux côtés.
-  const collectSlot = (slot?: string | BandMarkLapSlot) => {
-    if (typeof slot === 'object') keys.add(slot.series || 'default')
+  const collectSlot = (slot?: BandSlotValue) => {
+    if (typeof slot === 'object' && 'kind' in slot) keys.add(slot.series || 'default')
   }
   preset.value.pages.forEach((page) => {
     if (page.kind === 'laps') keys.add(page.series || 'default')
@@ -312,16 +313,43 @@ function bandBellLabel(key: string): string {
 }
 
 // Ce que porte un `<select>` de case de bandeau/encoche : le jeton simple
-// (chaîne) tel quel, ou le `kind` de l'objet « marquer un tour » — c'est ce
-// qui sélectionne l'option correspondante dans le menu déroulant.
-function bandSlotKind(value?: string | BandMarkLapSlot): string {
-  return typeof value === 'object' ? value.kind : (value || '')
+// (chaîne) tel quel, le `kind` de l'objet « marquer un tour », ou le jeton
+// enveloppé d'une couleur (`BandColoredSlot.slot`) — c'est ce qui sélectionne
+// l'option correspondante dans le menu déroulant.
+function bandSlotKind(value?: BandSlotValue): string {
+  if (typeof value !== 'object') return value || ''
+  return 'kind' in value ? value.kind : value.slot
 }
 
 // L'objet « marquer un tour » d'une case, ou `null` — ce qui commande
 // l'affichage des champs série/label sous le `<select>`.
-function bandLapSlot(value?: string | BandMarkLapSlot): BandMarkLapSlot | null {
-  return typeof value === 'object' ? value : null
+function bandLapSlot(value?: BandSlotValue): BandMarkLapSlot | null {
+  return typeof value === 'object' && 'kind' in value ? value : null
+}
+
+// La couleur de fond réglée sur une case, ou `null` — que la case soit
+// l'objet « marquer un tour » ou l'enveloppe `{slot, color}` d'un jeton
+// simple, les deux seuls objets à pouvoir en porter une.
+function bandSlotColor(value?: BandSlotValue): string | null {
+  return (typeof value === 'object' && value.color) || null
+}
+
+// Recompose une case avec une nouvelle couleur de fond, en gardant son jeton
+// (mesure, commande, …) et — pour « marquer un tour » — sa série/son label.
+// `null`/`''` retire la couleur et retombe sur le jeton nu plutôt que de
+// garder une enveloppe désormais sans couleur à porter.
+function withBandSlotColor(value: BandSlotValue | undefined, color: string | null): BandSlotValue {
+  const lap = bandLapSlot(value)
+  if (lap) {
+    if (!color) {
+      const { color: _drop, ...rest } = lap
+      return rest
+    }
+    return { ...lap, color }
+  }
+  const kind = bandSlotKind(value)
+  if (!kind) return ''
+  return color ? { slot: kind, color } : kind
 }
 
 // Le libellé d'une action de bouton Di2 (`catalog.button_actions`) — sa
@@ -1015,7 +1043,7 @@ function duplicateBand(index: number) {
   preset.value.bands.splice(index + 1, 0, copy)
 }
 
-function setBandMetric(band: Band, index: number, value: string | BandMarkLapSlot) {
+function setBandMetric(band: Band, index: number, value: BandSlotValue) {
   // Écrit en place plutôt que de retirer la case : un `splice` décalerait
   // tout ce qui suit vers la gauche, et une case vidée au milieu se
   // retrouverait toujours en bout de jeu. Seules les cases vides en fin de
@@ -1029,19 +1057,27 @@ function setBandMetric(band: Band, index: number, value: string | BandMarkLapSlo
 
 // Ce que choisit le `<select>` d'une case : soit un jeton simple (mesure,
 // commande, radar, sonnette), soit `'mark_lap'` — auquel cas la case devient
-// l'objet réglable (série + label) plutôt que la chaîne elle-même.
+// l'objet réglable (série + label) plutôt que la chaîne elle-même. La couleur
+// déjà réglée sur la case suit le changement de jeton, plutôt que de se
+// perdre pour un simple changement de mesure.
 function setBandSlotKind(band: Band, index: number, value: string) {
-  setBandMetric(band, index, value === 'mark_lap' ? { kind: 'mark_lap', series: 'default' } : value)
+  const color = bandSlotColor(band.metrics[index])
+  const next: BandSlotValue = value === 'mark_lap' ? { kind: 'mark_lap', series: 'default' } : value
+  setBandMetric(band, index, color ? withBandSlotColor(next, color) : next)
+}
+
+function setBandSlotColor(band: Band, index: number, value: string) {
+  setBandMetric(band, index, withBandSlotColor(band.metrics[index], value || null))
 }
 
 function setBandLapSeries(band: Band, index: number, value: string) {
   const slot = band.metrics[index]
-  if (typeof slot === 'object') slot.series = value
+  if (typeof slot === 'object' && 'kind' in slot) slot.series = value
 }
 
 function setBandLapLabel(band: Band, index: number, value: string) {
   const slot = band.metrics[index]
-  if (typeof slot === 'object') slot.label = value || undefined
+  if (typeof slot === 'object' && 'kind' in slot) slot.label = value || undefined
 }
 
 // ── la bande de l'encoche ───────────────────────────────────────────────────
@@ -1051,24 +1087,30 @@ function addNotchSet() {
   notch.push({})
 }
 
-function setNotchMetric(set: Notch, side: 'left' | 'right', value: string | BandMarkLapSlot) {
+function setNotchMetric(set: Notch, side: 'left' | 'right', value: BandSlotValue) {
   if (value) set[side] = value
   else delete set[side]
 }
 
 // Même rôle que `setBandSlotKind`, côté encoche.
 function setNotchSlotKind(set: Notch, side: 'left' | 'right', value: string) {
-  setNotchMetric(set, side, value === 'mark_lap' ? { kind: 'mark_lap', series: 'default' } : value)
+  const color = bandSlotColor(set[side])
+  const next: BandSlotValue = value === 'mark_lap' ? { kind: 'mark_lap', series: 'default' } : value
+  setNotchMetric(set, side, color ? withBandSlotColor(next, color) : next)
+}
+
+function setNotchSlotColor(set: Notch, side: 'left' | 'right', value: string) {
+  setNotchMetric(set, side, withBandSlotColor(set[side], value || null))
 }
 
 function setNotchLapSeries(set: Notch, side: 'left' | 'right', value: string) {
   const slot = set[side]
-  if (typeof slot === 'object') slot.series = value
+  if (typeof slot === 'object' && 'kind' in slot) slot.series = value
 }
 
 function setNotchLapLabel(set: Notch, side: 'left' | 'right', value: string) {
   const slot = set[side]
-  if (typeof slot === 'object') slot.label = value || undefined
+  if (typeof slot === 'object' && 'kind' in slot) slot.label = value || undefined
 }
 
 function removeNotchSet(index: number) {
@@ -1955,40 +1997,45 @@ async function save() {
              class="d-flex align-items-center gap-2 mb-2">
           <div class="row g-1 flex-grow-1">
             <div class="col-6">
-              <select class="form-select form-select-sm" :value="bandSlotKind(set.left)"
-                      @change="setNotchSlotKind(set, 'left', ($event.target as HTMLSelectElement).value)">
-                <option value="">—</option>
-                <optgroup :label="t('companion.settings.band_actions_group')">
-                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
-                    {{ bandActionLabel(action) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_radar_group')">
-                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
-                    {{ bandRadarLabel(radar) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_workout_group')">
-                  <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
-                    {{ bandWorkoutLabel(workout) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_bell_group')">
-                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
-                    {{ bandBellLabel(bell) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_lap_group')">
-                  <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
-                    {{ bandActionLabel(lap) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_metrics_group')">
-                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                    {{ metricLabel(metric) }}
-                  </option>
-                </optgroup>
-              </select>
+              <div class="d-flex gap-1 align-items-center">
+                <select class="form-select form-select-sm flex-grow-1" :value="bandSlotKind(set.left)"
+                        @change="setNotchSlotKind(set, 'left', ($event.target as HTMLSelectElement).value)">
+                  <option value="">—</option>
+                  <optgroup :label="t('companion.settings.band_actions_group')">
+                    <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                      {{ bandActionLabel(action) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_radar_group')">
+                    <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                      {{ bandRadarLabel(radar) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_workout_group')">
+                    <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
+                      {{ bandWorkoutLabel(workout) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_bell_group')">
+                    <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                      {{ bandBellLabel(bell) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_lap_group')">
+                    <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
+                      {{ bandActionLabel(lap) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_metrics_group')">
+                    <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                      {{ metricLabel(metric) }}
+                    </option>
+                  </optgroup>
+                </select>
+                <CompanionColorPicker v-if="bandSlotKind(set.left)" :model-value="bandSlotColor(set.left)"
+                                       fallback="#1f2226" :label="t('companion.settings.block_color')"
+                                       @update:model-value="(v) => setNotchSlotColor(set, 'left', v || '')" />
+              </div>
               <div v-if="bandLapSlot(set.left)" class="d-flex gap-1 mt-1">
                 <input class="form-control form-control-sm" style="min-width: 0"
                        :value="bandLapSlot(set.left)!.series"
@@ -2001,40 +2048,45 @@ async function save() {
               </div>
             </div>
             <div class="col-6">
-              <select class="form-select form-select-sm" :value="bandSlotKind(set.right)"
-                      @change="setNotchSlotKind(set, 'right', ($event.target as HTMLSelectElement).value)">
-                <option value="">—</option>
-                <optgroup :label="t('companion.settings.band_actions_group')">
-                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
-                    {{ bandActionLabel(action) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_radar_group')">
-                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
-                    {{ bandRadarLabel(radar) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_workout_group')">
-                  <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
-                    {{ bandWorkoutLabel(workout) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_bell_group')">
-                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
-                    {{ bandBellLabel(bell) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_lap_group')">
-                  <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
-                    {{ bandActionLabel(lap) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_metrics_group')">
-                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                    {{ metricLabel(metric) }}
-                  </option>
-                </optgroup>
-              </select>
+              <div class="d-flex gap-1 align-items-center">
+                <select class="form-select form-select-sm flex-grow-1" :value="bandSlotKind(set.right)"
+                        @change="setNotchSlotKind(set, 'right', ($event.target as HTMLSelectElement).value)">
+                  <option value="">—</option>
+                  <optgroup :label="t('companion.settings.band_actions_group')">
+                    <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                      {{ bandActionLabel(action) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_radar_group')">
+                    <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                      {{ bandRadarLabel(radar) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_workout_group')">
+                    <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
+                      {{ bandWorkoutLabel(workout) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_bell_group')">
+                    <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                      {{ bandBellLabel(bell) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_lap_group')">
+                    <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
+                      {{ bandActionLabel(lap) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_metrics_group')">
+                    <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                      {{ metricLabel(metric) }}
+                    </option>
+                  </optgroup>
+                </select>
+                <CompanionColorPicker v-if="bandSlotKind(set.right)" :model-value="bandSlotColor(set.right)"
+                                       fallback="#1f2226" :label="t('companion.settings.block_color')"
+                                       @update:model-value="(v) => setNotchSlotColor(set, 'right', v || '')" />
+              </div>
               <div v-if="bandLapSlot(set.right)" class="d-flex gap-1 mt-1">
                 <input class="form-control form-control-sm" style="min-width: 0"
                        :value="bandLapSlot(set.right)!.series"
@@ -2088,41 +2140,47 @@ async function save() {
              class="d-flex align-items-center gap-2 mb-2">
           <div class="row g-1 flex-grow-1">
             <div v-for="slot in catalog.max_band_metrics" :key="slot" class="col-6 col-sm-3">
-              <select class="form-select form-select-sm"
-                      :value="bandSlotKind(band.metrics[slot - 1])"
-                      @change="setBandSlotKind(band, slot - 1, ($event.target as HTMLSelectElement).value)">
-                <option value="">—</option>
-                <optgroup :label="t('companion.settings.band_actions_group')">
-                  <option v-for="action in catalog.band_actions" :key="action" :value="action">
-                    {{ bandActionLabel(action) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_radar_group')">
-                  <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
-                    {{ bandRadarLabel(radar) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_workout_group')">
-                  <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
-                    {{ bandWorkoutLabel(workout) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_bell_group')">
-                  <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
-                    {{ bandBellLabel(bell) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_lap_group')">
-                  <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
-                    {{ bandActionLabel(lap) }}
-                  </option>
-                </optgroup>
-                <optgroup :label="t('companion.settings.band_metrics_group')">
-                  <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
-                    {{ metricLabel(metric) }}
-                  </option>
-                </optgroup>
-              </select>
+              <div class="d-flex gap-1 align-items-center">
+                <select class="form-select form-select-sm flex-grow-1"
+                        :value="bandSlotKind(band.metrics[slot - 1])"
+                        @change="setBandSlotKind(band, slot - 1, ($event.target as HTMLSelectElement).value)">
+                  <option value="">—</option>
+                  <optgroup :label="t('companion.settings.band_actions_group')">
+                    <option v-for="action in catalog.band_actions" :key="action" :value="action">
+                      {{ bandActionLabel(action) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_radar_group')">
+                    <option v-for="radar in catalog.band_radar" :key="radar" :value="radar">
+                      {{ bandRadarLabel(radar) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_workout_group')">
+                    <option v-for="workout in catalog.band_workout" :key="workout" :value="workout">
+                      {{ bandWorkoutLabel(workout) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_bell_group')">
+                    <option v-for="bell in catalog.band_bell" :key="bell" :value="bell">
+                      {{ bandBellLabel(bell) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_lap_group')">
+                    <option v-for="lap in catalog.band_mark_lap" :key="lap" :value="lap">
+                      {{ bandActionLabel(lap) }}
+                    </option>
+                  </optgroup>
+                  <optgroup :label="t('companion.settings.band_metrics_group')">
+                    <option v-for="metric in sortedMetrics" :key="metric" :value="metric">
+                      {{ metricLabel(metric) }}
+                    </option>
+                  </optgroup>
+                </select>
+                <CompanionColorPicker v-if="bandSlotKind(band.metrics[slot - 1])"
+                                       :model-value="bandSlotColor(band.metrics[slot - 1])"
+                                       fallback="#1f2226" :label="t('companion.settings.block_color')"
+                                       @update:model-value="(v) => setBandSlotColor(band, slot - 1, v || '')" />
+              </div>
               <div v-if="bandLapSlot(band.metrics[slot - 1])" class="d-flex gap-1 mt-1">
                 <input class="form-control form-control-sm" style="min-width: 0"
                        :value="bandLapSlot(band.metrics[slot - 1])!.series"

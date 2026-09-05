@@ -452,15 +452,30 @@ export interface Page {
 // La case « marquer un tour » du bandeau ou de l'encoche — seule case à
 // porter un réglage libre (série + label) plutôt qu'un simple jeton de
 // catalogue, voir `CompanionSettings.sanitize_band_lap_slot` (Rails) et
-// `BandMarkLapSlot` (Dart, `ride_preset.dart`).
+// `BandMarkLapSlot` (Dart, `ride_preset.dart`). `color` s'y ajoute comme sur
+// n'importe quelle case : déjà un objet, elle la porte directement.
 export interface BandMarkLapSlot {
   kind: 'mark_lap'
   series: string
   label?: string
+  color?: string
 }
 
+// L'enveloppe d'un jeton simple (mesure, commande, radar, sonnette, tronçon
+// d'entraînement) avec une couleur de fond — une chaîne nue ne peut porter
+// aucune clé de plus. Voir `CompanionSettings.sanitize_band_colored_slot`
+// (Rails) et `BandSlot.parse` (Dart, `ride_preset.dart`).
+export interface BandColoredSlot {
+  slot: string
+  color: string
+}
+
+// Ce que porte une case de bandeau ou d'encoche : un jeton simple, l'objet
+// « marquer un tour », ou l'un des deux enveloppé d'une couleur de fond.
+export type BandSlotValue = string | BandMarkLapSlot | BandColoredSlot
+
 export interface Band {
-  metrics: (string | BandMarkLapSlot)[]
+  metrics: BandSlotValue[]
 }
 
 // Ce qu'un geste sur un canal du D-Fly déclenche — une chaîne du catalogue
@@ -492,8 +507,8 @@ export interface Buttons {
 // l'absence (ou une liste vide) ne retombe jamais sur un contenu par défaut —
 // voir `CompanionSettings.sanitize_notch_sets`.
 export interface Notch {
-  left?: string | BandMarkLapSlot
-  right?: string | BandMarkLapSlot
+  left?: BandSlotValue
+  right?: BandSlotValue
 }
 
 // Un rappel périodique — boire, manger, entamer une intervalle — voir

@@ -1698,22 +1698,42 @@ module CompanionSettings
       BAND_RADAR.include?(raw) || BAND_WORKOUT.include?(raw) || BAND_WORKOUT_NEXT.include?(raw)
   end
 
+  # Un jeton simple (voir `band_slot?`) devient `{"kind" => "mark_lap", ...}`
+  # ou `{"slot" => ..., "color" => ...}` dès que l'éditeur y règle une couleur
+  # de fond — une chaîne nue ne peut porter aucune clé de plus. `mark_lap` est
+  # déjà un objet, la couleur s'y ajoute directement (`sanitize_band_lap_slot`) ;
+  # les autres passent par l'enveloppe `"slot"` (`sanitize_band_colored_slot`).
   def sanitize_band_entry(raw)
     return raw if band_slot?(raw)
+    return nil unless raw.is_a?(Hash)
 
-    sanitize_band_lap_slot(raw)
+    raw["kind"] == "mark_lap" ? sanitize_band_lap_slot(raw) : sanitize_band_colored_slot(raw)
   end
 
   # `mark_lap` est la seule case de bandeau/encoche à porter un réglage libre
   # (série + label) : les autres se contentent d'une chaîne (voir
-  # `band_slot?`), celle-ci est donc le seul objet toléré dans ces tableaux —
-  # `nil` pour tout objet dont le `kind` n'est pas reconnu, même repli qu'une
-  # chaîne inconnue de `band_slot?`.
+  # `band_slot?`), celle-ci est donc le seul objet toléré tel quel dans ces
+  # tableaux — `nil` pour tout objet dont le `kind` n'est pas reconnu, même
+  # repli qu'une chaîne inconnue de `band_slot?`.
   def sanitize_band_lap_slot(raw)
     return nil unless raw.is_a?(Hash) && raw["kind"] == "mark_lap"
 
     label = raw["label"].to_s.strip[0, MAX_BAND_LAP_LABEL_LENGTH]
-    { "kind" => "mark_lap", "series" => sanitize_series(raw["series"]), "label" => label.presence }.compact
+    { "kind" => "mark_lap", "series" => sanitize_series(raw["series"]), "label" => label.presence,
+      "color" => sanitize_hex_color(raw["color"]) }.compact
+  end
+
+  # L'enveloppe d'un jeton simple avec sa couleur de fond
+  # (`{"slot" => "power", "color" => "#rrggbb"}`) — voir `BandSlot.parse`
+  # (Dart, `ride_preset.dart`). Retombe sur le jeton nu quand la couleur ne
+  # tient pas : une case sans couleur exploitable n'a aucune raison de rester
+  # enveloppée dans ce que l'appli reçoit.
+  def sanitize_band_colored_slot(raw)
+    slot = raw["slot"]
+    return nil unless band_slot?(slot)
+
+    color = sanitize_hex_color(raw["color"])
+    color ? { "slot" => slot, "color" => color } : slot
   end
 
   # Ce que les quatre canaux du D-Fly déclenchent, par profil de sortie — voir

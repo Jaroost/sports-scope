@@ -1,13 +1,16 @@
-<% content_for :title, t("chains.title") %>
+<% content_for :title, t("maintenance.title") %>
 
 <div class="d-flex align-items-center gap-3 mb-2">
   <span class="dashboard-badge bg-primary-subtle text-primary">
-    <i class="fa-solid fa-link" aria-hidden="true"></i>
+    <i class="fa-solid fa-gears" aria-hidden="true"></i>
   </span>
-  <h1 class="mb-0"><%= t("chains.title") %></h1>
+  <h1 class="mb-0"><%= t("maintenance.title") %></h1>
 </div>
-<p class="text-muted"><%= t("chains.intro") %></p>
+<p class="text-muted"><%= t("maintenance.intro") %></p>
 
 <%# Un vélo « par défaut » existe toujours (créé automatiquement sans Strava), donc
     pas de garde Strava ici : seul le bouton de resynchronisation dépend du lien Strava. %>
 <div data-vue-component="ChainWax" data-vue-props='<%= { stravaLinked: current_user.strava_linked? }.to_json %>'></div>
+
+<h2 class="h5 mt-4 mb-2"><%= t("maintenance.other_parts") %></h2>
+<div data-vue-component="PartsWear"></div>

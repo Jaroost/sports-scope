@@ -12,6 +12,7 @@ import ProfileDialog from './components/ProfileDialog.vue'
 import NewRouteButton from './components/NewRouteButton.vue'
 import PwaInstall from './components/PwaInstall.vue'
 import ChainWax from './components/ChainWax.vue'
+import PartsWear from './components/PartsWear.vue'
 import PerformanceAnalysis from './components/PerformanceAnalysis.vue'
 import TodayPlanWidget from './components/TodayPlanWidget.vue'
 import RefreshAll from './components/RefreshAll.vue'
@@ -36,6 +37,7 @@ const registry: Record<string, Component> = {
   NewRouteButton,
   PwaInstall,
   ChainWax,
+  PartsWear,
   PerformanceAnalysis,
   TodayPlanWidget,
   RefreshAll,

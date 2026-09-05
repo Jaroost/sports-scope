@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_29_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_05_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -25,28 +25,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_29_120000) do
     t.boolean "uses_wax", default: true, null: false
     t.index ["user_id", "strava_gear_id"], name: "index_bikes_on_user_id_and_strava_gear_id", unique: true
     t.index ["user_id"], name: "index_bikes_on_user_id"
-  end
-
-  create_table "chain_mounts", force: :cascade do |t|
-    t.bigint "bike_id", null: false
-    t.bigint "chain_id", null: false
-    t.datetime "created_at", null: false
-    t.datetime "mounted_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["bike_id", "mounted_at"], name: "index_chain_mounts_on_bike_id_and_mounted_at"
-    t.index ["bike_id"], name: "index_chain_mounts_on_bike_id"
-    t.index ["chain_id"], name: "index_chain_mounts_on_chain_id"
-  end
-
-  create_table "chains", force: :cascade do |t|
-    t.bigint "bike_id", null: false
-    t.datetime "created_at", null: false
-    t.datetime "last_waxed_at"
-    t.string "name", null: false
-    t.boolean "needs_wax", default: false, null: false
-    t.datetime "updated_at", null: false
-    t.integer "wax_threshold_km", default: 300, null: false
-    t.index ["bike_id"], name: "index_chains_on_bike_id"
   end
 
   create_table "chart_layouts", force: :cascade do |t|
@@ -118,6 +96,42 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_29_120000) do
     t.index ["user_id", "last_opened_at"], name: "index_opened_routes_on_user_id_and_last_opened_at"
     t.index ["user_id", "route_id"], name: "index_opened_routes_on_user_id_and_route_id", unique: true
     t.index ["user_id"], name: "index_opened_routes_on_user_id"
+  end
+
+  create_table "part_mounts", force: :cascade do |t|
+    t.bigint "bike_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "mounted_at", null: false
+    t.bigint "part_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["bike_id", "mounted_at"], name: "index_part_mounts_on_bike_id_and_mounted_at"
+    t.index ["bike_id"], name: "index_part_mounts_on_bike_id"
+    t.index ["part_id"], name: "index_part_mounts_on_part_id"
+  end
+
+  create_table "part_types", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "default_wear_threshold_km", null: false
+    t.string "key"
+    t.string "name"
+    t.datetime "updated_at", null: false
+    t.bigint "user_id"
+    t.index ["user_id", "name"], name: "index_part_types_on_user_id_and_name", unique: true
+    t.index ["user_id"], name: "index_part_types_on_user_id"
+  end
+
+  create_table "parts", force: :cascade do |t|
+    t.bigint "bike_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "last_waxed_at"
+    t.string "name", null: false
+    t.boolean "needs_wax", default: false, null: false
+    t.bigint "part_type_id", null: false
+    t.datetime "updated_at", null: false
+    t.integer "wax_threshold_km", default: 300, null: false
+    t.integer "wear_threshold_km", default: 3000, null: false
+    t.index ["bike_id"], name: "index_parts_on_bike_id"
+    t.index ["part_type_id"], name: "index_parts_on_part_type_id"
   end
 
   create_table "planned_rides", force: :cascade do |t|
@@ -297,14 +311,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_29_120000) do
   end
 
   add_foreign_key "bikes", "users"
-  add_foreign_key "chain_mounts", "bikes"
-  add_foreign_key "chain_mounts", "chains"
-  add_foreign_key "chains", "bikes"
   add_foreign_key "chart_layouts", "users"
   add_foreign_key "imported_activities", "users"
   add_foreign_key "named_segments", "users"
   add_foreign_key "opened_routes", "routes"
   add_foreign_key "opened_routes", "users"
+  add_foreign_key "part_mounts", "bikes"
+  add_foreign_key "part_mounts", "parts"
+  add_foreign_key "part_types", "users"
+  add_foreign_key "parts", "bikes"
+  add_foreign_key "parts", "part_types"
   add_foreign_key "planned_rides", "routes"
   add_foreign_key "planned_rides", "users"
   add_foreign_key "pois", "users"

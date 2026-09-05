@@ -258,6 +258,9 @@ class User < ApplicationRecord
   has_many :strava_backfill_runs, dependent: :destroy
   has_many :strava_gears, dependent: :destroy
   has_many :bikes, dependent: :destroy
+  # Types de pièce custom déclarés par l'utilisateur (cf. PartType) — s'ajoutent aux
+  # types globaux (pneu, roue, pédalier, cassette, chaîne, frein hydraulique).
+  has_many :part_types, dependent: :destroy
   # Noms donnés aux segments découverts automatiquement (cf. NamedSegment).
   has_many :named_segments, dependent: :destroy
 

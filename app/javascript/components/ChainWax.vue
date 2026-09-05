@@ -116,7 +116,7 @@ function submitWax(chain: any) {
   const date = waxDate.value
   const scope = waxAll.value ? 'bike' : 'chain'
   openWax.value = null
-  run(() => api(`/api/chains/${chain.id}/wax`, 'POST', { waxed_at: date, scope }))
+  run(() => api(`/api/parts/${chain.id}/wax`, 'POST', { waxed_at: date, scope }))
 }
 
 // ── Montage (rotation) ──────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ function startMount(chain: any) {
 function submitMount(bike: any, chain: any) {
   const date = mountDate.value
   openMount.value = null
-  run(() => api(`/api/bikes/${bike.id}/mount`, 'POST', { chain_id: chain.id, mounted_at: date }))
+  run(() => api(`/api/bikes/${bike.id}/mount`, 'POST', { part_id: chain.id, mounted_at: date }))
 }
 
 // ── Seuil ───────────────────────────────────────────────────────────────────────
@@ -138,16 +138,16 @@ function startSeuil(chain: any) {
 function submitSeuil(chain: any) {
   const km = Math.max(1, Math.round(Number(seuilValue.value) || 0))
   editSeuil.value = null
-  run(() => api(`/api/chains/${chain.id}`, 'PATCH', { wax_threshold_km: km }))
+  run(() => api(`/api/parts/${chain.id}`, 'PATCH', { wax_threshold_km: km }))
 }
 
 function addChain(bike: any) {
-  run(() => api(`/api/bikes/${bike.id}/chains`, 'POST'))
+  run(() => api(`/api/bikes/${bike.id}/parts`, 'POST', { part_type_id: bike.chain_part_type_id }))
 }
 function removeChain(bike: any, chain: any) {
   if (bike.chains.length <= 1) return
   if (!window.confirm(t('chains.delete_confirm'))) return
-  run(() => api(`/api/chains/${chain.id}`, 'DELETE'))
+  run(() => api(`/api/parts/${chain.id}`, 'DELETE'))
 }
 // Une chaîne est « à recirer » soit parce qu'elle a dépassé son seuil de km, soit
 // parce que l'utilisateur l'a marquée comme telle (bruit, pluie, remontage…).
@@ -155,7 +155,7 @@ function needsWax(chain: any) {
   return chain.needs_wax === true || chain.progress_percent >= 100
 }
 function toggleNeedsWax(chain: any) {
-  run(() => api(`/api/chains/${chain.id}`, 'PATCH', { needs_wax: !chain.needs_wax }))
+  run(() => api(`/api/parts/${chain.id}`, 'PATCH', { needs_wax: !chain.needs_wax }))
 }
 
 // Chaînes encore utilisables (cirées et sous leur seuil) parmi celles du vélo.
@@ -220,8 +220,8 @@ function confirmMountNext() {
   if (!bike || !chain) return
 
   run(async () => {
-    if (markOutgoing) await api(`/api/chains/${outgoing.id}`, 'PATCH', { needs_wax: true })
-    return api(`/api/bikes/${bike.id}/mount`, 'POST', { chain_id: chain.id, mounted_at: date })
+    if (markOutgoing) await api(`/api/parts/${outgoing.id}`, 'PATCH', { needs_wax: true })
+    return api(`/api/bikes/${bike.id}/mount`, 'POST', { part_id: chain.id, mounted_at: date })
   })
 }
 

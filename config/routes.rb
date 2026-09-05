@@ -204,15 +204,19 @@ Rails.application.routes.draw do
   delete "/api/named_segments/:id", to: "named_segments#destroy", constraints: { id: /\d+/ }
   delete "/api/imported_activities/:id", to: "imported_activities#destroy", constraints: { id: /\d+/ }
 
-  # Bike chain waxing tracker (JSON consumed by Vue components)
+  # Bike parts wear tracker — chain waxing + generic wear (JSON consumed by Vue components)
   get    "/api/bikes", to: "bikes#index"
   patch  "/api/bikes/:id", to: "bikes#update", constraints: { id: /\d+/ }
   delete "/api/bikes/:id", to: "bikes#destroy", constraints: { id: /\d+/ }
-  post   "/api/bikes/:id/chains", to: "bikes#add_chain", constraints: { id: /\d+/ }
+  post   "/api/bikes/:id/parts", to: "bikes#add_part", constraints: { id: /\d+/ }
   post   "/api/bikes/:id/mount", to: "bikes#mount", constraints: { id: /\d+/ }
-  patch  "/api/chains/:id", to: "chains#update", constraints: { id: /\d+/ }
-  delete "/api/chains/:id", to: "chains#destroy", constraints: { id: /\d+/ }
-  post   "/api/chains/:id/wax", to: "chains#wax", constraints: { id: /\d+/ }
+  patch  "/api/parts/:id", to: "parts#update", constraints: { id: /\d+/ }
+  delete "/api/parts/:id", to: "parts#destroy", constraints: { id: /\d+/ }
+  post   "/api/parts/:id/wax", to: "parts#wax", constraints: { id: /\d+/ }
+  get    "/api/part_types", to: "part_types#index"
+  post   "/api/part_types", to: "part_types#create"
+  patch  "/api/part_types/:id", to: "part_types#update", constraints: { id: /\d+/ }
+  delete "/api/part_types/:id", to: "part_types#destroy", constraints: { id: /\d+/ }
 
   # User preferences (JSON consumed by Vue components) — named layout presets
   get "/preferences/chart_layouts", to: "preferences#index"

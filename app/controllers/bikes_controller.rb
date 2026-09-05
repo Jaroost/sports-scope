@@ -1,6 +1,7 @@
-# Suivi du cirage de chaîne (par vélo). Sert la liste des vélos + leurs chaînes avec
-# les km parcourus depuis le dernier cirage. Les vélos viennent de Strava (gear) ;
-# sans Strava, un vélo « par défaut » est créé automatiquement.
+# Suivi d'usure du matériel (par vélo) : cirage de chaîne + usure des autres pièces
+# (pneu, roue, pédalier, cassette, frein hydraulique, types custom). Sert la liste
+# des vélos + leurs pièces avec les km parcourus. Les vélos viennent de Strava
+# (gear) ; sans Strava, un vélo « par défaut » est créé automatiquement.
 class BikesController < ApplicationController
   include BikeSerialization
 
@@ -53,30 +54,41 @@ class BikesController < ApplicationController
     head :no_content
   end
 
-  # POST /api/bikes/:id/chains — ajoute une chaîne au vélo.
-  def add_chain
+  # POST /api/bikes/:id/parts — ajoute une pièce au vélo pour un type donné
+  # (builtin ou custom de l'utilisateur).
+  def add_part
     bike = current_user.bikes.find_by(id: params[:id])
     return head :not_found unless bike
 
-    bike.chains.create!(name: "Chaîne #{bike.chains.count + 1}")
+    part_type = PartType.available_for(current_user).find_by(id: params[:part_type_id])
+    return head :not_found unless part_type
+
+    count = bike.parts.where(part_type: part_type).count
+    default_name = part_type.builtin? ? "#{t("parts.types.#{part_type.key}")} #{count + 1}" : "#{part_type.name} #{count + 1}"
+    name = params[:name].presence || default_name
+    bike.parts.create!(
+      name: name.to_s.strip.first(Part::MAX_NAME_LEN),
+      part_type: part_type,
+      wear_threshold_km: part_type.default_wear_threshold_km
+    )
     render json: { bike: serialize_bike(bike) }, status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
   end
 
-  # POST /api/bikes/:id/mount — déclare quelle chaîne est désormais montée
+  # POST /api/bikes/:id/mount — déclare quelle pièce est désormais montée
   # (date par défaut = maintenant, ajustable au passé).
   def mount
     bike = current_user.bikes.find_by(id: params[:id])
     return head :not_found unless bike
 
-    chain = bike.chains.find_by(id: params[:chain_id])
-    return head :not_found unless chain
+    part = bike.parts.find_by(id: params[:part_id])
+    return head :not_found unless part
 
     mounted_at = parse_time(params[:mounted_at]) || Time.current
     return render json: { error: "future_date" }, status: :unprocessable_entity if mounted_at > 1.day.from_now
 
-    bike.chain_mounts.create!(chain: chain, mounted_at: mounted_at)
+    bike.part_mounts.create!(part: part, mounted_at: mounted_at)
     render json: { bike: serialize_bike(bike) }, status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity

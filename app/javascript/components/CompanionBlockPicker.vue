@@ -774,7 +774,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <div class="cbpk-backdrop" @click.self="emit('close')">
+  <div class="cbpk-backdrop">
     <div class="cbpk-dialog shadow-lg">
       <div class="cbpk-header">
         <span class="cbpk-title">{{ t('companion.settings.pick_block') }}</span>

@@ -687,24 +687,44 @@ const metricTrendSegments = computed(() => {
 // ── Graphique de fond ────────────────────────────────────────────────────────
 //
 // Fac-similé statique (une vague plausible, pas de vraie sortie dans
-// l'éditeur) — même dessin que la tendance ci-dessus (aire + liseré noir/trait
-// coloré), mais une seule couleur d'aplat, pas une bande par zone : voir
-// `MetricView._paint` côté appli, `background_chart_window` n'existe que sur
-// un bloc `metric`. Quand actif, le fond *plat* de la case (`.cbp-metric`)
-// retombe sur `overrideBg`/le gris par défaut — jamais la couleur de zone/
-// tranche, qui passe alors dans l'aire du graphique à la place.
+// l'éditeur) — voir `MetricView._paint`/`_valueColorOf` côté appli,
+// `background_chart_window` n'existe que sur un bloc `metric`. Le fond *plat*
+// de la case (`.cbp-metric`) garde `metricBackground` (zone/tranches/couleur
+// d'éditeur) que le graphique soit actif ou non — c'est l'aire sous la courbe
+// qui se distingue de lui, pas l'inverse : un trapèze par segment, coloré sur
+// sa propre valeur, plutôt qu'un seul aplat qui se fondrait dans un fond déjà
+// de la même teinte.
 const BACKGROUND_CHART_SAMPLE = [40, 58, 50, 72, 64, 82, 60, 74, 66, 78]
+const HR_ZONE_METRICS = new Set(['heart_rate', 'hr_zone'])
+const POWER_ZONE_METRICS = new Set(['power', 'power_zone'])
+const GRADE_METRICS = new Set(['grade', 'grade_avg', 'grade_max', 'grade_min'])
+
 const hasBackgroundChart = computed(() => (
   props.block.kind === 'metric' && props.block.background_chart_window != null
 ))
+
+// Les points bruts du graphique : mêmes points, déjà tagués par zone, que
+// « Tendance cardio/puissance » ci-dessus pour le cardio/la puissance — pas de
+// vrai profil dans l'éditeur pour recalculer une zone depuis un seuil, la
+// même table pré-taguée sert donc les deux endroits. Un aplat plausible sinon
+// (`BACKGROUND_CHART_SAMPLE`), utilisable aussi bien par une tranche
+// personnalisée que par la pente (`colorForGrade`), toutes deux réelles sur
+// une simple valeur.
+const backgroundChartRawPoints = computed<{ value: number; zone?: string }[]>(() => {
+  const metric = props.block.metric
+  if (metric && HR_ZONE_METRICS.has(metric)) return METRIC_TREND_HR_SAMPLE
+  if (metric && POWER_ZONE_METRICS.has(metric)) return METRIC_TREND_POWER_SAMPLE
+  return BACKGROUND_CHART_SAMPLE.map((value) => ({ value }))
+})
 const backgroundChartPoints = computed(() => {
-  const values = BACKGROUND_CHART_SAMPLE
+  const pts = backgroundChartRawPoints.value
+  const values = pts.map((p) => p.value)
   const min = Math.min(...values)
   const max = Math.max(...values)
   const span = max - min || 1
-  return values.map((v, i) => ({
-    x: (i / (values.length - 1)) * 100,
-    y: 96 - ((v - min) / span) * 88,
+  return pts.map((p, i) => ({
+    x: (i / (pts.length - 1)) * 100,
+    y: 96 - ((p.value - min) / span) * 88,
   }))
 })
 const backgroundChartPolyline = computed(() => backgroundChartPoints.value.map((p) => `${p.x},${p.y}`).join(' '))
@@ -714,15 +734,45 @@ const backgroundChartAreaPath = computed(() => {
   const line = pts.map((p) => `${p.x},${p.y}`).join(' L')
   return `M${line} L${pts[pts.length - 1].x},100 L${pts[0].x},100 Z`
 })
-// La couleur de l'aire suit la définition de fond de la mesure (zone,
-// tranches) si elle est paramétrée pour cette mesure, sinon la couleur
-// choisie pour ce graphique — même ordre que `metricBackground` plus haut,
-// moins `overrideBg` qui va désormais au fond plat de la case.
-const backgroundChartAreaColor = computed(() => (
-  thresholdBandColor.value || sample.value.background
-    || (metricZone.value ? ZONE_COLORS[metricZone.value] : null)
-    || props.block.background_chart_color || RANGE_GAUGE_COLOR
-))
+
+// La couleur d'un segment selon sa propre valeur — tranches de l'éditeur,
+// puis zone (déjà taguée, cardio/puissance), puis couleur directe de la
+// mesure (la pente) : même ordre que `MetricView._valueColorOf` côté appli.
+// `null` sans aucune des trois — l'aire retombe alors sur un seul aplat
+// (`backgroundChartFlatColor`), une mesure sans zones/tranches/couleur
+// directe n'a rien d'autre à montrer.
+const backgroundChartSegmentColorOf = computed<
+  ((a: { value: number; zone?: string }, b: { value: number; zone?: string }) => string) | null
+>(() => {
+  if (hasThresholdBands.value) {
+    const thresholds = gaugeThresholds.value
+    const colors = gaugeThresholdColors.value
+    return (a, b) => colors[gaugeThresholdBandIndex((a.value + b.value) / 2, thresholds)] || RANGE_GAUGE_COLOR
+  }
+  const metric = props.block.metric
+  if (metric && (HR_ZONE_METRICS.has(metric) || POWER_ZONE_METRICS.has(metric))) {
+    return (a) => (a.zone && ZONE_COLORS[a.zone]) || RANGE_GAUGE_COLOR
+  }
+  if (metric && GRADE_METRICS.has(metric)) {
+    return (a, b) => colorForGrade((a.value + b.value) / 2)
+  }
+  return null
+})
+const backgroundChartSegments = computed(() => {
+  const colorOf = backgroundChartSegmentColorOf.value
+  if (!colorOf) return []
+  const pts = backgroundChartPoints.value
+  const raw = backgroundChartRawPoints.value
+  const segments: { d: string; color: string }[] = []
+  for (let i = 0; i < pts.length - 1; i++) {
+    segments.push({
+      d: `M${pts[i].x},${pts[i].y} L${pts[i + 1].x},${pts[i + 1].y} L${pts[i + 1].x},100 L${pts[i].x},100 Z`,
+      color: colorOf(raw[i], raw[i + 1]),
+    })
+  }
+  return segments
+})
+const backgroundChartFlatColor = computed(() => props.block.background_chart_color || RANGE_GAUGE_COLOR)
 const backgroundChartLineColor = computed(() => props.block.background_chart_line_color || '#FFFFFF')
 </script>
 
@@ -732,7 +782,7 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
     <div
       v-if="block.kind === 'metric'"
       class="cbp-card cbp-metric"
-      :style="{ background: (hasBackgroundChart ? overrideBg : metricBackground) || undefined, color: metricInk }"
+      :style="{ background: metricBackground || undefined, color: metricInk }"
     >
       <svg
         v-if="hasBackgroundChart"
@@ -741,7 +791,10 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
         preserveAspectRatio="none"
         aria-hidden="true"
       >
-        <path :d="backgroundChartAreaPath" :fill="backgroundChartAreaColor" />
+        <template v-if="backgroundChartSegments.length">
+          <path v-for="(segment, i) in backgroundChartSegments" :key="i" :d="segment.d" :fill="segment.color" />
+        </template>
+        <path v-else :d="backgroundChartAreaPath" :fill="backgroundChartFlatColor" />
         <polyline
           :points="backgroundChartPolyline"
           fill="none"

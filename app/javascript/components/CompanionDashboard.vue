@@ -2099,6 +2099,17 @@ async function save() {
               </div>
             </div>
           </div>
+          <!-- Même couleur, mais sur fond noir : une pastille jugée sur le
+               fond blanc de la carte paraît systématiquement plus terne que
+               le même hex sur l'écran de l'appli (contraste simultané) — ce
+               fac-similé la montre dans le bon contexte. -->
+          <div v-if="bandSlotKind(set.left) || bandSlotKind(set.right)" class="cdb-band-preview"
+               aria-hidden="true">
+            <span v-if="bandSlotKind(set.left)" class="cdb-band-preview-seg"
+                  :style="{ background: bandSlotColor(set.left) || '#1f2226' }"></span>
+            <span v-if="bandSlotKind(set.right)" class="cdb-band-preview-seg"
+                  :style="{ background: bandSlotColor(set.right) || '#1f2226' }"></span>
+          </div>
           <button class="btn btn-sm btn-link p-1" type="button"
                   :disabled="index === 0" @click="moveNotchSet(index, -1)">
             <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
@@ -2192,6 +2203,14 @@ async function save() {
                        maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
               </div>
             </div>
+          </div>
+          <!-- Même couleur, mais sur fond noir : voir le commentaire jumeau
+               sur la bande de l'encoche, ci-dessus. -->
+          <div v-if="band.metrics.some((m) => bandSlotKind(m))" class="cdb-band-preview" aria-hidden="true">
+            <template v-for="slot in catalog.max_band_metrics" :key="slot">
+              <span v-if="bandSlotKind(band.metrics[slot - 1])" class="cdb-band-preview-seg"
+                    :style="{ background: bandSlotColor(band.metrics[slot - 1]) || '#1f2226' }"></span>
+            </template>
           </div>
           <button class="btn btn-sm btn-link p-1" type="button"
                   :disabled="index === 0" @click="moveBand(index, -1)">
@@ -2685,6 +2704,24 @@ async function save() {
 }
 .cdb-sec-body {
   padding: 0.25rem 0 0.5rem;
+}
+
+/* Fac-similé de la bande/encoche sur fond noir, accolé au réglage de chaque
+   jeu : les pastilles de `CompanionColorPicker` restent sur le blanc de la
+   carte (utiles pour re-choisir une couleur), ce fond-ci sert uniquement à
+   juger le rendu tel qu'il apparaîtra en roulant. */
+.cdb-band-preview {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.3rem;
+  padding: 0.35rem;
+  border-radius: 0.5rem;
+  background: #000;
+}
+.cdb-band-preview-seg {
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 0.35rem;
 }
 
 /* Aux proportions de l'écran du téléphone, et non à la largeur de la page :

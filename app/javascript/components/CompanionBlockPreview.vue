@@ -268,12 +268,22 @@ const icon = computed(() => metricIcon(props.block))
 // que côté appli (`MetricView._defaultSecondaryCaption`) : déduite du
 // suffixe de la clé, jamais du nom complet de la mesure, trop long pour un
 // coin de carte.
-function secondaryCaption(slot: { metric: string; label?: string }): string | null {
+function secondaryCaptionBase(slot: { metric: string; label?: string }): string | null {
   if (slot.label) return slot.label
   if (slot.metric.endsWith('_avg')) return 'MOY'
   if (slot.metric.endsWith('_max')) return 'MAX'
   if (slot.metric.endsWith('_min')) return 'MIN'
   return null
+}
+
+function secondaryCaption(slot: { metric: string; label?: string; compute_window_s?: number }): string | null {
+  const base = secondaryCaptionBase(slot)
+  if (!base) return null
+  // Le fac-similé reste fidèle à ce que réglera vraiment la case (voir
+  // `MetricBlock.computeWindowS` côté appli) : une moyenne fenêtrée doit se
+  // distinguer d'une moyenne sur toute la sortie, sinon l'aperçu promettrait
+  // un chiffre dont on ne verrait pas qu'il n'est pas celui de toute la sortie.
+  return slot.compute_window_s ? `${base} ${slot.compute_window_s}s` : base
 }
 
 // Le contenu fixe d'un bloc `clock` — pas de `MetricId` pour porter un nom ou

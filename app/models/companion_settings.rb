@@ -483,6 +483,31 @@ module CompanionSettings
   # plage dynamique).
   ZONE_METRICS = %w[heart_rate hr_zone power power_zone].freeze
 
+  # Les mesures éligibles à `compute_window_s` (bloc `metric` ou annotation de
+  # coin — voir `sanitize_block`/`sanitize_secondary_slots`) : le calcul porte
+  # alors sur les N dernières secondes plutôt que sur toute la sortie. Même
+  # liste que `WINDOWABLE_METRICS` côté site (`companionSettings.ts`).
+  #
+  # Tous les `_avg`/`_max` du catalogue sauf `power_np`, qui a déjà sa propre
+  # fenêtre fixe (30 s, la définition même de la puissance normalisée — un
+  # réglage ici n'aurait pas de sens), et les `_min`, pour lesquels ce réglage
+  # n'a pas encore été demandé.
+  #
+  # `altitude_avg`/`altitude_max` existent côté appli (`MetricId`) mais pas
+  # ici ni dans `METRICS` : un bloc qui les nommerait est déjà rejeté avant
+  # d'atteindre ce réglage. Absence délibérée tant que ce trou-là n'est pas
+  # comblé séparément — les y ajouter maintenant ne ferait que composer une
+  # entrée morte.
+  WINDOWABLE_METRICS = %w[
+    speed_avg speed_max hr_avg hr_max power_avg power_max
+    cadence_avg cadence_max grade_avg grade_max climb_rate_avg climb_rate_max
+  ].freeze
+
+  # Borne de `compute_window_s`, en secondes — même plafond que
+  # `RideMetricTrack.recentWindowS` côté appli (1 h) : au-delà, l'appli n'a de
+  # toute façon plus l'historique brut pour recalculer la fenêtre.
+  MAX_COMPUTE_WINDOW_S = 3600
+
   # Les deux natures de jauge pour une mesure sans zones — voir
   # `sanitize_metric_layout`. `range` en tête : c'est le repli d'une mesure
   # éligible aux deux (cadence, vitesse, pente, distance) sans préférence
@@ -1395,6 +1420,16 @@ module CompanionSettings
         line_color = sanitize_hex_color(raw["background_chart_line_color"])
         block["background_chart_line_color"] = line_color if line_color
       end
+
+      # La fenêtre du calcul (et non de son affichage, ci-dessus) d'une
+      # mesure moyenne/maximum — voir `WINDOWABLE_METRICS`. `0` vaut « toute
+      # la sortie », même contrat que `background_chart_window` ; sans effet
+      # côté appli sur toute autre mesure, donc pas la peine de le garder ici
+      # non plus.
+      compute_window = raw["compute_window_s"]
+      if WINDOWABLE_METRICS.include?(metric) && compute_window.is_a?(Numeric) && compute_window >= 0
+        block["compute_window_s"] = compute_window.to_i.clamp(0, MAX_COMPUTE_WINDOW_S)
+      end
     when "clock"
       # Réglable comme un bloc `metric` (icône, disposition — même éditeur
       # côté site, `CompanionBlockPicker.vue`), mais jamais d'unité, de jauge
@@ -1528,7 +1563,15 @@ module CompanionSettings
       claimed << pos
       label = entry["label"].to_s.strip[0, MAX_SECONDARY_LABEL_LENGTH]
       size = entry["size"] if SECONDARY_SIZES.include?(entry["size"])
-      { "metric" => entry["metric"], "position" => pos, "label" => label.presence, "size" => size }.compact
+      compute_window = entry["compute_window_s"]
+      window_s =
+        if WINDOWABLE_METRICS.include?(entry["metric"]) && compute_window.is_a?(Numeric) && compute_window >= 0
+          compute_window.to_i.clamp(0, MAX_COMPUTE_WINDOW_S)
+        end
+      {
+        "metric" => entry["metric"], "position" => pos, "label" => label.presence, "size" => size,
+        "compute_window_s" => window_s,
+      }.compact
     end
   end
 

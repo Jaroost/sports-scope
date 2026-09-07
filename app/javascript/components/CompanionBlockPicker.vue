@@ -30,9 +30,9 @@ import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 import {
   blockChoices, blockFor, defaultGaugeThresholds, gaugeThresholdBandIndex, gaugeThresholdColor, isChoiceOf,
-  isDurationMetric, isDynamicGaugeMetric, isRangeGaugeMetric,
+  isDurationMetric, isDynamicGaugeMetric, isRangeGaugeMetric, isWindowableMetric,
   DEFAULT_METRIC_LAYOUT, GAUGE_SEGMENTS_MAX, GAUGE_SEGMENTS_MIN, GAUGE_THRESHOLD_COUNT_RANGE,
-  LAYOUT_TOKEN_ORDER, MAX_LAYOUT_ROWS,
+  LAYOUT_TOKEN_ORDER, MAX_COMPUTE_WINDOW_S, MAX_LAYOUT_ROWS,
   FUELING_CARBS_RANGE, FUELING_DEFAULTS, FUELING_INTERVAL_RANGE,
   MAX_SECONDARY_METRICS, METRIC_RANGE_DEFAULTS, metricDropdownLabel, metricLayout, metricSample,
   NATURAL_LINE_SIZE, previewScale, RANGE_GAUGE_COLOR, RANGE_GAUGE_SEGMENTS,
@@ -279,6 +279,26 @@ function setSecondarySize(slot: SecondaryMetricSlot, size: SecondaryMetricSize) 
   layout.value = { ...layout.value, secondary: next }
 }
 
+// Sa fenêtre de calcul — `0` quand `compute_window_s` est absent (toute la
+// sortie, jamais écrit dans ce cas), même repli que `secondarySizeOf`. Ne se
+// propose que pour une mesure moyenne/maximum (`isWindowableMetric`).
+function secondaryWindowOf(slot: SecondaryMetricSlot): number {
+  return slot.compute_window_s || 0
+}
+
+function setSecondaryWindow(slot: SecondaryMetricSlot, windowS: number) {
+  const next = (currentLayout.value.secondary || []).map((entry) => {
+    if (entry.position !== slot.position) return entry
+    const clamped = Math.max(0, Math.min(windowS || 0, MAX_COMPUTE_WINDOW_S))
+    if (clamped <= 0) {
+      const { compute_window_s: _drop, ...rest } = entry
+      return rest
+    }
+    return { ...entry, compute_window_s: clamped }
+  })
+  layout.value = { ...layout.value, secondary: next }
+}
+
 // Une rangée de plus que la plus haute utilisée, dans la limite du plafond —
 // toujours une case vide où poser le prochain élément, sans bouton
 // « + » séparé : elle apparaît d'elle-même, et disparaît de la même façon
@@ -456,6 +476,11 @@ const backgroundChartEnabled = ref<boolean>(props.block?.background_chart_window
 const backgroundChartWindowChoice = ref<number>(props.block?.background_chart_window || 0)
 const backgroundChartColorChoice = ref<string | null>(props.block?.background_chart_color || null)
 const backgroundChartLineColorChoice = ref<string | null>(props.block?.background_chart_line_color || '#FFFFFF')
+
+// La fenêtre du calcul (moyenne/maximum), indépendante de celle du graphique
+// de fond ci-dessus — `0` (le repli) vaut « toute la sortie », jamais écrit
+// dans le bloc émis (voir `blockFor`).
+const computeWindowS = ref<number>(props.block?.compute_window_s || 0)
 
 // Les jalons d'une jauge à tranches personnalisées (`gauge_color_mode ===
 // 'thresholds'`) : ceux du composant en cours d'édition s'ils sont de la
@@ -674,6 +699,7 @@ const groups = computed(() => {
             backgroundChartWindow: backgroundChartEnabled.value ? backgroundChartWindowChoice.value : undefined,
             backgroundChartColor: backgroundChartColorChoice.value ?? undefined,
             backgroundChartLineColor: backgroundChartLineColorChoice.value ?? undefined,
+            computeWindowS: computeWindowS.value || undefined,
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             windowS: windowS.value || undefined,
             carbsPerHour: carbsPerHour.value, intervalMin: intervalMin.value,
@@ -952,6 +978,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 <option value="hm">{{ t('companion.settings.duration_formats.hm') }}</option>
                 <option value="hms">{{ t('companion.settings.duration_formats.hms') }}</option>
               </select>
+            </label>
+
+            <label v-if="isWindowableMetric(metric)" class="cbpk-field small">
+              {{ t('companion.settings.compute_window_s') }}
+              <input
+                v-model.number="computeWindowS"
+                type="number"
+                min="0"
+                :max="MAX_COMPUTE_WINDOW_S"
+                :placeholder="t('companion.settings.compute_window_s_placeholder')"
+                class="form-control form-control-sm"
+              >
+              <span class="small text-body-secondary">{{ t('companion.settings.compute_window_s_hint') }}</span>
             </label>
           </div>
 
@@ -1366,6 +1405,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                       {{ t(`companion.settings.secondary_sizes.${s}_short`) }}
                     </button>
                   </div>
+                  <input
+                    v-if="isWindowableMetric(slot.metric)"
+                    :value="secondaryWindowOf(slot)"
+                    type="number"
+                    min="0"
+                    :max="MAX_COMPUTE_WINDOW_S"
+                    :title="t('companion.settings.compute_window_s')"
+                    :placeholder="t('companion.settings.compute_window_s_placeholder')"
+                    class="form-control form-control-sm cbpk-secondary-window"
+                    @change="setSecondaryWindow(slot, Number(($event.target as HTMLInputElement).value))"
+                  >
                   <button
                     type="button"
                     class="cbpk-secondary-remove"
@@ -1838,6 +1888,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.cbpk-secondary-window {
+  flex: none;
+  width: 4.5rem;
 }
 .cbpk-secondary-remove {
   flex: none;

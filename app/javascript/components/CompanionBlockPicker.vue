@@ -1250,6 +1250,85 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </button>
             </div>
 
+            <!-- Les annotations de coin : une mesure dérivée (min/moyenne/max)
+                 plus petite que le chiffre principal, avec son propre repère.
+                 « Ajouter » met la mesure choisie en main comme un jeton de
+                 palette — un tap sur une case libre la pose ensuite. Pas pour
+                 l'horloge : `ClockCard` ne les dessine pas, même famille que
+                 l'étiquette personnalisée ci-dessus. Avant la couleur/le
+                 graphique de fond ci-dessous : composer les coins de la case
+                 avant d'en régler l'habillage. -->
+            <div v-if="!isClockMetric" class="cbpk-secondary">
+              <p class="cbpk-secondary-title small text-body-secondary mb-1">
+                {{ t('companion.settings.secondary_values') }}
+              </p>
+
+              <div v-if="currentLayout.secondary?.length" class="cbpk-secondary-list mb-2">
+                <div v-for="slot in currentLayout.secondary" :key="slot.position" class="cbpk-secondary-item">
+                  <span class="cbpk-chip cbpk-chip--placed">{{ slot.label || metricLabel(slot.metric) }}</span>
+                  <div class="cbpk-row-heights" role="group" :aria-label="t('companion.settings.secondary_size')">
+                    <button
+                      v-for="s in (['small', 'normal', 'large'] as const)"
+                      :key="s"
+                      type="button"
+                      class="cbpk-row-height-btn"
+                      :class="{ 'cbpk-row-height-btn--selected': secondarySizeOf(slot) === s }"
+                      :title="t(`companion.settings.secondary_sizes.${s}`)"
+                      @click="setSecondarySize(slot, s)"
+                    >
+                      {{ t(`companion.settings.secondary_sizes.${s}_short`) }}
+                    </button>
+                  </div>
+                  <input
+                    v-if="isWindowableMetric(slot.metric)"
+                    :value="secondaryWindowOf(slot)"
+                    type="number"
+                    min="0"
+                    :max="MAX_COMPUTE_WINDOW_S"
+                    :title="t('companion.settings.compute_window_s')"
+                    :placeholder="t('companion.settings.compute_window_s_placeholder')"
+                    class="form-control form-control-sm cbpk-secondary-window"
+                    @change="setSecondaryWindow(slot, Number(($event.target as HTMLInputElement).value))"
+                  >
+                  <button
+                    type="button"
+                    class="cbpk-secondary-remove"
+                    :aria-label="t('companion.settings.secondary_remove')"
+                    @click="removeSecondarySlot(slot)"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div class="cbpk-secondary-form">
+                <select v-model="newSecondaryMetric" class="form-select form-select-sm">
+                  <option v-for="m in sortedMetrics" :key="m" :value="m">
+                    {{ metricLabel(m) }}
+                  </option>
+                </select>
+                <input
+                  v-model="newSecondaryLabel"
+                  type="text"
+                  class="form-control form-control-sm"
+                  :placeholder="t('companion.settings.secondary_label_placeholder')"
+                  maxlength="6"
+                >
+                <button
+                  type="button"
+                  class="cbpk-chip"
+                  :class="{ 'cbpk-chip--selected': !!pendingSecondary }"
+                  :disabled="(currentLayout.secondary?.length || 0) >= MAX_SECONDARY_METRICS"
+                  @click="addPendingSecondary"
+                >
+                  {{ t('companion.settings.secondary_add') }}
+                </button>
+              </div>
+              <p v-if="pendingSecondary" class="cbpk-secondary-hint small text-body-secondary">
+                {{ t('companion.settings.secondary_add_hint') }}
+              </p>
+            </div>
+
             <!-- Le fond par tranches : indépendant du jeton « Jauge », il tinte
                  la carte elle-même (voir le commentaire de `thresholdsEnabled`)
                  — proposé dès que la mesure s'y prête, jauge posée ou non. -->
@@ -1376,83 +1455,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                   />
                 </label>
               </template>
-            </div>
-
-            <!-- Les annotations de coin : une mesure dérivée (min/moyenne/max)
-                 plus petite que le chiffre principal, avec son propre repère.
-                 « Ajouter » met la mesure choisie en main comme un jeton de
-                 palette — un tap sur une case libre la pose ensuite. Pas pour
-                 l'horloge : `ClockCard` ne les dessine pas, même famille que
-                 l'étiquette personnalisée ci-dessus. -->
-            <div v-if="!isClockMetric" class="cbpk-secondary">
-              <p class="cbpk-secondary-title small text-body-secondary mb-1">
-                {{ t('companion.settings.secondary_values') }}
-              </p>
-
-              <div v-if="currentLayout.secondary?.length" class="cbpk-secondary-list mb-2">
-                <div v-for="slot in currentLayout.secondary" :key="slot.position" class="cbpk-secondary-item">
-                  <span class="cbpk-chip cbpk-chip--placed">{{ slot.label || metricLabel(slot.metric) }}</span>
-                  <div class="cbpk-row-heights" role="group" :aria-label="t('companion.settings.secondary_size')">
-                    <button
-                      v-for="s in (['small', 'normal', 'large'] as const)"
-                      :key="s"
-                      type="button"
-                      class="cbpk-row-height-btn"
-                      :class="{ 'cbpk-row-height-btn--selected': secondarySizeOf(slot) === s }"
-                      :title="t(`companion.settings.secondary_sizes.${s}`)"
-                      @click="setSecondarySize(slot, s)"
-                    >
-                      {{ t(`companion.settings.secondary_sizes.${s}_short`) }}
-                    </button>
-                  </div>
-                  <input
-                    v-if="isWindowableMetric(slot.metric)"
-                    :value="secondaryWindowOf(slot)"
-                    type="number"
-                    min="0"
-                    :max="MAX_COMPUTE_WINDOW_S"
-                    :title="t('companion.settings.compute_window_s')"
-                    :placeholder="t('companion.settings.compute_window_s_placeholder')"
-                    class="form-control form-control-sm cbpk-secondary-window"
-                    @change="setSecondaryWindow(slot, Number(($event.target as HTMLInputElement).value))"
-                  >
-                  <button
-                    type="button"
-                    class="cbpk-secondary-remove"
-                    :aria-label="t('companion.settings.secondary_remove')"
-                    @click="removeSecondarySlot(slot)"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-
-              <div class="cbpk-secondary-form">
-                <select v-model="newSecondaryMetric" class="form-select form-select-sm">
-                  <option v-for="m in sortedMetrics" :key="m" :value="m">
-                    {{ metricLabel(m) }}
-                  </option>
-                </select>
-                <input
-                  v-model="newSecondaryLabel"
-                  type="text"
-                  class="form-control form-control-sm"
-                  :placeholder="t('companion.settings.secondary_label_placeholder')"
-                  maxlength="6"
-                >
-                <button
-                  type="button"
-                  class="cbpk-chip"
-                  :class="{ 'cbpk-chip--selected': !!pendingSecondary }"
-                  :disabled="(currentLayout.secondary?.length || 0) >= MAX_SECONDARY_METRICS"
-                  @click="addPendingSecondary"
-                >
-                  {{ t('companion.settings.secondary_add') }}
-                </button>
-              </div>
-              <p v-if="pendingSecondary" class="cbpk-secondary-hint small text-body-secondary">
-                {{ t('companion.settings.secondary_add_hint') }}
-              </p>
             </div>
 
             <button type="button" class="btn btn-sm btn-outline-secondary" @click="saveLayoutPreset">

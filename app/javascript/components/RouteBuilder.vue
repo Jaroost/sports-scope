@@ -2604,7 +2604,6 @@ onBeforeUnmount(() => {
             ref="mapRef"
             :state="state"
             @waypoints-changed="recomputeRoute()"
-            @uturn-ok-changed="refreshTurnWarnings"
             @select-place="onSelectPlace"
             @hover-place="onHoverPlace"
             @retry-places="fetchImportantPlaces"

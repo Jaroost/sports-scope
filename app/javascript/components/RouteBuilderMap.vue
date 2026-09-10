@@ -47,7 +47,6 @@ import { useDismissOnOutside } from '../composables/useDismissOnOutside'
 const props = defineProps<{ state: RouteBuilderState }>()
 const emit = defineEmits<{
   'waypoints-changed': []
-  'uturn-ok-changed': []
   'select-place': [place: Place]
   'hover-place': [place: Place | null]
   'retry-places': []
@@ -1703,21 +1702,6 @@ function toggleWaypointFree(idx: number) {
   emit('waypoints-changed')
 }
 
-// Marque (ou non) le demi-tour provoqué par ce point comme délibéré. Purement informatif :
-// le drapeau ne change pas le tracé, donc on n'émet PAS `waypoints-changed` — un recalcul
-// BRouter serait inutile et ferait perdre l'alerte en cours. On demande juste à l'éditeur
-// de relister ses anomalies.
-function toggleWaypointUturnOk(idx: number) {
-  const wps = routeStore.waypoints.value
-  if (idx < 0 || idx >= wps.length) return
-  const next = wps.slice()
-  next[idx] = { ...next[idx], uturn_ok: !next[idx].uturn_ok }
-  routeStore.waypoints.value = next
-  deselectAll()
-  refreshWaypointMarkers()
-  emit('uturn-ok-changed')
-}
-
 // Inverse le sens du parcours. Le drapeau `free` d'un point marque son tronçon
 // ENTRANT comme droit (waypoint[i] → waypoint[i+1] droit ssi waypoint[i+1].free) :
 // après inversion, on réaffecte les drapeaux pour que chaque tronçon garde sa nature
@@ -2193,6 +2177,22 @@ async function copyCoords(btn: HTMLElement, text: string) {
   }
 }
 
+// Sections repliables de la tooltip d'un point (accordéon). L'état ouvert/fermé est
+// mémorisé le temps de la session : les marqueurs sont reconstruits à chaque changement
+// de tracé, sans quoi tout se replierait à la moindre action.
+const wpOpenSections = new Set<string>(['common'])
+
+function wpTooltipSection(key: string, label: string, bodyHtml: string, open: boolean): string {
+  if (!bodyHtml.trim()) return ''
+  return `<details class="wp-tooltip-group" data-section="${key}"${open ? ' open' : ''}>
+    <summary class="wp-tooltip-group-summary">
+      <i class="fa-solid fa-chevron-right wp-tooltip-group-chevron" aria-hidden="true"></i>
+      <span>${label}</span>
+    </summary>
+    <div class="wp-tooltip-group-body">${bodyHtml}</div>
+  </details>`
+}
+
 function refreshWaypointMarkers() {
   if (!_maplibregl || !mapInstance) return
   waypointMarkers.forEach((m) => m.remove()); waypointMarkers.length = 0
@@ -2216,21 +2216,6 @@ function refreshWaypointMarkers() {
     el.className = w.free ? 'wp-marker wp-marker--free' : 'wp-marker'
     const isLast = idx === routeStore.waypoints.value.length - 1
     const isFirst = idx === 0
-    const endpointHtml = ro ? '' : `
-      ${isFirst ? '' : `<button type="button" class="wp-tooltip-action wp-tooltip-action--set-start">
-        <i class="fa-solid fa-flag-checkered fa-flip-horizontal" aria-hidden="true"></i>
-        <span>${t('routes.set_as_start')}</span>
-      </button>`}
-      ${isLast ? '' : `<button type="button" class="wp-tooltip-action wp-tooltip-action--set-finish">
-        <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
-        <span>${t('routes.set_as_finish')}</span>
-      </button>`}`
-    const returnHtml = !ro && !isLast
-      ? `<button type="button" class="wp-tooltip-action wp-tooltip-action--return">
-           <i class="fa-solid fa-right-left" aria-hidden="true"></i>
-           <span>${t('routes.return_via_same_route')}</span>
-         </button>`
-      : ''
     const komootNeighbors = [
       idx > 0 ? routeStore.waypoints.value[idx - 1] : null,
       w,
@@ -2240,53 +2225,77 @@ function refreshWaypointMarkers() {
     const komootUrl = `https://www.komoot.com/plan/@${w.lat},${w.lng},13z?sport=touringbicycle&${komootPoints}`
     // Caméra Street View orientée dans le sens de parcours du tracé à ce waypoint.
     const svUrl = streetViewUrl(w.lat, w.lng, bearingAlongRoute(routeStore.geometry.value, w.lng, w.lat))
+
+    const setStartBtn = isFirst ? '' : `<button type="button" class="wp-tooltip-action wp-tooltip-action--set-start">
+      <i class="fa-solid fa-flag-checkered fa-flip-horizontal" aria-hidden="true"></i>
+      <span>${t('routes.set_as_start')}</span>
+    </button>`
+    const setFinishBtn = isLast ? '' : `<button type="button" class="wp-tooltip-action wp-tooltip-action--set-finish">
+      <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+      <span>${t('routes.set_as_finish')}</span>
+    </button>`
+    const reverseBtn = `<button type="button" class="wp-tooltip-action wp-tooltip-action--reverse">
+      <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+      <span>${t('routes.reverse_route')}</span>
+    </button>`
+    const returnBtn = isLast ? '' : `<button type="button" class="wp-tooltip-action wp-tooltip-action--return">
+      <i class="fa-solid fa-right-left" aria-hidden="true"></i>
+      <span>${t('routes.return_via_same_route')}</span>
+    </button>`
+    const freeBtn = `<button type="button" class="wp-tooltip-action wp-tooltip-action--free">
+      <i class="fa-solid fa-bezier-curve" aria-hidden="true"></i>
+      <span>${w.free ? t('routes.anchor_to_road') : t('routes.make_free')}</span>
+    </button>`
+    const deleteBtn = `<button type="button" class="wp-tooltip-action wp-tooltip-action--delete">
+      <i class="fa-solid fa-trash" aria-hidden="true"></i>
+      <span>${t('routes.remove_waypoint')}</span>
+    </button>`
+    const gmapsBtn = `<a class="wp-tooltip-action" href="${googleMapsUrl(w.lat, w.lng)}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-brands fa-google" aria-hidden="true"></i>
+      <span>Google Maps</span>
+    </a>`
+    const streetViewBtn = `<a class="wp-tooltip-action wp-tooltip-action--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-street-view" aria-hidden="true"></i>
+      <span>${t('routes.street_view')}</span>
+    </a>`
+    const komootBtn = `<a class="wp-tooltip-action wp-tooltip-action--komoot" href="${komootUrl}" target="_blank" rel="noopener noreferrer">
+      <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
+      <span>Komoot</span>
+    </a>`
+    const coordsRow = `<div class="wp-tooltip-coords-row">
+      <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${w.lat.toFixed(6)}" title="${t('routes.copy_latitude')}">
+        <i class="fa-regular fa-copy" aria-hidden="true"></i>
+        <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lat</span>${w.lat.toFixed(6)}</span>
+      </button>
+      <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${w.lng.toFixed(6)}" title="${t('routes.copy_longitude')}">
+        <i class="fa-regular fa-copy" aria-hidden="true"></i>
+        <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lng</span>${w.lng.toFixed(6)}</span>
+      </button>
+    </div>`
+
+    // Groupe « Courant » : les actions les plus fréquentes, ouvert par défaut. Le demi-tour
+    // assumé n'y est pas — il se gère dans l'alerte de virages suspects (cf. RouteBuilder.vue).
+    const commonBody = `
+      ${ro ? '' : returnBtn + freeBtn}
+      ${gmapsBtn}
+      ${streetViewBtn}`
+
+    // Groupe « Autres » : replié par défaut. « Supprimer » n'y est pas — il reste
+    // toujours visible sous les deux groupes.
+    const moreBody = `
+      ${ro ? '' : setStartBtn + setFinishBtn + reverseBtn}
+      ${komootBtn}
+      ${coordsRow}`
+
     el.innerHTML = `
       <div class="wp-tooltip">
         <div class="wp-tooltip-header">
           <span class="wp-tooltip-title">Point&nbsp;${ro ? (idx + 1) : `<input type="number" class="wp-tooltip-num-input" min="1" max="${routeStore.waypoints.value.length}" value="${idx + 1}" title="${t('routes.reorder_waypoint')}" />`}</span>
           <button type="button" class="wp-tooltip-close" aria-label="Fermer">×</button>
         </div>
-        <div class="wp-tooltip-coords-row">
-          <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${w.lat.toFixed(6)}" title="${t('routes.copy_latitude')}">
-            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-            <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lat</span>${w.lat.toFixed(6)}</span>
-          </button>
-          <button type="button" class="wp-tooltip-action wp-tooltip-action--copy" data-coord="${w.lng.toFixed(6)}" title="${t('routes.copy_longitude')}">
-            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-            <span class="wp-tooltip-coords"><span class="wp-tooltip-coord-label">Lng</span>${w.lng.toFixed(6)}</span>
-          </button>
-        </div>
-        <a class="wp-tooltip-action" href="${googleMapsUrl(w.lat, w.lng)}" target="_blank" rel="noopener noreferrer">
-          <i class="fa-brands fa-google" aria-hidden="true"></i>
-          <span>Google Maps</span>
-        </a>
-        <a class="wp-tooltip-action wp-tooltip-action--streetview" href="${svUrl}" target="_blank" rel="noopener noreferrer">
-          <i class="fa-solid fa-street-view" aria-hidden="true"></i>
-          <span>${t('routes.street_view')}</span>
-        </a>
-        <a class="wp-tooltip-action wp-tooltip-action--komoot" href="${komootUrl}" target="_blank" rel="noopener noreferrer">
-          <i class="fa-solid fa-person-biking" aria-hidden="true"></i>
-          <span>Komoot</span>
-        </a>
-        ${returnHtml}
-        ${endpointHtml}
-        ${ro ? '' : `
-        <button type="button" class="wp-tooltip-action wp-tooltip-action--reverse">
-          <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-          <span>${t('routes.reverse_route')}</span>
-        </button>
-        <button type="button" class="wp-tooltip-action wp-tooltip-action--free">
-          <i class="fa-solid fa-bezier-curve" aria-hidden="true"></i>
-          <span>${w.free ? t('routes.anchor_to_road') : t('routes.make_free')}</span>
-        </button>
-        <button type="button" class="wp-tooltip-action wp-tooltip-action--uturn-ok">
-          <i class="fa-solid fa-arrows-turn-to-dots" aria-hidden="true"></i>
-          <span>${w.uturn_ok ? t('routes.uturn_flag_again') : t('routes.uturn_is_expected')}</span>
-        </button>
-        <button type="button" class="wp-tooltip-action wp-tooltip-action--delete">
-          <i class="fa-solid fa-trash" aria-hidden="true"></i>
-          <span>${t('routes.remove_waypoint')}</span>
-        </button>`}
+        ${wpTooltipSection('common', t('routes.wp_group_common'), commonBody, wpOpenSections.has('common'))}
+        ${wpTooltipSection('more', t('routes.wp_group_more'), moreBody, wpOpenSections.has('more'))}
+        ${ro ? '' : deleteBtn}
         <div class="wp-tooltip-arrow"></div>
       </div>
       <span class="wp-marker-num"><span class="wp-marker-num-text">${idx + 1}</span></span>
@@ -2300,8 +2309,16 @@ function refreshWaypointMarkers() {
       activateWaypoint(idx)
     })
     el.querySelector('.wp-tooltip-close')!.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
+    el.querySelectorAll('.wp-tooltip-group').forEach((d) => {
+      d.addEventListener('toggle', () => {
+        const key = (d as HTMLElement).dataset.section
+        if (!key) return
+        if ((d as HTMLDetailsElement).open) wpOpenSections.add(key)
+        else wpOpenSections.delete(key)
+      })
+    })
     // Actions purement informatives : présentes aussi en lecture seule (vue partagée).
-    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--uturn-ok):not(.wp-tooltip-action--copy):not(.wp-tooltip-action--reverse):not(.wp-tooltip-action--set-start):not(.wp-tooltip-action--set-finish)').forEach((a) => {
+    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--copy):not(.wp-tooltip-action--reverse):not(.wp-tooltip-action--set-start):not(.wp-tooltip-action--set-finish)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     })
     el.querySelectorAll('.wp-tooltip-action--copy').forEach((btn) => {
@@ -2332,9 +2349,6 @@ function refreshWaypointMarkers() {
       numInput.addEventListener('change', commitNum)
       el.querySelector('.wp-tooltip-action--free')!.addEventListener('click', (ev: any) => {
         ev.stopPropagation(); ev.preventDefault(); toggleWaypointFree(idx)
-      })
-      el.querySelector('.wp-tooltip-action--uturn-ok')!.addEventListener('click', (ev: any) => {
-        ev.stopPropagation(); ev.preventDefault(); toggleWaypointUturnOk(idx)
       })
       el.querySelector('.wp-tooltip-action--reverse')!.addEventListener('click', (ev: any) => {
         ev.stopPropagation(); ev.preventDefault(); reverseWaypoints()

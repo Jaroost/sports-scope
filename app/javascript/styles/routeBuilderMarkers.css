@@ -276,6 +276,30 @@
 .wp-tooltip-action--delete { color: #dc2626; }
 .wp-tooltip-action--delete:hover { background: rgba(220,38,38,0.08); color: #dc2626; }
 .wp-tooltip-action--disabled { opacity: 0.38; pointer-events: none; cursor: default; }
+/* Sections repliables de la tooltip (accordéon) — <details>/<summary>. */
+.wp-tooltip-group { width: 100%; }
+.wp-tooltip-group + .wp-tooltip-group,
+.wp-tooltip-group + .wp-tooltip-action--delete { border-top: 1px solid rgba(0,0,0,0.06); margin-top: 2px; padding-top: 2px; }
+.wp-tooltip-group-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: 7px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #6b7280;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.wp-tooltip-group-summary::-webkit-details-marker { display: none; }
+.wp-tooltip-group-summary:hover { background: rgba(0,0,0,0.05); }
+.wp-tooltip-group-chevron { width: 10px; font-size: 0.6rem; text-align: center; transition: transform 0.12s; }
+.wp-tooltip-group[open] > .wp-tooltip-group-summary .wp-tooltip-group-chevron { transform: rotate(90deg); }
+.wp-tooltip-group-body { display: flex; flex-direction: column; gap: 2px; }
 .wp-tooltip-coords-row { display: flex; gap: 0.25rem; }
 .wp-tooltip-coords-row .wp-tooltip-action { width: auto; flex: 1 1 0; min-width: 0; gap: 0.4rem; padding-right: 0.45rem; }
 /* Popup de choix d'insertion (tracé qui repasse plusieurs fois au même endroit) : bouton

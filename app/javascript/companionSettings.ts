@@ -99,6 +99,12 @@ export interface Block {
   // Couleur du tracé de la courbe, indépendante de `background_chart_color`.
   // Absente : blanc, côté appli comme côté éditeur.
   background_chart_line_color?: string
+  // La fenêtre du **calcul** d'une mesure moyenne/maximum (`WINDOWABLE_METRICS`),
+  // en secondes — à ne pas confondre avec `background_chart_window`, qui ne
+  // fenêtre que l'affichage du mini-graphique de fond. Absent ou `0` : toute
+  // la sortie, comportement d'avant ce réglage ; `> 0` : les N dernières
+  // secondes — voir `CompanionSettings::WINDOWABLE_METRICS` côté Rails.
+  compute_window_s?: number
   // La fenêtre « roulante » d'un bloc `altitude_profile`, en km à venir depuis
   // la position courante — seulement quand un tracé est suivi (voir
   // `sanitize_block`). Absente : le profil entier du tracé, fait/restant,
@@ -183,6 +189,10 @@ export interface SecondaryMetricSlot {
   // jamais écrite pour rester silencieuse — même contrat que
   // `CompanionSettings::SECONDARY_SIZES` côté Rails.
   size?: 'normal' | 'large'
+  // Même réglage que `Block.compute_window_s`, propre à cette annotation :
+  // une case peut afficher une puissance moyenne sur toute la sortie flanquée
+  // d'un maximum sur les 30 dernières secondes, chacun sa fenêtre.
+  compute_window_s?: number
 }
 
 export type SecondaryMetricSize = 'small' | 'normal' | 'large'
@@ -452,15 +462,30 @@ export interface Page {
 // La case « marquer un tour » du bandeau ou de l'encoche — seule case à
 // porter un réglage libre (série + label) plutôt qu'un simple jeton de
 // catalogue, voir `CompanionSettings.sanitize_band_lap_slot` (Rails) et
-// `BandMarkLapSlot` (Dart, `ride_preset.dart`).
+// `BandMarkLapSlot` (Dart, `ride_preset.dart`). `color` s'y ajoute comme sur
+// n'importe quelle case : déjà un objet, elle la porte directement.
 export interface BandMarkLapSlot {
   kind: 'mark_lap'
   series: string
   label?: string
+  color?: string
 }
 
+// L'enveloppe d'un jeton simple (mesure, commande, radar, sonnette, tronçon
+// d'entraînement) avec une couleur de fond — une chaîne nue ne peut porter
+// aucune clé de plus. Voir `CompanionSettings.sanitize_band_colored_slot`
+// (Rails) et `BandSlot.parse` (Dart, `ride_preset.dart`).
+export interface BandColoredSlot {
+  slot: string
+  color: string
+}
+
+// Ce que porte une case de bandeau ou d'encoche : un jeton simple, l'objet
+// « marquer un tour », ou l'un des deux enveloppé d'une couleur de fond.
+export type BandSlotValue = string | BandMarkLapSlot | BandColoredSlot
+
 export interface Band {
-  metrics: (string | BandMarkLapSlot)[]
+  metrics: BandSlotValue[]
 }
 
 // Ce qu'un geste sur un canal du D-Fly déclenche — une chaîne du catalogue
@@ -492,8 +517,8 @@ export interface Buttons {
 // l'absence (ou une liste vide) ne retombe jamais sur un contenu par défaut —
 // voir `CompanionSettings.sanitize_notch_sets`.
 export interface Notch {
-  left?: string | BandMarkLapSlot
-  right?: string | BandMarkLapSlot
+  left?: BandSlotValue
+  right?: BandSlotValue
 }
 
 // Un rappel périodique — boire, manger, entamer une intervalle — voir
@@ -759,6 +784,7 @@ export function blockFor(
     gaugeThresholds?: number[]; gaugeThresholdColors?: string[]
     gaugeThickness?: GaugeThickness
     backgroundChartWindow?: number; backgroundChartColor?: string; backgroundChartLineColor?: string
+    computeWindowS?: number
     upcoming?: boolean
     color?: string | null; textColor?: string | null
   },
@@ -829,6 +855,11 @@ export function blockFor(
     block.background_chart_window = params.backgroundChartWindow
     if (params.backgroundChartColor) block.background_chart_color = params.backgroundChartColor
     if (params.backgroundChartLineColor) block.background_chart_line_color = params.backgroundChartLineColor
+  }
+  // La fenêtre du calcul lui-même — indépendante de celle du graphique de
+  // fond ci-dessus — seulement pour une mesure moyenne/maximum.
+  if (!isClock && choice.kind === 'metric' && isWindowableMetric(params.metric) && params.computeWindowS) {
+    block.compute_window_s = params.computeWindowS
   }
   if (
     choice.kind === 'zones' || choice.kind === 'lap_zones' ||
@@ -1345,6 +1376,30 @@ const DURATION_METRICS = new Set(['duration', 'moving_time', 'pause_time', 'rout
 export function isDurationMetric(metric: string | undefined): boolean {
   return !!metric && DURATION_METRICS.has(metric)
 }
+
+// ── Fenêtre de calcul (moyenne/maximum) ───────────────────────────────────────
+//
+// Tous les `_avg`/`_max` du catalogue, sauf `power_np` (déjà sa propre fenêtre
+// fixe de 30 s — la définition même de la puissance normalisée) et les `_min`
+// (pas encore demandé) — même liste que `CompanionSettings::WINDOWABLE_METRICS`
+// côté Rails.
+//
+// `altitude_avg`/`altitude_max` existent côté appli (`MetricId`) mais pas ici :
+// `METRICS` ne les connaît pas non plus, donc un bloc qui les nommerait est
+// déjà rejeté par le serveur avant ce réglage — les y ajouter composerait une
+// entrée morte tant que ce trou-là n'est pas comblé séparément.
+const WINDOWABLE_METRICS = new Set([
+  'speed_avg', 'speed_max', 'hr_avg', 'hr_max', 'power_avg', 'power_max',
+  'cadence_avg', 'cadence_max', 'grade_avg', 'grade_max', 'climb_rate_avg', 'climb_rate_max',
+])
+
+export function isWindowableMetric(metric: string | undefined): boolean {
+  return !!metric && WINDOWABLE_METRICS.has(metric)
+}
+
+// Même borne que `CompanionSettings::MAX_COMPUTE_WINDOW_S` côté Rails — au-delà,
+// l'appli n'a de toute façon plus l'historique brut pour recalculer la fenêtre.
+export const MAX_COMPUTE_WINDOW_S = 3600
 
 // ── Jauge à plage libre ──────────────────────────────────────────────────────
 //

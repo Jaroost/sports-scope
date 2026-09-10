@@ -31,8 +31,9 @@ def classify(tags):
     """Catégorie POI d'un élément OSM d'après ses tags, ou None s'il est ignoré.
 
     L'ordre des tests est significatif et reprend celui de l'ancien
-    GeocodesController#classify_poi. Points de vue, sommets et cols sont regroupés
-    sous "viewpoint" (une seule catégorie côté profil).
+    GeocodesController#classify_poi. Les cols (sellette OSM ou tag dédié) sont une
+    catégorie à part de "viewpoint" (points de vue et sommets) : c'est elle qui
+    alimente la détection de col en navigation libre.
     """
     amenity = tags.get("amenity")
 
@@ -49,11 +50,9 @@ def classify(tags):
         return "water"
     if amenity in ("cafe", "restaurant"):
         return "food"
-    if (
-        tags.get("tourism") == "viewpoint"
-        or tags.get("natural") in ("peak", "saddle")
-        or tags.get("mountain_pass") == "yes"
-    ):
+    if tags.get("natural") == "saddle" or tags.get("mountain_pass") == "yes":
+        return "col"
+    if tags.get("tourism") == "viewpoint" or tags.get("natural") == "peak":
         return "viewpoint"
     if amenity == "toilets":
         return "toilets"

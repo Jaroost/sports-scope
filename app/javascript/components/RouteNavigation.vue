@@ -543,6 +543,11 @@ const navError = ref<string | null>(null)
 // BRouter du détour en cours. Évite un double déclenchement et neutralise le bouton.
 const viaInserting = ref(false)
 const climbInfo = ref<ClimbInfo | null>(null)
+// Col deviné en navigation libre (pas de tracé) : cf. updateFreeClimbGuess, plus bas.
+// Hypothèse à faible confiance — pente soutenue + col OSM le plus proche dans l'axe
+// de progression — jamais calculée ni publiée sur itinéraire (climbInfo couvre déjà
+// ce cas avec des données exactes).
+const freeClimbGuess = ref<{ name: string; lat: number; lng: number; distanceM: number } | null>(null)
 // state : 'far' (lointain, bandeau discret) · 'near' (approche, violet/orange) ·
 // 'now' (virage atteint, maintenu en vert quelques secondes comme confirmation).
 const turnHint = ref<TurnHint | null>(null)
@@ -627,6 +632,23 @@ let displayWScale: number[] = []
 let alts: (number | null)[] = []
 let cumDistM: number[] = []
 let climbs: Climb[] = []
+// ─── Détection de col en navigation libre (updateFreeClimbGuess) ──────────────
+// Tampon glissant temporel (les fix GPS sont irréguliers, un compteur d'échantillons
+// serait donc un temps de réaction variable) : altitude + position des ~60 dernières
+// secondes, pour estimer une pente causale (arrière) faute de tracé à anticiper.
+const FREE_CLIMB_WINDOW_MS = 60_000
+let freeClimbSamples: { t: number; lat: number; lng: number; alt: number }[] = []
+// 'unknown' tant qu'on n'a pas assez de recul (ou pas d'altitude) ; 'flat' / 'climbing'
+// une fois l'hystérésis tranchée. Distinct de `flat` pour ne pas confondre « ça ne
+// monte pas » et « on ne sait pas encore ».
+let freeClimbState: 'unknown' | 'flat' | 'climbing' = 'unknown'
+// Horodatage depuis lequel la pente lissée est du côté courant du seuil d'hystérésis
+// (utilisé pour exiger quelques secondes de tenue avant de basculer d'état).
+let freeClimbSince = 0
+// Dernière estimation de pente exploitable (fenêtre assez longue) : sert la
+// dégradation propre en cas d'altitude absente ou de fenêtre trop courte.
+let freeClimbLastGradeAt = 0
+const FREE_CLIMB_GRACE_MS = 30_000
 // Noms donnés à la main aux cols de CE tracé (routes.climb_names), réappariés à
 // chaque recalcul par attachClimbNames — voir rebuildRouteState. Vide pour une
 // destination ad hoc ou un reroutage hors-trace : attachClimbNames n'y change alors
@@ -1542,6 +1564,13 @@ function unloadRoute() {
   cumDistM = []
   climbs = []
   routeClimbNames = []
+  // Repart de zéro sur la détection de col en navigation libre : les échantillons
+  // d'altitude du tracé qu'on quitte n'ont aucun rapport avec ce qui suit.
+  freeClimbSamples = []
+  freeClimbState = 'unknown'
+  freeClimbSince = 0
+  freeClimbLastGradeAt = 0
+  freeClimbGuess.value = null
   companionRouteClimbs(buildCompanionRouteClimbs([], [], []))
   companionRouteProfile(buildCompanionRouteProfile([], []))
   companionResupply(buildCompanionResupply([], [], [], 0))
@@ -2346,11 +2375,94 @@ function onPositionRoute(pos: GeolocationPosition, here: LngLat) {
   if (turnApproaching && !following.value && !cameraUnlocked.value) following.value = true
 }
 
+// Détecte, en navigation libre, une pente soutenue et devine le col OSM le plus
+// proche dans l'axe de progression — une hypothèse (« on suppose que le cycliste va
+// faire ce col »), pas une certitude comme climbInfo sur itinéraire. Ne porte pas
+// detectClimbs/gradeForIndex (qui exigent un profil complet avec anticipation) :
+// pente causale sur un tampon glissant temporel, avec hystérésis.
+//
+// Dégrade proprement si l'altitude GPS manque (courant selon l'appareil/l'OS) : on
+// garde le dernier état quelques secondes (FREE_CLIMB_GRACE_MS) avant de l'effacer,
+// plutôt que de faire clignoter la devinette au moindre trou.
+function updateFreeClimbGuess(pos: GeolocationPosition, here: LngLat) {
+  const now = Date.now()
+  const alt = pos.coords.altitude
+
+  if (alt == null) {
+    if (freeClimbLastGradeAt && now - freeClimbLastGradeAt > FREE_CLIMB_GRACE_MS) {
+      freeClimbState = 'unknown'
+      freeClimbGuess.value = null
+    }
+    return
+  }
+
+  freeClimbSamples.push({ t: now, lat: here[1], lng: here[0], alt })
+  freeClimbSamples = freeClimbSamples.filter((s) => now - s.t <= FREE_CLIMB_WINDOW_MS)
+  const oldest = freeClimbSamples[0]
+  if (!oldest) return
+
+  // Distance le long du tampon (somme des segments), pas à vol d'oiseau : plus fidèle
+  // si le tracé récent zigzague (arrêt, demi-tour, lacet).
+  let distM = 0
+  for (let i = 1; i < freeClimbSamples.length; i++) {
+    const a = freeClimbSamples[i - 1]
+    const b = freeClimbSamples[i]
+    distM += haversine([a.lng, a.lat], [b.lng, b.lat])
+  }
+
+  const climbDetection = sportPreferences(routeSport.value).climb_detection
+  // Sous ce plancher, la pente sur un tampon aussi court serait dominée par le bruit
+  // de quantification de l'altitude — même logique que grade_smoothing_m sur tracé.
+  if (distM < climbDetection.grade_smoothing_m / 2) return
+
+  const grade = ((alt - oldest.alt) / distM) * 100
+  freeClimbLastGradeAt = now
+
+  // Hystérésis asymétrique (esprit de climb_detection.merge_gap_m) : entrée à
+  // min_grade, sortie à sa moitié seulement — évite le flip-flop au seuil sur une
+  // altitude GPS bruitée. Un basculement doit en plus tenir 5 s pour être confirmé.
+  const isClimbingNow = freeClimbState === 'climbing'
+  const threshold = isClimbingNow ? climbDetection.min_grade * 0.5 : climbDetection.min_grade
+  const above = grade >= threshold
+  if (above !== isClimbingNow) {
+    if (!freeClimbSince) freeClimbSince = now
+    if (now - freeClimbSince >= 5_000) {
+      freeClimbState = above ? 'climbing' : 'flat'
+      freeClimbSince = 0
+    }
+  } else {
+    freeClimbSince = 0
+  }
+
+  if (freeClimbState !== 'climbing') {
+    freeClimbGuess.value = null
+    return
+  }
+
+  // En montée confirmée : col le plus proche parmi les POI déjà affichés (respecte
+  // le filtre "Cols" du panneau de séance — pas de recherche dédiée), à moins du
+  // rayon de détection ET à peu près dans l'axe de progression (cap ± 45°), pour ne
+  // pas deviner un col dans une vallée voisine qu'on ne fait que longer.
+  const radiusM = userPreferences().points_of_interest.radius_m
+  let best: { place: NavPlace; distM: number } | null = null
+  for (const place of pois.visiblePlaces.value) {
+    if (place.type !== 'col') continue
+    const d = haversine(here, [place.lng, place.lat])
+    if (d > radiusM) continue
+    if (Math.abs(bearingDelta(currentBearing, bearingBetween(here, [place.lng, place.lat]))) > 45) continue
+    if (!best || d < best.distM) best = { place, distM: d }
+  }
+  freeClimbGuess.value = best
+    ? { name: best.place.name, lat: best.place.lat, lng: best.place.lng, distanceM: best.distM }
+    : null
+}
+
 // Navigation libre (sans tracé) : aucun snapping ni virage. L'ancre est le GPS brut ;
 // la boucle d'animation extrapole librement au cap. On ne tient que la vitesse et le cap.
 function onPositionFree(pos: GeolocationPosition, here: LngLat) {
   updateBearing(pos, here)
   updateSpeed(pos, here)
+  updateFreeClimbGuess(pos, here)
   anchorPos = here
   anchorOnRoute = false
   anchorDistM = 0
@@ -2388,6 +2500,7 @@ function publishNavState() {
     remainingM: remainingM.value,
     remainingGainM: remainingGainM.value,
     climb: climbInfo.value,
+    colGuess: freeClimbGuess.value,
   }))
 }
 

@@ -104,6 +104,7 @@ const noMarkersWarn = ref(false)
 // drapeau se relève de lui-même dès que l'alerte a un nouveau contenu à montrer.
 const errorDismissed = ref(false)
 const snapDismissed = ref(false)
+const snapHelpOpen = ref(false)
 const noMarkersDismissed = ref(false)
 const styleCoverageDismissed = ref(false)
 watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
@@ -728,6 +729,7 @@ watch(() => routeStore.markers.value.length, (n) => {
 
 async function save() {
   if (routeStore.readOnly.value) return
+  if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
   // Sur mobile le champ nom du header n'est pas affiché : on le demande au moment de
   // l'enregistrement plutôt que de bloquer sur une erreur impossible à corriger.
   if (!routeStore.name.value.trim()) {
@@ -737,7 +739,6 @@ async function save() {
     if (!name) { routeStore.error.value = t('routes.error_name_required'); return }
     routeStore.name.value = name
   }
-  if (routeStore.waypoints.value.length < 2) { routeStore.error.value = t('routes.error_min_points'); return }
   // Seul endroit où les avertissements sont calculés : le tracé est terminé, il y a enfin
   // quelque chose à en dire. S'il y a matière, on fait barrage une fois — l'utilisateur
   // corrige, ou passe outre.
@@ -2366,7 +2367,7 @@ onBeforeUnmount(() => {
             <span class="d-none d-lg-inline">{{ t('routes.edit_route') }}</span>
           </a>
           <button v-if="!readOnly" type="button" class="btn btn-sm btn-warning d-flex align-items-center gap-1"
-            @click="save" :disabled="saving || routeStore.waypoints.value.length < 2 || !routeStore.name.value.trim()">
+            @click="save" :disabled="saving">
             <span v-if="saving" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
             <i v-else class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
             <span>{{ t('routes.save') }}</span>
@@ -2453,10 +2454,15 @@ onBeforeUnmount(() => {
                     <div class="map-notice-header">
                       <i class="fa-solid fa-map-pin" aria-hidden="true"></i>
                       <strong class="flex-grow-1">{{ t('routes.snap_warning_title', { count: snapWarnings.length }) }}</strong>
+                      <button type="button" class="map-notice-help" :class="{ 'is-open': snapHelpOpen }"
+                        :aria-label="t('routes.snap_warning_help_label')" :aria-expanded="snapHelpOpen"
+                        @click="snapHelpOpen = !snapHelpOpen">
+                        <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                      </button>
                       <button type="button" class="btn-close btn-close-sm" @click="snapDismissed = true"
                         :aria-label="t('routes.snap_warning_dismiss')"></button>
                     </div>
-                    <p class="map-notice-body">{{ t('routes.snap_warning_body') }}</p>
+                    <p v-if="snapHelpOpen" class="map-notice-body">{{ t('routes.snap_warning_body') }}</p>
                     <div class="map-notice-chips">
                       <button v-for="s in snapWarnings" :key="s.idx" type="button" class="map-notice-chip"
                         @click="focusSnapWarning(s.idx)">
@@ -3040,6 +3046,18 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
 }
 .btn-close-sm { --bs-btn-close-focus-shadow: none; padding: 0.25rem; background-size: 0.65em; }
+.map-notice-help {
+  border: 0;
+  background: none;
+  padding: 0.15rem;
+  line-height: 1;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.map-notice-help:hover,
+.map-notice-help.is-open { opacity: 1; }
 
 /* Pastille de réouverture : discrète (elle vit en permanence sur la carte tant que
    l'alerte n'est pas corrigée) mais assez colorée pour rester repérable. */

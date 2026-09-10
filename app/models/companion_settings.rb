@@ -483,6 +483,31 @@ module CompanionSettings
   # plage dynamique).
   ZONE_METRICS = %w[heart_rate hr_zone power power_zone].freeze
 
+  # Les mesures éligibles à `compute_window_s` (bloc `metric` ou annotation de
+  # coin — voir `sanitize_block`/`sanitize_secondary_slots`) : le calcul porte
+  # alors sur les N dernières secondes plutôt que sur toute la sortie. Même
+  # liste que `WINDOWABLE_METRICS` côté site (`companionSettings.ts`).
+  #
+  # Tous les `_avg`/`_max` du catalogue sauf `power_np`, qui a déjà sa propre
+  # fenêtre fixe (30 s, la définition même de la puissance normalisée — un
+  # réglage ici n'aurait pas de sens), et les `_min`, pour lesquels ce réglage
+  # n'a pas encore été demandé.
+  #
+  # `altitude_avg`/`altitude_max` existent côté appli (`MetricId`) mais pas
+  # ici ni dans `METRICS` : un bloc qui les nommerait est déjà rejeté avant
+  # d'atteindre ce réglage. Absence délibérée tant que ce trou-là n'est pas
+  # comblé séparément — les y ajouter maintenant ne ferait que composer une
+  # entrée morte.
+  WINDOWABLE_METRICS = %w[
+    speed_avg speed_max hr_avg hr_max power_avg power_max
+    cadence_avg cadence_max grade_avg grade_max climb_rate_avg climb_rate_max
+  ].freeze
+
+  # Borne de `compute_window_s`, en secondes — même plafond que
+  # `RideMetricTrack.recentWindowS` côté appli (1 h) : au-delà, l'appli n'a de
+  # toute façon plus l'historique brut pour recalculer la fenêtre.
+  MAX_COMPUTE_WINDOW_S = 3600
+
   # Les deux natures de jauge pour une mesure sans zones — voir
   # `sanitize_metric_layout`. `range` en tête : c'est le repli d'une mesure
   # éligible aux deux (cadence, vitesse, pente, distance) sans préférence
@@ -770,7 +795,7 @@ module CompanionSettings
   # tout ce chantier, et un unique profil par défaut ne le montrerait pas. Le
   # sélecteur de départ ne s'affiche d'ailleurs qu'à partir de deux.
   def defaults
-    { "v" => VERSION, "presets" => [ road, mtb, trainer ] }
+    { "v" => VERSION, "presets" => [ road, mtb, trainer ], "col_detection" => true }
   end
 
   # Le document d'un utilisateur, ou les profils par défaut.
@@ -783,7 +808,10 @@ module CompanionSettings
     stored = user.companion_settings
     return defaults if stored.blank? || stored["presets"].blank?
 
-    stored
+    # Un document antérieur à `col_detection` n'a pas la clé : la fabriquer plutôt
+    # que de la lire comme désactivée par absence — même logique indulgente que le
+    # reste de l'assainisseur.
+    stored.key?("col_detection") ? stored : stored.merge("col_detection" => true)
   end
 
   # ── L'assainisseur ──────────────────────────────────────────────────────────
@@ -821,8 +849,12 @@ module CompanionSettings
     return defaults if cleaned.empty?
 
     metric_layouts = sanitize_metric_layouts(document.is_a?(Hash) ? document["metric_layouts"] : nil)
+    # Toujours présente (jamais dépendante de `.compact`) : une valeur à `false` ne
+    # doit pas disparaître comme le ferait un `nil` optionnel.
+    col_detection = document.is_a?(Hash) ? !!document["col_detection"] : true
 
-    { "v" => VERSION, "presets" => cleaned, "metric_layouts" => metric_layouts.presence }.compact
+    { "v" => VERSION, "presets" => cleaned, "metric_layouts" => metric_layouts.presence,
+      "col_detection" => col_detection }.compact
   end
 
   def sanitize_preset(raw, index, seen, default_seen)
@@ -1388,6 +1420,16 @@ module CompanionSettings
         line_color = sanitize_hex_color(raw["background_chart_line_color"])
         block["background_chart_line_color"] = line_color if line_color
       end
+
+      # La fenêtre du calcul (et non de son affichage, ci-dessus) d'une
+      # mesure moyenne/maximum — voir `WINDOWABLE_METRICS`. `0` vaut « toute
+      # la sortie », même contrat que `background_chart_window` ; sans effet
+      # côté appli sur toute autre mesure, donc pas la peine de le garder ici
+      # non plus.
+      compute_window = raw["compute_window_s"]
+      if WINDOWABLE_METRICS.include?(metric) && compute_window.is_a?(Numeric) && compute_window >= 0
+        block["compute_window_s"] = compute_window.to_i.clamp(0, MAX_COMPUTE_WINDOW_S)
+      end
     when "clock"
       # Réglable comme un bloc `metric` (icône, disposition — même éditeur
       # côté site, `CompanionBlockPicker.vue`), mais jamais d'unité, de jauge
@@ -1521,7 +1563,15 @@ module CompanionSettings
       claimed << pos
       label = entry["label"].to_s.strip[0, MAX_SECONDARY_LABEL_LENGTH]
       size = entry["size"] if SECONDARY_SIZES.include?(entry["size"])
-      { "metric" => entry["metric"], "position" => pos, "label" => label.presence, "size" => size }.compact
+      compute_window = entry["compute_window_s"]
+      window_s =
+        if WINDOWABLE_METRICS.include?(entry["metric"]) && compute_window.is_a?(Numeric) && compute_window >= 0
+          compute_window.to_i.clamp(0, MAX_COMPUTE_WINDOW_S)
+        end
+      {
+        "metric" => entry["metric"], "position" => pos, "label" => label.presence, "size" => size,
+        "compute_window_s" => window_s,
+      }.compact
     end
   end
 
@@ -1691,22 +1741,42 @@ module CompanionSettings
       BAND_RADAR.include?(raw) || BAND_WORKOUT.include?(raw) || BAND_WORKOUT_NEXT.include?(raw)
   end
 
+  # Un jeton simple (voir `band_slot?`) devient `{"kind" => "mark_lap", ...}`
+  # ou `{"slot" => ..., "color" => ...}` dès que l'éditeur y règle une couleur
+  # de fond — une chaîne nue ne peut porter aucune clé de plus. `mark_lap` est
+  # déjà un objet, la couleur s'y ajoute directement (`sanitize_band_lap_slot`) ;
+  # les autres passent par l'enveloppe `"slot"` (`sanitize_band_colored_slot`).
   def sanitize_band_entry(raw)
     return raw if band_slot?(raw)
+    return nil unless raw.is_a?(Hash)
 
-    sanitize_band_lap_slot(raw)
+    raw["kind"] == "mark_lap" ? sanitize_band_lap_slot(raw) : sanitize_band_colored_slot(raw)
   end
 
   # `mark_lap` est la seule case de bandeau/encoche à porter un réglage libre
   # (série + label) : les autres se contentent d'une chaîne (voir
-  # `band_slot?`), celle-ci est donc le seul objet toléré dans ces tableaux —
-  # `nil` pour tout objet dont le `kind` n'est pas reconnu, même repli qu'une
-  # chaîne inconnue de `band_slot?`.
+  # `band_slot?`), celle-ci est donc le seul objet toléré tel quel dans ces
+  # tableaux — `nil` pour tout objet dont le `kind` n'est pas reconnu, même
+  # repli qu'une chaîne inconnue de `band_slot?`.
   def sanitize_band_lap_slot(raw)
     return nil unless raw.is_a?(Hash) && raw["kind"] == "mark_lap"
 
     label = raw["label"].to_s.strip[0, MAX_BAND_LAP_LABEL_LENGTH]
-    { "kind" => "mark_lap", "series" => sanitize_series(raw["series"]), "label" => label.presence }.compact
+    { "kind" => "mark_lap", "series" => sanitize_series(raw["series"]), "label" => label.presence,
+      "color" => sanitize_hex_color(raw["color"]) }.compact
+  end
+
+  # L'enveloppe d'un jeton simple avec sa couleur de fond
+  # (`{"slot" => "power", "color" => "#rrggbb"}`) — voir `BandSlot.parse`
+  # (Dart, `ride_preset.dart`). Retombe sur le jeton nu quand la couleur ne
+  # tient pas : une case sans couleur exploitable n'a aucune raison de rester
+  # enveloppée dans ce que l'appli reçoit.
+  def sanitize_band_colored_slot(raw)
+    slot = raw["slot"]
+    return nil unless band_slot?(slot)
+
+    color = sanitize_hex_color(raw["color"])
+    color ? { "slot" => slot, "color" => color } : slot
   end
 
   # Ce que les quatre canaux du D-Fly déclenchent, par profil de sortie — voir

@@ -88,6 +88,16 @@ export interface CompanionNavClimb {
   category: string | null
 }
 
+// Col deviné en navigation libre : hypothèse à faible confiance (pente soutenue +
+// col OSM le plus proche dans l'axe de progression), jamais publiée sur itinéraire
+// (où le col réel est déjà connu via `climb`).
+export interface CompanionNavColGuess {
+  name: string
+  lat: number
+  lng: number
+  distanceM: number
+}
+
 export interface CompanionNavState {
   type: 'nav'
   at: number
@@ -101,6 +111,7 @@ export interface CompanionNavState {
   remainingM: number
   remainingGainM: number
   climb: CompanionNavClimb | null
+  colGuess: CompanionNavColGuess | null
 }
 
 // Assemble l'état à publier. Pur : tout vient des paramètres, donc testable sans
@@ -120,6 +131,7 @@ export function navStateFor(input: {
   remainingM: number
   remainingGainM: number
   climb: ClimbInfo | null
+  colGuess?: CompanionNavColGuess | null
   at?: number
 }): CompanionNavState {
   const { hasRoute, hint, turnCoord, offRoute, arrived, climb } = input
@@ -163,6 +175,9 @@ export function navStateFor(input: {
           category: climb.climb.category,
         }
       : null,
+    // Guardé côté itinéraire pour la même raison que `climb` : un col deviné en
+    // navigation libre n'a pas de sens quand le col réel du tracé est déjà connu.
+    colGuess: !hasRoute && input.colGuess ? input.colGuess : null,
   }
 }
 

@@ -109,8 +109,14 @@ const turnHelpOpen = ref(false)
 const noMarkersDismissed = ref(false)
 const noMarkersHelpOpen = ref(false)
 const styleCoverageDismissed = ref(false)
+// Dernière puce cadrée, toutes alertes confondues : cliquer une puce replie la pile, on
+// retient donc le point pour le signaler quand l'utilisateur rouvre l'alerte. Une seule
+// puce à la fois — un clic dans une alerte efface la marque de l'autre. Clé préfixée
+// ("snap-" / "turn-") car les deux indexent des choses différentes (waypoint vs sommet
+// géométrique). Remise à null quand une liste est recalculée.
+const lastFocusedChip = ref<string | null>(null)
 watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
-watch(snapWarnings, () => { snapDismissed.value = false })
+watch(snapWarnings, () => { snapDismissed.value = false; lastFocusedChip.value = null })
 // Fond de carte hors zone : recalculé en direct (pas de "warn" imperatif à rafraîchir
 // comme noMarkersWarn) — replier ne vaut que pour le fond actuel, un nouveau choix
 // mérite un avertissement frais même si l'ancien avait été fermé.
@@ -663,6 +669,7 @@ function turnWarningLabel(a: TurnAnomaly): string {
 // le tracé a changé depuis, le repli ne vaut plus.
 function setTurnWarnings(anomalies: TurnAnomaly[]) {
   turnWarnings.value = anomalies
+  lastFocusedChip.value = null
   showTurnWarning.value = anomalies.length > 0
   if (anomalies.length) mapRef.value?.showTurnAnomalyMarkers(anomalies)
   else mapRef.value?.clearTurnAnomalyMarkers()
@@ -803,6 +810,7 @@ function startMarkerMode() {
 // l'utilisateur de cliquer le point s'il veut ses actions de correction.
 function focusTurnAnomaly(a: TurnAnomaly) {
   mapRef.value?.flyTo(a.lng, a.lat, 17)
+  lastFocusedChip.value = `turn-${a.idx}`
   collapseNotices()
 }
 
@@ -812,6 +820,7 @@ function focusSnapWarning(idx: number) {
   const w = routeStore.waypoints.value[idx]
   if (!w) return
   mapRef.value?.flyTo(w.lng, w.lat, 17)
+  lastFocusedChip.value = `snap-${idx}`
   collapseNotices()
 }
 
@@ -2467,8 +2476,9 @@ onBeforeUnmount(() => {
                     <p v-if="snapHelpOpen" class="map-notice-body">{{ t('routes.snap_warning_body') }}</p>
                     <div class="map-notice-chips">
                       <button v-for="s in snapWarnings" :key="s.idx" type="button" class="map-notice-chip"
-                        @click="focusSnapWarning(s.idx)">
-                        <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
+                        :class="{ 'is-visited': lastFocusedChip === `snap-${s.idx}` }" @click="focusSnapWarning(s.idx)">
+                        <i class="fa-solid" :class="lastFocusedChip === `snap-${s.idx}` ? 'fa-check' : 'fa-location-crosshairs'"
+                          aria-hidden="true"></i>
                         {{ t('routes.snap_warning_item', { point: s.idx + 1, distance: formatDistancePrecise(s.distM) }) }}
                       </button>
                     </div>
@@ -2490,9 +2500,10 @@ onBeforeUnmount(() => {
                     <p v-if="turnHelpOpen" class="map-notice-body">{{ t('routes.turn_warning_body') }}</p>
                     <div class="map-notice-chips">
                       <button v-for="(a, i) in turnWarnings" :key="i" type="button" class="map-notice-chip"
-                        @click="focusTurnAnomaly(a)">
-                        <i :class="a.kind === 'uturn' ? 'fa-solid fa-arrows-turn-to-dots' : 'fa-solid fa-location-crosshairs'"
-                          aria-hidden="true"></i>
+                        :class="{ 'is-visited': lastFocusedChip === `turn-${a.idx}` }" @click="focusTurnAnomaly(a)">
+                        <i aria-hidden="true"
+                          :class="lastFocusedChip === `turn-${a.idx}` ? 'fa-solid fa-check'
+                            : (a.kind === 'uturn' ? 'fa-solid fa-arrows-turn-to-dots' : 'fa-solid fa-location-crosshairs')"></i>
                         {{ turnWarningLabel(a) }}
                       </button>
                     </div>
@@ -3051,6 +3062,14 @@ onBeforeUnmount(() => {
   transition: background 0.12s;
 }
 .map-notice-chip:hover { background: #fff; }
+/* Puce déjà cadrée : l'utilisateur est allé voir ce point, on le distingue de ceux
+   qu'il reste à inspecter quand il rouvre l'alerte. */
+.map-notice-chip.is-visited {
+  background: #d1e7dd;
+  border-color: #a3cfbb;
+  color: #0f5132;
+}
+.map-notice-chip.is-visited:hover { background: #c5e1d3; }
 .map-notice-actions {
   pointer-events: auto;
   display: flex;

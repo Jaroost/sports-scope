@@ -1402,6 +1402,8 @@ fr:
     anchor_to_road: "Ancrer sur la route"
     return_via_same_route: "Ajouter à la fin de l'itinéraire"
     reverse_route: "Inverser le parcours"
+    set_as_start: "Définir comme départ"
+    set_as_finish: "Définir comme arrivée"
     route_point: "Point du trajet"
     insert_choice_title: "Le tracé passe ici plusieurs fois — où insérer ?"
     insert_as_point: "Insérer comme point %{n}"

@@ -1402,6 +1402,8 @@ en:
     anchor_to_road: "Anchor to road"
     return_via_same_route: "Add to end of route"
     reverse_route: "Reverse route"
+    set_as_start: "Set as start"
+    set_as_finish: "Set as finish"
     route_point: "Route point"
     insert_choice_title: "The route passes here more than once — where to insert?"
     insert_as_point: "Insert as point %{n}"

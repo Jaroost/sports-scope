@@ -1739,6 +1739,29 @@ function reverseWaypoints() {
   emit('waypoints-changed')
 }
 
+// Redéfinit le départ (ou l'arrivée) du parcours sur un point existant : le tableau
+// de points est pivoté pour amener `startIdx` en tête, les autres gardant leur ordre
+// relatif — d'où une simple renumérotation « en rond » (1→N décalés). Pensé pour les
+// boucles : sur un tracé ouvert, le raccordement entre l'ancien dernier point et
+// l'ancien premier devient un vrai tronçon, routé par BRouter au recalcul.
+// Chaque point garde son drapeau `free` (qui qualifie son tronçon entrant, préservé
+// par la rotation) ; seul le nouveau premier point perd le sien, désormais sans objet.
+function rotateWaypointsToStart(startIdx: number) {
+  const wps = routeStore.waypoints.value
+  const n = wps.length
+  if (n < 2) return
+  const k = ((startIdx % n) + n) % n
+  if (k === 0) return
+  const next = [...wps.slice(k), ...wps.slice(0, k)]
+  const first = { ...next[0] }
+  delete first.free
+  next[0] = first
+  routeStore.waypoints.value = next
+  deselectAll()
+  refreshWaypointMarkers()
+  emit('waypoints-changed')
+}
+
 function addReturnTo(idx: number) {
   if (atWaypointLimit()) return
   const wps = routeStore.waypoints.value
@@ -2192,6 +2215,16 @@ function refreshWaypointMarkers() {
     const el = document.createElement('div')
     el.className = w.free ? 'wp-marker wp-marker--free' : 'wp-marker'
     const isLast = idx === routeStore.waypoints.value.length - 1
+    const isFirst = idx === 0
+    const endpointHtml = ro ? '' : `
+      ${isFirst ? '' : `<button type="button" class="wp-tooltip-action wp-tooltip-action--set-start">
+        <i class="fa-solid fa-flag-checkered fa-flip-horizontal" aria-hidden="true"></i>
+        <span>${t('routes.set_as_start')}</span>
+      </button>`}
+      ${isLast ? '' : `<button type="button" class="wp-tooltip-action wp-tooltip-action--set-finish">
+        <i class="fa-solid fa-flag-checkered" aria-hidden="true"></i>
+        <span>${t('routes.set_as_finish')}</span>
+      </button>`}`
     const returnHtml = !ro && !isLast
       ? `<button type="button" class="wp-tooltip-action wp-tooltip-action--return">
            <i class="fa-solid fa-right-left" aria-hidden="true"></i>
@@ -2236,6 +2269,7 @@ function refreshWaypointMarkers() {
           <span>Komoot</span>
         </a>
         ${returnHtml}
+        ${endpointHtml}
         ${ro ? '' : `
         <button type="button" class="wp-tooltip-action wp-tooltip-action--reverse">
           <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
@@ -2267,7 +2301,7 @@ function refreshWaypointMarkers() {
     })
     el.querySelector('.wp-tooltip-close')!.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     // Actions purement informatives : présentes aussi en lecture seule (vue partagée).
-    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--uturn-ok):not(.wp-tooltip-action--copy):not(.wp-tooltip-action--reverse)').forEach((a) => {
+    el.querySelectorAll('.wp-tooltip-action:not(.wp-tooltip-action--delete):not(.wp-tooltip-action--free):not(.wp-tooltip-action--uturn-ok):not(.wp-tooltip-action--copy):not(.wp-tooltip-action--reverse):not(.wp-tooltip-action--set-start):not(.wp-tooltip-action--set-finish)').forEach((a) => {
       a.addEventListener('click', (ev: any) => { ev.stopPropagation(); deselectAll() })
     })
     el.querySelectorAll('.wp-tooltip-action--copy').forEach((btn) => {
@@ -2304,6 +2338,12 @@ function refreshWaypointMarkers() {
       })
       el.querySelector('.wp-tooltip-action--reverse')!.addEventListener('click', (ev: any) => {
         ev.stopPropagation(); ev.preventDefault(); reverseWaypoints()
+      })
+      el.querySelector('.wp-tooltip-action--set-start')?.addEventListener('click', (ev: any) => {
+        ev.stopPropagation(); ev.preventDefault(); rotateWaypointsToStart(idx)
+      })
+      el.querySelector('.wp-tooltip-action--set-finish')?.addEventListener('click', (ev: any) => {
+        ev.stopPropagation(); ev.preventDefault(); rotateWaypointsToStart(idx + 1)
       })
       el.querySelector('.wp-tooltip-action--return')?.addEventListener('click', (ev: any) => {
         ev.stopPropagation(); ev.preventDefault(); addReturnTo(idx)

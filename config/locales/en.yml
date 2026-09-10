@@ -1319,6 +1319,7 @@ en:
       other: "%{count} points snapped away from where you clicked"
     snap_warning_body: "Routing follows paths known to OpenStreetMap data. With no path where you clicked, these points were pulled onto the nearest way — so the route may drift from what you intended, or even flatten a loop into a line. Move the point onto an existing path, or make it \"free\" to draw a straight line that really goes through it."
     snap_warning_item: "Point %{point} · %{distance}"
+    snap_warning_help_label: "Why this warning?"
     snap_warning_dismiss: "Close"
     no_markers_warning_title: "No markers on this route"
     no_markers_warning_add: "Add a marker"

@@ -1319,6 +1319,7 @@ fr:
       other: "%{count} points accrochés loin de l'endroit cliqué"
     snap_warning_body: "Le routage suit les chemins connus des données OpenStreetMap. Faute de chemin à l'endroit cliqué, ces points ont été ramenés sur la voie la plus proche — le tracé peut donc s'écarter de ce que tu voulais, voire écraser une boucle en ligne droite. Déplace le point sur un chemin existant, ou passe-le en « libre » pour tracer une ligne droite qui passe vraiment par lui."
     snap_warning_item: "Point %{point} · %{distance}"
+    snap_warning_help_label: "Pourquoi cet avertissement ?"
     snap_warning_dismiss: "Fermer"
     no_markers_warning_title: "Aucun repère sur cet itinéraire"
     no_markers_warning_add: "Ajouter un repère"

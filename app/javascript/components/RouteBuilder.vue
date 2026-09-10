@@ -643,7 +643,17 @@ function computeTurnAnomalies(): TurnAnomaly[] {
   const turns = turnsFromVoiceHints(routeStore.voiceHints.value, geom, cumDistM)
   const diameterM = turnAnomalyDiameterForSport(routeStore.sport.value)
   const wps = routeStore.waypoints.value
-  const waypoints = wps.map((w) => [w.lng, w.lat] as LngLat)
+  // Association virage → point d'étape : on prend la position ACCROCHÉE du point (sa
+  // projection sur le tracé) et non celle cliquée. Un point ramené loin par BRouter est
+  // par définition à plus de snap_warn_m (≈ 25 m) du tracé, donc au-delà du rayon
+  // d'association (UTURN_WP_RADIUS_M = 25 m) : sans ça son propre demi-tour ressort
+  // « orphelin » (aucun point désigné) dès qu'il déclenche aussi l'alerte d'accrochage.
+  const farSnapped = new Set(snapWarnings.value.map((s) => s.idx))
+  const waypoints = wps.map((w, i) => {
+    const pos: LngLat = [w.lng, w.lat]
+    if (!farSnapped.has(i)) return pos
+    return projectOnRoute(pos, geom, cumDistM, nearestGeomIndex(pos, geom).idx).point
+  })
   const uturnOk = wps.map((w) => w.uturn_ok === true)
   const clusters = detectTurnAnomalies(turns, geom, { diameterM, waypoints })
   const claimed = new Set(clusters.map((a) => a.waypointIdx).filter((i) => i >= 0))
@@ -812,6 +822,21 @@ function focusTurnAnomaly(a: TurnAnomaly) {
   mapRef.value?.flyTo(a.lng, a.lat, 17)
   lastFocusedChip.value = `turn-${a.idx}`
   collapseNotices()
+}
+
+// « Demi-tour normal ici » depuis la puce, sans ouvrir la bulle du point : même effet que
+// wp-tooltip-action--uturn-ok côté carte (marque uturn_ok, ne relance PAS BRouter — le
+// drapeau ne change pas le tracé). detectUturnAnomalies écarte alors ce point, la puce
+// disparaît au relistage. Sens unique ici : pour re-signaler, on repasse par la bulle.
+function markTurnUturnOk(a: TurnAnomaly) {
+  const idx = a.waypointIdx
+  const wps = routeStore.waypoints.value
+  if (idx < 0 || idx >= wps.length) return
+  const next = wps.slice()
+  next[idx] = { ...next[idx], uturn_ok: true }
+  routeStore.waypoints.value = next
+  mapRef.value?.refreshWaypointMarkers()
+  refreshTurnWarnings()
 }
 
 // Recentre sur un point accroché au loin — repéré sur la carte par son propre marqueur
@@ -2526,13 +2551,19 @@ onBeforeUnmount(() => {
                     </div>
                     <p v-if="turnHelpOpen" class="map-notice-body">{{ t('routes.turn_warning_body') }}</p>
                     <div class="map-notice-chips">
-                      <button v-for="(a, i) in turnWarnings" :key="i" type="button" class="map-notice-chip"
-                        :class="{ 'is-visited': lastFocusedChip === `turn-${a.idx}` }" @click="focusTurnAnomaly(a)">
-                        <i aria-hidden="true"
-                          :class="lastFocusedChip === `turn-${a.idx}` ? 'fa-solid fa-check'
-                            : (a.kind === 'uturn' ? 'fa-solid fa-arrows-turn-to-dots' : 'fa-solid fa-location-crosshairs')"></i>
-                        {{ turnWarningLabel(a) }}
-                      </button>
+                      <div v-for="(a, i) in turnWarnings" :key="i" class="map-notice-chip-pair">
+                        <button type="button" class="map-notice-chip"
+                          :class="{ 'is-visited': lastFocusedChip === `turn-${a.idx}` }" @click="focusTurnAnomaly(a)">
+                          <i aria-hidden="true"
+                            :class="lastFocusedChip === `turn-${a.idx}` ? 'fa-solid fa-check'
+                              : (a.kind === 'uturn' ? 'fa-solid fa-arrows-turn-to-dots' : 'fa-solid fa-location-crosshairs')"></i>
+                          {{ turnWarningLabel(a) }}
+                        </button>
+                        <button v-if="a.kind === 'uturn' && a.waypointIdx >= 0" type="button"
+                          class="map-notice-chip map-notice-chip--uturn" @click="markTurnUturnOk(a)">
+                          {{ t('routes.uturn_ok_short') }}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -3106,6 +3137,26 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 .map-notice-chip--action:hover { background: #7a5c04; }
+/* Puce « demi-tour normal ici » : soudée à sa puce de point en un seul groupe segmenté
+   (coins internes carrés, bordure mitoyenne fusionnée), teinte d'acceptation pour se
+   distinguer de la puce d'anomalie rouge. */
+.map-notice-chip-pair { display: flex; }
+.map-notice-chip-pair > .map-notice-chip:not(:only-child):first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.map-notice-chip-pair > .map-notice-chip:not(:only-child):last-child {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+}
+.map-notice-chip-pair > .map-notice-chip:hover { position: relative; z-index: 1; }
+.map-notice-chip--uturn {
+  background: #d1e7dd;
+  border-color: #a3cfbb;
+  color: #0f5132;
+}
+.map-notice-chip--uturn:hover { background: #b9dcc9; }
 .map-notice-actions {
   pointer-events: auto;
   display: flex;

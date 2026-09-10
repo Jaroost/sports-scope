@@ -115,6 +115,11 @@ const styleCoverageDismissed = ref(false)
 // ("snap-" / "turn-") car les deux indexent des choses différentes (waypoint vs sommet
 // géométrique). Remise à null quand une liste est recalculée.
 const lastFocusedChip = ref<string | null>(null)
+// Demi-tour qu'on vient d'aller voir depuis sa puce : une pastille « demi-tour ok ici »
+// reste en tête de carte le temps de juger sur place, sans rouvrir l'alerte repliée par le
+// cadrage. Effacée dès que la liste des crochets change (setTurnWarnings) ou que l'alerte
+// est rouverte (reopenNotices).
+const pendingUturnAnomaly = ref<TurnAnomaly | null>(null)
 watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
 watch(snapWarnings, () => { snapDismissed.value = false; lastFocusedChip.value = null })
 // Fond de carte hors zone : recalculé en direct (pas de "warn" imperatif à rafraîchir
@@ -198,6 +203,7 @@ function reopenNotices() {
   snapDismissed.value = false
   noMarkersDismissed.value = false
   styleCoverageDismissed.value = false
+  pendingUturnAnomaly.value = null
   if (turnWarnings.value.length) showTurnWarning.value = true
 }
 const exportStyleId = ref('')
@@ -680,6 +686,7 @@ function turnWarningLabel(a: TurnAnomaly): string {
 function setTurnWarnings(anomalies: TurnAnomaly[]) {
   turnWarnings.value = anomalies
   lastFocusedChip.value = null
+  pendingUturnAnomaly.value = null
   showTurnWarning.value = anomalies.length > 0
   if (anomalies.length) mapRef.value?.showTurnAnomalyMarkers(anomalies)
   else mapRef.value?.clearTurnAnomalyMarkers()
@@ -821,6 +828,9 @@ function startMarkerMode() {
 function focusTurnAnomaly(a: TurnAnomaly) {
   mapRef.value?.flyTo(a.lng, a.lat, 17)
   lastFocusedChip.value = `turn-${a.idx}`
+  // Demi-tour rattaché à un point : on garde une pastille d'action en tête de carte, pour
+  // trancher « c'est voulu » sans rouvrir l'alerte qu'on vient de replier.
+  pendingUturnAnomaly.value = a.kind === 'uturn' && a.waypointIdx >= 0 ? a : null
   collapseNotices()
 }
 
@@ -837,6 +847,10 @@ function markTurnUturnOk(a: TurnAnomaly) {
   routeStore.waypoints.value = next
   mapRef.value?.refreshWaypointMarkers()
   refreshTurnWarnings()
+}
+
+function confirmPendingUturnOk() {
+  if (pendingUturnAnomaly.value) markTurnUturnOk(pendingUturnAnomaly.value)
 }
 
 // Recentre sur un point accroché au loin — repéré sur la carte par son propre marqueur
@@ -2487,6 +2501,14 @@ onBeforeUnmount(() => {
               <div class="map-notices">
                 <TransitionGroup name="map-notice">
 
+                  <!-- Pastille d'action après cadrage d'un demi-tour : trancher « c'est voulu »
+                       sans rouvrir l'alerte. Disparaît si l'alerte est rouverte ou le tracé change. -->
+                  <button v-if="pendingUturnAnomaly && !turnVisible" key="uturn-ok" type="button"
+                    class="map-notice-pill map-notice-pill--uturn" @click="confirmPendingUturnOk">
+                    <i class="fa-solid fa-arrows-turn-to-dots" aria-hidden="true"></i>
+                    <span>{{ t('routes.uturn_ok_here') }}</span>
+                  </button>
+
                   <!-- « Enregistrer quand même » : en tête de pile et hors des alertes, car il
                        vaut pour toutes celles qui font barrage. Reste offert même quand elles
                        sont repliées — le barrage, lui, tient tant que le tracé n'a pas changé. -->
@@ -3196,6 +3218,14 @@ onBeforeUnmount(() => {
   transition: background 0.12s;
 }
 .map-notice-pill:hover { background: #fee2e2; }
+/* Pastille « demi-tour ok ici » : teinte d'acceptation (comme la puce --uturn de l'alerte),
+   pas le rouge d'un rappel d'anomalie. */
+.map-notice-pill--uturn {
+  border-color: #a3cfbb;
+  background: #d1e7dd;
+  color: #0f5132;
+}
+.map-notice-pill--uturn:hover { background: #b9dcc9; }
 
 .map-notice-enter-active,
 .map-notice-leave-active { transition: opacity 0.15s ease, transform 0.15s ease; }

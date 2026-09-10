@@ -1308,6 +1308,7 @@ fr:
     uturn_warning_item_orphan: "Demi-tour · au %{distance}"
     uturn_is_expected: "Demi-tour normal ici"
     uturn_ok_short: "Ok ici"
+    uturn_ok_here: "Demi-tour ok ici"
     uturn_flag_again: "Signaler le demi-tour"
     turn_warning_save_anyway: "Enregistrer quand même"
     turn_warning_help_label: "Pourquoi cet avertissement ?"

@@ -1308,6 +1308,7 @@ en:
     uturn_warning_item_orphan: "U-turn · at %{distance}"
     uturn_is_expected: "U-turn expected here"
     uturn_ok_short: "Ok here"
+    uturn_ok_here: "U-turn ok here"
     uturn_flag_again: "Flag the u-turn again"
     turn_warning_save_anyway: "Save anyway"
     turn_warning_help_label: "Why this warning?"

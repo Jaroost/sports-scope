@@ -8,7 +8,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType, categoryForType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, shareVersionParam, fillDefaultClimbNames } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, projectOnRoute, shareVersionParam, fillDefaultClimbNames } from '../routeHelpers'
 import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
@@ -822,6 +822,28 @@ function focusSnapWarning(idx: number) {
   mapRef.value?.flyTo(w.lng, w.lat, 17)
   lastFocusedChip.value = `snap-${idx}`
   collapseNotices()
+}
+
+// Ramène d'un coup chaque point signalé sur le tracé obtenu, à sa projection
+// perpendiculaire (closestOnSegment via projectOnRoute) : le point se retrouve sur la voie
+// que BRouter a effectivement empruntée, l'accrochage tombe donc à ~0 au recalcul. On ne
+// touche pas aux points « libres » (jamais signalés de toute façon) ni à l'altitude —
+// recomputeRoute la refait.
+function snapFlaggedWaypointsToRoute() {
+  if (routeStore.readOnly.value || !snapWarnings.value.length) return
+  const geom = routeStore.geometry.value
+  if (geom.length < 2) return
+  const cum = buildDistancesM(geom)
+  const next = routeStore.waypoints.value.slice()
+  for (const s of snapWarnings.value) {
+    const w = next[s.idx]
+    if (!w || w.free) continue
+    const pos: LngLat = [w.lng, w.lat]
+    const { point } = projectOnRoute(pos, geom, cum, nearestGeomIndex(pos, geom).idx)
+    next[s.idx] = { ...w, lng: point[0], lat: point[1] }
+  }
+  routeStore.waypoints.value = next
+  recomputeRoute()
 }
 
 async function persist() {
@@ -2475,6 +2497,11 @@ onBeforeUnmount(() => {
                     </div>
                     <p v-if="snapHelpOpen" class="map-notice-body">{{ t('routes.snap_warning_body') }}</p>
                     <div class="map-notice-chips">
+                      <button type="button" class="map-notice-chip map-notice-chip--action"
+                        @click="snapFlaggedWaypointsToRoute">
+                        <i class="fa-solid fa-arrows-to-line" aria-hidden="true"></i>
+                        {{ t('routes.snap_warning_snap_all') }}
+                      </button>
                       <button v-for="s in snapWarnings" :key="s.idx" type="button" class="map-notice-chip"
                         :class="{ 'is-visited': lastFocusedChip === `snap-${s.idx}` }" @click="focusSnapWarning(s.idx)">
                         <i class="fa-solid" :class="lastFocusedChip === `snap-${s.idx}` ? 'fa-check' : 'fa-location-crosshairs'"
@@ -3070,6 +3097,15 @@ onBeforeUnmount(() => {
   color: #0f5132;
 }
 .map-notice-chip.is-visited:hover { background: #c5e1d3; }
+/* Action groupée « tout ramener sur le tracé » : puce pleine pour la détacher des puces
+   de cadrage point par point qui la suivent. Toujours dans l'alerte --warning (ambre). */
+.map-notice-chip--action {
+  background: #664d03;
+  border-color: #664d03;
+  color: #fff8e6;
+  font-weight: 600;
+}
+.map-notice-chip--action:hover { background: #7a5c04; }
 .map-notice-actions {
   pointer-events: auto;
   display: flex;

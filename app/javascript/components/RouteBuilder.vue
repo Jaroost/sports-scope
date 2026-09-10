@@ -99,9 +99,11 @@ const acceptedTurnItems = computed<TurnAnomaly[]>(() => {
     .filter((a) => a.accepted)
     .sort((a, b) => a.distM - b.distM)
 })
-// Repli du panneau des crochets — la croix le masque, le tracé qui change ou une
-// sauvegarde le rouvrent. `turnVisible` en tient compte avec le contenu réel.
-const turnNoticeCollapsed = ref(false)
+// Repli du panneau des crochets. Replié par défaut : à l'ouverture d'un itinéraire, le
+// rappel des demi-tours assumés ne doit pas s'afficher en grand — juste une pastille grise.
+// Une sauvegarde qui trouve des crochets ACTIFS le rouvre (applyTurnAnomalies), la croix
+// le replie, la pastille le rouvre.
+const turnNoticeCollapsed = ref(true)
 // « Point accroché au loin » : BRouter projette chaque waypoint sur la voie routable la plus
 // proche. Quand aucun chemin n'existe à l'endroit cliqué (trou de données OSM, plein champ…),
 // il l'accroche silencieusement des dizaines de mètres plus loin — au pire, plusieurs points
@@ -215,16 +217,22 @@ function applyStyleCoverageSuggestion() {
 }
 
 // Alertes repliées mais toujours d'actualité : elles gardent leurs données, seule leur
-// vue est masquée, et la pastille les rappelle.
-const hiddenNoticeCount = computed(() => {
+// vue est masquée, et la pastille les rappelle. On distingue les vraies alertes du simple
+// rappel des demi-tours assumés (informatif) : la pastille est grise, pas rouge, quand
+// c'est tout ce qu'elle cache.
+const hiddenAlertCount = computed(() => {
   let n = 0
   if (routeStore.error.value && errorDismissed.value) n++
   if (snapWarnings.value.length && snapDismissed.value) n++
-  if ((turnWarnings.value.length || acceptedTurnItems.value.length) && turnNoticeCollapsed.value) n++
+  if (turnWarnings.value.length && turnNoticeCollapsed.value) n++
   if (noMarkersWarn.value && noMarkersDismissed.value) n++
   if (styleCoverageWarn.value && styleCoverageDismissed.value) n++
   return n
 })
+const hiddenAcceptedTurns = computed(() =>
+  !turnWarnings.value.length && acceptedTurnItems.value.length > 0 && turnNoticeCollapsed.value,
+)
+const hiddenNoticeCount = computed(() => hiddenAlertCount.value + (hiddenAcceptedTurns.value ? 1 : 0))
 
 function reopenNotices() {
   errorDismissed.value = false
@@ -714,16 +722,16 @@ function pruneAcceptedUturns() {
   if (kept.length !== acc.length) routeStore.acceptedUturns.value = kept
 }
 
-// Un demi-tour sans point d'étape à portée n'accuse personne : on le situe à la distance
-// parcourue plutôt que d'annoncer un numéro de point qui n'existe pas.
+// Un demi-tour sans point d'étape à portée n'accuse personne : faute de numéro de point,
+// la distance parcourue reste son seul repère (les autres puces s'en passent, on clique
+// pour cadrer).
 function turnWarningLabel(a: TurnAnomaly): string {
-  const distance = formatDistancePrecise(a.distM)
   if (a.kind === 'uturn') {
     return a.waypointIdx >= 0
-      ? t('routes.uturn_warning_item', { point: a.waypointIdx + 1, distance })
-      : t('routes.uturn_warning_item_orphan', { distance })
+      ? t('routes.uturn_warning_item', { point: a.waypointIdx + 1 })
+      : t('routes.uturn_warning_item_orphan', { distance: formatDistancePrecise(a.distM) })
   }
-  return t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count, distance })
+  return t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count })
 }
 
 // Publie la liste des crochets ACTIFS. Le panneau des demi-tours assumés suit
@@ -2703,8 +2711,10 @@ onBeforeUnmount(() => {
                           {{ turnWarningLabel(a) }}
                         </button>
                         <button v-if="a.kind === 'uturn'" type="button"
-                          class="map-notice-chip map-notice-chip--uturn" @click="markTurnUturnOk(a)">
-                          {{ t('routes.uturn_ok_short') }}
+                          class="map-notice-chip map-notice-chip--uturn map-notice-chip--icon"
+                          :title="t('routes.uturn_ok_short')" :aria-label="t('routes.uturn_ok_short')"
+                          @click="markTurnUturnOk(a)">
+                          <i class="fa-solid fa-check" aria-hidden="true"></i>
                         </button>
                       </div>
                       <div v-for="(a, i) in acceptedTurnItems" :key="`a${i}`" class="map-notice-chip-pair">
@@ -2712,9 +2722,10 @@ onBeforeUnmount(() => {
                           <i class="fa-solid fa-check" aria-hidden="true"></i>
                           {{ turnWarningLabel(a) }}
                         </button>
-                        <button type="button" class="map-notice-chip map-notice-chip--reflag"
+                        <button type="button" class="map-notice-chip map-notice-chip--reflag map-notice-chip--icon"
+                          :title="t('routes.uturn_ko_short')" :aria-label="t('routes.uturn_ko_short')"
                           @click="unacceptUturn(a)">
-                          {{ t('routes.uturn_flag_again') }}
+                          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
                         </button>
                       </div>
                     </div>
@@ -2763,8 +2774,10 @@ onBeforeUnmount(() => {
                   <!-- Rappel des alertes repliées : seul vestige visible tant qu'elles ne sont
                        pas corrigées, sinon l'utilisateur perdrait l'info sans recours. -->
                   <button v-if="hiddenNoticeCount" key="reopen" type="button" class="map-notice-pill"
+                    :class="{ 'map-notice-pill--muted': hiddenAlertCount === 0 }"
                     @click="reopenNotices" :title="t('routes.notices_reopen')">
-                    <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                    <i aria-hidden="true" class="fa-solid"
+                      :class="hiddenAlertCount === 0 ? 'fa-arrows-turn-to-dots' : 'fa-triangle-exclamation'"></i>
                     <span>{{ t('routes.notices_reopen_count', { count: hiddenNoticeCount }) }}</span>
                   </button>
 
@@ -3279,6 +3292,12 @@ onBeforeUnmount(() => {
   transition: background 0.12s;
 }
 .map-notice-chip:hover { background: #fff; }
+/* Puce d'action icône seule (coche « ok ici » / croix « demi-tour ko ») : carrée,
+   sans le padding horizontal d'une puce à texte. */
+.map-notice-chip--icon {
+  gap: 0;
+  padding: 0.25rem 0.45rem;
+}
 /* Puce déjà cadrée : l'utilisateur est allé voir ce point, on le distingue de ceux
    qu'il reste à inspecter quand il rouvre l'alerte. */
 .map-notice-chip.is-visited {
@@ -3316,8 +3335,8 @@ onBeforeUnmount(() => {
   color: #0f5132;
 }
 .map-notice-chip--uturn:hover { background: #b9dcc9; }
-/* Demi-tour assumé : puce cochée en gris (le verdict tient), doublée d'une puce
-   « signaler à nouveau » qui le renvoie dans les crochets actifs. */
+/* Demi-tour assumé : puce cochée en gris (le verdict tient), doublée d'une puce rouge
+   « demi-tour ko » qui le renvoie dans les crochets actifs. */
 .map-notice-chip.is-accepted {
   background: #e9ecef;
   border-color: #ced4da;
@@ -3325,11 +3344,11 @@ onBeforeUnmount(() => {
 }
 .map-notice-chip.is-accepted:hover { background: #dee2e6; }
 .map-notice-chip--reflag {
-  background: rgba(255, 255, 255, 0.75);
-  color: #495057;
-  border-color: #ced4da;
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
 }
-.map-notice-chip--reflag:hover { background: #fff; }
+.map-notice-chip--reflag:hover { background: #b91c1c; }
 /* Lien « tout revérifier » dans l'en-tête du panneau : discret, aligné sur le texte. */
 .map-notice-recheck {
   border: 0;
@@ -3381,6 +3400,14 @@ onBeforeUnmount(() => {
   transition: background 0.12s;
 }
 .map-notice-pill:hover { background: #fee2e2; }
+/* Pastille qui ne cache qu'un rappel de demi-tours assumés : gris neutre, pas le rouge
+   d'une alerte à corriger. */
+.map-notice-pill--muted {
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #374151;
+}
+.map-notice-pill--muted:hover { background: #e5e7eb; }
 /* Pastille « demi-tour ok ici » : teinte d'acceptation (comme la puce --uturn de l'alerte),
    pas le rouge d'un rappel d'anomalie. */
 .map-notice-pill--uturn {
@@ -3396,14 +3423,21 @@ onBeforeUnmount(() => {
 .map-notice-leave-to { opacity: 0; transform: translateY(-6px); }
 .map-notice-leave-active { position: absolute; }
 
-/* Sur mobile la carte est trop étroite pour une colonne de 400px calée à droite : les
-   alertes reprennent toute la largeur, aux bords près. */
+/* Sur téléphone, les alertes se rangent sous les menus « Carte / Affichage / Mode »
+   (3 boutons btn-sm à partir de 10px ≈ 120px de haut) au lieu de barrer toute la largeur
+   au ras du haut. Cartes bornées, tout calé à gauche — « Enregistrer quand même »
+   compris. */
 @media (max-width: 767px), (max-height: 500px) {
   .map-notices {
-    left: 8px;
-    right: 8px;
-    top: 52px;
+    left: 10px;
+    right: 10px;
+    top: 130px;
     width: auto;
+    max-height: calc(100% - 150px);
+    align-items: flex-start;
   }
+  .map-notices > .map-notice { width: min(17rem, 100%); }
+  .map-notices .map-notice-pill,
+  .map-notices > .map-notice-actions { align-self: flex-start; }
 }
 </style>

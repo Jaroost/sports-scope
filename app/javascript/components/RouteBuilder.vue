@@ -105,7 +105,9 @@ const noMarkersWarn = ref(false)
 const errorDismissed = ref(false)
 const snapDismissed = ref(false)
 const snapHelpOpen = ref(false)
+const turnHelpOpen = ref(false)
 const noMarkersDismissed = ref(false)
+const noMarkersHelpOpen = ref(false)
 const styleCoverageDismissed = ref(false)
 watch(() => routeStore.error.value, (v) => { if (v) errorDismissed.value = false })
 watch(snapWarnings, () => { snapDismissed.value = false })
@@ -2477,10 +2479,15 @@ onBeforeUnmount(() => {
                     <div class="map-notice-header">
                       <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
                       <strong class="flex-grow-1">{{ t('routes.turn_warning_title') }}</strong>
+                      <button type="button" class="map-notice-help" :class="{ 'is-open': turnHelpOpen }"
+                        :aria-label="t('routes.turn_warning_help_label')" :aria-expanded="turnHelpOpen"
+                        @click="turnHelpOpen = !turnHelpOpen">
+                        <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                      </button>
                       <button type="button" class="btn-close btn-close-sm" @click="closeTurnWarning"
                         :aria-label="t('routes.turn_warning_dismiss')"></button>
                     </div>
-                    <p class="map-notice-body">{{ t('routes.turn_warning_body') }}</p>
+                    <p v-if="turnHelpOpen" class="map-notice-body">{{ t('routes.turn_warning_body') }}</p>
                     <div class="map-notice-chips">
                       <button v-for="(a, i) in turnWarnings" :key="i" type="button" class="map-notice-chip"
                         @click="focusTurnAnomaly(a)">
@@ -2496,10 +2503,15 @@ onBeforeUnmount(() => {
                     <div class="map-notice-header">
                       <i class="fa-solid fa-flag" aria-hidden="true"></i>
                       <strong class="flex-grow-1">{{ t('routes.no_markers_warning_title') }}</strong>
+                      <button type="button" class="map-notice-help" :class="{ 'is-open': noMarkersHelpOpen }"
+                        :aria-label="t('routes.no_markers_warning_help_label')" :aria-expanded="noMarkersHelpOpen"
+                        @click="noMarkersHelpOpen = !noMarkersHelpOpen">
+                        <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+                      </button>
                       <button type="button" class="btn-close btn-close-sm" @click="noMarkersDismissed = true"
                         :aria-label="t('routes.snap_warning_dismiss')"></button>
                     </div>
-                    <p class="map-notice-body">{{ t('routes.no_markers_warning_body') }}</p>
+                    <p v-if="noMarkersHelpOpen" class="map-notice-body">{{ t('routes.no_markers_warning_body') }}</p>
                     <div class="map-notice-chips">
                       <button type="button" class="map-notice-chip" @click="startMarkerMode">
                         <i class="fa-solid fa-signs-post" aria-hidden="true"></i>

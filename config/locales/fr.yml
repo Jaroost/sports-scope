@@ -1309,6 +1309,7 @@ fr:
     uturn_is_expected: "Demi-tour normal ici"
     uturn_flag_again: "Signaler le demi-tour"
     turn_warning_save_anyway: "Enregistrer quand même"
+    turn_warning_help_label: "Pourquoi cet avertissement ?"
     turn_warning_dismiss: "Fermer"
     notices_reopen: "Réafficher les alertes du tracé"
     notices_reopen_count:
@@ -1323,6 +1324,7 @@ fr:
     snap_warning_dismiss: "Fermer"
     no_markers_warning_title: "Aucun repère sur cet itinéraire"
     no_markers_warning_add: "Ajouter un repère"
+    no_markers_warning_help_label: "Pourquoi cet avertissement ?"
     no_markers_warning_body: "Quand vous partagez cet itinéraire, seuls le parcours et les repères (départ, arrivée, parking) sont affichés par défaut. Ajoutez des repères pour aider vos destinataires à s'orienter."
     style_coverage_warning_title: "Fond de carte hors zone"
     style_coverage_warning_body: "Le fond « %{region} » sélectionné ne couvre probablement pas cette zone et risque de s'afficher vide."

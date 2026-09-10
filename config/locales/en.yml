@@ -1309,6 +1309,7 @@ en:
     uturn_is_expected: "U-turn expected here"
     uturn_flag_again: "Flag the u-turn again"
     turn_warning_save_anyway: "Save anyway"
+    turn_warning_help_label: "Why this warning?"
     turn_warning_dismiss: "Close"
     notices_reopen: "Show route warnings again"
     notices_reopen_count:
@@ -1323,6 +1324,7 @@ en:
     snap_warning_dismiss: "Close"
     no_markers_warning_title: "No markers on this route"
     no_markers_warning_add: "Add a marker"
+    no_markers_warning_help_label: "Why this warning?"
     no_markers_warning_body: "When you share this route, only the course and its markers (start, finish, parking) are shown by default. Add markers to help recipients get their bearings."
     style_coverage_warning_title: "Base map out of coverage"
     style_coverage_warning_body: "The selected \"%{region}\" base map probably doesn't cover this area and may show up blank."

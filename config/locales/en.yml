@@ -1302,6 +1302,8 @@ en:
     error_elevation: "Elevation error"
     error_shared_not_found: "This shared route can't be found or is no longer available."
     turn_warning_title: "Suspicious turns detected"
+    turn_accepted_title: "Accepted u-turns"
+    uturn_recheck_all: "Re-check all"
     turn_warning_body: "The route makes a hook: either sharp turns bunched up in one spot, or a u-turn. This usually means a waypoint sits off the road or on a dead end, and navigation may fire contradictory instructions. Each spot is flagged on the map; tap it below to jump there, then click the waypoint to move or delete it — or, if the out-and-back is intended, mark it \"u-turn expected here\"."
     turn_warning_item: "Waypoint %{point} · %{count} bunched turns · at %{distance}"
     uturn_warning_item: "Waypoint %{point} · u-turn · at %{distance}"

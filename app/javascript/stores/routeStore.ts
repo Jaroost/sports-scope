@@ -17,6 +17,11 @@ class RouteStore {
   // `uturn_ok` : l'utilisateur assume le demi-tour que ce point provoque (aller-retour
   // délibéré) — purement informatif, n'affecte pas le routage (cf. detectUturnAnomalies).
   readonly waypoints = ref<Array<{ lng: number; lat: number; free?: boolean; uturn_ok?: boolean }>>([])
+  // Demi-tours du tracé assumés par l'auteur mais qui ne tombent PAS sur un point
+  // d'étape (ceux-là portent `uturn_ok` sur le waypoint). Ancrés par coordonnée,
+  // réappariés au demi-tour détecté par proximité à chaque recalcul du tracé
+  // (cf. detectUturnAnomalies) — colonne `routes.accepted_uturns`.
+  readonly acceptedUturns = ref<Array<{ lng: number; lat: number }>>([])
   readonly voiceHints = ref<VoiceHint[]>([])
   // Repères posés à la main (départ / arrivée / parking + libellé optionnel),
   // enregistrés avec l'itinéraire (colonne `routes.markers`). Distincts des POI
@@ -166,6 +171,7 @@ class RouteStore {
   reset() {
     this.geometry.value = []
     this.waypoints.value = []
+    this.acceptedUturns.value = []
     this.voiceHints.value = []
     this.markers.value = []
     this.climbNames.value = []

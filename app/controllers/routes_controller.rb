@@ -167,6 +167,7 @@ class RoutesController < ApplicationController
       pois: src.pois,
       markers: src.markers,
       climb_names: src.climb_names,
+      accepted_uturns: src.accepted_uturns,
       distance_m: src.distance_m,
       elevation_gain_m: src.elevation_gain_m,
       elevation_loss_m: src.elevation_loss_m,
@@ -224,6 +225,7 @@ class RoutesController < ApplicationController
     out[:pois] = clean_pois(p[:pois]) if p.key?(:pois)
     out[:markers] = clean_markers(p[:markers]) if p.key?(:markers)
     out[:climb_names] = clean_climb_names(p[:climb_names]) if p.key?(:climb_names)
+    out[:accepted_uturns] = clean_accepted_uturns(p[:accepted_uturns]) if p.key?(:accepted_uturns)
     out[:distance_m] = p[:distance_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:distance_m)
     out[:elevation_gain_m] = p[:elevation_gain_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_gain_m)
     out[:elevation_loss_m] = p[:elevation_loss_m].to_f.then { |v| v.positive? ? v : nil } if p.key?(:elevation_loss_m)
@@ -251,6 +253,25 @@ class RoutesController < ApplicationController
       wp["uturn_ok"] = true if h["uturn_ok"] || h[:uturn_ok]
       wp
     end.compact
+  end
+
+  MAX_ACCEPTED_UTURNS = 200
+
+  # Demi-tours du tracé que l'auteur a marqués comme délibérés et qui ne tombent
+  # PAS sur un point d'étape — ceux-là portent le flag `uturn_ok` sur le waypoint
+  # (clean_waypoints). Ancrés par coordonnée, réappariés au demi-tour détecté par
+  # proximité à chaque recalcul du tracé (detectUturnAnomalies, routeHelpers.ts).
+  def clean_accepted_uturns(raw)
+    return [] unless raw.is_a?(Array)
+    raw.take(MAX_ACCEPTED_UTURNS).filter_map do |item|
+      h = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
+      next unless h.is_a?(Hash)
+      lat = h["lat"] || h[:lat]
+      lng = h["lng"] || h[:lng]
+      next unless lat.is_a?(Numeric) && lng.is_a?(Numeric)
+      next if lat.abs > 90 || lng.abs > 180
+      { "lat" => lat.to_f, "lng" => lng.to_f }
+    end
   end
 
   def clean_geometry(raw)
@@ -437,6 +458,7 @@ class RoutesController < ApplicationController
       pois: route.pois || [],
       markers: route.markers || [],
       climb_names: route.climb_names || [],
+      accepted_uturns: route.accepted_uturns || [],
     )
   end
 

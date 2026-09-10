@@ -452,6 +452,14 @@
   0%, 100% { box-shadow: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 0 rgba(220,38,38,0.55); }
   50% { box-shadow: 0 2px 8px rgba(0,0,0,0.5), 0 0 0 10px rgba(220,38,38,0); }
 }
+/* Demi-tour assumé : marqueur figé et grisé, pas d'alerte qui pulse. */
+.turn-anomaly-marker--accepted {
+  background: #6b7280;
+  animation: none;
+  width: 24px;
+  height: 24px;
+  font-size: 0.75rem;
+}
 .user-location-dot {
   width: 16px;
   height: 16px;

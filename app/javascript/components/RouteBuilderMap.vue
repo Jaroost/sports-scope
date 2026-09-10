@@ -1220,16 +1220,19 @@ function clearTurnAnomalyMarkers() {
   turnAnomalyMarkers.length = 0
 }
 
-function showTurnAnomalyMarkers(anomalies: Array<{ lng: number; lat: number; kind?: string }>) {
+function showTurnAnomalyMarkers(anomalies: Array<{ lng: number; lat: number; kind?: string; accepted?: boolean }>) {
   if (!_maplibregl || !mapInstance) return
   clearTurnAnomalyMarkers()
   for (const a of anomalies) {
     const el = document.createElement('div')
-    el.className = 'turn-anomaly-marker'
+    // Demi-tour assumé : marqueur estompé (coché), pour le distinguer d'un crochet actif.
+    el.className = a.accepted ? 'turn-anomaly-marker turn-anomaly-marker--accepted' : 'turn-anomaly-marker'
     // Même icône que la puce correspondante dans l'alerte, pour relier les deux d'un coup d'œil.
-    el.innerHTML = a.kind === 'uturn'
-      ? '<i class="fa-solid fa-arrows-turn-to-dots"></i>'
-      : '<i class="fa-solid fa-triangle-exclamation"></i>'
+    el.innerHTML = a.accepted
+      ? '<i class="fa-solid fa-check"></i>'
+      : (a.kind === 'uturn'
+        ? '<i class="fa-solid fa-arrows-turn-to-dots"></i>'
+        : '<i class="fa-solid fa-triangle-exclamation"></i>')
     const marker = new _maplibregl.Marker({ element: el, anchor: 'center' })
       .setLngLat([a.lng, a.lat])
       .addTo(mapInstance)

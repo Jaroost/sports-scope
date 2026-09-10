@@ -8,7 +8,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType, categoryForType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, nearestGeomIndex, projectOnRoute, shareVersionParam, fillDefaultClimbNames } from '../routeHelpers'
+import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, UTURN_ACCEPT_RADIUS_M, nearestGeomIndex, projectOnRoute, shareVersionParam, fillDefaultClimbNames } from '../routeHelpers'
 import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
@@ -83,7 +83,25 @@ const shareMapStyle = ref<string | null>(null)
 // « Amas de virages » / « demi-tour » : un point d'étape mal posé (à côté de la route, ou
 // sur une impasse) fait crocheter BRouter, ce qui fausse la navigation.
 const turnWarnings = ref<TurnAnomaly[]>([])
-const showTurnWarning = ref(false)
+// Demi-tours du tracé que l'utilisateur a assumés (flag `uturn_ok` d'un point, ou
+// coordonnée dans routeStore.acceptedUturns), listés en direct pour pouvoir les
+// re-signaler. Dérivé de l'état, toujours à jour — cf. le panneau « demi-tours assumés ».
+const acceptedTurnItems = computed<TurnAnomaly[]>(() => {
+  const geom = routeStore.geometry.value
+  if (geom.length < 3) return []
+  const cumDistM = buildDistancesM(geom)
+  const turns = turnsFromVoiceHints(routeStore.voiceHints.value, geom, cumDistM)
+  const wps = routeStore.waypoints.value
+  const waypoints = wps.map((w) => [w.lng, w.lat] as LngLat)
+  const uturnOk = wps.map((w) => w.uturn_ok === true)
+  const accepted = routeStore.acceptedUturns.value.map((u) => [u.lng, u.lat] as LngLat)
+  return detectUturnAnomalies(turns, geom, { waypoints, uturnOk, accepted, includeAccepted: true })
+    .filter((a) => a.accepted)
+    .sort((a, b) => a.distM - b.distM)
+})
+// Repli du panneau des crochets — la croix le masque, le tracé qui change ou une
+// sauvegarde le rouvrent. `turnVisible` en tient compte avec le contenu réel.
+const turnNoticeCollapsed = ref(false)
 // « Point accroché au loin » : BRouter projette chaque waypoint sur la voie routable la plus
 // proche. Quand aucun chemin n'existe à l'endroit cliqué (trou de données OSM, plein champ…),
 // il l'accroche silencieusement des dizaines de mètres plus loin — au pire, plusieurs points
@@ -157,9 +175,19 @@ watch(snapWarnings, (list) => {
   )
 })
 
+// Marqueurs des crochets : crochets actifs (rouges, pulsés) + demi-tours assumés (gris,
+// cochés). Source unique — sinon deux chemins se disputeraient le même tableau de marqueurs.
+watch([turnWarnings, acceptedTurnItems], ([active, accepted]) => {
+  const all = [...active, ...accepted]
+  if (all.length) mapRef.value?.showTurnAnomalyMarkers(all)
+  else mapRef.value?.clearTurnAnomalyMarkers()
+})
+
 // Ce qui est réellement à l'écran, source unique pour l'affichage comme pour la pastille.
 const snapVisible = computed(() => snapWarnings.value.length > 0 && !snapDismissed.value)
-const turnVisible = computed(() => turnWarnings.value.length > 0 && showTurnWarning.value)
+const turnVisible = computed(() =>
+  (turnWarnings.value.length > 0 || acceptedTurnItems.value.length > 0) && !turnNoticeCollapsed.value,
+)
 const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismissed.value)
 // Ce qui compte, c'est ce qui est RÉELLEMENT à l'écran — le centre de la vue courante,
 // pas le tracé (un tracé suisse dont on s'est éloigné en Autriche pour vérifier un
@@ -192,7 +220,7 @@ const hiddenNoticeCount = computed(() => {
   let n = 0
   if (routeStore.error.value && errorDismissed.value) n++
   if (snapWarnings.value.length && snapDismissed.value) n++
-  if (turnWarnings.value.length && !showTurnWarning.value) n++
+  if ((turnWarnings.value.length || acceptedTurnItems.value.length) && turnNoticeCollapsed.value) n++
   if (noMarkersWarn.value && noMarkersDismissed.value) n++
   if (styleCoverageWarn.value && styleCoverageDismissed.value) n++
   return n
@@ -204,7 +232,7 @@ function reopenNotices() {
   noMarkersDismissed.value = false
   styleCoverageDismissed.value = false
   pendingUturnAnomaly.value = null
-  if (turnWarnings.value.length) showTurnWarning.value = true
+  turnNoticeCollapsed.value = false
 }
 const exportStyleId = ref('')
 const exportShowGrade = ref(false)
@@ -551,6 +579,7 @@ async function fetchRoute(id: number) {
     // enregistrée avec l'itinéraire.
     routeStore.setAvgSpeedKmh(r.avg_speed_kmh)
     routeStore.waypoints.value = Array.isArray(r.waypoints) ? r.waypoints : []
+    routeStore.acceptedUturns.value = Array.isArray(r.accepted_uturns) ? r.accepted_uturns : []
     routeStore.geometry.value = Array.isArray(r.geometry) ? r.geometry : []
     routeStore.voiceHints.value = Array.isArray(r.voice_hints) ? r.voice_hints : []
     routeStore.markers.value = Array.isArray(r.markers) ? r.markers : []
@@ -661,11 +690,28 @@ function computeTurnAnomalies(): TurnAnomaly[] {
     return projectOnRoute(pos, geom, cumDistM, nearestGeomIndex(pos, geom).idx).point
   })
   const uturnOk = wps.map((w) => w.uturn_ok === true)
+  const accepted = routeStore.acceptedUturns.value.map((u) => [u.lng, u.lat] as LngLat)
   const clusters = detectTurnAnomalies(turns, geom, { diameterM, waypoints })
   const claimed = new Set(clusters.map((a) => a.waypointIdx).filter((i) => i >= 0))
-  const uturns = detectUturnAnomalies(turns, geom, { waypoints, uturnOk })
+  const uturns = detectUturnAnomalies(turns, geom, { waypoints, uturnOk, accepted })
     .filter((a) => a.waypointIdx < 0 || !claimed.has(a.waypointIdx))
   return [...clusters, ...uturns].sort((a, b) => a.distM - b.distM)
+}
+
+// Écarte les demi-tours assumés « à la coordonnée » (routeStore.acceptedUturns) qui ne
+// correspondent plus à aucun demi-tour du tracé courant — point déplacé, tracé corrigé.
+// Sans ça la liste gonflerait au fil des éditions et un vrai demi-tour survenant plus tard
+// au même endroit resterait masqué. Les demi-tours rattachés à un point, eux, portent leur
+// verdict sur le waypoint et suivent son sort.
+function pruneAcceptedUturns() {
+  const acc = routeStore.acceptedUturns.value
+  const hints = routeStore.voiceHints.value
+  if (!acc.length || !hints.length) return
+  const uturnPts = hints
+    .filter((h) => h.cmd === 10 || h.cmd === 11 || h.cmd === 15)
+    .map((h) => [h.lng, h.lat] as LngLat)
+  const kept = acc.filter((a) => uturnPts.some((u) => haversine(u, [a.lng, a.lat]) <= UTURN_ACCEPT_RADIUS_M))
+  if (kept.length !== acc.length) routeStore.acceptedUturns.value = kept
 }
 
 // Un demi-tour sans point d'étape à portée n'accuse personne : on le situe à la distance
@@ -680,16 +726,21 @@ function turnWarningLabel(a: TurnAnomaly): string {
   return t('routes.turn_warning_item', { point: a.waypointIdx + 1, count: a.count, distance })
 }
 
-// Publie la liste des crochets : alerte + marqueurs, ou table rase. Comme pour les points
-// accrochés au loin, une liste non vide rouvre l'alerte même si elle avait été repliée —
-// le tracé a changé depuis, le repli ne vaut plus.
+// Publie la liste des crochets ACTIFS. Le panneau des demi-tours assumés suit
+// `acceptedTurnItems` (computed) tout seul ; les marqueurs carte des deux sont posés par
+// le watch ci-dessous.
 function setTurnWarnings(anomalies: TurnAnomaly[]) {
   turnWarnings.value = anomalies
   lastFocusedChip.value = null
   pendingUturnAnomaly.value = null
-  showTurnWarning.value = anomalies.length > 0
-  if (anomalies.length) mapRef.value?.showTurnAnomalyMarkers(anomalies)
-  else mapRef.value?.clearTurnAnomalyMarkers()
+}
+
+// Recalcule les crochets actifs et, si la liste n'est pas vide, rouvre le panneau même
+// s'il avait été replié — le tracé a changé depuis. Le panneau assumé-seul, lui, respecte
+// le repli.
+function applyTurnAnomalies() {
+  setTurnWarnings(computeTurnAnomalies())
+  if (turnWarnings.value.length) turnNoticeCollapsed.value = false
 }
 
 // Écart entre chaque point d'étape et le tracé réellement obtenu. Un point « libre » est
@@ -717,12 +768,60 @@ function clearRouteWarnings() {
   noMarkersDismissed.value = false
 }
 
-// Recalcule la liste après un changement qui ne retouche pas le tracé (marquer un demi-tour
-// comme normal) : sans ça l'alerte continuerait de lister un point déjà réglé. Ne réveille
-// rien si aucun avertissement n'est affiché — ils n'apparaissent qu'à la sauvegarde.
+// Recalcule la liste ACTIVE après un changement qui ne retouche pas le tracé (assumer un
+// demi-tour depuis sa puce) : sans ça l'alerte continuerait de lister un demi-tour déjà
+// réglé. Ne réveille rien si la liste active n'est pas déjà à l'écran — les alertes
+// n'apparaissent qu'à la sauvegarde ; le panneau des demi-tours assumés, lui, suit
+// `acceptedTurnItems` de lui-même. Le barrage (saveBlocked) est réévalué : assumer le
+// dernier demi-tour signalé doit lever le blocage sans re-tenter la sauvegarde.
 function refreshTurnWarnings() {
   if (!turnWarnings.value.length) return
-  setTurnWarnings(computeTurnAnomalies())
+  applyTurnAnomalies()
+  if (saveBlocked.value) refreshSaveBlock()
+}
+
+// « Signaler à nouveau » un demi-tour assumé : retire le verdict (flag du point, ou
+// coordonnée acquittée) et ré-audite. Contrairement à refreshTurnWarnings, on force le
+// recalcul actif même sans alerte à l'écran — l'utilisateur demande explicitement à revoir.
+function reauditUturns() {
+  applyTurnAnomalies()
+  turnNoticeCollapsed.value = false
+  if (saveBlocked.value) refreshSaveBlock()
+}
+
+function unacceptUturn(a: TurnAnomaly) {
+  if (a.waypointIdx >= 0) {
+    const wps = routeStore.waypoints.value
+    if (a.waypointIdx >= wps.length) return
+    const next = wps.slice()
+    const w = { ...next[a.waypointIdx] }
+    delete w.uturn_ok
+    next[a.waypointIdx] = w
+    routeStore.waypoints.value = next
+    mapRef.value?.refreshWaypointMarkers()
+  } else {
+    routeStore.acceptedUturns.value = routeStore.acceptedUturns.value.filter(
+      (u) => haversine([u.lng, u.lat], [a.lng, a.lat]) > UTURN_ACCEPT_RADIUS_M,
+    )
+  }
+  reauditUturns()
+}
+
+// Repart de zéro : oublie tous les verdicts « demi-tour assumé » et ré-audite le tracé
+// entier. Chaque demi-tour redevient une alerte active, à re-trancher au cas par cas.
+function recheckAllUturns() {
+  if (routeStore.acceptedUturns.value.length) routeStore.acceptedUturns.value = []
+  const wps = routeStore.waypoints.value
+  if (wps.some((w) => w.uturn_ok)) {
+    routeStore.waypoints.value = wps.map((w) => {
+      if (!w.uturn_ok) return w
+      const c = { ...w }
+      delete c.uturn_ok
+      return c
+    })
+    mapRef.value?.refreshWaypointMarkers()
+  }
+  reauditUturns()
 }
 
 // Ré-évalue tous les avertissements après un recalcul du tracé, pendant que l'utilisateur
@@ -731,7 +830,7 @@ function refreshTurnWarnings() {
 // rien — l'utilisateur n'a plus à re-sauvegarder juste pour voir ce qu'il reste à corriger.
 function reevaluateWarnings() {
   snapWarnings.value = computeSnapWarnings()
-  setTurnWarnings(computeTurnAnomalies())
+  applyTurnAnomalies()
   noMarkersWarn.value = routeStore.markers.value.length === 0
   refreshSaveBlock()
 }
@@ -769,7 +868,7 @@ async function save() {
   // quelque chose à en dire. S'il y a matière, on fait barrage une fois — l'utilisateur
   // corrige, ou passe outre.
   snapWarnings.value = computeSnapWarnings()
-  setTurnWarnings(computeTurnAnomalies())
+  applyTurnAnomalies()
   // Rappel informatif : un itinéraire sans repère perd de sa lisibilité une fois
   // partagé (le lecteur ne voit par défaut que le parcours et les repères).
   noMarkersWarn.value = routeStore.markers.value.length === 0
@@ -799,7 +898,7 @@ async function saveAnyway() {
 // Ferme l'alerte mais LAISSE les marqueurs sur la carte : ils guident l'utilisateur vers
 // les points à corriger et disparaissent au prochain recalcul du tracé (cf. recomputeRoute).
 function closeTurnWarning() {
-  showTurnWarning.value = false
+  turnNoticeCollapsed.value = true
 }
 
 // Cadrer un point à problème, c'est vouloir le corriger : la pile d'alertes n'a plus rien
@@ -810,7 +909,7 @@ function collapseNotices() {
   errorDismissed.value = true
   snapDismissed.value = true
   noMarkersDismissed.value = true
-  showTurnWarning.value = false
+  turnNoticeCollapsed.value = true
 }
 
 // Bascule la carte en pose de repère depuis l'alerte « aucun repère » : c'est le geste
@@ -828,24 +927,32 @@ function startMarkerMode() {
 function focusTurnAnomaly(a: TurnAnomaly) {
   mapRef.value?.flyTo(a.lng, a.lat, 17)
   lastFocusedChip.value = `turn-${a.idx}`
-  // Demi-tour rattaché à un point : on garde une pastille d'action en tête de carte, pour
-  // trancher « c'est voulu » sans rouvrir l'alerte qu'on vient de replier.
-  pendingUturnAnomaly.value = a.kind === 'uturn' && a.waypointIdx >= 0 ? a : null
+  // Demi-tour ACTIF (rattaché à un point ou non) : on garde une pastille d'action en tête
+  // de carte, pour trancher « c'est voulu » sans rouvrir l'alerte qu'on vient de replier.
+  // Un demi-tour déjà assumé n'a pas de pastille — il est déjà réglé.
+  pendingUturnAnomaly.value = a.kind === 'uturn' && !a.accepted ? a : null
   collapseNotices()
 }
 
-// « Demi-tour normal ici » depuis la puce, sans ouvrir la bulle du point : même effet que
-// wp-tooltip-action--uturn-ok côté carte (marque uturn_ok, ne relance PAS BRouter — le
-// drapeau ne change pas le tracé). detectUturnAnomalies écarte alors ce point, la puce
-// disparaît au relistage. Sens unique ici : pour re-signaler, on repasse par la bulle.
+// « Demi-tour normal ici » depuis la puce, sans ouvrir la bulle du point : ne relance PAS
+// BRouter — le verdict ne change pas le tracé. detectUturnAnomalies écarte alors ce
+// demi-tour, la puce disparaît au relistage. Sens unique ici : pour re-signaler un
+// demi-tour rattaché à un point, on repasse par la bulle ; un demi-tour orphelin, lui,
+// ressort dès que le tracé le rapproche à nouveau d'un endroit non assumé.
+//   • rattaché à un point → flag `uturn_ok` sur le waypoint (suit le point s'il bouge) ;
+//   • orphelin → coordonnée dans routeStore.acceptedUturns (réappariée par proximité).
 function markTurnUturnOk(a: TurnAnomaly) {
-  const idx = a.waypointIdx
-  const wps = routeStore.waypoints.value
-  if (idx < 0 || idx >= wps.length) return
-  const next = wps.slice()
-  next[idx] = { ...next[idx], uturn_ok: true }
-  routeStore.waypoints.value = next
-  mapRef.value?.refreshWaypointMarkers()
+  if (a.kind !== 'uturn') return
+  if (a.waypointIdx >= 0) {
+    const wps = routeStore.waypoints.value
+    if (a.waypointIdx >= wps.length) return
+    const next = wps.slice()
+    next[a.waypointIdx] = { ...next[a.waypointIdx], uturn_ok: true }
+    routeStore.waypoints.value = next
+    mapRef.value?.refreshWaypointMarkers()
+  } else {
+    routeStore.acceptedUturns.value = [...routeStore.acceptedUturns.value, { lng: a.lng, lat: a.lat }]
+  }
   refreshTurnWarnings()
 }
 
@@ -890,6 +997,7 @@ async function persist() {
   saving.value = true
   routeStore.error.value = null
   try {
+    pruneAcceptedUturns()
     // Comble les cols jamais renommés à la main avec leur défaut (lieu d'arrivée) :
     // sans ça, seul l'éditeur les affiche (displayClimbName), et la navigation, qui ne
     // recherche pas les localités, n'a rien à transmettre à l'appli compagnon — voir
@@ -905,6 +1013,7 @@ async function persist() {
     const body = JSON.stringify({
       name: routeStore.name.value.trim(),
       waypoints: routeStore.waypoints.value,
+      accepted_uturns: routeStore.acceptedUturns.value,
       geometry: routeStore.geometry.value,
       voice_hints: routeStore.voiceHints.value,
       // `relevantPlaces`, pas la liste brute : les localités sont désormais toujours
@@ -2019,7 +2128,7 @@ function setupGpxFileHandler() {
 watch(state, () => state.save(), { deep: true })
 
 // Toute édition des données persistées marque l'itinéraire comme non enregistré.
-watch([routeStore.waypoints, routeStore.name, routeStore.sport, routeStore.profile], () => {
+watch([routeStore.waypoints, routeStore.acceptedUturns, routeStore.name, routeStore.sport, routeStore.profile], () => {
   if (trackDirty) dirty.value = true
 }, { deep: true })
 
@@ -2558,12 +2667,24 @@ onBeforeUnmount(() => {
                     </div>
                   </div>
 
-                  <!-- Crochets : amas de virages / demi-tour (point mal placé) -->
-                  <div v-if="turnVisible" key="turns" class="map-notice map-notice--danger" role="alert">
+                  <!-- Crochets actifs (amas / demi-tour d'un point mal placé) + demi-tours
+                       assumés, dans un seul panneau. Ton rouge s'il y a de l'actif, neutre
+                       sinon (rappel des verdicts « demi-tour normal », avec « tout revérifier »). -->
+                  <div v-if="turnVisible" key="turns" class="map-notice"
+                    :class="turnWarnings.length ? 'map-notice--danger' : 'map-notice--muted'"
+                    :role="turnWarnings.length ? 'alert' : 'status'">
                     <div class="map-notice-header">
-                      <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
-                      <strong class="flex-grow-1">{{ t('routes.turn_warning_title') }}</strong>
-                      <button type="button" class="map-notice-help" :class="{ 'is-open': turnHelpOpen }"
+                      <i aria-hidden="true" class="fa-solid"
+                        :class="turnWarnings.length ? 'fa-triangle-exclamation' : 'fa-arrows-turn-to-dots'"></i>
+                      <strong class="flex-grow-1">
+                        {{ turnWarnings.length ? t('routes.turn_warning_title') : t('routes.turn_accepted_title') }}
+                      </strong>
+                      <button v-if="acceptedTurnItems.length" type="button" class="map-notice-recheck"
+                        @click="recheckAllUturns">
+                        {{ t('routes.uturn_recheck_all') }}
+                      </button>
+                      <button v-if="turnWarnings.length" type="button" class="map-notice-help"
+                        :class="{ 'is-open': turnHelpOpen }"
                         :aria-label="t('routes.turn_warning_help_label')" :aria-expanded="turnHelpOpen"
                         @click="turnHelpOpen = !turnHelpOpen">
                         <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
@@ -2571,9 +2692,9 @@ onBeforeUnmount(() => {
                       <button type="button" class="btn-close btn-close-sm" @click="closeTurnWarning"
                         :aria-label="t('routes.turn_warning_dismiss')"></button>
                     </div>
-                    <p v-if="turnHelpOpen" class="map-notice-body">{{ t('routes.turn_warning_body') }}</p>
+                    <p v-if="turnHelpOpen && turnWarnings.length" class="map-notice-body">{{ t('routes.turn_warning_body') }}</p>
                     <div class="map-notice-chips">
-                      <div v-for="(a, i) in turnWarnings" :key="i" class="map-notice-chip-pair">
+                      <div v-for="(a, i) in turnWarnings" :key="`w${i}`" class="map-notice-chip-pair">
                         <button type="button" class="map-notice-chip"
                           :class="{ 'is-visited': lastFocusedChip === `turn-${a.idx}` }" @click="focusTurnAnomaly(a)">
                           <i aria-hidden="true"
@@ -2581,9 +2702,19 @@ onBeforeUnmount(() => {
                               : (a.kind === 'uturn' ? 'fa-solid fa-arrows-turn-to-dots' : 'fa-solid fa-location-crosshairs')"></i>
                           {{ turnWarningLabel(a) }}
                         </button>
-                        <button v-if="a.kind === 'uturn' && a.waypointIdx >= 0" type="button"
+                        <button v-if="a.kind === 'uturn'" type="button"
                           class="map-notice-chip map-notice-chip--uturn" @click="markTurnUturnOk(a)">
                           {{ t('routes.uturn_ok_short') }}
+                        </button>
+                      </div>
+                      <div v-for="(a, i) in acceptedTurnItems" :key="`a${i}`" class="map-notice-chip-pair">
+                        <button type="button" class="map-notice-chip is-accepted" @click="focusTurnAnomaly(a)">
+                          <i class="fa-solid fa-check" aria-hidden="true"></i>
+                          {{ turnWarningLabel(a) }}
+                        </button>
+                        <button type="button" class="map-notice-chip map-notice-chip--reflag"
+                          @click="unacceptUturn(a)">
+                          {{ t('routes.uturn_flag_again') }}
                         </button>
                       </div>
                     </div>
@@ -3113,6 +3244,12 @@ onBeforeUnmount(() => {
   border-color: #fca5a5;
   color: #7f1d1d;
 }
+/* Panneau des demi-tours assumés, sans crochet actif : rappel neutre, pas une alerte. */
+.map-notice--muted {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  color: #374151;
+}
 .map-notice-header {
   display: flex;
   align-items: center;
@@ -3179,6 +3316,32 @@ onBeforeUnmount(() => {
   color: #0f5132;
 }
 .map-notice-chip--uturn:hover { background: #b9dcc9; }
+/* Demi-tour assumé : puce cochée en gris (le verdict tient), doublée d'une puce
+   « signaler à nouveau » qui le renvoie dans les crochets actifs. */
+.map-notice-chip.is-accepted {
+  background: #e9ecef;
+  border-color: #ced4da;
+  color: #495057;
+}
+.map-notice-chip.is-accepted:hover { background: #dee2e6; }
+.map-notice-chip--reflag {
+  background: rgba(255, 255, 255, 0.75);
+  color: #495057;
+  border-color: #ced4da;
+}
+.map-notice-chip--reflag:hover { background: #fff; }
+/* Lien « tout revérifier » dans l'en-tête du panneau : discret, aligné sur le texte. */
+.map-notice-recheck {
+  border: 0;
+  background: none;
+  padding: 0.15rem 0.3rem;
+  color: inherit;
+  font-size: 0.78rem;
+  text-decoration: underline;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.map-notice-recheck:hover { opacity: 1; }
 .map-notice-actions {
   pointer-events: auto;
   display: flex;

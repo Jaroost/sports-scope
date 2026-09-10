@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_05_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_10_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -164,6 +164,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_05_160000) do
   end
 
   create_table "routes", force: :cascade do |t|
+    t.jsonb "accepted_uturns", default: [], null: false
     t.string "activity", default: "cycling", null: false
     t.float "avg_speed_kmh"
     t.jsonb "climb_names", default: [], null: false

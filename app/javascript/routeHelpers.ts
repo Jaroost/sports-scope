@@ -1360,6 +1360,8 @@ export interface TurnAnomaly {
   distM: number       // distance cumulée jusqu'à l'amas
   count: number       // nombre de virages dans l'amas (1 pour un demi-tour isolé)
   waypointIdx: number // point d'étape en cause (-1 si aucun à portée / non fournis)
+  accepted?: boolean  // demi-tour assumé par l'utilisateur — renvoyé seulement avec
+                      // detectUturnAnomalies({ includeAccepted: true })
 }
 
 // Emprise d'un rond-point : rayon autour du hint RNDB dans lequel les virages voisins
@@ -1490,6 +1492,13 @@ export function detectTurnAnomalies(
 // voie), 20 m pour le cas extrême ; 25 m couvre donc tout sans mordre sur le point suivant.
 const UTURN_WP_RADIUS_M = 25
 
+// Rayon de réappariement d'un demi-tour assumé « à la coordonnée » (opts.accepted,
+// pour un demi-tour hors point d'étape — cf. routeStore.acceptedUturns). Plus large
+// que UTURN_WP_RADIUS_M : le sommet d'un demi-tour se déplace de quelques mètres d'un
+// recalcul à l'autre quand on retouche un point voisin, sans que l'aller-retour
+// change de nature. Reste assez serré pour ne pas absorber un AUTRE demi-tour proche.
+export const UTURN_ACCEPT_RADIUS_M = 30
+
 // Repère les demi-tours, seconde signature d'un point d'étape mal posé — et la seule que
 // `detectTurnAnomalies` ne peut pas voir. Un point posé sur une impasse fait sortir BRouter
 // de la route, aller au point, faire demi-tour et revenir : les virages d'entrée/sortie du
@@ -1509,13 +1518,22 @@ const UTURN_WP_RADIUS_M = 25
 //     le rattrape pas.
 //   • un point marqué `uturn_ok` : l'aller-retour est délibéré (sommet, point de vue), et
 //     la géométrie seule ne distingue pas ce cas d'un point mal posé — l'utilisateur tranche.
+//   • une coordonnée dans `opts.accepted` : même verdict de l'utilisateur, mais pour un
+//     demi-tour qui ne tombe sur AUCUN point d'étape (routeStore.acceptedUturns) — sans ça
+//     il ressortirait « orphelin » sans moyen de l'assumer.
+//
+// `opts.includeAccepted` inverse le traitement des demi-tours assumés : au lieu de les
+// taire, on les renvoie avec `accepted: true`. Sert au panneau « demi-tours assumés » de
+// l'éditeur, qui les liste pour pouvoir les re-signaler.
 export function detectUturnAnomalies(
   turns: TurnPoint[],
   geometry: Coord[],
-  opts: { waypoints?: LngLat[]; uturnOk?: boolean[]; radiusM?: number } = {},
+  opts: { waypoints?: LngLat[]; uturnOk?: boolean[]; accepted?: LngLat[]; includeAccepted?: boolean; radiusM?: number; acceptRadiusM?: number } = {},
 ): TurnAnomaly[] {
   const radiusM = opts.radiusM ?? UTURN_WP_RADIUS_M
+  const acceptRadiusM = opts.acceptRadiusM ?? UTURN_ACCEPT_RADIUS_M
   const waypoints = opts.waypoints ?? []
+  const accepted = opts.accepted ?? []
   const out: TurnAnomaly[] = []
   if (!geometry.length) return out
   for (const t of turns) {
@@ -1525,10 +1543,19 @@ export function detectUturnAnomalies(
     const p: LngLat = [g[0], g[1]]
     const waypointIdx = nearestWaypoint([p], waypoints, radiusM)
     // `waypointIdx >= 0` protège le cas sans waypoints : nearestWaypoint renvoie alors -1,
-    // qui vaut aussi `waypoints.length - 1` sur une liste vide.
+    // qui vaut aussi `waypoints.length - 1` sur une liste vide. Demi-tour du premier /
+    // dernier point : artefact de routage sans cap, jamais une vraie anomalie — écarté
+    // quoi qu'il arrive, il ne peut pas non plus être « assumé ».
     if (waypointIdx >= 0 && (waypointIdx === 0 || waypointIdx === waypoints.length - 1)) continue
-    if (waypointIdx >= 0 && opts.uturnOk?.[waypointIdx]) continue
-    out.push({ kind: 'uturn', idx: t.idx, lng: p[0], lat: p[1], distM: t.distM, count: 1, waypointIdx })
+    const item: TurnAnomaly = { kind: 'uturn', idx: t.idx, lng: p[0], lat: p[1], distM: t.distM, count: 1, waypointIdx }
+    const isAccepted =
+      (waypointIdx >= 0 && opts.uturnOk?.[waypointIdx] === true) ||
+      accepted.some((a) => haversine(a, p) <= acceptRadiusM)
+    if (isAccepted) {
+      if (opts.includeAccepted) out.push({ ...item, accepted: true })
+      continue
+    }
+    out.push(item)
   }
   return out
 }

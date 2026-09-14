@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
-import { ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
+import { ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, styleCoversPoint, suggestedStyleForPoint } from '../mapStyles'
 import { useNavLineWidth, widthRunsCollection } from '../navLineWidth'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
@@ -136,6 +136,22 @@ const activePanel = ref<string | null>(null)
 // Le fond de carte de navigation est gouverné par le profil (comme le créateur) :
 // on part du réglage du compte ; le sélecteur ne sert qu'à le changer en séance.
 const mapStyleId = ref(navPrefs.default_style as string)
+// Un fond régional (swisstopo, IGN, basemap.at) hors de sa zone ne sert que des tuiles
+// vides — et, sur réseau mobile, certaines requêtes de tuiles restent pendantes sans
+// fin (MapLibre ne pose aucun timeout), si bien que l'événement `load` n'arrive jamais
+// et que la navigation reste bloquée sur « Calcul du tracé… ». On bascule donc tout
+// seul vers un fond qui couvre la zone où l'on est, tant que l'utilisateur n'a pas
+// choisi un fond lui-même en séance (auquel cas on respecte son choix jusqu'à la fin).
+let userPickedStyle = false
+// Horodatage (performance.now) du dernier basculement automatique de fond — anti-
+// oscillation près d'une frontière de bbox (cf. maybeAdjustBaseForCoverage). -Infinity
+// pour ne jamais retarder le tout premier ajustement, même sur un fix GPS immédiat.
+let lastBaseAutoSwitch = -Infinity
+const BASE_AUTO_SWITCH_COOLDOWN_MS = 30000
+// Attente maximale de `style.load` au montage de la carte avant de lever quand même
+// l'overlay de chargement : au-delà, on entre en navigation sur une carte encore nue
+// plutôt que de rester figé si le style (distant) tarde. Voir initMap.
+const STYLE_LOAD_TIMEOUT_MS = 6000
 
 // ─── Carte hors-ligne (PMTiles swisstopo gris) ────────────────────────────────
 // Une archive du corridor a-t-elle été téléchargée pour ce trajet ? Le bouton dédié
@@ -1697,6 +1713,15 @@ async function initMap() {
   maplibre = (await import('maplibre-gl')).default
   await import('maplibre-gl/dist/maplibre-gl.css')
 
+  // Fond régional hors de sa zone (fond suisse pour un tracé français, p. ex.) : on part
+  // directement sur un fond qui couvre le point qu'on va cadrer — le départ du tracé en
+  // mode itinéraire, la Suisse en mode libre (avant le premier fix). Sans ça, les tuiles
+  // hors couverture peuvent bloquer l'événement `load` de la carte indéfiniment. Le
+  // suivi en roulant est fait par maybeAdjustBaseForCoverage.
+  if (hasRoute.value && geometry.length) {
+    mapStyleId.value = coverageAwareStyle(mapStyleId.value, geometry[0][0], geometry[0][1])
+  }
+
   // Branche l'archive hors-ligne du trajet (si déjà téléchargée) AVANT de construire le
   // style, pour pouvoir démarrer directement sur le fond local en cas de lancement
   // sans réseau.
@@ -1738,6 +1763,10 @@ async function initMap() {
   map.on('styleimagemissing', (e: any) => {
     map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) })
   })
+  // Erreurs de source / tuile (fond hors couverture, WMTS qui refuse une tuile) : on
+  // les trace sans les laisser bloquer la navigation — le filet de `initMap` garantit
+  // déjà l'entrée en séance même si des tuiles ne chargent jamais.
+  map.on('error', (e: any) => console.warn('[nav] carte', e?.error?.message ?? e?.error ?? e))
   // Met la hauteur du conteneur en cache : la boucle la lisait chaque frame via
   // clientHeight, ce qui force un reflow de layout synchrone. On ne la rafraîchit
   // qu'au redimensionnement (carte et fenêtre).
@@ -1835,10 +1864,26 @@ async function initMap() {
   // seulement — au clic, le double-clic pour zoomer reste normal, et rien ne le concurrence.
   if (TWO_FINGER_PAN) map.doubleClickZoom.disable()
 
+  // On attend `style.load` (style prêt = couches posables) et NON `load` : ce dernier
+  // n'est émis qu'une fois TOUTES les tuiles du viewport initial chargées ou en erreur,
+  // or une tuile hors couverture (fond régional loin de sa zone, réseau mobile) peut
+  // rester pendante sans fin — MapLibre ne pose aucun timeout — et l'overlay « Calcul
+  // du tracé… » ne se lèverait jamais. Filet supplémentaire : si `style.load` lui-même
+  // n'arrive pas (style distant injoignable), on lève l'attente au bout de
+  // STYLE_LOAD_TIMEOUT_MS ; les couches s'installeront quand `style.load` finira par
+  // arriver.
   await new Promise<void>((resolve) => {
-    map.on('load', () => {
-      // Mode itinéraire (lien partagé chargé avant la carte) : installe le tracé et
-      // cadre dessus avant le premier fix GPS. Mode libre : rien à installer.
+    let settled = false
+    let timer: number | undefined
+    const finish = () => {
+      if (settled) return
+      settled = true
+      if (timer !== undefined) window.clearTimeout(timer)
+      resolve()
+    }
+    const installAndFinish = () => {
+      // Mode itinéraire (tracé chargé avant la carte) : installe le tracé et cadre
+      // dessus avant le premier fix GPS. Mode libre : rien à installer.
       if (hasRoute.value && coords.length) {
         installRouteLayers()
         renderTurnMarkers()
@@ -1850,8 +1895,11 @@ async function initMap() {
       // itinéraire est chargé, mais le mode libre (rien à installer, cf. commentaire
       // au-dessus) n'a personne d'autre pour le faire.
       installOrReorderTraveledPath()
-      resolve()
-    })
+      finish()
+    }
+    if (map.isStyleLoaded()) installAndFinish()
+    else map.once('style.load', installAndFinish)
+    timer = window.setTimeout(finish, STYLE_LOAD_TIMEOUT_MS)
   })
 }
 
@@ -2223,15 +2271,46 @@ function maybeApplyMarkerScale() {
   pois.applyPoiScale(z)
 }
 
-function setMapStyle(id: string) {
+// Applique un fond de carte à la carte de navigation. `persist` : le reporter sur le
+// profil (choix explicite de l'utilisateur) ou non (ajustement de vue automatique de
+// couverture, cf. maybeAdjustBaseForCoverage).
+function applyMapStyle(id: string, persist: boolean) {
   if (!map || id === mapStyleId.value) return
   mapStyleId.value = id
   // Le fond de carte de la navigation guidée a sa propre préférence, distincte de celle
   // du créateur (elle-même désormais propre à chaque sport).
-  persistNavigationStyle(id as any)
+  if (persist) persistNavigationStyle(id as any)
   noteBaseReloaded()
   map.setStyle(resolveBaseStyle(id), { diff: false })
   map.once('style.load', afterStyleLoad)
+}
+
+function setMapStyle(id: string) {
+  // Choix explicite en séance : on cesse d'ajuster automatiquement le fond selon la
+  // couverture pour le reste de la session — l'utilisateur sait ce qu'il veut voir.
+  userPickedStyle = true
+  applyMapStyle(id, true)
+}
+
+// Fond à utiliser pour cadrer `[lng,lat]` : le fond `preferred` s'il couvre le point,
+// sinon le fond régional du pays concerné (ou le fond mondial par défaut).
+function coverageAwareStyle(preferred: string, lng: number, lat: number): string {
+  return styleCoversPoint(preferred, lng, lat) ? preferred : suggestedStyleForPoint({ lng, lat })
+}
+
+// En roulant, garde le fond de carte cohérent avec la zone traversée : bascule sur le
+// fond du pays où l'on se trouve quand le fond préféré du compte ne le couvre pas (fond
+// suisse en France, p. ex. — tuiles vides, voire requêtes de tuiles qui pendouillent),
+// et revient au fond préféré dès qu'il redevient pertinent. Sans persistance (c'est un
+// ajustement de vue), et sans rien faire si l'utilisateur a choisi un fond lui-même.
+function maybeAdjustBaseForCoverage(lng: number, lat: number) {
+  if (userPickedStyle || !map) return
+  const want = coverageAwareStyle(navPrefs.default_style as string, lng, lat)
+  if (want === mapStyleId.value) return
+  const now = performance.now()
+  if (now - lastBaseAutoSwitch < BASE_AUTO_SWITCH_COOLDOWN_MS) return
+  lastBaseAutoSwitch = now
+  applyMapStyle(want, false)
 }
 
 function afterStyleLoad() {
@@ -2509,6 +2588,9 @@ function onPosition(pos: GeolocationPosition) {
   gpsError.value = null
   hasFix.value = true
   bumpPosTick()
+  // Garde le fond de carte cohérent avec la zone où l'on roule (fond régional hors de
+  // sa zone → fond du pays traversé). No-op tant qu'on reste dans la couverture.
+  maybeAdjustBaseForCoverage(here[0], here[1])
 
   if (hasRoute.value) {
     onPositionRoute(pos, here)

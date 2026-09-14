@@ -32,9 +32,7 @@ DB=${OSM_POI_DATABASE:-osm_pois_development}
 # Régions par défaut : Suisse + voisinage cyclable. Élargir via OSM_POI_REGIONS.
 DEFAULT_REGIONS="\
 https://download.geofabrik.de/europe/switzerland-latest.osm.pbf \
-https://download.geofabrik.de/europe/france/rhone-alpes-latest.osm.pbf \
-https://download.geofabrik.de/europe/france/franche-comte-latest.osm.pbf \
-https://download.geofabrik.de/europe/france/alsace-latest.osm.pbf \
+https://download.geofabrik.de/europe/france-latest.osm.pbf \
 https://download.geofabrik.de/europe/italy/nord-ovest-latest.osm.pbf \
 https://download.geofabrik.de/europe/italy/nord-est-latest.osm.pbf \
 https://download.geofabrik.de/europe/austria-latest.osm.pbf \

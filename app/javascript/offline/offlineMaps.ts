@@ -1,60 +1,89 @@
-// Cartes hors-ligne pour la navigation : pré-télécharge le corridor du trajet depuis les
-// fonds WMTS swisstopo (JPEG), empaquète chaque couche en une archive PMTiles stockée dans
-// l'OPFS, puis les expose à MapLibre via le protocole `pmtiles://`.
+// Cartes hors-ligne pour la navigation : pré-télécharge le corridor du trajet depuis des
+// fonds WMTS officiels (swisstopo, IGN), empaquète chaque couche en une archive PMTiles
+// stockée dans l'OPFS, puis les expose à MapLibre via le protocole `pmtiles://`.
 //
-// Pourquoi seulement swisstopo : ce sont les seuls fonds utilisés en navigation dont les CGU
-// autorisent explicitement l'usage hors-ligne (géodonnées OGD, gratuites y compris
-// commercialement, seule condition : mention « © swisstopo »). Les autres fonds (CyclOSM,
-// OpenTopoMap) interdisent le pré-téléchargement. Voir la discussion CGU du projet.
+// Pourquoi seulement ces fonds-là : ce sont les seuls fonds utilisés en navigation dont les
+// CGU autorisent explicitement l'usage hors-ligne — géodonnées ouvertes (OGD suisse, Licence
+// Ouverte / Etalab pour l'IGN), gratuites y compris commercialement, seule condition une
+// mention d'attribution. Les autres fonds (CyclOSM, OpenTopoMap) interdisent le
+// pré-téléchargement. Voir la discussion CGU du projet.
 //
-// Hors de la couverture suisse (France, Italie…), le WMTS ne renvoie pas d'erreur : il
-// répond 200 avec une tuile JPEG uniforme de 668 octets. Le zoom maximal réellement servi
-// dépend donc du lieu (z17 sur le Plateau, z15 vers Aoste, z14 vers Annecy). On descend la
-// pyramide zoom par zoom : dès qu'une tuile est « vide », ses descendants le sont aussi et
-// ne sont pas demandés ; les niveaux manquants sont ensuite comblés en agrandissant le
-// quadrant correspondant du plus profond ancêtre réel. La carte reste ainsi lisible (mais
-// floue) au-delà de la frontière, au lieu de virer au blanc quand on zoome.
+// Hors de leur couverture (swisstopo en France, IGN en Suisse…), les deux services ne se
+// comportent PAS pareil — vérifié en direct plutôt que supposé :
+//   - swisstopo (wmts.geo.admin.ch) ne renvoie pas d'erreur : il répond 200 avec une tuile
+//     JPEG uniforme de 668 octets. Le zoom maximal réellement servi dépend donc du lieu (z17
+//     sur le Plateau, z15 vers Aoste, z14 vers Annecy).
+//   - IGN (data.geopf.fr) répond 404 (corps XML) dès qu'aucune donnée française ne couvre la
+//     tuile — sauf le plan (`ignplan`), qui garde un fond mondial jusqu'à des zooms assez fins
+//     près de la frontière avant de basculer en 404 à son tour.
+//   Les deux signalent la même chose (« rien ici ») et sont donc traités pareil : on descend
+//   la pyramide zoom par zoom, une tuile « vide » (au sens de l'un ou l'autre) élague ses
+//   descendants sans les demander ; les niveaux manquants sont ensuite comblés en agrandissant
+//   le quadrant correspondant du plus profond ancêtre réel. La carte reste ainsi lisible (mais
+//   floue) au-delà de la frontière, au lieu de virer au blanc quand on zoome.
 //
-// `swissimage` fait exception : hors de Suisse, il sert un fond mondial basse résolution au
-// lieu de la tuile vide. L'élagage ne s'y déclenche donc jamais et l'archive couvre tout le
-// corridor — ce qui donne le bon résultat visuel, sans code spécifique. Attention en
-// revanche : cette imagerie hors frontière n'est vraisemblablement pas de la donnée
-// swisstopo, et sort donc du cadre OGD ci-dessus.
+// `swissimage` et `ignortho` font exception : hors de leur pays, ils servent un fond mondial
+// basse résolution au lieu d'une absence de données (vérifié en direct jusqu'en Suisse pour
+// l'ortho IGN). L'élagage ne s'y déclenche donc quasi jamais et l'archive couvre tout le
+// corridor — ce qui donne le bon résultat visuel, sans code spécifique. Attention en revanche :
+// cette imagerie hors frontière n'est vraisemblablement pas de la donnée nationale du fond
+// concerné, et sort donc du cadre OGD/Etalab ci-dessus.
+//
+// Format des tuiles : swisstopo et `ignortho` sont du JPEG, `ignplan` du PNG (texte/vecteur,
+// la compression avec perte le rendrait illisible). Le format de chaque couche est porté par
+// `LAYER_SPECS` et suit tout le pipeline — décodage, ré-encodage des niveaux comblés, et
+// octet `tileType` de l'archive PMTiles — pour ne jamais mélanger les deux dans une archive.
 import { PMTiles, FileSource, Protocol } from 'pmtiles'
 import { buildPmtilesArchive, type RawTile } from './pmtilesWriter'
 import { corridorTiles, corridorTilesByZoom, boundsOf, type CorridorOpts, type Tile } from './tileMath'
 
 // Fonds téléchargeables. Les identifiants sont ceux de `mapStyles.ts` (MAP_STYLES), pour que
 // le style actif en navigation désigne directement son archive.
-export const OFFLINE_LAYERS = ['swissgrau', 'swisstopo', 'swissimage'] as const
+export const OFFLINE_LAYERS = ['swissgrau', 'swisstopo', 'swissimage', 'ignplan', 'ignortho'] as const
 export type OfflineLayer = (typeof OFFLINE_LAYERS)[number]
 
-// `avgTileBytes` : poids moyen d'une tuile, mesuré sur un corridor réel (Lausanne→Aigle,
-// zooms 10–17). Sert uniquement à l'estimation affichée avant téléchargement ; le poids
-// dépend surtout du paysage traversé (~16 Ko en forêt, ~28 Ko en ville ou en montagne).
-const LAYER_SPECS: Record<OfflineLayer, { wmts: string; avgTileBytes: number }> = {
-  swissgrau:  { wmts: 'ch.swisstopo.pixelkarte-grau',  avgTileBytes: 20.0 * 1024 },
-  swisstopo:  { wmts: 'ch.swisstopo.pixelkarte-farbe', avgTileBytes: 21.5 * 1024 },
-  swissimage: { wmts: 'ch.swisstopo.swissimage',       avgTileBytes: 17.9 * 1024 },
+type TileFormat = 'jpeg' | 'png'
+
+const SWISSTOPO_ATTRIBUTION = '© swisstopo'
+const IGN_ATTRIBUTION = '© IGN'
+
+const geoAdminUrl = (wmts: string) => (z: number, x: number, y: number) =>
+  `https://wmts.geo.admin.ch/1.0.0/${wmts}/default/current/3857/${z}/${x}/${y}.jpeg`
+
+const geopfUrl = (layer: string, format: TileFormat) => (z: number, x: number, y: number) =>
+  `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}` +
+  `&STYLE=normal&FORMAT=image/${format}&TILEMATRIXSET=PM&TILEMATRIX=${z}&TILEROW=${y}&TILECOL=${x}`
+
+// `avgTileBytes` : poids moyen d'une tuile, mesuré sur des corridors réels (swisstopo :
+// Lausanne→Aigle, zooms 10–17 ; IGN : autour de Lyon, mêmes zooms). Sert uniquement à
+// l'estimation affichée avant téléchargement ; le poids dépend surtout du paysage traversé,
+// et `ignplan` (vecteur rendu en PNG, texte compris) pèse nettement plus qu'une photo aérienne.
+const LAYER_SPECS: Record<OfflineLayer, { url: (z: number, x: number, y: number) => string; avgTileBytes: number; format: TileFormat; attribution: string }> = {
+  swissgrau:  { url: geoAdminUrl('ch.swisstopo.pixelkarte-grau'),  avgTileBytes: 20.0 * 1024, format: 'jpeg', attribution: SWISSTOPO_ATTRIBUTION },
+  swisstopo:  { url: geoAdminUrl('ch.swisstopo.pixelkarte-farbe'), avgTileBytes: 21.5 * 1024, format: 'jpeg', attribution: SWISSTOPO_ATTRIBUTION },
+  swissimage: { url: geoAdminUrl('ch.swisstopo.swissimage'),       avgTileBytes: 17.9 * 1024, format: 'jpeg', attribution: SWISSTOPO_ATTRIBUTION },
+  ignplan:    { url: geopfUrl('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'png'), avgTileBytes: 45.0 * 1024, format: 'png',  attribution: IGN_ATTRIBUTION },
+  ignortho:   { url: geopfUrl('ORTHOIMAGERY.ORTHOPHOTOS', 'jpeg'),         avgTileBytes: 20.0 * 1024, format: 'jpeg', attribution: IGN_ATTRIBUTION },
 }
 
 export function isOfflineLayer(id: string): id is OfflineLayer {
   return (OFFLINE_LAYERS as readonly string[]).includes(id)
 }
 
-const tileUrl = (layer: OfflineLayer, z: number, x: number, y: number) =>
-  `https://wmts.geo.admin.ch/1.0.0/${LAYER_SPECS[layer].wmts}/default/current/3857/${z}/${x}/${y}.jpeg`
+const tileUrl = (layer: OfflineLayer, z: number, x: number, y: number) => LAYER_SPECS[layer].url(z, x, y)
 
 const OPFS_DIR = 'offline-maps'
-const ATTRIBUTION = '© swisstopo'
 // Nombre de requêtes WMTS simultanées : un petit burst ponctuel par trajet reste compatible
-// avec le fair use swisstopo (la limite ~20 req/min vise la moyenne 24/7, pas un import unique).
+// avec le fair use de ces services (la limite ~20 req/min de swisstopo vise la moyenne 24/7,
+// pas un import unique) ; même prudence appliquée à data.geopf.fr, faute de chiffre publié.
 const CONCURRENCY = 6
 // Côté d'une tuile WMTS, en pixels.
 const TILE_PX = 256
 // La tuile « hors couverture » de swisstopo pèse 668 o (JPEG uniforme, toujours identique).
 // Toute tuile aussi légère est traitée comme vide : une tuile réelle mais unie (grand lac)
-// serait de toute façon reconstruite à l'identique depuis son parent.
+// serait de toute façon reconstruite à l'identique depuis son parent. IGN, lui, signale le
+// hors-couverture par un 404 explicite (cf. en-tête du fichier) : géré à part dans la boucle
+// de téléchargement, ce seuil ne le concerne pas.
 const BLANK_MAX_BYTES = 1024
 // Qualité de ré-encodage des tuiles agrandies. L'image est déjà floue : inutile de monter.
 const UPSCALE_QUALITY = 0.8
@@ -155,11 +184,13 @@ const tileKey = (z: number, x: number, y: number) => `${z}/${x}/${y}`
 
 /**
  * Agrandit le quadrant (`z`,`x`,`y`) de l'image d'un ancêtre situé `d` niveaux au-dessus,
- * pour produire une tuile 256×256 plausible là où swisstopo ne sert plus de données.
+ * pour produire une tuile 256×256 plausible là où le fond ne sert plus de données. Ré-encodée
+ * dans le format réel de la couche (`format`) : mélanger JPEG et PNG dans la même archive n'a
+ * pas de sens, l'octet `tileType` de l'en-tête PMTiles n'en portant qu'un seul.
  * Renvoie `null` si le navigateur n'expose pas `OffscreenCanvas` : on stocke alors
  * simplement moins de niveaux, sans faire échouer le téléchargement.
  */
-async function upscaleQuadrant(bitmap: ImageBitmap, d: number, x: number, y: number): Promise<Uint8Array | null> {
+async function upscaleQuadrant(bitmap: ImageBitmap, d: number, x: number, y: number, format: TileFormat): Promise<Uint8Array | null> {
   if (typeof OffscreenCanvas === 'undefined') return null
   const side = TILE_PX / 2 ** d // côté du quadrant dans l'image de l'ancêtre
   const canvas = new OffscreenCanvas(TILE_PX, TILE_PX)
@@ -168,18 +199,21 @@ async function upscaleQuadrant(bitmap: ImageBitmap, d: number, x: number, y: num
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(bitmap, (x & ((1 << d) - 1)) * side, (y & ((1 << d) - 1)) * side, side, side, 0, 0, TILE_PX, TILE_PX)
-  const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: UPSCALE_QUALITY })
+  const mime = `image/${format}`
+  // La qualité de compression n'a de sens que pour le JPEG ; le PNG (sans perte) l'ignorerait.
+  const blob = await canvas.convertToBlob(format === 'jpeg' ? { type: mime, quality: UPSCALE_QUALITY } : { type: mime })
   return new Uint8Array(await blob.arrayBuffer())
 }
 
 /**
  * Comble les tuiles absentes de `real` en les dérivant du plus profond ancêtre réel.
- * Les tuiles à combler sont regroupées par ancêtre pour ne décoder chaque JPEG qu'une fois.
+ * Les tuiles à combler sont regroupées par ancêtre pour ne décoder chaque image qu'une fois.
  */
 async function fillMissingTiles(
   real: Map<string, Uint8Array>,
   byZoom: Map<number, Tile[]>,
   minZoom: number,
+  format: TileFormat,
   collected: RawTile[],
 ): Promise<void> {
   const groups = new Map<string, { tile: Tile; d: number }[]>()
@@ -202,13 +236,15 @@ async function fillMissingTiles(
     if (!src) continue
     let bitmap: ImageBitmap
     try {
-      bitmap = await createImageBitmap(new Blob([src as BlobPart], { type: 'image/jpeg' }))
+      // Le type déclaré au Blob n'est qu'une étiquette : le décodeur sniffe les octets réels,
+      // donc ceci reste correct même si `real` contenait par erreur un autre format.
+      bitmap = await createImageBitmap(new Blob([src as BlobPart], { type: `image/${format}` }))
     } catch {
-      continue // JPEG illisible : on laisse ces tuiles absentes de l'archive
+      continue // image illisible : on laisse ces tuiles absentes de l'archive
     }
     try {
       for (const { tile, d } of items) {
-        const data = await upscaleQuadrant(bitmap, d, tile.x, tile.y)
+        const data = await upscaleQuadrant(bitmap, d, tile.x, tile.y, format)
         if (data) collected.push({ z: tile.z, x: tile.x, y: tile.y, data })
       }
     } finally {
@@ -231,7 +267,7 @@ export async function downloadOfflineArchive(
 ): Promise<{ tiles: number; bytes: number }> {
   const byZoom = corridorTilesByZoom(coords, opts)
   const total = [...byZoom.values()].reduce((n, list) => n + list.length, 0)
-  const real = new Map<string, Uint8Array>() // tuiles réellement servies par swisstopo
+  const real = new Map<string, Uint8Array>() // tuiles réellement servies par le fond
   const blank = new Set<string>()            // tuiles hors couverture, elles ou un ancêtre
   let done = 0
   let failed = 0
@@ -248,6 +284,11 @@ export async function downloadOfflineArchive(
             const data = new Uint8Array(await res.arrayBuffer())
             if (data.length > BLANK_MAX_BYTES) real.set(tileKey(t.z, t.x, t.y), data)
             else blank.add(tileKey(t.z, t.x, t.y))
+          } else if (res.status === 404) {
+            // Hors-couverture façon IGN (cf. en-tête du fichier) : même sémantique que la
+            // tuile vide de swisstopo, donc même élagage — jamais atteint pour swisstopo, qui
+            // répond toujours 200.
+            blank.add(tileKey(t.z, t.x, t.y))
           } else {
             failed++
           }
@@ -286,13 +327,14 @@ export async function downloadOfflineArchive(
     const [z, x, y] = key.split('/').map(Number)
     return { z, x, y, data }
   })
-  await fillMissingTiles(real, byZoom, opts.minZoom, collected)
+  await fillMissingTiles(real, byZoom, opts.minZoom, LAYER_SPECS[layer].format, collected)
 
   const archive = await buildPmtilesArchive(collected, {
     minZoom: opts.minZoom,
     maxZoom: opts.maxZoom,
     bounds: boundsOf(coords),
-    attribution: ATTRIBUTION,
+    attribution: LAYER_SPECS[layer].attribution,
+    tileType: LAYER_SPECS[layer].format,
   })
   await writeArchiveFile(token, layer, archive)
   return { tiles: collected.length, bytes: archive.length }
@@ -394,7 +436,7 @@ export function offlineStyle(token: string, layer: OfflineLayer, maxZoom: number
         tiles: [offlineTileUrl(token, layer)],
         tileSize: 256,
         maxzoom: maxZoom,
-        attribution: ATTRIBUTION,
+        attribution: LAYER_SPECS[layer].attribution,
       },
     },
     layers: [{ id: `${layer}-offline-base`, type: 'raster', source: `${layer}-offline` }],

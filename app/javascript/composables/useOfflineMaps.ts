@@ -7,9 +7,10 @@ import {
   purgeLegacyArchive, OFFLINE_LAYERS, isOfflineLayer, type OfflineLayer,
 } from '../offline/offlineMaps'
 
-// Chaque fond swisstopo (gris / couleur / satellite) a sa propre archive : le coureur
-// coche ce qu'il veut emporter, et ne paie que ça en Mo.
+// Chaque fond téléchargeable (swisstopo gris/couleur/satellite, IGN plan/ortho) a sa propre
+// archive : le coureur coche ce qu'il veut emporter, et ne paie que ça en Mo.
 type LayerFlags = Record<OfflineLayer, boolean>
+type LayerSigs = Record<OfflineLayer, string | null>
 
 interface OfflinePoi { name: string; type: string; lat: number; lng: number }
 
@@ -39,7 +40,12 @@ export interface UseOfflineMapsOptions {
 export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   const { getMap, getMaplibre, mapStyleId, routeToken, coords, pois, onBaseStyleReload } = opts
 
-  const noLayers = (): LayerFlags => ({ swissgrau: false, swisstopo: false, swissimage: false })
+  // Dérivés de `OFFLINE_LAYERS` plutôt que recopiés à chaque site d'usage : une couche de
+  // plus (IGN) ne doit pas demander de retrouver toutes les initialisations à la main.
+  const noLayers = (): LayerFlags =>
+    Object.fromEntries(OFFLINE_LAYERS.map((l) => [l, false])) as LayerFlags
+  const noSigs = (): LayerSigs =>
+    Object.fromEntries(OFFLINE_LAYERS.map((l) => [l, null])) as LayerSigs
 
   let baseIsOffline = false              // le fond actif est-il la version locale ?
   const offlineIsSup = offlineSupported()
@@ -54,7 +60,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   const offlineSelected = ref<LayerFlags>(noLayers())
   // Empreinte du tracé au moment du téléchargement, par couche. `null` = archive absente, ou
   // téléchargée avant l'introduction du suivi (on ne réclame alors rien).
-  const archivedSigs = ref<Record<OfflineLayer, string | null>>({ swissgrau: null, swisstopo: null, swissimage: null })
+  const archivedSigs = ref<LayerSigs>(noSigs())
 
   // Le tracé a changé depuis le téléchargement (reroutage, détour, édition) : l'archive ne
   // couvre plus tout l'itinéraire, il faut la retélécharger.
@@ -112,12 +118,12 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     const maplibre = getMaplibre()
     offlineRegistered = noLayers()
     offlineHas.value = noLayers()
-    archivedSigs.value = { swissgrau: null, swisstopo: null, swissimage: null }
+    archivedSigs.value = noSigs()
     const token = routeToken.value
     if (token && offlineIsSup) {
       void purgeLegacyArchive(token)
       const has = noLayers()
-      const sigs: Record<OfflineLayer, string | null> = { swissgrau: null, swisstopo: null, swissimage: null }
+      const sigs: LayerSigs = noSigs()
       for (const l of OFFLINE_LAYERS) {
         if (!await hasOfflineArchive(token, l)) continue
         has[l] = true
@@ -160,7 +166,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   function onOfflineRemoved() {
     offlineHas.value = noLayers()
     offlineRegistered = noLayers()
-    archivedSigs.value = { swissgrau: null, swisstopo: null, swissimage: null }
+    archivedSigs.value = noSigs()
     resetOfflineSelection()
     refreshBaseMap()
   }

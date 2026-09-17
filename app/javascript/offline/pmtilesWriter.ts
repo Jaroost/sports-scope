@@ -8,12 +8,17 @@
 //     `ROOT_DIR_BUDGET`, sinon l'archive est silencieusement illisible. Tant qu'elle
 //     tient, on garde une racine unique ; au-delà on bascule sur des répertoires « leaf ».
 //   - compression interne (header + répertoires) = gzip ; compression des tuiles = aucune
-//     (les JPEG swisstopo sont déjà compressés).
+//     (les tuiles JPEG/PNG des fonds téléchargeables sont déjà compressées).
 //   - archive « clustered » : entrées triées par tileId, données concaténées dans le même
 //     ordre → les offsets se déduisent en chaîne (encodage court « 0 » du lecteur).
 import { zxyToTileId } from 'pmtiles'
 
 export interface RawTile { z: number; x: number; y: number; data: Uint8Array }
+
+// Valeurs de l'octet `tileType` du header PMTiles v3 (spec Protomaps) : une seule par
+// archive, donc une seule par couche — `offlineMaps.ts` ne mélange jamais JPEG et PNG dans
+// le même lot de tuiles (cf. son en-tête, section format).
+const TILE_TYPE_BYTE: Record<'jpeg' | 'png', number> = { png: 2, jpeg: 3 }
 
 export interface PmtilesMeta {
   minZoom: number
@@ -22,6 +27,8 @@ export interface PmtilesMeta {
   bounds: [number, number, number, number]
   attribution?: string
   name?: string
+  /** Format réel des tuiles fournies. Par défaut JPEG (fonds historiques, tous en JPEG). */
+  tileType?: 'jpeg' | 'png'
 }
 
 interface Entry { tileId: number; offset: number; length: number; runLength: number }
@@ -105,7 +112,7 @@ async function buildDirectories(entries: Entry[]): Promise<{ root: Uint8Array; l
   }
 }
 
-/** Assemble une archive PMTiles v3 (raster JPEG) à partir d'un lot de tuiles. */
+/** Assemble une archive PMTiles v3 (raster, JPEG ou PNG selon `meta.tileType`) à partir d'un lot de tuiles. */
 export async function buildPmtilesArchive(tiles: RawTile[], meta: PmtilesMeta): Promise<Uint8Array> {
   const sorted = tiles
     .map((t) => ({ data: t.data, tileId: zxyToTileId(t.z, t.x, t.y) }))
@@ -148,7 +155,7 @@ export async function buildPmtilesArchive(tiles: RawTile[], meta: PmtilesMeta): 
   dv.setUint8(96, 1)                      // clustered
   dv.setUint8(97, 2)                      // internal compression = gzip
   dv.setUint8(98, 1)                      // tile compression = none
-  dv.setUint8(99, 3)                      // tile type = JPEG
+  dv.setUint8(99, TILE_TYPE_BYTE[meta.tileType ?? 'jpeg'])
   dv.setUint8(100, meta.minZoom)
   dv.setUint8(101, meta.maxZoom)
   dv.setInt32(102, e7(meta.bounds[0]), true)

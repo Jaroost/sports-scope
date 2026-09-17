@@ -2010,6 +2010,7 @@ fr:
         horn2: "Klaxon 2"
         horn3: "Klaxon 3"
         horn4: "Klaxon 4"
+        bout-du-rouleau: "Bout du rouleau"
         start_lap: "Marquer un tour"
         sleep: "Mettre en veille"
         wake: "Sortir de veille"
@@ -2176,6 +2177,7 @@ fr:
         horn2: "Klaxon 2"
         horn3: "Klaxon 3"
         horn4: "Klaxon 4"
+        bout-du-rouleau: "Bout du rouleau"
       sensors:
         gps: "GPS"
         barometer: "Baromètre"

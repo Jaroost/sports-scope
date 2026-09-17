@@ -350,11 +350,12 @@ module CompanionSettings
   # imite le klaxon deux tons des voitures de la caravane du Tour de France —
   # plus reconnaissable dans le vent qu'une tonalité pure, précisément parce
   # que ce n'est PAS le son des autres alertes de l'appli (radar, virages),
-  # qui doivent rester identifiables sans confusion possible. `booster` est
-  # le plus long (~6 s) — le minuteur de secours côté appli (`BellPlayer`,
-  # `bell_player.dart`) est calé dessus. `horn2`/`horn3`/`horn4` sont d'autres
-  # variantes du klaxon (toutes sous 3 s, sous le même minuteur).
-  BELL_SOUNDS = %w[bell horn booster horn2 horn3 horn4].freeze
+  # qui doivent rester identifiables sans confusion possible. `booster` et
+  # `bout-du-rouleau` sont les deux plus longs (~6 s) — le minuteur de secours
+  # côté appli (`BellPlayer`, `bell_player.dart`) est calé dessus. `horn2`/
+  # `horn3`/`horn4` sont d'autres variantes du klaxon (toutes sous 3 s, sous le
+  # même minuteur).
+  BELL_SOUNDS = %w[bell horn booster horn2 horn3 horn4 bout-du-rouleau].freeze
 
   # `bell`, en case de bandeau ou d'encoche — même raisonnement que
   # `BAND_RADAR` pour `radar` : la case porte directement le son choisi
@@ -408,10 +409,12 @@ module CompanionSettings
 
   # Ce qu'un geste sur un canal du D-Fly peut déclencher — jetons de chaîne
   # plutôt qu'une liste de composants (`BLOCKS`) : ce ne sont pas des mesures à
-  # poser sur une page, et six d'entre elles (`bell`/`horn`/`booster`/
-  # `horn2`/`horn3`/`horn4`) recoupent déjà `BELL_SOUNDS` sous un autre nom, la
+  # poser sur une page. `BELL_SOUNDS` composé directement dedans plutôt que
+  # recopié : ces jetons recoupent déjà ce catalogue sous un autre nom, la
   # sonnette n'ayant pas de réglage à part ici comme elle en a un sur un bloc
-  # `bell`.
+  # `bell` — les recopier à la main aurait fait manquer `bout-du-rouleau` à ce
+  # menu-ci le jour où il a rejoint `BELL_SOUNDS`, exactement le genre d'oubli
+  # que ce fichier essaie d'éviter ailleurs.
   # `go_to_page:<clé>`
   # n'y figure pas : c'est un jeton composé, dont la partie variable est une
   # clé de page et pas un choix fixe de ce catalogue — voir
@@ -428,9 +431,10 @@ module CompanionSettings
   # `toggle_pause` suspend/reprend l'enregistrement, même principe que
   # `toggle_sleep` — un seul bouton, c'est `RideRecorder.state` côté appli qui
   # décide lequel des deux gestes il pose (`TogglePauseAction`, `ride_preset.dart`).
-  BUTTON_ACTIONS = %w[
-    next_page previous_page bell horn booster horn2 horn3 horn4 start_lap sleep wake toggle_sleep toggle_pause
-  ].freeze
+  BUTTON_ACTIONS = (
+    %w[next_page previous_page] + BELL_SOUNDS +
+    %w[start_lap sleep wake toggle_sleep toggle_pause]
+  ).freeze
 
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.

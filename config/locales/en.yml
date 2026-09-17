@@ -2010,6 +2010,7 @@ en:
         horn2: "Horn 2"
         horn3: "Horn 3"
         horn4: "Horn 4"
+        bout-du-rouleau: "Running on empty"
         start_lap: "Mark a lap"
         sleep: "Sleep"
         wake: "Wake"
@@ -2176,6 +2177,7 @@ en:
         horn2: "Horn 2"
         horn3: "Horn 3"
         horn4: "Horn 4"
+        bout-du-rouleau: "Running on empty"
       sensors:
         gps: "GPS"
         barometer: "Barometer"

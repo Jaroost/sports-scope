@@ -186,13 +186,15 @@ const {
 // Le panneau qui pilote normalement le téléchargement (NavOfflineButton, dans
 // NavControlsPanel) est masqué dans l'appli mobile — voir companionBridge.ts pour
 // le pourquoi. On s'enregistre tant que cette page est montée : l'appli obtient
-// les mêmes trois gestes que le panneau web (démarrer, annuler, supprimer) sans
-// qu'on réécrive le téléchargement côté Dart, et l'état poussé lui permet
-// d'afficher une entrée de menu à jour (prêt, en cours, périmé, en échec).
+// les mêmes gestes que le panneau web (démarrer, annuler, supprimer, cocher une
+// couche) sans qu'on réécrive le téléchargement côté Dart, et l'état poussé lui
+// permet d'afficher une entrée de menu à jour (prêt, en cours, périmé, en échec)
+// et la liste des couches (cf. `layers` ci-dessous).
 registerOfflineMapsHandlers({
   start: () => { void startOfflineDownload() },
   cancel: cancelOfflineDownload,
   remove: () => { void removeOfflineMap() },
+  toggleLayer: toggleOfflineLayer,
 })
 onBeforeUnmount(() => registerOfflineMapsHandlers(null))
 
@@ -222,6 +224,9 @@ watch(
     mb: offlineEst.value.mb,
     tiles: offlineEst.value.tiles,
     errored: offlineErrored.value,
+    // Libellé déjà traduit : l'appli affiche la liste telle quelle, sans tenir sa propre
+    // table de libellés par id (cf. `companionBridge.ts`).
+    layers: offlineLayerRows.value.map((l) => ({ ...l, label: t(`strava.map_style_${l.id}`) })),
   }),
   (state) => pushOfflineMapsState(state),
   { immediate: true, deep: true },

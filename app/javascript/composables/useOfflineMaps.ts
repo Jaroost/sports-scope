@@ -77,7 +77,12 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   const offlineLayerRows = computed(() =>
     OFFLINE_LAYERS.map((id) => ({ id, ready: offlineHas.value[id], stale: layerStale(id), selected: offlineSelected.value[id] })),
   )
-  function toggleOfflineLayer(id: OfflineLayer) {
+  // `id` en `string` et pas `OfflineLayer` : outre le panneau web (dont les lignes sont déjà
+  // typées), l'appli mobile appelle ce geste via `companionBridge.ts` avec un id de couche
+  // qu'elle ne fait que relayer — une version plus ancienne ou plus récente de l'appli, ou un
+  // message malformé, ne doit pas pouvoir écrire une clé arbitraire dans `offlineSelected`.
+  function toggleOfflineLayer(id: string) {
+    if (!isOfflineLayer(id)) return
     offlineSelected.value = { ...offlineSelected.value, [id]: !offlineSelected.value[id] }
   }
   const offlinePct = computed(() =>

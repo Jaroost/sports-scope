@@ -288,9 +288,23 @@ export async function companionLinkTarget(href: string): Promise<string> {
 // useControlsHide y est `enabled: false`) — elle a son propre tiroir de commandes
 // natif, sous le WebView. On ne réécrit pas le téléchargement côté Dart pour
 // autant : RouteNavigation.vue s'enregistre ici tant qu'un trajet est affiché, et
-// l'appli se contente d'appeler les trois gestes que son propre menu propose déjà
-// (démarrer, annuler, supprimer) et d'écouter l'état pour afficher une entrée de
-// menu à jour.
+// l'appli se contente d'appeler les quatre gestes que son propre menu propose déjà
+// (démarrer, annuler, supprimer, cocher/décocher une couche) et d'écouter l'état
+// pour afficher une entrée de menu à jour et la liste des couches disponibles.
+//
+// Une couche archivable (cf. `OFFLINE_LAYERS`, `offlineMaps.ts`), telle qu'affichée par le
+// panneau web : `label` est déjà traduite (t('strava.map_style_<id>')) pour que l'appli n'ait
+// pas à tenir sa propre table de libellés — un fond de plus côté site n'exige alors aucune
+// mise à jour de l'appli pour s'afficher correctement, seulement pour devenir sélectionnable
+// (cf. `toggleLayer` ci-dessous).
+export interface OfflineMapsBridgeLayer {
+  id: string
+  label: string
+  ready: boolean
+  stale: boolean
+  selected: boolean
+}
+
 export interface OfflineMapsBridgeState {
   supported: boolean
   ready: boolean
@@ -300,12 +314,14 @@ export interface OfflineMapsBridgeState {
   mb: number
   tiles: number
   errored: boolean
+  layers: OfflineMapsBridgeLayer[]
 }
 
 interface OfflineMapsBridgeHandlers {
   start(): void
   cancel(): void
   remove(): void
+  toggleLayer(id: string): void
 }
 
 let offlineHandlers: OfflineMapsBridgeHandlers | null = null
@@ -341,6 +357,7 @@ export function installCompanionBridge(): void {
       offlineStart(): void
       offlineCancel(): void
       offlineRemove(): void
+      offlineToggleLayer(id: string): void
       sleepEnter(): void
       sleepExit(): void
       setPoiFilter(visibleKeys: string[]): void
@@ -380,6 +397,7 @@ export function installCompanionBridge(): void {
     offlineStart() { offlineHandlers?.start() },
     offlineCancel() { offlineHandlers?.cancel() },
     offlineRemove() { offlineHandlers?.remove() },
+    offlineToggleLayer(id: string) { offlineHandlers?.toggleLayer(id) },
     sleepEnter() { sleepHandlers?.enter() },
     sleepExit() { sleepHandlers?.exit() },
     // Liste des clés de catégorie à afficher (poiCategories.ts). Une valeur

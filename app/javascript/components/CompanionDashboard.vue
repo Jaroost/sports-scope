@@ -5,11 +5,12 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
+import CompanionThresholdEditor from './CompanionThresholdEditor.vue'
 import {
-  canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR, DEFAULT_METRIC_LAYOUT,
-  DEFAULT_TRAVELED_PATH_COLOR, fitCells,
-  fitDividers, fitListBlocks, gridSideOf, gutterRect, isGridLayout, listSegments,
-  maxSpan, metricDropdownLabel, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
+  bandThresholdsEligible, canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR,
+  DEFAULT_METRIC_LAYOUT, DEFAULT_TRAVELED_PATH_COLOR, fitCells,
+  fitDividers, fitListBlocks, gaugeThresholdColor, gridSideOf, gutterRect, isGridLayout, listSegments,
+  maxSpan, metricDropdownLabel, metricSample, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
   type Band, type BandMarkLapSlot, type BandSlotValue, type Block, type Buttons, type ButtonChannel, type Catalog,
   type Cell,
@@ -350,6 +351,46 @@ function withBandSlotColor(value: BandSlotValue | undefined, color: string | nul
   const kind = bandSlotKind(value)
   if (!kind) return ''
   return color ? { slot: kind, color } : kind
+}
+
+// Les jalons et couleurs d'une couleur de fond conditionnelle réglée sur une
+// case (`BandColoredSlot.gauge_thresholds`/`gauge_threshold_colors`), ou
+// `null` — seule l'enveloppe d'un jeton simple peut en porter, jamais
+// « marquer un tour » (pas une mesure, voir `bandLapSlot`).
+function bandSlotThresholds(value?: BandSlotValue): { thresholds: number[]; colors: string[] } | null {
+  if (typeof value !== 'object' || 'kind' in value) return null
+  const thresholds = value.gauge_thresholds
+  const colors = value.gauge_threshold_colors
+  return thresholds?.length && colors?.length === thresholds.length + 1 ? { thresholds, colors } : null
+}
+
+// Recompose une case avec une couleur de fond conditionnelle, en gardant son
+// jeton — même contrat que `withBandSlotColor`, exclusif avec elle : régler
+// des tranches retire la couleur fixe, et réciproquement (voir
+// `sanitize_band_colored_slot` côté Rails, qui fait déjà primer les tranches
+// si jamais les deux étaient présentes).
+function withBandSlotThresholds(
+  value: BandSlotValue | undefined,
+  thresholds: { thresholds: number[]; colors: string[] } | null,
+): BandSlotValue {
+  const kind = bandSlotKind(value)
+  if (!kind) return ''
+  return thresholds
+    ? { slot: kind, gauge_thresholds: thresholds.thresholds, gauge_threshold_colors: thresholds.colors }
+    : kind
+}
+
+// La couleur à montrer dans le fac-similé sombre (`cdb-band-preview`) : la
+// couleur fixe comme avant, ou — cas conditionnel — celle de la tranche que
+// traverserait la valeur d'exemple du catalogue (`METRIC_SAMPLES`), même
+// calcul que l'aperçu d'un composant de grille (`CompanionBlockPreview.vue`).
+function bandSlotPreviewColor(value?: BandSlotValue): string {
+  const thresholds = bandSlotThresholds(value)
+  if (thresholds) {
+    const kind = bandSlotKind(value)
+    return gaugeThresholdColor(metricSample(kind).numeric, thresholds.thresholds, thresholds.colors) || '#1f2226'
+  }
+  return bandSlotColor(value) || '#1f2226'
 }
 
 // Le libellé d'une action de bouton Di2 (`catalog.button_actions`) — sa
@@ -1070,6 +1111,12 @@ function setBandSlotColor(band: Band, index: number, value: string) {
   setBandMetric(band, index, withBandSlotColor(band.metrics[index], value || null))
 }
 
+function setBandSlotThresholds(
+  band: Band, index: number, value: { thresholds: number[]; colors: string[] } | null,
+) {
+  setBandMetric(band, index, withBandSlotThresholds(band.metrics[index], value))
+}
+
 function setBandLapSeries(band: Band, index: number, value: string) {
   const slot = band.metrics[index]
   if (typeof slot === 'object' && 'kind' in slot) slot.series = value
@@ -1101,6 +1148,12 @@ function setNotchSlotKind(set: Notch, side: 'left' | 'right', value: string) {
 
 function setNotchSlotColor(set: Notch, side: 'left' | 'right', value: string) {
   setNotchMetric(set, side, withBandSlotColor(set[side], value || null))
+}
+
+function setNotchSlotThresholds(
+  set: Notch, side: 'left' | 'right', value: { thresholds: number[]; colors: string[] } | null,
+) {
+  setNotchMetric(set, side, withBandSlotThresholds(set[side], value))
 }
 
 function setNotchLapSeries(set: Notch, side: 'left' | 'right', value: string) {
@@ -2032,7 +2085,8 @@ async function save() {
                     </option>
                   </optgroup>
                 </select>
-                <CompanionColorPicker v-if="bandSlotKind(set.left)" :model-value="bandSlotColor(set.left)"
+                <CompanionColorPicker v-if="bandSlotKind(set.left) && !bandSlotThresholds(set.left)"
+                                       :model-value="bandSlotColor(set.left)"
                                        fallback="#1f2226" :label="t('companion.settings.block_color')"
                                        @update:model-value="(v) => setNotchSlotColor(set, 'left', v || '')" />
               </div>
@@ -2046,6 +2100,10 @@ async function save() {
                        @change="setNotchLapLabel(set, 'left', ($event.target as HTMLInputElement).value)"
                        maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
               </div>
+              <CompanionThresholdEditor v-if="bandThresholdsEligible(bandSlotKind(set.left))"
+                                         :key="`notch-left-${index}-${bandSlotKind(set.left)}`"
+                                         :metric="bandSlotKind(set.left)" :model-value="bandSlotThresholds(set.left)"
+                                         @update:model-value="(v) => setNotchSlotThresholds(set, 'left', v)" />
             </div>
             <div class="col-6">
               <div class="d-flex gap-1 align-items-center">
@@ -2083,7 +2141,8 @@ async function save() {
                     </option>
                   </optgroup>
                 </select>
-                <CompanionColorPicker v-if="bandSlotKind(set.right)" :model-value="bandSlotColor(set.right)"
+                <CompanionColorPicker v-if="bandSlotKind(set.right) && !bandSlotThresholds(set.right)"
+                                       :model-value="bandSlotColor(set.right)"
                                        fallback="#1f2226" :label="t('companion.settings.block_color')"
                                        @update:model-value="(v) => setNotchSlotColor(set, 'right', v || '')" />
               </div>
@@ -2097,6 +2156,10 @@ async function save() {
                        @change="setNotchLapLabel(set, 'right', ($event.target as HTMLInputElement).value)"
                        maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
               </div>
+              <CompanionThresholdEditor v-if="bandThresholdsEligible(bandSlotKind(set.right))"
+                                         :key="`notch-right-${index}-${bandSlotKind(set.right)}`"
+                                         :metric="bandSlotKind(set.right)" :model-value="bandSlotThresholds(set.right)"
+                                         @update:model-value="(v) => setNotchSlotThresholds(set, 'right', v)" />
             </div>
           </div>
           <!-- Même couleur, mais sur fond noir : une pastille jugée sur le
@@ -2106,9 +2169,9 @@ async function save() {
           <div v-if="bandSlotKind(set.left) || bandSlotKind(set.right)" class="cdb-band-preview"
                aria-hidden="true">
             <span v-if="bandSlotKind(set.left)" class="cdb-band-preview-seg"
-                  :style="{ background: bandSlotColor(set.left) || '#1f2226' }"></span>
+                  :style="{ background: bandSlotPreviewColor(set.left) }"></span>
             <span v-if="bandSlotKind(set.right)" class="cdb-band-preview-seg"
-                  :style="{ background: bandSlotColor(set.right) || '#1f2226' }"></span>
+                  :style="{ background: bandSlotPreviewColor(set.right) }"></span>
           </div>
           <button class="btn btn-sm btn-link p-1" type="button"
                   :disabled="index === 0" @click="moveNotchSet(index, -1)">
@@ -2187,7 +2250,7 @@ async function save() {
                     </option>
                   </optgroup>
                 </select>
-                <CompanionColorPicker v-if="bandSlotKind(band.metrics[slot - 1])"
+                <CompanionColorPicker v-if="bandSlotKind(band.metrics[slot - 1]) && !bandSlotThresholds(band.metrics[slot - 1])"
                                        :model-value="bandSlotColor(band.metrics[slot - 1])"
                                        fallback="#1f2226" :label="t('companion.settings.block_color')"
                                        @update:model-value="(v) => setBandSlotColor(band, slot - 1, v || '')" />
@@ -2202,6 +2265,11 @@ async function save() {
                        @change="setBandLapLabel(band, slot - 1, ($event.target as HTMLInputElement).value)"
                        maxlength="10" :placeholder="t('companion.settings.band_lap_label')">
               </div>
+              <CompanionThresholdEditor v-if="bandThresholdsEligible(bandSlotKind(band.metrics[slot - 1]))"
+                                         :key="`band-${index}-${slot}-${bandSlotKind(band.metrics[slot - 1])}`"
+                                         :metric="bandSlotKind(band.metrics[slot - 1])"
+                                         :model-value="bandSlotThresholds(band.metrics[slot - 1])"
+                                         @update:model-value="(v) => setBandSlotThresholds(band, slot - 1, v)" />
             </div>
           </div>
           <!-- Même couleur, mais sur fond noir : voir le commentaire jumeau
@@ -2209,7 +2277,7 @@ async function save() {
           <div v-if="band.metrics.some((m) => bandSlotKind(m))" class="cdb-band-preview" aria-hidden="true">
             <template v-for="slot in catalog.max_band_metrics" :key="slot">
               <span v-if="bandSlotKind(band.metrics[slot - 1])" class="cdb-band-preview-seg"
-                    :style="{ background: bandSlotColor(band.metrics[slot - 1]) || '#1f2226' }"></span>
+                    :style="{ background: bandSlotPreviewColor(band.metrics[slot - 1]) }"></span>
             </template>
           </div>
           <button class="btn btn-sm btn-link p-1" type="button"

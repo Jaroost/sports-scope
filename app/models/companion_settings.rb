@@ -1770,17 +1770,36 @@ module CompanionSettings
       "color" => sanitize_hex_color(raw["color"]) }.compact
   end
 
-  # L'enveloppe d'un jeton simple avec sa couleur de fond
-  # (`{"slot" => "power", "color" => "#rrggbb"}`) — voir `BandSlot.parse`
-  # (Dart, `ride_preset.dart`). Retombe sur le jeton nu quand la couleur ne
-  # tient pas : une case sans couleur exploitable n'a aucune raison de rester
-  # enveloppée dans ce que l'appli reçoit.
+  # L'enveloppe d'un jeton simple avec sa couleur de fond — fixe
+  # (`{"slot" => "power", "color" => "#rrggbb"}`) ou conditionnelle
+  # (`{"slot" => "speed", "gauge_thresholds" => [...], "gauge_threshold_colors"
+  # => [...]}`), voir `BandSlot.parse` (Dart, `ride_preset.dart`). Les deux
+  # sont exclusifs — les tranches l'emportent quand les deux sont réglées, une
+  # case ne montre jamais deux fonds à la fois. Retombe sur le jeton nu quand
+  # ni l'un ni l'autre ne tient : une case sans couleur exploitable n'a aucune
+  # raison de rester enveloppée dans ce que l'appli reçoit.
   def sanitize_band_colored_slot(raw)
     slot = raw["slot"]
     return nil unless band_slot?(slot)
 
+    thresholds = sanitize_band_gauge_thresholds(slot, raw)
+    return { "slot" => slot, "gauge_thresholds" => thresholds[:thresholds],
+              "gauge_threshold_colors" => thresholds[:colors] } if thresholds
+
     color = sanitize_hex_color(raw["color"])
     color ? { "slot" => slot, "color" => color } : slot
+  end
+
+  # Même mécanisme que le fond par tranches d'un composant de grille
+  # (`sanitize_block`, `gauge_color_mode == "thresholds"`) : sans objet pour
+  # une mesure à zones d'entraînement (elle garde son aplat de zone, voir
+  # `ZONE_METRICS`) ou hors du catalogue des mesures — une commande, un son ou
+  # un mode de radar n'a pas de valeur numérique à trancher.
+  def sanitize_band_gauge_thresholds(slot, raw)
+    return nil unless METRICS.include?(slot) && !ZONE_METRICS.include?(slot) &&
+      (RANGE_GAUGE_METRICS.include?(slot) || DYNAMIC_GAUGE_METRICS.include?(slot))
+
+    sanitize_gauge_thresholds(raw["gauge_thresholds"], raw["gauge_threshold_colors"])
   end
 
   # Ce que les quatre canaux du D-Fly déclenchent, par profil de sortie — voir

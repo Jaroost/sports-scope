@@ -474,10 +474,15 @@ export interface BandMarkLapSlot {
 // L'enveloppe d'un jeton simple (mesure, commande, radar, sonnette, tronçon
 // d'entraînement) avec une couleur de fond — une chaîne nue ne peut porter
 // aucune clé de plus. Voir `CompanionSettings.sanitize_band_colored_slot`
-// (Rails) et `BandSlot.parse` (Dart, `ride_preset.dart`).
+// (Rails) et `BandSlot.parse` (Dart, `ride_preset.dart`). `color` (fixe) et
+// `gauge_thresholds`/`gauge_threshold_colors` (conditionnelle, seulement une
+// case `metric` éligible — voir `bandThresholdsEligible`) sont exclusifs :
+// les tranches l'emportent côté Rails quand les deux sont réglées.
 export interface BandColoredSlot {
   slot: string
-  color: string
+  color?: string
+  gauge_thresholds?: number[]
+  gauge_threshold_colors?: string[]
 }
 
 // Ce que porte une case de bandeau ou d'encoche : un jeton simple, l'objet
@@ -1440,6 +1445,17 @@ const DYNAMIC_GAUGE_METRICS = new Set([
 
 export function isDynamicGaugeMetric(metric: string | undefined): boolean {
   return !!metric && DYNAMIC_GAUGE_METRICS.has(metric)
+}
+
+// Une case de bandeau/encoche (`BandColoredSlot`) peut porter une couleur de
+// fond conditionnelle exactement dans les mêmes conditions qu'un composant de
+// grille (`CompanionBlockPicker.vue` : `!metricZoneEligible && (rangeEligible
+// || dynamicEligible)`) — même repli côté Rails (`sanitize_band_gauge_thresholds`,
+// `!ZONE_METRICS.include?`). Une mesure à zones d'entraînement garde son
+// aplat de zone, une commande/un son/un mode de radar n'a pas de valeur
+// numérique à trancher.
+export function bandThresholdsEligible(metric: string | undefined): boolean {
+  return !!metric && !metricSample(metric).zone && (isRangeGaugeMetric(metric) || isDynamicGaugeMetric(metric))
 }
 
 // La position du curseur dans la vignette : purement illustrative, l'éditeur

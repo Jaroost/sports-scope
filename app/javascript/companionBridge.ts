@@ -215,6 +215,26 @@ export function registerPoiHandlers(handlers: PoiBridgeHandlers | null): void {
   poiHandlers = handlers
 }
 
+// ─── Fond de carte : commande venue de l'appli ───────────────────────────────
+//
+// Choisi hors sortie via `PATCH /api/companion_settings/map_style`
+// (`ProfilesController#update_navigation_style`) quand `NavControlsPanel` est
+// hors d'atteinte (masqué dans l'appli). Cette commande-ci couvre l'autre cas,
+// une fois en route : le même geste que le panneau web (`setMapStyle`, plus
+// haut dans ce fichier) — bascule en direct la carte déjà ouverte, *et*
+// persiste le choix comme préférence de compte (`persistNavigationStyle`,
+// appelée par `setMapStyle` lui-même), donc `CompanionSettingsStore` reste
+// cohérent avec ce que l'appli a demandé sans repasser par une écriture réseau
+// depuis Dart.
+interface MapStyleBridgeHandlers {
+  set(id: string): void
+}
+let mapStyleHandlers: MapStyleBridgeHandlers | null = null
+
+export function registerMapStyleHandlers(handlers: MapStyleBridgeHandlers | null): void {
+  mapStyleHandlers = handlers
+}
+
 // Une page web ne peut pas savoir si l'appli est installée : au mieux on sait
 // qu'elle *pourrait* l'être. On se limite donc à Android, et on ne propose rien
 // quand on tourne déjà dans l'appli, où le lien n'aurait aucun sens.
@@ -362,6 +382,7 @@ export function installCompanionBridge(): void {
       sleepExit(): void
       setPoiFilter(visibleKeys: string[]): void
       focusPoi(lat: number, lng: number): void
+      setMapStyle(id: string): void
     }
   }
 
@@ -419,6 +440,13 @@ export function installCompanionBridge(): void {
         }
       } catch {
         // Coordonnées inexploitables : rien à recadrer.
+      }
+    },
+    setMapStyle(id: string) {
+      try {
+        if (typeof id === 'string') mapStyleHandlers?.set(id)
+      } catch {
+        // Id inexploitable : le fond courant reste inchangé.
       }
     },
   }

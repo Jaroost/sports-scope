@@ -27,7 +27,15 @@ class CompanionSettingsController < ApplicationController
       # du dashboard (dépôt voisin) pour afficher le même fond que celui vu en
       # roulant, plutôt qu'un fond choisi indépendamment. `preferences_with_defaults`
       # garantit une valeur même pour un compte qui n'a jamais ouvert ce réglage.
-      "map_style" => current_user.preferences_with_defaults.dig("navigation", "default_style")
+      "map_style" => current_user.preferences_with_defaults.dig("navigation", "default_style"),
+      # Le catalogue des fonds proposables, pour que l'appli puisse le choisir depuis
+      # son propre menu (hors d'une sortie, sans `NavControlsPanel` — masqué dans le
+      # WebView) via PATCH /api/companion_settings/map_style. Libellés déjà traduits
+      # (mêmes clés que le sélecteur web, `strava.map_style_<id>`) : l'appli n'a pas à
+      # tenir sa propre table, un fond de plus côté site s'affiche donc sans mise à
+      # jour de l'appli. `ProfilesController::ALLOWED_MAP_STYLES` fait autorité — c'est
+      # déjà la liste blanche qui valide l'écriture, une seconde ici la ferait diverger.
+      "map_styles" => ProfilesController::ALLOWED_MAP_STYLES.map { |id| { "id" => id, "label" => t("strava.map_style_#{id}") } }
     )
   end
 

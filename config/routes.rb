@@ -117,6 +117,11 @@ Rails.application.routes.draw do
   get "/api/companion_settings", to: "companion_settings#show", as: :api_companion_settings
   patch "/api/companion_settings", to: "companion_settings#update"
 
+  # Fond de carte de la navigation guidée (préférences.navigation.default_style),
+  # accessible depuis l'appli compagnon hors d'une sortie (cf. ProfilesController).
+  # Distinct de PATCH /api/profile/preferences, qui attend l'objet complet.
+  patch "/api/companion_settings/map_style", to: "profiles#update_navigation_style"
+
   # Budget de charge (TSS jour/semaine) calculé côté navigateur par
   # useTrainingPlan.ts, persisté pour être inclus dans /api/companion_settings
   # (cf. TrainingBudgetsController).

@@ -41,6 +41,7 @@ import {
   companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, companionRouteProfile,
   companionPois, companionResupply, registerPoiHandlers,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
+  registerMapStyleHandlers,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
@@ -344,6 +345,13 @@ registerPoiHandlers({
   },
 })
 onBeforeUnmount(() => registerPoiHandlers(null))
+
+// Fond de carte demandé depuis le menu natif d'une page de sortie : même geste
+// que le sélecteur du panneau web (persiste comme préférence de compte, cf.
+// `setMapStyle` plus haut) — voir `companionBridge.ts` pour le pourquoi de
+// l'existence de ce second chemin, à côté de `PATCH /api/companion_settings/map_style`.
+registerMapStyleHandlers({ set: setMapStyle })
+onBeforeUnmount(() => registerMapStyleHandlers(null))
 
 // ─── Parcours des POI ──────────────────────────────────────────────────────────
 // Enchaîne les POI visibles en volant de l'un à l'autre (cf. usePoiBrowse) : consomme les

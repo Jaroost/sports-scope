@@ -93,6 +93,22 @@ class ProfilesController < ApplicationController
     render json: { athlete: current_user.preferences_with_defaults["athlete"] }
   end
 
+  # PATCH /api/companion_settings/map_style — même patron que `update_athlete` : en
+  # fusion, jamais l'objet complet. Ouvre le fond de carte de la navigation guidée au
+  # choix depuis l'appli compagnon, hors d'une sortie (elle n'a pas accès à
+  # `NavControlsPanel`, masqué dans le WebView — voir le CLAUDE.md du dépôt compagnon).
+  # `PATCH /api/profile/preferences` ne convenait pas ici : il attend l'objet complet
+  # et assainit le reste, donc un appelant qui n'enverrait que ce réglage écraserait en
+  # silence tous les autres (POI, recherche, entraînement…) avec leurs valeurs d'usine.
+  def update_navigation_style
+    prefs = current_user.preferences.is_a?(Hash) ? current_user.preferences.deep_dup : {}
+    prefs["navigation"] ||= {}
+    current = prefs["navigation"]["default_style"] || "swissgrau"
+    prefs["navigation"]["default_style"] = allowed(params[:id], ALLOWED_MAP_STYLES, current)
+    current_user.update!(preferences: prefs)
+    render json: { default_style: current_user.preferences_with_defaults.dig("navigation", "default_style") }
+  end
+
   private
 
   def sanitize_preferences(raw)

@@ -32,7 +32,7 @@ import type { Climb, ClimbLocality, Coord, LngLat } from '../routeHelpers'
 import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 import { createScaledMarkerGroup, mergeOverlappingMarkers, MARKER_SCALE_VAR } from '../mapMarkerGroup'
 import {
-  escapeHtml, googleMapsUrl, popupHeaderHtml, popupLinkHtml, popupMapLinksHtml,
+  escapeHtml, googleMapsUrl, popupHeaderHtml, popupLinkHtml, popupMapLinksHtml, popupOpeningHoursHtml,
 } from '../placePopup'
 import { useMapLocation } from '../composables/useMapLocation'
 import { usePlaceSearch, placeShortName, flyToPlace, reverseGeocode } from '../composables/usePlaceSearch'
@@ -1027,8 +1027,10 @@ function showPlacePopup(place: Place) {
         <i class="fa-solid fa-bookmark" aria-hidden="true"></i>
         <span>${escapeHtml(t('routes.save_poi'))}</span>
       </button>`
+  const hoursRow = place.openingHours ? popupOpeningHoursHtml(place.openingHours) : ''
   wrap.innerHTML = `
     ${popupHeaderHtml(place.name)}
+    ${hoursRow}
     ${addAction}
     ${saveAction}
     ${popupMapLinksHtml(mapsUrl, svUrl)}`

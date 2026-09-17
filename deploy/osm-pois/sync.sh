@@ -246,17 +246,18 @@ load() {
 	DROP TABLE IF EXISTS osm_pois_stage;
 	DROP TABLE IF EXISTS osm_pois_new;
 	CREATE TABLE osm_pois_stage (
-	  category text NOT NULL,
-	  name     text,
-	  lat      double precision NOT NULL,
-	  lng      double precision NOT NULL,
-	  country  text,
-	  ord      bigserial
+	  category       text NOT NULL,
+	  name           text,
+	  lat            double precision NOT NULL,
+	  lng            double precision NOT NULL,
+	  country        text,
+	  opening_hours  text,
+	  ord            bigserial
 	);
-	\\copy osm_pois_stage (category, name, lat, lng, country) FROM '$csv' WITH (FORMAT csv, NULL '')
+	\\copy osm_pois_stage (category, name, lat, lng, country, opening_hours) FROM '$csv' WITH (FORMAT csv, NULL '')
 
 	CREATE TABLE osm_pois_new AS
-	SELECT category, name, lat, lng, country
+	SELECT category, name, lat, lng, country, opening_hours
 	FROM (
 	  SELECT DISTINCT ON (category, name, lat, lng) *
 	  FROM osm_pois_stage

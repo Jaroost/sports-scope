@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Transforme la sortie `osmium export -f geojsonseq` en CSV chargeable par COPY.
 
-Lit un flux GeoJSON Text Sequences sur stdin, écrit `category,name,lat,lng,country`
-sur stdout (une ligne par POI retenu), et un résumé par catégorie sur stderr.
+Lit un flux GeoJSON Text Sequences sur stdin, écrit
+`category,name,lat,lng,country,opening_hours` sur stdout (une ligne par POI retenu), et
+un résumé par catégorie sur stderr.
+
+`opening_hours` est recopié tel quel (syntaxe OSM, ex. `Mo-Fr 06:30-18:30; Sa
+06:30-12:00`) : ni parsé ni traduit ici, `osmium tags-filter` garde déjà tous les tags
+d'un élément retenu (pas seulement ceux du filtre), donc rien à changer côté sync.sh
+pour qu'il arrive jusqu'ici.
 
 `--country XX` : code ISO 3166-1 alpha-2 de l'extrait traité (sync.sh appelle ce
 script une fois par extrait, cf. COUNTRY_CODES). OSM ne porte pas le pays sur les
@@ -139,8 +145,12 @@ def main():
         # name vide = NULL en base : le libellé par défaut est appliqué côté Rails
         # (GeocodesController::DEFAULT_POI_NAMES), qui connaît la locale.
         name = (tags.get("name") or "").strip()
+        # opening_hours vide = NULL en base : « horaires inconnus », pas « fermé ».
+        opening_hours = (tags.get("opening_hours") or "").strip()
 
-        out.write(f"{category},{csv_field(name)},{lat:.7f},{lng:.7f},{country}\n")
+        out.write(
+            f"{category},{csv_field(name)},{lat:.7f},{lng:.7f},{country},{csv_field(opening_hours)}\n"
+        )
         counts[category] += 1
 
     total = sum(counts.values())

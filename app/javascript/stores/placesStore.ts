@@ -11,6 +11,9 @@ export interface Place {
   lat: number
   markerLng: number
   markerLat: number
+  // Syntaxe OSM brute (`opening_hours`), ou null : absent d'OSM sur la plupart des POI,
+  // pas seulement les boulangeries. null veut dire « inconnu », jamais « fermé ».
+  openingHours: string | null
 }
 
 class PlacesStore {

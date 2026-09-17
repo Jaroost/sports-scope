@@ -84,6 +84,17 @@ export function popupMapLinksHtml(mapsUrl: string, svUrl: string): string {
   )
 }
 
+// Ligne horaires d'ouverture, quand le POI en porte un. Le texte est la syntaxe OSM brute
+// (ex. « Mo-Fr 06:30-18:30; Sa 06:30-12:00 ») : pas de parseur ici, un POI sans cette clé
+// n'affiche simplement pas la ligne — absent veut dire « inconnu », jamais « fermé ».
+export function popupOpeningHoursHtml(openingHours: string): string {
+  return `
+    <div class="place-popup-hours">
+      <i class="fa-regular fa-clock" aria-hidden="true"></i>
+      <span>${escapeHtml(openingHours)}</span>
+    </div>`
+}
+
 // Ligne « Lat / Lng » copiables. Le clic est câblé par l'appelant (cf. `.place-popup-link--copy`
 // et l'attribut `data-coord`), qui gère l'accusé de copie.
 export function popupCoordsRowHtml(lat: number, lng: number): string {

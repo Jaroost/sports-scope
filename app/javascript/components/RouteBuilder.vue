@@ -397,6 +397,7 @@ async function fetchImportantPlaces() {
         lat: node.lat,
         markerLng: isPoi ? node.lng : geom[nearestIdx][0],
         markerLat: isPoi ? node.lat : geom[nearestIdx][1],
+        openingHours: node.opening_hours ?? null,
       })
     }
     results.sort((a, b) => a.distanceM - b.distanceM)

@@ -48,15 +48,17 @@ class GeocodesController < ApplicationController
     return render json: [] if categories.empty?
 
     places = OsmPoi.in_bbox(south, west, north, east).where(category: categories)
-      .pluck(:lat, :lng, :name, :category)
-      .filter_map do |lat, lng, name, category|
+      .pluck(:lat, :lng, :name, :category, :opening_hours)
+      .filter_map do |lat, lng, name, category, opening_hours|
         # `name` est NULL pour les POI OSM sans tag `name` : le libellé par défaut
         # est appliqué ici, où la catégorie a un sens métier. Une localité sans nom
         # n'a en revanche rien à afficher, elle est écartée.
         label = name.presence || DEFAULT_POI_NAMES[category]
         next unless label
 
-        { lat: lat, lng: lng, name: label, type: category }
+        # opening_hours : syntaxe OSM brute, non traduite — absent (NULL) veut dire
+        # « inconnu », pas « fermé », et reste tel quel côté front.
+        { lat: lat, lng: lng, name: label, type: category, opening_hours: opening_hours.presence }
       end
 
     render json: places

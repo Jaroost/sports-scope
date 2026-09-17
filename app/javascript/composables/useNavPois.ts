@@ -2,7 +2,7 @@ import { reactive, ref, computed, watch } from 'vue'
 import { t } from '../i18n'
 import { haversine, bearingFromRoute } from '../routeHelpers'
 import { streetViewUrl, probeStreetViewLink } from '../streetView'
-import { popupHeaderHtml, popupActionHtml, popupMapLinksHtml, googleMapsUrl } from '../placePopup'
+import { popupHeaderHtml, popupActionHtml, popupMapLinksHtml, popupOpeningHoursHtml, googleMapsUrl } from '../placePopup'
 import type { Coord, LngLat } from '../routeHelpers'
 import { userPreferences } from '../userPreferences'
 import { POI_CATEGORIES, categoryForType } from '../poiCategories'
@@ -20,7 +20,9 @@ import { savedPoisStore } from '../stores/savedPoisStore'
 
 // `saved` : POI provenant de la table `pois` (badge étoile, rendu en permanence) par
 // opposition aux POI Overpass découverts à la volée.
-export interface NavPlace { name: string; type: string; lng: number; lat: number; saved?: boolean }
+// openingHours : syntaxe OSM brute (`opening_hours`), absente sur la plupart des POI
+// (pas seulement les boulangeries) — undefined veut dire « inconnu », jamais « fermé ».
+export interface NavPlace { name: string; type: string; lng: number; lat: number; saved?: boolean; openingHours?: string }
 
 // Résultat d'une recherche POI, remonté à l'appelant pour un retour visuel (toast) :
 // `ok` faux signale un échec réseau / serveur Overpass ; sinon `count` est le nombre
@@ -167,7 +169,7 @@ export function useNavPois(deps: {
         }
         if (minD > radiusM) continue
         seen.add(key)
-        places.push({ name: node.name, type: node.type, lng: node.lng, lat: node.lat })
+        places.push({ name: node.name, type: node.type, lng: node.lng, lat: node.lat, openingHours: node.opening_hours ?? undefined })
       }
       // Compte par catégorie (0 inclus pour celles sans résultat) pour l'afficher
       // à côté de chaque catégorie dans le panneau.
@@ -396,8 +398,10 @@ export function useNavPois(deps: {
     const insertAction = onInsertVia && hasRoute?.()
       ? popupActionHtml({ className: 'place-popup-link--add-route', icon: 'fa-solid fa-circle-plus', label: t('routes.add_to_route') })
       : ''
+    const hoursRow = place.openingHours ? popupOpeningHoursHtml(place.openingHours) : ''
     wrap.innerHTML = `
       ${popupHeaderHtml(place.name)}
+      ${hoursRow}
       ${navAction}
       ${insertAction}
       ${popupMapLinksHtml(mapsUrl, svUrl)}`

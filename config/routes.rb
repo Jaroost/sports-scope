@@ -1,6 +1,7 @@
 Rails.application.routes.draw do
   scope "(:locale)", locale: /en|fr/ do
     root "pages#home"
+    get "/privacy", to: "pages#privacy", as: :privacy
     get "/dashboard", to: "pages#dashboard", as: :dashboard
     get "/performance", to: "pages#performance", as: :performance
     get "/activities/:id", to: "activities#show", as: :activity, constraints: { id: /\d+/ }

@@ -6,6 +6,12 @@ class PagesController < ApplicationController
   def home
   end
 
+  # Publique : sert notamment à justifier une demande d'accès API tierce (ex. Garmin
+  # Connect Developer Program), qui exige un lien de politique de confidentialité sur
+  # le même domaine que le site.
+  def privacy
+  end
+
   def dashboard
     require_login!
   end

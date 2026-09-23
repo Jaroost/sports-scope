@@ -46,6 +46,52 @@ export function buildDistancesM(geom: Array<Coord | LngLat>): number[] {
   return d
 }
 
+// Index spatial des sommets d'un tracé, pour trouver le sommet le plus proche d'un point
+// SANS balayer tout le tracé : une grille régulière de cellules d'au moins `cellM` de côté,
+// et `nearest` n'examine que les 3 × 3 cellules autour du point. Tout sommet à moins de
+// `cellM` y tombe forcément ; au-delà, `nearest` peut rendre null ou un sommet qui n'est
+// pas le plus proche du tracé entier — réservé donc à un appelant qui écarte de toute
+// façon ce qui dépasse `cellM` (recherche de lieux dans un rayon).
+// Même critère que le balayage complet qu'il remplace : carré de l'écart en degrés, la
+// longitude comprimée par cos(lat) du point cherché, le plus petit indice à égalité.
+export function buildVertexGrid(geom: Array<Coord | LngLat>, cellM: number) {
+  let maxAbsLat = 0
+  for (const p of geom) maxAbsLat = Math.max(maxAbsLat, Math.abs(p[1]))
+  const cellLat = cellM / 111320
+  // Cellule la plus large en degrés de longitude, celle de la latitude la plus haute : la
+  // grille couvre alors au moins `cellM` sur tout le tracé.
+  const cellLng = cellM / (111320 * Math.max(Math.cos((maxAbsLat * Math.PI) / 180), 0.01))
+  const cells = new Map<string, number[]>()
+  const keyOf = (cx: number, cy: number) => `${cx}:${cy}`
+  for (let i = 0; i < geom.length; i++) {
+    const k = keyOf(Math.floor(geom[i][0] / cellLng), Math.floor(geom[i][1] / cellLat))
+    const bucket = cells.get(k)
+    if (bucket) bucket.push(i)
+    else cells.set(k, [i])
+  }
+  return {
+    nearest(lng: number, lat: number): number | null {
+      const cx = Math.floor(lng / cellLng)
+      const cy = Math.floor(lat / cellLat)
+      const cosLat = Math.cos((lat * Math.PI) / 180)
+      let best = -1, bestD2 = Infinity
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const bucket = cells.get(keyOf(cx + dx, cy + dy))
+          if (!bucket) continue
+          for (const i of bucket) {
+            const dLng = (geom[i][0] - lng) * cosLat
+            const dLat = geom[i][1] - lat
+            const d2 = dLng * dLng + dLat * dLat
+            if (d2 < bestD2 || (d2 === bestD2 && i < best)) { bestD2 = d2; best = i }
+          }
+        }
+      }
+      return best >= 0 ? best : null
+    },
+  }
+}
+
 export function formatKm(m: number): string {
   if (!m) return '0 km'
   return `${(m / 1000).toFixed(2)} km`

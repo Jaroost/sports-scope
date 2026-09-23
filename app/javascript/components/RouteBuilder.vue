@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick, toRaw } from 'vue'
 import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
 import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, COVERAGE_WARN_MIN_ZOOM } from '../mapStyles'
@@ -8,7 +8,7 @@ import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
 import { POI_CATEGORIES, isPointType, categoryForType } from '../poiCategories'
-import { haversine, buildDistancesM, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, UTURN_ACCEPT_RADIUS_M, nearestGeomIndex, projectOnRoute, shareVersionParam, fillDefaultClimbNames } from '../routeHelpers'
+import { haversine, buildDistancesM, buildVertexGrid, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, UTURN_ACCEPT_RADIUS_M, nearestGeomIndex, projectOnRoute, shareVersionParam, fillDefaultClimbNames } from '../routeHelpers'
 import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
@@ -328,7 +328,10 @@ function interpolateElevation(fullCoords: any[], sampled: any[], sampledEle: num
 
 async function fetchImportantPlaces() {
   const token = ++placesStore.token
-  const geom = routeStore.geometry.value
+  // Tableau brut, pas le proxy réactif : la boucle de proximité plus bas lit des milliers
+  // de sommets par lieu, et chaque `geom[i][0]` à travers le proxy passe par un piège
+  // `get` de Vue — plusieurs secondes de page figée sur un long tracé.
+  const geom = toRaw(routeStore.geometry.value)
   if (geom.length < 2) { placesStore.isFetchingPlaces.value = false; return }
 
   // On ne recherche que les catégories cochées dans le profil — sauf les localités,
@@ -370,20 +373,19 @@ async function fetchImportantPlaces() {
     // configurable, marqueur posé sur le lieu. Localités : accrochées au point le
     // plus proche du tracé.
     const radiusM = placesStore.placeRadiusM.value
+    // Sommet le plus proche par grille plutôt que par balayage du tracé entier : la bbox
+    // d'un long tracé ramène des milliers de lieux, dont la plupart loin du tracé, et le
+    // balayage coûtait lieux × sommets (~35 M d'itérations sur 250 km). La marge couvre
+    // l'écart entre l'approximation plane de la grille et le haversine du seuil.
+    const grid = buildVertexGrid(geom, Math.max(radiusM, THRESHOLD_M) * 1.05)
     for (const node of nodes) {
       const isPoi = isPointType(node.type)
       const seenKey = isPoi
         ? `${node.type}:${node.lat.toFixed(3)}:${node.lng.toFixed(3)}`
         : `${node.type ?? ''}:${node.name}`
       if (seen.has(seenKey)) continue
-      const cosLat = Math.cos(node.lat * Math.PI / 180)
-      let minD2 = Infinity, nearestIdx = 0
-      for (let i = 0; i < geom.length; i++) {
-        const dLng = (geom[i][0] - node.lng) * cosLat
-        const dLat = geom[i][1] - node.lat
-        const d2 = dLng * dLng + dLat * dLat
-        if (d2 < minD2) { minD2 = d2; nearestIdx = i }
-      }
+      const nearestIdx = grid.nearest(node.lng, node.lat)
+      if (nearestIdx == null) continue
       const threshold = isPoi ? radiusM : THRESHOLD_M
       const dist = haversine(geom[nearestIdx], [node.lng, node.lat])
       if (dist > threshold) continue

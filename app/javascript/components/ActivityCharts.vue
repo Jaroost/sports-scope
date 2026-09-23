@@ -161,6 +161,13 @@ const visibleUncollapsedStreams = computed(() => {
   return result
 })
 
+// Lignes du tableau de la pastille puissance (clés de chartStats et de range_stats).
+const wattsStatRows = [
+  { key: 'min', icon: 'fa-arrow-down-short-wide' },
+  { key: 'mean', icon: 'fa-equals' },
+  { key: 'max', icon: 'fa-arrow-up-wide-short' },
+] as const
+
 // Stream chips shown in the sticky header — independent of chartDefs order.
 const chipStreams = computed(() => {
   const present = new Set(visibleUncollapsedStreams.value)
@@ -396,7 +403,9 @@ function fmtStat(def, value) {
   return def.format ? def.format(value) : fmt(value, def.digits)
 }
 
-function chartStats(def) {
+// skipZeros : pour la puissance, résume aussi les seuls moments où l'on pédale
+// (hors roue libre et arrêts) — montré à côté des stats complètes dans la pastille.
+function chartStats(def, skipZeros = false) {
   const data = props.streams?.[def.key]?.data
   if (!data || data.length === 0) return null
   const s = selectionDisplay.value?.startIdx ?? 0
@@ -408,6 +417,7 @@ function chartStats(def) {
   for (let i = s; i <= e && i < data.length; i++) {
     const v = def.transform(data[i])
     if (v == null || Number.isNaN(v)) continue
+    if (skipZeros && v <= 0) continue
     count++
     sum += v
     if (v < mn) mn = v
@@ -2039,7 +2049,7 @@ onBeforeUnmount(() => {
             <i class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
           </span>
           <span
-            v-if="rangeNp() != null"
+            v-if="rangeNp() != null && !chipStreams.includes('watts')"
             class="range-chip range-chip-stream"
             :style="{ background: '#fd7e141f', color: '#fd7e14' }"
             data-bs-toggle="tooltip"
@@ -2073,6 +2083,10 @@ onBeforeUnmount(() => {
             <i :class="`fa-solid ${chartIcons[streamKey] || 'fa-chart-line'}`" aria-hidden="true"></i>
             <strong v-if="chartStats(vdef(streamKey))">{{ fmtStat(vdef(streamKey), chartStats(vdef(streamKey)).mean) }} {{ vdef(streamKey).unit }}</strong>
             <strong v-else>–</strong>
+            <template v-if="streamKey === 'watts' && rangeNp() != null">
+              <span class="range-chip-tag">{{ t('strava.np_label') }}</span>
+              <strong>{{ Math.round(rangeNp()) }} W</strong>
+            </template>
             <i v-if="chartStats(vdef(streamKey))" class="fa-solid fa-circle-info chip-info-hint" aria-hidden="true"></i>
             <span v-if="chartStats(vdef(streamKey))" class="chip-popover">
               <div class="chart-tooltip-title">
@@ -2081,7 +2095,35 @@ onBeforeUnmount(() => {
                   {{ streamLabel(streamKey) }}
                 </div>
               </div>
-              <div class="chart-tooltip-section">
+              <div v-if="streamKey === 'watts'" class="chart-tooltip-section watts-stats-grid">
+                <span></span>
+                <span></span>
+                <span class="watts-stats-head">{{ t('strava.range_stats.all_samples') }}</span>
+                <span class="watts-stats-head">{{ t('strava.range_stats.nonzero') }}</span>
+                <template v-for="row in wattsStatRows" :key="row.key">
+                  <i :class="`fa-solid ${row.icon} chart-tooltip-icon`" aria-hidden="true"></i>
+                  <span class="chart-tooltip-name">{{ t(`strava.range_stats.${row.key}`) }}</span>
+                  <span v-for="(st, i) in [chartStats(vdef('watts')), chartStats(vdef('watts'), true)]" :key="i" class="watts-stats-value">
+                    <template v-if="st">
+                      {{ fmtStat(vdef('watts'), st[row.key]) }} W
+                      <span
+                        v-if="statZone('watts', st[row.key])"
+                        class="chart-tooltip-zone"
+                        :style="{ background: intensityZoneColor(statZone('watts', st[row.key])) }"
+                        :title="zoneLabel(statZone('watts', st[row.key]))"
+                      >{{ statZone('watts', st[row.key]).toUpperCase() }}</span>
+                    </template>
+                    <template v-else>–</template>
+                  </span>
+                </template>
+                <template v-if="rangeNp() != null">
+                  <i class="fa-solid fa-bolt chart-tooltip-icon" aria-hidden="true"></i>
+                  <span class="chart-tooltip-name">{{ t('strava.range_stats.normalized') }}</span>
+                  <span class="watts-stats-value">{{ Math.round(rangeNp()) }} W</span>
+                  <span></span>
+                </template>
+              </div>
+              <div v-else class="chart-tooltip-section">
                 <div class="chart-tooltip-row">
                   <i class="fa-solid fa-arrow-down-short-wide chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.min') }}</span>
@@ -2758,6 +2800,24 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.45rem;
   line-height: 1.65;
+}
+.watts-stats-grid {
+  display: grid;
+  grid-template-columns: auto auto auto auto;
+  align-items: center;
+  column-gap: 0.45rem;
+  line-height: 1.65;
+}
+.watts-stats-head {
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.6);
+  text-align: right;
+}
+.watts-stats-value {
+  font-weight: 600;
+  text-align: right;
+  padding-left: 0.55rem;
+  white-space: nowrap;
 }
 .chart-tooltip-swatch {
   width: 10px;

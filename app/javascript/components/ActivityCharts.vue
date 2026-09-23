@@ -1477,6 +1477,9 @@ function onChartPointerDown(group, e) {
   // Pointer Events : couvre souris ET tactile (le drag-reorder marche donc sur mobile).
   if (e.button !== undefined && e.button > 0) return
   if (e.target.closest && e.target.closest('button')) return
+  // Au doigt, on passe par la sélection puis la pose (cf. « Sélectionner puis poser »)
+  // plutôt que par le glisser : l'en-tête laisse alors défiler la page.
+  if (e.pointerType === 'touch' && touchPicking.value) return
   pdStartX = e.clientX
   pdStartY = e.clientY
   pdInitialized = false
@@ -1575,6 +1578,63 @@ function onPointerUp() {
   dragOverSlotIndex.value = null
   isCopyMode.value = false
   pdInitialized = false
+}
+
+// ─── Sélectionner puis poser (écrans tactiles) ───────────────────────────
+// Le glisser au doigt est pénible sur téléphone : il faut tenir le graphique tout en
+// faisant défiler la page vers une cible souvent hors écran, et la moitié gauche/droite
+// (fusionner/copier) se vise mal. Sur un appareil tactile, un bouton de l'en-tête
+// sélectionne le graphique ; chaque destination devient alors un bouton à toucher —
+// « Déplacer ici » entre deux graphiques, « Fusionner » / « Copier » sur les autres.
+// La souris garde le glisser, y compris sur un portable à écran tactile.
+const coarsePointerQuery = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(any-pointer: coarse)')
+  : null
+const touchPicking = ref(!!coarsePointerQuery?.matches)
+const pickedId = ref(null)
+
+function onCoarsePointerChange(e) {
+  touchPicking.value = e.matches
+  if (!e.matches) pickedId.value = null
+}
+coarsePointerQuery?.addEventListener?.('change', onCoarsePointerChange)
+onBeforeUnmount(() => coarsePointerQuery?.removeEventListener?.('change', onCoarsePointerChange))
+
+const pickedIndex = computed(() => availableLayout.value.findIndex((g) => g.id === pickedId.value))
+const pickedGroup = computed(() => availableLayout.value[pickedIndex.value] || null)
+
+// Le graphique sélectionné peut disparaître sous nos pieds (préférence chargée,
+// disposition réinitialisée) : on sort alors du mode.
+watch(availableLayout, (layout) => {
+  if (pickedId.value && !layout.some((g) => g.id === pickedId.value)) pickedId.value = null
+})
+
+function groupLabel(group) {
+  return group.streams.map((s) => streamLabel(s)).join(' + ')
+}
+
+function togglePick(group) {
+  pickedId.value = pickedId.value === group.id ? null : group.id
+}
+
+// Les deux emplacements qui encadrent le graphique sélectionné le laisseraient où il est.
+function isUsefulSlot(slotIdx) {
+  const p = pickedIndex.value
+  return p >= 0 && slotIdx !== p && slotIdx !== p + 1
+}
+
+function pickMoveTo(slotIdx) {
+  const source = pickedId.value
+  pickedId.value = null
+  if (source) moveGroupToIndex(source, slotIdx)
+}
+
+function pickDropOn(targetId, copy) {
+  const source = pickedId.value
+  pickedId.value = null
+  if (!source) return
+  if (copy) copyToGroup(source, targetId)
+  else mergeGroups(source, targetId)
 }
 
 // ─── Zoom (drag-selection on a chart) ────────────────────────────
@@ -2162,6 +2222,15 @@ onBeforeUnmount(() => {
           </span>
         </div>
       </div>
+      <!-- Mode « sélectionner puis poser » (tactile) : rappel de ce qui est en main,
+           dans l'en-tête collant pour rester visible pendant qu'on cherche la cible. -->
+      <div v-if="pickedGroup" class="chart-pick-banner mt-2" role="status">
+        <i class="fa-solid fa-hand-pointer" aria-hidden="true"></i>
+        <span class="flex-grow-1">{{ t('strava.layout.pick_banner', { name: groupLabel(pickedGroup) }) }}</span>
+        <button type="button" class="btn btn-sm btn-light" @click="pickedId = null">
+          {{ t('strava.layout.pick_cancel') }}
+        </button>
+      </div>
     </div>
     <div class="card-body">
       <div v-if="streamsLoading" class="text-muted d-flex align-items-center gap-2">
@@ -2176,9 +2245,19 @@ onBeforeUnmount(() => {
         <i class="fa-regular fa-folder-open" aria-hidden="true"></i>
         <span>{{ t('strava.no_stream_data') }}</span>
       </div>
-      <div v-else class="chart-layout">
+      <div v-else class="chart-layout" :class="{ 'touch-picking': touchPicking }">
         <template v-for="(group, gIdx) in availableLayout" :key="group.id">
+          <button
+            v-if="pickedId && isUsefulSlot(gIdx)"
+            type="button"
+            class="chart-pick-slot"
+            @click="pickMoveTo(gIdx)"
+          >
+            <i class="fa-solid fa-arrows-up-down" aria-hidden="true"></i>
+            <span>{{ t('strava.layout.move_here') }}</span>
+          </button>
           <div
+            v-else
             class="chart-drop-slot"
             :class="{ active: dragOverSlotIndex === gIdx, hinting: dragSourceId }"
             :data-slot-idx="gIdx"
@@ -2188,9 +2267,21 @@ onBeforeUnmount(() => {
             :class="{
               'merge-target': dragOverGroupId === group.id && dragSourceId !== group.id,
               dragging: dragSourceId === group.id,
+              picked: pickedId === group.id,
             }"
             :data-group-id="group.id"
           >
+            <div
+              v-if="pickedId && pickedId !== group.id"
+              class="chart-group-zones chart-group-zones-pick"
+            >
+              <button type="button" class="chart-zone chart-zone-merge" @click="pickDropOn(group.id, false)">
+                <span>{{ t('strava.layout.merge_here') }}</span>
+              </button>
+              <button type="button" class="chart-zone chart-zone-copy" @click="pickDropOn(group.id, true)">
+                <span>{{ t('strava.layout.copy_here') }}</span>
+              </button>
+            </div>
             <div
               v-if="dragOverGroupId === group.id && dragSourceId !== group.id"
               class="chart-group-zones"
@@ -2209,7 +2300,20 @@ onBeforeUnmount(() => {
             >
               <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <div class="d-flex align-items-center gap-2 flex-wrap">
-                  <span class="drag-handle">
+                  <button
+                    v-if="touchPicking"
+                    type="button"
+                    class="btn btn-sm pick-handle"
+                    :class="pickedId === group.id ? 'btn-warning' : 'btn-outline-secondary'"
+                    :title="pickedId === group.id ? t('strava.layout.pick_cancel') : t('strava.layout.pick')"
+                    :aria-label="pickedId === group.id ? t('strava.layout.pick_cancel') : t('strava.layout.pick')"
+                    :aria-pressed="pickedId === group.id"
+                    @click="togglePick(group)"
+                    @pointerdown.stop
+                  >
+                    <i :class="pickedId === group.id ? 'fa-solid fa-xmark' : 'fa-solid fa-up-down-left-right'" aria-hidden="true"></i>
+                  </button>
+                  <span v-else class="drag-handle">
                     <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
                   </span>
                   <template v-if="!group.collapsed">
@@ -2332,7 +2436,17 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </template>
+        <button
+          v-if="pickedId && isUsefulSlot(availableLayout.length)"
+          type="button"
+          class="chart-pick-slot"
+          @click="pickMoveTo(availableLayout.length)"
+        >
+          <i class="fa-solid fa-arrows-up-down" aria-hidden="true"></i>
+          <span>{{ t('strava.layout.move_here') }}</span>
+        </button>
         <div
+          v-else
           class="chart-drop-slot"
           :class="{ active: dragOverSlotIndex === availableLayout.length, hinting: dragSourceId }"
           :data-slot-idx="availableLayout.length"
@@ -2746,6 +2860,58 @@ onBeforeUnmount(() => {
 .chart-drop-slot.active::before {
   color: #0d6efd;
   font-weight: bold;
+}
+
+.chart-group.picked {
+  outline: 3px solid rgba(252, 76, 2, 0.6);
+  outline-offset: -3px;
+  background: rgba(252, 76, 2, 0.04);
+}
+/* En mode tactile l'en-tête n'est plus une poignée de glisser : il rend la main au
+   défilement natif (sinon poser le doigt dessus bloquerait le scroll de la page). */
+.chart-layout.touch-picking .chart-group-header { touch-action: auto; }
+.pick-handle {
+  padding: 0.15rem 0.45rem;
+  line-height: 1.2;
+}
+.chart-pick-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 0.4rem;
+  background: #fc4c02;
+  color: #fff;
+  font-size: 0.875rem;
+}
+.chart-pick-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  min-height: 44px;
+  margin: 6px 0;
+  border-radius: 0.4rem;
+  border: 2px dashed rgba(13, 110, 253, 0.55);
+  background: rgba(13, 110, 253, 0.08);
+  color: #0a58ca;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.chart-pick-slot:active { background: rgba(13, 110, 253, 0.25); }
+/* Les zones fusionner/copier deviennent des boutons à toucher, et non plus un simple
+   retour visuel sous un doigt qui glisse. */
+.chart-group-zones-pick { pointer-events: auto; }
+.chart-group-zones-pick .chart-zone {
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.chart-group-zones-pick .chart-zone-merge { border-right: 2px dashed rgba(0, 0, 0, 0.15); }
+.chart-group-zones-pick .chart-zone:active span {
+  background: rgba(0, 0, 0, 0.25);
+  color: #fff;
 }
 
 .chart-canvas-wrap {

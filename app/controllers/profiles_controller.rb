@@ -109,6 +109,16 @@ class ProfilesController < ApplicationController
     render json: { default_style: current_user.preferences_with_defaults.dig("navigation", "default_style") }
   end
 
+  # PATCH /api/profile/activity_stats — ordre et visibilité des sections de l'onglet
+  # Statistiques d'une activité. En fusion, comme `update_athlete` : l'éditeur de
+  # disposition n'a pas l'objet complet de préférences sous la main.
+  def update_activity_stats
+    prefs = current_user.preferences.is_a?(Hash) ? current_user.preferences.deep_dup : {}
+    prefs["activity_stats"] = sanitize_activity_stats(params[:activity_stats], current_user)
+    current_user.update!(preferences: prefs)
+    render json: { activity_stats: current_user.preferences_with_defaults["activity_stats"] }
+  end
+
   private
 
   def sanitize_preferences(raw)
@@ -169,7 +179,19 @@ class ProfilesController < ApplicationController
       # et sur le widget d'accueil), et un enregistrement de profil ne doit pas le
       # ramener à « progresser doucement » dans le dos de l'utilisateur.
       "training" => sanitize_training(incoming[:training], current_user),
+      # Même contrat de préservation : le formulaire de profil ne connaît pas la
+      # disposition de l'onglet Statistiques, qui se compose sur la page d'activité.
+      "activity_stats" => sanitize_activity_stats(incoming[:activity_stats], current_user),
     }
+  end
+
+  # Clé `sections` absente du payload ⇒ disposition déjà stockée.
+  def sanitize_activity_stats(raw, user)
+    raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
+    raw = (raw || {}).with_indifferent_access
+    existing = user.preferences.is_a?(Hash) ? (user.preferences["activity_stats"] || {}) : {}
+    sections = raw.key?(:sections) ? raw[:sections] : existing["sections"]
+    { "sections" => User.normalize_activity_stats_sections(sections) }
   end
 
   # Assainit l'objectif d'entraînement. Comme pour les seuils athlète, une clé absente

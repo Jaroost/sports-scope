@@ -161,7 +161,11 @@ const visibleUncollapsedStreams = computed(() => {
   return result
 })
 
-// Lignes du tableau de la pastille puissance (clés de chartStats et de range_stats).
+// Flux dont la pastille montre les stats avec ET sans les zéros : pour la puissance
+// comme pour la cadence, un 0 est une roue libre ou un arrêt, pas une mesure de l'effort.
+const ZERO_SPLIT_STREAMS = new Set(['watts', 'cadence'])
+
+// Lignes du tableau de ces pastilles (clés de chartStats et de range_stats).
 const wattsStatRows = [
   { key: 'min', icon: 'fa-arrow-down-short-wide' },
   { key: 'mean', icon: 'fa-equals' },
@@ -403,7 +407,7 @@ function fmtStat(def, value) {
   return def.format ? def.format(value) : fmt(value, def.digits)
 }
 
-// skipZeros : pour la puissance, résume aussi les seuls moments où l'on pédale
+// skipZeros : pour la puissance et la cadence (ZERO_SPLIT_STREAMS), résume aussi les seuls moments où l'on pédale
 // (hors roue libre et arrêts) — montré à côté des stats complètes dans la pastille.
 function chartStats(def, skipZeros = false) {
   const data = props.streams?.[def.key]?.data
@@ -2155,7 +2159,7 @@ onBeforeUnmount(() => {
                   {{ streamLabel(streamKey) }}
                 </div>
               </div>
-              <div v-if="streamKey === 'watts'" class="chart-tooltip-section watts-stats-grid">
+              <div v-if="ZERO_SPLIT_STREAMS.has(streamKey)" class="chart-tooltip-section watts-stats-grid">
                 <span></span>
                 <span></span>
                 <span class="watts-stats-head">{{ t('strava.range_stats.all_samples') }}</span>
@@ -2163,20 +2167,20 @@ onBeforeUnmount(() => {
                 <template v-for="row in wattsStatRows" :key="row.key">
                   <i :class="`fa-solid ${row.icon} chart-tooltip-icon`" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t(`strava.range_stats.${row.key}`) }}</span>
-                  <span v-for="(st, i) in [chartStats(vdef('watts')), chartStats(vdef('watts'), true)]" :key="i" class="watts-stats-value">
+                  <span v-for="(st, i) in [chartStats(vdef(streamKey)), chartStats(vdef(streamKey), true)]" :key="i" class="watts-stats-value">
                     <template v-if="st">
-                      {{ fmtStat(vdef('watts'), st[row.key]) }} W
+                      {{ fmtStat(vdef(streamKey), st[row.key]) }} {{ vdef(streamKey).unit }}
                       <span
-                        v-if="statZone('watts', st[row.key])"
+                        v-if="statZone(streamKey, st[row.key])"
                         class="chart-tooltip-zone"
-                        :style="{ background: intensityZoneColor(statZone('watts', st[row.key])) }"
-                        :title="zoneLabel(statZone('watts', st[row.key]))"
-                      >{{ statZone('watts', st[row.key]).toUpperCase() }}</span>
+                        :style="{ background: intensityZoneColor(statZone(streamKey, st[row.key])) }"
+                        :title="zoneLabel(statZone(streamKey, st[row.key]))"
+                      >{{ statZone(streamKey, st[row.key]).toUpperCase() }}</span>
                     </template>
                     <template v-else>–</template>
                   </span>
                 </template>
-                <template v-if="rangeNp() != null">
+                <template v-if="streamKey === 'watts' && rangeNp() != null">
                   <i class="fa-solid fa-bolt chart-tooltip-icon" aria-hidden="true"></i>
                   <span class="chart-tooltip-name">{{ t('strava.range_stats.normalized') }}</span>
                   <span class="watts-stats-value">{{ Math.round(rangeNp()) }} W</span>

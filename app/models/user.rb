@@ -70,6 +70,12 @@ class User < ApplicationRecord
   # Préférences par défaut du créateur d'itinéraire. Sert à la fois de valeurs
   # initiales et de schéma de référence (clés autorisées + types) pour assainir
   # les payloads entrants — cf. ProfilesController.
+  # Sections réorganisables de l'onglet Statistiques d'une activité, dans leur ordre
+  # par défaut. Miroir de ACTIVITY_STATS_SECTION_KEYS (userPreferences.ts).
+  ACTIVITY_STATS_SECTION_KEYS = %w[
+    efforts segment training overview laps climbs thresholds power_curve peak_powers splits intervals
+  ].freeze
+
   DEFAULT_PREFERENCES = {
     # Menus de la barre de navigation : liste ordonnée (l'ordre = ordre d'affichage)
     # d'items {clé, visible}. L'utilisateur peut réordonner et masquer chaque menu
@@ -209,6 +215,13 @@ class User < ApplicationRecord
       "goal" => "improve_slow",
       "event" => nil,
     },
+    # Onglet Statistiques d'une activité : sections dans l'ordre d'affichage, chacune
+    # masquable. Même patron que la navbar (liste ordonnée d'items {clé, visible},
+    # normalisée par normalize_activity_stats_sections). Réglage de compte et non de
+    # navigateur : la disposition composée sur l'ordinateur vaut aussi au téléphone.
+    "activity_stats" => {
+      "sections" => ACTIVITY_STATS_SECTION_KEYS.map { |key| { "key" => key, "visible" => true } },
+    },
   }.freeze
 
   # Menus de navigation configurables, dans leur ordre par défaut. Source de vérité des
@@ -244,6 +257,29 @@ class User < ApplicationRecord
   def self.coerce_navbar_flag(item, str_key, sym_key)
     value = item.key?(str_key) ? item[str_key] : item[sym_key]
     value.nil? ? true : ActiveModel::Type::Boolean.new.cast(value)
+  end
+
+  # Même contrat que normalize_navbar_items pour les sections de l'onglet Statistiques :
+  # clés connues seulement, dédoublonnées, dans l'ordre reçu ; une section connue absente
+  # (ajoutée après l'enregistrement de la disposition) est réinjectée visible juste après
+  # sa voisine de l'ordre par défaut, plutôt qu'en fin de liste.
+  def self.normalize_activity_stats_sections(raw)
+    raw = [] unless raw.is_a?(Array)
+    by_key = {}
+    raw.each do |item|
+      next unless item.is_a?(Hash)
+      key = (item["key"] || item[:key]).to_s
+      next unless ACTIVITY_STATS_SECTION_KEYS.include?(key) && !by_key.key?(key)
+      by_key[key] = { "key" => key, "visible" => coerce_navbar_flag(item, "visible", :visible) }
+    end
+    result = by_key.values
+    ACTIVITY_STATS_SECTION_KEYS.each_with_index do |key, i|
+      next if by_key.key?(key)
+      prev = i.positive? ? result.index { |s| s["key"] == ACTIVITY_STATS_SECTION_KEYS[i - 1] } : nil
+      result.insert(prev ? prev + 1 : 0, { "key" => key, "visible" => true })
+      by_key[key] = true
+    end
+    result
   end
 
   has_many :chart_layouts, dependent: :destroy
@@ -306,6 +342,8 @@ class User < ApplicationRecord
     # La navbar est une liste ordonnée (pas un simple hash de clés) : on la normalise
     # pour garantir des items valides et complets, même après l'ajout d'un nouveau menu.
     result["navbar"]["items"] = self.class.normalize_navbar_items(result.dig("navbar", "items"))
+    result["activity_stats"]["sections"] =
+      self.class.normalize_activity_stats_sections(result.dig("activity_stats", "sections"))
     result
   end
 

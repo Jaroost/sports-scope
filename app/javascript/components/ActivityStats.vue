@@ -9,6 +9,10 @@ import {
   type IntervalSegment, type CurvePoint, type CurveSeries,
 } from '../activityHelpers'
 import PowerCurveChart from './PowerCurveChart.vue'
+import {
+  userPreferences, persistActivityStatsSections, normalizeActivityStatsSections,
+  type ActivityStatsSection, type ActivityStatsSectionKey,
+} from '../userPreferences'
 
 interface ClimbWithVam extends ClimbSegment {
   duration: number | null
@@ -386,6 +390,88 @@ function setHoveredPeak(dur)  { emit('update:hoveredPeakDuration', dur) }
 
 function toggleCollapsed() { emit('update:collapsed', !props.collapsed) }
 
+// ─── Sections : ordre et visibilité ─────────────────────────────────────────
+// Chaque section se déplace et se masque ; la disposition est un réglage de compte
+// (preferences.activity_stats, cf. User::ACTIVITY_STATS_SECTION_KEYS). L'analyseur du
+// segment sélectionné en fait partie : il n'apparaît qu'avec une sélection, d'où son
+// propre libellé d'absence (`empty`) dans l'éditeur.
+const SECTION_META: Record<ActivityStatsSectionKey, { icon: string; label: string; empty?: string }> = {
+  efforts: { icon: 'fa-medal', label: 'strava.stats.efforts_title' },
+  segment: { icon: 'fa-arrows-left-right-to-line', label: 'strava.stats.segment_title', empty: 'strava.stats.layout.segment_empty' },
+  training: { icon: 'fa-gauge-high', label: 'strava.stats.training_title' },
+  overview: { icon: 'fa-person-biking', label: 'strava.stats.layout.overview' },
+  laps: { icon: 'fa-flag-checkered', label: 'strava.stats.laps_title' },
+  climbs: { icon: 'fa-mountain', label: 'strava.stats.climbs_title' },
+  thresholds: { icon: 'fa-gauge-high', label: 'strava.stats.thresholds_title' },
+  power_curve: { icon: 'fa-chart-line', label: 'strava.stats.power_curve_title' },
+  peak_powers: { icon: 'fa-bolt', label: 'strava.stats.peak_power_title' },
+  splits: { icon: 'fa-stopwatch', label: 'strava.stats.splits_title' },
+  intervals: { icon: 'fa-stopwatch-20', label: 'strava.stats.intervals_title' },
+}
+
+// Une section n'est dessinée que si la sortie a de quoi la remplir.
+const sectionAvailable = computed<Record<ActivityStatsSectionKey, boolean>>(() => ({
+  efforts: hasEfforts.value,
+  segment: props.segmentSummary != null,
+  training: !!(props.trainingMetrics || props.decoupling),
+  overview: !!(props.movingStats || props.globalVam != null),
+  laps: props.laps.length > 0,
+  climbs: props.climbsWithVam.length > 0,
+  thresholds: hasThresholds.value,
+  power_curve: activityCurve.value.length >= 2,
+  peak_powers: props.peakPowers.length > 0,
+  splits: props.splits.length > 0,
+  intervals: props.intervals.length > 0,
+}))
+
+const sections = ref<ActivityStatsSection[]>(
+  normalizeActivityStatsSections(userPreferences().activity_stats.sections),
+)
+const anyVisibleSection = computed(() => sections.value.some((s) => s.visible && sectionAvailable.value[s.key]))
+const editing = ref(false)
+const pickedKey = ref<ActivityStatsSectionKey | null>(null)
+const pickedIndex = computed(() => sections.value.findIndex((s) => s.key === pickedKey.value))
+const pickedSection = computed(() => sections.value[pickedIndex.value] || null)
+
+function saveSections(next: ActivityStatsSection[]) {
+  sections.value = next
+  persistActivityStatsSections(next)
+}
+
+function toggleEditing() {
+  editing.value = !editing.value
+  pickedKey.value = null
+}
+
+function toggleSectionVisible(key: ActivityStatsSectionKey) {
+  saveSections(sections.value.map((s) => (s.key === key ? { ...s, visible: !s.visible } : s)))
+}
+
+function togglePickSection(key: ActivityStatsSectionKey) {
+  pickedKey.value = pickedKey.value === key ? null : key
+}
+
+// Les deux emplacements qui encadrent la section choisie la laisseraient où elle est.
+function isUsefulSectionSlot(slotIdx: number) {
+  const p = pickedIndex.value
+  return p >= 0 && slotIdx !== p && slotIdx !== p + 1
+}
+
+function moveSectionTo(slotIdx: number) {
+  const p = pickedIndex.value
+  pickedKey.value = null
+  if (p < 0) return
+  const next = [...sections.value]
+  const [moved] = next.splice(p, 1)
+  next.splice(slotIdx > p ? slotIdx - 1 : slotIdx, 0, moved)
+  saveSections(next)
+}
+
+function resetSections() {
+  pickedKey.value = null
+  saveSections(normalizeActivityStatsSections([]))
+}
+
 // ─── Tooltips Bootstrap ──────────────────────────────────────────────────────
 // Les infobulles explicatives (cartes de charge/intensité + pastilles) passent en
 // tooltips Bootstrap : contenu HTML mis en forme, boîte large et lisible plutôt que
@@ -414,7 +500,7 @@ watch(
   () => [
     props.trainingMetrics, props.decoupling, props.efficiency, props.gradeAdjusted,
     props.globalVam, props.segmentSummary, props.collapsed, hasEfforts.value,
-    props.intervals.length,
+    props.intervals.length, editing.value, sections.value,
   ],
   () => nextTick(initTooltips),
 )
@@ -426,8 +512,21 @@ watch(
       <i class="fa-solid fa-chart-simple text-warning" aria-hidden="true"></i>
       <h3 class="h6 mb-0">{{ t('strava.stats.title') }}</h3>
       <button
+        v-if="!collapsed"
         type="button"
-        class="btn btn-sm btn-outline-secondary ms-auto"
+        class="btn btn-sm ms-auto"
+        :class="editing ? 'btn-warning' : 'btn-outline-secondary'"
+        :title="t('strava.stats.layout.customize')"
+        :aria-label="t('strava.stats.layout.customize')"
+        :aria-pressed="editing"
+        @click="toggleEditing"
+      >
+        <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+      </button>
+      <button
+        type="button"
+        class="btn btn-sm btn-outline-secondary"
+        :class="{ 'ms-auto': collapsed }"
         :title="collapsed ? t('strava.layout.show_chart') : t('strava.layout.hide_chart')"
         :aria-pressed="collapsed"
         @click="toggleCollapsed"
@@ -436,737 +535,812 @@ watch(
       </button>
     </div>
     <div v-if="!collapsed" class="card-body">
-      <!-- Meilleurs efforts : classement de la sortie (distance / dénivelé / durée)
-           parmi les activités du même sport, en absolu et sur son année. Or / argent /
-           bronze pour le top 3 ; affiché seulement si la sortie décroche une médaille. -->
-      <div v-if="hasEfforts" class="stats-section mb-3">
-        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-medal text-warning" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.efforts_title') }}</span>
-          <i
-            class="fa-regular fa-circle-question text-muted"
-            data-bs-toggle="tooltip"
-            :data-bs-title="t('strava.stats.efforts_hint', { sport: t(`performance.sports.${bestEfforts.sport}`) })"
-            aria-hidden="true"
-          ></i>
-        </h4>
-        <div class="table-responsive">
-          <table class="table table-sm stats-table align-middle mb-0">
-            <thead>
-              <tr>
-                <th></th>
-                <th></th>
-                <th>{{ t('strava.stats.effort_overall') }}</th>
-                <th v-if="effortYear != null">{{ t('strava.stats.effort_year', { year: effortYear }) }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in effortRows" :key="`effort-${row.key}`">
-                <td class="effort-label">{{ t(`strava.stats.effort_${row.key}`) }}</td>
-                <td class="text-muted">{{ effortValue(row.key, row.value) }}</td>
-                <td>
-                  <span class="effort-rank">
-                    <i
-                      v-if="medalColor(row.overall.rank)"
-                      class="fa-solid fa-medal effort-medal"
-                      :style="{ color: medalColor(row.overall.rank) }"
-                      :title="medalTitle(row.overall.rank)"
-                      aria-hidden="true"
-                    ></i>
-                    <span :class="{ 'text-muted': !medalColor(row.overall.rank) }">
-                      {{ t('strava.stats.effort_rank', { rank: row.overall.rank }) }}
-                    </span>
-                    <span class="effort-pool text-muted">{{ t('strava.stats.effort_pool', { count: row.overall.count }) }}</span>
-                  </span>
-                </td>
-                <td v-if="effortYear != null">
-                  <span v-if="row.year" class="effort-rank">
-                    <i
-                      v-if="medalColor(row.year.rank)"
-                      class="fa-solid fa-medal effort-medal"
-                      :style="{ color: medalColor(row.year.rank) }"
-                      :title="medalTitle(row.year.rank)"
-                      aria-hidden="true"
-                    ></i>
-                    <span :class="{ 'text-muted': !medalColor(row.year.rank) }">
-                      {{ t('strava.stats.effort_rank', { rank: row.year.rank }) }}
-                    </span>
-                    <span class="effort-pool text-muted">{{ t('strava.stats.effort_pool', { count: row.year.count }) }}</span>
-                  </span>
-                  <span v-else class="text-muted">–</span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Analyseur du segment sélectionné (drague A/B, clic sur un col / un pic de
-           puissance / un split). Récap complet de la tranche ; se referme au clic sur ×. -->
-      <div v-if="segmentSummary" class="segment-panel mb-3">
-        <div class="segment-head">
-          <i class="fa-solid fa-arrows-left-right-to-line text-warning" aria-hidden="true"></i>
-          <span class="segment-title">{{ t('strava.stats.segment_title') }}</span>
+      <!-- Mode « personnaliser » : la liste compacte des sections, à réordonner en
+           sélectionnant une section puis sa destination (même geste que les graphiques
+           au doigt), et à masquer. Enregistré sur le compte, donc commun à tous les
+           appareils. -->
+      <div v-if="editing" class="stats-layout-editor">
+        <p class="text-muted small mb-2">
+          {{ pickedSection ? t('strava.stats.layout.pick_banner', { name: t(SECTION_META[pickedSection.key].label) }) : t('strava.stats.layout.hint') }}
+        </p>
+        <template v-for="(sec, sIdx) in sections" :key="sec.key">
           <button
+            v-if="pickedKey && isUsefulSectionSlot(sIdx)"
             type="button"
-            class="btn btn-sm btn-outline-secondary segment-clear"
-            :title="t('strava.stats.segment_clear')"
-            @click="clearSelection"
+            class="stats-pick-slot"
+            @click="moveSectionTo(sIdx)"
           >
-            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+            <i class="fa-solid fa-arrows-up-down" aria-hidden="true"></i>
+            <span>{{ t('strava.stats.layout.move_here') }}</span>
+          </button>
+          <div class="stats-layout-row" :class="{ picked: pickedKey === sec.key, 'is-hidden': !sec.visible }">
+            <button
+              type="button"
+              class="btn btn-sm"
+              :class="pickedKey === sec.key ? 'btn-warning' : 'btn-outline-secondary'"
+              :title="pickedKey === sec.key ? t('strava.stats.layout.pick_cancel') : t('strava.stats.layout.pick')"
+              :aria-label="pickedKey === sec.key ? t('strava.stats.layout.pick_cancel') : t('strava.stats.layout.pick')"
+              :aria-pressed="pickedKey === sec.key"
+              @click="togglePickSection(sec.key)"
+            >
+              <i :class="pickedKey === sec.key ? 'fa-solid fa-xmark' : 'fa-solid fa-up-down-left-right'" aria-hidden="true"></i>
+            </button>
+            <i :class="`fa-solid ${SECTION_META[sec.key].icon} text-warning`" aria-hidden="true"></i>
+            <span class="flex-grow-1">
+              {{ t(SECTION_META[sec.key].label) }}
+              <span v-if="!sectionAvailable[sec.key]" class="text-muted small">— {{ t(SECTION_META[sec.key].empty || 'strava.stats.layout.no_data') }}</span>
+            </span>
+            <button
+              type="button"
+              class="btn btn-sm"
+              :class="sec.visible ? 'btn-outline-secondary' : 'btn-secondary'"
+              :title="sec.visible ? t('strava.stats.layout.hide') : t('strava.stats.layout.show')"
+              :aria-label="sec.visible ? t('strava.stats.layout.hide') : t('strava.stats.layout.show')"
+              :aria-pressed="!sec.visible"
+              @click="toggleSectionVisible(sec.key)"
+            >
+              <i :class="sec.visible ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash'" aria-hidden="true"></i>
+            </button>
+          </div>
+        </template>
+        <button
+          v-if="pickedKey && isUsefulSectionSlot(sections.length)"
+          type="button"
+          class="stats-pick-slot"
+          @click="moveSectionTo(sections.length)"
+        >
+          <i class="fa-solid fa-arrows-up-down" aria-hidden="true"></i>
+          <span>{{ t('strava.stats.layout.move_here') }}</span>
+        </button>
+        <div class="d-flex justify-content-between align-items-center mt-3">
+          <button type="button" class="btn btn-sm btn-link px-0" @click="resetSections">
+            {{ t('strava.stats.layout.reset') }}
+          </button>
+          <button type="button" class="btn btn-sm btn-warning" @click="toggleEditing">
+            {{ t('strava.stats.layout.done') }}
           </button>
         </div>
-        <div class="segment-grid">
-          <div v-if="segmentSummary.duration != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stats.seg_time') }}</span>
-            <strong>{{ formatHMS(segmentSummary.duration) }}</strong>
-          </div>
-          <div v-if="segmentSummary.distance != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stats.seg_distance') }}</span>
-            <strong>{{ formatKm(segmentSummary.distance) }}</strong>
-          </div>
-          <div v-if="segmentSummary.pace != null || segmentSummary.avgSpeed != null" class="segment-item">
-            <span class="segment-item-label">{{ segmentSummary.isRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth') }}</span>
-            <strong>{{ speedLabel(segmentSummary) }} <span class="segment-unit">{{ speedUnit(segmentSummary) }}</span></strong>
-          </div>
-          <div v-if="segmentSummary.gap != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stats.gap') }}</span>
-            <strong>{{ formatPace(segmentSummary.gap) }} <span class="segment-unit">{{ t('strava.stats.pace_unit') }}</span></strong>
-          </div>
-          <div v-if="segmentSummary.avgHr != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stream.heartrate') }}</span>
-            <strong>{{ Math.round(segmentSummary.avgHr) }} <span class="segment-unit">bpm</span></strong>
-          </div>
-          <div v-if="segmentSummary.avgPower != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stats.col_power') }}</span>
-            <strong>
-              {{ Math.round(segmentSummary.avgPower) }} <span class="segment-unit">W</span>
-              <span v-if="segmentSummary.np != null" class="text-muted segment-np">· NP {{ Math.round(segmentSummary.np) }}</span>
-            </strong>
-          </div>
-          <div v-if="segmentSummary.avgCadence != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stream.cadence') }}</span>
-            <strong>{{ Math.round(segmentSummary.avgCadence) }} <span class="segment-unit">rpm</span></strong>
-          </div>
-          <div v-if="segmentSummary.gain > 0" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stats.col_gain') }}</span>
-            <strong>+{{ Math.round(segmentSummary.gain) }} <span class="segment-unit">m</span></strong>
-          </div>
-          <div v-if="segmentSummary.avgGrade != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stream.grade_smooth') }}</span>
-            <strong>{{ segmentSummary.avgGrade.toFixed(1) }} <span class="segment-unit">%</span></strong>
-          </div>
-          <div v-if="segmentSummary.vam != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stats.col_vam') }}</span>
-            <strong>{{ Math.round(segmentSummary.vam) }} <span class="segment-unit">m/h</span></strong>
-          </div>
-          <div v-if="segmentSummary.ef != null" class="segment-item">
-            <span class="segment-item-label">{{ t('strava.stats.ef') }}</span>
-            <strong>{{ efValue(segmentSummary.ef) }}</strong>
-          </div>
-        </div>
       </div>
+      <template v-else>
+        <template v-for="sec in sections" :key="sec.key">
+          <template v-if="sec.visible">
+            <!-- Meilleurs efforts : classement de la sortie (distance / dénivelé / durée)
+                 parmi les activités du même sport, en absolu et sur son année. Or / argent /
+                 bronze pour le top 3 ; affiché seulement si la sortie décroche une médaille. -->
+            <div v-if="sec.key === 'efforts' && sectionAvailable.efforts" class="stats-section stats-block">
+              <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-medal text-warning" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.efforts_title') }}</span>
+                <i
+                  class="fa-regular fa-circle-question text-muted"
+                  data-bs-toggle="tooltip"
+                  :data-bs-title="t('strava.stats.efforts_hint', { sport: t(`performance.sports.${bestEfforts.sport}`) })"
+                  aria-hidden="true"
+                ></i>
+              </h4>
+              <div class="table-responsive">
+                <table class="table table-sm stats-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th></th>
+                      <th>{{ t('strava.stats.effort_overall') }}</th>
+                      <th v-if="effortYear != null">{{ t('strava.stats.effort_year', { year: effortYear }) }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="row in effortRows" :key="`effort-${row.key}`">
+                      <td class="effort-label">{{ t(`strava.stats.effort_${row.key}`) }}</td>
+                      <td class="text-muted">{{ effortValue(row.key, row.value) }}</td>
+                      <td>
+                        <span class="effort-rank">
+                          <i
+                            v-if="medalColor(row.overall.rank)"
+                            class="fa-solid fa-medal effort-medal"
+                            :style="{ color: medalColor(row.overall.rank) }"
+                            :title="medalTitle(row.overall.rank)"
+                            aria-hidden="true"
+                          ></i>
+                          <span :class="{ 'text-muted': !medalColor(row.overall.rank) }">
+                            {{ t('strava.stats.effort_rank', { rank: row.overall.rank }) }}
+                          </span>
+                          <span class="effort-pool text-muted">{{ t('strava.stats.effort_pool', { count: row.overall.count }) }}</span>
+                        </span>
+                      </td>
+                      <td v-if="effortYear != null">
+                        <span v-if="row.year" class="effort-rank">
+                          <i
+                            v-if="medalColor(row.year.rank)"
+                            class="fa-solid fa-medal effort-medal"
+                            :style="{ color: medalColor(row.year.rank) }"
+                            :title="medalTitle(row.year.rank)"
+                            aria-hidden="true"
+                          ></i>
+                          <span :class="{ 'text-muted': !medalColor(row.year.rank) }">
+                            {{ t('strava.stats.effort_rank', { rank: row.year.rank }) }}
+                          </span>
+                          <span class="effort-pool text-muted">{{ t('strava.stats.effort_pool', { count: row.year.count }) }}</span>
+                        </span>
+                        <span v-else class="text-muted">–</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-      <!-- Charge & intensité : NP / IF / TSS / VI + découplage aérobie.
-           Chaque carte porte un badge « à quoi ça correspond » + son mode de calcul. -->
-      <div v-if="trainingMetrics || decoupling" class="stats-section mb-3">
-        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-gauge-high text-warning" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.training_title') }}</span>
-        </h4>
-        <div class="row g-3 metric-cards-row">
-          <!-- TSS -->
-          <div v-if="trainingMetrics && trainingMetrics.tss != null" class="col-12 col-sm-6 col-xl-4">
-            <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.tss_hint')">
-              <div class="metric-head">
-                <i class="fa-solid fa-fire-flame-curved text-danger" aria-hidden="true"></i>
-                <span class="metric-label">{{ t('strava.stats.tss') }}</span>
-                <span class="metric-badge" :style="{ backgroundColor: tssBadge(trainingMetrics.tss).color }">
-                  {{ t(`strava.stats.tss_level_${tssBadge(trainingMetrics.tss).key}`) }}
-                </span>
-              </div>
-              <div class="metric-value">{{ Math.round(trainingMetrics.tss) }}</div>
-              <details class="metric-details">
-                <summary>{{ t('strava.stats.calc_label') }}</summary>
-                <div class="metric-calc">
-                  <i class="fa-solid fa-calculator" aria-hidden="true"></i>
-                  <span>{{ t('strava.stats.tss_calc') }}</span>
-                </div>
-              </details>
-            </div>
-          </div>
-          <!-- IF -->
-          <div v-if="trainingMetrics && trainingMetrics.intensity != null" class="col-12 col-sm-6 col-xl-4">
-            <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.if_hint')">
-              <div class="metric-head">
-                <i class="fa-solid fa-bolt-lightning text-warning" aria-hidden="true"></i>
-                <span class="metric-label">{{ t('strava.stats.if_label') }}</span>
-                <span class="metric-badge" :style="{ backgroundColor: ifBadge(trainingMetrics.intensity).color }">
-                  {{ t(`strava.stats.if_zone_${ifBadge(trainingMetrics.intensity).key}`) }}
-                </span>
-              </div>
-              <div class="metric-value">{{ trainingMetrics.intensity.toFixed(2) }}</div>
-              <details class="metric-details">
-                <summary>{{ t('strava.stats.calc_label') }}</summary>
-                <div class="metric-calc">
-                  <i class="fa-solid fa-calculator" aria-hidden="true"></i>
-                  <span>{{ t('strava.stats.if_calc') }}</span>
-                </div>
-              </details>
-            </div>
-          </div>
-          <!-- NP -->
-          <div v-if="trainingMetrics && trainingMetrics.np != null" class="col-12 col-sm-6 col-xl-4">
-            <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.np_hint')">
-              <div class="metric-head">
-                <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
-                <span class="metric-label">{{ t('strava.stats.np') }}</span>
-                <span
-                  v-if="npVsAvgPct != null"
-                  class="metric-badge metric-badge-neutral"
+            <!-- Analyseur du segment sélectionné (drague A/B, clic sur un col / un pic de
+                 puissance / un split). Récap complet de la tranche ; se referme au clic sur ×. -->
+            <div v-if="sec.key === 'segment' && sectionAvailable.segment" class="segment-panel stats-block">
+              <div class="segment-head">
+                <i class="fa-solid fa-arrows-left-right-to-line text-warning" aria-hidden="true"></i>
+                <span class="segment-title">{{ t('strava.stats.segment_title') }}</span>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-outline-secondary segment-clear"
+                  :title="t('strava.stats.segment_clear')"
+                  @click="clearSelection"
                 >
-                  {{ t('strava.stats.np_vs_avg', { pct: (npVsAvgPct >= 0 ? '+' : '') + Math.round(npVsAvgPct) }) }}
-                </span>
+                  <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                </button>
               </div>
-              <div class="metric-value">{{ Math.round(trainingMetrics.np) }} <span class="metric-unit">W</span></div>
-              <details class="metric-details">
-                <summary>{{ t('strava.stats.calc_label') }}</summary>
-                <div class="metric-calc">
-                  <i class="fa-solid fa-calculator" aria-hidden="true"></i>
-                  <span>{{ t('strava.stats.np_calc') }}</span>
+              <div class="segment-grid">
+                <div v-if="segmentSummary.duration != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stats.seg_time') }}</span>
+                  <strong>{{ formatHMS(segmentSummary.duration) }}</strong>
                 </div>
-              </details>
-            </div>
-          </div>
-          <!-- VI -->
-          <div v-if="trainingMetrics && trainingMetrics.vi != null" class="col-12 col-sm-6 col-xl-4">
-            <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.vi_hint')">
-              <div class="metric-head">
-                <i class="fa-solid fa-wave-square text-info" aria-hidden="true"></i>
-                <span class="metric-label">{{ t('strava.stats.vi') }}</span>
-                <span class="metric-badge" :style="{ backgroundColor: viBadge(trainingMetrics.vi).color }">
-                  {{ t(`strava.stats.vi_level_${viBadge(trainingMetrics.vi).key}`) }}
-                </span>
-              </div>
-              <div class="metric-value">{{ trainingMetrics.vi.toFixed(2) }}</div>
-              <details class="metric-details">
-                <summary>{{ t('strava.stats.calc_label') }}</summary>
-                <div class="metric-calc">
-                  <i class="fa-solid fa-calculator" aria-hidden="true"></i>
-                  <span>{{ t('strava.stats.vi_calc') }}</span>
+                <div v-if="segmentSummary.distance != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stats.seg_distance') }}</span>
+                  <strong>{{ formatKm(segmentSummary.distance) }}</strong>
                 </div>
-              </details>
-            </div>
-          </div>
-          <!-- Découplage aérobie -->
-          <div v-if="decoupling" class="col-12 col-sm-6 col-xl-4">
-            <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t(`strava.stats.decoupling_hint_${decoupling.basis}`)">
-              <div class="metric-head">
-                <i class="fa-solid fa-heart-circle-bolt" :style="{ color: decouplingBadge(decoupling.pct).color }" aria-hidden="true"></i>
-                <span class="metric-label">{{ t('strava.stats.decoupling') }}</span>
-                <span class="metric-badge" :style="{ backgroundColor: decouplingBadge(decoupling.pct).color }">
-                  {{ t(`strava.stats.decoupling_level_${decouplingBadge(decoupling.pct).key}`) }}
-                </span>
-              </div>
-              <div class="metric-value" :style="{ color: decouplingBadge(decoupling.pct).color }">
-                {{ decoupling.pct > 0 ? '+' : '' }}{{ decoupling.pct.toFixed(1) }} <span class="metric-unit">%</span>
-              </div>
-              <details class="metric-details">
-                <summary>{{ t('strava.stats.calc_label') }}</summary>
-                <div class="metric-calc">
-                  <i class="fa-solid fa-calculator" aria-hidden="true"></i>
-                  <span>{{ t(`strava.stats.decoupling_calc_${decoupling.basis}`) }}</span>
+                <div v-if="segmentSummary.pace != null || segmentSummary.avgSpeed != null" class="segment-item">
+                  <span class="segment-item-label">{{ segmentSummary.isRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth') }}</span>
+                  <strong>{{ speedLabel(segmentSummary) }} <span class="segment-unit">{{ speedUnit(segmentSummary) }}</span></strong>
                 </div>
-              </details>
-            </div>
-          </div>
-          <!-- Facteur d'efficience (EF) -->
-          <div v-if="efficiency" class="col-12 col-sm-6 col-xl-4">
-            <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t(`strava.stats.ef_hint_${efficiency.basis}`)">
-              <div class="metric-head">
-                <i class="fa-solid fa-gauge text-success" aria-hidden="true"></i>
-                <span class="metric-label">{{ t('strava.stats.ef') }}</span>
-                <span class="metric-badge metric-badge-neutral">
-                  {{ t(`strava.stats.ef_basis_${efficiency.basis}`) }}
-                </span>
-              </div>
-              <div class="metric-value">{{ efValue(efficiency.value) }}</div>
-              <details class="metric-details">
-                <summary>{{ t('strava.stats.calc_label') }}</summary>
-                <div class="metric-calc">
-                  <i class="fa-solid fa-calculator" aria-hidden="true"></i>
-                  <span>{{ t(`strava.stats.ef_calc_${efficiency.basis}`) }}</span>
+                <div v-if="segmentSummary.gap != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stats.gap') }}</span>
+                  <strong>{{ formatPace(segmentSummary.gap) }} <span class="segment-unit">{{ t('strava.stats.pace_unit') }}</span></strong>
                 </div>
-              </details>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Top-line stats: temps actif / arrêts / VAM globale -->
-      <div v-if="movingStats || globalVam != null" class="row g-3 mb-3 stats-pills-row">
-        <div v-if="movingStats" class="col-6 col-md-3">
-          <div class="stat-card">
-            <span class="stat-icon"><i class="fa-solid fa-person-biking text-success" aria-hidden="true"></i></span>
-            <div>
-              <div class="text-muted small">{{ t('strava.stats.moving') }}</div>
-              <strong>{{ formatHMS(movingStats.moving) }}</strong>
-            </div>
-          </div>
-        </div>
-        <div v-if="movingStats" class="col-6 col-md-3">
-          <div class="stat-card">
-            <span class="stat-icon"><i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i></span>
-            <div>
-              <div class="text-muted small">{{ t('strava.stats.elapsed') }}</div>
-              <strong>{{ formatHMS(movingStats.elapsed) }}</strong>
-            </div>
-          </div>
-        </div>
-        <div v-if="movingStats" class="col-6 col-md-3">
-          <div class="stat-card">
-            <span class="stat-icon"><i class="fa-solid fa-pause text-secondary" aria-hidden="true"></i></span>
-            <div>
-              <div class="text-muted small">
-                {{ t('strava.stats.stopped') }}
-                <span v-if="movingStats.elapsed > 0" class="text-muted">· {{ movingStats.stopPct.toFixed(0) }} %</span>
-              </div>
-              <strong>{{ formatHMS(movingStats.stopped) }}</strong>
-            </div>
-          </div>
-        </div>
-        <div v-if="globalVam != null" class="col-6 col-md-3">
-          <div class="stat-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.vam_hint')">
-            <span class="stat-icon"><i class="fa-solid fa-mountain text-success" aria-hidden="true"></i></span>
-            <div>
-              <div class="text-muted small">{{ t('strava.stats.vam_global') }}</div>
-              <strong>{{ Math.round(globalVam) }} m/h</strong>
-            </div>
-          </div>
-        </div>
-        <div v-if="gradeAdjusted" class="col-6 col-md-3">
-          <div class="stat-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.gap_hint')">
-            <span class="stat-icon"><i class="fa-solid fa-person-running text-primary" aria-hidden="true"></i></span>
-            <div>
-              <div class="text-muted small">{{ t('strava.stats.gap') }}</div>
-              <strong>{{ formatPace(gradeAdjusted.gap) }} {{ t('strava.stats.pace_unit') }}</strong>
-              <div v-if="gapDeltaSec != null && gapDeltaSec !== 0" class="text-muted small">
-                {{ gapDeltaSec < 0 ? '−' : '+' }}{{ Math.abs(gapDeltaSec) }} {{ t('strava.stats.gap_delta') }}
+                <div v-if="segmentSummary.avgHr != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stream.heartrate') }}</span>
+                  <strong>{{ Math.round(segmentSummary.avgHr) }} <span class="segment-unit">bpm</span></strong>
+                </div>
+                <div v-if="segmentSummary.avgPower != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stats.col_power') }}</span>
+                  <strong>
+                    {{ Math.round(segmentSummary.avgPower) }} <span class="segment-unit">W</span>
+                    <span v-if="segmentSummary.np != null" class="text-muted segment-np">· NP {{ Math.round(segmentSummary.np) }}</span>
+                  </strong>
+                </div>
+                <div v-if="segmentSummary.avgCadence != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stream.cadence') }}</span>
+                  <strong>{{ Math.round(segmentSummary.avgCadence) }} <span class="segment-unit">rpm</span></strong>
+                </div>
+                <div v-if="segmentSummary.gain > 0" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stats.col_gain') }}</span>
+                  <strong>+{{ Math.round(segmentSummary.gain) }} <span class="segment-unit">m</span></strong>
+                </div>
+                <div v-if="segmentSummary.avgGrade != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stream.grade_smooth') }}</span>
+                  <strong>{{ segmentSummary.avgGrade.toFixed(1) }} <span class="segment-unit">%</span></strong>
+                </div>
+                <div v-if="segmentSummary.vam != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stats.col_vam') }}</span>
+                  <strong>{{ Math.round(segmentSummary.vam) }} <span class="segment-unit">m/h</span></strong>
+                </div>
+                <div v-if="segmentSummary.ef != null" class="segment-item">
+                  <span class="segment-item-label">{{ t('strava.stats.ef') }}</span>
+                  <strong>{{ efValue(segmentSummary.ef) }}</strong>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      <!-- Tours enregistrés par l'appareil (bouton « lap » ou auto-lap). Placés avant
-           les splits : ce sont les coupures voulues par l'athlète, les splits n'étant
-           qu'un découpage kilométrique recalculé. Mêmes lignes cliquables. -->
-      <div v-if="laps.length > 0" class="stats-section">
-        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-flag-checkered text-primary" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.laps_title') }}</span>
-        </h4>
-        <div class="table-responsive stats-table-scroll">
-          <table class="table table-sm stats-table align-middle mb-0">
-            <thead>
-              <tr>
-                <th>{{ t('strava.stats.lap_col_num') }}</th>
-                <th v-if="lapsHasName">{{ t('strava.stats.lap_col_name') }}</th>
-                <th :title="t('strava.stats.col_time')">
-                  <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
-                </th>
-                <th :title="t('strava.stats.seg_distance')">
-                  <i class="fa-solid fa-ruler-horizontal text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.seg_distance') }}</span>
-                </th>
-                <th :title="lapsAnyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth')">
-                  <i :class="lapsAnyRun ? 'fa-solid fa-person-running' : 'fa-solid fa-gauge-high'" class="text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ lapsAnyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth') }}</span>
-                </th>
-                <th v-if="lapsHasGap" :title="t('strava.stats.gap')">
-                  <i class="fa-solid fa-mountain-sun text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.gap') }}</span>
-                </th>
-                <th v-if="lapsHasHr" :title="t('strava.stream.heartrate')">
-                  <i class="fa-solid fa-heart-pulse text-danger" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stream.heartrate') }}</span>
-                </th>
-                <th v-if="lapsHasPower" :title="t('strava.stats.col_power')">
-                  <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
-                </th>
-                <th v-if="lapsHasGain" :title="t('strava.stats.col_gain')">
-                  <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="l in laps"
-                :key="`lap-${l.index}`"
-                class="climb-row"
-                :class="{ 'climb-row-active': isSplitSelected(l) }"
-                role="button"
-                tabindex="0"
-                :title="t('strava.stats.lap_click')"
-                :aria-pressed="isSplitSelected(l)"
-                @click="selectSplit(l)"
-                @keydown.enter.prevent="selectSplit(l)"
-                @keydown.space.prevent="selectSplit(l)"
-              >
-                <td>
-                  {{ l.index }}
-                  <i
-                    v-if="l.auto"
-                    class="fa-solid fa-robot text-muted split-partial"
-                    :title="t('strava.stats.lap_auto')"
-                    aria-hidden="true"
-                  ></i>
-                </td>
-                <td v-if="lapsHasName" class="text-truncate" style="max-width: 10rem;">{{ l.name || '–' }}</td>
-                <td>{{ l.duration != null ? formatHMS(l.duration) : '–' }}</td>
-                <td>{{ l.distance != null ? formatKm(l.distance) : '–' }}</td>
-                <td>{{ speedLabel(l) }} <span class="text-muted small">{{ speedUnit(l) }}</span></td>
-                <td v-if="lapsHasGap">{{ l.gap != null ? formatPace(l.gap) : '–' }}</td>
-                <td v-if="lapsHasHr">{{ l.avgHr != null ? Math.round(l.avgHr) : '–' }}</td>
-                <td v-if="lapsHasPower">{{ l.avgPower != null ? `${Math.round(l.avgPower)} W` : '–' }}</td>
-                <td v-if="lapsHasGain">{{ l.gain > 0 ? `+${Math.round(l.gain)} m` : '–' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+            <!-- Charge & intensité : NP / IF / TSS / VI + découplage aérobie.
+                 Chaque carte porte un badge « à quoi ça correspond » + son mode de calcul. -->
+            <div v-if="sec.key === 'training' && sectionAvailable.training" class="stats-section stats-block">
+              <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-gauge-high text-warning" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.training_title') }}</span>
+              </h4>
+              <div class="row g-3 metric-cards-row">
+                <!-- TSS -->
+                <div v-if="trainingMetrics && trainingMetrics.tss != null" class="col-12 col-sm-6 col-xl-4">
+                  <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.tss_hint')">
+                    <div class="metric-head">
+                      <i class="fa-solid fa-fire-flame-curved text-danger" aria-hidden="true"></i>
+                      <span class="metric-label">{{ t('strava.stats.tss') }}</span>
+                      <span class="metric-badge" :style="{ backgroundColor: tssBadge(trainingMetrics.tss).color }">
+                        {{ t(`strava.stats.tss_level_${tssBadge(trainingMetrics.tss).key}`) }}
+                      </span>
+                    </div>
+                    <div class="metric-value">{{ Math.round(trainingMetrics.tss) }}</div>
+                    <details class="metric-details">
+                      <summary>{{ t('strava.stats.calc_label') }}</summary>
+                      <div class="metric-calc">
+                        <i class="fa-solid fa-calculator" aria-hidden="true"></i>
+                        <span>{{ t('strava.stats.tss_calc') }}</span>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+                <!-- IF -->
+                <div v-if="trainingMetrics && trainingMetrics.intensity != null" class="col-12 col-sm-6 col-xl-4">
+                  <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.if_hint')">
+                    <div class="metric-head">
+                      <i class="fa-solid fa-bolt-lightning text-warning" aria-hidden="true"></i>
+                      <span class="metric-label">{{ t('strava.stats.if_label') }}</span>
+                      <span class="metric-badge" :style="{ backgroundColor: ifBadge(trainingMetrics.intensity).color }">
+                        {{ t(`strava.stats.if_zone_${ifBadge(trainingMetrics.intensity).key}`) }}
+                      </span>
+                    </div>
+                    <div class="metric-value">{{ trainingMetrics.intensity.toFixed(2) }}</div>
+                    <details class="metric-details">
+                      <summary>{{ t('strava.stats.calc_label') }}</summary>
+                      <div class="metric-calc">
+                        <i class="fa-solid fa-calculator" aria-hidden="true"></i>
+                        <span>{{ t('strava.stats.if_calc') }}</span>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+                <!-- NP -->
+                <div v-if="trainingMetrics && trainingMetrics.np != null" class="col-12 col-sm-6 col-xl-4">
+                  <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.np_hint')">
+                    <div class="metric-head">
+                      <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
+                      <span class="metric-label">{{ t('strava.stats.np') }}</span>
+                      <span
+                        v-if="npVsAvgPct != null"
+                        class="metric-badge metric-badge-neutral"
+                      >
+                        {{ t('strava.stats.np_vs_avg', { pct: (npVsAvgPct >= 0 ? '+' : '') + Math.round(npVsAvgPct) }) }}
+                      </span>
+                    </div>
+                    <div class="metric-value">{{ Math.round(trainingMetrics.np) }} <span class="metric-unit">W</span></div>
+                    <details class="metric-details">
+                      <summary>{{ t('strava.stats.calc_label') }}</summary>
+                      <div class="metric-calc">
+                        <i class="fa-solid fa-calculator" aria-hidden="true"></i>
+                        <span>{{ t('strava.stats.np_calc') }}</span>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+                <!-- VI -->
+                <div v-if="trainingMetrics && trainingMetrics.vi != null" class="col-12 col-sm-6 col-xl-4">
+                  <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.vi_hint')">
+                    <div class="metric-head">
+                      <i class="fa-solid fa-wave-square text-info" aria-hidden="true"></i>
+                      <span class="metric-label">{{ t('strava.stats.vi') }}</span>
+                      <span class="metric-badge" :style="{ backgroundColor: viBadge(trainingMetrics.vi).color }">
+                        {{ t(`strava.stats.vi_level_${viBadge(trainingMetrics.vi).key}`) }}
+                      </span>
+                    </div>
+                    <div class="metric-value">{{ trainingMetrics.vi.toFixed(2) }}</div>
+                    <details class="metric-details">
+                      <summary>{{ t('strava.stats.calc_label') }}</summary>
+                      <div class="metric-calc">
+                        <i class="fa-solid fa-calculator" aria-hidden="true"></i>
+                        <span>{{ t('strava.stats.vi_calc') }}</span>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+                <!-- Découplage aérobie -->
+                <div v-if="decoupling" class="col-12 col-sm-6 col-xl-4">
+                  <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t(`strava.stats.decoupling_hint_${decoupling.basis}`)">
+                    <div class="metric-head">
+                      <i class="fa-solid fa-heart-circle-bolt" :style="{ color: decouplingBadge(decoupling.pct).color }" aria-hidden="true"></i>
+                      <span class="metric-label">{{ t('strava.stats.decoupling') }}</span>
+                      <span class="metric-badge" :style="{ backgroundColor: decouplingBadge(decoupling.pct).color }">
+                        {{ t(`strava.stats.decoupling_level_${decouplingBadge(decoupling.pct).key}`) }}
+                      </span>
+                    </div>
+                    <div class="metric-value" :style="{ color: decouplingBadge(decoupling.pct).color }">
+                      {{ decoupling.pct > 0 ? '+' : '' }}{{ decoupling.pct.toFixed(1) }} <span class="metric-unit">%</span>
+                    </div>
+                    <details class="metric-details">
+                      <summary>{{ t('strava.stats.calc_label') }}</summary>
+                      <div class="metric-calc">
+                        <i class="fa-solid fa-calculator" aria-hidden="true"></i>
+                        <span>{{ t(`strava.stats.decoupling_calc_${decoupling.basis}`) }}</span>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+                <!-- Facteur d'efficience (EF) -->
+                <div v-if="efficiency" class="col-12 col-sm-6 col-xl-4">
+                  <div class="metric-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t(`strava.stats.ef_hint_${efficiency.basis}`)">
+                    <div class="metric-head">
+                      <i class="fa-solid fa-gauge text-success" aria-hidden="true"></i>
+                      <span class="metric-label">{{ t('strava.stats.ef') }}</span>
+                      <span class="metric-badge metric-badge-neutral">
+                        {{ t(`strava.stats.ef_basis_${efficiency.basis}`) }}
+                      </span>
+                    </div>
+                    <div class="metric-value">{{ efValue(efficiency.value) }}</div>
+                    <details class="metric-details">
+                      <summary>{{ t('strava.stats.calc_label') }}</summary>
+                      <div class="metric-calc">
+                        <i class="fa-solid fa-calculator" aria-hidden="true"></i>
+                        <span>{{ t(`strava.stats.ef_calc_${efficiency.basis}`) }}</span>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-      <!-- Splits automatiques par km. Lignes cliquables : sélectionnent la tranche
-           sur la carte + le graphique (même mécanisme que les cols). -->
-      <div v-if="splits.length > 0" class="stats-section">
-        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-stopwatch text-warning" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.splits_title') }}</span>
-        </h4>
-        <div class="table-responsive stats-table-scroll">
-          <table class="table table-sm stats-table align-middle mb-0">
-            <thead>
-              <tr>
-                <th>{{ t('strava.stats.split_col_km') }}</th>
-                <th :title="t('strava.stats.col_time')">
-                  <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
-                </th>
-                <th :title="anyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth')">
-                  <i :class="anyRun ? 'fa-solid fa-person-running' : 'fa-solid fa-gauge-high'" class="text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ anyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth') }}</span>
-                </th>
-                <th v-if="splitsHasGap" :title="t('strava.stats.gap')">
-                  <i class="fa-solid fa-mountain-sun text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.gap') }}</span>
-                </th>
-                <th v-if="splitsHasHr" :title="t('strava.stream.heartrate')">
-                  <i class="fa-solid fa-heart-pulse text-danger" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stream.heartrate') }}</span>
-                </th>
-                <th v-if="splitsHasPower" :title="t('strava.stats.col_power')">
-                  <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
-                </th>
-                <th v-if="splitsHasGain" :title="t('strava.stats.col_gain')">
-                  <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="s in splits"
-                :key="`split-${s.index}`"
-                class="climb-row"
-                :class="{ 'climb-row-active': isSplitSelected(s) }"
-                role="button"
-                tabindex="0"
-                :title="t('strava.stats.split_click')"
-                :aria-pressed="isSplitSelected(s)"
-                @click="selectSplit(s)"
-                @keydown.enter.prevent="selectSplit(s)"
-                @keydown.space.prevent="selectSplit(s)"
-              >
-                <td>
-                  {{ s.index }}
-                  <span v-if="s.partial" class="split-partial text-muted">{{ formatKm(s.distance) }}</span>
-                </td>
-                <td>{{ s.duration != null ? formatHMS(s.duration) : '–' }}</td>
-                <td>{{ speedLabel(s) }} <span class="text-muted small">{{ speedUnit(s) }}</span></td>
-                <td v-if="splitsHasGap">{{ s.gap != null ? formatPace(s.gap) : '–' }}</td>
-                <td v-if="splitsHasHr">{{ s.avgHr != null ? Math.round(s.avgHr) : '–' }}</td>
-                <td v-if="splitsHasPower">{{ s.avgPower != null ? `${Math.round(s.avgPower)} W` : '–' }}</td>
-                <td v-if="splitsHasGain">{{ s.gain > 0 ? `+${Math.round(s.gain)} m` : '–' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+            <!-- Top-line stats: temps actif / arrêts / VAM globale -->
+            <div v-if="sec.key === 'overview' && sectionAvailable.overview" class="stats-block">
+              <div class="row g-3 stats-pills-row">
+                <div v-if="movingStats" class="col-6 col-md-3">
+                  <div class="stat-card">
+                    <span class="stat-icon"><i class="fa-solid fa-person-biking text-success" aria-hidden="true"></i></span>
+                    <div>
+                      <div class="text-muted small">{{ t('strava.stats.moving') }}</div>
+                      <strong>{{ formatHMS(movingStats.moving) }}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="movingStats" class="col-6 col-md-3">
+                  <div class="stat-card">
+                    <span class="stat-icon"><i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i></span>
+                    <div>
+                      <div class="text-muted small">{{ t('strava.stats.elapsed') }}</div>
+                      <strong>{{ formatHMS(movingStats.elapsed) }}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="movingStats" class="col-6 col-md-3">
+                  <div class="stat-card">
+                    <span class="stat-icon"><i class="fa-solid fa-pause text-secondary" aria-hidden="true"></i></span>
+                    <div>
+                      <div class="text-muted small">
+                        {{ t('strava.stats.stopped') }}
+                        <span v-if="movingStats.elapsed > 0" class="text-muted">· {{ movingStats.stopPct.toFixed(0) }} %</span>
+                      </div>
+                      <strong>{{ formatHMS(movingStats.stopped) }}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="globalVam != null" class="col-6 col-md-3">
+                  <div class="stat-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.vam_hint')">
+                    <span class="stat-icon"><i class="fa-solid fa-mountain text-success" aria-hidden="true"></i></span>
+                    <div>
+                      <div class="text-muted small">{{ t('strava.stats.vam_global') }}</div>
+                      <strong>{{ Math.round(globalVam) }} m/h</strong>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="gradeAdjusted" class="col-6 col-md-3">
+                  <div class="stat-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.gap_hint')">
+                    <span class="stat-icon"><i class="fa-solid fa-person-running text-primary" aria-hidden="true"></i></span>
+                    <div>
+                      <div class="text-muted small">{{ t('strava.stats.gap') }}</div>
+                      <strong>{{ formatPace(gradeAdjusted.gap) }} {{ t('strava.stats.pace_unit') }}</strong>
+                      <div v-if="gapDeltaSec != null && gapDeltaSec !== 0" class="text-muted small">
+                        {{ gapDeltaSec < 0 ? '−' : '+' }}{{ Math.abs(gapDeltaSec) }} {{ t('strava.stats.gap_delta') }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-      <!-- Climbs (per-climb VAM) -->
-      <!-- Intervalles détectés automatiquement (efforts durs soutenus). Cliquer une
-           ligne la surligne sur la carte et le graphique via la sélection partagée. -->
-      <div v-if="intervals.length > 0" class="stats-section">
-        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-stopwatch-20 text-warning" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.intervals_title') }}</span>
-          <i
-            class="fa-regular fa-circle-question text-muted"
-            data-bs-toggle="tooltip"
-            :data-bs-title="t('strava.stats.intervals_hint')"
-            aria-hidden="true"
-          ></i>
-        </h4>
-        <div class="table-responsive stats-table-scroll">
-          <table class="table table-sm stats-table align-middle mb-0">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th :title="t('strava.stats.col_time')">
-                  <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
-                </th>
-                <th :title="t('strava.stats.col_length')">
-                  <i class="fa-solid fa-route text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_length') }}</span>
-                </th>
-                <th :title="t('strava.stats.intervals_effort')">
-                  <i class="fa-solid fa-fire text-danger" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.intervals_effort') }}</span>
-                </th>
-                <th v-if="intervalsHaveGrade" :title="t('strava.stats.col_grade')">
-                  <i class="fa-solid fa-slash text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_grade') }}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="iv in intervals"
-                :key="`interval-${iv.index}`"
-                class="climb-row"
-                :class="{ 'climb-row-active': isIntervalSelected(iv) }"
-                role="button"
-                tabindex="0"
-                :title="t('strava.stats.intervals_click')"
-                :aria-pressed="isIntervalSelected(iv)"
-                @click="selectInterval(iv)"
-                @keydown.enter.prevent="selectInterval(iv)"
-                @keydown.space.prevent="selectInterval(iv)"
-              >
-                <td>{{ iv.index }}</td>
-                <td>{{ iv.duration != null ? formatHMS(iv.duration) : '–' }}</td>
-                <td>{{ iv.distance != null ? formatKm(iv.distance) : '–' }}</td>
-                <td>{{ intervalEffort(iv) }}</td>
-                <td v-if="intervalsHaveGrade">{{ iv.avgGrade != null ? `${iv.avgGrade.toFixed(1)} %` : '–' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+            <!-- Tours enregistrés par l'appareil (bouton « lap » ou auto-lap). Placés avant
+                 les splits : ce sont les coupures voulues par l'athlète, les splits n'étant
+                 qu'un découpage kilométrique recalculé. Mêmes lignes cliquables. -->
+            <div v-if="sec.key === 'laps' && sectionAvailable.laps" class="stats-section stats-block">
+              <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-flag-checkered text-primary" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.laps_title') }}</span>
+              </h4>
+              <div class="table-responsive stats-table-scroll">
+                <table class="table table-sm stats-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>{{ t('strava.stats.lap_col_num') }}</th>
+                      <th v-if="lapsHasName">{{ t('strava.stats.lap_col_name') }}</th>
+                      <th :title="t('strava.stats.col_time')">
+                        <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
+                      </th>
+                      <th :title="t('strava.stats.seg_distance')">
+                        <i class="fa-solid fa-ruler-horizontal text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.seg_distance') }}</span>
+                      </th>
+                      <th :title="lapsAnyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth')">
+                        <i :class="lapsAnyRun ? 'fa-solid fa-person-running' : 'fa-solid fa-gauge-high'" class="text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ lapsAnyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth') }}</span>
+                      </th>
+                      <th v-if="lapsHasGap" :title="t('strava.stats.gap')">
+                        <i class="fa-solid fa-mountain-sun text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.gap') }}</span>
+                      </th>
+                      <th v-if="lapsHasHr" :title="t('strava.stream.heartrate')">
+                        <i class="fa-solid fa-heart-pulse text-danger" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stream.heartrate') }}</span>
+                      </th>
+                      <th v-if="lapsHasPower" :title="t('strava.stats.col_power')">
+                        <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
+                      </th>
+                      <th v-if="lapsHasGain" :title="t('strava.stats.col_gain')">
+                        <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="l in laps"
+                      :key="`lap-${l.index}`"
+                      class="climb-row"
+                      :class="{ 'climb-row-active': isSplitSelected(l) }"
+                      role="button"
+                      tabindex="0"
+                      :title="t('strava.stats.lap_click')"
+                      :aria-pressed="isSplitSelected(l)"
+                      @click="selectSplit(l)"
+                      @keydown.enter.prevent="selectSplit(l)"
+                      @keydown.space.prevent="selectSplit(l)"
+                    >
+                      <td>
+                        {{ l.index }}
+                        <i
+                          v-if="l.auto"
+                          class="fa-solid fa-robot text-muted split-partial"
+                          :title="t('strava.stats.lap_auto')"
+                          aria-hidden="true"
+                        ></i>
+                      </td>
+                      <td v-if="lapsHasName" class="text-truncate" style="max-width: 10rem;">{{ l.name || '–' }}</td>
+                      <td>{{ l.duration != null ? formatHMS(l.duration) : '–' }}</td>
+                      <td>{{ l.distance != null ? formatKm(l.distance) : '–' }}</td>
+                      <td>{{ speedLabel(l) }} <span class="text-muted small">{{ speedUnit(l) }}</span></td>
+                      <td v-if="lapsHasGap">{{ l.gap != null ? formatPace(l.gap) : '–' }}</td>
+                      <td v-if="lapsHasHr">{{ l.avgHr != null ? Math.round(l.avgHr) : '–' }}</td>
+                      <td v-if="lapsHasPower">{{ l.avgPower != null ? `${Math.round(l.avgPower)} W` : '–' }}</td>
+                      <td v-if="lapsHasGain">{{ l.gain > 0 ? `+${Math.round(l.gain)} m` : '–' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-      <div v-if="climbsWithVam.length > 0" class="stats-section">
-        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.climbs_title') }}</span>
-        </h4>
-        <div class="table-responsive stats-table-scroll">
-          <table class="table table-sm stats-table align-middle mb-0">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th :title="t('strava.stats.col_length')">
-                  <i class="fa-solid fa-route text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_length') }}</span>
-                </th>
-                <th :title="t('strava.stats.col_gain')">
-                  <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
-                </th>
-                <th :title="t('strava.stats.col_grade')">
-                  <i class="fa-solid fa-slash text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_grade') }}</span>
-                </th>
-                <th :title="t('strava.stats.col_time')">
-                  <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
-                </th>
-                <th :title="t('strava.stats.col_vam')">
-                  <i class="fa-solid fa-mountain text-success" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_vam') }}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(c, i) in climbsWithVam"
-                :key="`climb-${i}`"
-                class="climb-row"
-                :class="{
-                  'climb-row-active': isClimbSelected(c),
-                  'climb-row-hover': hoveredClimbStartIdx === c.startIdx,
-                }"
-                role="button"
-                tabindex="0"
-                :title="t('strava.click_to_select_climb')"
-                :aria-pressed="isClimbSelected(c)"
-                @click="selectClimb(c)"
-                @keydown.enter.prevent="selectClimb(c)"
-                @keydown.space.prevent="selectClimb(c)"
-                @mouseenter="setHoveredClimb(c.startIdx)"
-                @mouseleave="setHoveredClimb(null)"
-                @focus="setHoveredClimb(c.startIdx)"
-                @blur="setHoveredClimb(null)"
-              >
-                <td>
-                  <span class="climb-cat-badge" :class="`climb-cat-${c.category || 'HC'}`">
-                    <span>{{ c.category ? `Cat ${c.category}` : 'HC' }}</span>
+            <!-- Climbs (per-climb VAM) -->
+            <div v-if="sec.key === 'climbs' && sectionAvailable.climbs" class="stats-section stats-block">
+              <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-mountain text-warning" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.climbs_title') }}</span>
+              </h4>
+              <div class="table-responsive stats-table-scroll">
+                <table class="table table-sm stats-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th :title="t('strava.stats.col_length')">
+                        <i class="fa-solid fa-route text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_length') }}</span>
+                      </th>
+                      <th :title="t('strava.stats.col_gain')">
+                        <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
+                      </th>
+                      <th :title="t('strava.stats.col_grade')">
+                        <i class="fa-solid fa-slash text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_grade') }}</span>
+                      </th>
+                      <th :title="t('strava.stats.col_time')">
+                        <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
+                      </th>
+                      <th :title="t('strava.stats.col_vam')">
+                        <i class="fa-solid fa-mountain text-success" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_vam') }}</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="(c, i) in climbsWithVam"
+                      :key="`climb-${i}`"
+                      class="climb-row"
+                      :class="{
+                        'climb-row-active': isClimbSelected(c),
+                        'climb-row-hover': hoveredClimbStartIdx === c.startIdx,
+                      }"
+                      role="button"
+                      tabindex="0"
+                      :title="t('strava.click_to_select_climb')"
+                      :aria-pressed="isClimbSelected(c)"
+                      @click="selectClimb(c)"
+                      @keydown.enter.prevent="selectClimb(c)"
+                      @keydown.space.prevent="selectClimb(c)"
+                      @mouseenter="setHoveredClimb(c.startIdx)"
+                      @mouseleave="setHoveredClimb(null)"
+                      @focus="setHoveredClimb(c.startIdx)"
+                      @blur="setHoveredClimb(null)"
+                    >
+                      <td>
+                        <span class="climb-cat-badge" :class="`climb-cat-${c.category || 'HC'}`">
+                          <span>{{ c.category ? `Cat ${c.category}` : 'HC' }}</span>
+                        </span>
+                      </td>
+                      <td>{{ formatKm(c.lengthM) }}</td>
+                      <td>+{{ Math.round(c.gain) }} m</td>
+                      <td>{{ c.avgGrade.toFixed(1) }} %</td>
+                      <td>{{ c.duration != null ? formatHMS(c.duration) : '–' }}</td>
+                      <td>{{ c.vam != null ? `${Math.round(c.vam)} m/h` : '–' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Seuils estimés SUR CETTE SORTIE : ce qu'elle prouve à elle seule, en
+                 regard des seuils de l'athlète. Rien n'est mis à jour automatiquement. -->
+            <div v-if="sec.key === 'thresholds' && sectionAvailable.thresholds" class="stats-section stats-block">
+              <h4 class="h6 mb-1 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-gauge-high text-warning" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.thresholds_title') }}</span>
+              </h4>
+              <p class="text-muted small mb-2">{{ t('strava.stats.thresholds_hint') }}</p>
+              <div class="threshold-grid">
+                <div v-if="ftpEstimate" class="threshold-card">
+                  <span class="threshold-label">{{ t('strava.stats.threshold_ftp') }}</span>
+                  <strong class="threshold-value">
+                    {{ ftpEstimate.watts }}<span class="threshold-unit">W</span>
+                    <span v-if="ftpEstimate.w_per_kg" class="threshold-sub">
+                      · {{ formatWPerKg(ftpEstimate.w_per_kg) }}
+                    </span>
+                  </strong>
+                  <span class="threshold-method">{{ methodLabel(ftpEstimate) }}</span>
+                  <span v-if="ftpDelta != null" class="threshold-delta" :class="deltaClass(ftpDelta)">
+                    {{ signed(ftpDelta) }} W {{ t('strava.stats.threshold_vs_reference', { value: `${thresholdRef.ftp} W` }) }}
                   </span>
-                </td>
-                <td>{{ formatKm(c.lengthM) }}</td>
-                <td>+{{ Math.round(c.gain) }} m</td>
-                <td>{{ c.avgGrade.toFixed(1) }} %</td>
-                <td>{{ c.duration != null ? formatHMS(c.duration) : '–' }}</td>
-                <td>{{ c.vam != null ? `${Math.round(c.vam)} m/h` : '–' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </div>
 
-      <!-- Seuils estimés SUR CETTE SORTIE : ce qu'elle prouve à elle seule, en
-           regard des seuils de l'athlète. Rien n'est mis à jour automatiquement. -->
-      <div v-if="hasThresholds" class="stats-section mt-3">
-        <h4 class="h6 mb-1 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-gauge-high text-warning" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.thresholds_title') }}</span>
-        </h4>
-        <p class="text-muted small mb-2">{{ t('strava.stats.thresholds_hint') }}</p>
-        <div class="threshold-grid">
-          <div v-if="ftpEstimate" class="threshold-card">
-            <span class="threshold-label">{{ t('strava.stats.threshold_ftp') }}</span>
-            <strong class="threshold-value">
-              {{ ftpEstimate.watts }}<span class="threshold-unit">W</span>
-              <span v-if="ftpEstimate.w_per_kg" class="threshold-sub">
-                · {{ formatWPerKg(ftpEstimate.w_per_kg) }}
-              </span>
-            </strong>
-            <span class="threshold-method">{{ methodLabel(ftpEstimate) }}</span>
-            <span v-if="ftpDelta != null" class="threshold-delta" :class="deltaClass(ftpDelta)">
-              {{ signed(ftpDelta) }} W {{ t('strava.stats.threshold_vs_reference', { value: `${thresholdRef.ftp} W` }) }}
-            </span>
-          </div>
-
-          <div v-if="lthrEstimate" class="threshold-card">
-            <span class="threshold-label">{{ t('strava.stats.threshold_lthr') }}</span>
-            <strong class="threshold-value">
-              {{ lthrEstimate.bpm }}<span class="threshold-unit">bpm</span>
-              <span v-if="lthrEstimate.max_hr" class="threshold-sub">
-                · {{ t('strava.stats.threshold_max_hr', { value: lthrEstimate.max_hr }) }}
-              </span>
-            </strong>
-            <span class="threshold-method">{{ methodLabel(lthrEstimate) }}</span>
-            <span v-if="lthrDelta != null" class="threshold-delta" :class="deltaClass(lthrDelta)">
-              {{ signed(lthrDelta) }} bpm {{ t('strava.stats.threshold_vs_reference', { value: `${thresholdRef.lthr} bpm` }) }}
-            </span>
-          </div>
-
-          <div v-if="avgWPerKg != null" class="threshold-card">
-            <span class="threshold-label">{{ t('strava.stats.threshold_w_per_kg') }}</span>
-            <strong class="threshold-value">{{ formatWPerKg(avgWPerKg) }}</strong>
-            <span class="threshold-method">
-              {{ t('strava.stats.threshold_w_per_kg_hint', { watts: Math.round(avgWatts), weight: thresholdRef.weight_kg }) }}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Courbes de puissance : celle de la sortie et le record de tous les temps,
-           superposées sur les mêmes axes. Le tableau détaillé suit juste en dessous. -->
-      <div v-if="activityCurve.length >= 2" class="stats-section mt-3">
-        <h4 class="h6 mb-1 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-chart-line text-warning" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.power_curve_title') }}</span>
-        </h4>
-        <p class="text-muted small mb-2">{{ t('strava.stats.power_curve_hint') }}</p>
-        <PowerCurveChart :series="powerCurveSeries" />
-      </div>
-
-      <!-- Peak average power per duration (shortest → longest). -->
-      <div v-if="peakPowers.length > 0" class="stats-section mt-3">
-        <h4 class="h6 mb-2 d-flex align-items-center gap-2">
-          <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
-          <span>{{ t('strava.stats.peak_power_title') }}</span>
-        </h4>
-        <div class="table-responsive stats-table-scroll">
-          <table class="table table-sm stats-table align-middle mb-0">
-            <thead>
-              <tr>
-                <th :title="t('strava.stats.col_duration')">
-                  <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_duration') }}</span>
-                </th>
-                <th :title="t('strava.stats.col_power')">
-                  <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
-                  <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="pp in peakPowers"
-                :key="`peak-${pp.duration}`"
-                class="climb-row"
-                :class="{
-                  'climb-row-active': isPeakPowerSelected(pp),
-                  'climb-row-hover': hoveredPeakDuration === pp.duration,
-                }"
-                role="button"
-                tabindex="0"
-                :title="t('strava.click_to_select_peak_power')"
-                :aria-pressed="isPeakPowerSelected(pp)"
-                @click="selectPeak(pp)"
-                @keydown.enter.prevent="selectPeak(pp)"
-                @keydown.space.prevent="selectPeak(pp)"
-                @mouseenter="setHoveredPeak(pp.duration)"
-                @mouseleave="setHoveredPeak(null)"
-                @focus="setHoveredPeak(pp.duration)"
-                @blur="setHoveredPeak(null)"
-              >
-                <td>{{ formatPowerDuration(pp.duration) }}</td>
-                <td class="d-flex align-items-center gap-2 flex-wrap">
-                  <span>{{ Math.round(pp.avgPower) }} W</span>
-                  <!-- Podium historique sur cette durée : or / argent / bronze. Le rang 1
-                       porte le libellé « Record », l'argent et le bronze leur médaille. -->
-                  <span
-                    v-if="peakPowerMedal(pp)"
-                    class="peak-power-badge"
-                    :class="PEAK_MEDAL_CLASS[peakPowerMedal(pp)]"
-                    :title="peakPowerMedal(pp) === 1 ? t('strava.stats.peak_power_pr_hint') : medalTitle(peakPowerMedal(pp))"
-                  >
-                    <i class="fa-solid fa-medal" aria-hidden="true"></i>
-                    <span>{{ peakPowerMedal(pp) === 1 ? t('strava.stats.peak_power_pr') : medalTitle(peakPowerMedal(pp)) }}</span>
+                <div v-if="lthrEstimate" class="threshold-card">
+                  <span class="threshold-label">{{ t('strava.stats.threshold_lthr') }}</span>
+                  <strong class="threshold-value">
+                    {{ lthrEstimate.bpm }}<span class="threshold-unit">bpm</span>
+                    <span v-if="lthrEstimate.max_hr" class="threshold-sub">
+                      · {{ t('strava.stats.threshold_max_hr', { value: lthrEstimate.max_hr }) }}
+                    </span>
+                  </strong>
+                  <span class="threshold-method">{{ methodLabel(lthrEstimate) }}</span>
+                  <span v-if="lthrDelta != null" class="threshold-delta" :class="deltaClass(lthrDelta)">
+                    {{ signed(lthrDelta) }} bpm {{ t('strava.stats.threshold_vs_reference', { value: `${thresholdRef.lthr} bpm` }) }}
                   </span>
-                  <!-- Meilleur historique à battre : montré tant que la sortie n'est pas le
-                       record (argent/bronze ou hors podium). -->
-                  <span
-                    v-if="peakPowerMedal(pp) !== 1 && peakPowerBestFor(pp)"
-                    class="peak-power-best text-muted small"
-                    :title="t('strava.stats.peak_power_best_hint')"
-                  >
-                    <i class="fa-regular fa-star" aria-hidden="true"></i>
-                    {{ Math.round(peakPowerBestFor(pp).avg_watts) }} W
+                </div>
+
+                <div v-if="avgWPerKg != null" class="threshold-card">
+                  <span class="threshold-label">{{ t('strava.stats.threshold_w_per_kg') }}</span>
+                  <strong class="threshold-value">{{ formatWPerKg(avgWPerKg) }}</strong>
+                  <span class="threshold-method">
+                    {{ t('strava.stats.threshold_w_per_kg_hint', { watts: Math.round(avgWatts), weight: thresholdRef.weight_kg }) }}
                   </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Courbes de puissance : celle de la sortie et le record de tous les temps,
+                 superposées sur les mêmes axes. Le tableau détaillé suit juste en dessous. -->
+            <div v-if="sec.key === 'power_curve' && sectionAvailable.power_curve" class="stats-section stats-block">
+              <h4 class="h6 mb-1 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-chart-line text-warning" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.power_curve_title') }}</span>
+              </h4>
+              <p class="text-muted small mb-2">{{ t('strava.stats.power_curve_hint') }}</p>
+              <PowerCurveChart :series="powerCurveSeries" />
+            </div>
+
+            <!-- Peak average power per duration (shortest → longest). -->
+            <div v-if="sec.key === 'peak_powers' && sectionAvailable.peak_powers" class="stats-section stats-block">
+              <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.peak_power_title') }}</span>
+              </h4>
+              <div class="table-responsive stats-table-scroll">
+                <table class="table table-sm stats-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th :title="t('strava.stats.col_duration')">
+                        <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_duration') }}</span>
+                      </th>
+                      <th :title="t('strava.stats.col_power')">
+                        <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="pp in peakPowers"
+                      :key="`peak-${pp.duration}`"
+                      class="climb-row"
+                      :class="{
+                        'climb-row-active': isPeakPowerSelected(pp),
+                        'climb-row-hover': hoveredPeakDuration === pp.duration,
+                      }"
+                      role="button"
+                      tabindex="0"
+                      :title="t('strava.click_to_select_peak_power')"
+                      :aria-pressed="isPeakPowerSelected(pp)"
+                      @click="selectPeak(pp)"
+                      @keydown.enter.prevent="selectPeak(pp)"
+                      @keydown.space.prevent="selectPeak(pp)"
+                      @mouseenter="setHoveredPeak(pp.duration)"
+                      @mouseleave="setHoveredPeak(null)"
+                      @focus="setHoveredPeak(pp.duration)"
+                      @blur="setHoveredPeak(null)"
+                    >
+                      <td>{{ formatPowerDuration(pp.duration) }}</td>
+                      <td class="d-flex align-items-center gap-2 flex-wrap">
+                        <span>{{ Math.round(pp.avgPower) }} W</span>
+                        <!-- Podium historique sur cette durée : or / argent / bronze. Le rang 1
+                             porte le libellé « Record », l'argent et le bronze leur médaille. -->
+                        <span
+                          v-if="peakPowerMedal(pp)"
+                          class="peak-power-badge"
+                          :class="PEAK_MEDAL_CLASS[peakPowerMedal(pp)]"
+                          :title="peakPowerMedal(pp) === 1 ? t('strava.stats.peak_power_pr_hint') : medalTitle(peakPowerMedal(pp))"
+                        >
+                          <i class="fa-solid fa-medal" aria-hidden="true"></i>
+                          <span>{{ peakPowerMedal(pp) === 1 ? t('strava.stats.peak_power_pr') : medalTitle(peakPowerMedal(pp)) }}</span>
+                        </span>
+                        <!-- Meilleur historique à battre : montré tant que la sortie n'est pas le
+                             record (argent/bronze ou hors podium). -->
+                        <span
+                          v-if="peakPowerMedal(pp) !== 1 && peakPowerBestFor(pp)"
+                          class="peak-power-best text-muted small"
+                          :title="t('strava.stats.peak_power_best_hint')"
+                        >
+                          <i class="fa-regular fa-star" aria-hidden="true"></i>
+                          {{ Math.round(peakPowerBestFor(pp).avg_watts) }} W
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Splits automatiques par km. Lignes cliquables : sélectionnent la tranche
+                 sur la carte + le graphique (même mécanisme que les cols). -->
+            <div v-if="sec.key === 'splits' && sectionAvailable.splits" class="stats-section stats-block">
+              <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-stopwatch text-warning" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.splits_title') }}</span>
+              </h4>
+              <div class="table-responsive stats-table-scroll">
+                <table class="table table-sm stats-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>{{ t('strava.stats.split_col_km') }}</th>
+                      <th :title="t('strava.stats.col_time')">
+                        <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
+                      </th>
+                      <th :title="anyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth')">
+                        <i :class="anyRun ? 'fa-solid fa-person-running' : 'fa-solid fa-gauge-high'" class="text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ anyRun ? t('strava.stream.pace') : t('strava.stream.velocity_smooth') }}</span>
+                      </th>
+                      <th v-if="splitsHasGap" :title="t('strava.stats.gap')">
+                        <i class="fa-solid fa-mountain-sun text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.gap') }}</span>
+                      </th>
+                      <th v-if="splitsHasHr" :title="t('strava.stream.heartrate')">
+                        <i class="fa-solid fa-heart-pulse text-danger" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stream.heartrate') }}</span>
+                      </th>
+                      <th v-if="splitsHasPower" :title="t('strava.stats.col_power')">
+                        <i class="fa-solid fa-bolt text-warning" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_power') }}</span>
+                      </th>
+                      <th v-if="splitsHasGain" :title="t('strava.stats.col_gain')">
+                        <i class="fa-solid fa-arrow-trend-up text-success" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_gain') }}</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="s in splits"
+                      :key="`split-${s.index}`"
+                      class="climb-row"
+                      :class="{ 'climb-row-active': isSplitSelected(s) }"
+                      role="button"
+                      tabindex="0"
+                      :title="t('strava.stats.split_click')"
+                      :aria-pressed="isSplitSelected(s)"
+                      @click="selectSplit(s)"
+                      @keydown.enter.prevent="selectSplit(s)"
+                      @keydown.space.prevent="selectSplit(s)"
+                    >
+                      <td>
+                        {{ s.index }}
+                        <span v-if="s.partial" class="split-partial text-muted">{{ formatKm(s.distance) }}</span>
+                      </td>
+                      <td>{{ s.duration != null ? formatHMS(s.duration) : '–' }}</td>
+                      <td>{{ speedLabel(s) }} <span class="text-muted small">{{ speedUnit(s) }}</span></td>
+                      <td v-if="splitsHasGap">{{ s.gap != null ? formatPace(s.gap) : '–' }}</td>
+                      <td v-if="splitsHasHr">{{ s.avgHr != null ? Math.round(s.avgHr) : '–' }}</td>
+                      <td v-if="splitsHasPower">{{ s.avgPower != null ? `${Math.round(s.avgPower)} W` : '–' }}</td>
+                      <td v-if="splitsHasGain">{{ s.gain > 0 ? `+${Math.round(s.gain)} m` : '–' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Intervalles détectés automatiquement (efforts durs soutenus). Cliquer une
+                 ligne la surligne sur la carte et le graphique via la sélection partagée. -->
+            <div v-if="sec.key === 'intervals' && sectionAvailable.intervals" class="stats-section stats-block">
+              <h4 class="h6 mb-2 d-flex align-items-center gap-2">
+                <i class="fa-solid fa-stopwatch-20 text-warning" aria-hidden="true"></i>
+                <span>{{ t('strava.stats.intervals_title') }}</span>
+                <i
+                  class="fa-regular fa-circle-question text-muted"
+                  data-bs-toggle="tooltip"
+                  :data-bs-title="t('strava.stats.intervals_hint')"
+                  aria-hidden="true"
+                ></i>
+              </h4>
+              <div class="table-responsive stats-table-scroll">
+                <table class="table table-sm stats-table align-middle mb-0">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th :title="t('strava.stats.col_time')">
+                        <i class="fa-regular fa-clock text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_time') }}</span>
+                      </th>
+                      <th :title="t('strava.stats.col_length')">
+                        <i class="fa-solid fa-route text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_length') }}</span>
+                      </th>
+                      <th :title="t('strava.stats.intervals_effort')">
+                        <i class="fa-solid fa-fire text-danger" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.intervals_effort') }}</span>
+                      </th>
+                      <th v-if="intervalsHaveGrade" :title="t('strava.stats.col_grade')">
+                        <i class="fa-solid fa-slash text-secondary" aria-hidden="true"></i>
+                        <span class="visually-hidden">{{ t('strava.stats.col_grade') }}</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr
+                      v-for="iv in intervals"
+                      :key="`interval-${iv.index}`"
+                      class="climb-row"
+                      :class="{ 'climb-row-active': isIntervalSelected(iv) }"
+                      role="button"
+                      tabindex="0"
+                      :title="t('strava.stats.intervals_click')"
+                      :aria-pressed="isIntervalSelected(iv)"
+                      @click="selectInterval(iv)"
+                      @keydown.enter.prevent="selectInterval(iv)"
+                      @keydown.space.prevent="selectInterval(iv)"
+                    >
+                      <td>{{ iv.index }}</td>
+                      <td>{{ iv.duration != null ? formatHMS(iv.duration) : '–' }}</td>
+                      <td>{{ iv.distance != null ? formatKm(iv.distance) : '–' }}</td>
+                      <td>{{ intervalEffort(iv) }}</td>
+                      <td v-if="intervalsHaveGrade">{{ iv.avgGrade != null ? `${iv.avgGrade.toFixed(1)} %` : '–' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
+        </template>
+        <p v-if="!anyVisibleSection" class="text-muted small mb-0">{{ t('strava.stats.layout.all_hidden') }}</p>
+      </template>
     </div>
   </div>
 </template>
@@ -1194,6 +1368,38 @@ watch(
 }
 .climb-cat-badge > span { color: #fff; }
 
+.stats-block ~ .stats-block { margin-top: 1rem; }
+.stats-layout-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.35rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(108, 117, 125, 0.04);
+}
+.stats-layout-row.picked {
+  outline: 2px solid rgba(252, 76, 2, 0.6);
+  background: rgba(252, 76, 2, 0.06);
+}
+.stats-layout-row.is-hidden > span { opacity: 0.5; text-decoration: line-through; }
+.stats-pick-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+  min-height: 40px;
+  margin-bottom: 0.35rem;
+  border-radius: 0.4rem;
+  border: 2px dashed rgba(13, 110, 253, 0.55);
+  background: rgba(13, 110, 253, 0.08);
+  color: #0a58ca;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+.stats-pick-slot:active { background: rgba(13, 110, 253, 0.25); }
 .stats-section + .stats-section { border-top: 1px dashed rgba(0, 0, 0, 0.08); padding-top: 0.75rem; }
 
 /* Seuils de la sortie : une carte par estimation (FTP, seuil FC, W/kg). */

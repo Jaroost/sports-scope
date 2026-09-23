@@ -80,8 +80,21 @@ export interface TrainingPreferences {
   event: TargetEventPref | null
 }
 
+// Sections réorganisables de l'onglet Statistiques d'une activité, dans leur ordre par
+// défaut. Miroir de User::ACTIVITY_STATS_SECTION_KEYS (liste blanche côté serveur).
+export const ACTIVITY_STATS_SECTION_KEYS = [
+  'efforts', 'segment', 'training', 'overview', 'laps', 'climbs', 'thresholds',
+  'power_curve', 'peak_powers', 'splits', 'intervals',
+] as const
+export type ActivityStatsSectionKey = typeof ACTIVITY_STATS_SECTION_KEYS[number]
+export interface ActivityStatsSection {
+  key: ActivityStatsSectionKey
+  visible: boolean
+}
+
 export interface UserPreferences {
   training: TrainingPreferences
+  activity_stats: { sections: ActivityStatsSection[] }
   points_of_interest: {
     show_cemeteries: boolean
     show_bakeries: boolean
@@ -150,6 +163,7 @@ function sportDefaults(
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
   training: { goal: 'improve_slow', event: null },
+  activity_stats: { sections: ACTIVITY_STATS_SECTION_KEYS.map((key) => ({ key, visible: true })) },
   points_of_interest: {
     show_cemeteries: true,
     show_bakeries: true,
@@ -313,6 +327,49 @@ export function persistTrainingPlan(training: TrainingPreferences): void {
   patchPreferencesQuietly(prefs)
 }
 
+// Ordre et visibilité des sections de l'onglet Statistiques d'une activité. Endpoint
+// dédié en fusion (comme /api/athlete) : n'envoie que ce réglage. Best-effort — la page
+// a déjà réarrangé ses sections, un échec réseau ne fait que perdre la disposition au
+// prochain chargement.
+export function persistActivityStatsSections(sections: ActivityStatsSection[]): void {
+  const prefs = userPreferences()
+  prefs.activity_stats = { sections: sections.map(({ key, visible }) => ({ key, visible })) }
+  if (!isLoggedIn()) return
+  void fetch('/api/profile/activity_stats', {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      'X-CSRF-Token': csrfToken(),
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify({ activity_stats: prefs.activity_stats }),
+  }).catch(() => { /* ignore — miroir best-effort */ })
+}
+
+// Même contrat que User.normalize_activity_stats_sections : clés connues, dédoublonnées,
+// dans l'ordre reçu ; une section connue absente (ajoutée après l'enregistrement de la
+// disposition) est rajoutée visible juste après sa voisine de la liste par défaut.
+export function normalizeActivityStatsSections(raw: unknown): ActivityStatsSection[] {
+  const out: ActivityStatsSection[] = []
+  const seen = new Set<string>()
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const key = item?.key
+      if (!ACTIVITY_STATS_SECTION_KEYS.includes(key) || seen.has(key)) continue
+      seen.add(key)
+      out.push({ key, visible: item.visible !== false })
+    }
+  }
+  ACTIVITY_STATS_SECTION_KEYS.forEach((key, i) => {
+    if (seen.has(key)) return
+    const prev = i > 0 ? out.findIndex((s) => s.key === ACTIVITY_STATS_SECTION_KEYS[i - 1]) : -1
+    out.splice(prev + 1, 0, { key, visible: true })
+    seen.add(key)
+  })
+  return out
+}
+
 // PATCH de l'objet complet de préférences — l'endpoint attend tout l'objet et
 // assainit le reste. Rejette sur échec : à l'appelant de décider quoi en faire.
 function patchPreferences(prefs: UserPreferences): Promise<void> {
@@ -347,6 +404,7 @@ function parse(): UserPreferences {
     const d = DEFAULT_PREFERENCES
     return {
       training: parseTraining(incoming.training),
+      activity_stats: { sections: normalizeActivityStatsSections(incoming.activity_stats?.sections) },
       points_of_interest: { ...d.points_of_interest, ...incoming.points_of_interest },
       search: {
         country_codes: Array.isArray(incoming.search?.country_codes)

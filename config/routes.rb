@@ -73,6 +73,7 @@ Rails.application.routes.draw do
 
   # User preferences profile (JSON consumed by Vue)
   patch "/api/profile/preferences", to: "profiles#update"
+  patch "/api/profile/activity_stats", to: "profiles#update_activity_stats"
 
   # OmniAuth (POST entry points, GET callbacks)
   post "/auth/:provider", to: "sessions#passthrough", as: :auth_request, constraints: { provider: /keycloak|strava/ }

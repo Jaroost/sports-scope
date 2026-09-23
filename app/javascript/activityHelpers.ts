@@ -662,7 +662,22 @@ const HR_DROPOUT_FLOOR = 30 // bpm sous lesquels le cardio est « perdu »
 const HR_NORMAL = 80 // bpm au-dessus desquels le signal est sain (avant un décrochage)
 const GAP_MIN_TOTAL_S = 120 // en deçà, un trou isolé est du bruit
 const GAP_WARN_TOTAL_S = 600 // au-delà, ça mérite un avertissement franc
+// Un trou où l'on n'a pas avancé est une pause de l'enregistreur (auto-pause ou bouton),
+// pas un capteur muet : on reprend là où on s'était arrêté. Une vraie perte de signal en
+// roulant, elle, saute des centaines de mètres. Mesuré sur une sortie à 48 pauses : toutes
+// sous 3 m et 0,4 m/s ; un décrochage GPS à vélo passe plusieurs m/s.
+const GAP_PAUSE_MAX_M = 30
+const GAP_PAUSE_MAX_SPEED = 0.5 // m/s moyens sur la durée du trou
 const HR_DROPOUT_MIN_TOTAL_S = 20
+
+function isRecorderPause(gap: PauseSegment, distance: (number | null)[] | undefined): boolean {
+  if (!Array.isArray(distance)) return false
+  const d0 = distance[gap.startIdx]
+  const d1 = distance[gap.endIdx]
+  if (typeof d0 !== 'number' || typeof d1 !== 'number') return false
+  const moved = Math.abs(d1 - d0)
+  return moved <= GAP_PAUSE_MAX_M || moved / gap.durationSec < GAP_PAUSE_MAX_SPEED
+}
 
 export function dataQualityFlags(
   streams: Record<string, { data?: unknown } | undefined> | null | undefined,
@@ -671,8 +686,12 @@ export function dataQualityFlags(
   const flags: QualityFlag[] = []
   const time = streams?.time?.data as (number | null)[] | undefined
 
-  // 1. Trous d'enregistrement (capteur muet). Réutilise le détecteur des graphiques.
-  const gaps = detectRecordingGaps(time)
+  // 1. Trous d'enregistrement (capteur muet). Réutilise le détecteur des graphiques, mais
+  //    écarte les pauses : l'enregistreur s'arrête pendant l'arrêt, ce n'est pas une
+  //    anomalie. Sans flux de distance (home trainer sans capteur de vitesse…), on ne
+  //    peut pas trancher et tous les trous comptent, comme avant.
+  const distance = streams?.distance?.data as (number | null)[] | undefined
+  const gaps = detectRecordingGaps(time).filter((g) => !isRecorderPause(g, distance))
   if (gaps.length) {
     const seconds = totalPausedSeconds(gaps)
     if (gaps.length >= 2 || seconds >= GAP_MIN_TOTAL_S) {

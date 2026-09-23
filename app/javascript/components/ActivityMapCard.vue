@@ -21,10 +21,10 @@ import {
 // lissage de pente du profil utilisateur — pour que l'analyse et la création
 // d'itinéraire restent cohérentes.
 import {
-  simplifyIndices, nudgeIndicesOffTurns, buildGradedSegments, detectClimbs, GRADE_BUCKETS,
+  simplifyIndices, nudgeIndicesOffTurns, buildGradedSegments, GRADE_BUCKETS,
   buildOffsetDisplayLine, haversine,
 } from '../routeHelpers'
-import type { LngLat } from '../routeHelpers'
+import type { LngLat, Climb } from '../routeHelpers'
 import { sportPreferences, routeProfileForSport, turnAnomalyDiameterForSport } from '../userPreferences'
 import { repairAgainstTrack } from '../routeRepair'
 import { buildTooltipHtml } from '../activityTooltip'
@@ -37,6 +37,9 @@ const props = defineProps({
   activityId: { type: [String, Number], default: null },
   source: { type: String, default: 'strava' }, // 'strava' or 'imported'
   streams: { type: Object as PropType<Record<string, any> | null>, default: null },
+  // Montées détectées par le parent (detectClimbs) — partagées avec l'onglet stats
+  // plutôt que redétectées à chaque réinstallation des marqueurs.
+  climbs: { type: Array as PropType<Climb[]>, default: () => [] },
   photos: { type: Array as PropType<PhotoLike[]>, default: () => [] },
   // Current cross-component selection — { startIdx, endIdx } | null.
   selection: { type: Object, default: null },
@@ -511,11 +514,8 @@ function installClimbMarkers(maplibregl) {
   climbMarkerEls.clear()
   if (!state.showClimbs) return
   const latlng = props.streams?.latlng?.data
-  const altitudes = props.streams?.altitude?.data
-  const distances = props.streams?.distance?.data
-  if (!latlng || !altitudes || !distances) return
-  const climbs = detectClimbs(altitudes, distances)
-  climbs.forEach((climb) => {
+  if (!latlng) return
+  props.climbs.forEach((climb) => {
     const pt = latlng[climb.startIdx]
     if (!pt) return
     const el = buildClimbMarkerEl(climb)

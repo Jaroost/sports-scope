@@ -11,7 +11,7 @@
 // The parent's job is to glue them together via the shared refs documented
 // in the "Cross-component state" block below.
 
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, shallowRef, markRaw, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
 import {
   PEAK_POWER_DURATIONS, POWER_CURVE_DURATIONS, peakPowerCurve,
@@ -61,7 +61,11 @@ const bestEffortsUrl = computed(() => props.source === 'imported'
 const loading = ref(true)
 const error = ref(null)
 const activity = ref(null)
-const streams = ref(null)
+// shallowRef + markRaw : une longue sortie fait ~30 000 points × une dizaine de flux.
+// En réactivité profonde, chaque lecture `alt[i]` des boucles d'analyse passerait par
+// un Proxy, et chaque paire `[lat, lng]` en recevrait un — plusieurs secondes sur
+// téléphone. Les streams ne sont jamais modifiés sur place, seulement remplacés d'un bloc.
+const streams = shallowRef(null)
 const streamsLoading = ref(false)
 const streamsError = ref(null)
 const photos = ref([])
@@ -219,7 +223,10 @@ const segmentSummary = computed(() => {
 
 // Best average power per standard duration (peak-power curve) — les durées du
 // tableau des meilleures puissances moyennes.
-const peakPowers = computed(() => peakPowerCurve(streams.value, PEAK_POWER_DURATIONS))
+// Extraites de la courbe dense ci-dessous plutôt que recalculées : les durées de
+// référence en font toutes partie, et chaque durée coûte une passe sur les streams.
+const PEAK_DURATION_SET = new Set(PEAK_POWER_DURATIONS)
+const peakPowers = computed(() => powerCurve.value.filter((p) => PEAK_DURATION_SET.has(p.duration)))
 
 // Même calcul sur une grille dense : c'est la *courbe* de puissance de la sortie
 // (graphique), là où `peakPowers` n'en donne que les 11 durées de référence.
@@ -235,16 +242,20 @@ const qualityFlags = computed(() => dataQualityFlags(streams.value, activity.val
 // pics, qui ne donne qu'un meilleur effort par durée sans en révéler la structure.
 const intervals = computed(() => detectIntervals(streams.value, activity.value))
 
+// Montées détectées — calculées une fois ici et partagées avec la carte (marqueurs),
+// qui les redessine à chaque changement de style sans avoir à les redétecter.
+const climbs = computed(() => {
+  const alt = streams.value?.altitude?.data
+  const dist = streams.value?.distance?.data
+  if (!Array.isArray(alt) || !Array.isArray(dist) || alt.length === 0) return []
+  return detectClimbs(alt, dist)
+})
+
 // Per-climb stats enriched with duration + VAM. detectClimbs already gives
 // gain/lengthM/avgGrade/category; we add the per-climb time and VAM.
 const climbsWithVam = computed(() => {
-  if (!streams.value) return []
-  const alt = streams.value.altitude?.data
-  const dist = streams.value.distance?.data
-  const time = streams.value.time?.data
-  if (!Array.isArray(alt) || !Array.isArray(dist) || alt.length === 0) return []
-  const climbs = detectClimbs(alt, dist)
-  return climbs.map((c) => {
+  const time = streams.value?.time?.data
+  return climbs.value.map((c) => {
     const t0 = Array.isArray(time) ? time[c.startIdx] : null
     const t1 = Array.isArray(time) ? time[c.endIdx] : null
     const duration = (t0 != null && t1 != null) ? Math.max(0, t1 - t0) : null
@@ -339,7 +350,7 @@ async function fetchStreams() {
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
-    streams.value = withSmoothedGrade(payload.streams || {})
+    streams.value = markRaw(withSmoothedGrade(payload.streams || {}))
     // Une activité sans GPS (squash, tapis, muscu…) n'a pas de flux `distance` :
     // l'axe des abscisses par défaut n'a alors rien à mesurer, on bascule sur le temps.
     if (!streams.value.distance?.data?.length) xAxis.value = 'time'
@@ -436,11 +447,15 @@ watch(chartsCollapsed, (v) => {
 
 onMounted(async () => {
   fetchPhotos()
+  // Les streams ne dépendent pas du détail : on les demande en même temps. Le détail
+  // peut prendre plus d'une seconde (appel Strava quand le cache est froid), et les
+  // streams d'une longue sortie pèsent plusieurs Mo — les enchaîner additionnait les deux.
+  const streamsDone = fetchStreams()
   await fetchActivity()
   if (!activity.value) return
   // Fire-and-forget — le bandeau conditions se remplit dès que la météo arrive.
   fetchWeather()
-  await fetchStreams()
+  await streamsDone
   // Fire-and-forget — the table renders fine without ranks.
   fetchPeakPowerRanks()
   // Fire-and-forget — the medals section stays hidden until it arrives.
@@ -468,6 +483,7 @@ onMounted(async () => {
         :activity-id="props.activityId"
         :source="props.source"
         :streams="streams"
+        :climbs="climbs"
         :photos="photos"
         :selection="selection"
         :preview-range="hoveredSegmentRange"

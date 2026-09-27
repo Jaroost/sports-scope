@@ -21,6 +21,9 @@ interface ZonesPayload {
   power: ZoneChannel | null
   lthr: number | null
   ftp: number | null
+  // Répartition des ZONE_WINDOW_DAYS (6 semaines) derniers jours, même seuils —
+  // sert de référence pour situer CETTE séance face aux habitudes récentes.
+  recent: { hr: ZoneChannel | null; power: ZoneChannel | null; window_days: number } | null
 }
 
 const loading = ref(false)
@@ -61,7 +64,8 @@ function zoneLabel(zone: string): string {
 
 const hasAny = computed(() => !!(data.value?.hr || data.value?.power))
 
-// Les deux canaux rendus par la même boucle, avec leur seuil de référence.
+// Les deux canaux rendus par la même boucle, avec leur seuil de référence + la
+// répartition récente (6 semaines) du même canal, pour comparaison.
 const channels = computed(() => {
   const d = data.value
   return [
@@ -70,6 +74,7 @@ const channels = computed(() => {
       title: t('strava.zones.hr_title'),
       ref: d?.lthr ? t('strava.zones.hr_ref', { bpm: d.lthr }) : '',
       channel: d?.hr ?? null,
+      recentChannel: d?.recent?.hr ?? null,
       empty: d?.lthr ? t('strava.zones.no_hr') : t('strava.zones.set_lthr_hint'),
     },
     {
@@ -77,10 +82,19 @@ const channels = computed(() => {
       title: t('strava.zones.power_title'),
       ref: d?.ftp ? t('strava.zones.power_ref', { watts: d.ftp }) : '',
       channel: d?.power ?? null,
+      recentChannel: d?.recent?.power ?? null,
       empty: t('strava.zones.no_power'),
     },
   ].filter((c) => c.channel || c.key === 'hr' || (c.key === 'power' && data.value?.ftp))
 })
+
+// pct d'une zone dans la répartition récente (6 semaines), pour l'afficher en regard
+// du pct de CETTE séance. null si le canal n'a pas d'historique récent.
+function recentPct(recentChannel: ZoneChannel | null, zone: string): number | null {
+  return recentChannel?.zones.find((z) => z.zone === zone)?.pct ?? null
+}
+
+const windowDays = computed(() => data.value?.recent?.window_days ?? null)
 
 // Segments réellement présents (pct > 0) ; la légende, elle, liste toutes les zones.
 function segments(channel: ZoneChannel | null) {
@@ -208,6 +222,27 @@ const advices = computed(() => {
                   <span v-if="s.pct >= 8" class="zone-seg-label">{{ Math.round(s.pct) }}%</span>
                 </div>
               </div>
+
+              <!-- Répartition récente (fenêtre glissante) du même canal, en regard de celle-ci —
+                   même échelle et couleurs, en plus fin/estompé pour rester secondaire. -->
+              <template v-if="c.recentChannel">
+                <div
+                  class="zone-bar zone-bar-recent"
+                  role="img"
+                  :aria-label="t('strava.zones.recent_label', { days: windowDays })"
+                >
+                  <div
+                    v-for="s in segments(c.recentChannel)" :key="s.zone"
+                    class="zone-seg"
+                    :style="{ width: `${s.pct}%`, backgroundColor: intensityZoneColor(s.zone) }"
+                    :title="zoneTitle(s, c.unit)"
+                  ></div>
+                </div>
+                <div class="zone-bar-recent-label text-muted small">
+                  {{ t('strava.zones.recent_label', { days: windowDays }) }}
+                </div>
+              </template>
+
               <div class="d-flex flex-wrap gap-2 mt-2">
                 <span
                   v-for="z in c.channel.zones" :key="z.zone"
@@ -217,6 +252,9 @@ const advices = computed(() => {
                   <span class="zone-dot" :style="{ backgroundColor: intensityZoneColor(z.zone) }"></span>
                   <span class="fw-semibold">{{ zoneLabel(z.zone) }}</span>
                   <span class="text-muted">{{ t('performance.zones.legend_value', { pct: z.pct, time: fmtSeconds(z.seconds) }) }}</span>
+                  <span v-if="recentPct(c.recentChannel, z.zone) != null" class="zone-legend-recent">
+                    {{ t('strava.zones.recent_pct', { pct: recentPct(c.recentChannel, z.zone) }) }}
+                  </span>
                 </span>
               </div>
             </template>
@@ -266,6 +304,20 @@ const advices = computed(() => {
 }
 .zone-legend-muted {
   opacity: 0.45;
+}
+.zone-legend-recent {
+  color: var(--bs-secondary-color, #6c757d);
+  font-size: 0.72rem;
+}
+/* Barre de référence (fenêtre glissante) : plus fine et estompée pour rester
+   secondaire face à la répartition de la séance. */
+.zone-bar-recent {
+  height: 0.7rem;
+  opacity: 0.55;
+  margin-top: 0.35rem;
+}
+.zone-bar-recent-label {
+  margin-top: 0.25rem;
 }
 .zone-dot {
   display: inline-block;

@@ -185,8 +185,10 @@ module TrainingLoad
   # « étais-je frais ou cramé ce jour-là ? » sur la page d'activité. On prend le
   # point de série de la VEILLE : ce jour-là n'inclut pas encore le TSS de la séance,
   # donc son TSB décrit bien l'état AVANT l'effort. Réutilise la série déjà mise en
-  # cache (`summary`). Renvoie { ctl:, atl:, tsb:, form_zone: } ou nil si la date
-  # tombe hors de l'historique de forme.
+  # cache (`summary`). L'ACWR, lui, décrit un risque de pic de charge SUR LES JOURS
+  # QUI SUIVENT la séance (moyenne acute/chronic incluant le TSS du jour) : on le lit
+  # donc sur le jour même, pas la veille. Renvoie { ctl:, atl:, tsb:, form_zone:,
+  # acwr:, acwr_zone: } ou nil si la date tombe hors de l'historique de forme.
   def form_on(user, date)
     day = parse_date(date)
     return nil unless day
@@ -201,7 +203,12 @@ module TrainingLoad
     point ||= series.find { |p| p[:date] == day.iso8601 }
     return nil unless point
 
-    { ctl: point[:ctl], atl: point[:atl], tsb: point[:tsb], form_zone: form_zone(point[:tsb]) }
+    same_day = series.find { |p| p[:date] == day.iso8601 } || point
+
+    {
+      ctl: point[:ctl], atl: point[:atl], tsb: point[:tsb], form_zone: form_zone(point[:tsb]),
+      acwr: same_day[:acwr], acwr_zone: acwr_zone(same_day[:acwr])
+    }
   end
 
   # ── TSS d'une activité (cascade puissance → FC → estimation) ─────────────────
@@ -329,7 +336,10 @@ module TrainingLoad
   # Reprend les histogrammes pré-calculés de la sortie et les MÊMES seuils courants
   # que la page performance (LTHR courant, FTP de la date de la sortie), pour une
   # répartition cohérente entre les deux pages. Puissance : seulement pour le vélo.
-  # Renvoie `{ hr:, power:, lthr:, ftp: }` — hr/power nil si le canal manque.
+  # `recent` : même forme, mais sur les ZONE_WINDOW_DAYS derniers jours (`summary`,
+  # déjà en cache) — sert au front à situer CETTE séance face aux habitudes récentes,
+  # plutôt que de la lire seule. Renvoie `{ hr:, power:, lthr:, ftp:, recent: }` —
+  # hr/power nil si le canal manque, recent nil sans historique récent.
   def zones_for_activity(user, activity)
     return nil unless activity
 
@@ -347,11 +357,14 @@ module TrainingLoad
       ftp, ZoneDistribution::POWER_ZONES, ZoneDistribution::POWER_BUCKET
     ) : {}
 
+    recent = summary(user)[:zones]
+
     {
       hr: ZoneDistribution.present(hr_secs, ZoneDistribution::HR_ZONES, lthr_value),
       power: ZoneDistribution.present(power_secs, ZoneDistribution::POWER_ZONES, ftp),
       lthr: lthr_value,
-      ftp: ftp
+      ftp: ftp,
+      recent: recent && { hr: recent[:hr], power: recent[:power], window_days: recent[:window_days] }
     }
   end
 

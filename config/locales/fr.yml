@@ -700,6 +700,8 @@ fr:
       no_hr: "Aucune donnée de fréquence cardiaque."
       no_power: "Aucune donnée de puissance."
       set_lthr_hint: "Renseigne ton seuil FC (LTHR) dans ton profil pour afficher les zones cardio."
+      recent_label: "Moyenne des %{days} derniers jours"
+      recent_pct: "(%{pct}% habituellement)"
       advice_label: "Conseil"
       advice_recovery: "Séance de récupération — presque tout en douceur, idéale entre deux gros efforts."
       advice_endurance: "Séance d'endurance : l'essentiel du temps en aérobie facile, parfait pour construire ta base."

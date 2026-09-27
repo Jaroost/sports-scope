@@ -700,6 +700,8 @@ en:
       no_hr: "No heart-rate data."
       no_power: "No power data."
       set_lthr_hint: "Set your HR threshold (LTHR) in your profile to show heart-rate zones."
+      recent_label: "Average over the last %{days} days"
+      recent_pct: "(usually %{pct}%)"
       advice_label: "Tip"
       advice_recovery: "Recovery ride — almost all easy, ideal between two hard efforts."
       advice_endurance: "Endurance session: most of the time in easy aerobic, perfect for building your base."

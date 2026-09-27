@@ -6,7 +6,7 @@
 import { computed, type PropType } from 'vue'
 import { t } from '../i18n'
 import { weatherBucket, weatherLabel, windCardinal, windArrowDeg, type Weather } from '../weatherHelpers'
-import { zoneColor } from '../composables/useTrainingPlan'
+import { zoneColor, acwrColor } from '../composables/useTrainingPlan'
 
 const props = defineProps({
   activity: { type: Object as PropType<Record<string, any>>, required: true },
@@ -30,6 +30,20 @@ const formTsb = computed(() => {
 })
 const formLabel = computed(() => t(`performance.load.zone_${formZoneKey.value}`))
 const formHint = computed(() => t(`performance.load.zone_${formZoneKey.value}_hint`))
+
+// Ratio de charge aiguë/chronique (ACWR) au jour de la séance : même risque de pic de
+// charge que la page performance (TrainingLoad.form_on), affiché ici pour ne pas avoir
+// à changer de page pour savoir si cette sortie faisait grimper le risque de blessure.
+const acwr = computed(() => {
+  const v = props.activity?.form?.acwr
+  return Number.isFinite(v) ? v : null
+})
+const acwrZoneKey = computed(() => props.activity?.form?.acwr_zone || null)
+const acwrPillColor = computed(() => acwrColor(acwrZoneKey.value))
+const acwrLabel = computed(() => (acwrZoneKey.value ? t(`performance.load.acwr_${acwrZoneKey.value}`) : null))
+const acwrHint = computed(() =>
+  acwrZoneKey.value ? t(`performance.load.acwr_${acwrZoneKey.value}_hint`) : t('performance.load.acwr_pending'),
+)
 
 // Le matériel Strava (vélo ou chaussures) n'est présent que dans le détail Strava.
 const gear = computed(() => {
@@ -65,7 +79,13 @@ const hasWeather = computed(() =>
   !!w.value && (w.value.temperature != null || w.value.wind_speed != null || w.value.weather_code != null),
 )
 const hasContent = computed(
-  () => !!form.value || !!gearName.value || !!deviceName.value || hasWeather.value || props.weatherLoading,
+  () =>
+    !!form.value ||
+    acwr.value != null ||
+    !!gearName.value ||
+    !!deviceName.value ||
+    hasWeather.value ||
+    props.weatherLoading,
 )
 
 function fmt1(v: number | null | undefined): string {
@@ -83,8 +103,15 @@ function fmt1(v: number | null | undefined): string {
         <span class="cond-sub">{{ formLabel }}</span>
       </span>
 
+      <!-- ACWR au jour de la séance : risque de pic de charge, même échelle que la page performance. -->
+      <span v-if="acwr != null" class="cond-pill cond-acwr" :title="`${t('performance.load.acwr_label')} — ${acwrHint}`">
+        <i class="fa-solid fa-gauge-high" :style="{ color: acwrPillColor }" aria-hidden="true"></i>
+        <span class="cond-val" :style="{ color: acwrPillColor }">{{ acwr.toFixed(2) }}</span>
+        <span v-if="acwrLabel" class="cond-sub">{{ acwrLabel }}</span>
+      </span>
+
       <span
-        v-if="form && (gearName || deviceName || hasWeather || weatherLoading)"
+        v-if="(form || acwr != null) && (gearName || deviceName || hasWeather || weatherLoading)"
         class="cond-sep"
         aria-hidden="true"
       ></span>

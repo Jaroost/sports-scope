@@ -1894,6 +1894,13 @@ function attachTouchInteraction(canvas: HTMLCanvasElement, chart: any) {
           if (sIdx <= 0 && eIdx >= maxIdx) emit('clear-selection')
           else if (eIdx > sIdx) emit('select-segment', sIdx, eIdx)
         }
+      } else {
+        // Simple tap sans glissement : sans preventDefault ici, le navigateur le
+        // rejoue en clic souris (émulation tactile), que `events` (mousedown/mousemove/
+        // …) laisse passer jusqu'à Chart.js — qui affiche alors sa tooltip au point le
+        // plus proche. Sur téléphone ça entre en conflit avec la sélection au doigt :
+        // on annule ce rejeu, un tap seul ne doit rien afficher.
+        ev.preventDefault()
       }
       chart.update('none')
     }

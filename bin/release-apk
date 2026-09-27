@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Raccourci vers tool/release.sh du dépôt voisin sports-scope-companion
+# (build + publication de l'APK sur sports.logicraft.ch).
+exec "${COMPANION_DIR:-$HOME/dev/sports-scope-companion}/tool/release.sh" "$@"

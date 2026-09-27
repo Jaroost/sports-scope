@@ -552,7 +552,11 @@ function buildClimbMarkerEl(climb) {
   el.addEventListener('mousedown', (ev) => ev.stopPropagation())
   // Survol : on surligne la ligne du tableau de stats (hoveredClimbStartIdx) ET on
   // prévisualise le tronçon comme sélectionné sur la carte (tronçon bleu + poignées).
+  // Pas pendant un drag des poignées A/B : passer par-dessus un col en déplaçant un
+  // drapeau ne doit pas se prendre pour un survol, sinon on sélectionne le col au lieu
+  // de déplacer la poignée.
   el.addEventListener('mouseenter', () => {
+    if (isDragging) return
     emit('update:hoveredClimbStartIdx', climb.startIdx)
     previewSelection.value = { startIdx: climb.startIdx, endIdx: climb.endIdx }
   })

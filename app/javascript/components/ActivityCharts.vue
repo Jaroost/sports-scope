@@ -1032,12 +1032,29 @@ async function renderCharts() {
     group.streams.forEach((streamKey, idx) => {
       const def = vdef(streamKey)
       if (!def) return
+      // Bornes fixées sur l'étendue complète du flux (hors zoom/pan sur x), sinon Chart.js
+      // recalcule le min/max de l'axe y à partir des seuls points visibles dans la fenêtre
+      // x à chaque update (DatasetController.getMinMax filtre sur les bornes de l'autre
+      // axe) — l'axe y "sautait" à chaque pincement à 2 doigts sur mobile. `grace` restitue
+      // le petit espace au-dessus/en dessous que Chart.js ajoute normalement tout seul.
+      const yRaw = props.streams[streamKey]?.data
+      let yMin = Infinity, yMax = -Infinity
+      if (yRaw) {
+        for (let i = 0; i < yRaw.length; i++) {
+          const v = def.transform(yRaw[i])
+          if (v == null || Number.isNaN(v)) continue
+          if (v < yMin) yMin = v
+          if (v > yMax) yMax = v
+        }
+      }
+      const hasRange = Number.isFinite(yMin) && Number.isFinite(yMax)
       yScales[`y-${idx}`] = {
         type: 'linear',
         position: idx % 2 === 0 ? 'left' : 'right',
         // Titre d'axe retiré pour gagner de la place — l'unité est rappelée dans la
         // légende du panneau. Les graduations restent colorées pour repérer l'axe.
         title: { display: false },
+        ...(hasRange ? { min: yMin, max: yMax, grace: '5%' } : {}),
         ticks: {
           maxTicksLimit: 6,
           color: def.color,

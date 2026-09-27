@@ -1,5 +1,6 @@
-import { ref, computed, type Ref } from 'vue'
+import { ref, computed, watch, type Ref } from 'vue'
 import { mapStyleFor } from '../mapStyles'
+import { dataSaverActive } from '../companionBridge'
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
@@ -91,7 +92,14 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
 
   function wantOffline(): boolean {
     const id = mapStyleId.value
-    return isOfflineLayer(id) && offlineRegistered[id] && typeof navigator !== 'undefined' && navigator.onLine === false
+    if (!isOfflineLayer(id) || !offlineRegistered[id]) return false
+    // Sans réseau (comme avant) OU économie de données choisie par l'appli mobile
+    // (`dataSaverActive` — voir companionBridge.ts, RouteNavigation.vue) : dans les
+    // deux cas on ne veut plus des tuiles en direct. Sans cette seconde condition,
+    // l'archive téléchargée restait ignorée tant que le téléphone avait du réseau
+    // — exactement le cas où l'économie de données sert — et `transformRequest`
+    // bloquait alors les tuiles en direct sans jamais faire apparaître les locales.
+    return dataSaverActive.value || (typeof navigator !== 'undefined' && navigator.onLine === false)
   }
 
   function resolveBaseStyle(id: string): string | object {
@@ -232,6 +240,12 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     deleteOfflinePois(token)
     onOfflineRemoved()
   }
+
+  // Bascule le fond dès que l'appli mobile active/désactive l'économie de données en
+  // pleine sortie — même geste que les écouteurs `online`/`offline` de RouteNavigation.vue,
+  // pour la même raison : sans lui, activer le réglage depuis le menu ⋮ n'aurait d'effet
+  // qu'au prochain rechargement de la page.
+  watch(dataSaverActive, refreshBaseMap)
 
   return {
     offlineIsSup,

@@ -723,6 +723,10 @@ fr:
       humidity: "Humidité"
       precipitation: "Précipitations"
       form: "Fraîcheur à l'entrée de la séance"
+    week_progress:
+      title: "Charge de la semaine"
+      hint: "Où cette sortie place ta semaine (lundi → dimanche) face à ta cible — même calcul que la page Performances."
+      see_analysis: "Voir le détail"
     quality:
       title: "Qualité des données"
       hint: "Des anomalies d'enregistrement peuvent fausser certaines mesures (charge, puissance normalisée, moyennes, courbe de puissance). Rien n'est corrigé automatiquement — c'est juste à garder en tête en lisant l'analyse."
@@ -863,6 +867,8 @@ fr:
       threshold_w_per_kg_hint: "%{watts} W pour %{weight} kg"
       threshold_max_hr: "FC max %{value}"
       threshold_vs_reference: "vs %{value}"
+      threshold_trend: "%{amount} sur %{months} mois"
+      threshold_trend_flat: "stable"
       threshold_method_cp_model: "Modèle Critical Power"
       threshold_method_ftp_60min: "Effort d'~1 h"
       threshold_method_ftp_20min: "95 % du meilleur 20 min"

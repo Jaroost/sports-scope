@@ -723,6 +723,10 @@ en:
       humidity: "Humidity"
       precipitation: "Precipitation"
       form: "Freshness entering the session"
+    week_progress:
+      title: "This week's load"
+      hint: "Where this ride places your week (Monday → Sunday) against your target — same calculation as the Performance page."
+      see_analysis: "See detail"
     quality:
       title: "Data quality"
       hint: "Recording glitches can distort some metrics (training load, normalized power, averages, power curve). Nothing is corrected automatically — just keep it in mind when reading the analysis."
@@ -863,6 +867,8 @@ en:
       threshold_w_per_kg_hint: "%{watts} W for %{weight} kg"
       threshold_max_hr: "Max HR %{value}"
       threshold_vs_reference: "vs %{value}"
+      threshold_trend: "%{amount} over %{months} months"
+      threshold_trend_flat: "flat"
       threshold_method_cp_model: "Critical Power model"
       threshold_method_ftp_60min: "~1 h effort"
       threshold_method_ftp_20min: "95% of best 20 min"

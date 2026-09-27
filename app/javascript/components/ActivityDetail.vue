@@ -27,6 +27,7 @@ import ActivityStats from './ActivityStats.vue'
 import ActivityMapCard from './ActivityMapCard.vue'
 import ActivityCharts from './ActivityCharts.vue'
 import ActivityConditions from './ActivityConditions.vue'
+import ActivityWeekProgress from './ActivityWeekProgress.vue'
 import ActivityDataQuality from './ActivityDataQuality.vue'
 import ActivityZones from './ActivityZones.vue'
 import ActivitySegments from './ActivitySegments.vue'
@@ -660,6 +661,11 @@ onMounted(async () => {
         @hover="hoverSegment"
         @select="selectSegment"
       />
+
+      <!-- Contribution à la cible hebdomadaire — seulement si la sortie tombe dans la
+           semaine en cours (silencieux sinon, cf. le composant). En fin de page :
+           contexte secondaire, pas une métrique de la sortie elle-même. -->
+      <ActivityWeekProgress :activity-date="activity?.start_date_local || activity?.start_date || ''" />
     </div>
   </div>
 </template>

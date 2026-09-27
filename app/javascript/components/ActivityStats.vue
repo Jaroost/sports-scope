@@ -269,6 +269,20 @@ function deltaTo(value: number | null | undefined, reference: number | null | un
 const ftpDelta = computed(() => deltaTo(ftpEstimate.value?.watts, thresholdRef.value.ftp))
 const lthrDelta = computed(() => deltaTo(lthrEstimate.value?.bpm, thresholdRef.value.lthr))
 
+// Tendance du seuil DE RÉFÉRENCE (pas de cette sortie) sur les derniers mois — situe
+// la séance dans une dynamique de progression plutôt que face à une valeur figée.
+// Servie par le back (ActivityThresholds.trend) : { delta, months, from_date }.
+interface ThresholdTrend { delta: number; months: number; from_date: string }
+const ftpTrend = computed<ThresholdTrend | null>(() => thresholdRef.value.ftp_trend || null)
+const lthrTrend = computed<ThresholdTrend | null>(() => thresholdRef.value.lthr_trend || null)
+function trendLabel(trend: ThresholdTrend | null, unit: string): string | null {
+  if (!trend) return null
+  const amount = trend.delta === 0 ? t('strava.stats.threshold_trend_flat') : `${signed(trend.delta)} ${unit}`
+  return t('strava.stats.threshold_trend', { amount, months: trend.months })
+}
+const ftpTrendLabel = computed(() => trendLabel(ftpTrend.value, 'W'))
+const lthrTrendLabel = computed(() => trendLabel(lthrTrend.value, 'bpm'))
+
 // Signe explicite : « +12 » / « −8 » (un 0 reste « 0 », pas « +0 »).
 function signed(delta: number): string {
   if (delta > 0) return `+${delta}`
@@ -1100,6 +1114,9 @@ watch(
                   <span v-if="ftpDelta != null" class="threshold-delta" :class="deltaClass(ftpDelta)">
                     {{ signed(ftpDelta) }} W {{ t('strava.stats.threshold_vs_reference', { value: `${thresholdRef.ftp} W` }) }}
                   </span>
+                  <span v-if="ftpTrendLabel" class="threshold-delta" :class="deltaClass(ftpTrend?.delta ?? null)">
+                    <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i> {{ ftpTrendLabel }}
+                  </span>
                 </div>
 
                 <div v-if="lthrEstimate" class="threshold-card">
@@ -1113,6 +1130,9 @@ watch(
                   <span class="threshold-method">{{ methodLabel(lthrEstimate) }}</span>
                   <span v-if="lthrDelta != null" class="threshold-delta" :class="deltaClass(lthrDelta)">
                     {{ signed(lthrDelta) }} bpm {{ t('strava.stats.threshold_vs_reference', { value: `${thresholdRef.lthr} bpm` }) }}
+                  </span>
+                  <span v-if="lthrTrendLabel" class="threshold-delta" :class="deltaClass(lthrTrend?.delta ?? null)">
+                    <i class="fa-solid fa-arrow-trend-up" aria-hidden="true"></i> {{ lthrTrendLabel }}
                   </span>
                 </div>
 

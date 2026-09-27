@@ -767,6 +767,7 @@ fr:
     clear_selection: "Effacer la sélection"
     reset_zoom: "Réinitialiser zoom"
     zoom_to_selection: "Zoomer sélection"
+    pan_zoom_hint: "Faire glisser pour déplacer la zone zoomée"
     selection: "Sélection"
     whole_activity: "Activité complète"
     range_stats:

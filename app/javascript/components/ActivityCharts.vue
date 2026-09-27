@@ -1676,6 +1676,63 @@ function setZoom(min, max) {
 
 function resetZoom() { emit('update:zoomRange', null) }
 
+// ─── Curseur de déplacement (pan) sous le graphique quand zoomé ───────────
+// Contrairement à setZoom (qui peut réduire la fenêtre en butant sur un bord — pensé
+// pour le pincement/redimensionnement), ici la largeur de la fenêtre ne doit jamais
+// changer : on ne fait que la faire glisser, butée contre les bords si besoin.
+function panZoomTo(newMin: number) {
+  if (!props.zoomRange) return
+  const span = props.zoomRange.xMax - props.zoomRange.xMin
+  const lo = Math.min(Math.max(newMin, xMinAll), xMaxAll - span)
+  emit('update:zoomRange', { xMin: lo, xMax: lo + span })
+}
+
+const zoomThumbStyle = computed(() => {
+  if (!props.zoomRange) return {}
+  const total = xMaxAll - xMinAll
+  if (total <= 0) return {}
+  const left = ((props.zoomRange.xMin - xMinAll) / total) * 100
+  const width = Math.max(6, ((props.zoomRange.xMax - props.zoomRange.xMin) / total) * 100)
+  return { left: `${Math.min(left, 100 - width)}%`, width: `${width}%` }
+})
+
+let panDrag: { startClientX: number, startMin: number, span: number } | null = null
+
+function panSliderPointerDown(ev: PointerEvent) {
+  if (!props.zoomRange) return
+  const track = ev.currentTarget as HTMLElement
+  const total = xMaxAll - xMinAll
+  const span = props.zoomRange.xMax - props.zoomRange.xMin
+  if (total <= 0 || span <= 0) return
+  track.setPointerCapture(ev.pointerId)
+  const rect = track.getBoundingClientRect()
+  const thumb = track.querySelector('.zoom-pan-thumb') as HTMLElement | null
+  const thumbRect = thumb?.getBoundingClientRect()
+  const withinThumb = thumbRect && ev.clientX >= thumbRect.left && ev.clientX <= thumbRect.right
+  if (!withinThumb) {
+    // Tap ailleurs sur la piste : centre directement la fenêtre sur le point touché.
+    const frac = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width))
+    panZoomTo(xMinAll + frac * total - span / 2)
+  }
+  panDrag = { startClientX: ev.clientX, startMin: props.zoomRange.xMin, span }
+}
+
+function panSliderPointerMove(ev: PointerEvent) {
+  if (!panDrag) return
+  const track = ev.currentTarget as HTMLElement
+  const total = xMaxAll - xMinAll
+  if (total <= 0) return
+  const rect = track.getBoundingClientRect()
+  const deltaValue = ((ev.clientX - panDrag.startClientX) / rect.width) * total
+  panZoomTo(panDrag.startMin + deltaValue)
+}
+
+function panSliderPointerUp(ev: PointerEvent) {
+  panDrag = null
+  const track = ev.currentTarget as HTMLElement
+  if (track.hasPointerCapture?.(ev.pointerId)) track.releasePointerCapture(ev.pointerId)
+}
+
 function zoomToSelection() {
   if (!props.selection) return
   const xs = props.streams?.[xKey.value]?.data
@@ -2406,6 +2463,20 @@ onBeforeUnmount(() => {
                 <canvas :id="`chart-${group.id}`"></canvas>
                 <div class="chart-tooltip-slot" :data-group-id="group.id"></div>
               </div>
+              <!-- Zoomé : piste tactile pour déplacer la fenêtre sans repincer — le
+                   pincement à 2 doigts reste possible, ceci n'est qu'une alternative
+                   plus précise pour le pan seul. -->
+              <div
+                v-if="zoomRange"
+                class="zoom-pan-track"
+                :title="t('strava.pan_zoom_hint')"
+                @pointerdown="panSliderPointerDown"
+                @pointermove="panSliderPointerMove"
+                @pointerup="panSliderPointerUp"
+                @pointercancel="panSliderPointerUp"
+              >
+                <div class="zoom-pan-thumb" :style="zoomThumbStyle"></div>
+              </div>
               <div v-if="group.streams.includes('watts') && hasPowerZones" class="zone-toggle-row">
                 <button
                   type="button"
@@ -2943,6 +3014,26 @@ onBeforeUnmount(() => {
 .chart-canvas-wrap canvas {
   cursor: crosshair;
   touch-action: pan-y;
+}
+.zoom-pan-track {
+  position: relative;
+  height: 18px;
+  margin: 4px 0 2px;
+  border-radius: 999px;
+  background: rgba(108, 117, 125, 0.12);
+  cursor: grab;
+  /* Le geste doit rester dans la piste (déplacer la fenêtre), pas déclencher le
+     défilement natif de la page. */
+  touch-action: none;
+}
+.zoom-pan-track:active { cursor: grabbing; }
+.zoom-pan-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  border-radius: 999px;
+  background: rgba(252, 76, 2, 0.55);
+  pointer-events: none;
 }
 </style>
 

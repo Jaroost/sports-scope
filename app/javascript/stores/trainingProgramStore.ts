@@ -28,6 +28,33 @@ export type MilestoneIcon = typeof MILESTONE_ICONS[number]['key']
 export const CUE_TIMINGS = ['before', 'at'] as const
 export type CueTiming = typeof CUE_TIMINGS[number]
 
+// Catalogue fermé — miroir de TrainingProgram::SPORTS (training_program.rb). Pilote
+// uniquement l'unité de saisie/affichage de la vitesse cible (km/h vs allure min/km) —
+// le stockage reste toujours en km/h (cf. TargetRange sur `speedKmh`).
+export const SPORTS = ['cycling', 'running'] as const
+export type Sport = typeof SPORTS[number]
+
+// Une cible + ses bornes pour un canal (puissance, FC, cadence ou vitesse). `min`/`max`
+// n'ont de sens qu'accompagnés de `target` (cf. TrainingProgram#validate_target_bounds).
+export interface TargetRange {
+  target: number | null
+  min: number | null
+  max: number | null
+}
+
+function emptyTargetRange(): TargetRange {
+  return { target: null, min: null, max: null }
+}
+
+// Miroir de TrainingProgram::TARGET_FIELDS (training_program.rb) — plafonds de
+// sanité, pas des zones physio. Le serveur reclampe de toute façon à l'enregistrement.
+export const TARGET_CEILINGS: Record<'power' | 'heartRate' | 'cadence' | 'speedKmh', number> = {
+  power: 3000,
+  heartRate: 250,
+  cadence: 220,
+  speedKmh: 120,
+}
+
 export interface Milestone {
   offsetSeconds: number
   sound: Sound | null
@@ -36,6 +63,10 @@ export interface Milestone {
   cueTiming: CueTiming | null
   color: string | null
   textColor: string | null
+  power: TargetRange
+  heartRate: TargetRange
+  cadence: TargetRange
+  speedKmh: TargetRange
 }
 
 export const MAX_MILESTONES = 200
@@ -51,11 +82,16 @@ export function openingMilestone(): Milestone {
     cueTiming: null,
     color: null,
     textColor: null,
+    power: emptyTargetRange(),
+    heartRate: emptyTargetRange(),
+    cadence: emptyTargetRange(),
+    speedKmh: emptyTargetRange(),
   }
 }
 
 class TrainingProgramStore {
   readonly name = ref('')
+  readonly sport = ref<Sport>('cycling')
   readonly milestones = ref<Milestone[]>([openingMilestone()])
   readonly currentId = ref<number | null>(null)
   readonly shareToken = ref<string | null>(null)
@@ -65,6 +101,7 @@ class TrainingProgramStore {
 
   reset() {
     this.name.value = ''
+    this.sport.value = 'cycling'
     this.milestones.value = [openingMilestone()]
     this.currentId.value = null
     this.shareToken.value = null

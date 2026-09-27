@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, useTemplateRef, toRaw } from 'vue'
 import { t } from '../i18n'
-import { trainingProgramStore, openingMilestone, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, MAX_MILESTONES } from '../stores/trainingProgramStore'
-import type { Milestone, Sound } from '../stores/trainingProgramStore'
+import { trainingProgramStore, openingMilestone, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, SPORTS, TARGET_CEILINGS, MAX_MILESTONES } from '../stores/trainingProgramStore'
+import type { Milestone, Sound, TargetRange } from '../stores/trainingProgramStore'
 import { csrfToken } from '../csrf'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 
@@ -118,6 +118,60 @@ function onDeltaChange(index: number, event: Event) {
   normalize()
 }
 
+// Canaux à structure identique (min/cible/max en valeur absolue) — la vitesse est
+// traitée à part car son unité change selon `trainingProgramStore.sport`.
+const TARGET_CHANNELS = ['power', 'heartRate', 'cadence'] as const
+
+// i18n en snake_case (`target_heart_rate`), clés du store en camelCase (`heartRate`).
+const CHANNEL_I18N_KEYS: Record<typeof TARGET_CHANNELS[number], string> = {
+  power: 'target_power',
+  heartRate: 'target_heart_rate',
+  cadence: 'target_cadence',
+}
+
+function channelLabel(key: typeof TARGET_CHANNELS[number]): string {
+  return t(`training_programs.${CHANNEL_I18N_KEYS[key]}`)
+}
+
+function hasAnyTarget(m: Milestone): boolean {
+  return [m.power, m.heartRate, m.cadence, m.speedKmh].some((r) => r.target != null)
+}
+
+function onNumberFieldChange(range: TargetRange, field: 'target' | 'min' | 'max', ceiling: number, event: Event) {
+  const text = (event.target as HTMLInputElement).value.trim()
+  if (!text) { range[field] = null; return }
+  const value = Number(text)
+  if (Number.isFinite(value)) range[field] = Math.min(Math.max(value, 0), ceiling)
+}
+
+// Vitesse : km/h pour un programme vélo, allure (mm:ss/km) pour un programme course —
+// stockage toujours en km/h. `formatTime`/`parseTime` sont génériques (minutes:secondes)
+// et servent tel quel pour l'allure. Attention : le champ "min" reste la borne basse de
+// *vitesse*, donc l'allure la plus lente (le plus grand mm:ss) une fois convertie —
+// on ne renomme pas les bornes en passant en allure, on ne fait que les afficher autrement.
+function speedUnitLabel(): string {
+  return trainingProgramStore.sport.value === 'running' ? t('training_programs.target_pace') : t('training_programs.target_speed')
+}
+
+function speedFieldDisplay(range: TargetRange, field: 'target' | 'min' | 'max'): string {
+  const value = range[field]
+  if (value == null) return ''
+  if (trainingProgramStore.sport.value === 'running') return formatTime(Math.round(3600 / value))
+  return String(Math.round(value * 10) / 10)
+}
+
+function onSpeedFieldChange(range: TargetRange, field: 'target' | 'min' | 'max', event: Event) {
+  const text = (event.target as HTMLInputElement).value.trim()
+  if (!text) { range[field] = null; return }
+  if (trainingProgramStore.sport.value === 'running') {
+    const paceSeconds = parseTime(text)
+    if (paceSeconds && paceSeconds > 0) range[field] = Math.min(3600 / paceSeconds, TARGET_CEILINGS.speedKmh)
+  } else {
+    const value = Number(text)
+    if (Number.isFinite(value)) range[field] = Math.min(Math.max(value, 0), TARGET_CEILINGS.speedKmh)
+  }
+}
+
 function iconClass(icon: string): string {
   return MILESTONE_ICONS.find((i) => i.key === icon)?.icon ?? ''
 }
@@ -126,13 +180,8 @@ function addMilestone() {
   if (milestones.value.length >= MAX_MILESTONES) return
   const last = milestones.value[milestones.value.length - 1]
   milestones.value.push({
+    ...openingMilestone(),
     offsetSeconds: (last?.offsetSeconds ?? 0) + 60,
-    sound: null,
-    segmentName: '',
-    icon: null,
-    cueTiming: null,
-    color: null,
-    textColor: null,
   })
 }
 
@@ -143,15 +192,7 @@ function insertMilestoneBefore(index: number) {
   const prev = milestones.value[index - 1]
   const curr = milestones.value[index]
   const mid = prev.offsetSeconds + Math.max(1, Math.round((curr.offsetSeconds - prev.offsetSeconds) / 2))
-  milestones.value.splice(index, 0, {
-    offsetSeconds: mid,
-    sound: null,
-    segmentName: '',
-    icon: null,
-    cueTiming: null,
-    color: null,
-    textColor: null,
-  })
+  milestones.value.splice(index, 0, { ...openingMilestone(), offsetSeconds: mid })
   normalize()
 }
 
@@ -223,6 +264,23 @@ function soundLabel(sound: Sound): string {
   return t(`training_programs.sound_${sound}`)
 }
 
+// snake_case (API, `target_power`/`min_power`/`max_power`, ...) <-> TargetRange.
+function targetRangeFromApi(m: any, field: string): TargetRange {
+  return {
+    target: m[`target_${field}`] ?? null,
+    min: m[`min_${field}`] ?? null,
+    max: m[`max_${field}`] ?? null,
+  }
+}
+
+function targetRangeToApi(range: TargetRange, field: string): Record<string, number | null> {
+  return {
+    [`target_${field}`]: range.target,
+    [`min_${field}`]: range.min,
+    [`max_${field}`]: range.max,
+  }
+}
+
 async function fetchProgram(id: number) {
   try {
     const res = await fetch(`/api/training_programs/${id}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
@@ -230,6 +288,7 @@ async function fetchProgram(id: number) {
     const payload = await res.json()
     const p = payload.training_program
     trainingProgramStore.name.value = p.name || ''
+    trainingProgramStore.sport.value = SPORTS.includes(p.sport) ? p.sport : 'cycling'
     trainingProgramStore.shareToken.value = p.share_token || null
     const loaded = Array.isArray(p.milestones) ? p.milestones : []
     trainingProgramStore.milestones.value = loaded.length
@@ -241,6 +300,10 @@ async function fetchProgram(id: number) {
           cueTiming: m.cue_timing ?? null,
           color: m.color ?? null,
           textColor: m.text_color ?? null,
+          power: targetRangeFromApi(m, 'power'),
+          heartRate: targetRangeFromApi(m, 'heart_rate'),
+          cadence: targetRangeFromApi(m, 'cadence'),
+          speedKmh: targetRangeFromApi(m, 'speed_kmh'),
         }))
       : [openingMilestone()]
     selected.value = new Set()
@@ -261,6 +324,7 @@ async function save() {
     normalize()
     const body = JSON.stringify({
       name: trainingProgramStore.name.value.trim(),
+      sport: trainingProgramStore.sport.value,
       milestones: milestones.value.map((m) => ({
         offset_seconds: m.offsetSeconds,
         sound: m.sound,
@@ -269,6 +333,10 @@ async function save() {
         cue_timing: m.cueTiming,
         color: m.color,
         text_color: m.textColor,
+        ...targetRangeToApi(m.power, 'power'),
+        ...targetRangeToApi(m.heartRate, 'heart_rate'),
+        ...targetRangeToApi(m.cadence, 'cadence'),
+        ...targetRangeToApi(m.speedKmh, 'speed_kmh'),
       })),
     })
     const url = trainingProgramStore.isEditMode.value
@@ -325,9 +393,13 @@ onMounted(() => {
       {{ trainingProgramStore.error.value }}
     </div>
 
-    <div class="mb-4">
-      <input v-model="trainingProgramStore.name.value" type="text" class="form-control form-control-lg"
-             :placeholder="t('training_programs.name_placeholder')" maxlength="80">
+    <div class="mb-4 d-flex gap-2 flex-wrap">
+      <input v-model="trainingProgramStore.name.value" type="text" class="form-control form-control-lg flex-grow-1"
+             style="min-width: 12rem" :placeholder="t('training_programs.name_placeholder')" maxlength="80">
+      <select v-model="trainingProgramStore.sport.value" class="form-select form-select-lg" style="width: auto"
+              :title="t('training_programs.sport_hint')">
+        <option v-for="sport in SPORTS" :key="sport" :value="sport">{{ t(`training_programs.sport_${sport}`) }}</option>
+      </select>
     </div>
 
     <p class="text-body-secondary small mb-4">
@@ -429,6 +501,33 @@ onMounted(() => {
             </button>
           </div>
         </div>
+
+        <details class="tp-targets px-3 pb-3">
+          <summary class="small text-body-secondary">
+            {{ t('training_programs.targets_summary') }}
+            <span v-if="hasAnyTarget(milestone)" class="badge text-bg-warning ms-1">{{ t('training_programs.targets_set') }}</span>
+          </summary>
+          <div class="tp-targets-grid mt-2">
+            <div v-for="channel in TARGET_CHANNELS" :key="channel" class="tp-target-row">
+              <span class="small text-body-secondary tp-target-label">{{ channelLabel(channel) }}</span>
+              <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_min')"
+                     :value="milestone[channel].min ?? ''" @change="onNumberFieldChange(milestone[channel], 'min', TARGET_CEILINGS[channel], $event)">
+              <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_target')"
+                     :value="milestone[channel].target ?? ''" @change="onNumberFieldChange(milestone[channel], 'target', TARGET_CEILINGS[channel], $event)">
+              <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_max')"
+                     :value="milestone[channel].max ?? ''" @change="onNumberFieldChange(milestone[channel], 'max', TARGET_CEILINGS[channel], $event)">
+            </div>
+            <div class="tp-target-row">
+              <span class="small text-body-secondary tp-target-label">{{ speedUnitLabel() }}</span>
+              <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_min')"
+                     :value="speedFieldDisplay(milestone.speedKmh, 'min')" @change="onSpeedFieldChange(milestone.speedKmh, 'min', $event)">
+              <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_target')"
+                     :value="speedFieldDisplay(milestone.speedKmh, 'target')" @change="onSpeedFieldChange(milestone.speedKmh, 'target', $event)">
+              <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_max')"
+                     :value="speedFieldDisplay(milestone.speedKmh, 'max')" @change="onSpeedFieldChange(milestone.speedKmh, 'max', $event)">
+            </div>
+          </div>
+        </details>
         </div>
       </template>
     </div>
@@ -489,5 +588,22 @@ onMounted(() => {
   width: 1.5rem;
   text-align: center;
   color: var(--bs-warning);
+}
+.tp-targets summary {
+  cursor: pointer;
+}
+.tp-targets-grid {
+  display: grid;
+  gap: 0.4rem;
+  max-width: 32rem;
+}
+.tp-target-row {
+  display: grid;
+  grid-template-columns: 5.5rem repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+  align-items: center;
+}
+.tp-target-label {
+  white-space: nowrap;
 }
 </style>

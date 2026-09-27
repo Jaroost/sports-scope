@@ -16,11 +16,30 @@ class TrainingProgram < ApplicationRecord
   MAX_SEGMENT_NAME_LEN = 60
   MAX_MILESTONES = 200
 
+  # Pilote seulement l'unité de saisie/affichage de la vitesse cible dans l'éditeur
+  # (km/h vs allure min/km) — stockage toujours en km/h (target_speed_kmh & co),
+  # quel que soit le sport. Cf. TrainingProgramBuilder.vue.
+  SPORTS = %w[cycling running].freeze
+
+  # Plafonds de sanité des cibles/bornes par jalon — larges, pas des zones physio.
+  MAX_POWER_W = 3000
+  MAX_HR_BPM = 250
+  MAX_CADENCE_RPM = 220
+  MAX_SPEED_KMH = 120
+  # (nom du champ jsonb => plafond), utilisé pour valider les 4 canaux de la même façon.
+  TARGET_FIELDS = {
+    "power" => MAX_POWER_W,
+    "heart_rate" => MAX_HR_BPM,
+    "cadence" => MAX_CADENCE_RPM,
+    "speed_kmh" => MAX_SPEED_KMH,
+  }.freeze
+
   belongs_to :user
   # Unguessable token for the public shared lookup consumed by the companion app deep-link.
   has_secure_token :share_token
 
   validates :name, presence: true, length: { maximum: MAX_NAME_LEN }
+  validates :sport, inclusion: { in: SPORTS }
   validates :milestones, presence: true
   validate :validate_milestones
 
@@ -78,6 +97,31 @@ class TrainingProgram < ApplicationRecord
       unless text_color.nil? || text_color.match?(HEX_COLOR)
         errors.add(:milestones, "text_color must be a #rrggbb hex value")
       end
+
+      TARGET_FIELDS.each { |field, ceiling| validate_target_bounds(m, field, ceiling) }
+    end
+  end
+
+  # Une borne (min/max) n'a de sens qu'accompagnée d'une cible ; quand les deux bornes
+  # sont là, la cible doit tomber entre elles. Chaque valeur présente doit être un
+  # nombre non négatif sous son plafond de sanité (cf. TARGET_FIELDS).
+  def validate_target_bounds(milestone, field, ceiling)
+    target = milestone["target_#{field}"]
+    min = milestone["min_#{field}"]
+    max = milestone["max_#{field}"]
+
+    [["target_#{field}", target], ["min_#{field}", min], ["max_#{field}", max]].each do |name, value|
+      next if value.nil?
+      unless value.is_a?(Numeric) && value >= 0 && value <= ceiling
+        errors.add(:milestones, "#{name} must be a number between 0 and #{ceiling}")
+      end
+    end
+
+    if (min || max) && target.nil?
+      errors.add(:milestones, "min_#{field}/max_#{field} require target_#{field}")
+    end
+    if target && min && max && !(min..max).cover?(target)
+      errors.add(:milestones, "target_#{field} must be between min_#{field} and max_#{field}")
     end
   end
 end

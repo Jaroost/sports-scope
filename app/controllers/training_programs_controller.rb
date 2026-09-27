@@ -63,7 +63,7 @@ class TrainingProgramsController < ApplicationController
     return head :not_found unless src
     requested = params[:name].to_s.strip.first(MAX_NAME_LEN).presence
     copy_name = requested || "#{src.name} (copie)".first(MAX_NAME_LEN)
-    copy = current_user.training_programs.create!(name: copy_name, milestones: src.milestones)
+    copy = current_user.training_programs.create!(name: copy_name, sport: src.sport, milestones: src.milestones)
     render json: { training_program: serialize_full(copy) }, status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
@@ -74,8 +74,22 @@ class TrainingProgramsController < ApplicationController
   def sanitize_attrs(p)
     out = {}
     out[:name] = p[:name].to_s.strip.first(MAX_NAME_LEN).presence if p.key?(:name)
+    if p.key?(:sport)
+      sport = p[:sport].to_s
+      out[:sport] = TrainingProgram::SPORTS.include?(sport) ? sport : "cycling"
+    end
     out[:milestones] = clean_milestones(p[:milestones]) if p.key?(:milestones)
     out
+  end
+
+  # Coerce une valeur en Float dans [0, ceiling], ou nil si absente/inexploitable —
+  # la cohérence cible/bornes (ex: min <= target <= max) reste validée côté modèle.
+  def clean_target(h, field, ceiling)
+    value = h[field] || h[field.to_sym]
+    return nil unless value.is_a?(Numeric) || (value.is_a?(String) && value.match?(/\A-?\d+(\.\d+)?\z/))
+    Float(value).clamp(0, ceiling)
+  rescue ArgumentError, TypeError
+    nil
   end
 
   # Reconstruit la liste plutôt que de recopier ce qui est passé : chaque jalon est
@@ -99,6 +113,11 @@ class TrainingProgramsController < ApplicationController
       text_color = (h["text_color"] || h[:text_color]).presence&.to_s&.strip&.downcase
       text_color = nil unless text_color.nil? || text_color.match?(TrainingProgram::HEX_COLOR)
       segment_name = (h["segment_name"] || h[:segment_name]).to_s.strip.first(TrainingProgram::MAX_SEGMENT_NAME_LEN)
+      targets = TrainingProgram::TARGET_FIELDS.each_with_object({}) do |(field, ceiling), acc|
+        acc["target_#{field}"] = clean_target(h, "target_#{field}", ceiling)
+        acc["min_#{field}"] = clean_target(h, "min_#{field}", ceiling)
+        acc["max_#{field}"] = clean_target(h, "max_#{field}", ceiling)
+      end
       {
         "offset_seconds" => offset.to_i,
         "sound" => sound,
@@ -107,7 +126,7 @@ class TrainingProgramsController < ApplicationController
         "cue_timing" => cue_timing,
         "color" => color,
         "text_color" => text_color,
-      }
+      }.merge(targets)
     end
     cleaned.sort_by { |m| m["offset_seconds"] }
   end
@@ -116,6 +135,7 @@ class TrainingProgramsController < ApplicationController
     {
       id: program.id,
       name: program.name,
+      sport: program.sport,
       share_token: program.share_token,
       duration_seconds: program.duration_seconds,
       segment_count: Array(program.milestones).size,

@@ -41,7 +41,7 @@ import {
   companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, companionRouteProfile,
   companionPois, companionResupply, registerPoiHandlers,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
-  registerMapStyleHandlers,
+  registerMapStyleHandlers, dataSaverActive,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
@@ -1702,6 +1702,22 @@ async function insertViaIntoRoute(lng: number, lat: number) {
 
 function refreshContainerH() { containerH = map?.getContainer()?.clientHeight || 0 }
 
+// Économie de données (appli mobile, `dataSaverActive` — voir companionBridge.ts,
+// setDataSaver) : bloque toute requête de carte qui quitterait le téléphone une
+// fois l'archive hors-ligne branchée, plutôt que de la laisser retomber sur les
+// tuiles en direct hors de la couverture téléchargée. `pmtiles://` (archive locale,
+// voir useOfflineMaps) et notre propre origine (police web, éventuel proxy) passent
+// sans y toucher ; tout le reste (WMTS suisstopo/IGN/basemap.at, styles vectoriels,
+// glyphes, sprites tiers) est redirigé vers `about:blank`, qui échoue instantanément
+// sans sortir du téléphone — MapLibre traite l'échec exactement comme une tuile hors
+// couverture (case grise), déjà le comportement attendu sans réseau du tout.
+function transformRequest(url: string): { url: string } | undefined {
+  if (!dataSaverActive.value) return undefined
+  if (url.startsWith('pmtiles://')) return undefined
+  if (url.startsWith(window.location.origin)) return undefined
+  return { url: 'about:blank' }
+}
+
 function closeCoordPopup() {
   if (coordPopup) { coordPopup.remove(); coordPopup = null }
 }
@@ -1746,6 +1762,7 @@ async function initMap() {
   map = new maplibre.Map({
     container: mapEl.value,
     style: resolveBaseStyle(mapStyleId.value) as any,
+    transformRequest,
     // Mode itinéraire : on part du départ du tracé (recadré sur l'ensemble au load).
     // Mode libre : vue d'ensemble de la Suisse jusqu'au premier fix GPS.
     center: hasRoute.value ? coords[0] : DEFAULT_CENTER,

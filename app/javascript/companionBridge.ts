@@ -215,6 +215,21 @@ export function registerPoiHandlers(handlers: PoiBridgeHandlers | null): void {
   poiHandlers = handlers
 }
 
+// ─── Économie de données : commande venue de l'appli ─────────────────────────
+//
+// Interrupteur posé par l'appli (feuille « Économie de données », en dehors de la
+// page, ou sur une bascule à venir dans le menu ⋮) : le cycliste a téléchargé sa
+// carte hors-ligne et ne veut plus consommer son forfait pour des tuiles hors
+// couverture, des POI ou une recherche de lieu. Réactif plutôt qu'un simple
+// booléen : lu à chaque requête (transformRequest de la carte, fetchPlaces) sans
+// avoir à réinstaller quoi que ce soit au changement.
+//
+// Volontairement grossier — un seul interrupteur pour toute la navigation plutôt
+// qu'un réglage par type de requête : c'est exactement ce que demande le cas
+// d'usage (itinérance, forfait limité), et un réglage plus fin n'aurait personne
+// pour le régler correctement depuis un guidon.
+export const dataSaverActive = ref(false)
+
 // ─── Fond de carte : commande venue de l'appli ───────────────────────────────
 //
 // Choisi hors sortie via `PATCH /api/companion_settings/map_style`
@@ -383,6 +398,7 @@ export function installCompanionBridge(): void {
       setPoiFilter(visibleKeys: string[]): void
       focusPoi(lat: number, lng: number): void
       setMapStyle(id: string): void
+      setDataSaver(active: boolean): void
     }
   }
 
@@ -448,6 +464,9 @@ export function installCompanionBridge(): void {
       } catch {
         // Id inexploitable : le fond courant reste inchangé.
       }
+    },
+    setDataSaver(active: boolean) {
+      dataSaverActive.value = active === true
     },
   }
 

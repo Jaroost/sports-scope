@@ -9,6 +9,7 @@ import { POI_CATEGORIES, categoryForType } from '../poiCategories'
 import { markerMeta, markerKindLabel } from '../routeMarkers'
 import type { RouteMarker } from '../routeMarkers'
 import { savedPoisStore } from '../stores/savedPoisStore'
+import { dataSaverActive } from '../companionBridge'
 
 // ─── Points d'intérêt de la navigation (POI ponctuels du profil) ───────────────
 // Sous-système autonome de RouteNavigation.vue : recherche Overpass des POI autour
@@ -124,6 +125,11 @@ export function useNavPois(deps: {
   //   • avec centre [lng, lat] (bouton « chercher autour de moi », mode libre) : bbox
   //     autour du point, filtre par distance au centre.
   async function fetchPlaces(opts: { center?: [number, number] } = {}): Promise<PoiSearchResult> {
+    // Économie de données (appli mobile) : on garde les POI déjà posés — ceux
+    // sauvegardés avec le tracé (routePlaces) restent affichés — plutôt que
+    // d'aller en chercher de nouveaux, même au chargement initial.
+    if (dataSaverActive.value) return { ok: false }
+
     const geometry = getGeometry()
     const poi = userPreferences().points_of_interest
     // Toutes les catégories ponctuelles : l'affichage est ensuite filtré par le

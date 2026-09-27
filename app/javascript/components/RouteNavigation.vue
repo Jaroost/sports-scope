@@ -1702,20 +1702,30 @@ async function insertViaIntoRoute(lng: number, lat: number) {
 
 function refreshContainerH() { containerH = map?.getContainer()?.clientHeight || 0 }
 
+// Un pixel PNG transparent : la redirection de repli de `transformRequest`
+// ci-dessous. `about:blank` semblait le choix naturel (aucun octet réseau,
+// échoue instantanément) mais le WebView Android refuse purement et simplement
+// ce schéma d'URL pour un `fetch` (« URL scheme "about" is not supported » —
+// vérifié sur appareil, pas seulement en théorie) : chaque tuile finissait en
+// erreur JS au lieu d'une case grise silencieuse. Une image locale, elle,
+// charge sans réseau ET sans lever d'exception — la tuile se rend transparente
+// plutôt que grise, ce qui revient au même visuellement pour une zone hors
+// couverture de l'archive.
+const BLOCKED_REQUEST_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII='
+
 // Économie de données (appli mobile, `dataSaverActive` — voir companionBridge.ts,
 // setDataSaver) : bloque toute requête de carte qui quitterait le téléphone une
 // fois l'archive hors-ligne branchée, plutôt que de la laisser retomber sur les
 // tuiles en direct hors de la couverture téléchargée. `pmtiles://` (archive locale,
 // voir useOfflineMaps) et notre propre origine (police web, éventuel proxy) passent
 // sans y toucher ; tout le reste (WMTS suisstopo/IGN/basemap.at, styles vectoriels,
-// glyphes, sprites tiers) est redirigé vers `about:blank`, qui échoue instantanément
-// sans sortir du téléphone — MapLibre traite l'échec exactement comme une tuile hors
-// couverture (case grise), déjà le comportement attendu sans réseau du tout.
+// glyphes, sprites tiers) est redirigé vers un pixel local.
 function transformRequest(url: string): { url: string } | undefined {
   if (!dataSaverActive.value) return undefined
   if (url.startsWith('pmtiles://')) return undefined
   if (url.startsWith(window.location.origin)) return undefined
-  return { url: 'about:blank' }
+  return { url: BLOCKED_REQUEST_URL }
 }
 
 function closeCoordPopup() {

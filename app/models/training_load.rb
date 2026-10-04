@@ -321,7 +321,7 @@ module TrainingLoad
   # ne PAS charger la colonne `streams` (volumineuse).
   def zone_rows(user, cutoff)
     cols = %i[started_at activity_type hr_histogram power_histogram]
-    strava = user.strava_activities.where(started_at: cutoff..).select(cols)
+    strava = user.strava_activities.counted.where(started_at: cutoff..).select(cols)
     imported = user.imported_activities.where(started_at: cutoff..).select(cols)
     (strava.to_a + imported.to_a).filter_map do |a|
       date = a.started_at&.to_date

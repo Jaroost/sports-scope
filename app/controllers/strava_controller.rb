@@ -67,6 +67,17 @@ class StravaController < ApplicationController
     render json: { error: e.message }, status: :bad_gateway
   end
 
+  # PATCH /strava/activities/:id/ignore { ignored: true|false } — écarte l'activité (ou
+  # la réintègre) du calcul de charge et des seuils. `save!` bumpe `updated_at`, donc
+  # `UserActivities.data_version` change et les caches FTP / LTHR / records / charge
+  # se recalculent à la prochaine lecture. Le TSS de l'activité elle-même est alors
+  # absent de la liste (`tss_by_activity` ne la compte plus).
+  def ignore
+    activity = current_user.strava_activities.find_by!(strava_id: params[:id])
+    activity.update!(ignored: ActiveModel::Type::Boolean.new.cast(params[:ignored]) ? true : false)
+    render json: { id: activity.strava_id, ignored: activity.ignored }
+  end
+
   # POST /strava/sync — force a (re)synchronisation of activity summaries.
   # `?full=1` re-paginates the whole history; otherwise it's incremental.
   def sync
@@ -504,7 +515,7 @@ class StravaController < ApplicationController
     # Vignettes des photos (URLs Strava en 256 px) : la liste les fait défiler avec
     # le tracé. `nil` tant que le backfill n'est pas passé — la vignette montre
     # alors le seul tracé, sans trou d'affichage.
-    base = base.merge('photo_thumbs' => a.photo_thumbs)
+    base = base.merge('photo_thumbs' => a.photo_thumbs, 'ignored' => a.ignored)
     # TSS ajouté au vol (non persisté) : dépend de seuils modifiables, se recalcule
     # à chaque lecture. Absent si l'activité n'a pas pu être notée.
     tss ? base.merge('tss' => tss[:tss], 'tss_source' => tss[:source]) : base

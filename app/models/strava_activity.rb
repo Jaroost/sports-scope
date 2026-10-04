@@ -19,6 +19,10 @@ class StravaActivity < ApplicationRecord
   # extraction par activité à chaque « Tout rafraîchir ».
   after_commit :extract_localities_later, on: %i[create update], if: :saved_change_to_summary_polyline?
 
+  # Activités écartées par l'utilisateur (`ignored`) : exclues de la charge (TSS), des
+  # seuils (FTP / LTHR), des records et des zones, mais toujours listées et consultables.
+  scope :counted, -> { where(ignored: false) }
+
   # Les gear_id Strava sont préfixés par type : « b… » pour les vélos, « g… » pour
   # les chaussures. Le suivi du cirage ne concerne que les vélos — on écarte donc
   # les chaussures (sinon une sortie course créerait un faux « vélo »).

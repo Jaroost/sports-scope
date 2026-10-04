@@ -88,6 +88,7 @@ Rails.application.routes.draw do
 
   # Strava activities (JSON consumed by Vue components)
   get "/strava/activities", to: "strava#activities", as: :strava_activities
+  patch "/strava/activities/:id/ignore", to: "strava#ignore", as: :strava_activity_ignore, constraints: { id: /\d+/ }
   post "/strava/sync", to: "strava#sync", as: :strava_sync
   post "/strava/refresh", to: "strava#refresh", as: :strava_refresh
   post "/strava/recompute", to: "strava#recompute", as: :strava_recompute

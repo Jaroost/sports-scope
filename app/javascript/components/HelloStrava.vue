@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
+import { csrfToken } from '../csrf'
 import { formatDaysAgo } from '../timeAgo'
 import { activityIcon, sportType } from '../activityHelpers'
 import { useStickyListHeader } from '../composables/useStickyListHeader'
@@ -269,6 +270,25 @@ async function fetchActivities() {
     error.value = e.message
   } finally {
     loading.value = false
+  }
+}
+
+// Écarte (ou réintègre) une activité du calcul de charge et des seuils. Mise à jour
+// optimiste de la ligne ; le TSS affiché se rafraîchit en rechargeant la page de liste.
+async function toggleIgnored(activity) {
+  const next = !activity.ignored
+  try {
+    const res = await fetch(`${props.endpoint}/${activity.id}/ignore`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+      body: JSON.stringify({ ignored: next }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    activity.ignored = next
+    await fetchActivities()
+  } catch (e) {
+    error.value = e.message
   }
 }
 
@@ -697,6 +717,7 @@ function hasThumb(activity) {
           <a
             :href="`${localePrefix}/activities/${activity.id}`"
             class="activity-row d-flex justify-content-between align-items-center text-decoration-none text-reset"
+            :class="{ 'activity-row--ignored': activity.ignored }"
           >
             <div class="activity-row__main d-flex align-items-center gap-3">
               <ActivityThumb
@@ -711,7 +732,10 @@ function hasThumb(activity) {
                 <i :class="`fa-solid ${activityIcon(sportType(activity))}`" aria-hidden="true"></i>
               </span>
               <div class="min-width-0">
-                <div class="fw-semibold">{{ activity.name }}</div>
+                <div class="fw-semibold">
+                  {{ activity.name }}
+                  <span v-if="activity.ignored" class="badge text-bg-secondary ms-1">{{ t('strava.ignored_badge') }}</span>
+                </div>
                 <small class="text-muted">
                   <i class="fa-solid fa-tag me-1" aria-hidden="true"></i>{{ sportType(activity) }}
                   <span class="mx-1">·</span>
@@ -730,6 +754,16 @@ function hasThumb(activity) {
                 <span class="tss-value">{{ Math.round(activity.tss) }}</span>
                 <span class="tss-unit">{{ t('strava.tss_label') }}</span>
               </span>
+              <button
+                type="button"
+                class="btn btn-sm btn-link text-muted p-1"
+                :title="activity.ignored ? t('strava.unignore_hint') : t('strava.ignore_hint')"
+                :aria-label="activity.ignored ? t('strava.unignore_hint') : t('strava.ignore_hint')"
+                :aria-pressed="!!activity.ignored"
+                @click.prevent.stop="toggleIgnored(activity)"
+              >
+                <i :class="activity.ignored ? 'fa-solid fa-eye-slash' : 'fa-regular fa-eye'" aria-hidden="true"></i>
+              </button>
               <div class="text-start activity-metrics">
                 <!-- Distance masquée à 0 : une activité sans GPS (squash, muscu…) n'en a pas,
                      et « 0.00 km » se lit comme une mesure alors qu'il n'y a rien à mesurer. -->
@@ -828,6 +862,10 @@ function hasThumb(activity) {
 
 .min-width-0 {
   min-width: 0;
+}
+
+.activity-row--ignored {
+  opacity: 0.55;
 }
 
 /* Sur téléphone, la ligne d'activité tient mal sur une seule rangée : le nom, le

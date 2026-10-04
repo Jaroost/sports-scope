@@ -30,7 +30,10 @@ module UserActivities
         ["#{connection.quote(source)} AS source",
          "#{cfg[:id_column]}::text AS external_id"] + Array(columns).map(&:to_s)
       ).join(', ')
-      "SELECT #{selected} FROM #{cfg[:table]} WHERE user_id = #{quoted_uid}"
+      # Les activités Strava ignorées par l'utilisateur sortent de toute agrégation
+      # (charge, seuils, records) : un seul point de filtrage pour tous les appelants.
+      ignored = source == 'strava' ? ' AND NOT ignored' : ''
+      "SELECT #{selected} FROM #{cfg[:table]} WHERE user_id = #{quoted_uid}#{ignored}"
     end.join(' UNION ALL ')
   end
 

@@ -69,7 +69,7 @@ module FtpEstimator
   # `peak_powers`. On `select` explicitement pour ne PAS charger la colonne
   # `streams` (volumineuse) inutile ici.
   def cycling_power_activities(user)
-    strava = user.strava_activities.select(:strava_id, :name, :started_at, :activity_type, :peak_powers)
+    strava = user.strava_activities.counted.select(:strava_id, :name, :started_at, :activity_type, :peak_powers)
     imported = user.imported_activities.select(:id, :name, :started_at, :activity_type, :peak_powers)
     rows = strava.to_a.map { |a| [a, 'strava', a.strava_id] } +
            imported.to_a.map { |a| [a, 'imported', a.id] }

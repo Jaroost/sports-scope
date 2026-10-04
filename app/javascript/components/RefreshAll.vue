@@ -73,6 +73,11 @@ async function pollStreams() {
 
 const activitiesSyncing = ref(false)
 const statsSyncing = ref(false)
+// Explication dépliée sous les boutons (un seul à la fois) : masquée par défaut pour gagner de la place.
+const helpOpen = ref<'activities' | 'stats' | null>(null)
+function toggleHelp(which: 'activities' | 'stats') {
+  helpOpen.value = helpOpen.value === which ? null : which
+}
 const msg = ref<string | null>(null)
 // Tonalité du message : succès (données à jour / nouveautés), info (backfill du
 // matériel d'enregistrement encore en cours en arrière-plan) ou erreur.
@@ -94,7 +99,10 @@ async function refreshActivities() {
   activitiesSyncing.value = true
   msg.value = null
   try {
-    const res = await fetch('/strava/refresh', {
+    // `?full=1` : repagination complète, seule à repérer les activités supprimées sur
+    // Strava (l'incrémental ne les voit jamais). Quelques secondes et ~1 requête par
+    // 200 activités — acceptable pour un clic explicite.
+    const res = await fetch('/strava/refresh?full=1', {
       method: 'POST',
       headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
       credentials: 'same-origin',
@@ -171,31 +179,55 @@ onUnmounted(() => {
 
 <template>
   <div class="d-flex align-items-center justify-content-center gap-2 flex-wrap">
-    <button
-      type="button"
-      class="btn btn-outline-warning d-flex align-items-center gap-2"
-      :disabled="activitiesSyncing"
-      @click="refreshActivities"
-    >
-      <span v-if="activitiesSyncing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-      <i v-else class="fa-solid fa-rotate" aria-hidden="true"></i>
-      <span>{{ activitiesSyncing ? t('strava.refresh_all_syncing') : t('strava.refresh_activities_button') }}</span>
-    </button>
-    <button
-      type="button"
-      class="btn btn-outline-warning d-flex align-items-center gap-2"
-      :disabled="statsSyncing"
-      :title="t('strava.refresh_stats_help')"
-      @click="recomputeStats"
-    >
-      <span v-if="statsSyncing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-      <i v-else class="fa-solid fa-calculator" aria-hidden="true"></i>
-      <span>{{ statsSyncing ? t('strava.refresh_stats_syncing') : t('strava.refresh_stats_button') }}</span>
-    </button>
-    <div class="refresh-help text-muted small w-100 d-flex flex-column flex-md-row justify-content-center gap-1 gap-md-4">
-      <span><strong>{{ t('strava.refresh_activities_button') }}</strong> : {{ t('strava.refresh_activities_help') }}</span>
-      <span><strong>{{ t('strava.refresh_stats_button') }}</strong> : {{ t('strava.refresh_stats_help') }}</span>
+    <div class="btn-group" role="group">
+      <button
+        type="button"
+        class="btn btn-outline-warning d-flex align-items-center gap-2"
+        :disabled="activitiesSyncing"
+        @click="refreshActivities"
+      >
+        <span v-if="activitiesSyncing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <i v-else class="fa-solid fa-rotate" aria-hidden="true"></i>
+        <span>{{ activitiesSyncing ? t('strava.refresh_all_syncing') : t('strava.refresh_activities_button') }}</span>
+      </button>
+      <button
+        type="button"
+        class="btn btn-outline-warning"
+        :class="{ active: helpOpen === 'activities' }"
+        :aria-expanded="helpOpen === 'activities'"
+        :aria-label="t('strava.refresh_activities_help')"
+        :title="t('strava.refresh_activities_help')"
+        @click="toggleHelp('activities')"
+      >
+        <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+      </button>
     </div>
+    <div class="btn-group" role="group">
+      <button
+        type="button"
+        class="btn btn-outline-warning d-flex align-items-center gap-2"
+        :disabled="statsSyncing"
+        @click="recomputeStats"
+      >
+        <span v-if="statsSyncing" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+        <i v-else class="fa-solid fa-calculator" aria-hidden="true"></i>
+        <span>{{ statsSyncing ? t('strava.refresh_stats_syncing') : t('strava.refresh_stats_button') }}</span>
+      </button>
+      <button
+        type="button"
+        class="btn btn-outline-warning"
+        :class="{ active: helpOpen === 'stats' }"
+        :aria-expanded="helpOpen === 'stats'"
+        :aria-label="t('strava.refresh_stats_help')"
+        :title="t('strava.refresh_stats_help')"
+        @click="toggleHelp('stats')"
+      >
+        <i class="fa-regular fa-circle-question" aria-hidden="true"></i>
+      </button>
+    </div>
+    <small v-if="helpOpen" class="text-muted w-100 text-center">
+      {{ helpOpen === 'activities' ? t('strava.refresh_activities_help') : t('strava.refresh_stats_help') }}
+    </small>
     <small
       v-if="msg"
       class="d-flex align-items-center gap-1 w-100 justify-content-center"

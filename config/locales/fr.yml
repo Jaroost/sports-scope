@@ -546,7 +546,7 @@ fr:
     refresh_all_device: "Matériel d'enregistrement : %{done}/%{total} récupérés (en cours en arrière-plan…)"
     refresh_all_error: "Échec de l'actualisation."
     refresh_activities_button: "Rafraîchir les activités"
-    refresh_activities_help: "Récupère les nouvelles activités Strava, vos vélos et télécharge en arrière-plan leurs données détaillées (puissance, FC…)."
+    refresh_activities_help: "Synchronise vos activités Strava (nouvelles et supprimées), vos vélos et télécharge en arrière-plan leurs données détaillées (puissance, FC…)."
     refresh_all_streams: "Téléchargement des données détaillées : %{done}/%{total} — le TSS des sorties se met à jour à la fin."
     refresh_stats_button: "Recalculer stats & seuils"
     refresh_stats_help: "Recalcule FTP, records & volumes et charge d'entraînement à partir des données déjà téléchargées (sans appel à Strava)."

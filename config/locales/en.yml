@@ -546,7 +546,7 @@ en:
     refresh_all_device: "Recording gear: %{done}/%{total} retrieved (running in the background…)"
     refresh_all_error: "Refresh failed."
     refresh_activities_button: "Refresh activities"
-    refresh_activities_help: "Fetches new Strava activities and your bikes, then downloads their detailed data (power, HR…) in the background."
+    refresh_activities_help: "Syncs your Strava activities (new and deleted) and your bikes, then downloads their detailed data (power, HR…) in the background."
     refresh_all_streams: "Downloading detailed data: %{done}/%{total} — activity TSS updates once finished."
     refresh_stats_button: "Recompute stats & thresholds"
     refresh_stats_help: "FTP, records & volumes, training load — recomputed from data already downloaded."

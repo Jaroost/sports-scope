@@ -5,8 +5,9 @@ import { t } from '../i18n'
 import { STRAVA_REFRESHED_EVENT } from '../stravaRefresh'
 import { csrfToken } from '../csrf'
 
-// Suivi d'usure des pièces hors chaîne (pneu, roue, pédalier, cassette, frein
-// hydraulique, types custom) — le cirage de chaîne reste géré par ChainWax.vue.
+// Suivi d'usure des pièces (chaîne, pneu, roue, pédalier, cassette, frein
+// hydraulique, types custom). Les chaînes apparaissent ici avec leur usure en km ;
+// leur cirage reste géré par ChainWax.vue.
 // Chaque type groupe les pièces d'un vélo qui en portent, en cartes. Certains
 // types (pneu, roue, plaquette/disque de frein) autorisent plusieurs pièces
 // montées en même temps (avant/arrière) : cf. part_type.allow_multiple_mounted,
@@ -90,14 +91,14 @@ function typeLabel(partType: any) {
   return partType.key ? t(`parts.types.${partType.key}`) : partType.name
 }
 
-// Types custom sélectionnables (hors chaîne, gérée par ChainWax.vue).
+// Types sélectionnables à l'ajout (hors chaîne : on l'ajoute depuis ChainWax.vue,
+// qui porte aussi son suivi de cirage).
 const selectableTypes = computed(() => partTypes.value.filter((pt) => pt.key !== 'chain'))
 
-// Groupe les pièces d'un vélo (hors chaîne, actives ET au rebut) par type de pièce.
+// Groupe les pièces d'un vélo (actives ET au rebut) par type de pièce.
 function groupsFor(bike: any) {
   const byType = new Map<number, { partType: any; parts: any[] }>()
   for (const part of bike.parts || []) {
-    if (part.part_type.key === 'chain') continue
     const entry = byType.get(part.part_type.id) || { partType: part.part_type, parts: [] }
     entry.parts.push(part)
     byType.set(part.part_type.id, entry)

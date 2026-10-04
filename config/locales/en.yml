@@ -421,7 +421,7 @@ en:
   maintenance:
     title: "Bike maintenance"
     intro: "Track wear on your bikes: chain waxing, and mileage on each part since it was mounted."
-    other_parts: "Other parts"
+    other_parts: "Parts wear"
   parts:
     loading: "Loading…"
     add: "Add"

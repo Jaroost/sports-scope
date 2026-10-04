@@ -421,7 +421,7 @@ fr:
   maintenance:
     title: "Entretien du vélo"
     intro: "Suivez l'usure de vos vélos : cirage de chaîne, et kilométrage de chaque pièce depuis son montage."
-    other_parts: "Autres composants"
+    other_parts: "Usure des composants"
   parts:
     loading: "Chargement…"
     add: "Ajouter"

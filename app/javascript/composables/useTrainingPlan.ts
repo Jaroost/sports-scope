@@ -88,9 +88,11 @@ export function acwrColor(zone: string | null): string {
   return (zone && ACWR_ZONES[zone]) || '#6c757d'
 }
 
-// ── Zones d'intensité (FC / puissance) : palette froid → chaud, z1..z7 ────────
+// ── Zones d'intensité (FC / puissance) : z1..z7 ───────────────────────────────
+// Même palette que l'appli compagnon (`ui/zone_colors.dart`) et son aperçu
+// (`ZONE_COLORS`, CompanionBlockPreview.vue) : à garder alignées.
 const INTENSITY_ZONE_COLORS: Record<string, string> = {
-  z1: '#0d6efd', z2: '#20c997', z3: '#ffc107', z4: '#fd7e14', z5: '#dc3545', z6: '#b02a37', z7: '#7a1f2b',
+  z1: '#2E6FD6', z2: '#2E9E4F', z3: '#E0C000', z4: '#E8760C', z5: '#D32F2F', z6: '#8E24AA', z7: '#5E35B1',
 }
 export function intensityZoneColor(zone: string): string {
   return INTENSITY_ZONE_COLORS[zone] ?? '#6c757d'

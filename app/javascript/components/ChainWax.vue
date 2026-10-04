@@ -142,6 +142,25 @@ function submitUnmount(chain: any) {
   run(() => api(`/api/parts/${chain.id}/unmount`, 'POST', { unmounted_at: date }))
 }
 
+// Corriger la date de montage de la chaîne montée (erreur de saisie).
+const openEditMount = ref<number | null>(null)
+const editMountDate = ref(nowStr())
+function toLocalInput(iso: string | null) {
+  if (!iso) return nowStr()
+  const d = new Date(iso)
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+function startEditMount(chain: any) {
+  openEditMount.value = chain.id
+  editMountDate.value = toLocalInput(chain.mounted_at)
+}
+function submitEditMount(chain: any) {
+  const date = editMountDate.value
+  if (!date) return
+  openEditMount.value = null
+  run(() => api(`/api/parts/${chain.id}`, 'PATCH', { mounted_at: new Date(date).toISOString() }))
+}
+
 // ── Renommer ────────────────────────────────────────────────────────────────────
 const editName = ref<number | null>(null)
 const nameValue = ref('')
@@ -422,12 +441,29 @@ onBeforeUnmount(() => {
               {{ remainingKm(bike) }} {{ t('chains.km_remaining') }}
             </small>
             <button
+              v-if="mountedChain(bike).id === bike.mounted_chain_id"
+              type="button"
+              class="btn btn-sm btn-outline-secondary py-0"
+              @click="startEditMount(mountedChain(bike))"
+            >
+              <i class="fa-regular fa-calendar-check me-1" aria-hidden="true"></i>{{ t('chains.edit_mount_date') }}
+            </button>
+            <button
               v-if="nextReadyChain(bike)"
               type="button"
               class="btn btn-sm btn-outline-primary ms-auto py-0"
               @click="openMountNext(bike)"
             >
               <i class="fa-solid fa-rotate me-1" aria-hidden="true"></i>{{ t('chains.mount_next') }}
+            </button>
+          </div>
+          <div v-if="openEditMount === mountedChain(bike).id" class="d-flex align-items-center gap-2 flex-wrap mt-2">
+            <input v-model="editMountDate" type="datetime-local" class="form-control form-control-sm" style="width: auto" />
+            <button type="button" class="btn btn-sm btn-success" @click="submitEditMount(mountedChain(bike))">
+              <i class="fa-solid fa-check me-1" aria-hidden="true"></i>{{ t('chains.mount_confirm_edit') }}
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @click="openEditMount = null">
+              {{ t('chains.cancel') }}
             </button>
           </div>
         </div>
@@ -576,6 +612,14 @@ onBeforeUnmount(() => {
               >
                 <i class="fa-solid fa-eject me-1" aria-hidden="true"></i>{{ t('parts.unmount') }}
               </button>
+              <button
+                v-if="chain.id === bike.mounted_chain_id"
+                type="button"
+                class="btn btn-sm btn-outline-secondary"
+                @click="startEditMount(chain)"
+              >
+                <i class="fa-regular fa-calendar-check me-1" aria-hidden="true"></i>{{ t('chains.edit_mount_date') }}
+              </button>
               <button type="button" class="btn btn-sm btn-outline-secondary" @click="startSeuil(chain)">
                 <i class="fa-solid fa-sliders me-1" aria-hidden="true"></i>{{ t('chains.threshold') }}
               </button>
@@ -637,6 +681,17 @@ onBeforeUnmount(() => {
               </button>
               <button type="button" class="btn btn-sm btn-outline-secondary" @click="openMount = null">
                 <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+              </button>
+            </div>
+
+            <!-- Formulaire correction de la date de montage -->
+            <div v-if="openEditMount === chain.id" class="d-flex align-items-center gap-2 flex-wrap mt-2">
+              <input v-model="editMountDate" type="datetime-local" class="form-control form-control-sm" style="width: auto" />
+              <button type="button" class="btn btn-sm btn-success" @click="submitEditMount(chain)">
+                <i class="fa-solid fa-check me-1" aria-hidden="true"></i>{{ t('chains.mount_confirm_edit') }}
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" @click="openEditMount = null">
+                {{ t('chains.cancel') }}
               </button>
             </div>
 

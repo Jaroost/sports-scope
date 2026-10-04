@@ -406,6 +406,8 @@ en:
     mount_next_body: "Mount %{chain} on %{bike} in place of the current chain."
     mount_confirm: "Mount"
     mount_date: "Mounting date and time"
+    edit_mount_date: "Edit mounting date"
+    mount_confirm_edit: "Save"
     mark_current_rewax: "Mark %{chain} as needing wax"
     cancel: "Cancel"
     close: "Close"

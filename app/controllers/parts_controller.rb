@@ -9,6 +9,7 @@ class PartsController < ApplicationController
 
   # PATCH /api/parts/:id — renommer / changer le seuil d'usure / éditer les notes /
   # (chaîne uniquement) changer le seuil de cirage ou marquer « à recirer ».
+  # `mounted_at` corrige la date de montage en cours (erreur de saisie).
   def update
     @part.name = params[:name].to_s.strip.first(Part::MAX_NAME_LEN) if params[:name].present?
     @part.notes = params[:notes].to_s.strip.first(Part::MAX_NOTES_LEN) if params.key?(:notes)
@@ -16,6 +17,18 @@ class PartsController < ApplicationController
     if @part.chain_part?
       @part.wax_threshold_km = params[:wax_threshold_km].to_i if params.key?(:wax_threshold_km)
       @part.needs_wax = ActiveModel::Type::Boolean.new.cast(params[:needs_wax]) if params.key?(:needs_wax)
+    end
+    if params.key?(:mounted_at)
+      mounted_at = parse_time(params[:mounted_at])
+      return render json: { error: "invalid_date" }, status: :unprocessable_entity unless mounted_at
+      return render json: { error: "future_date" }, status: :unprocessable_entity if mounted_at > 1.day.from_now
+
+      # Corrige la date du montage en cours (à défaut, du dernier montage).
+      mount = @part.part_mounts.order(:mounted_at, :id).where(unmounted_at: nil).last ||
+              @part.part_mounts.order(:mounted_at, :id).last
+      return render json: { error: "not_mounted" }, status: :unprocessable_entity unless mount
+
+      mount.update!(mounted_at: mounted_at)
     end
     @part.save!
     render json: { bike: serialize_bike(@part.bike) }

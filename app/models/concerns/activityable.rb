@@ -51,6 +51,35 @@ module Activityable
     self
   end
 
+  # Streams tels que les voit tout le reste de l'app : bruts moins ce que l'utilisateur
+  # a écarté (`stream_exclusions`). Les streams stockés ne sont jamais modifiés.
+  def effective_streams
+    StreamExclusions.apply(streams, stream_exclusions)
+  end
+
+  # Ce que le masque a retiré (canaux écartés + échantillons des plages), pour l'afficher
+  # en transparence sur les graphiques. {} sans exclusion.
+  def ignored_streams
+    StreamExclusions.ignored(streams, stream_exclusions)
+  end
+
+  # Pose les exclusions (document assaini) et recalcule les dérivées dessus. `save!`
+  # bumpe `updated_at` : `UserActivities.data_version` change, FTP / LTHR / records /
+  # charge se recalculent à la prochaine lecture.
+  def update_stream_exclusions!(input)
+    self.stream_exclusions = StreamExclusions.sanitize(input)
+    assign_derivations
+    save!
+    self
+  end
+
+  # Valeurs de résumé à neutraliser dans les payloads : un canal écarté ne doit plus
+  # afficher de moyenne ni de maximum issus du capteur défaillant.
+  def excluded_summary_overrides
+    StreamExclusions.channels(stream_exclusions).flat_map { |c| StreamExclusions::SUMMARY_FIELDS[c] }
+                    .index_with { nil }
+  end
+
   # Recompute every derived column from the stored `streams` and persist. No-op
   # save when nothing changed. Returns true iff at least one column changed.
   #
@@ -68,6 +97,7 @@ module Activityable
   private
 
   def assign_derivations
-    STREAM_DERIVATIONS.each { |column, compute| self[column] = compute.call(streams) }
+    visible = effective_streams
+    STREAM_DERIVATIONS.each { |column, compute| self[column] = compute.call(visible) }
   end
 end

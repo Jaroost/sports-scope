@@ -30,6 +30,7 @@ import ActivityConditions from './ActivityConditions.vue'
 import ActivityWeekProgress from './ActivityWeekProgress.vue'
 import ActivityDataQuality from './ActivityDataQuality.vue'
 import ActivityZones from './ActivityZones.vue'
+import ActivityStreamExclusions from './ActivityStreamExclusions.vue'
 import ActivitySegments from './ActivitySegments.vue'
 import SegmentCompare from './SegmentCompare.vue'
 
@@ -48,6 +49,7 @@ const activityUrl = computed(() => props.source === 'imported'
 const streamsUrl = computed(() => props.source === 'imported'
   ? `/api/imported_activities/${props.activityId}/streams`
   : `/strava/activities/${props.activityId}/streams`)
+const exclusionsUrl = computed(() => `${streamsUrl.value.replace(/\/streams$/, '')}/stream_exclusions`)
 const photosUrl = computed(() => props.source === 'imported'
   ? null // imported (FIT) has no photos
   : `/strava/activities/${props.activityId}/photos`)
@@ -67,6 +69,11 @@ const activity = ref(null)
 // un Proxy, et chaque paire `[lat, lng]` en recevrait un — plusieurs secondes sur
 // téléphone. Les streams ne sont jamais modifiés sur place, seulement remplacés d'un bloc.
 const streams = shallowRef(null)
+// Données de capteur écartées par l'utilisateur ({ channels, ranges }) — voir
+// ActivityStreamExclusions. Les `streams` ci-dessus sont déjà masqués côté serveur.
+const streamExclusions = ref({})
+// Ce que le masque a retiré (même forme que `streams`), dessiné en fantôme sur les graphiques.
+const ignoredStreams = shallowRef({})
 const streamsLoading = ref(false)
 const streamsError = ref(null)
 const photos = ref([])
@@ -352,6 +359,8 @@ async function fetchStreams() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     streams.value = markRaw(withSmoothedGrade(payload.streams || {}))
+    streamExclusions.value = payload.stream_exclusions || {}
+    ignoredStreams.value = markRaw(payload.ignored_streams || {})
     // Une activité sans GPS (squash, tapis, muscu…) n'a pas de flux `distance` :
     // l'axe des abscisses par défaut n'a alors rien à mesurer, on bascule sur le temps.
     if (!streams.value.distance?.data?.length) xAxis.value = 'time'
@@ -360,6 +369,19 @@ async function fetchStreams() {
   } finally {
     streamsLoading.value = false
   }
+}
+
+// Les exclusions changent les streams ET tout ce qui en dérive côté serveur (résumé
+// de l'activité, courbe de puissance, rangs, zones, TSS) : on remplace les streams
+// d'un bloc puis on relit le reste. Les zones se rechargent à la réouverture de l'onglet.
+async function onExclusionsUpdated(payload) {
+  streams.value = markRaw(withSmoothedGrade(payload.streams || {}))
+  ignoredStreams.value = markRaw(payload.ignored_streams || {})
+  streamExclusions.value = payload.stream_exclusions || {}
+  clearSelection()
+  await fetchActivity()
+  fetchPeakPowerRanks()
+  fetchBestEfforts()
 }
 
 async function fetchPhotos() {
@@ -605,6 +627,15 @@ onMounted(async () => {
         @select-segment="(s, e) => setSelection(s, e)"
       />
 
+      <ActivityStreamExclusions
+        v-if="effectiveTab === 'analysis' && streams"
+        :url="exclusionsUrl"
+        :streams="streams"
+        :exclusions="streamExclusions"
+        :selection="selection"
+        @updated="onExclusionsUpdated"
+      />
+
       <ActivityCharts
         v-if="effectiveTab === 'analysis'"
         class="mb-3"
@@ -615,6 +646,8 @@ onMounted(async () => {
         :streams-loading="streamsLoading"
         :streams-error="streamsError"
         :selection="selection"
+        :exclusions="streamExclusions"
+        :ignored-streams="ignoredStreams"
         :laps="laps"
         :show-grade="showGrade"
         v-model:x-axis="xAxis"

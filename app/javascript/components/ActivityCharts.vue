@@ -42,6 +42,11 @@ const props = defineProps({
   // overlay + flags, and emit `select-segment` / `clear-selection` when the
   // user drags on a chart.
   selection: { type: Object, default: null },
+  // Données de capteur écartées ({ channels, ranges: [{ from, to, channels? }] }, from/to en
+  // secondes) — les plages sont peintes en bandes hachurées, les streams reçus sont déjà masqués.
+  exclusions: { type: Object, default: () => ({}) },
+  // Valeurs masquées (même forme que `streams`, nil hors des plages) — tracées en fantôme.
+  ignoredStreams: { type: Object, default: () => ({}) },
   // Tours de l'appareil (LapRow[]) — dessinés en traits verticaux numérotés.
   laps: { type: Array, default: () => [] },
   // v-model:x-axis — propagated up so MapCard can pick the right unit in the
@@ -184,7 +189,7 @@ function syncLayoutWithStreams() {
   if (!props.streams) return
   const present = new Set(
     chartDefs
-      .filter((d) => streamIsMeaningful(d.key, props.streams[d.key], props.activity))
+      .filter((d) => streamIsMeaningful(d.key, props.streams[d.key] || props.ignoredStreams?.[d.key], props.activity))
       .map((d) => d.key),
   )
   const cleaned = chartLayout.value
@@ -701,6 +706,81 @@ const pauseBandPlugin = {
   },
 }
 
+// Plages de données écartées par l'utilisateur : bande orangée hachurée sous les courbes
+// (les points masqués y sont des trous), distincte des pauses grises. Le trait de la
+// courbe disparaît dans la plage, la bande dit pourquoi.
+const EXCLUDED_COLOR = '217, 119, 6'
+const excludedBandPlugin = {
+  id: 'activityExcludedBands',
+  beforeDatasetsDraw(chart) {
+    const spans = chart.$excludedSpans
+    if (!spans || spans.length === 0 || !chart.scales.x) return
+    const { ctx, chartArea } = chart
+    const h = chartArea.bottom - chartArea.top
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, h)
+    ctx.clip()
+    for (const span of spans) {
+      const { lo, hi } = pauseSpanPixels(chart, span)
+      if (hi <= lo) continue
+      ctx.fillStyle = `rgba(${EXCLUDED_COLOR}, 0.12)`
+      ctx.fillRect(lo, chartArea.top, hi - lo, h)
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(lo, chartArea.top, hi - lo, h)
+      ctx.clip()
+      ctx.strokeStyle = `rgba(${EXCLUDED_COLOR}, 0.35)`
+      ctx.lineWidth = 1
+      for (let x = lo - h; x < hi; x += PAUSE_HATCH_STEP_PX) {
+        ctx.beginPath()
+        ctx.moveTo(x, chartArea.bottom)
+        ctx.lineTo(x + h, chartArea.top)
+        ctx.stroke()
+      }
+      ctx.restore()
+      ctx.strokeStyle = `rgba(${EXCLUDED_COLOR}, 0.8)`
+      ctx.beginPath()
+      ctx.moveTo(lo + 0.5, chartArea.top)
+      ctx.lineTo(lo + 0.5, chartArea.bottom)
+      ctx.moveTo(hi - 0.5, chartArea.top)
+      ctx.lineTo(hi - 0.5, chartArea.bottom)
+      ctx.stroke()
+    }
+    ctx.restore()
+  },
+  afterDatasetsDraw(chart) {
+    const spans = chart.$excludedSpans
+    if (!spans || spans.length === 0 || !chart.scales.x) return
+    const { ctx, chartArea } = chart
+    const label = t('strava.exclusions.band')
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(chartArea.left, chartArea.top, chartArea.right - chartArea.left, chartArea.bottom - chartArea.top)
+    ctx.clip()
+    ctx.font = '600 10px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    const textW = ctx.measureText(label).width
+    for (const span of spans) {
+      const { lo, hi } = pauseSpanPixels(chart, span)
+      if (hi - lo < textW + 14) continue
+      const boxW = textW + 10
+      const boxX = (lo + hi) / 2 - boxW / 2
+      const boxY = chartArea.top + 3
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+      ctx.strokeStyle = `rgba(${EXCLUDED_COLOR}, 0.8)`
+      ctx.beginPath()
+      ctx.roundRect(boxX, boxY, boxW, 15, 3)
+      ctx.fill()
+      ctx.stroke()
+      ctx.fillStyle = `rgb(${EXCLUDED_COLOR})`
+      ctx.fillText(label, (lo + hi) / 2, boxY + 8)
+    }
+    ctx.restore()
+  },
+}
+
 // Repères de tours : un trait vertical à chaque coupure enregistrée par l'appareil,
 // numéroté en pied de graphique. Purement décoratif — la sélection d'un tour passe
 // par la table de l'onglet « Analyse ». Le numéro n'est peint que s'il reste de la
@@ -906,7 +986,7 @@ async function renderCharts() {
   if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
-  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, zoneBandsPlugin, pauseBandPlugin, lapMarkPlugin)
+  Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, zoneBandsPlugin, pauseBandPlugin, excludedBandPlugin, lapMarkPlugin)
 
   destroyCharts()
 
@@ -936,6 +1016,17 @@ async function renderCharts() {
   const lapMarks = (props.laps as { index: number; startIdx: number }[])
     .filter((l, i) => i > 0 && xRaw[l.startIdx] != null)
     .map((l) => ({ index: l.index, x: chartXFromRaw(xRaw[l.startIdx]) }))
+  // Plages écartées → bornes sur l'axe tracé, via le stream `time` (les plages sont en
+  // secondes, quel que soit l'axe). Premier échantillon ≥ from, dernier ≤ to.
+  const timeData = props.streams.time?.data
+  const excludedRanges = (props.exclusions?.ranges || []).flatMap((r) => {
+    if (!Array.isArray(timeData)) return []
+    let i0 = timeData.findIndex((tt) => tt >= r.from)
+    let i1 = -1
+    for (let i = timeData.length - 1; i >= 0; i--) if (timeData[i] <= r.to) { i1 = i; break }
+    if (i0 < 0 || i1 < i0 || xRaw[i0] == null || xRaw[i1] == null) return []
+    return [{ x0: chartXFromRaw(xRaw[i0]), x1: chartXFromRaw(xRaw[i1]), channels: r.channels || null }]
+  })
   const gapNullAfter = new Map(gapSegments.map((g) => [
     g.startIdx,
     (chartXFromRaw(xRaw[g.startIdx]) + chartXFromRaw(xRaw[g.endIdx])) / 2,
@@ -957,7 +1048,7 @@ async function renderCharts() {
       const label = totalForKey > 1
         ? `${t('strava.stream.' + (def.labelKey || def.key))} #${count} (${def.unit})`
         : `${t('strava.stream.' + (def.labelKey || def.key))} (${def.unit})`
-      const yRaw = props.streams[streamKey].data
+      const yRaw = props.streams[streamKey]?.data || []
       const len = Math.min(xRaw.length, yRaw.length)
 
       // Coloration par pente du profil d'altitude, par zone de puissance ou par zone de
@@ -1028,6 +1119,44 @@ async function renderCharts() {
       }
     }).filter(Boolean)
 
+    // Données ignorées en fantôme : même couleur et même axe que le capteur, mais pâles,
+    // en pointillés et sans remplissage — on voit ce qui a été écarté sans qu'il compte.
+    // Un dataset par capteur concerné ; aucun n'existe sans exclusion.
+    group.streams.forEach((streamKey, idx) => {
+      const def = vdef(streamKey)
+      const ghostRaw = props.ignoredStreams?.[streamKey]?.data
+      if (!def || !Array.isArray(ghostRaw)) return
+      const len = Math.min(xRaw.length, ghostRaw.length)
+      const data = []
+      let inRun = false
+      // Les nil hors plage deviennent des coupures : sans elles la ligne relierait deux plages.
+      for (const i of downsampleIndices(len, maxPoints, gapEdges)) {
+        const v = ghostRaw[i]
+        if (v == null) {
+          if (inRun) data.push({ x: chartXFromRaw(xRaw[i]), y: null })
+          inRun = false
+          continue
+        }
+        data.push({ x: chartXFromRaw(xRaw[i]), y: def.transform(v) })
+        inRun = true
+      }
+      datasets.push({
+        label: `${t('strava.stream.' + (def.labelKey || def.key))} (${t('strava.exclusions.band')})`,
+        data,
+        borderColor: def.color + '80',
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        borderDash: [4, 3],
+        pointRadius: 0,
+        tension: 0.2,
+        fill: false,
+        spanGaps: false,
+        yAxisID: `y-${idx}`,
+        $streamKey: streamKey,
+        $ghost: true,
+      } as any)
+    })
+
     const yScales = {}
     group.streams.forEach((streamKey, idx) => {
       const def = vdef(streamKey)
@@ -1037,9 +1166,10 @@ async function renderCharts() {
       // x à chaque update (DatasetController.getMinMax filtre sur les bornes de l'autre
       // axe) — l'axe y "sautait" à chaque pincement à 2 doigts sur mobile. `grace` restitue
       // le petit espace au-dessus/en dessous que Chart.js ajoute normalement tout seul.
-      const yRaw = props.streams[streamKey]?.data
       let yMin = Infinity, yMax = -Infinity
-      if (yRaw) {
+      // Données retenues + fantômes : l'axe doit contenir ce qu'on dessine.
+      for (const yRaw of [props.streams[streamKey]?.data, props.ignoredStreams?.[streamKey]?.data]) {
+        if (!yRaw) continue
         for (let i = 0; i < yRaw.length; i++) {
           const v = def.transform(yRaw[i])
           if (v == null || Number.isNaN(v)) continue
@@ -1117,6 +1247,10 @@ async function renderCharts() {
 
     ;(chart as any).$pauseSpans = pauseSpans
     ;(chart as any).$lapMarks = lapMarks
+    // Une plage limitée à certains capteurs ne se peint que sur les graphiques qui en tracent un.
+    ;(chart as any).$excludedSpans = excludedRanges.filter(
+      (r) => !r.channels || r.channels.some((c) => group.streams.includes(c)),
+    )
 
     const zoneBands = []
     const wattsIdx = group.streams.indexOf('watts')
@@ -1990,6 +2124,16 @@ watch(() => props.streams, async (val, old) => {
     await nextTick()
     await renderCharts()
   }
+})
+
+// Exclusions modifiées : le parent a remplacé les streams (masqués), mais le watcher
+// ci-dessus ne réagit qu'au premier chargement. On réaligne la disposition (un canal
+// écarté disparaît, un canal réintégré revient) puis on repeint.
+watch(() => [props.exclusions, props.ignoredStreams], async () => {
+  if (!props.streams) return
+  syncLayoutWithStreams()
+  await nextTick()
+  await renderCharts()
 })
 
 // ─── Tooltips Bootstrap des pastilles (VAM / NP / efficience) ─────────────────

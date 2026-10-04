@@ -222,7 +222,7 @@ module TrainingLoad
       return tss_from_if(hours, np / ftp, 'power')
     end
 
-    hr = numeric(row['average_heartrate'])
+    hr = numeric(row['average_heartrate']) unless row['hr_ignored']
     if hr&.positive? && lthr&.positive?
       return tss_from_if(hours, hr / lthr, 'hr')
     end
@@ -374,9 +374,9 @@ module TrainingLoad
   def activity_histogram(activity, channel, bucket)
     stored = channel == 'heartrate' ? activity.hr_histogram : activity.power_histogram
     return stored if stored.present?
-    return {} unless activity.streams.is_a?(Hash)
+    return {} unless activity.effective_streams.is_a?(Hash)
 
-    ZoneDistribution.histogram(activity.streams, channel, bucket)
+    ZoneDistribution.histogram(activity.effective_streams, channel, bucket)
   end
 
   # Attache à chaque point de série les activités du jour (triées par TSS décroissant),
@@ -509,7 +509,7 @@ module TrainingLoad
   # LTHR ≈ 0,9 × FC max. Grossier mais borné — et surtout disponible sans streams,
   # ce qui reste sa seule raison d'exister.
   def auto_lthr(rows)
-    max_hr = rows.filter_map { |r| numeric(r['average_heartrate']) }.max
+    max_hr = rows.filter_map { |r| numeric(r['average_heartrate']) unless r['hr_ignored'] }.max
     return nil unless max_hr&.positive?
 
     (max_hr / 0.92 * 0.9).round
@@ -517,8 +517,10 @@ module TrainingLoad
 
   # ── Helpers ──────────────────────────────────────────────────────────────────
   def load_rows(user)
-    columns = %w[name started_at moving_time_s average_heartrate activity_type normalized_power average_speed
-                 distance_m]
+    columns = ['name', 'started_at', 'moving_time_s', 'average_heartrate', 'activity_type', 'normalized_power',
+               'average_speed', 'distance_m',
+               # Canal cardio écarté : le TSS ne doit pas retomber sur la FC moyenne du résumé.
+               "COALESCE(stream_exclusions->'channels' @> '\"heartrate\"'::jsonb, false) AS hr_ignored"]
     union = UserActivities.union_sql(user_id: user.id, columns: columns)
     UserActivities.select_all("SELECT * FROM (#{union}) rows", 'TrainingLoad#load_rows')
   end

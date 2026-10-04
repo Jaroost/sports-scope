@@ -33,8 +33,19 @@ class ImportedActivitiesController < ApplicationController
     activity = current_user.imported_activities.find_by(id: params[:id])
     return head :not_found unless activity
 
-    streams = activity.streams.is_a?(Hash) ? activity.streams : {}
-    render json: { streams: streams }
+    streams = activity.effective_streams.is_a?(Hash) ? activity.effective_streams : {}
+    render json: { streams: streams, stream_exclusions: activity.stream_exclusions,
+                   ignored_streams: activity.ignored_streams }
+  end
+
+  # PATCH /api/imported_activities/:id/stream_exclusions — voir `StravaController#stream_exclusions`.
+  def stream_exclusions
+    activity = current_user.imported_activities.find_by(id: params[:id])
+    return head :not_found unless activity
+
+    activity.update_stream_exclusions!(params.permit(channels: [], ranges: [:from, :to, { channels: [] }]))
+    render json: { streams: activity.effective_streams, stream_exclusions: activity.stream_exclusions,
+                   ignored_streams: activity.ignored_streams }
   end
 
   # POST /api/imported_activities
@@ -65,7 +76,7 @@ class ImportedActivitiesController < ApplicationController
       podium: PeakPowerCurve.podium_for(current_user, activity.peak_powers, exclude: ['imported', activity.id]),
       # Seuils (FTP / LTHR) que CETTE sortie prouve, + ceux de l'athlète pour comparer.
       thresholds: ActivityThresholds.for_activity(
-        current_user, peak_powers: activity.peak_powers, streams: activity.streams,
+        current_user, peak_powers: activity.peak_powers, streams: activity.effective_streams,
         activity_type: activity.activity_type
       )
     }
@@ -158,8 +169,9 @@ class ImportedActivitiesController < ApplicationController
       max_cadence: a.max_cadence,
       start_latlng: a.start_latlng,
       end_latlng: a.end_latlng,
-      created_at: a.created_at.iso8601
-    }.tap { |h| h[:laps] = a.laps if with_laps }
+      created_at: a.created_at.iso8601,
+      stream_exclusions: a.stream_exclusions
+    }.merge(a.excluded_summary_overrides).tap { |h| h[:laps] = a.laps if with_laps }
   end
 
   def sanitize_attrs(p)

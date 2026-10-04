@@ -88,6 +88,7 @@ Rails.application.routes.draw do
 
   # Strava activities (JSON consumed by Vue components)
   get "/strava/activities", to: "strava#activities", as: :strava_activities
+  patch "/strava/activities/:id/stream_exclusions", to: "strava#stream_exclusions", as: :strava_activity_stream_exclusions, constraints: { id: /\d+/ }
   patch "/strava/activities/:id/ignore", to: "strava#ignore", as: :strava_activity_ignore, constraints: { id: /\d+/ }
   post "/strava/sync", to: "strava#sync", as: :strava_sync
   post "/strava/refresh", to: "strava#refresh", as: :strava_refresh
@@ -200,6 +201,7 @@ Rails.application.routes.draw do
   post "/api/imported_activities", to: "imported_activities#create"
   get "/api/imported_activities/:id", to: "imported_activities#show", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/streams", to: "imported_activities#streams", constraints: { id: /\d+/ }
+  patch "/api/imported_activities/:id/stream_exclusions", to: "imported_activities#stream_exclusions", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/peak_power_ranks", to: "imported_activities#peak_power_ranks", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/best_efforts", to: "imported_activities#best_efforts", constraints: { id: /\d+/ }
   get "/api/imported_activities/:id/zones", to: "imported_activities#zones", constraints: { id: /\d+/ }

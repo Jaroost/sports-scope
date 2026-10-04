@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_04_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_04_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -64,6 +64,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_04_120000) do
     t.string "source", default: "fit", null: false
     t.jsonb "start_latlng"
     t.datetime "started_at"
+    t.jsonb "stream_exclusions", default: {}, null: false
     t.jsonb "streams", default: {}, null: false
     t.float "total_elevation_gain"
     t.jsonb "track_cells", default: {}, null: false
@@ -238,6 +239,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_04_120000) do
     t.jsonb "start_latlng"
     t.datetime "started_at"
     t.bigint "strava_id", null: false
+    t.jsonb "stream_exclusions", default: {}, null: false
     t.jsonb "streams", default: {}, null: false
     t.datetime "streams_fetched_at"
     t.float "total_elevation_gain"

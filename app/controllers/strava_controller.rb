@@ -78,6 +78,20 @@ class StravaController < ApplicationController
     render json: { id: activity.strava_id, ignored: activity.ignored }
   end
 
+  # PATCH /strava/activities/:id/stream_exclusions { channels: [...], ranges: [...] } —
+  # écarte des données de capteur (canaux entiers ou plages de temps). Les streams
+  # bruts restent intacts ; les dérivées (NP, courbes, histogrammes) sont recalculées
+  # sur le masque. Un corps vide lève toutes les exclusions. Rend les streams masqués
+  # pour que le front se réaligne sans second aller-retour.
+  def stream_exclusions
+    activity = current_user.strava_activities.find_by!(strava_id: params[:id])
+    return head :conflict if activity.streams_fetched_at.blank?
+
+    activity.update_stream_exclusions!(params.permit(channels: [], ranges: [:from, :to, { channels: [] }]))
+    render json: { streams: activity.effective_streams, stream_exclusions: activity.stream_exclusions,
+                   ignored_streams: activity.ignored_streams }
+  end
+
   # POST /strava/sync — force a (re)synchronisation of activity summaries.
   # `?full=1` re-paginates the whole history; otherwise it's incremental.
   def sync
@@ -120,12 +134,16 @@ class StravaController < ApplicationController
     # Sert les streams persistés dès qu'on les a déjà récupérés (consultation
     # antérieure ou backfill) : la BDD est le cache. `?refresh=1` force un re-fetch.
     if params[:refresh].blank? && activity&.streams_fetched_at.present?
-      return render json: { cached_at: activity.streams_fetched_at.iso8601, streams: activity.streams }
+      return render json: { cached_at: activity.streams_fetched_at.iso8601, streams: activity.effective_streams,
+                            stream_exclusions: activity.stream_exclusions,
+                   ignored_streams: activity.ignored_streams }
     end
 
     streams = StravaStreamsFetcher.new(current_user).fetch(id)
     activity&.store_streams!(streams)
-    render json: { cached_at: Time.current.iso8601, streams: streams }
+    render json: { cached_at: Time.current.iso8601, streams: activity ? activity.effective_streams : streams,
+                   stream_exclusions: activity&.stream_exclusions || {},
+                   ignored_streams: activity&.ignored_streams || {} }
   rescue StravaStreamsFetcher::ApiError => e
     status = e.status == 404 ? :not_found : :bad_gateway
     render json: { error: e.message }, status: status
@@ -155,7 +173,7 @@ class StravaController < ApplicationController
       podium: PeakPowerCurve.podium_for(current_user, current, exclude: ['strava', id]),
       # Seuils (FTP / LTHR) que CETTE sortie prouve, + ceux de l'athlète pour comparer.
       thresholds: ActivityThresholds.for_activity(
-        current_user, peak_powers: current, streams: streams,
+        current_user, peak_powers: current, streams: activity ? activity.effective_streams : streams,
         activity_type: activity&.activity_type
       )
     }
@@ -537,6 +555,11 @@ class StravaController < ApplicationController
       # le rattache ici pour que la page de détail affiche NP / VI sans re-fetch.
       extra['normalized_power'] = record.normalized_power if record&.normalized_power
     end
+
+    # Canaux de capteur écartés : le résumé Strava (mis en cache) garde les moyennes du
+    # capteur défaillant, on les neutralise ici, hors cache, comme le TSS.
+    extra.merge!(record.excluded_summary_overrides.transform_keys(&:to_s)) if record
+    extra['stream_exclusions'] = record.stream_exclusions if record && StreamExclusions.any?(record.stream_exclusions)
 
     # Forme (fraîcheur) à l'entrée de la séance — contexte « étais-je frais ? ». Datée
     # sur le `started_at` en base (même passe que la série de charge), indépendante du TSS.

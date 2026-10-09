@@ -82,6 +82,9 @@ services:
       VITE_RUBY_HOST: ${VITE_HOST:-vite.localtest.me}
       VITE_RUBY_PORT: 443
       VITE_RUBY_HTTPS: "true"
+      # vite_ruby ≥ 3.10 se fie sinon à un fichier meta (port du serveur) qui ne colle pas
+      # avec le port 443 de Traefik : on revient au test de connexion TCP.
+      VITE_RUBY_DEV_SERVER_CONNECTION_CHECK: "true"
       KEYCLOAK_BASE_URL: https://${KEYCLOAK_HOST:-keycloak.localtest.me}
       KEYCLOAK_REALM: sports-scope
       KEYCLOAK_CLIENT_ID: rails-app

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, useTemplateRef, toRaw } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { t } from '../i18n'
-import { trainingProgramStore, openingMilestone, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, SPORTS, TARGET_CEILINGS, MAX_MILESTONES } from '../stores/trainingProgramStore'
-import type { Milestone, Sound, TargetRange } from '../stores/trainingProgramStore'
+import { trainingProgramStore, newBlock, isGroup, SPORTS, MAX_REPEAT, DEFAULT_START_TIMING, DEFAULT_END_TIMING } from '../stores/trainingProgramStore'
+import type { Block, Item, SoundIssue, SoundSlotRef, TargetRange } from '../stores/trainingProgramStore'
+import * as editing from '../stores/trainingProgramEditing'
+import { formatTime } from '../trainingProgramTime'
 import { csrfToken } from '../csrf'
-import CompanionColorPicker from './CompanionColorPicker.vue'
+import TrainingProgramItemList from './TrainingProgramItemList.vue'
 
 const props = defineProps({
   trainingProgramId: { type: [String, Number], default: null },
@@ -17,252 +19,34 @@ const saving = ref(false)
 const saved = ref(false)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
-const milestones = trainingProgramStore.milestones
-const previewAudio = useTemplateRef<HTMLAudioElement>('previewAudio')
+const items = trainingProgramStore.items
+const { issues, targetIssues, durationSeconds, selected, repeatCount } = editing
 
-// Sélection multiple pour répéter un bloc (ex. effort/repos d'un fractionné) — par
-// référence d'objet et non par index : `normalize()` retrie le tableau après chaque
-// modif, un index se périmerait.
-const selected = ref<Set<Milestone>>(new Set())
-const repeatCount = ref(2)
-
-function isSelected(milestone: Milestone): boolean {
-  return selected.value.has(milestone)
+function slotLabel(ref: SoundSlotRef): string {
+  return t(`training_programs.sound_slot_${ref.edge}`, { at: formatTime(editing.slotStart(ref)) })
 }
 
-function toggleSelected(milestone: Milestone) {
-  const next = new Set(selected.value)
-  if (next.has(milestone)) next.delete(milestone)
-  else next.add(milestone)
-  selected.value = next
+function issueMessage(issue: SoundIssue): string {
+  return issue.kind === 'overlap'
+    ? t('training_programs.error_sounds_overlap', { a: slotLabel(issue.a), b: slotLabel(issue.b) })
+    : t('training_programs.error_sound_before_start', { slot: slotLabel(issue.slot) })
 }
 
-// Indices (dans l'ordre chronologique courant) des jalons sélectionnés.
-function selectedIndices(): number[] {
-  return milestones.value
-    .map((m, i) => (selected.value.has(m) ? i : -1))
-    .filter((i) => i >= 0)
+const CHANNEL_I18N_KEYS = { power: 'target_power', heartRate: 'target_heart_rate', cadence: 'target_cadence' } as const
+
+function targetIssueMessage(issue: editing.TargetIssue): string {
+  const channel = issue.channel === 'speedKmh'
+    ? (trainingProgramStore.sport.value === 'running' ? t('training_programs.target_pace') : t('training_programs.target_speed'))
+    : t(`training_programs.${CHANNEL_I18N_KEYS[issue.channel]}`)
+  const name = issue.block.segmentName.trim() || formatTime(editing.startSecondsOf(issue.block))
+  return t(`training_programs.error_target_${issue.kind}`, { name, channel })
 }
 
-// Répéter suppose une sélection contiguë suivie d'au moins un jalon : ce jalon
-// suivant sert de clôture (cf. repeatSelected) et doit déjà exister.
-const canRepeatSelected = computed(() => {
-  const indices = selectedIndices()
-  if (indices.length === 0) return false
-  for (let k = 1; k < indices.length; k++) {
-    if (indices[k] !== indices[k - 1] + 1) return false
-  }
-  return indices[indices.length - 1] + 1 < milestones.value.length
+// Pourquoi « Répéter » est grisé, pour le dire plutôt que de laisser deviner.
+const groupHint = computed(() => {
+  const blocker = editing.groupBlocker.value
+  return blocker ? t(`training_programs.group_hint_${blocker}`) : ''
 })
-
-const durationSeconds = computed(() => milestones.value[milestones.value.length - 1]?.offsetSeconds ?? 0)
-
-function formatTime(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60)
-  const s = totalSeconds % 60
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
-// Accepte "m:ss" ou un nombre brut de secondes. `null` = saisie inexploitable
-// (le champ est alors laissé tel quel, sans modifier le jalon).
-function parseTime(text: string): number | null {
-  const trimmed = text.trim()
-  const withColon = trimmed.match(/^(\d+):([0-5]?\d)$/)
-  if (withColon) return Number(withColon[1]) * 60 + Number(withColon[2])
-  const bare = trimmed.match(/^\d+$/)
-  return bare ? Number(bare[0]) : null
-}
-
-// Retri par le temps (décision retenue : pas de boutons monter/descendre, le
-// temps saisi est la seule source d'ordre) + garanties attendues côté serveur :
-// premier jalon toujours à 0, offsets strictement croissants.
-function normalize() {
-  const arr = [...milestones.value].sort((a, b) => a.offsetSeconds - b.offsetSeconds)
-  let previous = -1
-  arr.forEach((m, i) => {
-    if (i === 0) {
-      m.offsetSeconds = 0
-    } else if (m.offsetSeconds <= previous) {
-      m.offsetSeconds = previous + 1
-    }
-    previous = m.offsetSeconds
-  })
-  milestones.value = arr
-}
-
-// Champ "temps absolu" : fixe directement la position du jalon depuis le début.
-function onTimeChange(milestone: Milestone, event: Event) {
-  const parsed = parseTime((event.target as HTMLInputElement).value)
-  if (parsed != null) milestone.offsetSeconds = Math.max(0, parsed)
-  normalize()
-}
-
-// Champ "durée depuis le jalon précédent" : les deux champs pointent vers le même
-// offsetSeconds, juste affiché différemment — modifier l'un met l'autre à jour.
-function deltaSeconds(index: number): number {
-  return milestones.value[index].offsetSeconds - milestones.value[index - 1].offsetSeconds
-}
-
-// Changer la durée d'un tronçon ne doit pas déplacer les jalons suivants dans le
-// temps absolu sans les décaler : leur propre durée (l'écart à leur voisin) est
-// ce que l'utilisateur a réellement composé pour eux, et doit rester intacte —
-// c'est le temps absolu qui doit céder, pas les durées des tronçons suivants.
-function onDeltaChange(index: number, event: Event) {
-  const parsed = parseTime((event.target as HTMLInputElement).value)
-  if (parsed == null) return
-  const milestone = milestones.value[index]
-  const shift = milestones.value[index - 1].offsetSeconds + Math.max(0, parsed) - milestone.offsetSeconds
-  for (let i = index; i < milestones.value.length; i++) {
-    milestones.value[i].offsetSeconds += shift
-  }
-  normalize()
-}
-
-// Canaux à structure identique (min/cible/max en valeur absolue) — la vitesse est
-// traitée à part car son unité change selon `trainingProgramStore.sport`.
-const TARGET_CHANNELS = ['power', 'heartRate', 'cadence'] as const
-
-// i18n en snake_case (`target_heart_rate`), clés du store en camelCase (`heartRate`).
-const CHANNEL_I18N_KEYS: Record<typeof TARGET_CHANNELS[number], string> = {
-  power: 'target_power',
-  heartRate: 'target_heart_rate',
-  cadence: 'target_cadence',
-}
-
-function channelLabel(key: typeof TARGET_CHANNELS[number]): string {
-  return t(`training_programs.${CHANNEL_I18N_KEYS[key]}`)
-}
-
-function hasAnyTarget(m: Milestone): boolean {
-  return [m.power, m.heartRate, m.cadence, m.speedKmh].some((r) => r.target != null)
-}
-
-function onNumberFieldChange(range: TargetRange, field: 'target' | 'min' | 'max', ceiling: number, event: Event) {
-  const text = (event.target as HTMLInputElement).value.trim()
-  if (!text) { range[field] = null; return }
-  const value = Number(text)
-  if (Number.isFinite(value)) range[field] = Math.min(Math.max(value, 0), ceiling)
-}
-
-// Vitesse : km/h pour un programme vélo, allure (mm:ss/km) pour un programme course —
-// stockage toujours en km/h. `formatTime`/`parseTime` sont génériques (minutes:secondes)
-// et servent tel quel pour l'allure. Attention : le champ "min" reste la borne basse de
-// *vitesse*, donc l'allure la plus lente (le plus grand mm:ss) une fois convertie —
-// on ne renomme pas les bornes en passant en allure, on ne fait que les afficher autrement.
-function speedUnitLabel(): string {
-  return trainingProgramStore.sport.value === 'running' ? t('training_programs.target_pace') : t('training_programs.target_speed')
-}
-
-function speedFieldDisplay(range: TargetRange, field: 'target' | 'min' | 'max'): string {
-  const value = range[field]
-  if (value == null) return ''
-  if (trainingProgramStore.sport.value === 'running') return formatTime(Math.round(3600 / value))
-  return String(Math.round(value * 10) / 10)
-}
-
-function onSpeedFieldChange(range: TargetRange, field: 'target' | 'min' | 'max', event: Event) {
-  const text = (event.target as HTMLInputElement).value.trim()
-  if (!text) { range[field] = null; return }
-  if (trainingProgramStore.sport.value === 'running') {
-    const paceSeconds = parseTime(text)
-    if (paceSeconds && paceSeconds > 0) range[field] = Math.min(3600 / paceSeconds, TARGET_CEILINGS.speedKmh)
-  } else {
-    const value = Number(text)
-    if (Number.isFinite(value)) range[field] = Math.min(Math.max(value, 0), TARGET_CEILINGS.speedKmh)
-  }
-}
-
-function iconClass(icon: string): string {
-  return MILESTONE_ICONS.find((i) => i.key === icon)?.icon ?? ''
-}
-
-function addMilestone() {
-  if (milestones.value.length >= MAX_MILESTONES) return
-  const last = milestones.value[milestones.value.length - 1]
-  milestones.value.push({
-    ...openingMilestone(),
-    offsetSeconds: (last?.offsetSeconds ?? 0) + 60,
-  })
-}
-
-// Insère un jalon vide entre le jalon `index - 1` et le jalon `index` (ex. un
-// rappel de boisson au milieu d'un long tronçon), à mi-chemin des deux.
-function insertMilestoneBefore(index: number) {
-  if (milestones.value.length >= MAX_MILESTONES) return
-  const prev = milestones.value[index - 1]
-  const curr = milestones.value[index]
-  const mid = prev.offsetSeconds + Math.max(1, Math.round((curr.offsetSeconds - prev.offsetSeconds) / 2))
-  milestones.value.splice(index, 0, { ...openingMilestone(), offsetSeconds: mid })
-  normalize()
-}
-
-function duplicateMilestone(index: number) {
-  if (milestones.value.length >= MAX_MILESTONES) return
-  const copy = structuredClone(toRaw(milestones.value[index])) as Milestone
-  copy.offsetSeconds += 1
-  milestones.value.splice(index + 1, 0, copy)
-  normalize()
-}
-
-// Répète un bloc contigu (ex. effort + repos d'un fractionné) `repeatCount` fois
-// au total. Le jalon qui suit immédiatement la sélection sert de clôture : c'est
-// lui qui donne la durée du dernier segment sélectionné (celle d'un jalon n'est
-// jamais que l'écart jusqu'au suivant), donc il n'est jamais dupliqué — seulement
-// repoussé, avec tout ce qui vient après lui, pour laisser la place aux copies.
-// Sans ce jalon de clôture, dupliquer le bloc perdrait la durée de son dernier
-// segment (d'où `canRepeatSelected`, qui exige sa présence).
-function repeatSelected() {
-  if (!canRepeatSelected.value) return
-  const times = Math.max(2, Math.floor(repeatCount.value) || 2)
-  const indices = selectedIndices()
-  const closingIndex = indices[indices.length - 1] + 1
-  const repeats = times - 1
-  if (milestones.value.length + indices.length * repeats > MAX_MILESTONES) return
-
-  const cycleLength = milestones.value[closingIndex].offsetSeconds - milestones.value[indices[0]].offsetSeconds
-  if (cycleLength <= 0) return
-
-  const body = indices.map((i) => milestones.value[i])
-  const copies: Milestone[] = []
-  for (let k = 1; k <= repeats; k++) {
-    for (const m of body) {
-      const copy = structuredClone(toRaw(m)) as Milestone
-      copy.offsetSeconds = m.offsetSeconds + k * cycleLength
-      copies.push(copy)
-    }
-  }
-
-  const shift = repeats * cycleLength
-  milestones.value.forEach((m, i) => { if (i >= closingIndex) m.offsetSeconds += shift })
-  milestones.value.splice(closingIndex, 0, ...copies)
-  normalize()
-  selected.value = new Set()
-}
-
-function removeMilestone(index: number) {
-  if (index === 0) return // le jalon d'ouverture (0:00) n'est jamais supprimable
-  const [removed] = milestones.value.splice(index, 1)
-  if (selected.value.has(removed)) {
-    const next = new Set(selected.value)
-    next.delete(removed)
-    selected.value = next
-  }
-}
-
-function soundUrl(sound: Sound): string {
-  return `/sounds/${sound}.wav`
-}
-
-function playSound(sound: Sound | null) {
-  if (!sound || !previewAudio.value) return
-  previewAudio.value.src = soundUrl(sound)
-  previewAudio.value.currentTime = 0
-  previewAudio.value.play().catch(() => { /* lecture bloquée (autoplay) — pas grave, c'est un aperçu */ })
-}
-
-function soundLabel(sound: Sound): string {
-  return t(`training_programs.sound_${sound}`)
-}
 
 // snake_case (API, `target_power`/`min_power`/`max_power`, ...) <-> TargetRange.
 function targetRangeFromApi(m: any, field: string): TargetRange {
@@ -281,6 +65,52 @@ function targetRangeToApi(range: TargetRange, field: string): Record<string, num
   }
 }
 
+function blockFromApi(b: any): Block {
+  return {
+    durationSeconds: Math.max(1, Number(b.duration_seconds) || 1),
+    startSound: b.start_sound ?? null,
+    startCueTiming: b.start_cue_timing ?? DEFAULT_START_TIMING,
+    endSound: b.end_sound ?? null,
+    endCueTiming: b.end_cue_timing ?? DEFAULT_END_TIMING,
+    segmentName: b.segment_name || '',
+    icon: b.icon ?? null,
+    color: b.color ?? null,
+    textColor: b.text_color ?? null,
+    power: targetRangeFromApi(b, 'power'),
+    heartRate: targetRangeFromApi(b, 'heart_rate'),
+    cadence: targetRangeFromApi(b, 'cadence'),
+    speedKmh: targetRangeFromApi(b, 'speed_kmh'),
+  }
+}
+
+function blockToApi(b: Block) {
+  return {
+    duration_seconds: b.durationSeconds,
+    start_sound: b.startSound,
+    start_cue_timing: b.startSound ? b.startCueTiming : null,
+    end_sound: b.endSound,
+    end_cue_timing: b.endSound ? b.endCueTiming : null,
+    segment_name: b.segmentName.trim(),
+    icon: b.icon,
+    color: b.color,
+    text_color: b.textColor,
+    ...targetRangeToApi(b.power, 'power'),
+    ...targetRangeToApi(b.heartRate, 'heart_rate'),
+    ...targetRangeToApi(b.cadence, 'cadence'),
+    ...targetRangeToApi(b.speedKmh, 'speed_kmh'),
+  }
+}
+
+function itemFromApi(item: any): Item {
+  return Array.isArray(item.items)
+    ? { repeat: Math.min(Math.max(Number(item.repeat) || 2, 2), MAX_REPEAT), items: item.items.map(itemFromApi) }
+    : blockFromApi(item)
+}
+
+function itemToApi(item: Item) {
+  return isGroup(item) ? { repeat: item.repeat, items: item.items.map(itemToApi) } : blockToApi(item)
+}
+
 async function fetchProgram(id: number) {
   try {
     const res = await fetch(`/api/training_programs/${id}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
@@ -290,22 +120,8 @@ async function fetchProgram(id: number) {
     trainingProgramStore.name.value = p.name || ''
     trainingProgramStore.sport.value = SPORTS.includes(p.sport) ? p.sport : 'cycling'
     trainingProgramStore.shareToken.value = p.share_token || null
-    const loaded = Array.isArray(p.milestones) ? p.milestones : []
-    trainingProgramStore.milestones.value = loaded.length
-      ? loaded.map((m: any) => ({
-          offsetSeconds: Number(m.offset_seconds) || 0,
-          sound: m.sound ?? null,
-          segmentName: m.segment_name || '',
-          icon: m.icon ?? null,
-          cueTiming: m.cue_timing ?? null,
-          color: m.color ?? null,
-          textColor: m.text_color ?? null,
-          power: targetRangeFromApi(m, 'power'),
-          heartRate: targetRangeFromApi(m, 'heart_rate'),
-          cadence: targetRangeFromApi(m, 'cadence'),
-          speedKmh: targetRangeFromApi(m, 'speed_kmh'),
-        }))
-      : [openingMilestone()]
+    const loaded: any[] = Array.isArray(p.items) ? p.items : []
+    trainingProgramStore.items.value = loaded.length ? loaded.map(itemFromApi) : [newBlock()]
     selected.value = new Set()
   } catch (e: any) {
     trainingProgramStore.error.value = e.message
@@ -318,26 +134,17 @@ async function save() {
     trainingProgramStore.error.value = t('training_programs.error_name_required')
     return
   }
+  if (issues.value.length || targetIssues.value.length) {
+    trainingProgramStore.error.value = t('training_programs.error_fix_before_save')
+    return
+  }
   saving.value = true
   trainingProgramStore.error.value = null
   try {
-    normalize()
     const body = JSON.stringify({
       name: trainingProgramStore.name.value.trim(),
       sport: trainingProgramStore.sport.value,
-      milestones: milestones.value.map((m) => ({
-        offset_seconds: m.offsetSeconds,
-        sound: m.sound,
-        segment_name: m.segmentName.trim(),
-        icon: m.icon,
-        cue_timing: m.cueTiming,
-        color: m.color,
-        text_color: m.textColor,
-        ...targetRangeToApi(m.power, 'power'),
-        ...targetRangeToApi(m.heartRate, 'heart_rate'),
-        ...targetRangeToApi(m.cadence, 'cadence'),
-        ...targetRangeToApi(m.speedKmh, 'speed_kmh'),
-      })),
+      items: items.value.map(itemToApi),
     })
     const url = trainingProgramStore.isEditMode.value
       ? `/api/training_programs/${trainingProgramStore.currentId.value}`
@@ -393,6 +200,15 @@ onMounted(() => {
       {{ trainingProgramStore.error.value }}
     </div>
 
+    <div v-if="issues.length || targetIssues.length" class="alert alert-warning py-2" role="alert">
+      <div v-for="(issue, i) in issues" :key="`s${i}`">
+        <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ issueMessage(issue) }}
+      </div>
+      <div v-for="(issue, i) in targetIssues" :key="`t${i}`">
+        <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>{{ targetIssueMessage(issue) }}
+      </div>
+    </div>
+
     <div class="mb-4 d-flex gap-2 flex-wrap">
       <input v-model="trainingProgramStore.name.value" type="text" class="form-control form-control-lg flex-grow-1"
              style="min-width: 12rem" :placeholder="t('training_programs.name_placeholder')" maxlength="80">
@@ -409,201 +225,22 @@ onMounted(() => {
     <div v-if="selected.size > 0" class="d-flex align-items-center gap-2 mb-3 flex-wrap">
       <div class="d-flex align-items-center gap-1">
         <label class="small mb-0" for="tp-repeat-count">{{ t('training_programs.repeat_label') }}</label>
-        <input id="tp-repeat-count" v-model.number="repeatCount" type="number" min="2" max="50"
+        <input id="tp-repeat-count" v-model.number="repeatCount" type="number" min="2" :max="MAX_REPEAT"
                class="form-control form-control-sm" style="width: 4.5rem">
       </div>
-      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!canRepeatSelected" @click="repeatSelected">
+      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!!editing.groupBlocker.value" @click="editing.groupSelected()">
         <i class="fa-solid fa-repeat me-1" aria-hidden="true"></i>{{ t('training_programs.repeat_selected') }}
       </button>
-      <button type="button" class="btn btn-sm btn-link text-body-secondary" @click="selected = new Set()">
+      <button type="button" class="btn btn-sm btn-link text-body-secondary" @click="editing.clearSelection()">
         {{ t('training_programs.clear_selection') }}
       </button>
-      <span v-if="!canRepeatSelected" class="small text-body-secondary">{{ t('training_programs.repeat_hint') }}</span>
+      <span v-if="groupHint" class="small text-body-secondary">{{ groupHint }}</span>
     </div>
 
-    <div class="tp-timeline">
-      <template v-for="(milestone, index) in milestones" :key="index">
-        <div v-if="index !== 0" class="tp-connector d-flex align-items-center gap-1">
-          <i class="fa-solid fa-arrow-down-long text-body-secondary" aria-hidden="true"></i>
-          <input type="text" class="form-control form-control-sm tp-time-input"
-                 :title="t('training_programs.time_delta_hint')"
-                 :value="formatTime(deltaSeconds(index))" @change="onDeltaChange(index, $event)">
-          <button type="button" class="btn btn-sm btn-link p-1" :disabled="milestones.length >= MAX_MILESTONES"
-                  :title="t('training_programs.insert_milestone')" :aria-label="t('training_programs.insert_milestone')"
-                  @click="insertMilestoneBefore(index)">
-            <i class="fa-solid fa-plus" aria-hidden="true"></i>
-          </button>
-        </div>
-        <div class="tp-milestone card mb-3" :class="{ 'tp-milestone-selected': isSelected(milestone) }"
-             :style="milestone.color ? { '--tp-dot-color': milestone.color } : {}">
-          <div class="card-body d-flex align-items-start gap-2 flex-wrap">
-          <div class="form-check mt-1">
-            <input type="checkbox" class="form-check-input" :checked="isSelected(milestone)"
-                   :aria-label="t('training_programs.select_milestone')"
-                   @change="toggleSelected(milestone)">
-          </div>
+    <TrainingProgramItemList :items="items" :owner="null" leading />
 
-          <div v-if="index === 0" class="tp-time">
-            <label class="form-label small mb-1">0:00</label>
-          </div>
-          <div v-else class="tp-time">
-            <input type="text" class="form-control form-control-sm tp-time-input"
-                   :title="t('training_programs.time_absolute_hint')"
-                   :value="formatTime(milestone.offsetSeconds)" @change="onTimeChange(milestone, $event)">
-          </div>
-
-          <div class="flex-grow-1" style="min-width: 12rem">
-            <input v-model="milestone.segmentName" type="text" class="form-control form-control-sm"
-                   :placeholder="t('training_programs.segment_name_placeholder')" maxlength="60">
-          </div>
-
-          <div class="d-flex align-items-center gap-1">
-            <i v-if="milestone.icon" class="fa-solid tp-icon-preview" :class="iconClass(milestone.icon)" aria-hidden="true"></i>
-            <select v-model="milestone.icon" class="form-select form-select-sm" style="width: auto">
-              <option :value="null">{{ t('training_programs.icon_none') }}</option>
-              <option v-for="icon in MILESTONE_ICONS" :key="icon.key" :value="icon.key">{{ t(`training_programs.icon_${icon.key}`) }}</option>
-            </select>
-          </div>
-
-          <div class="d-flex align-items-center gap-1">
-            <select v-model="milestone.sound" class="form-select form-select-sm" style="width: auto">
-              <option :value="null">{{ t('training_programs.sound_none') }}</option>
-              <option v-for="sound in SOUNDS" :key="sound" :value="sound">{{ soundLabel(sound) }}</option>
-            </select>
-            <button type="button" class="btn btn-sm btn-link p-1" :disabled="!milestone.sound"
-                    :title="t('training_programs.play_preview')" :aria-label="t('training_programs.play_preview')"
-                    @click="playSound(milestone.sound)">
-              <i class="fa-solid fa-play" aria-hidden="true"></i>
-            </button>
-          </div>
-
-          <div v-if="index !== 0 && milestone.sound" class="d-flex align-items-center gap-1">
-            <select v-model="milestone.cueTiming" class="form-select form-select-sm" style="width: auto">
-              <option v-for="timing in CUE_TIMINGS" :key="timing" :value="timing">{{ t(`training_programs.cue_timing_${timing}`) }}</option>
-            </select>
-          </div>
-
-          <div class="d-flex align-items-center gap-1">
-            <CompanionColorPicker v-model="milestone.color" fallback="#6c757d" :label="t('training_programs.segment_color')" />
-            <CompanionColorPicker v-model="milestone.textColor" fallback="#ffffff" :label="t('training_programs.segment_text_color')" />
-          </div>
-
-          <div class="d-flex gap-1 ms-auto">
-            <button type="button" class="btn btn-sm btn-link p-1" :disabled="milestones.length >= MAX_MILESTONES"
-                    :title="t('training_programs.duplicate')" :aria-label="t('training_programs.duplicate')"
-                    @click="duplicateMilestone(index)">
-              <i class="fa-regular fa-copy" aria-hidden="true"></i>
-            </button>
-            <button type="button" class="btn btn-sm btn-link text-danger p-1" :disabled="index === 0"
-                    :title="t('training_programs.delete')" :aria-label="t('training_programs.delete')"
-                    @click="removeMilestone(index)">
-              <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-            </button>
-          </div>
-        </div>
-
-        <details class="tp-targets px-3 pb-3">
-          <summary class="small text-body-secondary">
-            {{ t('training_programs.targets_summary') }}
-            <span v-if="hasAnyTarget(milestone)" class="badge text-bg-warning ms-1">{{ t('training_programs.targets_set') }}</span>
-          </summary>
-          <div class="tp-targets-grid mt-2">
-            <div v-for="channel in TARGET_CHANNELS" :key="channel" class="tp-target-row">
-              <span class="small text-body-secondary tp-target-label">{{ channelLabel(channel) }}</span>
-              <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_min')"
-                     :value="milestone[channel].min ?? ''" @change="onNumberFieldChange(milestone[channel], 'min', TARGET_CEILINGS[channel], $event)">
-              <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_target')"
-                     :value="milestone[channel].target ?? ''" @change="onNumberFieldChange(milestone[channel], 'target', TARGET_CEILINGS[channel], $event)">
-              <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_max')"
-                     :value="milestone[channel].max ?? ''" @change="onNumberFieldChange(milestone[channel], 'max', TARGET_CEILINGS[channel], $event)">
-            </div>
-            <div class="tp-target-row">
-              <span class="small text-body-secondary tp-target-label">{{ speedUnitLabel() }}</span>
-              <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_min')"
-                     :value="speedFieldDisplay(milestone.speedKmh, 'min')" @change="onSpeedFieldChange(milestone.speedKmh, 'min', $event)">
-              <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_target')"
-                     :value="speedFieldDisplay(milestone.speedKmh, 'target')" @change="onSpeedFieldChange(milestone.speedKmh, 'target', $event)">
-              <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_max')"
-                     :value="speedFieldDisplay(milestone.speedKmh, 'max')" @change="onSpeedFieldChange(milestone.speedKmh, 'max', $event)">
-            </div>
-          </div>
-        </details>
-        </div>
-      </template>
-    </div>
-
-    <button type="button" class="btn btn-outline-secondary" :disabled="milestones.length >= MAX_MILESTONES" @click="addMilestone">
-      <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('training_programs.add_milestone') }}
+    <button type="button" class="btn btn-outline-secondary" :disabled="!editing.canAdd(1, 1)" @click="editing.addBlock(null, 1)">
+      <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('training_programs.add_block') }}
     </button>
-
-    <audio ref="previewAudio"></audio>
   </div>
 </template>
-
-<style scoped>
-.tp-timeline {
-  position: relative;
-  padding-left: 1.5rem;
-}
-.tp-timeline::before {
-  content: '';
-  position: absolute;
-  left: 0.5rem;
-  top: 0.25rem;
-  bottom: 0.25rem;
-  width: 2px;
-  background: var(--bs-border-color);
-}
-.tp-milestone {
-  position: relative;
-}
-.tp-milestone-selected {
-  border-color: var(--bs-warning);
-  box-shadow: 0 0 0 1px var(--bs-warning);
-}
-.tp-milestone::before {
-  content: '';
-  position: absolute;
-  left: -1.5rem;
-  top: 1.25rem;
-  width: 0.65rem;
-  height: 0.65rem;
-  border-radius: 50%;
-  background: var(--tp-dot-color, var(--bs-warning));
-}
-.tp-connector {
-  margin: -0.25rem 0 0.75rem 0.1rem;
-}
-.tp-connector i {
-  width: 0.9rem;
-  text-align: center;
-}
-.tp-time {
-  flex-shrink: 0;
-}
-.tp-time-input {
-  width: 3.5rem;
-}
-.tp-icon-preview {
-  width: 1.5rem;
-  text-align: center;
-  color: var(--bs-warning);
-}
-.tp-targets summary {
-  cursor: pointer;
-}
-.tp-targets-grid {
-  display: grid;
-  gap: 0.4rem;
-  max-width: 32rem;
-}
-.tp-target-row {
-  display: grid;
-  grid-template-columns: 5.5rem repeat(3, minmax(0, 1fr));
-  gap: 0.4rem;
-  align-items: center;
-}
-.tp-target-label {
-  white-space: nowrap;
-}
-</style>

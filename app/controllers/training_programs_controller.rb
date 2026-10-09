@@ -63,7 +63,7 @@ class TrainingProgramsController < ApplicationController
     return head :not_found unless src
     requested = params[:name].to_s.strip.first(MAX_NAME_LEN).presence
     copy_name = requested || "#{src.name} (copie)".first(MAX_NAME_LEN)
-    copy = current_user.training_programs.create!(name: copy_name, sport: src.sport, milestones: src.milestones)
+    copy = current_user.training_programs.create!(name: copy_name, sport: src.sport, items: src.items)
     render json: { training_program: serialize_full(copy) }, status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: e.message }, status: :unprocessable_entity
@@ -78,7 +78,7 @@ class TrainingProgramsController < ApplicationController
       sport = p[:sport].to_s
       out[:sport] = TrainingProgram::SPORTS.include?(sport) ? sport : "cycling"
     end
-    out[:milestones] = clean_milestones(p[:milestones]) if p.key?(:milestones)
+    out[:items] = clean_items(p[:items]) if p.key?(:items)
     out
   end
 
@@ -92,43 +92,62 @@ class TrainingProgramsController < ApplicationController
     nil
   end
 
-  # Reconstruit la liste plutôt que de recopier ce qui est passé : chaque jalon est
-  # borné puis retrié par offset_seconds — l'éditeur retrie déjà côté front (cf.
-  # TrainingProgramBuilder.vue), mais le serveur ne fait jamais confiance à cet ordre.
-  def clean_milestones(raw)
+  # Un son (`start_sound` / `end_sound`) et son moment (`*_cue_timing`) : le moment
+  # n'est gardé que si le son l'est.
+  def clean_sound(h, prefix, default_timing)
+    sound = (h["#{prefix}_sound"] || h[:"#{prefix}_sound"]).presence&.to_s
+    return { "#{prefix}_sound" => nil, "#{prefix}_cue_timing" => nil } unless TrainingProgram::SOUNDS.include?(sound)
+    timing = (h["#{prefix}_cue_timing"] || h[:"#{prefix}_cue_timing"]).presence&.to_s
+    timing = default_timing unless TrainingProgram::CUE_TIMINGS.include?(timing)
+    { "#{prefix}_sound" => sound, "#{prefix}_cue_timing" => timing }
+  end
+
+  # Reconstruit la liste plutôt que de recopier ce qui est passé : chaque bloc est
+  # borné, l'ordre reçu est conservé (c'est lui qui fait le programme). Un élément est
+  # un bloc ou un groupe de répétition (`repeat` + `items`, imbriqué jusqu'à
+  # MAX_GROUP_DEPTH niveaux ; au-delà le groupe est écarté). La cohérence d'ensemble —
+  # plafond une fois déplié, chevauchement des sons — reste validée côté modèle.
+  def clean_items(raw, depth = 0)
     return [] unless raw.is_a?(Array)
-    cleaned = raw.take(TrainingProgram::MAX_MILESTONES).filter_map do |item|
+    raw.take(TrainingProgram::MAX_BLOCKS).filter_map do |item|
       h = item.respond_to?(:to_unsafe_h) ? item.to_unsafe_h : item
       next unless h.is_a?(Hash)
-      offset = h["offset_seconds"] || h[:offset_seconds]
-      next unless offset.is_a?(Numeric) && offset >= 0
-      sound = (h["sound"] || h[:sound]).presence
-      sound = nil unless sound.nil? || TrainingProgram::SOUNDS.include?(sound.to_s)
-      icon = (h["icon"] || h[:icon]).presence
-      icon = nil unless icon.nil? || TrainingProgram::ICONS.include?(icon.to_s)
-      cue_timing = (h["cue_timing"] || h[:cue_timing]).presence
-      cue_timing = nil unless cue_timing.nil? || TrainingProgram::CUE_TIMINGS.include?(cue_timing.to_s)
-      color = (h["color"] || h[:color]).presence&.to_s&.strip&.downcase
-      color = nil unless color.nil? || color.match?(TrainingProgram::HEX_COLOR)
-      text_color = (h["text_color"] || h[:text_color]).presence&.to_s&.strip&.downcase
-      text_color = nil unless text_color.nil? || text_color.match?(TrainingProgram::HEX_COLOR)
-      segment_name = (h["segment_name"] || h[:segment_name]).to_s.strip.first(TrainingProgram::MAX_SEGMENT_NAME_LEN)
-      targets = TrainingProgram::TARGET_FIELDS.each_with_object({}) do |(field, ceiling), acc|
-        acc["target_#{field}"] = clean_target(h, "target_#{field}", ceiling)
-        acc["min_#{field}"] = clean_target(h, "min_#{field}", ceiling)
-        acc["max_#{field}"] = clean_target(h, "max_#{field}", ceiling)
-      end
-      {
-        "offset_seconds" => offset.to_i,
-        "sound" => sound,
-        "segment_name" => segment_name,
-        "icon" => icon,
-        "cue_timing" => cue_timing,
-        "color" => color,
-        "text_color" => text_color,
-      }.merge(targets)
+      repeat = h["repeat"] || h[:repeat]
+      next clean_block(h) if repeat.nil?
+      next if depth >= TrainingProgram::MAX_GROUP_DEPTH
+
+      count = repeat.is_a?(Numeric) ? repeat.to_i : 0
+      inner = clean_items(h["items"] || h[:items], depth + 1)
+      next if inner.empty?
+      { "repeat" => count.clamp(2, TrainingProgram::MAX_REPEAT), "items" => inner }
     end
-    cleaned.sort_by { |m| m["offset_seconds"] }
+  end
+
+  def clean_block(h)
+    return unless h.is_a?(Hash)
+    duration = h["duration_seconds"] || h[:duration_seconds]
+    return unless duration.is_a?(Numeric) && duration >= 1
+    icon = (h["icon"] || h[:icon]).presence
+    icon = nil unless icon.nil? || TrainingProgram::ICONS.include?(icon.to_s)
+    color = (h["color"] || h[:color]).presence&.to_s&.strip&.downcase
+    color = nil unless color.nil? || color.match?(TrainingProgram::HEX_COLOR)
+    text_color = (h["text_color"] || h[:text_color]).presence&.to_s&.strip&.downcase
+    text_color = nil unless text_color.nil? || text_color.match?(TrainingProgram::HEX_COLOR)
+    segment_name = (h["segment_name"] || h[:segment_name]).to_s.strip.first(TrainingProgram::MAX_SEGMENT_NAME_LEN)
+    targets = TrainingProgram::TARGET_FIELDS.each_with_object({}) do |(field, ceiling), acc|
+      acc["target_#{field}"] = clean_target(h, "target_#{field}", ceiling)
+      acc["min_#{field}"] = clean_target(h, "min_#{field}", ceiling)
+      acc["max_#{field}"] = clean_target(h, "max_#{field}", ceiling)
+    end
+    {
+      "duration_seconds" => duration.to_i.clamp(1, TrainingProgram::MAX_BLOCK_SECONDS),
+      "segment_name" => segment_name,
+      "icon" => icon,
+      "color" => color,
+      "text_color" => text_color,
+    }.merge(clean_sound(h, "start", TrainingProgram::DEFAULT_START_TIMING))
+     .merge(clean_sound(h, "end", TrainingProgram::DEFAULT_END_TIMING))
+     .merge(targets)
   end
 
   def serialize_summary(program)
@@ -138,12 +157,19 @@ class TrainingProgramsController < ApplicationController
       sport: program.sport,
       share_token: program.share_token,
       duration_seconds: program.duration_seconds,
-      segment_count: Array(program.milestones).size,
+      segment_count: program.flat_blocks.size,
       updated_at: program.updated_at.iso8601,
     }
   end
 
   def serialize_full(program)
-    serialize_summary(program).merge(milestones: program.milestones || [])
+    # `items` : ce que l'éditeur modifie (blocs et groupes de répétition). `blocks` : les
+    # mêmes, dépliés — ce que lit l'appli compagnon. `milestones` : le programme au format
+    # d'avant les blocs, pour les versions de l'appli qui ne connaissent pas encore `blocks`.
+    serialize_summary(program).merge(
+      items: program.items || [],
+      blocks: program.flat_blocks,
+      milestones: program.legacy_milestones,
+    )
   end
 end

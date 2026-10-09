@@ -5,6 +5,7 @@ import { csrfToken } from '../csrf'
 import { formatDuration } from '../routeHelpers'
 import CompanionStartWorkoutAction from './CompanionStartWorkoutAction.vue'
 import TrainingProgramProfileChart from './TrainingProgramProfileChart.vue'
+import { serializeProgram, fileNameFor, downloadText, parseProgramFile, MAX_FILE_BYTES } from '../trainingProgramFile'
 
 interface TrainingProgramSummary {
   id: number
@@ -79,6 +80,47 @@ async function duplicateProgram(program: TrainingProgramSummary) {
   }
 }
 
+// Exporte le programme tel que l'API le sert (blocs et groupes), dans un fichier JSON.
+async function exportProgram(program: TrainingProgramSummary) {
+  try {
+    const res = await fetch(`/api/training_programs/${program.id}`, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const full = (await res.json()).training_program
+    downloadText(fileNameFor(full.name), serializeProgram(full))
+  } catch (e: any) {
+    error.value = e.message
+  }
+}
+
+const importInput = ref<HTMLInputElement | null>(null)
+
+// Crée un nouveau programme à partir d'un fichier exporté. Le serveur le reconstruit et
+// le valide (durées, sons qui se chevauchent, cibles) : son message d'erreur est affiché tel quel.
+async function importProgram(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // permet de réimporter le même fichier
+  if (!file) return
+  error.value = null
+  try {
+    if (file.size > MAX_FILE_BYTES) throw new Error(t('training_programs.import_error_invalid'))
+    const parsed = parseProgramFile(await file.text())
+    const res = await fetch('/api/training_programs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+      body: JSON.stringify({ name: parsed.name.trim() || file.name.replace(/\.json$/i, ''), sport: parsed.sport, items: parsed.items }),
+    })
+    if (!res.ok) {
+      const errPayload = await res.json().catch(() => null)
+      throw new Error(errPayload?.error || `HTTP ${res.status}`)
+    }
+    await fetchPrograms()
+  } catch (e: any) {
+    error.value = e.message
+  }
+}
+
 async function removeProgram(program: TrainingProgramSummary) {
   if (!window.confirm(t('training_programs.confirm_delete'))) return
   try {
@@ -101,9 +143,15 @@ onMounted(fetchPrograms)
   <div class="container py-4">
     <div class="d-flex align-items-center justify-content-between mb-3">
       <h1 class="h4 mb-0">{{ t('training_programs.list_title') }}</h1>
-      <a :href="`${localePrefix}/training_programs/new`" class="btn btn-warning">
-        <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('training_programs.new') }}
-      </a>
+      <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-secondary" @click="importInput?.click()">
+          <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>{{ t('training_programs.import') }}
+        </button>
+        <input ref="importInput" type="file" accept="application/json,.json" class="d-none" @change="importProgram">
+        <a :href="`${localePrefix}/training_programs/new`" class="btn btn-warning">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('training_programs.new') }}
+        </a>
+      </div>
     </div>
 
     <div v-if="error" class="alert alert-danger py-2">{{ error }}</div>
@@ -125,6 +173,9 @@ onMounted(fetchPrograms)
           <CompanionStartWorkoutAction :share-token="program.share_token" />
           <button type="button" class="btn btn-sm btn-link p-1" :title="t('training_programs.rename')" @click="renameProgram(program)">
             <i class="fa-solid fa-pen" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="btn btn-sm btn-link p-1" :title="t('training_programs.export')" :aria-label="t('training_programs.export')" @click="exportProgram(program)">
+            <i class="fa-solid fa-file-export" aria-hidden="true"></i>
           </button>
           <button type="button" class="btn btn-sm btn-link p-1" :title="t('training_programs.duplicate')" @click="duplicateProgram(program)">
             <i class="fa-regular fa-copy" aria-hidden="true"></i>

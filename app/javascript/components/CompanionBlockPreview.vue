@@ -85,6 +85,16 @@ const overrideStyle = computed(() => ({
 // `companionSettings`, parce que la dialogue de choix s'en sert aussi.
 const shape = computed(() => blockShape(props.block))
 
+// La durée d'un bloc `timer`, en `mm:ss` (`h:mm:ss` au-delà d'une heure) comme
+// l'appli l'écrit (`formatDuration`).
+const timerText = computed(() => {
+  const total = props.block.duration_s ?? 300
+  const h = Math.floor(total / 3600)
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
+  const s = String(total % 60).padStart(2, '0')
+  return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`
+})
+
 // Le pire pourcentage de BATTERY_SAMPLE, restreint à `block.sensor` s'il en
 // vise un — même repli que côté appli (BatteryBlockView._compact) quand
 // aucun appareil de l'aperçu ne porte ce capteur.
@@ -965,6 +975,20 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
     <div v-else-if="block.kind === 'stopwatch'" class="cbp-card cbp-center" :style="overrideStyle">
       <div v-if="block.label && !shape.stopwatchCompact" class="cbp-title">{{ block.label }}</div>
       <div class="cbp-stopwatch-time" :class="{ 'cbp-stopwatch-compact': shape.stopwatchCompact }">02:34</div>
+      <div class="cbp-stopwatch-buttons">
+        <span class="cbp-action-compact"><i class="fa-solid fa-play" aria-hidden="true"></i></span>
+        <span class="cbp-action-compact"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></span>
+      </div>
+    </div>
+
+    <!-- Minuteur --------------------------------------------------------------
+         La durée réglée, pleine : l'éditeur ne décompte pas. Le clignotement
+         de l'échéance ne se dessine pas ici. -->
+    <div v-else-if="block.kind === 'timer'" class="cbp-card cbp-center" :style="overrideStyle">
+      <div v-if="block.label && !shape.timerCompact" class="cbp-title">{{ block.label }}</div>
+      <div class="cbp-stopwatch-time" :class="{ 'cbp-stopwatch-compact': shape.timerCompact }">
+        {{ timerText }}
+      </div>
       <div class="cbp-stopwatch-buttons">
         <span class="cbp-action-compact"><i class="fa-solid fa-play" aria-hidden="true"></i></span>
         <span class="cbp-action-compact"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></span>

@@ -177,6 +177,12 @@ module CompanionSettings
     # montrent le même chrono. `label` (titre) et `id` sont portés par le bloc,
     # voir `sanitize_block`. Deux modes : `full` (grand chiffre) / `compact`.
     "stopwatch" => %w[full compact],
+    # Un minuteur : compte à rebours de `duration_s` secondes (réglé en minutes +
+    # secondes dans l'éditeur), même bouton démarrer/arrêter et même remise à
+    # zéro que `stopwatch`. À l'échéance le fond clignote jusqu'à ce qu'on
+    # appuie, et `sound` (voir `BELL_SOUNDS`) est joué s'il est réglé — absent,
+    # silencieux. `id` et `label` comme `stopwatch`.
+    "timer" => %w[full compact],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.
@@ -735,6 +741,11 @@ module CompanionSettings
   # (court, sinon l'appli le tronque de toute façon), `id` retombe sur
   # `default` comme `series` — mêmes valeurs que `StopwatchBlock` côté Dart.
   MAX_STOPWATCH_LABEL_LENGTH = 24
+
+  # Durée d'un bloc `timer`, en secondes : une seconde au moins, un jour au
+  # plus — mêmes bornes et défaut (5 min) que `TimerBlock` côté Dart.
+  TIMER_DURATION_S_RANGE = 1..86_400
+  DEFAULT_TIMER_DURATION_S = 300
 
   # Douze rappels par profil au plus — même borne, et même raison, que
   # `ReminderSpec.maxCount` côté Dart : au-delà, un tableau de bord composé ici
@@ -1496,6 +1507,15 @@ module CompanionSettings
       # réglage — même raisonnement que `window_km`. `true` bascule sur le
       # tronçon qui suivra, pour l'annoncer en aperçu avant qu'il ne commence.
       block["upcoming"] = true if raw["upcoming"] == true
+    when "timer"
+      block["id"] = sanitize_series(raw["id"])
+      label = raw["label"].to_s.strip[0, MAX_STOPWATCH_LABEL_LENGTH]
+      block["label"] = label if label.present?
+      duration = raw["duration_s"]
+      block["duration_s"] =
+        duration.is_a?(Numeric) ? duration.round.clamp(TIMER_DURATION_S_RANGE) : DEFAULT_TIMER_DURATION_S
+      # Absent : silencieux. Contrairement à `bell`, aucun son n'est fabriqué.
+      block["sound"] = raw["sound"] if BELL_SOUNDS.include?(raw["sound"])
     when "stopwatch"
       block["id"] = sanitize_series(raw["id"])
       label = raw["label"].to_s.strip[0, MAX_STOPWATCH_LABEL_LENGTH]

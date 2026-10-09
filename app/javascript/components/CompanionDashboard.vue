@@ -1021,6 +1021,11 @@ function labelFor(block: Block): string {
   // marqué atterrit.
   if (block.kind === 'mark_lap') parts.push(block.series || 'default')
   // Comme la série : un texte libre qui distingue deux chronos d'une page.
+  if (block.kind === 'timer') {
+    const total = block.duration_s ?? 300
+    parts.push(`${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`)
+    if (block.label?.trim()) parts.push(block.label.trim())
+  }
   if (block.kind === 'stopwatch') parts.push(block.label?.trim() || block.id || 'default')
   if (block.mode) parts.push(t(`companion.settings.modes.${block.mode}`))
   return parts.join(' · ')

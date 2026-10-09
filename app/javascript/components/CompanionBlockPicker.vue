@@ -91,7 +91,15 @@ const series = ref(props.block?.series || 'default')
 // Un bloc `stopwatch` : son identité (deux composants de même `id` partagent
 // un chrono) et son titre, vide par défaut — pas de titre.
 const stopwatchId = ref(props.block?.id || 'default')
-const stopwatchLabel = ref(props.block?.kind === 'stopwatch' ? (props.block?.label || '') : '')
+const stopwatchLabel = ref(
+  props.block?.kind === 'stopwatch' || props.block?.kind === 'timer' ? (props.block?.label || '') : '',
+)
+// La durée d'un bloc `timer`, en minutes + secondes (le document garde des
+// secondes), et son son — vide : silencieux, contrairement à `sound` (bell).
+const timerTotal = props.block?.kind === 'timer' ? (props.block?.duration_s ?? 300) : 300
+const timerMinutes = ref<number>(Math.floor(timerTotal / 60))
+const timerSeconds = ref<number>(timerTotal % 60)
+const timerSound = ref<string>(props.block?.kind === 'timer' ? (props.block?.sound || '') : '')
 // L'horloge n'a pas de `Block.format` (elle garde `mode`, comme avant que les
 // deux genres partagent cet éditeur — voir `blockFor`) : ce même bouton
 // HH:MM/HH:MM:SS lit donc l'un ou l'autre selon ce qui est réellement édité.
@@ -708,6 +716,7 @@ const groups = computed(() => {
             windowS: windowS.value || undefined,
             carbsPerHour: carbsPerHour.value, intervalMin: intervalMin.value,
             stopwatchId: stopwatchId.value, stopwatchLabel: stopwatchLabel.value,
+            timerMinutes: timerMinutes.value, timerSeconds: timerSeconds.value, timerSound: timerSound.value,
             upcoming: workoutTarget.value === 'next',
             color: color.value, textColor: textColor.value,
           }),
@@ -889,7 +898,41 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               >
             </label>
 
-            <template v-if="group.kind === 'stopwatch'">
+            <template v-if="group.kind === 'timer'">
+              <label class="cbpk-param small">
+                {{ t('companion.settings.timer_minutes') }}
+                <input
+                  v-model.number="timerMinutes"
+                  type="number"
+                  min="0"
+                  max="1439"
+                  step="1"
+                  class="form-control form-control-sm"
+                >
+              </label>
+              <label class="cbpk-param small">
+                {{ t('companion.settings.timer_seconds') }}
+                <input
+                  v-model.number="timerSeconds"
+                  type="number"
+                  min="0"
+                  max="59"
+                  step="5"
+                  class="form-control form-control-sm"
+                >
+              </label>
+              <label class="cbpk-param small">
+                {{ t('companion.settings.timer_sound') }}
+                <select v-model="timerSound" class="form-select form-select-sm">
+                  <option value="">{{ t('companion.settings.timer_sound_none') }}</option>
+                  <option v-for="s in catalog.bell_sounds" :key="s" :value="s">
+                    {{ t(`companion.settings.bell_sounds.${s}`) }}
+                  </option>
+                </select>
+              </label>
+            </template>
+
+            <template v-if="group.kind === 'stopwatch' || group.kind === 'timer'">
               <label class="cbpk-param small">
                 {{ t('companion.settings.stopwatch_label') }}
                 <input
@@ -1043,8 +1086,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
             {{ t('companion.settings.fueling_hint') }}
           </p>
 
-          <p v-if="group.kind === 'stopwatch'" class="text-body-secondary small mb-2">
-            {{ t('companion.settings.stopwatch_hint') }}
+          <p v-if="group.kind === 'stopwatch' || group.kind === 'timer'" class="text-body-secondary small mb-2">
+            {{ t(group.kind === 'timer' ? 'companion.settings.timer_hint' : 'companion.settings.stopwatch_hint') }}
           </p>
 
           <p v-if="group.kind === 'battery'" class="text-body-secondary small mb-2">

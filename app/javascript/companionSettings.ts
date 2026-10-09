@@ -147,6 +147,9 @@ export interface Block {
   // le même chrono côté appli (`StopwatchRegistry`). Absent vaut `'default'`.
   // Son titre est `label`, déjà déclaré plus haut pour `metric`.
   id?: string
+  // Durée d'un bloc `timer`, en secondes (son `sound` est celui de `bell`,
+  // absent = silencieux).
+  duration_s?: number
 }
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
@@ -789,6 +792,7 @@ export function blockFor(
     windowKm?: number; windowS?: number; sound?: string
     carbsPerHour?: number; intervalMin?: number
     stopwatchId?: string; stopwatchLabel?: string
+    timerMinutes?: number; timerSeconds?: number; timerSound?: string
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
     gaugeThresholds?: number[]; gaugeThresholdColors?: string[]
@@ -897,6 +901,13 @@ export function blockFor(
   }
   // L'identité est toujours écrite (repli `'default'`, comme `series`) ; le
   // titre seulement s'il est renseigné — vide, la carte n'en porte pas.
+  if (choice.kind === 'timer') {
+    block.id = params.stopwatchId?.trim() || 'default'
+    if (params.stopwatchLabel?.trim()) block.label = params.stopwatchLabel.trim()
+    const total = Math.round((params.timerMinutes || 0) * 60 + (params.timerSeconds || 0))
+    block.duration_s = Math.min(Math.max(total, 1), 86400)
+    if (params.timerSound) block.sound = params.timerSound
+  }
   if (choice.kind === 'stopwatch') {
     block.id = params.stopwatchId?.trim() || 'default'
     if (params.stopwatchLabel?.trim()) block.label = params.stopwatchLabel.trim()
@@ -1671,6 +1682,7 @@ export interface BlockShape {
   lapSummaryCards: boolean
   markLapCompact: boolean
   stopwatchCompact: boolean
+  timerCompact: boolean
   recordingCompact: boolean
   changeRouteCompact: boolean
   clearRouteCompact: boolean
@@ -1713,6 +1725,7 @@ export function blockShape(block: Block): BlockShape {
     lapSummaryCards: block.kind === 'lap_summary' && block.mode !== 'list',
     markLapCompact: block.kind === 'mark_lap' && block.mode === 'compact',
     stopwatchCompact: block.kind === 'stopwatch' && block.mode === 'compact',
+    timerCompact: block.kind === 'timer' && block.mode === 'compact',
     recordingCompact: block.kind === 'recording' && block.mode === 'compact',
     changeRouteCompact: block.kind === 'change_route' && block.mode === 'compact',
     clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',

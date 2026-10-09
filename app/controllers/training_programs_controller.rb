@@ -10,7 +10,7 @@ class TrainingProgramsController < ApplicationController
   # un programme n'a ni tracé ni géométrie à plafonner, et la liste reste courte.
   def index
     programs = current_user.training_programs.order(updated_at: :desc)
-    render json: { training_programs: programs.map { |p| serialize_summary(p) } }
+    render json: { training_programs: programs.map { |p| serialize_summary(p).merge(profile: serialize_profile(p)) } }
   end
 
   # GET /api/training_programs/:id
@@ -159,6 +159,25 @@ class TrainingProgramsController < ApplicationController
       duration_seconds: program.duration_seconds,
       segment_count: program.flat_blocks.size,
       updated_at: program.updated_at.iso8601,
+    }
+  end
+
+  PROFILE_CHANNELS = %w[power heart_rate cadence speed_kmh].freeze
+
+  # De quoi dessiner le profil d'un programme dans la liste : les blocs dépliés réduits à
+  # leur durée et, pour chaque mesure ciblée quelque part dans le programme, à
+  # `[cible, min, max]`, et à leur couleur. Les mesures jamais ciblées sont omises ; `nil` s'il n'y en a
+  # aucune (rien à dessiner).
+  def serialize_profile(program)
+    blocks = program.flat_blocks
+    channels = PROFILE_CHANNELS.select { |c| blocks.any? { |b| !b["target_#{c}"].nil? } }
+    return nil if channels.empty?
+
+    {
+      channels: channels,
+      steps: blocks.map do |b|
+        { duration_seconds: b["duration_seconds"], color: b["color"] }.merge(channels.to_h { |c| [c, [b["target_#{c}"], b["min_#{c}"], b["max_#{c}"]]] })
+      end,
     }
   end
 

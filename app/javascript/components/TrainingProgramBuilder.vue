@@ -7,6 +7,7 @@ import * as editing from '../stores/trainingProgramEditing'
 import { formatTime } from '../trainingProgramTime'
 import { csrfToken } from '../csrf'
 import TrainingProgramItemList from './TrainingProgramItemList.vue'
+import TrainingProgramProfileChart from './TrainingProgramProfileChart.vue'
 
 const props = defineProps({
   trainingProgramId: { type: [String, Number], default: null },
@@ -20,7 +21,7 @@ const saved = ref(false)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const items = trainingProgramStore.items
-const { issues, targetIssues, durationSeconds, selected, repeatCount } = editing
+const { issues, targetIssues, durationSeconds, selected, repeatCount, profile } = editing
 
 function slotLabel(ref: SoundSlotRef): string {
   return t(`training_programs.sound_slot_${ref.edge}`, { at: formatTime(editing.slotStart(ref)) })
@@ -218,9 +219,13 @@ onMounted(() => {
       </select>
     </div>
 
-    <p class="text-body-secondary small mb-4">
+    <p class="text-body-secondary small" :class="profile ? 'mb-2' : 'mb-4'">
       {{ t('training_programs.duration', { duration: formatTime(durationSeconds) }) }}
     </p>
+
+    <div v-if="profile" class="mb-4">
+      <TrainingProgramProfileChart :profile="profile" :sport="trainingProgramStore.sport.value" wide />
+    </div>
 
     <div v-if="selected.size > 0" class="d-flex align-items-center gap-2 mb-3 flex-wrap">
       <div class="d-flex align-items-center gap-1">

@@ -1598,7 +1598,7 @@ en:
     open: "Open"
     open_in_app: "Open in the app"
     error_name_required: "Name is required"
-    segment_count: "%{count} segments"
+    segment_count: "%{count} blocks"
     confirm_delete: "Delete this program?"
     rename: "Rename"
     copy_suffix: "(copy)"

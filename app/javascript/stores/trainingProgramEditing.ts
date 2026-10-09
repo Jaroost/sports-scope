@@ -66,6 +66,30 @@ export function slotHasIssue(block: Block, edge: 'start' | 'end'): boolean {
   return issues.value.some((issue) => issueSlots(issue).some((r) => r.edge === edge && toRaw(flat.value[r.block]) === raw))
 }
 
+// Le profil du programme en cours d'édition, au même format que `profile` dans la liste
+// (cf. TrainingProgramsController#serialize_profile) pour alimenter le même graphique :
+// les blocs dépliés réduits à leur durée et, par mesure ciblée quelque part,
+// `[cible, min, max]`. `null` tant qu'aucune cible n'est posée.
+const PROFILE_CHANNELS = [
+  ['power', 'power'],
+  ['heart_rate', 'heartRate'],
+  ['cadence', 'cadence'],
+  ['speed_kmh', 'speedKmh'],
+] as const
+
+export const profile = computed(() => {
+  const channels = PROFILE_CHANNELS.filter(([, key]) => flat.value.some((b) => b[key].target != null))
+  if (channels.length === 0) return null
+  return {
+    channels: channels.map(([name]) => name as string),
+    steps: flat.value.map((b) => ({
+      duration_seconds: b.durationSeconds,
+      color: b.color,
+      ...Object.fromEntries(channels.map(([name, key]) => [name, [b[key].target, b[key].min, b[key].max]])),
+    })),
+  }
+})
+
 // Cibles incohérentes : une borne (min/max) n'a de sens qu'avec une cible, et la cible
 // doit tomber entre les deux. Miroir de TrainingProgram#validate_target_bounds — le
 // serveur refuse l'enregistrement sinon, avec un message qui ne dit pas quel bloc.

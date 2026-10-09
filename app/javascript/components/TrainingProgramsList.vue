@@ -4,11 +4,14 @@ import { t } from '../i18n'
 import { csrfToken } from '../csrf'
 import { formatDuration } from '../routeHelpers'
 import CompanionStartWorkoutAction from './CompanionStartWorkoutAction.vue'
+import TrainingProgramProfileChart from './TrainingProgramProfileChart.vue'
 
 interface TrainingProgramSummary {
   id: number
   name: string
+  sport: string
   share_token: string
+  profile: { channels: string[]; steps: any[] } | null
   duration_seconds: number
   segment_count: number
   updated_at: string
@@ -117,6 +120,7 @@ onMounted(fetchPrograms)
             {{ formatDuration(program.duration_seconds) }} · {{ t('training_programs.segment_count', { count: program.segment_count }) }}
           </small>
         </a>
+        <TrainingProgramProfileChart v-if="program.profile" :profile="program.profile" :sport="program.sport" />
         <div class="d-flex gap-1">
           <CompanionStartWorkoutAction :share-token="program.share_token" />
           <button type="button" class="btn btn-sm btn-link p-1" :title="t('training_programs.rename')" @click="renameProgram(program)">

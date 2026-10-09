@@ -1598,7 +1598,7 @@ fr:
     open: "Ouvrir"
     open_in_app: "Ouvrir dans l'application"
     error_name_required: "Le nom est requis"
-    segment_count: "%{count} tronçons"
+    segment_count: "%{count} blocs"
     confirm_delete: "Supprimer ce programme ?"
     rename: "Renommer"
     copy_suffix: "(copie)"

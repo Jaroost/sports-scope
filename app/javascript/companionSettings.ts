@@ -143,6 +143,10 @@ export interface Block {
   // par `sanitize_block` côté Rails (`FUELING_*_RANGE`).
   carbs_g_per_h?: number
   interval_min?: number
+  // L'identité d'un bloc `stopwatch` : deux composants de même `id` montrent
+  // le même chrono côté appli (`StopwatchRegistry`). Absent vaut `'default'`.
+  // Son titre est `label`, déjà déclaré plus haut pour `metric`.
+  id?: string
 }
 
 // ── La disposition d'un bloc `metric` ───────────────────────────────────────
@@ -784,6 +788,7 @@ export function blockFor(
     metric?: string; source?: string; sensor?: string; series?: string; format?: string; min?: number; max?: number
     windowKm?: number; windowS?: number; sound?: string
     carbsPerHour?: number; intervalMin?: number
+    stopwatchId?: string; stopwatchLabel?: string
     layout?: MetricLayout; icon?: string; label?: string; gaugeKind?: string
     gaugeFill?: string; gaugeSegments?: number; gaugeColorMode?: string; gaugeColor?: string
     gaugeThresholds?: number[]; gaugeThresholdColors?: string[]
@@ -889,6 +894,12 @@ export function blockFor(
   if (choice.kind === 'fueling') {
     block.carbs_g_per_h = params.carbsPerHour ?? FUELING_DEFAULTS.carbs_g_per_h
     block.interval_min = params.intervalMin ?? FUELING_DEFAULTS.interval_min
+  }
+  // L'identité est toujours écrite (repli `'default'`, comme `series`) ; le
+  // titre seulement s'il est renseigné — vide, la carte n'en porte pas.
+  if (choice.kind === 'stopwatch') {
+    block.id = params.stopwatchId?.trim() || 'default'
+    if (params.stopwatchLabel?.trim()) block.label = params.stopwatchLabel.trim()
   }
   // Absent (`undefined`) vaut « tronçon en cours » — même raisonnement que
   // `window_km`/`window_s` : jamais écrit pour rester silencieux tant que ce
@@ -1659,6 +1670,7 @@ export interface BlockShape {
   averagesCards: boolean
   lapSummaryCards: boolean
   markLapCompact: boolean
+  stopwatchCompact: boolean
   recordingCompact: boolean
   changeRouteCompact: boolean
   clearRouteCompact: boolean
@@ -1700,6 +1712,7 @@ export function blockShape(block: Block): BlockShape {
     // en carte ou en liste — une forme neuve, pas une variante de `averages`.
     lapSummaryCards: block.kind === 'lap_summary' && block.mode !== 'list',
     markLapCompact: block.kind === 'mark_lap' && block.mode === 'compact',
+    stopwatchCompact: block.kind === 'stopwatch' && block.mode === 'compact',
     recordingCompact: block.kind === 'recording' && block.mode === 'compact',
     changeRouteCompact: block.kind === 'change_route' && block.mode === 'compact',
     clearRouteCompact: block.kind === 'clear_route' && block.mode === 'compact',

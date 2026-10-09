@@ -1020,6 +1020,8 @@ function labelFor(block: Block): string {
   // composants d'une page — et c'est justement la série qui décide où le tour
   // marqué atterrit.
   if (block.kind === 'mark_lap') parts.push(block.series || 'default')
+  // Comme la série : un texte libre qui distingue deux chronos d'une page.
+  if (block.kind === 'stopwatch') parts.push(block.label?.trim() || block.id || 'default')
   if (block.mode) parts.push(t(`companion.settings.modes.${block.mode}`))
   return parts.join(' · ')
 }

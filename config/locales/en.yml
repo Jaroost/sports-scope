@@ -1952,6 +1952,10 @@ en:
       lap_delta_hint: "Compares the last two laps of the manual series, so you need a 'Mark lap' button somewhere on the dashboard to open laps."
       fueling_carbs: "Carbs (g/h)"
       fueling_interval: "Interval (min)"
+      stopwatch_label: "Title"
+      stopwatch_label_placeholder: "Optional"
+      stopwatch_id: "Stopwatch identity"
+      stopwatch_hint: "Two components with the same identity show the same stopwatch; different identities run independently. The stopwatch keeps running when you change page, and starts from zero on each new ride."
       fueling_hint: "The countdown tracks elapsed ride time and restarts on its own at each interval — nothing to tap. 'Advised' is the cumulative target since the start, scaled to moving time."
       # One sentence per block kind, shown under its group header in the picker:
       # what it shows, and where its data comes from.
@@ -1983,6 +1987,7 @@ en:
         weather: "Weather and precipitation for the GPS position — from the animated map to the trend chart. Comes from GPS, not the page: usable even without a map."
         wind: "Wind projected onto your heading: its head or tail component, and its direction relative to travel."
         resupply: "Upcoming water and food stops on the route, with their distance along the course (not as the crow flies)."
+        stopwatch: "A stopwatch: one start / stop button and a reset button."
         fueling: "A timer that reminds you to eat, with a carbs-per-hour target and a running advised total."
         training_budget: "'Do I keep going or head home?' — today's remaining load, the fatigue ceiling, freshness, injury risk."
         workout_segment: "The name of the current training segment (or the next one)."
@@ -2184,6 +2189,7 @@ en:
         weather_compact: "Weather (compact)"
         wind: "Wind"
         lap_delta: "Lap vs previous"
+        stopwatch: "Stopwatch"
         fueling: "Fueling"
         resupply: "Resupply on route"
         training_budget: "Training budget"

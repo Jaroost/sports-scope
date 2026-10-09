@@ -959,6 +959,18 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
       </template>
     </div>
 
+    <!-- Chronomètre ----------------------------------------------------------
+         Le temps (inventé : le chrono ne court pas dans l'éditeur), puis le
+         bouton démarrer/arrêter et la remise à zéro. -->
+    <div v-else-if="block.kind === 'stopwatch'" class="cbp-card cbp-center" :style="overrideStyle">
+      <div v-if="block.label && !shape.stopwatchCompact" class="cbp-title">{{ block.label }}</div>
+      <div class="cbp-stopwatch-time" :class="{ 'cbp-stopwatch-compact': shape.stopwatchCompact }">02:34</div>
+      <div class="cbp-stopwatch-buttons">
+        <span class="cbp-action-compact"><i class="fa-solid fa-play" aria-hidden="true"></i></span>
+        <span class="cbp-action-compact"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i></span>
+      </div>
+    </div>
+
     <!-- Marquer un tour -----------------------------------------------------
          Clôt le tour courant d'une série et en ouvre un nouveau : un geste
          sec, pas une bascule comme l'enregistrement. -->
@@ -2282,6 +2294,20 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
   border: 1px solid rgba(255, 255, 255, 0.24);
   background: #1f2226;
   color: #fff;
+}
+.cbp-stopwatch-time {
+  font-size: 2.4em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.cbp-stopwatch-compact {
+  font-size: 1.6em;
+}
+.cbp-stopwatch-buttons {
+  display: flex;
+  gap: 0.6em;
+  margin-top: 0.4em;
 }
 .cbp-rec-dot {
   width: 0.9em;

@@ -171,6 +171,12 @@ module CompanionSettings
     # `sanitize_block`), pas par le compte : c'est cosmétique et propre au
     # profil, contrairement à l'objectif d'entraînement de `training_budget`.
     "fueling" => [],
+    # Un chronomètre : un bouton démarrer/arrêter (le même, qui bascule) et un
+    # bouton de remise à zéro. Ne lit aucun capteur ; son état vit côté appli
+    # (`StopwatchRegistry`), indexé par `id` — deux composants de même `id`
+    # montrent le même chrono. `label` (titre) et `id` sont portés par le bloc,
+    # voir `sanitize_block`. Deux modes : `full` (grand chiffre) / `compact`.
+    "stopwatch" => %w[full compact],
     # Le budget de charge : ce qu'il reste à faire aujourd'hui, jusqu'où on peut aller
     # sans se cramer, la fatigue et le risque de blessure. `day` répond à « je continue
     # ou je rentre ? », `week` situe la sortie dans la semaine.
@@ -724,6 +730,11 @@ module CompanionSettings
   FUELING_INTERVAL_MIN_RANGE = 5..60
   DEFAULT_FUELING_CARBS_G_PER_H = 60
   DEFAULT_FUELING_INTERVAL_MIN = 20
+
+  # Le titre d'un bloc `stopwatch` : borné comme le label libre d'une mesure
+  # (court, sinon l'appli le tronque de toute façon), `id` retombe sur
+  # `default` comme `series` — mêmes valeurs que `StopwatchBlock` côté Dart.
+  MAX_STOPWATCH_LABEL_LENGTH = 24
 
   # Douze rappels par profil au plus — même borne, et même raison, que
   # `ReminderSpec.maxCount` côté Dart : au-delà, un tableau de bord composé ici
@@ -1485,6 +1496,10 @@ module CompanionSettings
       # réglage — même raisonnement que `window_km`. `true` bascule sur le
       # tronçon qui suivra, pour l'annoncer en aperçu avant qu'il ne commence.
       block["upcoming"] = true if raw["upcoming"] == true
+    when "stopwatch"
+      block["id"] = sanitize_series(raw["id"])
+      label = raw["label"].to_s.strip[0, MAX_STOPWATCH_LABEL_LENGTH]
+      block["label"] = label if label.present?
     when "fueling"
       carbs = raw["carbs_g_per_h"]
       block["carbs_g_per_h"] =

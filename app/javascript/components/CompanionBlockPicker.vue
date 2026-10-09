@@ -88,6 +88,10 @@ const source = ref(props.block?.source || props.catalog.zone_sources[0])
 const sensor = ref<string>(props.block?.sensor || '')
 const sound = ref(props.block?.sound || props.catalog.bell_sounds[0])
 const series = ref(props.block?.series || 'default')
+// Un bloc `stopwatch` : son identité (deux composants de même `id` partagent
+// un chrono) et son titre, vide par défaut — pas de titre.
+const stopwatchId = ref(props.block?.id || 'default')
+const stopwatchLabel = ref(props.block?.kind === 'stopwatch' ? (props.block?.label || '') : '')
 // L'horloge n'a pas de `Block.format` (elle garde `mode`, comme avant que les
 // deux genres partagent cet éditeur — voir `blockFor`) : ce même bouton
 // HH:MM/HH:MM:SS lit donc l'un ou l'autre selon ce qui est réellement édité.
@@ -703,6 +707,7 @@ const groups = computed(() => {
             min: min.value, max: max.value, windowKm: windowKm.value || undefined,
             windowS: windowS.value || undefined,
             carbsPerHour: carbsPerHour.value, intervalMin: intervalMin.value,
+            stopwatchId: stopwatchId.value, stopwatchLabel: stopwatchLabel.value,
             upcoming: workoutTarget.value === 'next',
             color: color.value, textColor: textColor.value,
           }),
@@ -884,6 +889,23 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               >
             </label>
 
+            <template v-if="group.kind === 'stopwatch'">
+              <label class="cbpk-param small">
+                {{ t('companion.settings.stopwatch_label') }}
+                <input
+                  v-model="stopwatchLabel"
+                  type="text"
+                  maxlength="24"
+                  :placeholder="t('companion.settings.stopwatch_label_placeholder')"
+                  class="form-control form-control-sm"
+                >
+              </label>
+              <label class="cbpk-param small">
+                {{ t('companion.settings.stopwatch_id') }}
+                <input v-model="stopwatchId" type="text" class="form-control form-control-sm">
+              </label>
+            </template>
+
             <label v-if="group.kind === 'altitude_profile'" class="cbpk-param small">
               {{ t('companion.settings.altitude_window_km') }}
               <input
@@ -1019,6 +1041,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
           <p v-if="group.kind === 'fueling'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.fueling_hint') }}
+          </p>
+
+          <p v-if="group.kind === 'stopwatch'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.stopwatch_hint') }}
           </p>
 
           <p v-if="group.kind === 'battery'" class="text-body-secondary small mb-2">

@@ -1952,6 +1952,10 @@ fr:
       lap_delta_hint: "Compare les deux derniers tours de la série manuelle : il faut donc un bouton « Marquer un tour » quelque part sur le tableau de bord pour ouvrir des tours."
       fueling_carbs: "Glucides (g/h)"
       fueling_interval: "Intervalle (min)"
+      stopwatch_label: "Titre"
+      stopwatch_label_placeholder: "Optionnel"
+      stopwatch_id: "Identité du chrono"
+      stopwatch_hint: "Deux composants de même identité montrent le même chrono ; deux identités différentes courent indépendamment. Le chrono continue de tourner quand on change de page, et repart de zéro à chaque nouvelle sortie."
       fueling_hint: "Le compte à rebours se cale sur le temps écoulé depuis le départ et repart tout seul à chaque échéance — aucun geste à faire. « Conseillé » est la cible cumulée depuis le début, rapportée au temps en roulant."
       # Une phrase par genre de composant, affichée sous l'en-tête de son groupe
       # dans la dialogue de choix : ce qu'il montre, et d'où vient sa donnée.
@@ -1983,6 +1987,7 @@ fr:
         weather: "Météo et précipitations pour la position GPS — de la carte animée au graphique de tendance. Vient du GPS, pas de la page : posable même sans carte."
         wind: "Le vent projeté sur le cap : sa composante de face ou de dos, et sa direction relative au déplacement."
         resupply: "Les points d'eau et de ravitaillement à venir sur le tracé, avec leur distance le long du parcours (pas à vol d'oiseau)."
+        stopwatch: "Un chronomètre : un bouton démarrer / arrêter et un bouton de remise à zéro."
         fueling: "Un minuteur qui rappelle de manger, avec la cible de glucides par heure et le total conseillé."
         training_budget: "« Je continue ou je rentre ? » — la charge restante du jour, le plafond de fatigue, la fraîcheur, le risque."
         workout_segment: "Le nom du tronçon d'entraînement en cours (ou celui qui suit)."
@@ -2184,6 +2189,7 @@ fr:
         weather_compact: "Météo (compact)"
         wind: "Vent"
         lap_delta: "Tour vs précédent"
+        stopwatch: "Chronomètre"
         fueling: "Ravitaillement"
         resupply: "Ravitos sur le tracé"
         training_budget: "Budget de charge"

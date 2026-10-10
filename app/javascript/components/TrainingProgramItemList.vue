@@ -14,10 +14,22 @@ const props = defineProps<{
   items: Item[]
   owner: Group | null
   leading: boolean
+  // Nombre de tours de chaque groupe englobant (vide à la racine), du plus extérieur au plus
+  // intérieur : donne le niveau des variables de répétition et l'aperçu du tour 1.
+  rounds?: number[]
 }>()
 
 // Le nombre de fois que cette liste est jouée : ajouter un bloc ici pèse autant dans le
 // plafond du programme déplié.
+// `{nK}` : K = niveau de ce groupe (1 = le plus extérieur), soit le nombre de groupes qui
+// l'englobent + 1.
+const tokenOf = (max = false) => `{n${(props.rounds?.length ?? 0) + 1}${max ? '-max' : ''}}`
+
+function onTokenDragStart(event: DragEvent, max = false) {
+  event.dataTransfer?.setData('text/plain', tokenOf(max))
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
+}
+
 const multiplier = computed(() => editing.multiplierOf(props.owner))
 
 let nextKey = 0
@@ -47,7 +59,7 @@ function onRepeatChange(group: Group, event: Event) {
 
       <TrainingProgramBlockCard
         v-if="!isGroup(item)"
-        :block="item" :first="leading && index === 0"
+        :block="item" :first="leading && index === 0" :rounds="rounds ?? []"
         selectable :selected="editing.isSelected(item)"
         :can-move-up="index > 0" :can-move-down="index < items.length - 1"
         :can-duplicate="editing.canDuplicate(item, multiplier)"
@@ -78,6 +90,11 @@ function onRepeatChange(group: Group, event: Event) {
                    :max="editing.maxRepeatFor(item, multiplier)"
                    :value="item.repeat" @change="onRepeatChange(item, $event)">
           </div>
+          <!-- La variable de ce groupe : son numéro de tour. À glisser sur le nom ou la
+               description d'un bloc (ou clic = au curseur). Niveau 1 = groupe le plus extérieur. -->
+          <button v-for="max in [false, true]" :key="String(max)" type="button" class="btn btn-sm btn-outline-warning tp-token" draggable="true"
+                  :title="t(max ? 'training_programs.repeat_token_total' : 'training_programs.repeat_token_round', { token: tokenOf(max) })"
+                  @mousedown.prevent @dragstart="onTokenDragStart($event, max)" @click="editing.insertIntoLastField(tokenOf(max))">{{ tokenOf(max) }}</button>
           <span class="small text-body-secondary">
             {{ t('training_programs.group_summary', { cycle: formatHuman(editing.cycleSeconds(item)), total: formatHuman(editing.cycleSeconds(item) * item.repeat) }) }}
           </span>
@@ -112,7 +129,7 @@ function onRepeatChange(group: Group, event: Event) {
 
         <div class="tp-group-body">
           <TrainingProgramItemList :items="item.items" :owner="item"
-                                   :leading="leading && index === 0" />
+                                   :leading="leading && index === 0" :rounds="[...(rounds ?? []), item.repeat]" />
           <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!editing.canAdd(1, multiplier * item.repeat)"
                   @click="editing.addBlock(item, multiplier * item.repeat)">
             <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('training_programs.add_block_to_group') }}
@@ -124,6 +141,10 @@ function onRepeatChange(group: Group, event: Event) {
 </template>
 
 <style scoped>
+.tp-token {
+  font-family: var(--bs-font-monospace);
+  cursor: grab;
+}
 .tp-drop-target {
   outline: 2px dashed var(--bs-warning);
   outline-offset: 2px;

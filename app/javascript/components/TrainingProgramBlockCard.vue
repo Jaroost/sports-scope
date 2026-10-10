@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
-import { trainingProgramStore, MAX_DESCRIPTION_LEN, SOUND_SECONDS, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, TARGET_CEILINGS } from '../stores/trainingProgramStore'
+import { trainingProgramStore, MAX_DESCRIPTION_LEN, SOUND_SECONDS, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, TARGET_CEILINGS, fillCounters } from '../stores/trainingProgramStore'
 import type { Block, Sound, TargetRange } from '../stores/trainingProgramStore'
 import { formatTime, parseTime } from '../trainingProgramTime'
+import * as editing from '../stores/trainingProgramEditing'
 import CompanionColorPicker from './CompanionColorPicker.vue'
 
 // Un bloc du programme : durée, nom, icône, couleurs, sons de début/fin et cibles.
@@ -16,6 +17,8 @@ const props = defineProps<{
   // Le tout premier bloc du programme : rien avant lui, donc pas de moment pour son son de début.
   first: boolean
   selectable?: boolean
+  // Nombre de tours de chaque groupe englobant : l'aperçu montre le tour 1 de chacun.
+  rounds?: number[]
   selected?: boolean
   canMoveUp: boolean
   canMoveDown: boolean
@@ -111,6 +114,19 @@ function onSpeedFieldChange(range: TargetRange, field: 'target' | 'min' | 'max',
   }
 }
 
+// Le nom tel que le téléphone l'écrira au premier tour.
+// Le champ texte (nom ou description) où écrit un clic sur une variable de répétition,
+// proposée dans l'en-tête de chaque groupe (TrainingProgramItemList).
+function onFieldFocus(event: FocusEvent) {
+  editing.rememberTextField(event.target as HTMLInputElement | HTMLTextAreaElement)
+}
+
+const roundOnes = () => (props.rounds ?? []).map((max): [number, number] => [1, max])
+// La description telle que l'appli la dira au premier tour : lue par l'aperçu vocal, et
+// base de l'estimation de durée.
+const previewDescription = computed(() => fillCounters(props.block.description.trim(), roundOnes()))
+const previewName = computed(() => fillCounters(props.block.segmentName.trim(), roundOnes()))
+
 function iconClass(icon: string): string {
   return MILESTONE_ICONS.find((i) => i.key === icon)?.icon ?? ''
 }
@@ -138,7 +154,7 @@ function playSound(sound: Sound | null) {
 // rognent encore la place sans qu'on le voie d'ici.
 const SPEECH_CHARS_PER_SECOND = 15
 
-const speechSeconds = computed(() => Math.ceil(props.block.description.trim().length / SPEECH_CHARS_PER_SECOND))
+const speechSeconds = computed(() => Math.ceil(previewDescription.value.length / SPEECH_CHARS_PER_SECOND))
 
 const speechRoom = computed(() => {
   const b = props.block
@@ -162,7 +178,7 @@ function speakDescription() {
     synth.cancel()
     return
   }
-  const text = props.block.description.trim()
+  const text = previewDescription.value
   if (!text) return
   synth.cancel()
   const utterance = new SpeechSynthesisUtterance(text)
@@ -188,7 +204,7 @@ onBeforeUnmount(() => {
       <div class="tp-phone-preview tp-phone-preview-mobile d-md-none" :title="t('training_programs.phone_preview')"
            :style="{ backgroundColor: block.color || '#6c757d', color: block.textColor || '#ffffff' }">
         <i v-if="block.icon" class="fa-solid" :class="iconClass(block.icon)" aria-hidden="true"></i>
-        <span class="tp-phone-preview-text">{{ block.segmentName.trim() }}</span>
+        <span class="tp-phone-preview-text">{{ previewName }}</span>
       </div>
 
       <div class="d-flex align-items-center gap-2 w-100">
@@ -206,7 +222,7 @@ onBeforeUnmount(() => {
         <div class="tp-phone-preview d-none d-md-inline-flex" :title="t('training_programs.phone_preview')"
              :style="{ backgroundColor: block.color || '#6c757d', color: block.textColor || '#ffffff' }">
           <i v-if="block.icon" class="fa-solid" :class="iconClass(block.icon)" aria-hidden="true"></i>
-          <span class="tp-phone-preview-text">{{ block.segmentName.trim() }}</span>
+          <span class="tp-phone-preview-text">{{ previewName }}</span>
         </div>
         <div class="d-flex gap-1 ms-auto">
           <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!canMoveUp"
@@ -241,6 +257,7 @@ onBeforeUnmount(() => {
         </span>
         <div class="flex-grow-1" style="min-width: 10rem">
           <input v-model="block.segmentName" type="text" class="form-control form-control-sm"
+               @focus="onFieldFocus" @drop.stop
                  :placeholder="t('training_programs.segment_name_placeholder')" maxlength="60">
         </div>
         <div class="d-flex align-items-center gap-1">
@@ -257,8 +274,10 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="d-flex align-items-start gap-2 w-100">
-        <i class="fa-solid fa-comment-dots text-body-secondary tp-line-icon" :title="t('training_programs.description_label')" aria-hidden="true"></i>
+        <i class="fa-solid fa-comment-dots text-body-secondary tp-line-icon" :title="t('training_programs.description_label') + ' — ' + t('training_programs.repeat_vars_hint')" aria-hidden="true"></i>
         <textarea v-model="block.description" class="form-control form-control-sm" rows="1"
+                  @focus="onFieldFocus" @drop.stop
+                  :title="t('training_programs.repeat_vars_hint')"
                   :maxlength="MAX_DESCRIPTION_LEN" :placeholder="t('training_programs.description_placeholder')"
                   :aria-label="t('training_programs.description_label')"></textarea>
         <button v-if="speechSupported" type="button" class="btn btn-sm btn-link p-1"

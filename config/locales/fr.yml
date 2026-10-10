@@ -1528,6 +1528,9 @@ fr:
     cyclosm_ncn: "National"
     cyclosm_icn: "International (EuroVelo)"
   training_programs:
+    repeat_token_round: "%{token} : numéro du tour en cours de ce groupe. Glisser sur le nom ou la description d'un bloc (ou cliquer pour l'insérer au curseur). Utilisable comme opérande avec * : {n1*n2}, {n1-max*n2-max}."
+    repeat_token_total: "%{token} : nombre total de tours de ce groupe. Glisser sur le nom ou la description d'un bloc (ou cliquer pour l'insérer au curseur). Utilisable comme opérande avec * : {n1*n2}, {n1-max*n2-max}."
+    repeat_vars_hint: "Dans un groupe répété, {n} devient le numéro du tour en cours. Avec des groupes imbriqués : {n1} pour le groupe le plus extérieur, {n2} pour le suivant, etc. Ajoute -max pour le nombre total de tours : {n}/{n-max}. Les produits sont possibles : {n1*n2}, {n1-max*n2-max}."
     phone_preview: "Aperçu sur le téléphone"
     human_second_one: "seconde"
     human_second_other: "secondes"

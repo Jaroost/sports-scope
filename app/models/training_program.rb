@@ -71,10 +71,49 @@ class TrainingProgram < ApplicationRecord
   # éventuellement imbriqué) est remplacé par ses éléments, répétés. C'est la forme
   # que lit l'appli compagnon (`blocks`) et sur laquelle portent les durées et les
   # contrôles de sons.
-  def self.flatten_items(items)
+  def self.flatten_items(items, counters = [])
     Array(items).flat_map do |item|
-      next [item] unless group?(item)
-      flatten_items(item["items"]) * item["repeat"].to_i
+      next [fill_counters(item, counters)] unless group?(item)
+      repeat = item["repeat"].to_i
+      Array.new(repeat) { |i| flatten_items(item["items"], counters + [[i + 1, repeat]]) }.flatten(1)
+    end
+  end
+
+  # Variables de répétition : dans le nom et la description d'un bloc, `{n}` devient le
+  # numéro (à partir de 1) du tour en cours du groupe qui le contient directement, et
+  # `{n1}`, `{n2}`, `{n3}` celui du groupe de niveau 1 (le plus extérieur), 2, 3… —
+  # un niveau d'imbrication, une variable. Suffixées de `-max` (`{n-max}`, `{n1-max}`…),
+  # elles donnent le nombre total de tours du groupe : « tour {n}/{n-max} ». Hors de tout groupe, ou pour un niveau qui
+  # n'existe pas, le texte reste tel quel. Le remplacement se fait ici, au dépliage :
+  # l'appli compagnon reçoit des textes déjà complets et n'a rien à connaître.
+  # Des produits aussi : `{n1*n2}` (le tour en cours sur l'ensemble des deux groupes,
+  # numéroté à partir de 1), `{n1-max*n2-max}` (le nombre total de blocs joués, tous
+  # tours confondus). Un seul opérande manquant et l'expression reste telle quelle.
+  COUNTER_OPERAND = /n([1-9])?(-max)?/
+  COUNTER_TEMPLATE = /\{(#{COUNTER_OPERAND}(?:\s*\*\s*#{COUNTER_OPERAND})*)\}/
+  COUNTER_FIELDS = %w[segment_name description].freeze
+
+  def self.fill_counters(block, counters)
+    return block if counters.empty? || !block.is_a?(Hash)
+    return block unless COUNTER_FIELDS.any? { |f| block[f].is_a?(String) && block[f].match?(COUNTER_TEMPLATE) }
+
+    block.merge(COUNTER_FIELDS.to_h do |field|
+      text = block[field]
+      next [field, text] unless text.is_a?(String)
+
+      [field, text.gsub(COUNTER_TEMPLATE) { |match| counter_product(Regexp.last_match(1), counters) || match }]
+    end)
+  end
+
+  # Le produit des opérandes d'une expression (`n1*n2-max`), ou nil si l'un d'eux vise un
+  # niveau de groupe qui n'existe pas.
+  def self.counter_product(expression, counters)
+    expression.split(/\s*\*\s*/).reduce(1) do |product, operand|
+      level, max = operand.match(/\An([1-9])?(-max)?\z/).captures
+      round = counters[level ? level.to_i - 1 : counters.size - 1]
+      return nil unless round
+
+      product * round[max ? 1 : 0]
     end
   end
 

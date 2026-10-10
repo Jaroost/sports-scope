@@ -335,3 +335,23 @@ export function isDropTarget(owner: Group | null, index: number): boolean {
 export function isDragging(owner: Group | null, index: number): boolean {
   return !!drag.value && sameOwner(drag.value.owner, owner) && drag.value.index === index
 }
+
+// ─── Variables de répétition ({n}, {n1}…) ────────────────────────────────────
+// Le dernier champ texte (nom ou description d'un bloc) où l'on a mis le curseur : c'est
+// là qu'écrit un clic sur la variable d'un groupe, faute de glisser-déposer (tablette).
+let lastTextField: HTMLInputElement | HTMLTextAreaElement | null = null
+
+export function rememberTextField(el: HTMLInputElement | HTMLTextAreaElement) {
+  lastTextField = el
+}
+
+export function insertIntoLastField(token: string) {
+  const el = lastTextField
+  if (!el || !el.isConnected) return
+  const max = el.maxLength > 0 ? el.maxLength : Infinity
+  if (el.value.length + token.length > max) return
+  const start = el.selectionStart ?? el.value.length
+  el.setRangeText(token, start, el.selectionEnd ?? start, 'end')
+  el.dispatchEvent(new Event('input', { bubbles: true })) // v-model relit le champ
+  el.focus()
+}

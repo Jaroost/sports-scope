@@ -1528,6 +1528,9 @@ en:
     cyclosm_ncn: "National"
     cyclosm_icn: "International (EuroVelo)"
   training_programs:
+    repeat_token_round: "%{token}: current round number of this group. Drag onto a block's name or description (or click to insert at the cursor). Can be used as an operand with *: {n1*n2}, {n1-max*n2-max}."
+    repeat_token_total: "%{token}: total number of rounds of this group. Drag onto a block's name or description (or click to insert at the cursor). Can be used as an operand with *: {n1*n2}, {n1-max*n2-max}."
+    repeat_vars_hint: "Inside a repeated group, {n} becomes the current round number. With nested groups: {n1} for the outermost group, {n2} for the next one, and so on. Add -max for the total number of rounds: {n}/{n-max}. Products work too: {n1*n2}, {n1-max*n2-max}."
     phone_preview: "Phone preview"
     human_second_one: "second"
     human_second_other: "seconds"

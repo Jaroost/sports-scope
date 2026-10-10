@@ -112,6 +112,30 @@ export function isGroup(item: Item): item is Group {
   return 'repeat' in item
 }
 
+// Variables de répétition d'un nom/description : `{n}` = tour du groupe le plus proche,
+// `{n1}`… = tour du groupe de niveau 1 (le plus extérieur), 2… ; suffixées de `-max`
+// (`{n-max}`, `{n1-max}`), le nombre total de tours du groupe. Miroir de
+// TrainingProgram.fill_counters (le serveur remplace au dépliage) : `rounds` porte, pour
+// chaque groupe englobant du plus extérieur au plus intérieur, `[tour, total]`. Hors
+// groupe, ou pour un niveau absent, le texte reste tel quel.
+// Produits aussi : `{n1*n2}`, `{n1-max*n2-max}` (un opérande manquant : texte inchangé).
+const COUNTER_OPERAND = 'n[1-9]?(?:-max)?'
+const COUNTER_TEMPLATE = new RegExp(`\\{(${COUNTER_OPERAND}(?:\\s*\\*\\s*${COUNTER_OPERAND})*)\\}`, 'g')
+
+export function fillCounters(text: string, rounds: [number, number][]): string {
+  if (!rounds.length) return text
+  return text.replace(COUNTER_TEMPLATE, (match, expression: string) => {
+    let product = 1
+    for (const operand of expression.split(/\s*\*\s*/)) {
+      const [, level, max] = operand.match(/^n([1-9])?(-max)?$/)!
+      const round = rounds[level ? Number(level) - 1 : rounds.length - 1]
+      if (round == null) return match
+      product *= round[max ? 1 : 0]
+    }
+    return String(product)
+  })
+}
+
 // Les blocs du programme dépliés — un groupe répété trois fois y apparaît trois fois
 // (le même objet). C'est sur cette liste que portent la durée et les contrôles de sons.
 export function flattenItems(items: Item[]): Block[] {

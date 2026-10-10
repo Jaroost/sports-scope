@@ -999,7 +999,8 @@ module CompanionSettings
         # Sans `menu`, et pas par oubli : la carte est le WebView peint au fond
         # de la pile pour toute la sortie, pas une page qu'on ouvre et qu'on
         # referme. La ranger derrière le menu ne voudrait rien dire.
-        { "kind" => "map", "key" => page_key(page, "Carte", key_seen) }
+        { "kind" => "map", "key" => page_key(page, "Carte", key_seen),
+          "hide_workout_badge" => hide_workout_badge_flag(page) }.compact
       when "grid" then sanitize_grid(page, key_seen)
       when "list" then sanitize_list(page, key_seen)
       when "laps" then sanitize_laps(page, key_seen)
@@ -1036,6 +1037,13 @@ module CompanionSettings
   # « pas de bouton », des deux côtés.
   def leave_button_flag(page)
     true if page["leave_button"] == true
+  end
+
+  # Cache la pastille d'entraînement (épinglée en haut de la sortie) tant que cette page est
+  # sous les yeux — pour une page qui n'a pas la place de la porter, ou qui dit déjà tout.
+  # Même repli que `leave_button_flag` : absent vaut « pastille visible », des deux côtés.
+  def hide_workout_badge_flag(page)
+    true if page["hide_workout_badge"] == true
   end
 
   # L'icône choisie dans l'éditeur pour repérer cette page dans le menu ⋮ du
@@ -1125,7 +1133,8 @@ module CompanionSettings
       "menu" => menu, "menu_condition" => condition,
       "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
-      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page) }.compact
+      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page),
+      "hide_workout_badge" => hide_workout_badge_flag(page) }.compact
   end
 
   # Les séparateurs qui tiennent dans la grille : une ligne (`"h"`) ou une colonne
@@ -1204,7 +1213,8 @@ module CompanionSettings
       "blocks" => blocks, "cols" => cols, "menu" => menu, "menu_condition" => condition,
       "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
-      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page) }.compact
+      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page),
+      "hide_workout_badge" => hide_workout_badge_flag(page) }.compact
   end
 
   # Les blocs d'une page `list`, ou d'une page `laps` en liste défilante
@@ -1287,7 +1297,8 @@ module CompanionSettings
       "menu" => menu, "menu_condition" => condition,
       "menu_condition_lap_name" => lap_name || nil,
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
-      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page) }.merge(layout).compact
+      "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page),
+      "hide_workout_badge" => hide_workout_badge_flag(page) }.merge(layout).compact
   end
 
   def sanitize_lap_blocks(page)

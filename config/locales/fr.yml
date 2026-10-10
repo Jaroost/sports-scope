@@ -1909,6 +1909,8 @@ fr:
       page_icon_help: "Repère cette page dans le menu ⋮ du téléphone — utile dès que plusieurs pages se ressemblent (deux grilles, par exemple). « Icône par défaut » retombe sur celle du genre de page."
       page_leave_button_label: "Bouton retour à l'accueil dans l'en-tête"
       page_leave_button_help: "Un raccourci en un tap, à côté du menu ⋮ — qui garde de toute façon toujours « Revenir à l'accueil »."
+      page_hide_workout_badge_label: "Cacher la pastille d'entraînement sur cette page"
+      page_hide_workout_badge_help: "La pastille du tronçon en cours, en haut à gauche, n'apparaît pas tant que cette page est affichée."
       page_effort: "Effort"
       page_numbers: "Chiffres"
       page_laps: "Tours"

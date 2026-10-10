@@ -464,6 +464,10 @@ export interface Page {
   // voisin), qui reste toujours là quel que soit ce réglage. Absent vaut
   // « pas de bouton », comportement d'avant ce réglage.
   leave_button?: boolean
+  // Cache la pastille d'entraînement tant que cette page est sous les yeux
+  // (`RidePageSpec.hideWorkoutBadge`, dépôt voisin). Absent vaut « pastille
+  // visible », comportement d'avant ce réglage.
+  hide_workout_badge?: boolean
 }
 
 // La case « marquer un tour » du bandeau ou de l'encoche — seule case à

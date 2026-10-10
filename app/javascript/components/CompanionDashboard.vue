@@ -676,6 +676,13 @@ function toggleLeaveButton(page: Page) {
   else page.leave_button = true
 }
 
+// La pastille d'entraînement cachée sur cette page — voir `Page.hide_workout_badge`.
+// Effacée et non mise à `false`, même règle que `leave_button`.
+function toggleHideWorkoutBadge(page: Page) {
+  if (page.hide_workout_badge) delete page.hide_workout_badge
+  else page.hide_workout_badge = true
+}
+
 // Combien de pages restent à faire défiler. Sert à dire, sous la liste, ce que le
 // cycliste trouvera au glissé et ce qu'il devra aller chercher.
 const swipeCount = computed(
@@ -1651,6 +1658,17 @@ async function save() {
                   {{ t('companion.settings.page_leave_button_label') }}
                 </label>
                 <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_leave_button_help') }}</p>
+              </div>
+
+              <!-- La pastille d'entraînement reste visible partout par défaut ; on la
+                   retire des pages qui n'ont pas la place de la porter. -->
+              <div class="mb-2 form-check">
+                <input :id="`hide-workout-badge-${index}`" type="checkbox" class="form-check-input"
+                       :checked="!!page.hide_workout_badge" @change="toggleHideWorkoutBadge(page)">
+                <label class="form-check-label small" :for="`hide-workout-badge-${index}`">
+                  {{ t('companion.settings.page_hide_workout_badge_label') }}
+                </label>
+                <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_hide_workout_badge_help') }}</p>
               </div>
 
               <!-- Seulement pour une page déjà rangée derrière le menu : la

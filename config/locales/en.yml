@@ -1909,6 +1909,8 @@ en:
       page_icon_help: "Marks this page in the phone's ⋮ menu — useful as soon as several pages look alike (two grids, for instance). \"Default icon\" falls back to the one for the page's kind."
       page_leave_button_label: "Back-to-home button in the header"
       page_leave_button_help: "A one-tap shortcut, next to the ⋮ menu — which still always keeps \"Back to home\"."
+      page_hide_workout_badge_label: "Hide the workout badge on this page"
+      page_hide_workout_badge_help: "The current-segment badge at the top left is hidden while this page is shown."
       page_effort: "Effort"
       page_numbers: "Figures"
       page_laps: "Laps"

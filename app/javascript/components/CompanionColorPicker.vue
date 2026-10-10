@@ -70,6 +70,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentMoused
       class="ccp-swatch"
       :style="{ backgroundColor: modelValue || fallback }"
       :aria-label="label"
+      :title="label"
       @click="toggle"
     />
 

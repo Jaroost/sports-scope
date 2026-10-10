@@ -18,15 +18,15 @@ interface Profile {
   steps: Step[]
 }
 
-const props = defineProps<{ profile: Profile; sport: string; wide?: boolean }>()
+const props = defineProps<{ profile: Profile | null; sport: string; wide?: boolean }>()
 
 const W = 200
 const H = 48
 const PAD = 3
 
-const chosen = ref(props.profile.channels[0])
+const chosen = ref(props.profile?.channels[0])
 // En édition les mesures ciblées changent : si celle choisie n'existe plus, on prend la première.
-const channel = computed(() => (props.profile.channels.includes(chosen.value) ? chosen.value : props.profile.channels[0]))
+const channel = computed(() => (props.profile?.channels.includes(chosen.value) ? chosen.value : props.profile?.channels[0]))
 
 const CHANNEL_UNITS: Record<string, string> = { power: 'W', heart_rate: 'bpm', cadence: 'rpm', speed_kmh: 'km/h' }
 
@@ -35,12 +35,12 @@ function channelLabel(c: string): string {
   return t(`training_programs.target_${c}`)
 }
 
-const total = computed(() => props.profile.steps.reduce((sum, s) => sum + s.duration_seconds, 0) || 1)
+const total = computed(() => (props.profile?.steps ?? []).reduce((sum, s) => sum + s.duration_seconds, 0) || 1)
 
 // [début, fin, cible, min, max] de chaque bloc, pour la mesure affichée.
 const spans = computed(() => {
   let acc = 0
-  return props.profile.steps.map((step) => {
+  return (props.profile?.steps ?? []).map((step) => {
     const start = acc
     acc += step.duration_seconds
     const [target, min, max] = (step[channel.value] as Bounds | undefined) ?? [null, null, null]
@@ -80,6 +80,7 @@ const segments = computed(() => {
 })
 
 const title = computed(() => {
+  if (!props.profile) return t('training_programs.profile_empty')
   const values = spans.value.flatMap((s) => [s.target, s.min, s.max]).filter((v): v is number => v != null)
   const unit = CHANNEL_UNITS[channel.value]
   return `${channelLabel(channel.value)} · ${Math.round(Math.min(...values) * 10) / 10}–${Math.round(Math.max(...values) * 10) / 10} ${unit}`
@@ -88,7 +89,12 @@ const title = computed(() => {
 
 <template>
   <div class="tp-profile" :class="{ 'tp-profile-wide': wide }">
-    <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" class="tp-profile-svg" role="img" :aria-label="title">
+    <!-- Sans cible nulle part : on garde la place du graphique (le formulaire ne descend
+         pas à la première cible saisie) et on explique ce qui le remplira. -->
+    <div v-if="!profile" class="tp-profile-svg tp-profile-placeholder">
+      <span>{{ t('training_programs.profile_empty') }}</span>
+    </div>
+    <svg v-else :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" class="tp-profile-svg" role="img" :aria-label="title">
       <title>{{ title }}</title>
       <path v-for="(seg, i) in segments" :key="`a${i}`" :d="seg.area" class="tp-profile-area"
             :style="seg.color ? { fill: seg.color } : {}" />
@@ -96,8 +102,8 @@ const title = computed(() => {
             :style="seg.color ? { stroke: seg.color } : {}" vector-effect="non-scaling-stroke" />
     </svg>
     <div class="d-flex justify-content-between align-items-center tp-profile-foot">
-      <span class="text-body-secondary">{{ channelLabel(channel) }}</span>
-      <span v-if="profile.channels.length > 1" class="d-flex gap-1">
+      <span class="text-body-secondary">{{ channel ? channelLabel(channel) : '\u00a0' }}</span>
+      <span v-if="profile && profile.channels.length > 1" class="d-flex gap-1">
         <button v-for="c in profile.channels" :key="c" type="button" class="tp-profile-chip"
                 :class="{ active: c === channel }" :title="channelLabel(c)" @click="chosen = c">
           {{ CHANNEL_UNITS[c] }}
@@ -121,7 +127,19 @@ const title = computed(() => {
   display: block;
   width: 100%;
   height: 3.5rem;
-  border-bottom: 1px solid var(--bs-border-color);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.375rem;
+  /* Un fond pour qu'on voie où s'arrête la zone du graphique. */
+  background: var(--bs-tertiary-bg);
+}
+.tp-profile-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 1rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--bs-secondary-color);
 }
 .tp-profile-area {
   fill: var(--bs-warning);

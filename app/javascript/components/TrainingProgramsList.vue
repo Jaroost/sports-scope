@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
-import { formatDuration } from '../routeHelpers'
+import { formatHuman } from '../trainingProgramTime'
 import CompanionStartWorkoutAction from './CompanionStartWorkoutAction.vue'
 import TrainingProgramProfileChart from './TrainingProgramProfileChart.vue'
 import { useAthleteState } from '../composables/useAthleteState'
@@ -318,7 +318,7 @@ onMounted(fetchPrograms)
           <a :href="`${localePrefix}/training_programs/${program.id}/edit`" class="flex-grow-1 text-decoration-none text-body">
             <span class="d-block fw-semibold">{{ program.name }}</span>
             <small class="text-body-secondary d-flex flex-wrap align-items-center gap-x-3 gap-y-1">
-              <span>{{ formatDuration(program.duration_seconds) }} · {{ t('training_programs.segment_count', { count: program.segment_count }) }}</span>
+              <span>{{ formatHuman(program.duration_seconds) }} · {{ t('training_programs.segment_count', { count: program.segment_count }) }}</span>
               <span v-if="loads.get(program.id)" class="d-inline-flex align-items-center gap-1" :title="t('routes.tss.hint_short')">
                 <i class="fa-solid fa-bolt" style="color: #6f42c1" aria-hidden="true"></i>
                 <span>{{ t('routes.tss.label') }} ≈ {{ loads.get(program.id)!.tss }}</span>

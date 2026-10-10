@@ -4,7 +4,7 @@ import { t } from '../i18n'
 import { isGroup } from '../stores/trainingProgramStore'
 import type { Group, Item } from '../stores/trainingProgramStore'
 import * as editing from '../stores/trainingProgramEditing'
-import { formatTime } from '../trainingProgramTime'
+import { formatHuman } from '../trainingProgramTime'
 import TrainingProgramBlockCard from './TrainingProgramBlockCard.vue'
 
 // Une liste d'éléments du programme : des blocs et des groupes de répétition. Récursive —
@@ -46,7 +46,7 @@ function onRepeatChange(group: Group, event: Event) {
 
       <TrainingProgramBlockCard
         v-if="!isGroup(item)"
-        :block="item" :start="editing.startSecondsOf(item)" :first="leading && index === 0"
+        :block="item" :first="leading && index === 0"
         selectable :selected="editing.isSelected(item)"
         :can-move-up="index > 0" :can-move-down="index < items.length - 1"
         :can-duplicate="editing.canDuplicate(item, multiplier)"
@@ -77,30 +77,30 @@ function onRepeatChange(group: Group, event: Event) {
                    :value="item.repeat" @change="onRepeatChange(item, $event)">
           </div>
           <span class="small text-body-secondary">
-            {{ t('training_programs.group_summary', { cycle: formatTime(editing.cycleSeconds(item)), total: formatTime(editing.cycleSeconds(item) * item.repeat) }) }}
+            {{ t('training_programs.group_summary', { cycle: formatHuman(editing.cycleSeconds(item)), total: formatHuman(editing.cycleSeconds(item) * item.repeat) }) }}
           </span>
           <div class="d-flex gap-1 ms-auto">
-            <button type="button" class="btn btn-sm btn-link p-1" :disabled="index === 0"
+            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="index === 0"
                     :title="t('training_programs.move_up')" :aria-label="t('training_programs.move_up')"
                     @click="editing.move(owner, index, index - 1)">
               <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
             </button>
-            <button type="button" class="btn btn-sm btn-link p-1" :disabled="index === items.length - 1"
+            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="index === items.length - 1"
                     :title="t('training_programs.move_down')" :aria-label="t('training_programs.move_down')"
                     @click="editing.move(owner, index, index + 1)">
               <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
             </button>
-            <button type="button" class="btn btn-sm btn-link p-1"
+            <button type="button" class="btn btn-sm btn-outline-secondary"
                     :title="t('training_programs.ungroup')" :aria-label="t('training_programs.ungroup')"
                     @click="editing.ungroup(owner, index)">
               <i class="fa-solid fa-object-ungroup" aria-hidden="true"></i>
             </button>
-            <button type="button" class="btn btn-sm btn-link p-1" :disabled="!editing.canDuplicate(item, multiplier)"
+            <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!editing.canDuplicate(item, multiplier)"
                     :title="t('training_programs.duplicate')" :aria-label="t('training_programs.duplicate')"
                     @click="editing.duplicate(owner, index, multiplier)">
               <i class="fa-regular fa-copy" aria-hidden="true"></i>
             </button>
-            <button type="button" class="btn btn-sm btn-link text-danger p-1"
+            <button type="button" class="btn btn-sm btn-outline-danger"
                     :title="t('training_programs.delete_group')" :aria-label="t('training_programs.delete_group')"
                     @click="editing.remove(owner, index)">
               <i class="fa-regular fa-trash-can" aria-hidden="true"></i>

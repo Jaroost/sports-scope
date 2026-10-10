@@ -13,7 +13,6 @@ import CompanionColorPicker from './CompanionColorPicker.vue'
 const props = defineProps<{
   block: Block
   // Instant de départ (s) de la première occurrence du bloc — informatif.
-  start: number
   // Le tout premier bloc du programme : rien avant lui, donc pas de moment pour son son de début.
   first: boolean
   selectable?: boolean
@@ -45,6 +44,11 @@ function onDurationChange(event: Event) {
 
 // Canaux à structure identique (min/cible/max en valeur absolue) — la vitesse est
 // traitée à part car son unité change selon `trainingProgramStore.sport`.
+// Une icône par mesure ciblée, devant son libellé.
+const CHANNEL_ICONS: Record<string, string> = {
+  power: 'fa-bolt', heartRate: 'fa-heart-pulse', cadence: 'fa-arrows-spin', speed: 'fa-gauge-high',
+}
+
 const TARGET_CHANNELS = ['power', 'heartRate', 'cadence'] as const
 
 // i18n en snake_case (`target_heart_rate`), clés du store en camelCase (`heartRate`).
@@ -58,8 +62,18 @@ function channelLabel(key: typeof TARGET_CHANNELS[number]): string {
   return t(`training_programs.${CHANNEL_I18N_KEYS[key]}`)
 }
 
-function hasAnyTarget(m: Block): boolean {
-  return [m.power, m.heartRate, m.cadence, m.speedKmh].some((r) => r.target != null)
+// Les cibles posées, pour le badge du menu : « 180 W », « 130 bpm »… (la cible seule, pas
+// les bornes). La vitesse suit l'unité du sport, comme son champ.
+function targetTags(m: Block): string[] {
+  const tags: string[] = []
+  if (m.power.target != null) tags.push(`${Math.round(m.power.target)} W`)
+  if (m.heartRate.target != null) tags.push(`${Math.round(m.heartRate.target)} bpm`)
+  if (m.cadence.target != null) tags.push(`${Math.round(m.cadence.target)} rpm`)
+  if (m.speedKmh.target != null) {
+    const running = trainingProgramStore.sport.value === 'running'
+    tags.push(`${speedFieldDisplay(m.speedKmh, 'target')} ${running ? '/km' : 'km/h'}`)
+  }
+  return tags
 }
 
 function onNumberFieldChange(range: TargetRange, field: 'target' | 'min' | 'max', ceiling: number, event: Event) {
@@ -168,68 +182,80 @@ onBeforeUnmount(() => {
   <div class="tp-block card" :class="{ 'tp-block-selected': selected }"
        :style="block.color ? { '--tp-dot-color': block.color } : {}">
     <div class="card-body d-flex align-items-start gap-2 flex-wrap">
-      <span class="tp-handle text-body-secondary mt-1" draggable="true"
-            :title="t('training_programs.drag_hint')" :aria-label="t('training_programs.drag_hint')"
-            @dragstart="emit('drag-start', $event)" @dragend="emit('drag-end')">
-        <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
-      </span>
-
-      <div v-if="selectable" class="form-check mt-1">
-        <input type="checkbox" class="form-check-input" :checked="selected"
-               :aria-label="t('training_programs.select_block')"
-               @change="emit('toggle-select')">
+      <!-- Aperçu de la case telle que le téléphone la peint : fond, icône, texte. -->
+      <div class="tp-phone-preview tp-phone-preview-mobile d-md-none" :title="t('training_programs.phone_preview')"
+           :style="{ backgroundColor: block.color || '#6c757d', color: block.textColor || '#ffffff' }">
+        <i v-if="block.icon" class="fa-solid" :class="iconClass(block.icon)" aria-hidden="true"></i>
+        <span class="tp-phone-preview-text">{{ block.segmentName.trim() }}</span>
       </div>
 
-      <div class="tp-start small text-body-secondary mt-1" :title="t('training_programs.start_at_hint')">
-        {{ formatTime(start) }}
+      <div class="d-flex align-items-center gap-2 w-100">
+        <span class="tp-handle text-body-secondary" draggable="true"
+              :title="t('training_programs.drag_hint')" :aria-label="t('training_programs.drag_hint')"
+              @dragstart="emit('drag-start', $event)" @dragend="emit('drag-end')">
+          <i class="fa-solid fa-grip-vertical" aria-hidden="true"></i>
+        </span>
+        <div v-if="selectable" class="form-check">
+          <input type="checkbox" class="form-check-input" :checked="selected"
+                 :aria-label="t('training_programs.select_block')"
+                 @change="emit('toggle-select')">
+        </div>
+        <!-- Aperçu de la case telle que le téléphone la peint (bureau : à côté de la sélection). -->
+        <div class="tp-phone-preview d-none d-md-inline-flex" :title="t('training_programs.phone_preview')"
+             :style="{ backgroundColor: block.color || '#6c757d', color: block.textColor || '#ffffff' }">
+          <i v-if="block.icon" class="fa-solid" :class="iconClass(block.icon)" aria-hidden="true"></i>
+          <span class="tp-phone-preview-text">{{ block.segmentName.trim() }}</span>
+        </div>
+        <div class="d-flex gap-1 ms-auto">
+          <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!canMoveUp"
+                  :title="t('training_programs.move_up')" :aria-label="t('training_programs.move_up')"
+                  @click="emit('move-up')">
+            <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!canMoveDown"
+                  :title="t('training_programs.move_down')" :aria-label="t('training_programs.move_down')"
+                  @click="emit('move-down')">
+            <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!canDuplicate"
+                  :title="t('training_programs.duplicate')" :aria-label="t('training_programs.duplicate')"
+                  @click="emit('duplicate')">
+            <i class="fa-regular fa-copy" aria-hidden="true"></i>
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-danger"
+                  :title="t('training_programs.delete')" :aria-label="t('training_programs.delete')"
+                  @click="emit('remove')">
+            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+          </button>
+        </div>
       </div>
 
-      <input type="text" class="form-control form-control-sm tp-time-input"
-             :title="t('training_programs.block_duration_hint')" :aria-label="t('training_programs.block_duration_hint')"
-             :value="formatTime(block.durationSeconds)" @change="onDurationChange">
-
-      <div class="flex-grow-1" style="min-width: 12rem">
-        <input v-model="block.segmentName" type="text" class="form-control form-control-sm"
-               :placeholder="t('training_programs.segment_name_placeholder')" maxlength="60">
+      <div class="d-flex align-items-center gap-2 flex-wrap w-100">
+        <span class="d-inline-flex align-items-center gap-1">
+          <i class="fa-regular fa-clock text-body-secondary" aria-hidden="true"></i>
+          <input type="text" class="form-control form-control-sm tp-time-input"
+                 :title="t('training_programs.block_duration_hint')" :aria-label="t('training_programs.block_duration_hint')"
+                 :value="formatTime(block.durationSeconds)" @change="onDurationChange">
+        </span>
+        <div class="flex-grow-1" style="min-width: 10rem">
+          <input v-model="block.segmentName" type="text" class="form-control form-control-sm"
+                 :placeholder="t('training_programs.segment_name_placeholder')" maxlength="60">
+        </div>
+        <div class="d-flex align-items-center gap-1">
+          <i v-if="block.icon" class="fa-solid tp-icon-preview" :class="iconClass(block.icon)" aria-hidden="true"></i>
+          <select v-model="block.icon" class="form-select form-select-sm" style="width: auto">
+            <option :value="null">{{ t('training_programs.icon_none') }}</option>
+            <option v-for="icon in MILESTONE_ICONS" :key="icon.key" :value="icon.key">{{ t(`training_programs.icon_${icon.key}`) }}</option>
+          </select>
+        </div>
+        <div class="d-flex align-items-center gap-1">
+          <CompanionColorPicker v-model="block.color" fallback="#6c757d" :label="t('training_programs.segment_color')" />
+          <CompanionColorPicker v-model="block.textColor" fallback="#ffffff" :label="t('training_programs.segment_text_color')" />
+        </div>
       </div>
 
-      <div class="d-flex align-items-center gap-1">
-        <i v-if="block.icon" class="fa-solid tp-icon-preview" :class="iconClass(block.icon)" aria-hidden="true"></i>
-        <select v-model="block.icon" class="form-select form-select-sm" style="width: auto">
-          <option :value="null">{{ t('training_programs.icon_none') }}</option>
-          <option v-for="icon in MILESTONE_ICONS" :key="icon.key" :value="icon.key">{{ t(`training_programs.icon_${icon.key}`) }}</option>
-        </select>
-      </div>
-
-      <div class="d-flex align-items-center gap-1">
-        <CompanionColorPicker v-model="block.color" fallback="#6c757d" :label="t('training_programs.segment_color')" />
-        <CompanionColorPicker v-model="block.textColor" fallback="#ffffff" :label="t('training_programs.segment_text_color')" />
-      </div>
-
-      <div class="d-flex gap-1 ms-auto">
-        <button type="button" class="btn btn-sm btn-link p-1" :disabled="!canMoveUp"
-                :title="t('training_programs.move_up')" :aria-label="t('training_programs.move_up')"
-                @click="emit('move-up')">
-          <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
-        </button>
-        <button type="button" class="btn btn-sm btn-link p-1" :disabled="!canMoveDown"
-                :title="t('training_programs.move_down')" :aria-label="t('training_programs.move_down')"
-                @click="emit('move-down')">
-          <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
-        </button>
-        <button type="button" class="btn btn-sm btn-link p-1" :disabled="!canDuplicate"
-                :title="t('training_programs.duplicate')" :aria-label="t('training_programs.duplicate')"
-                @click="emit('duplicate')">
-          <i class="fa-regular fa-copy" aria-hidden="true"></i>
-        </button>
-        <button type="button" class="btn btn-sm btn-link text-danger p-1"
-                :title="t('training_programs.delete')" :aria-label="t('training_programs.delete')"
-                @click="emit('remove')">
-          <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-        </button>
-      </div>
-
-      <div class="d-flex align-items-start gap-1 w-100">
+      <div class="d-flex align-items-start gap-2 w-100">
+        <i class="fa-solid fa-comment-dots text-body-secondary tp-line-icon" :title="t('training_programs.description_label')" aria-hidden="true"></i>
         <textarea v-model="block.description" class="form-control form-control-sm" rows="1"
                   :maxlength="MAX_DESCRIPTION_LEN" :placeholder="t('training_programs.description_placeholder')"
                   :aria-label="t('training_programs.description_label')"></textarea>
@@ -247,9 +273,21 @@ onBeforeUnmount(() => {
         {{ t('training_programs.description_too_long', { speech: formatTime(speechSeconds), room: formatTime(speechRoom) }) }}
       </div>
 
-      <div class="d-flex gap-3 flex-wrap w-100">
-        <div class="d-flex align-items-center gap-1 tp-sound-slot" :class="{ 'tp-sound-error': startSoundIssue }">
-          <span class="small text-body-secondary">{{ t('training_programs.sound_start_label') }}</span>
+    </div>
+
+    <details class="tp-targets px-3 pb-2" :open="!!(startSoundIssue || endSoundIssue)">
+      <summary class="small text-body-secondary">
+        <i class="fa-solid fa-volume-high fa-fw me-1" aria-hidden="true"></i>{{ t('training_programs.sounds_summary') }}
+        <span v-if="block.startSound || block.endSound" class="badge text-bg-warning ms-1">
+          <template v-if="block.startSound"><i class="fa-solid fa-flag me-1" aria-hidden="true"></i>{{ soundLabel(block.startSound) }}</template>
+          <template v-if="block.startSound && block.endSound"> – </template>
+          <template v-if="block.endSound"><i class="fa-solid fa-flag-checkered me-1" aria-hidden="true"></i>{{ soundLabel(block.endSound) }}</template>
+        </span>
+      </summary>
+      <div class="d-flex flex-column gap-2 mt-2">
+        <div class="d-flex align-items-center gap-1 flex-wrap tp-sound-slot" :class="{ 'tp-sound-error': startSoundIssue }">
+          <i class="fa-solid fa-flag text-body-secondary fa-fw" aria-hidden="true"></i>
+          <span class="small text-body-secondary tp-sound-label">{{ t('training_programs.sound_start_label') }}</span>
           <select v-model="block.startSound" class="form-select form-select-sm" style="width: auto">
             <option :value="null">{{ t('training_programs.sound_none') }}</option>
             <option v-for="sound in SOUNDS" :key="sound" :value="sound">{{ soundLabel(sound) }}</option>
@@ -263,8 +301,9 @@ onBeforeUnmount(() => {
             <option v-for="timing in CUE_TIMINGS" :key="timing" :value="timing">{{ t(`training_programs.start_cue_timing_${timing}`) }}</option>
           </select>
         </div>
-        <div class="d-flex align-items-center gap-1 tp-sound-slot" :class="{ 'tp-sound-error': endSoundIssue }">
-          <span class="small text-body-secondary">{{ t('training_programs.sound_end_label') }}</span>
+        <div class="d-flex align-items-center gap-1 flex-wrap tp-sound-slot" :class="{ 'tp-sound-error': endSoundIssue }">
+          <i class="fa-solid fa-flag-checkered text-body-secondary fa-fw" aria-hidden="true"></i>
+          <span class="small text-body-secondary tp-sound-label">{{ t('training_programs.sound_end_label') }}</span>
           <select v-model="block.endSound" class="form-select form-select-sm" style="width: auto">
             <option :value="null">{{ t('training_programs.sound_none') }}</option>
             <option v-for="sound in SOUNDS" :key="sound" :value="sound">{{ soundLabel(sound) }}</option>
@@ -279,16 +318,18 @@ onBeforeUnmount(() => {
           </select>
         </div>
       </div>
-    </div>
+    </details>
 
     <details class="tp-targets px-3 pb-3">
       <summary class="small text-body-secondary">
-        {{ t('training_programs.targets_summary') }}
-        <span v-if="hasAnyTarget(block)" class="badge text-bg-warning ms-1">{{ t('training_programs.targets_set') }}</span>
+        <i class="fa-solid fa-bullseye fa-fw me-1" aria-hidden="true"></i>{{ t('training_programs.targets_summary') }}
+        <span v-for="tag in targetTags(block)" :key="tag" class="badge text-bg-warning ms-1">{{ tag }}</span>
       </summary>
       <div class="tp-targets-grid mt-2">
         <div v-for="channel in TARGET_CHANNELS" :key="channel" class="tp-target-row">
-          <span class="small text-body-secondary tp-target-label">{{ channelLabel(channel) }}</span>
+          <span class="small text-body-secondary tp-target-label">
+            <i :class="`fa-solid ${CHANNEL_ICONS[channel]} fa-fw me-1`" aria-hidden="true"></i>{{ channelLabel(channel) }}
+          </span>
           <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_min')"
                  :value="block[channel].min ?? ''" @change="onNumberFieldChange(block[channel], 'min', TARGET_CEILINGS[channel], $event)">
           <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_target')"
@@ -297,7 +338,9 @@ onBeforeUnmount(() => {
                  :value="block[channel].max ?? ''" @change="onNumberFieldChange(block[channel], 'max', TARGET_CEILINGS[channel], $event)">
         </div>
         <div class="tp-target-row">
-          <span class="small text-body-secondary tp-target-label">{{ speedUnitLabel() }}</span>
+          <span class="small text-body-secondary tp-target-label">
+            <i :class="`fa-solid ${CHANNEL_ICONS.speed} fa-fw me-1`" aria-hidden="true"></i>{{ speedUnitLabel() }}
+          </span>
           <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_min')"
                  :value="speedFieldDisplay(block.speedKmh, 'min')" @change="onSpeedFieldChange(block.speedKmh, 'min', $event)">
           <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_target')"
@@ -322,16 +365,47 @@ onBeforeUnmount(() => {
   cursor: grab;
   padding: 0 0.25rem;
 }
-.tp-start {
-  width: 3.5rem;
-}
 .tp-time-input {
-  width: 3.5rem;
+  width: 5rem;
+}
+.tp-phone-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-width: 7rem;
+  max-width: 11rem;
+  height: 2.5rem;
+  padding: 0 0.6rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  overflow: hidden;
+}
+.tp-phone-preview-mobile {
+  /* Première ligne de la carte, sur toute la largeur. */
+  display: flex;
+  width: 100%;
+  max-width: none;
+}
+.tp-phone-preview-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tp-icon-preview {
   width: 1.5rem;
   text-align: center;
   color: var(--bs-warning);
+}
+.tp-line-icon {
+  flex-shrink: 0;
+  width: 1.25rem;
+  text-align: center;
+  line-height: calc(1.5em + 0.5rem); /* centrée sur la première ligne du champ */
+}
+.tp-sound-label {
+  min-width: 5.5rem; /* aligne les deux listes de sons l'une sous l'autre */
 }
 .tp-sound-slot {
   padding: 0.15rem 0.4rem;

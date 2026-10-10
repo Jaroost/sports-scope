@@ -4,7 +4,7 @@ import { t } from '../i18n'
 import { trainingProgramStore, newBlock, isGroup, SPORTS, MAX_REPEAT, DEFAULT_START_TIMING, DEFAULT_END_TIMING } from '../stores/trainingProgramStore'
 import type { Block, Item, SoundIssue, SoundSlotRef, TargetRange } from '../stores/trainingProgramStore'
 import * as editing from '../stores/trainingProgramEditing'
-import { formatTime } from '../trainingProgramTime'
+import { formatTime, formatHuman } from '../trainingProgramTime'
 import { csrfToken } from '../csrf'
 import TrainingProgramItemList from './TrainingProgramItemList.vue'
 import TrainingProgramProfileChart from './TrainingProgramProfileChart.vue'
@@ -189,13 +189,22 @@ onMounted(() => {
 
 <template>
   <div class="container py-4 tp-builder">
-    <div class="d-flex align-items-center justify-content-between mb-3 gap-2">
-      <a :href="`${localePrefix}/training_programs`" class="btn btn-sm btn-outline-secondary">
-        <i class="fa-solid fa-arrow-left me-1" aria-hidden="true"></i>{{ t('training_programs.back') }}
+    <!-- Une seule ligne : retour, nom, sport, enregistrer. Sur téléphone les boutons ne
+         gardent que leur icône pour laisser la place au nom. -->
+    <div class="d-flex align-items-center mb-3 gap-2 flex-nowrap">
+      <a :href="`${localePrefix}/training_programs`" class="btn btn-outline-secondary flex-shrink-0"
+         :title="t('training_programs.back')" :aria-label="t('training_programs.back')">
+        <i class="fa-solid fa-arrow-left" aria-hidden="true"></i><span class="d-none d-md-inline ms-1">{{ t('training_programs.back') }}</span>
       </a>
-      <button type="button" class="btn btn-warning" :disabled="saving" @click="save">
-        <i class="fa-solid fa-floppy-disk me-1" aria-hidden="true"></i>
-        {{ saved ? t('training_programs.saved') : t('training_programs.save') }}
+      <input v-model="trainingProgramStore.name.value" type="text" class="form-control flex-grow-1"
+             style="min-width: 0" :placeholder="t('training_programs.name_placeholder')" maxlength="80">
+      <select v-model="trainingProgramStore.sport.value" class="form-select flex-shrink-0" style="width: auto"
+              :title="t('training_programs.sport_hint')">
+        <option v-for="sport in SPORTS" :key="sport" :value="sport">{{ t(`training_programs.sport_${sport}`) }}</option>
+      </select>
+      <button type="button" class="btn btn-warning flex-shrink-0" :disabled="saving" :title="t('training_programs.save')" @click="save">
+        <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+        <span class="d-none d-md-inline ms-1">{{ saved ? t('training_programs.saved') : t('training_programs.save') }}</span>
       </button>
     </div>
 
@@ -212,42 +221,59 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="mb-4 d-flex gap-2 flex-wrap">
-      <input v-model="trainingProgramStore.name.value" type="text" class="form-control form-control-lg flex-grow-1"
-             style="min-width: 12rem" :placeholder="t('training_programs.name_placeholder')" maxlength="80">
-      <select v-model="trainingProgramStore.sport.value" class="form-select form-select-lg" style="width: auto"
-              :title="t('training_programs.sport_hint')">
-        <option v-for="sport in SPORTS" :key="sport" :value="sport">{{ t(`training_programs.sport_${sport}`) }}</option>
-      </select>
+    <div class="mb-3">
+      <TrainingProgramProfileChart :profile="profile ?? null" :sport="trainingProgramStore.sport.value" wide />
     </div>
 
-    <p class="text-body-secondary small" :class="profile ? 'mb-2' : 'mb-4'">
-      {{ t('training_programs.duration', { duration: formatTime(durationSeconds) }) }}
-    </p>
-
-    <div v-if="profile" class="mb-4">
-      <TrainingProgramProfileChart :profile="profile" :sport="trainingProgramStore.sport.value" wide />
-    </div>
-
-    <div v-if="selected.size > 0" class="d-flex align-items-center gap-2 mb-3 flex-wrap">
-      <div class="d-flex align-items-center gap-1">
-        <label class="small mb-0" for="tp-repeat-count">{{ t('training_programs.repeat_label') }}</label>
-        <input id="tp-repeat-count" v-model.number="repeatCount" type="number" min="2" :max="MAX_REPEAT"
-               class="form-control form-control-sm" style="width: 4.5rem">
+    <div class="card shadow-sm border-0">
+      <!-- L'en-tête porte toujours la sélection : sa hauteur ne change pas, que des blocs
+           soient sélectionnés ou non, donc le formulaire dessous ne se décale plus. -->
+      <div class="tp-sticky-top">
+      <div class="card-header activity-card-header tp-card-header d-flex align-items-center gap-2 flex-wrap">
+        <template v-if="selected.size > 0">
+          <span class="fw-semibold small me-1">{{ t('training_programs.selected_count', { count: selected.size }) }}</span>
+          <div class="d-flex align-items-center gap-1">
+            <label class="small mb-0" for="tp-repeat-count">{{ t('training_programs.repeat_label') }}</label>
+            <input id="tp-repeat-count" v-model.number="repeatCount" type="number" min="2" :max="MAX_REPEAT"
+                   class="form-control form-control-sm" style="width: 4.5rem">
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!!editing.groupBlocker.value" @click="editing.groupSelected()">
+            <i class="fa-solid fa-repeat me-1" aria-hidden="true"></i>{{ t('training_programs.repeat_selected') }}
+          </button>
+          <button type="button" class="btn btn-sm btn-link text-body-secondary" @click="editing.clearSelection()">
+            {{ t('training_programs.clear_selection') }}
+          </button>
+          <span v-if="groupHint" class="small text-body-secondary">{{ groupHint }}</span>
+        </template>
+        <span v-else class="small text-body-secondary">{{ t('training_programs.selection_empty') }}</span>
+        <span class="ms-auto small text-body-secondary text-nowrap">
+          <i class="fa-regular fa-clock me-1" aria-hidden="true"></i>{{ t('training_programs.duration', { duration: formatHuman(durationSeconds) }) }}
+        </span>
       </div>
-      <button type="button" class="btn btn-sm btn-outline-secondary" :disabled="!!editing.groupBlocker.value" @click="editing.groupSelected()">
-        <i class="fa-solid fa-repeat me-1" aria-hidden="true"></i>{{ t('training_programs.repeat_selected') }}
-      </button>
-      <button type="button" class="btn btn-sm btn-link text-body-secondary" @click="editing.clearSelection()">
-        {{ t('training_programs.clear_selection') }}
-      </button>
-      <span v-if="groupHint" class="small text-body-secondary">{{ groupHint }}</span>
+      </div>
+
+      <div class="card-body">
+        <TrainingProgramItemList :items="items" :owner="null" leading />
+
+        <button type="button" class="btn btn-outline-secondary" :disabled="!editing.canAdd(1, 1)" @click="editing.addBlock(null, 1)">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('training_programs.add_block') }}
+        </button>
+      </div>
     </div>
-
-    <TrainingProgramItemList :items="items" :owner="null" leading />
-
-    <button type="button" class="btn btn-outline-secondary" :disabled="!editing.canAdd(1, 1)" @click="editing.addBlock(null, 1)">
-      <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('training_programs.add_block') }}
-    </button>
   </div>
 </template>
+
+<style scoped>
+/* Collé sous la navbar au défilement. Fond opaque : `card-header` est semi-transparent,
+   la liste des blocs défilerait au travers. Le card n'a pas d'overflow, le sticky tient. */
+.tp-sticky-top {
+  position: sticky;
+  top: var(--navbar-h, 3.5rem);
+  z-index: 5;
+  background: var(--bs-card-bg, var(--bs-body-bg));
+  border-radius: var(--bs-card-border-radius) var(--bs-card-border-radius) 0 0;
+}
+.tp-card-header {
+  min-height: 3.25rem;
+}
+</style>

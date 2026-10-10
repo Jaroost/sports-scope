@@ -1528,6 +1528,13 @@ en:
     cyclosm_ncn: "National"
     cyclosm_icn: "International (EuroVelo)"
   training_programs:
+    list_heading: "Programs"
+    filter_name: "Name"
+    filter_name_placeholder: "Program name…"
+    filter_avg_power: "Average power (W)"
+    filter_avg_heart_rate: "Average heart rate (bpm)"
+    filter_avg_cadence: "Average cadence (rpm)"
+    none_match: "No program matches the filters."
     list_title: "My training programs"
     new: "New program"
     builder_title: "Create a training program"

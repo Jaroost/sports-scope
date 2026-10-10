@@ -64,7 +64,7 @@ const y = (value: number) => H - PAD - ((value - range.value.lo) / (range.value.
 // La cible en escalier : un palier par bloc, tracé de la couleur du bloc, relié par un
 // trait vertical au palier précédent quand celui-ci a une cible aussi.
 const segments = computed(() => {
-  const out: { d: string; color: string | null }[] = []
+  const out: { d: string; area: string; color: string | null }[] = []
   let previousY: number | null = null
   for (const s of spans.value) {
     if (s.target == null) { previousY = null; continue }
@@ -72,7 +72,8 @@ const segments = computed(() => {
     const d = previousY == null
       ? `M ${x(s.start)} ${level} H ${x(s.end)}`
       : `M ${x(s.start)} ${previousY} V ${level} H ${x(s.end)}`
-    out.push({ d, color: s.color })
+    const area = `M ${x(s.start)} ${H} V ${level} H ${x(s.end)} V ${H} Z`
+    out.push({ d, area, color: s.color })
     previousY = level
   }
   return out
@@ -89,6 +90,8 @@ const title = computed(() => {
   <div class="tp-profile" :class="{ 'tp-profile-wide': wide }">
     <svg :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" class="tp-profile-svg" role="img" :aria-label="title">
       <title>{{ title }}</title>
+      <path v-for="(seg, i) in segments" :key="`a${i}`" :d="seg.area" class="tp-profile-area"
+            :style="seg.color ? { fill: seg.color } : {}" />
       <path v-for="(seg, i) in segments" :key="i" :d="seg.d" class="tp-profile-line" fill="none"
             :style="seg.color ? { stroke: seg.color } : {}" vector-effect="non-scaling-stroke" />
     </svg>
@@ -119,6 +122,10 @@ const title = computed(() => {
   width: 100%;
   height: 3.5rem;
   border-bottom: 1px solid var(--bs-border-color);
+}
+.tp-profile-area {
+  fill: var(--bs-warning);
+  fill-opacity: 0.3;
 }
 .tp-profile-line {
   stroke: var(--bs-warning);

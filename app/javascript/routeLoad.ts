@@ -121,7 +121,7 @@ export function estimateRouteLoad(route: RouteShape, athlete: AthleteState): Rou
 
 // Contexte de forme : poids de la sortie rapporté à la charge habituelle (CTL) et
 // fraîcheur (TSB) au lendemain si on la fait aujourd'hui.
-function formContext(tss: number, athlete: AthleteState) {
+export function formContext(tss: number, athlete: AthleteState) {
   const { ctl, atl } = athlete
   if (ctl == null || atl == null || ctl <= 0) {
     return { ctlRatio: null, level: null, tsbNow: null, tsbAfter: null }
@@ -145,4 +145,33 @@ function formContext(tss: number, athlete: AthleteState) {
     tsbNow: Math.round(ctl - atl),
     tsbAfter: Math.round(ctlAfter - atlAfter),
   }
+}
+
+// ─── TSS estimé d'un programme d'entraînement ─────────────────────────────────
+// Un programme porte ses cibles : on n'a pas à deviner la puissance par la physique.
+// Chaque bloc donne IF = cible / FTP, et TSS = Σ h × IF² × 100 (la formule du TSS
+// appliquée bloc par bloc : plus fidèle qu'un IF moyen, l'intensité compte au carré).
+// Repli, comme pour un itinéraire : sans FTP, sans cible de puissance ou hors vélo
+// (la FTP ne dit rien d'une allure), le facteur d'intensité par défaut du vélo.
+export function estimateProgramLoad(
+  steps: { duration_seconds: number; power?: unknown }[],
+  durationS: number,
+  sport: string,
+  athlete: AthleteState,
+): { tss: number; level: RouteLoad['level'] } | null {
+  if (!(durationS > 0)) return null
+  const ftp = athlete.ftp && athlete.ftp > 0 ? athlete.ftp : null
+  const fallback = ESTIMATED_IF.cycling
+  let tss = 0
+  if (!steps.length) {
+    tss = (durationS / 3600) * fallback ** 2 * 100
+  } else {
+    for (const step of steps) {
+      const target = Array.isArray(step.power) ? (step.power[0] as number | null) : null
+      const raw = sport === 'cycling' && ftp && target != null && target > 0 ? target / ftp : fallback
+      tss += (step.duration_seconds / 3600) * Math.min(raw, INTENSITY_CAP) ** 2 * 100
+    }
+  }
+  tss = Math.round(tss)
+  return { tss, level: formContext(tss, athlete).level }
 }

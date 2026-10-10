@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
-import { trainingProgramStore, MAX_DESCRIPTION_LEN, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, TARGET_CEILINGS } from '../stores/trainingProgramStore'
+import { trainingProgramStore, MAX_DESCRIPTION_LEN, SOUND_SECONDS, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, TARGET_CEILINGS } from '../stores/trainingProgramStore'
 import type { Block, Sound, TargetRange } from '../stores/trainingProgramStore'
 import { formatTime, parseTime } from '../trainingProgramTime'
 import CompanionColorPicker from './CompanionColorPicker.vue'
@@ -115,6 +115,25 @@ function playSound(sound: Sound | null) {
   previewAudio.play().catch(() => { /* lecture bloquée (autoplay) — pas grave, c'est un aperçu */ })
 }
 
+// Durée de lecture estimée (~15 caractères/s en français) contre la place réellement
+// laissée à la voix : l'appli la fait parler après le son de début s'il joue sur le
+// bloc (`at`, ou premier bloc), et la coupe quand le son de fin « avant » démarre (en
+// avance sur la frontière), à la frontière sinon. Ne regarde que ce bloc : un son de
+// début du bloc suivant réglé « avant », ou un son de fin `at` du bloc précédent,
+// rognent encore la place sans qu'on le voie d'ici.
+const SPEECH_CHARS_PER_SECOND = 15
+
+const speechSeconds = computed(() => Math.ceil(props.block.description.trim().length / SPEECH_CHARS_PER_SECOND))
+
+const speechRoom = computed(() => {
+  const b = props.block
+  const startCost = b.startSound && (props.first || b.startCueTiming === 'at') ? SOUND_SECONDS[b.startSound] : 0
+  const endCost = b.endSound && b.endCueTiming === 'before' ? SOUND_SECONDS[b.endSound] : 0
+  return Math.max(0, b.durationSeconds - startCost - endCost)
+})
+
+const speechTooLong = computed(() => speechSeconds.value > speechRoom.value)
+
 // Lecture de la description par la synthèse vocale du navigateur — un aperçu de ce que
 // l'appli dira au début du bloc (voix du téléphone, donc pas tout à fait la même).
 // Relancer sur un autre bloc coupe le précédent ; recliquer sur celui qui parle l'arrête.
@@ -221,6 +240,11 @@ onBeforeUnmount(() => {
                 @click="speakDescription">
           <i class="fa-solid" :class="speaking ? 'fa-stop' : 'fa-volume-high'" aria-hidden="true"></i>
         </button>
+      </div>
+
+      <div v-if="speechTooLong" class="small text-warning-emphasis w-100">
+        <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+        {{ t('training_programs.description_too_long', { speech: formatTime(speechSeconds), room: formatTime(speechRoom) }) }}
       </div>
 
       <div class="d-flex gap-3 flex-wrap w-100">

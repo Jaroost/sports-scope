@@ -1554,6 +1554,7 @@ fr:
     description_placeholder: "Description (lue à voix haute au début du bloc, sur l'appli)"
     description_play: "Écouter la description"
     description_stop: "Arrêter la lecture"
+    description_too_long: "La lecture dure environ %{speech} mais il ne reste que %{room} avant la fin du bloc (ou le son de fin) : la voix sera coupée."
     sound_none: "Aucun son"
     sound_start: "Départ"
     sound_end: "Fin"

@@ -1554,6 +1554,7 @@ en:
     description_placeholder: "Description (read aloud at the start of the block, in the app)"
     description_play: "Listen to the description"
     description_stop: "Stop playback"
+    description_too_long: "Reading takes about %{speech} but only %{room} remain before the end of the block (or its end sound): the voice will be cut off."
     sound_none: "No sound"
     sound_start: "Start"
     sound_end: "End"

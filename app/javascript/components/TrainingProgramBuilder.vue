@@ -245,6 +245,11 @@ onMounted(() => {
           </button>
           <span v-if="groupHint" class="small text-body-secondary">{{ groupHint }}</span>
         </template>
+        <!-- Sans sélection, le profil en tout petit prend la place du message : l'en-tête
+             garde sa hauteur. Sans cible nulle part, le message reste. -->
+        <div v-else-if="profile" class="flex-grow-1" style="min-width: 0">
+          <TrainingProgramProfileChart :profile="profile" :sport="trainingProgramStore.sport.value" mini />
+        </div>
         <span v-else class="small text-body-secondary">{{ t('training_programs.selection_empty') }}</span>
         <span class="ms-auto small text-body-secondary text-nowrap">
           <i class="fa-regular fa-clock me-1" aria-hidden="true"></i>{{ t('training_programs.duration', { duration: formatHuman(durationSeconds) }) }}

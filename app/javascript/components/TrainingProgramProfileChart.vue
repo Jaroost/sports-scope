@@ -18,7 +18,7 @@ interface Profile {
   steps: Step[]
 }
 
-const props = defineProps<{ profile: Profile | null; sport: string; wide?: boolean }>()
+const props = defineProps<{ profile: Profile | null; sport: string; wide?: boolean; mini?: boolean }>()
 
 const W = 200
 const H = 48
@@ -88,7 +88,7 @@ const title = computed(() => {
 </script>
 
 <template>
-  <div class="tp-profile" :class="{ 'tp-profile-wide': wide }">
+  <div class="tp-profile" :class="{ 'tp-profile-wide': wide, 'tp-profile-mini': mini }">
     <!-- Sans cible nulle part : on garde la place du graphique (le formulaire ne descend
          pas à la première cible saisie) et on explique ce qui le remplira. -->
     <div v-if="!profile" class="tp-profile-svg tp-profile-placeholder">
@@ -101,7 +101,7 @@ const title = computed(() => {
       <path v-for="(seg, i) in segments" :key="i" :d="seg.d" class="tp-profile-line" fill="none"
             :style="seg.color ? { stroke: seg.color } : {}" vector-effect="non-scaling-stroke" />
     </svg>
-    <div class="d-flex justify-content-between align-items-center tp-profile-foot">
+    <div v-if="!mini" class="d-flex justify-content-between align-items-center tp-profile-foot">
       <span class="text-body-secondary">{{ channel ? channelLabel(channel) : '\u00a0' }}</span>
       <span v-if="profile && profile.channels.length > 1" class="d-flex gap-1">
         <button v-for="c in profile.channels" :key="c" type="button" class="tp-profile-chip"
@@ -116,6 +116,13 @@ const title = computed(() => {
 <style scoped>
 .tp-profile {
   width: 12rem;
+}
+/* Version réduite pour l'en-tête : le tracé seul, sans pied ni boutons de mesure. */
+.tp-profile-mini {
+  width: 100%;
+}
+.tp-profile-mini .tp-profile-svg {
+  height: 1.75rem;
 }
 .tp-profile-wide {
   width: 100%;

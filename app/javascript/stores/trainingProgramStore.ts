@@ -1,4 +1,5 @@
 import { ref, computed } from 'vue'
+import { formatHuman } from '../trainingProgramTime'
 
 // Catalogue fermé — miroir de TrainingProgram::SOUNDS (training_program.rb) et des
 // fichiers `assets/sounds/*.wav` du dépôt companion. `null` = pas de son.
@@ -118,6 +119,34 @@ export function isGroup(item: Item): item is Group {
 // TrainingProgram.fill_counters (le serveur remplace au dépliage) : `rounds` porte, pour
 // chaque groupe englobant du plus extérieur au plus intérieur, `[tour, total]`. Hors
 // groupe, ou pour un niveau absent, le texte reste tel quel.
+// Variables de cibles d'un nom/description : `{power}` (W), `{hr}` (bpm), `{cadence}` (rpm),
+// `{speed}` (km/h) et `{pace}` (m:ss/km) deviennent la cible du bloc, nombre seul ;
+// `{duration}` la durée du bloc en clair. Miroir de
+// TrainingProgram.fill_targets. Sans cible sur le canal, la variable reste telle quelle.
+export const TARGET_VARIABLES = ['power', 'hr', 'cadence', 'speed', 'pace', 'duration'] as const
+export type TargetVariable = typeof TARGET_VARIABLES[number]
+
+export type TargetBound = 'min' | 'target' | 'max'
+
+// `bound` : la cible, ou une borne (`{power-min}`, `{power-max}`).
+export function targetVariableText(block: Block, variable: TargetVariable, bound: TargetBound = 'target'): string | null {
+  if (variable === 'duration') return bound === 'target' && block.durationSeconds > 0 ? formatHuman(block.durationSeconds) : null
+  const range = { power: block.power, hr: block.heartRate, cadence: block.cadence, speed: block.speedKmh, pace: block.speedKmh }[variable]
+  const value = range[bound]
+  if (value == null || !(value > 0)) return null
+  if (variable === 'speed') return String(Math.round(value * 10) / 10)
+  if (variable === 'pace') {
+    const seconds = Math.round(3600 / value)
+    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  }
+  return String(Math.round(value))
+}
+
+export function fillTargets(text: string, block: Block): string {
+  return text.replace(/\{(power|hr|cadence|speed|pace|duration)(?:-(min|max))?\}/g, (match, variable: TargetVariable, bound?: 'min' | 'max') =>
+    targetVariableText(block, variable, bound ?? 'target') ?? match)
+}
+
 // Produits aussi : `{n1*n2}`, `{n1-max*n2-max}` (un opérande manquant : texte inchangé).
 const COUNTER_OPERAND = 'n[1-9]?(?:-max)?'
 const COUNTER_TEMPLATE = new RegExp(`\\{(${COUNTER_OPERAND}(?:\\s*\\*\\s*${COUNTER_OPERAND})*)\\}`, 'g')

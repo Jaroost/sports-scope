@@ -73,7 +73,7 @@ class TrainingProgram < ApplicationRecord
   # contrôles de sons.
   def self.flatten_items(items, counters = [])
     Array(items).flat_map do |item|
-      next [fill_counters(item, counters)] unless group?(item)
+      next [fill_counters(fill_targets(item), counters)] unless group?(item)
       repeat = item["repeat"].to_i
       Array.new(repeat) { |i| flatten_items(item["items"], counters + [[i + 1, repeat]]) }.flatten(1)
     end
@@ -92,6 +92,61 @@ class TrainingProgram < ApplicationRecord
   COUNTER_OPERAND = /n([1-9])?(-max)?/
   COUNTER_TEMPLATE = /\{(#{COUNTER_OPERAND}(?:\s*\*\s*#{COUNTER_OPERAND})*)\}/
   COUNTER_FIELDS = %w[segment_name description].freeze
+
+  # Variables de cibles : `{power}` (W), `{hr}` (bpm), `{cadence}` (rpm), `{speed}` (km/h) et
+  # `{pace}` (allure m:ss par km) deviennent la **cible** du bloc, nombre seul — l'unité
+  # s'écrit dans le texte (« {power} watts », que la voix lira correctement). Sans cible
+  # sur ce canal, la variable reste telle quelle. S'applique à tous les blocs, répétés ou non.
+  TARGET_TEMPLATE = /\{(power|hr|cadence|speed|pace|duration)(?:-(min|max))?\}/
+  TARGET_VARIABLE_CHANNELS = { "power" => "power", "hr" => "heart_rate", "cadence" => "cadence",
+                               "speed" => "speed_kmh", "pace" => "speed_kmh" }.freeze
+
+  def self.fill_targets(block)
+    return block unless block.is_a?(Hash)
+    return block unless COUNTER_FIELDS.any? { |f| block[f].is_a?(String) && block[f].match?(TARGET_TEMPLATE) }
+
+    block.merge(COUNTER_FIELDS.to_h do |field|
+      text = block[field]
+      next [field, text] unless text.is_a?(String)
+
+      [field, text.gsub(TARGET_TEMPLATE) { |match| target_text(block, Regexp.last_match(1), Regexp.last_match(2)) || match }]
+    end)
+  end
+
+  # `bound` : nil (la cible), "min" ou "max" — la même variable avec `-min` / `-max`
+  # (`{power-min}`), pour écrire une borne plutôt que la cible.
+  def self.target_text(block, variable, bound = nil)
+    return duration_text(block["duration_seconds"]) if variable == "duration" && bound.nil?
+    return nil if variable == "duration"
+
+    value = block["#{bound || 'target'}_#{TARGET_VARIABLE_CHANNELS.fetch(variable)}"]
+    return nil unless value.is_a?(Numeric) && value.positive?
+
+    case variable
+    when "speed" then value.round(1).to_s.sub(/\.0\z/, "")
+    when "pace" then format("%d:%02d", *(3600.0 / value).round.divmod(60))
+    else value.round.to_s
+    end
+  end
+
+  # `{duration}` : la durée du bloc dite en clair (« 2 minutes », « 1 min 30 s », « 1h30 »),
+  # dans la langue de la requête. Miroir de formatHuman (trainingProgramTime.ts).
+  def self.duration_text(seconds)
+    total = seconds.to_i
+    return nil unless total.positive?
+
+    h, m, s = total / 3600, total % 3600 / 60, total % 60
+    key = ->(name, n) { I18n.t("training_programs.human_#{name}_#{n == 1 ? 'one' : 'other'}") }
+    sec_short = I18n.t("training_programs.human_sec_short")
+    if h.positive?
+      base = m.positive? ? format("%dh%02d", h, m) : "#{h}h"
+      s.positive? ? "#{base} #{s} #{sec_short}" : base
+    elsif m.positive?
+      s.positive? ? "#{m} #{I18n.t('training_programs.human_min_short')} #{s} #{sec_short}" : "#{m} #{key.call('minute', m)}"
+    else
+      "#{s} #{key.call('second', s)}"
+    end
+  end
 
   def self.fill_counters(block, counters)
     return block if counters.empty? || !block.is_a?(Hash)

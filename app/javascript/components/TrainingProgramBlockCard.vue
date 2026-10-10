@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
-import { trainingProgramStore, MAX_DESCRIPTION_LEN, SOUND_SECONDS, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, TARGET_CEILINGS, fillCounters } from '../stores/trainingProgramStore'
-import type { Block, Sound, TargetRange } from '../stores/trainingProgramStore'
+import { trainingProgramStore, MAX_DESCRIPTION_LEN, SOUND_SECONDS, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, TARGET_CEILINGS, fillCounters, fillTargets } from '../stores/trainingProgramStore'
+import type { Block, Sound, TargetBound, TargetRange, TargetVariable } from '../stores/trainingProgramStore'
 import { formatTime, parseTime } from '../trainingProgramTime'
 import * as editing from '../stores/trainingProgramEditing'
 import CompanionColorPicker from './CompanionColorPicker.vue'
@@ -68,16 +68,43 @@ function channelLabel(key: typeof TARGET_CHANNELS[number]): string {
 
 // Les cibles posées, pour le badge du menu : « 180 W », « 130 bpm »… (la cible seule, pas
 // les bornes). La vitesse suit l'unité du sport, comme son champ.
-function targetTags(m: Block): string[] {
-  const tags: string[] = []
-  if (m.power.target != null) tags.push(`${Math.round(m.power.target)} W`)
-  if (m.heartRate.target != null) tags.push(`${Math.round(m.heartRate.target)} bpm`)
-  if (m.cadence.target != null) tags.push(`${Math.round(m.cadence.target)} rpm`)
+// Cliquer ou glisser un badge écrit la variable de cette cible (`{power}`…) dans le nom ou
+// la description : le serveur la remplace par la valeur au dépliage.
+function targetTags(m: Block): { label: string; variable: TargetVariable }[] {
+  const tags: { label: string; variable: TargetVariable }[] = []
+  if (m.power.target != null) tags.push({ label: `${Math.round(m.power.target)} W`, variable: 'power' })
+  if (m.heartRate.target != null) tags.push({ label: `${Math.round(m.heartRate.target)} bpm`, variable: 'hr' })
+  if (m.cadence.target != null) tags.push({ label: `${Math.round(m.cadence.target)} rpm`, variable: 'cadence' })
   if (m.speedKmh.target != null) {
     const running = trainingProgramStore.sport.value === 'running'
-    tags.push(`${speedFieldDisplay(m.speedKmh, 'target')} ${running ? '/km' : 'km/h'}`)
+    tags.push({ label: `${speedFieldDisplay(m.speedKmh, 'target')} ${running ? '/km' : 'km/h'}`, variable: running ? 'pace' : 'speed' })
   }
   return tags
+}
+
+function boundToken(variable: TargetVariable, bound: TargetBound): string {
+  return `{${variable}${bound === 'target' ? '' : `-${bound}`}}`
+}
+
+const TARGET_BOUNDS: TargetBound[] = ['min', 'target', 'max']
+const BOUND_ICONS: Record<TargetBound, string> = { min: 'fa-angles-down', target: 'fa-bullseye', max: 'fa-angles-up' }
+
+// Une ligne par mesure ciblée (la vitesse en dernier, son unité suit le sport) : son canal,
+// son libellé, son icône et la variable qu'elle écrit.
+const targetRows = computed(() => {
+  const running = trainingProgramStore.sport.value === 'running'
+  return [
+    ...TARGET_CHANNELS.map((channel) => ({
+      channel: channel as typeof TARGET_CHANNELS[number] | 'speedKmh', label: channelLabel(channel), icon: CHANNEL_ICONS[channel],
+      variable: ({ power: 'power', heartRate: 'hr', cadence: 'cadence' } as const)[channel] as TargetVariable,
+    })),
+    { channel: 'speedKmh' as const, label: speedUnitLabel(), icon: CHANNEL_ICONS.speed, variable: (running ? 'pace' : 'speed') as TargetVariable },
+  ]
+})
+
+function onTargetTagDragStart(variable: TargetVariable, event: DragEvent, bound: TargetBound = 'target') {
+  event.dataTransfer?.setData('text/plain', boundToken(variable, bound))
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy'
 }
 
 function onNumberFieldChange(range: TargetRange, field: 'target' | 'min' | 'max', ceiling: number, event: Event) {
@@ -124,8 +151,8 @@ function onFieldFocus(event: FocusEvent) {
 const roundOnes = () => (props.rounds ?? []).map((max): [number, number] => [1, max])
 // La description telle que l'appli la dira au premier tour : lue par l'aperçu vocal, et
 // base de l'estimation de durée.
-const previewDescription = computed(() => fillCounters(props.block.description.trim(), roundOnes()))
-const previewName = computed(() => fillCounters(props.block.segmentName.trim(), roundOnes()))
+const previewDescription = computed(() => fillCounters(fillTargets(props.block.description.trim(), props.block), roundOnes()))
+const previewName = computed(() => fillCounters(fillTargets(props.block.segmentName.trim(), props.block), roundOnes()))
 
 function iconClass(icon: string): string {
   return MILESTONE_ICONS.find((i) => i.key === icon)?.icon ?? ''
@@ -250,7 +277,13 @@ onBeforeUnmount(() => {
 
       <div class="d-flex align-items-center gap-2 flex-wrap w-100">
         <span class="d-inline-flex align-items-center gap-1">
-          <i class="fa-regular fa-clock text-body-secondary" aria-hidden="true"></i>
+          <!-- L'horloge écrit {duration} (durée en clair) dans le nom ou la description. -->
+          <button type="button" class="btn btn-sm btn-link p-0 text-body-secondary" draggable="true"
+                  :title="t('training_programs.duration_token_hint')"
+                  @mousedown.prevent @click="editing.insertIntoLastField('{duration}')"
+                  @dragstart="onTargetTagDragStart('duration', $event)">
+            <i class="fa-regular fa-clock" aria-hidden="true"></i>
+          </button>
           <input type="text" class="form-control form-control-sm tp-time-input"
                  :title="t('training_programs.block_duration_hint')" :aria-label="t('training_programs.block_duration_hint')"
                  :value="formatTime(block.durationSeconds)" @change="onDurationChange">
@@ -344,30 +377,29 @@ onBeforeUnmount(() => {
     <details class="tp-targets px-3 pb-3">
       <summary class="small text-body-secondary">
         <i class="fa-solid fa-bullseye fa-fw me-1" aria-hidden="true"></i>{{ t('training_programs.targets_summary') }}
-        <span v-for="tag in targetTags(block)" :key="tag" class="badge text-bg-warning ms-1">{{ tag }}</span>
+        <button v-for="tag in targetTags(block)" :key="tag.variable" type="button" class="badge text-bg-warning border-0 ms-1 tp-target-tag"
+                draggable="true" :title="t('training_programs.target_tag_hint', { token: `{${tag.variable}}` })"
+                @mousedown.prevent @click.prevent.stop="editing.insertIntoLastField(`{${tag.variable}}`)"
+                @dragstart="onTargetTagDragStart(tag.variable, $event)">{{ tag.label }}</button>
       </summary>
       <div class="tp-targets-grid mt-2">
-        <div v-for="channel in TARGET_CHANNELS" :key="channel" class="tp-target-row">
-          <span class="small text-body-secondary tp-target-label">
-            <i :class="`fa-solid ${CHANNEL_ICONS[channel]} fa-fw me-1`" aria-hidden="true"></i>{{ channelLabel(channel) }}
+        <div v-for="row in targetRows" :key="row.channel" class="tp-target-row">
+          <span class="small text-body-secondary tp-target-label" :title="row.label">
+            <i :class="`fa-solid ${row.icon} fa-fw me-1`" aria-hidden="true"></i>{{ row.label }}
           </span>
-          <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_min')"
-                 :value="block[channel].min ?? ''" @change="onNumberFieldChange(block[channel], 'min', TARGET_CEILINGS[channel], $event)">
-          <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_target')"
-                 :value="block[channel].target ?? ''" @change="onNumberFieldChange(block[channel], 'target', TARGET_CEILINGS[channel], $event)">
-          <input type="number" class="form-control form-control-sm" :placeholder="t('training_programs.target_max')"
-                 :value="block[channel].max ?? ''" @change="onNumberFieldChange(block[channel], 'max', TARGET_CEILINGS[channel], $event)">
-        </div>
-        <div class="tp-target-row">
-          <span class="small text-body-secondary tp-target-label">
-            <i :class="`fa-solid ${CHANNEL_ICONS.speed} fa-fw me-1`" aria-hidden="true"></i>{{ speedUnitLabel() }}
-          </span>
-          <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_min')"
-                 :value="speedFieldDisplay(block.speedKmh, 'min')" @change="onSpeedFieldChange(block.speedKmh, 'min', $event)">
-          <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_target')"
-                 :value="speedFieldDisplay(block.speedKmh, 'target')" @change="onSpeedFieldChange(block.speedKmh, 'target', $event)">
-          <input type="text" class="form-control form-control-sm" :placeholder="t('training_programs.target_max')"
-                 :value="speedFieldDisplay(block.speedKmh, 'max')" @change="onSpeedFieldChange(block.speedKmh, 'max', $event)">
+          <div v-for="bound in TARGET_BOUNDS" :key="bound" class="input-group input-group-sm flex-nowrap">
+            <!-- L'icône écrit la variable de cette valeur dans le nom ou la description (clic ou glisser). -->
+            <button type="button" class="input-group-text tp-bound-icon" draggable="true"
+                    :title="`${t(`training_programs.target_${bound}`)} — ${t('training_programs.target_tag_hint', { token: boundToken(row.variable, bound) })}`"
+                    @mousedown.prevent @click="editing.insertIntoLastField(boundToken(row.variable, bound))"
+                    @dragstart="onTargetTagDragStart(row.variable, $event, bound)">
+              <i :class="`fa-solid ${BOUND_ICONS[bound]}`" aria-hidden="true"></i>
+            </button>
+            <input v-if="row.channel !== 'speedKmh'" type="number" class="form-control" :aria-label="t(`training_programs.target_${bound}`)"
+                   :value="block[row.channel][bound] ?? ''" @change="onNumberFieldChange(block[row.channel], bound, TARGET_CEILINGS[row.channel], $event)">
+            <input v-else type="text" class="form-control" :aria-label="t(`training_programs.target_${bound}`)"
+                   :value="speedFieldDisplay(block.speedKmh, bound)" @change="onSpeedFieldChange(block.speedKmh, bound, $event)">
+          </div>
         </div>
       </div>
     </details>
@@ -442,15 +474,33 @@ onBeforeUnmount(() => {
 .tp-targets-grid {
   display: grid;
   gap: 0.4rem;
-  max-width: 32rem;
+  max-width: 38rem;
 }
 .tp-target-row {
   display: grid;
-  grid-template-columns: 5.5rem repeat(3, minmax(0, 1fr));
+  grid-template-columns: 9.5rem repeat(3, minmax(0, 1fr));
   gap: 0.4rem;
   align-items: center;
 }
 .tp-target-label {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tp-bound-icon {
+  cursor: pointer;
+  padding: 0 0.4rem;
+}
+@media (max-width: 575.98px) {
+  /* Téléphone : le libellé a sa propre ligne, les trois champs dessous. */
+  .tp-target-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .tp-target-label {
+    grid-column: 1 / -1;
+  }
+}
+.tp-target-tag {
+  cursor: pointer;
 }
 </style>

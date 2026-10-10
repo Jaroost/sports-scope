@@ -76,6 +76,7 @@ export interface Block {
   endSound: Sound | null
   endCueTiming: CueTiming
   segmentName: string
+  description: string
   icon: MilestoneIcon | null
   color: string | null
   textColor: string | null
@@ -89,6 +90,8 @@ export interface Block {
 // et MAX_REPEAT.
 export const MAX_BLOCKS = 200
 export const MAX_REPEAT = 99
+// Miroir de TrainingProgram::MAX_DESCRIPTION_LEN.
+export const MAX_DESCRIPTION_LEN = 300
 
 export const DEFAULT_BLOCK_SECONDS = 300
 
@@ -146,6 +149,7 @@ export function newBlock(): Block {
     endSound: null,
     endCueTiming: DEFAULT_END_TIMING,
     segmentName: '',
+    description: '',
     icon: null,
     color: null,
     textColor: null,

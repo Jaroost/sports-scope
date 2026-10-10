@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { onBeforeUnmount, ref } from 'vue'
 import { t } from '../i18n'
-import { trainingProgramStore, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, TARGET_CEILINGS } from '../stores/trainingProgramStore'
+import { trainingProgramStore, MAX_DESCRIPTION_LEN, SOUNDS, MILESTONE_ICONS, CUE_TIMINGS, TARGET_CEILINGS } from '../stores/trainingProgramStore'
 import type { Block, Sound, TargetRange } from '../stores/trainingProgramStore'
 import { formatTime, parseTime } from '../trainingProgramTime'
 import CompanionColorPicker from './CompanionColorPicker.vue'
@@ -113,6 +114,35 @@ function playSound(sound: Sound | null) {
   previewAudio.currentTime = 0
   previewAudio.play().catch(() => { /* lecture bloquée (autoplay) — pas grave, c'est un aperçu */ })
 }
+
+// Lecture de la description par la synthèse vocale du navigateur — un aperçu de ce que
+// l'appli dira au début du bloc (voix du téléphone, donc pas tout à fait la même).
+// Relancer sur un autre bloc coupe le précédent ; recliquer sur celui qui parle l'arrête.
+const speechSupported = typeof window !== 'undefined' && 'speechSynthesis' in window
+const speaking = ref(false)
+
+function speakDescription() {
+  if (!speechSupported) return
+  const synth = window.speechSynthesis
+  if (speaking.value) {
+    synth.cancel()
+    return
+  }
+  const text = props.block.description.trim()
+  if (!text) return
+  synth.cancel()
+  const utterance = new SpeechSynthesisUtterance(text)
+  utterance.lang = document.querySelector<HTMLMetaElement>('meta[name="i18n-locale"]')?.content === 'fr' ? 'fr-FR' : 'en-US'
+  const end = () => { speaking.value = false }
+  utterance.onend = end
+  utterance.onerror = end
+  speaking.value = true
+  synth.speak(utterance)
+}
+
+onBeforeUnmount(() => {
+  if (speaking.value) window.speechSynthesis.cancel()
+})
 </script>
 
 <template>
@@ -177,6 +207,19 @@ function playSound(sound: Sound | null) {
                 :title="t('training_programs.delete')" :aria-label="t('training_programs.delete')"
                 @click="emit('remove')">
           <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <div class="d-flex align-items-start gap-1 w-100">
+        <textarea v-model="block.description" class="form-control form-control-sm" rows="1"
+                  :maxlength="MAX_DESCRIPTION_LEN" :placeholder="t('training_programs.description_placeholder')"
+                  :aria-label="t('training_programs.description_label')"></textarea>
+        <button v-if="speechSupported" type="button" class="btn btn-sm btn-link p-1"
+                :disabled="!speaking && !block.description.trim()"
+                :title="speaking ? t('training_programs.description_stop') : t('training_programs.description_play')"
+                :aria-label="speaking ? t('training_programs.description_stop') : t('training_programs.description_play')"
+                @click="speakDescription">
+          <i class="fa-solid" :class="speaking ? 'fa-stop' : 'fa-volume-high'" aria-hidden="true"></i>
         </button>
       </div>
 

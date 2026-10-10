@@ -26,6 +26,9 @@ class TrainingProgram < ApplicationRecord
   HEX_COLOR = /\A#[0-9a-fA-F]{6}\z/
   MAX_NAME_LEN = 80
   MAX_SEGMENT_NAME_LEN = 60
+  # Texte libre d'un bloc, lu à voix haute par l'appli companion à son début : assez
+  # pour une consigne, pas pour un discours (à 15 caractères/s, ~20 s de parole).
+  MAX_DESCRIPTION_LEN = 300
   # Plafond du programme **déplié** (chaque répétition d'un groupe compte).
   MAX_BLOCKS = 200
   MAX_REPEAT = 99

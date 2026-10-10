@@ -134,6 +134,7 @@ class TrainingProgramsController < ApplicationController
     text_color = (h["text_color"] || h[:text_color]).presence&.to_s&.strip&.downcase
     text_color = nil unless text_color.nil? || text_color.match?(TrainingProgram::HEX_COLOR)
     segment_name = (h["segment_name"] || h[:segment_name]).to_s.strip.first(TrainingProgram::MAX_SEGMENT_NAME_LEN)
+    description = (h["description"] || h[:description]).to_s.strip.first(TrainingProgram::MAX_DESCRIPTION_LEN)
     targets = TrainingProgram::TARGET_FIELDS.each_with_object({}) do |(field, ceiling), acc|
       acc["target_#{field}"] = clean_target(h, "target_#{field}", ceiling)
       acc["min_#{field}"] = clean_target(h, "min_#{field}", ceiling)
@@ -142,6 +143,7 @@ class TrainingProgramsController < ApplicationController
     {
       "duration_seconds" => duration.to_i.clamp(1, TrainingProgram::MAX_BLOCK_SECONDS),
       "segment_name" => segment_name,
+      "description" => description,
       "icon" => icon,
       "color" => color,
       "text_color" => text_color,

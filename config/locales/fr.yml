@@ -1528,6 +1528,8 @@ fr:
     cyclosm_ncn: "National"
     cyclosm_icn: "International (EuroVelo)"
   training_programs:
+    optional_label: "Optionnel"
+    optional_hint: "Sur le téléphone, un grand glissé pendant ce bloc le saute — par exemple l'échauffement."
     preview_button: "Aperçu"
     preview_title: "Aperçu de l'entraînement"
     preview_close: "Fermer"

@@ -123,6 +123,13 @@ class TrainingProgramsController < ApplicationController
     end
   end
 
+  # Un bloc optionnel peut être sauté depuis l'appli compagnon (échauffement…). La clé
+  # n'est écrite que quand elle est vraie : absente = obligatoire, des deux côtés, donc un
+  # document d'avant ce réglage — ou une appli plus ancienne que lui — ne saute rien.
+  def optional_flag(h)
+    ActiveModel::Type::Boolean.new.cast(h["optional"] || h[:optional]) ? { "optional" => true } : {}
+  end
+
   def clean_block(h)
     return unless h.is_a?(Hash)
     duration = h["duration_seconds"] || h[:duration_seconds]
@@ -147,7 +154,8 @@ class TrainingProgramsController < ApplicationController
       "icon" => icon,
       "color" => color,
       "text_color" => text_color,
-    }.merge(clean_sound(h, "start", TrainingProgram::DEFAULT_START_TIMING))
+    }.merge(optional_flag(h))
+     .merge(clean_sound(h, "start", TrainingProgram::DEFAULT_START_TIMING))
      .merge(clean_sound(h, "end", TrainingProgram::DEFAULT_END_TIMING))
      .merge(targets)
   end

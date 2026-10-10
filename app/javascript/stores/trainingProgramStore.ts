@@ -81,6 +81,8 @@ export interface Block {
   icon: MilestoneIcon | null
   color: string | null
   textColor: string | null
+  // Bloc qu'on peut sauter depuis l'appli compagnon (l'échauffement, par exemple).
+  optional: boolean
   power: TargetRange
   heartRate: TargetRange
   cadence: TargetRange
@@ -264,6 +266,7 @@ export function newBlock(): Block {
     icon: null,
     color: null,
     textColor: null,
+    optional: false,
     power: emptyTargetRange(),
     heartRate: emptyTargetRange(),
     cadence: emptyTargetRange(),

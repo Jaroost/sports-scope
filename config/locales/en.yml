@@ -1528,6 +1528,8 @@ en:
     cyclosm_ncn: "National"
     cyclosm_icn: "International (EuroVelo)"
   training_programs:
+    optional_label: "Optional"
+    optional_hint: "On the phone, a long swipe during this block skips it — for example the warm-up."
     preview_button: "Preview"
     preview_title: "Workout preview"
     preview_close: "Close"

@@ -148,6 +148,8 @@ function onFieldFocus(event: FocusEvent) {
   editing.rememberTextField(event.target as HTMLInputElement | HTMLTextAreaElement)
 }
 
+const uid = Math.random().toString(36).slice(2, 8)
+
 const roundOnes = () => (props.rounds ?? []).map((max): [number, number] => [1, max])
 // La description telle que l'appli la dira au premier tour : lue par l'aperçu vocal, et
 // base de l'estimation de durée.
@@ -303,6 +305,13 @@ onBeforeUnmount(() => {
         <div class="d-flex align-items-center gap-1">
           <CompanionColorPicker v-model="block.color" fallback="#6c757d" :label="t('training_programs.segment_color')" />
           <CompanionColorPicker v-model="block.textColor" fallback="#ffffff" :label="t('training_programs.segment_text_color')" />
+        </div>
+
+        <div class="form-check form-switch mb-0" :title="t('training_programs.optional_hint')">
+          <input :id="`tp-optional-${uid}`" v-model="block.optional" type="checkbox" class="form-check-input" role="switch">
+          <label :for="`tp-optional-${uid}`" class="form-check-label small">
+            <i class="fa-solid fa-forward me-1" aria-hidden="true"></i>{{ t('training_programs.optional_label') }}
+          </label>
         </div>
       </div>
 

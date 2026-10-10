@@ -42,7 +42,8 @@ function onRepeatChange(group: Group, event: Event) {
     <div v-for="(item, index) in items" :key="keyOf(item)"
          class="tp-item mb-2"
          :class="{ 'tp-drop-target': editing.isDropTarget(owner, index), 'tp-dragging': editing.isDragging(owner, index) }"
-         @dragover="editing.onDragOver(owner, index, $event)" @drop.prevent="editing.onDrop(owner, index)">
+         @dragover="editing.onDragOver(owner, index, $event)" @drop.prevent="editing.onDrop(owner, index)"
+         @mouseenter="isGroup(item) && editing.setHovered(item)" @mouseleave="isGroup(item) && editing.setHovered(owner)">
 
       <TrainingProgramBlockCard
         v-if="!isGroup(item)"
@@ -54,7 +55,8 @@ function onRepeatChange(group: Group, event: Event) {
         @toggle-select="editing.toggleSelected(item)"
         @move-up="editing.move(owner, index, index - 1)" @move-down="editing.move(owner, index, index + 1)"
         @duplicate="editing.duplicate(owner, index, multiplier)" @remove="editing.remove(owner, index)"
-        @drag-start="editing.onDragStart(owner, index, $event)" @drag-end="editing.onDragEnd" />
+        @drag-start="editing.onDragStart(owner, index, $event)" @drag-end="editing.onDragEnd"
+        @hover="editing.setHovered($event ? item : owner)" />
 
       <div v-else class="tp-group" :class="{ 'tp-group-selected': editing.isSelected(item) }">
         <div class="tp-group-header d-flex align-items-center gap-2 flex-wrap">

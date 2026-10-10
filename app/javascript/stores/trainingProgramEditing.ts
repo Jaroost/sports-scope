@@ -77,6 +77,13 @@ const PROFILE_CHANNELS = [
   ['speed_kmh', 'speedKmh'],
 ] as const
 
+// L'élément survolé dans la liste — un bloc, ou un groupe répété : le graphique éclaire
+// la (ou les) tranche(s) de temps de tous les blocs qu'il contient.
+const hovered = shallowRef<Set<Block> | null>(null)
+export function setHovered(item: Item | null) {
+  hovered.value = item ? new Set(flattenItems([item]).map((b) => toRaw(b))) : null
+}
+
 export const profile = computed(() => {
   const channels = PROFILE_CHANNELS.filter(([, key]) => flat.value.some((b) => b[key].target != null))
   if (channels.length === 0) return null
@@ -85,6 +92,7 @@ export const profile = computed(() => {
     steps: flat.value.map((b) => ({
       duration_seconds: b.durationSeconds,
       color: b.color,
+      highlight: hovered.value?.has(toRaw(b)) ?? false,
       ...Object.fromEntries(channels.map(([name, key]) => [name, [b[key].target, b[key].min, b[key].max]])),
     })),
   }

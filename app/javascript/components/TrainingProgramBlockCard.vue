@@ -32,6 +32,7 @@ const emit = defineEmits<{
   (e: 'remove'): void
   (e: 'drag-start', event: DragEvent): void
   (e: 'drag-end'): void
+  (e: 'hover', on: boolean): void
 }>()
 
 // Une durée nulle donnerait deux sons au même instant et un bloc invisible : 1 s minimum.
@@ -180,6 +181,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="tp-block card" :class="{ 'tp-block-selected': selected }"
+       @mouseenter="emit('hover', true)" @mouseleave="emit('hover', false)"
        :style="block.color ? { '--tp-dot-color': block.color } : {}">
     <div class="card-body d-flex align-items-start gap-2 flex-wrap">
       <!-- Aperçu de la case telle que le téléphone la peint : fond, icône, texte. -->

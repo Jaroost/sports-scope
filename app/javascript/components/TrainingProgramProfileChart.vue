@@ -11,7 +11,9 @@ interface Step {
   duration_seconds: number
   // Couleur du bloc, `#rrggbb` (celle du « fond » réglé dans l'éditeur), ou absente.
   color?: string | null
-  [channel: string]: number | string | Bounds | null | undefined
+  // Bloc survolé dans l'éditeur : sa tranche de temps est éclairée.
+  highlight?: boolean
+  [channel: string]: number | string | boolean | Bounds | null | undefined
 }
 interface Profile {
   channels: string[]
@@ -44,7 +46,7 @@ const spans = computed(() => {
     const start = acc
     acc += step.duration_seconds
     const [target, min, max] = (step[channel.value] as Bounds | undefined) ?? [null, null, null]
-    return { start, end: acc, target, min, max, color: step.color ?? null }
+    return { start, end: acc, target, min, max, color: step.color ?? null, highlight: !!step.highlight }
   })
 })
 
@@ -79,6 +81,8 @@ const segments = computed(() => {
   return out
 })
 
+const highlights = computed(() => spans.value.filter((s) => s.highlight).map((s) => ({ x: x(s.start), w: x(s.end) - x(s.start) })))
+
 const title = computed(() => {
   if (!props.profile) return t('training_programs.profile_empty')
   const values = spans.value.flatMap((s) => [s.target, s.min, s.max]).filter((v): v is number => v != null)
@@ -96,6 +100,7 @@ const title = computed(() => {
     </div>
     <svg v-else :viewBox="`0 0 ${W} ${H}`" preserveAspectRatio="none" class="tp-profile-svg" role="img" :aria-label="title">
       <title>{{ title }}</title>
+      <rect v-for="(h, i) in highlights" :key="`h${i}`" :x="h.x" y="0" :width="h.w" :height="H" class="tp-profile-highlight" />
       <path v-for="(seg, i) in segments" :key="`a${i}`" :d="seg.area" class="tp-profile-area"
             :style="seg.color ? { fill: seg.color } : {}" />
       <path v-for="(seg, i) in segments" :key="i" :d="seg.d" class="tp-profile-line" fill="none"
@@ -147,6 +152,10 @@ const title = computed(() => {
   text-align: center;
   font-size: 0.8rem;
   color: var(--bs-secondary-color);
+}
+.tp-profile-highlight {
+  fill: var(--bs-body-color);
+  fill-opacity: 0.18;
 }
 .tp-profile-area {
   fill: var(--bs-warning);

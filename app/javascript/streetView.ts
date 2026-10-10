@@ -45,7 +45,14 @@ export function checkStreetView(lat: number, lng: number): Promise<boolean> {
       svCache.set(key, v); resolve(v)
     }
     const timer = setTimeout(() => finish(true), SV_PROBE_TIMEOUT_MS)
-    ;(window as any)[cb] = (d: any) => finish(Array.isArray(d?.[1]) && d[1].length > 0)
+    // Google a mis ce service hors ligne : il répond `[[5,"generic","… decommissioned …"]]`,
+    // sans panorama (d[1]). Cette réponse d'erreur ne dit RIEN de la couverture : on retombe
+    // sur le repli optimiste plutôt que de griser tous les liens.
+    ;(window as any)[cb] = (d: any) => {
+      const status = d?.[0]?.[0]
+      if (typeof status === 'number' && status !== 0 && !Array.isArray(d?.[1])) return finish(true)
+      finish(Array.isArray(d?.[1]) && d[1].length > 0)
+    }
     s.src = `https://maps.googleapis.com/maps/api/js/GeoPhotoService.SingleImageSearch?pb=!1m5!1sapiv3!5sUS!11m2!1m1!1b0!2m4!1m2!3d${lat}!4d${lng}!2d50!3m18!2m2!1sen!2sUS!9m1!1e2!11m12!1m3!1e2!2b1!3e2!1m3!1e3!2b1!3e2!1m3!1e10!2b1!3e2!4m6!1e1!1e2!1e3!1e4!1e8!1e6&callback=${cb}`
     s.onerror = () => finish(true)
     document.head.appendChild(s)

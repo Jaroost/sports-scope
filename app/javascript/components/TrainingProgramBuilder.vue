@@ -7,6 +7,7 @@ import * as editing from '../stores/trainingProgramEditing'
 import { formatTime, formatHuman } from '../trainingProgramTime'
 import { csrfToken } from '../csrf'
 import TrainingProgramItemList from './TrainingProgramItemList.vue'
+import TrainingProgramPreviewDialog from './TrainingProgramPreviewDialog.vue'
 import TrainingProgramProfileChart from './TrainingProgramProfileChart.vue'
 
 const props = defineProps({
@@ -21,6 +22,7 @@ const saved = ref(false)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const items = trainingProgramStore.items
+const showPreview = ref(false)
 const { issues, targetIssues, durationSeconds, selected, repeatCount, profile } = editing
 
 function slotLabel(ref: SoundSlotRef): string {
@@ -202,6 +204,10 @@ onMounted(() => {
               :title="t('training_programs.sport_hint')">
         <option v-for="sport in SPORTS" :key="sport" :value="sport">{{ t(`training_programs.sport_${sport}`) }}</option>
       </select>
+      <button type="button" class="btn btn-outline-secondary flex-shrink-0" :title="t('training_programs.preview_button')"
+              :aria-label="t('training_programs.preview_button')" @click="showPreview = true">
+        <i class="fa-regular fa-eye" aria-hidden="true"></i><span class="d-none d-md-inline ms-1">{{ t('training_programs.preview_button') }}</span>
+      </button>
       <button type="button" class="btn btn-warning flex-shrink-0" :disabled="saving" :title="t('training_programs.save')" @click="save">
         <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
         <span class="d-none d-md-inline ms-1">{{ saved ? t('training_programs.saved') : t('training_programs.save') }}</span>
@@ -265,6 +271,8 @@ onMounted(() => {
         </button>
       </div>
     </div>
+
+    <TrainingProgramPreviewDialog :show="showPreview" @close="showPreview = false" />
   </div>
 </template>
 

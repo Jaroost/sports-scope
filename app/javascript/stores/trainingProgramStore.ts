@@ -147,21 +147,69 @@ export function fillTargets(text: string, block: Block): string {
     targetVariableText(block, variable, bound ?? 'target') ?? match)
 }
 
-// Produits aussi : `{n1*n2}`, `{n1-max*n2-max}` (un opérande manquant : texte inchangé).
-const COUNTER_OPERAND = 'n[1-9]?(?:-max)?'
-const COUNTER_TEMPLATE = new RegExp(`\\{(${COUNTER_OPERAND}(?:\\s*\\*\\s*${COUNTER_OPERAND})*)\\}`, 'g')
+// Des calculs aussi : `+ - *`, des entiers, des parenthèses (`{n1*n2}`, `{n1-max*n2-max}`,
+// compteur continu sur deux niveaux `{(n1-1)*n2-max+n2}`). Une expression illisible, ou qui
+// vise un niveau absent, reste telle quelle. Miroir de TrainingProgram::CounterExpression.
+const COUNTER_TEMPLATE = /\{([nmax0-9+\-*()\s]+)\}/g
+const COUNTER_TOKEN = /^\s*(\d+|n[1-9]?(?:-max)?|[-+*()])/
+
+export function evaluateCounterExpression(expression: string, rounds: [number, number][]): number | null {
+  const tokens: string[] = []
+  for (let rest = expression; rest.trim() !== ''; ) {
+    const match = rest.match(COUNTER_TOKEN)
+    if (!match) return null
+    tokens.push(match[1])
+    rest = rest.slice(match[0].length)
+  }
+  let pos = 0
+  let usedCounter = false
+  const invalid = new Error('invalid')
+
+  const factor = (): number => {
+    const token = tokens[pos++]
+    if (token === undefined) throw invalid
+    if (token === '-') return -factor()
+    if (token === '(') {
+      const value = sum()
+      if (tokens[pos++] !== ')') throw invalid
+      return value
+    }
+    if (/^\d+$/.test(token)) return Number(token)
+    const [, level, max] = token.match(/^n([1-9])?(-max)?$/) ?? []
+    if (!token.startsWith('n')) throw invalid
+    const round = rounds[level ? Number(level) - 1 : rounds.length - 1]
+    if (round == null) throw invalid
+    usedCounter = true
+    return round[max ? 1 : 0]
+  }
+  const product = (): number => {
+    let value = factor()
+    while (tokens[pos] === '*') { pos++; value *= factor() }
+    return value
+  }
+  const sum = (): number => {
+    let value = product()
+    while (tokens[pos] === '+' || tokens[pos] === '-') {
+      const operator = tokens[pos++]
+      const right = product()
+      value = operator === '+' ? value + right : value - right
+    }
+    return value
+  }
+
+  try {
+    const value = sum()
+    return pos === tokens.length && usedCounter ? value : null
+  } catch {
+    return null
+  }
+}
 
 export function fillCounters(text: string, rounds: [number, number][]): string {
   if (!rounds.length) return text
   return text.replace(COUNTER_TEMPLATE, (match, expression: string) => {
-    let product = 1
-    for (const operand of expression.split(/\s*\*\s*/)) {
-      const [, level, max] = operand.match(/^n([1-9])?(-max)?$/)!
-      const round = rounds[level ? Number(level) - 1 : rounds.length - 1]
-      if (round == null) return match
-      product *= round[max ? 1 : 0]
-    }
-    return String(product)
+    const value = evaluateCounterExpression(expression, rounds)
+    return value == null ? match : String(value)
   })
 }
 
@@ -172,6 +220,16 @@ export function flattenItems(items: Item[]): Block[] {
     if (!isGroup(item)) return [item]
     const inner = flattenItems(item.items)
     return Array.from({ length: item.repeat }, () => inner).flat()
+  })
+}
+
+// Les mêmes blocs dépliés, chacun avec ses tours : pour chaque groupe englobant, du plus
+// extérieur au plus intérieur, `[tour, total]`. C'est ce qu'il faut pour écrire le texte
+// définitif d'un bloc (`fillTargets` puis `fillCounters`), comme le fera le serveur.
+export function expandWithRounds(items: Item[], rounds: [number, number][] = []): { block: Block; rounds: [number, number][] }[] {
+  return items.flatMap((item) => {
+    if (!isGroup(item)) return [{ block: item, rounds }]
+    return Array.from({ length: item.repeat }, (_, i) => expandWithRounds(item.items, [...rounds, [i + 1, item.repeat] as [number, number]])).flat()
   })
 }
 

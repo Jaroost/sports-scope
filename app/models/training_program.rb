@@ -86,11 +86,11 @@ class TrainingProgram < ApplicationRecord
   # elles donnent le nombre total de tours du groupe : « tour {n}/{n-max} ». Hors de tout groupe, ou pour un niveau qui
   # n'existe pas, le texte reste tel quel. Le remplacement se fait ici, au dépliage :
   # l'appli compagnon reçoit des textes déjà complets et n'a rien à connaître.
-  # Des produits aussi : `{n1*n2}` (le tour en cours sur l'ensemble des deux groupes,
-  # numéroté à partir de 1), `{n1-max*n2-max}` (le nombre total de blocs joués, tous
-  # tours confondus). Un seul opérande manquant et l'expression reste telle quelle.
-  COUNTER_OPERAND = /n([1-9])?(-max)?/
-  COUNTER_TEMPLATE = /\{(#{COUNTER_OPERAND}(?:\s*\*\s*#{COUNTER_OPERAND})*)\}/
+  # Des calculs aussi, avec `+ - *`, des entiers et des parenthèses : `{n1*n2}`,
+  # `{n1-max*n2-max}` (le nombre de blocs joués), et un compteur continu sur deux niveaux :
+  # `{(n1-1)*n2-max+n2}` (voir CounterExpression). Une expression qu'on ne sait pas lire,
+  # ou qui vise un niveau absent, reste telle quelle.
+  COUNTER_TEMPLATE = /\{([nmax0-9+\-*()\s]+)\}/
   COUNTER_FIELDS = %w[segment_name description].freeze
 
   # Variables de cibles : `{power}` (W), `{hr}` (bpm), `{cadence}` (rpm), `{speed}` (km/h) et
@@ -156,20 +156,8 @@ class TrainingProgram < ApplicationRecord
       text = block[field]
       next [field, text] unless text.is_a?(String)
 
-      [field, text.gsub(COUNTER_TEMPLATE) { |match| counter_product(Regexp.last_match(1), counters) || match }]
+      [field, text.gsub(COUNTER_TEMPLATE) { |match| CounterExpression.evaluate(Regexp.last_match(1), counters)&.to_s || match }]
     end)
-  end
-
-  # Le produit des opérandes d'une expression (`n1*n2-max`), ou nil si l'un d'eux vise un
-  # niveau de groupe qui n'existe pas.
-  def self.counter_product(expression, counters)
-    expression.split(/\s*\*\s*/).reduce(1) do |product, operand|
-      level, max = operand.match(/\An([1-9])?(-max)?\z/).captures
-      round = counters[level ? level.to_i - 1 : counters.size - 1]
-      return nil unless round
-
-      product * round[max ? 1 : 0]
-    end
   end
 
   def flat_blocks

@@ -1233,7 +1233,7 @@ function setClimb(key: string, value: boolean) {
   preset.value.climb = { ...(preset.value.climb || {}), [key]: value }
 }
 
-function setWorkout(key: string, value: boolean) {
+function setWorkout(key: string, value: boolean | string) {
   preset.value.workout = { ...(preset.value.workout || {}), [key]: value }
 }
 
@@ -2569,6 +2569,28 @@ async function save() {
                 {{ t('companion.settings.workout_sounds') }}
               </label>
             </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <label class="form-label small mb-1" for="workout-voice-style">
+              {{ t('companion.settings.workout_voice_style') }}
+            </label>
+            <select class="form-select form-select-sm" id="workout-voice-style"
+                    :value="(preset.workout?.voice_style as string) || 'lively'"
+                    @change="setWorkout('voice_style', ($event.target as HTMLSelectElement).value)">
+              <option value="calm">{{ t('companion.settings.workout_voice_calm') }}</option>
+              <option value="lively">{{ t('companion.settings.workout_voice_lively') }}</option>
+              <option value="energetic">{{ t('companion.settings.workout_voice_energetic') }}</option>
+            </select>
+          </div>
+          <div class="col-12 col-md-6">
+            <label class="form-label small mb-1" for="workout-voice-name">
+              {{ t('companion.settings.workout_voice_name') }}
+            </label>
+            <input class="form-control form-control-sm" type="text" id="workout-voice-name" maxlength="80"
+                   :value="(preset.workout?.voice_name as string) || ''"
+                   :placeholder="t('companion.settings.workout_voice_name_placeholder')"
+                   @change="setWorkout('voice_name', ($event.target as HTMLInputElement).value)">
+            <div class="form-text">{{ t('companion.settings.workout_voice_name_help') }}</div>
           </div>
         </div>
 

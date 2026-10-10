@@ -2002,6 +2002,12 @@ module CompanionSettings
     }
   end
 
+  # Les tons de la voix des entraînements (hauteur et débit réglés côté
+  # appli, `WorkoutVoiceStyle`). `lively` est le défaut : absent vaut enjoué.
+  WORKOUT_VOICE_STYLES = %w[calm lively energetic].freeze
+  WORKOUT_VOICE_STYLE_DEFAULT = "lively"
+  WORKOUT_VOICE_NAME_MAX = 80
+
   # La pastille de tronçon en cours (haut d'écran), le popup de changement de
   # tronçon (2-3 s au centre) et les tonalités de jalon (`WorkoutCuePlayer`) —
   # les seuls repères d'un programme d'entraînement en dehors des blocs qu'on
@@ -2011,11 +2017,21 @@ module CompanionSettings
   def sanitize_workout(raw)
     return nil unless raw.is_a?(Hash)
 
-    {
+    out = {
       "badge" => raw["badge"] != false,
       "popup" => raw["popup"] != false,
-      "sounds" => raw["sounds"] != false
+      "sounds" => raw["sounds"] != false,
+      # Le ton de la synthèse vocale des descriptions de tronçon. Un style
+      # inconnu retombe sur le défaut plutôt que de faire perdre le profil.
+      "voice_style" => WORKOUT_VOICE_STYLES.include?(raw["voice_style"]) ? raw["voice_style"] : WORKOUT_VOICE_STYLE_DEFAULT
     }
+    # Une voix précise, par son nom côté Android. Le site ne peut pas
+    # l'énumérer (elle dépend du téléphone) : texte libre, borné, et omis
+    # s'il est vide — l'appli choisit alors elle-même la meilleure voix française.
+    voice = raw["voice_name"]
+    voice = voice.strip[0, WORKOUT_VOICE_NAME_MAX] if voice.is_a?(String)
+    out["voice_name"] = voice if voice.present?
+    out
   end
 
   # Le toast d'ouverture de tour (bandeau/encoche/page, Di2, col — la série

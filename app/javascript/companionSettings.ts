@@ -583,7 +583,7 @@ export interface Preset {
   climb?: Record<string, boolean>
   // Pastille de tronçon (haut d'écran) et popup de changement de tronçon —
   // même forme que `climb`.
-  workout?: Record<string, boolean>
+  workout?: Record<string, boolean | string>
   // Le toast d'ouverture de tour (bandeau/encoche/page, Di2, col — pas
   // `workout`, qui a déjà `workout.popup`) — voir `sanitize_laps` (Rails).
   laps?: Record<string, boolean>

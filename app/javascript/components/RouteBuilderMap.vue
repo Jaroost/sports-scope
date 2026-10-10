@@ -453,6 +453,12 @@ async function initMap() {
         }
       })
       mapInstance.on('mousemove', (e: any) => {
+        // Filet de sécurité : un mousemove qui atteint le canvas (bouton relâché) prouve
+        // qu'on n'est sur aucun marqueur HTML. Si le marqueur a été recréé pendant le survol
+        // (sélection du col, réinstallation des marqueurs), son mouseleave ne part jamais et
+        // overClimbMarker resterait coincé à true, bloquant l'insertion de point.
+        const oe = e.originalEvent as MouseEvent | undefined
+        if (overClimbMarker && oe && oe.buttons === 0 && oe.target === mapInstance.getCanvas()) overClimbMarker = false
         // Mode « mesurer » : viseur, et pas de marqueur d'insertion sur le tracé.
         if (measureMode.value) {
           hideHoverMarker()

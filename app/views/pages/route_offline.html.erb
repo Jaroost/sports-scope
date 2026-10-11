@@ -1,0 +1,3 @@
+<% content_for :title, t("routes.offline_title") %>
+<% content_for :hide_navbar, true %>
+<div data-vue-component="OfflineDownloader" data-vue-props='<%= { shareToken: @share_token }.to_json %>'></div>

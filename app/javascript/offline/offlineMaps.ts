@@ -90,7 +90,13 @@ const UPSCALE_QUALITY = 0.8
 
 export const OFFLINE_DEFAULTS: CorridorOpts = { minZoom: 10, maxZoom: 17, bufferM: 400 }
 
-export interface DownloadProgress { done: number; total: number; failed: number }
+// Étapes d'un téléchargement : les tuiles (la barre), puis trois temps de traitement local
+// sans tuile à compter — sur un long itinéraire le comblement par agrandissement et
+// l'assemblage de l'archive prennent bien plus longtemps que le réseau.
+export type DownloadPhase = 'tiles' | 'fill' | 'build' | 'write'
+
+// `sub` : avancement 0-100 à l'intérieur de l'étape, quand elle sait le dire (comblement).
+export interface DownloadProgress { done: number; total: number; failed: number; phase: DownloadPhase; sub?: number }
 
 // L'OPFS et l'écriture par flux ne sont pas disponibles partout (Safari ancien, contextes
 // non sécurisés) : on dégrade en masquant la fonctionnalité plutôt qu'en plantant.
@@ -215,6 +221,7 @@ async function fillMissingTiles(
   minZoom: number,
   format: TileFormat,
   collected: RawTile[],
+  onFill?: (done: number, total: number) => void,
 ): Promise<void> {
   const groups = new Map<string, { tile: Tile; d: number }[]>()
   for (const [z, tiles] of byZoom) {
@@ -231,6 +238,11 @@ async function fillMissingTiles(
     }
   }
 
+  let toFill = 0
+  for (const items of groups.values()) toFill += items.length
+  let filled = 0
+  onFill?.(0, toFill)
+
   for (const [ancestor, items] of groups) {
     const src = real.get(ancestor)
     if (!src) continue
@@ -246,6 +258,7 @@ async function fillMissingTiles(
       for (const { tile, d } of items) {
         const data = await upscaleQuadrant(bitmap, d, tile.x, tile.y, format)
         if (data) collected.push({ z: tile.z, x: tile.x, y: tile.y, data })
+        onFill?.(++filled, toFill)
       }
     } finally {
       bitmap.close()
@@ -297,7 +310,7 @@ export async function downloadOfflineArchive(
           failed++ // erreur réseau ponctuelle : on continue, la tuile sera comblée
         }
         done++
-        onProgress?.({ done, total, failed })
+        onProgress?.({ done, total, failed, phase: 'tiles' })
       }
     }
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tiles.length) }, worker))
@@ -317,7 +330,7 @@ export async function downloadOfflineArchive(
         toFetch.push(t)
       }
     }
-    onProgress?.({ done, total, failed })
+    onProgress?.({ done, total, failed, phase: 'tiles' })
     await fetchTiles(toFetch)
   }
 
@@ -327,8 +340,14 @@ export async function downloadOfflineArchive(
     const [z, x, y] = key.split('/').map(Number)
     return { z, x, y, data }
   })
-  await fillMissingTiles(real, byZoom, opts.minZoom, LAYER_SPECS[layer].format, collected)
+  const report = (phase: DownloadPhase, sub?: number) => onProgress?.({ done, total, failed, phase, sub })
+  report('fill', 0)
+  await fillMissingTiles(
+    real, byZoom, opts.minZoom, LAYER_SPECS[layer].format, collected,
+    (n, all) => report('fill', all ? Math.round((n / all) * 100) : 100),
+  )
 
+  report('build')
   const archive = await buildPmtilesArchive(collected, {
     minZoom: opts.minZoom,
     maxZoom: opts.maxZoom,
@@ -336,6 +355,7 @@ export async function downloadOfflineArchive(
     attribution: LAYER_SPECS[layer].attribution,
     tileType: LAYER_SPECS[layer].format,
   })
+  report('write')
   await writeArchiveFile(token, layer, archive)
   return { tiles: collected.length, bytes: archive.length }
 }

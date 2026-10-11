@@ -349,6 +349,9 @@ export interface OfflineMapsBridgeState {
   mb: number
   tiles: number
   errored: boolean
+  // Étape du téléchargement en cours, déjà traduite (avec le fond et l'avancement s'il y en a) ;
+  // vide hors téléchargement. Absente d'un site plus ancien : l'appli n'affiche alors que le %.
+  phase: string
   layers: OfflineMapsBridgeLayer[]
 }
 

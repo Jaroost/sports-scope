@@ -96,6 +96,16 @@ class PagesController < ApplicationController
     @share_token = token
   end
 
+  # Télécharge la carte hors-ligne d'un itinéraire sans ouvrir la navigation (voir
+  # OfflineDownloader.vue) : adressé par share_token comme la navigation, donc public.
+  def route_offline
+    token = params[:token]
+    unless Route.exists?(share_token: token)
+      head :not_found and return
+    end
+    @share_token = token
+  end
+
   # Page de partage publique : le résumé de l'itinéraire (aperçu, stats, lieux) et
   # les liens vers ses différentes formes (lecture seule, navigation, GPX, repères
   # dans Google Maps). Rendue côté serveur, sans îlot Vue : les crawlers d'aperçu des

@@ -1,11 +1,12 @@
 import { ref, computed, watch, type Ref } from 'vue'
 import { mapStyleFor } from '../mapStyles'
-import { dataSaverActive } from '../companionBridge'
+import { dataSaverActive, type OfflineMapsBridgeState } from '../companionBridge'
+import { t } from '../i18n'
 import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
   routeSignature, saveArchiveSignature, archiveSignature, deleteArchiveSignature,
-  purgeLegacyArchive, OFFLINE_LAYERS, isOfflineLayer, type OfflineLayer,
+  purgeLegacyArchive, OFFLINE_LAYERS, isOfflineLayer, type OfflineLayer, type DownloadPhase,
 } from '../offline/offlineMaps'
 
 // Chaque fond téléchargeable (swisstopo gris/couleur/satellite, IGN plan/ortho) a sa propre
@@ -53,6 +54,11 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   const offlineDownloading = ref(false)
   const offlineProgress = ref({ done: 0, total: 0, failed: 0 })
   const offlineErrored = ref(false)
+  // Étape en cours (tuiles, comblement, assemblage, écriture) et fond concerné : la barre ne
+  // bouge plus une fois les tuiles reçues, or le traitement local est la partie longue.
+  const offlinePhase = ref<{ phase: DownloadPhase; layer: OfflineLayer | null; sub: number | null }>(
+    { phase: 'tiles', layer: null, sub: null },
+  )
   let offlineAbort: AbortController | null = null
   // Archives présentes dans l'OPFS, et celles branchées sur le protocole pmtiles://.
   const offlineHas = ref<LayerFlags>(noLayers())
@@ -89,6 +95,31 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   const offlinePct = computed(() =>
     offlineProgress.value.total ? Math.round((offlineProgress.value.done / offlineProgress.value.total) * 100) : 0,
   )
+
+  function phaseLabel(): string {
+    const { phase, layer, sub } = offlinePhase.value
+    const step = t(`routes.offline_phase_${phase}`)
+    const suffix = sub != null ? ` (${sub} %)` : ''
+    return layer ? `${t(`strava.map_style_${layer}`)} — ${step}${suffix}` : step
+  }
+
+  // Ce que l'appli mobile voit du téléchargement (`pushOfflineMapsState`). Ici plutôt que dans
+  // chaque page : la navigation et la page de téléchargement seul (`OfflineDownloader.vue`)
+  // parlent exactement le même message, donc l'appli n'a qu'un langage à comprendre.
+  const bridgeState = computed<OfflineMapsBridgeState>(() => ({
+    supported: offlineIsSup && !!routeToken.value,
+    ready: offlineReady.value,
+    stale: offlineStale.value,
+    downloading: offlineDownloading.value,
+    pct: offlinePct.value,
+    mb: offlineEst.value.mb,
+    tiles: offlineEst.value.tiles,
+    errored: offlineErrored.value,
+    phase: offlineDownloading.value ? phaseLabel() : '',
+    // Libellé déjà traduit : l'appli affiche la liste telle quelle, sans tenir sa propre
+    // table de libellés par id (cf. `companionBridge.ts`).
+    layers: offlineLayerRows.value.map((l) => ({ ...l, label: t(`strava.map_style_${l.id}`) })),
+  }))
 
   function wantOffline(): boolean {
     const id = mapStyleId.value
@@ -208,7 +239,10 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
       for (const layer of layers) {
         await downloadOfflineArchive(
           token, layer, dlCoords, undefined,
-          (p) => { offlineProgress.value = { done: base + p.done, total: perLayer * layers.length, failed: failed + p.failed } },
+          (p) => {
+            offlineProgress.value = { done: base + p.done, total: perLayer * layers.length, failed: failed + p.failed }
+            offlinePhase.value = { phase: p.phase, layer, sub: p.sub ?? null }
+          },
           offlineAbort.signal,
         )
         base += perLayer
@@ -249,7 +283,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
 
   return {
     offlineIsSup,
-    offlineDownloading, offlineProgress, offlineErrored,
+    offlineDownloading, offlineProgress, offlineErrored, offlinePhase, bridgeState,
     offlineReady, offlineStale, offlinePct, offlineEst, offlineLayerRows, selectedLayers,
     toggleOfflineLayer,
     resolveBaseStyle, refreshBaseMap, noteBaseReloaded, syncOfflineState,

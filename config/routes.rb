@@ -25,6 +25,9 @@ Rails.application.routes.draw do
     # Navigation is addressed by share_token (not id) so the link is shareable
     # and unguessable; the page and its API are public.
     get "/routes/:token/navigate", to: "pages#route_navigation", as: :navigate_route
+    # Téléchargement de la carte hors-ligne seul, sans navigation : page minimale que
+    # l'appli compagnon charge hors écran depuis sa liste d'itinéraires.
+    get "/routes/:token/offline", to: "pages#route_offline", as: :offline_route
     # Read-only view of a route inside the builder UI — addressed by share_token,
     # public (works for signed-out recipients).
     get "/routes/:token/view", to: "pages#route_view", as: :view_route

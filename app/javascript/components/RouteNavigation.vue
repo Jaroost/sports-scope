@@ -169,7 +169,7 @@ const routeMarkersRaw = ref<RouteMarker[]>([])
 // réseau) : cf. useOfflineMaps. `offlineCoords`/`offlinePois` (état du tracé actif, aussi
 // consommés par la session persistée) lui sont passés en entrée.
 const {
-  offlineIsSup, offlineDownloading, offlineErrored,
+  offlineIsSup, offlineDownloading, offlineErrored, bridgeState,
   offlineReady, offlineStale, offlinePct, offlineEst, offlineLayerRows, selectedLayers,
   toggleOfflineLayer,
   resolveBaseStyle, refreshBaseMap, noteBaseReloaded, syncOfflineState,
@@ -215,23 +215,7 @@ registerSleepHandlers({
 })
 onBeforeUnmount(() => registerSleepHandlers(null))
 
-watch(
-  () => ({
-    supported: offlineIsSup && !!routeToken.value,
-    ready: offlineReady.value,
-    stale: offlineStale.value,
-    downloading: offlineDownloading.value,
-    pct: offlinePct.value,
-    mb: offlineEst.value.mb,
-    tiles: offlineEst.value.tiles,
-    errored: offlineErrored.value,
-    // Libellé déjà traduit : l'appli affiche la liste telle quelle, sans tenir sa propre
-    // table de libellés par id (cf. `companionBridge.ts`).
-    layers: offlineLayerRows.value.map((l) => ({ ...l, label: t(`strava.map_style_${l.id}`) })),
-  }),
-  (state) => pushOfflineMapsState(state),
-  { immediate: true, deep: true },
-)
+watch(bridgeState, (state) => pushOfflineMapsState(state), { immediate: true, deep: true })
 
 // Réglages caméra (zoom), ajustables en séance et reportés sur le profil.
 // La caméra reste toujours à plat (pitch 0) pour économiser la batterie. La boucle

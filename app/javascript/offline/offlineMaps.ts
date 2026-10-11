@@ -330,6 +330,21 @@ export function saveArchiveBuffer(token: string, layer: OfflineLayer, bufferM: n
   try { localStorage.setItem(bufferKey(token, layer), String(bufferM)) } catch { /* quota */ }
 }
 
+// Dernière marge choisie, pour tous les itinéraires : propre à cet appareil (localStorage de
+// la page, que partagent la navigation et la page de téléchargement de l'appli).
+const BUFFER_PREF_KEY = 'offline-buffer-pref'
+
+export function loadBufferPref(): number {
+  try {
+    const n = Number(localStorage.getItem(BUFFER_PREF_KEY))
+    return isOfflineBuffer(n) ? n : OFFLINE_DEFAULTS.bufferM
+  } catch { return OFFLINE_DEFAULTS.bufferM }
+}
+
+export function saveBufferPref(bufferM: number): void {
+  try { localStorage.setItem(BUFFER_PREF_KEY, String(bufferM)) } catch { /* quota */ }
+}
+
 export function archiveBuffer(token: string, layer: OfflineLayer): number {
   try {
     const n = Number(localStorage.getItem(bufferKey(token, layer)))

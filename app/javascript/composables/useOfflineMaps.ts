@@ -6,7 +6,7 @@ import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
   routeSignature, saveArchiveSignature, archiveSignature, deleteArchiveSignature,
-  purgeLegacyArchive, OFFLINE_LAYERS, OFFLINE_BUFFER_CHOICES, isOfflineBuffer, saveArchiveBuffer, archiveBuffer, isOfflineLayer, type OfflineLayer, type DownloadPhase,
+  purgeLegacyArchive, OFFLINE_LAYERS, OFFLINE_BUFFER_CHOICES, isOfflineBuffer, saveArchiveBuffer, archiveBuffer, loadBufferPref, saveBufferPref, isOfflineLayer, type OfflineLayer, type DownloadPhase,
 } from '../offline/offlineMaps'
 
 // Chaque fond téléchargeable (swisstopo gris/couleur/satellite, IGN plan/ortho) a sa propre
@@ -76,7 +76,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   const archivedSigs = ref<LayerSigs>(noSigs())
   // Marge de chaque côté du tracé pour le prochain téléchargement, et celle de chaque archive
   // déjà présente (une marge plus large demandée depuis reste « à télécharger »).
-  const offlineBufferM = ref<number>(OFFLINE_DEFAULTS.bufferM)
+  const offlineBufferM = ref<number>(loadBufferPref())
   const archivedBuffers = ref<Record<OfflineLayer, number>>(noBuffers())
 
   // Le tracé a changé depuis le téléchargement (reroutage, détour, édition) : l'archive ne
@@ -96,7 +96,9 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     (l) => !offlineHas.value[l] || archivedBuffers.value[l] < offlineBufferM.value,
   ))
   function setOfflineBuffer(m: number) {
-    if (isOfflineBuffer(m)) offlineBufferM.value = m
+    if (!isOfflineBuffer(m)) return
+    offlineBufferM.value = m
+    saveBufferPref(m)
   }
   const corridor = () => ({ ...OFFLINE_DEFAULTS, bufferM: offlineBufferM.value })
   const offlineEst = computed(() => estimateOffline(coords.value, selectedLayers.value, corridor()))
@@ -205,6 +207,14 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
       offlineHas.value = has
       archivedSigs.value = sigs
       archivedBuffers.value = buffers
+      // Une carte déjà là montre la marge avec laquelle elle a été faite (la plus large s'il y
+      // en a plusieurs), pas un réglage qui ne dirait rien de ce qui est stocké. Sans archive,
+      // on garde la dernière marge choisie. Non mémorisé : ce n'est pas un choix de l'utilisateur.
+      const stored = OFFLINE_LAYERS.filter((l) => has[l]).map((l) => buffers[l])
+      if (stored.length > 0) {
+        const widest = Math.max(...stored)
+        if (isOfflineBuffer(widest)) offlineBufferM.value = widest
+      }
     }
     resetOfflineSelection()
     refreshBaseMap()

@@ -344,6 +344,9 @@ export interface OfflineMapsBridgeState {
   supported: boolean
   ready: boolean
   stale: boolean
+  // Une couche cochée reste à télécharger (même si une autre archive est déjà prête) — absent
+  // d'un site plus ancien, l'appli retombe alors sur `ready`/`stale` seuls.
+  missing: boolean
   downloading: boolean
   pct: number
   mb: number

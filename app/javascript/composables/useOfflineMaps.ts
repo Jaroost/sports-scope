@@ -1,5 +1,5 @@
 import { ref, computed, watch, type Ref } from 'vue'
-import { mapStyleFor } from '../mapStyles'
+import { mapStyleFor, styleCoversPoint, suggestedStyleForPoint } from '../mapStyles'
 import { dataSaverActive, type OfflineMapsBridgeState } from '../companionBridge'
 import { t } from '../i18n'
 import {
@@ -79,6 +79,10 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   const offlineReady = computed(() => OFFLINE_LAYERS.some((l) => offlineHas.value[l]))
   const offlineStale = computed(() => OFFLINE_LAYERS.some(layerStale))
   const selectedLayers = computed(() => OFFLINE_LAYERS.filter((l) => offlineSelected.value[l]))
+  // Une couche cochée n'est pas encore téléchargée : `offlineReady` (« au moins une archive »)
+  // ne suffit plus à dire qu'il n'y a rien à faire — un tracé Suisse + France peut avoir son
+  // fond suisse et attendre encore le français.
+  const offlineMissing = computed(() => selectedLayers.value.some((l) => !offlineHas.value[l]))
   const offlineEst = computed(() => estimateOffline(coords.value, selectedLayers.value))
   // Vue à plat pour le panneau : une ligne par fond téléchargeable.
   const offlineLayerRows = computed(() =>
@@ -110,6 +114,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     supported: offlineIsSup && !!routeToken.value,
     ready: offlineReady.value,
     stale: offlineStale.value,
+    missing: offlineMissing.value,
     downloading: offlineDownloading.value,
     pct: offlinePct.value,
     mb: offlineEst.value.mb,
@@ -183,14 +188,38 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     refreshBaseMap()
   }
 
+  // Fonds à ajouter pour que la sélection couvre TOUT le tracé : un itinéraire à cheval sur deux
+  // pays (Suisse + France) n'est couvert par aucun fond régional seul — swisstopo hors de Suisse
+  // ne sert que du vide, qu'on comble en flou. Pour chaque point échantillonné qu'aucun fond
+  // coché ne couvre, on ajoute le fond représentant de son pays s'il est archivable ; il couvre
+  // alors les points suivants du même pays, d'où au plus un fond par pays traversé.
+  function layersMissingFor(selected: OfflineLayer[]): OfflineLayer[] {
+    const line = coords.value
+    if (line.length === 0) return []
+    const step = Math.max(1, Math.floor(line.length / 300))
+    const have = [...selected]
+    const added: OfflineLayer[] = []
+    for (let i = 0; i < line.length; i += step) {
+      const [lng, lat] = line[i]
+      if (have.some((l) => styleCoversPoint(l, lng, lat))) continue
+      const candidate = suggestedStyleForPoint({ lng, lat })
+      if (!isOfflineLayer(candidate) || have.includes(candidate)) continue
+      have.push(candidate)
+      added.push(candidate)
+    }
+    return added
+  }
+
   // Pré-coche ce qui est déjà téléchargé (pour proposer un re-téléchargement à l'identique),
-  // à défaut le fond actif s'il est archivable, sinon le gris.
+  // à défaut le fond actif s'il est archivable ; puis complète pour les pays que ces fonds ne
+  // couvrent pas (cf. `layersMissingFor`). Le gris suisse reste le repli quand rien n'a pu
+  // être déduit du tracé (fond actif mondial, tracé hors de toute zone connue).
   function resetOfflineSelection() {
     const sel = noLayers()
     for (const l of OFFLINE_LAYERS) sel[l] = offlineHas.value[l]
-    if (!OFFLINE_LAYERS.some((l) => sel[l])) {
-      sel[isOfflineLayer(mapStyleId.value) ? mapStyleId.value : 'swissgrau'] = true
-    }
+    if (!OFFLINE_LAYERS.some((l) => sel[l]) && isOfflineLayer(mapStyleId.value)) sel[mapStyleId.value] = true
+    for (const l of layersMissingFor(OFFLINE_LAYERS.filter((id) => sel[id]))) sel[l] = true
+    if (!OFFLINE_LAYERS.some((l) => sel[l])) sel.swissgrau = true
     offlineSelected.value = sel
   }
 
@@ -284,7 +313,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   return {
     offlineIsSup,
     offlineDownloading, offlineProgress, offlineErrored, offlinePhase, bridgeState,
-    offlineReady, offlineStale, offlinePct, offlineEst, offlineLayerRows, selectedLayers,
+    offlineReady, offlineStale, offlineMissing, offlinePct, offlineEst, offlineLayerRows, selectedLayers,
     toggleOfflineLayer,
     resolveBaseStyle, refreshBaseMap, noteBaseReloaded, syncOfflineState,
     startOfflineDownload, cancelOfflineDownload, removeOfflineMap,

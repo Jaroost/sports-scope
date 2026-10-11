@@ -87,6 +87,9 @@ const TILE_PX = 256
 const BLANK_MAX_BYTES = 1024
 // Qualité de ré-encodage des tuiles agrandies. L'image est déjà floue : inutile de monter.
 const UPSCALE_QUALITY = 0.8
+// Tuiles agrandies en parallèle : autant que de cœurs, sans dépasser ce qu'un téléphone tient
+// (chaque travail garde un canvas et une image décodée en mémoire).
+const FILL_CONCURRENCY = Math.max(2, Math.min(6, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4))
 
 export const OFFLINE_DEFAULTS: CorridorOpts = { minZoom: 10, maxZoom: 17, bufferM: 400 }
 
@@ -193,17 +196,19 @@ const tileKey = (z: number, x: number, y: number) => `${z}/${x}/${y}`
  * pour produire une tuile 256×256 plausible là où le fond ne sert plus de données. Ré-encodée
  * dans le format réel de la couche (`format`) : mélanger JPEG et PNG dans la même archive n'a
  * pas de sens, l'octet `tileType` de l'en-tête PMTiles n'en portant qu'un seul.
- * Renvoie `null` si le navigateur n'expose pas `OffscreenCanvas` : on stocke alors
- * simplement moins de niveaux, sans faire échouer le téléchargement.
+ * Le canvas est fourni par l'appelant (un par travailleur) plutôt que recréé à chaque tuile.
  */
-async function upscaleQuadrant(bitmap: ImageBitmap, d: number, x: number, y: number, format: TileFormat): Promise<Uint8Array | null> {
-  if (typeof OffscreenCanvas === 'undefined') return null
+async function upscaleQuadrant(
+  canvas: OffscreenCanvas,
+  ctx: OffscreenCanvasRenderingContext2D,
+  bitmap: ImageBitmap,
+  d: number,
+  x: number,
+  y: number,
+  format: TileFormat,
+): Promise<Uint8Array> {
   const side = TILE_PX / 2 ** d // côté du quadrant dans l'image de l'ancêtre
-  const canvas = new OffscreenCanvas(TILE_PX, TILE_PX)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-  ctx.imageSmoothingEnabled = true
-  ctx.imageSmoothingQuality = 'high'
+  ctx.clearRect(0, 0, TILE_PX, TILE_PX)
   ctx.drawImage(bitmap, (x & ((1 << d) - 1)) * side, (y & ((1 << d) - 1)) * side, side, side, 0, 0, TILE_PX, TILE_PX)
   const mime = `image/${format}`
   // La qualité de compression n'a de sens que pour le JPEG ; le PNG (sans perte) l'ignorerait.
@@ -242,28 +247,64 @@ async function fillMissingTiles(
   for (const items of groups.values()) toFill += items.length
   let filled = 0
   onFill?.(0, toFill)
+  // Sans `OffscreenCanvas` : on stocke simplement moins de niveaux, sans faire échouer le
+  // téléchargement.
+  if (typeof OffscreenCanvas === 'undefined' || toFill === 0) return
 
+  // Un travail par tuile à combler, rangés par ancêtre : l'image d'un ancêtre n'est décodée
+  // qu'une fois, et libérée dès que sa dernière tuile est faite — il n'y en a donc que
+  // quelques-unes en mémoire à la fois. Le gros du temps est le ré-encodage (JPEG, et surtout
+  // PNG), qui part sur un fil à part côté navigateur : plusieurs tuiles en vol en même temps
+  // l'occupent vraiment, là où une par une le laissait presque au repos.
+  const jobs: { ancestor: string; tile: Tile; d: number }[] = []
+  const remaining = new Map<string, number>()
   for (const [ancestor, items] of groups) {
-    const src = real.get(ancestor)
-    if (!src) continue
-    let bitmap: ImageBitmap
-    try {
+    remaining.set(ancestor, items.length)
+    for (const { tile, d } of items) jobs.push({ ancestor, tile, d })
+  }
+  const bitmaps = new Map<string, Promise<ImageBitmap | null>>()
+  const bitmapOf = (ancestor: string): Promise<ImageBitmap | null> => {
+    let p = bitmaps.get(ancestor)
+    if (!p) {
+      const src = real.get(ancestor)
       // Le type déclaré au Blob n'est qu'une étiquette : le décodeur sniffe les octets réels,
       // donc ceci reste correct même si `real` contenait par erreur un autre format.
-      bitmap = await createImageBitmap(new Blob([src as BlobPart], { type: `image/${format}` }))
-    } catch {
-      continue // image illisible : on laisse ces tuiles absentes de l'archive
+      p = src
+        ? createImageBitmap(new Blob([src as BlobPart], { type: `image/${format}` })).catch(() => null) // illisible : tuiles laissées absentes
+        : Promise.resolve(null)
+      bitmaps.set(ancestor, p)
     }
-    try {
-      for (const { tile, d } of items) {
-        const data = await upscaleQuadrant(bitmap, d, tile.x, tile.y, format)
-        if (data) collected.push({ z: tile.z, x: tile.x, y: tile.y, data })
-        onFill?.(++filled, toFill)
+    return p
+  }
+  const release = async (ancestor: string) => {
+    const left = (remaining.get(ancestor) ?? 1) - 1
+    remaining.set(ancestor, left)
+    if (left > 0) return
+    const bmp = await bitmaps.get(ancestor)
+    bmp?.close()
+    bitmaps.delete(ancestor)
+  }
+
+  let next = 0
+  const worker = async (): Promise<void> => {
+    const canvas = new OffscreenCanvas(TILE_PX, TILE_PX)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    while (next < jobs.length) {
+      const { ancestor, tile, d } = jobs[next++]
+      const bitmap = await bitmapOf(ancestor)
+      if (bitmap) {
+        const data = await upscaleQuadrant(canvas, ctx, bitmap, d, tile.x, tile.y, format)
+        collected.push({ z: tile.z, x: tile.x, y: tile.y, data })
       }
-    } finally {
-      bitmap.close()
+      await release(ancestor)
+      onFill?.(++filled, toFill)
     }
   }
+  const workers = Math.min(FILL_CONCURRENCY, jobs.length)
+  await Promise.all(Array.from({ length: workers }, worker))
 }
 
 /**

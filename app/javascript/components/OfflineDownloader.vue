@@ -29,7 +29,7 @@ const mapStyleId = ref(userPreferences().navigation.default_style as string)
 const loadFailed = ref(false)
 
 const {
-  offlineErrored, offlineDownloading, offlineReady, offlineStale, offlinePct, bridgeState,
+  offlineErrored, offlineDownloading, offlineReady, offlineStale, offlineMissing, offlinePct, bridgeState,
   syncOfflineState, startOfflineDownload, cancelOfflineDownload,
 } = useOfflineMaps({
   getMap: () => null,
@@ -69,9 +69,9 @@ onMounted(async () => {
       : suggestedStyleForPoint({ lng, lat })
     routeToken.value = props.shareToken
     // Pré-coche (archives déjà là, sinon fond actif) puis décide : une archive à jour n'est
-    // pas refaite, l'appli le lit dans l'état (`ready && !stale`) et conclut tout de suite.
+    // pas refaite (sauf s'il manque le fond d'un autre pays traversé), l'appli le lit dans l'état (`ready && !stale`) et conclut tout de suite.
     await syncOfflineState()
-    if (!offlineReady.value || offlineStale.value) await startOfflineDownload()
+    if (!offlineReady.value || offlineStale.value || offlineMissing.value) await startOfflineDownload()
   } catch {
     loadFailed.value = true
     offlineErrored.value = true
@@ -83,7 +83,7 @@ onMounted(async () => {
   <div class="container py-5 text-center">
     <p v-if="loadFailed || offlineErrored" class="text-danger mb-0">{{ t('routes.offline_error') }}</p>
     <p v-else-if="offlineDownloading" class="mb-0">{{ bridgeState.phase }} · {{ offlinePct }} %</p>
-    <p v-else-if="offlineReady && !offlineStale" class="mb-0">{{ t('routes.offline_ready') }}</p>
+    <p v-else-if="offlineReady && !offlineStale && !offlineMissing" class="mb-0">{{ t('routes.offline_ready') }}</p>
     <p v-else class="mb-0">…</p>
   </div>
 </template>

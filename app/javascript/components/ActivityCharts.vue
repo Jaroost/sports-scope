@@ -128,8 +128,53 @@ async function fetchZones() {
 }
 
 // Coloration de la courbe elle-même, le long du parcours.
-const showPowerZoneColor = ref(false)
+const showPowerZoneColor = ref(true)
 const showHrZoneColor = ref(false)
+// Coloration du dénivelé (pente) sur le graphique d'altitude : propre au graphique, activée
+// par défaut (indépendante du bouton de la carte, dont l'état initial dépend des préférences).
+const showGradeColor = ref(true)
+
+// Bornes Y manuelles par flux (unités affichées) ; vide = automatique. Mémorisées par
+// navigateur, comme une préférence d'affichage.
+const AXIS_RANGES_KEY = 'activityCharts.axisRanges'
+function loadAxisRanges() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(AXIS_RANGES_KEY) || '{}')
+    return raw && typeof raw === 'object' ? raw : {}
+  } catch { return {} }
+}
+const axisRanges = ref(loadAxisRanges())
+// Sélection libre (rectangle, horizontal + vertical) par graphique : la partie horizontale
+// sélectionne le segment comme d'habitude, la verticale fixe les bornes Y des courbes.
+const freeSelect = ref({})
+function groupHasAxisBounds(group) {
+  return uniqueStreams(group).some((k) => axisRanges.value[k])
+}
+function resetGroupAxes(group) {
+  uniqueStreams(group).forEach(resetAxis)
+}
+function axisBound(streamKey, side) {
+  const v = axisRanges.value[streamKey]?.[side]
+  return Number.isFinite(v) ? v : null
+}
+function setAxisBound(streamKey, side, raw) {
+  const n = raw === '' || raw == null ? NaN : Number(raw)
+  const cur = { ...(axisRanges.value[streamKey] || {}) }
+  if (Number.isFinite(n)) cur[side] = n
+  else delete cur[side]
+  const next = { ...axisRanges.value }
+  if (Object.keys(cur).length) next[streamKey] = cur
+  else delete next[streamKey]
+  axisRanges.value = next
+  try { localStorage.setItem(AXIS_RANGES_KEY, JSON.stringify(next)) } catch { /* best-effort */ }
+}
+function resetAxis(streamKey) {
+  setAxisBound(streamKey, 'min', '')
+  setAxisBound(streamKey, 'max', '')
+}
+function uniqueStreams(group) {
+  return [...new Set(group.streams)]
+}
 // Bandes horizontales en fond de graphique (repère fixe sur l'axe Y), indépendantes
 // des deux précédentes.
 const showPowerZoneBands = ref(false)
@@ -902,6 +947,8 @@ const dragSelectPlugin = {
         st.mode = 'select'
         st.x0 = e.x
         st.x1 = e.x
+        st.y0 = e.y
+        st.y1 = e.y
         chart.canvas.style.cursor = 'crosshair'
       }
       if (native.type === 'touchstart' && native.cancelable) native.preventDefault()
@@ -914,6 +961,7 @@ const dragSelectPlugin = {
       if (native.type === 'touchmove' && native.cancelable) native.preventDefault()
     } else if (isMove && st.mode === 'select') {
       st.x1 = e.x
+      st.y1 = e.y
       if (native.type === 'touchmove' && native.cancelable) native.preventDefault()
       chart.draw()
     } else if (isMove && !st.mode) {
@@ -929,10 +977,15 @@ const dragSelectPlugin = {
           const v1 = chart.scales.x.getValueForPixel(x1)
           chart.$onSelect?.(v0, v1)
         }
+        if (chart.$freeSelect && st.y0 != null && st.y1 != null && Math.abs(st.y1 - st.y0) >= 4) {
+          chart.$onYRange?.(st.y0, st.y1)
+        }
       }
       st.mode = null
       st.x0 = null
       st.x1 = null
+      st.y0 = null
+      st.y1 = null
       st.fixedValue = null
       chart.canvas.style.cursor = 'crosshair'
       chart.draw()
@@ -965,7 +1018,13 @@ const dragSelectPlugin = {
     if (st && st.mode === 'select' && st.x0 != null && st.x1 != null) {
       ctx.save()
       ctx.fillStyle = 'rgba(13, 110, 253, 0.25)'
-      ctx.fillRect(Math.min(st.x0, st.x1), chartArea.top, Math.abs(st.x1 - st.x0), chartArea.bottom - chartArea.top)
+      if (chart.$freeSelect && st.y0 != null && st.y1 != null) {
+        const yLo = Math.max(chartArea.top, Math.min(chartArea.bottom, Math.min(st.y0, st.y1)))
+        const yHi = Math.max(chartArea.top, Math.min(chartArea.bottom, Math.max(st.y0, st.y1)))
+        ctx.fillRect(Math.min(st.x0, st.x1), yLo, Math.abs(st.x1 - st.x0), yHi - yLo)
+      } else {
+        ctx.fillRect(Math.min(st.x0, st.x1), chartArea.top, Math.abs(st.x1 - st.x0), chartArea.bottom - chartArea.top)
+      }
       ctx.restore()
     }
   },
@@ -1056,7 +1115,7 @@ async function renderCharts() {
       // couleur par échantillon dans les trois cas. Lue par gradeFillPlugin (remplissage)
       // et par `segment.borderColor` (couleur de la ligne), toutes deux indexées sur les
       // points du dataset — d'où un seul jeu de variables (rawColors/gradeColors).
-      const gradeAltitude = props.showGrade && streamKey === 'altitude'
+      const gradeAltitude = showGradeColor.value && streamKey === 'altitude'
       const powerZoned = showPowerZoneColor.value && streamKey === 'watts' && hasPowerZones.value
       const hrZoned = showHrZoneColor.value && streamKey === 'heartrate' && hasHrZones.value
       const zoneColored = gradeAltitude || powerZoned || hrZoned
@@ -1185,6 +1244,9 @@ async function renderCharts() {
         // légende du panneau. Les graduations restent colorées pour repérer l'axe.
         title: { display: false },
         ...(hasRange ? { min: yMin, max: yMax, grace: '5%' } : {}),
+        // Bornes manuelles : prioritaires sur l'auto (Chart.js ignore alors `grace`).
+        ...(axisBound(streamKey, 'min') != null ? { min: axisBound(streamKey, 'min') } : {}),
+        ...(axisBound(streamKey, 'max') != null ? { max: axisBound(streamKey, 'max') } : {}),
         ticks: {
           maxTicksLimit: 6,
           color: def.color,
@@ -1262,6 +1324,29 @@ async function renderCharts() {
       zoneBands.push({ yAxisID: `y-${hrIdx}`, threshold: zonesData.value?.lthr, zones: HR_ZONES })
     }
     ;(chart as any).$zoneBands = zoneBands
+
+    ;(chart as any).$freeSelect = !!freeSelect.value[group.id]
+    // Rectangle libre : ses bornes verticales (px) deviennent le min/max de l'axe de
+    // chaque courbe du graphique (chacune a sa propre échelle).
+    ;(chart as any).$onYRange = (yA: number, yB: number) => {
+      const area = chart.chartArea
+      const top = Math.max(area.top, Math.min(yA, yB))
+      const bottom = Math.min(area.bottom, Math.max(yA, yB))
+      const next = { ...axisRanges.value }
+      const seen = new Set<string>()
+      group.streams.forEach((streamKey, idx) => {
+        if (seen.has(streamKey)) return
+        seen.add(streamKey)
+        const scale = chart.scales[`y-${idx}`]
+        if (!scale) return
+        const hi = scale.getValueForPixel(top)
+        const lo = scale.getValueForPixel(bottom)
+        if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi <= lo) return
+        next[streamKey] = { min: Number(lo.toPrecision(4)), max: Number(hi.toPrecision(4)) }
+      })
+      axisRanges.value = next
+      try { localStorage.setItem(AXIS_RANGES_KEY, JSON.stringify(next)) } catch { /* best-effort */ }
+    }
 
     ;(chart as any).$onSelect = (v0: number, v1: number) => {
       const r0 = chartXToRaw(Math.min(v0, v1))
@@ -1944,6 +2029,8 @@ function attachTouchInteraction(canvas: HTMLCanvasElement, chart: any) {
     // Sélection : on ne capture pas encore (pas de preventDefault) — le scroll vertical
     // de la page reste possible tant que le doigt n'a pas tranché en faveur de l'horizontale.
     touchSelect = { id: touch.identifier, startPx: x, startY: touch.clientY, moved: false, chart }
+    // Sélection libre : le doigt est capturé d'emblée (pas de scroll de page sur ce graphique).
+    if (chart.$freeSelect) ev.preventDefault()
   }
 
   const onMove = (ev: TouchEvent) => {
@@ -1987,15 +2074,19 @@ function attachTouchInteraction(canvas: HTMLCanvasElement, chart: any) {
         // Tant que ce n'est pas le cas (vertical ou diagonal), on ne fait pas de
         // preventDefault : le scroll vertical de la page reste possible. Dès que le
         // geste penche vers la verticale, on abandonne définitivement la sélection.
-        if (dx <= TOUCH_TAP_TOL_PX || dx <= dy) {
+        if (chart.$freeSelect) {
+          if (dx <= TOUCH_TAP_TOL_PX && dy <= TOUCH_TAP_TOL_PX) return
+        } else if (dx <= TOUCH_TAP_TOL_PX || dx <= dy) {
           if (dy > TOUCH_TAP_TOL_PX && dy >= dx) touchSelect = null
           return
         }
         touchSelect.moved = true
-        chart.$drag = { mode: 'select', x0: touchSelect.startPx, x1: x }
+        const rectTop = canvas.getBoundingClientRect().top
+        chart.$drag = { mode: 'select', x0: touchSelect.startPx, x1: x, y0: touchSelect.startY - rectTop, y1: touchSelect.startY - rectTop }
       }
       ev.preventDefault()
       chart.$drag.x1 = x
+      chart.$drag.y1 = tt.clientY - canvas.getBoundingClientRect().top
       chart.update('none')
     }
   }
@@ -2027,6 +2118,9 @@ function attachTouchInteraction(canvas: HTMLCanvasElement, chart: any) {
           const maxIdx = (xs?.length || 1) - 1
           if (sIdx <= 0 && eIdx >= maxIdx) emit('clear-selection')
           else if (eIdx > sIdx) emit('select-segment', sIdx, eIdx)
+        }
+        if (chart.$freeSelect && drag.y0 != null && drag.y1 != null && Math.abs(drag.y1 - drag.y0) >= 4) {
+          chart.$onYRange?.(drag.y0, drag.y1)
         }
       } else {
         // Simple tap sans glissement : sans preventDefault ici, le navigateur le
@@ -2070,12 +2164,18 @@ watch(() => props.xAxis, () => {
 
 // La « couleur des tracés » (re)colore le remplissage du profil d'altitude : on reconstruit
 // les datasets pour (dés)activer $gradeColors et le fill uni.
-watch(() => props.showGrade, () => {
+watch(showGradeColor, () => {
+  if (props.streams) renderCharts()
+})
+watch(freeSelect, (v) => {
+  chartInstances.forEach((chart, id) => { chart.$freeSelect = !!v[id] })
+})
+watch(axisRanges, () => {
   if (props.streams) renderCharts()
 })
 
 // Pastilles « zones de … » : même reconstruction de datasets que showGrade.
-watch([showPowerZoneColor, showHrZoneColor], () => {
+watch([showPowerZoneColor, showHrZoneColor, hasPowerZones, hasHrZones], () => {
   if (props.streams) renderCharts()
 })
 
@@ -2587,6 +2687,27 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="d-flex gap-1">
                   <button
+                    v-if="!group.collapsed && groupHasAxisBounds(group)"
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                    :title="t('strava.axis_reset')"
+                    @click="resetGroupAxes(group)"
+                    @pointerdown.stop
+                  >
+                    <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                  </button>
+                  <button
+                    v-if="!group.collapsed"
+                    type="button"
+                    class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                    :class="{ active: freeSelect[group.id] }"
+                    :title="freeSelect[group.id] ? t('strava.free_select_off') : t('strava.free_select_on')"
+                    @click="freeSelect = { ...freeSelect, [group.id]: !freeSelect[group.id] }"
+                    @pointerdown.stop
+                  >
+                    <i class="fa-solid fa-ruler-vertical" aria-hidden="true"></i>
+                  </button>
+                  <button
                     v-if="group.streams.length > 1 && !group.collapsed"
                     type="button"
                     class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
@@ -2627,6 +2748,18 @@ onBeforeUnmount(() => {
                 @pointercancel="panSliderPointerUp"
               >
                 <div class="zoom-pan-thumb" :style="zoomThumbStyle"></div>
+              </div>
+              <div v-if="group.streams.includes('altitude')" class="zone-toggle-row">
+                <button
+                  type="button"
+                  class="zone-toggle-pill"
+                  :class="{ active: showGradeColor }"
+                  :title="showGradeColor ? t('strava.hide_grade_colors') : t('strava.show_grade_colors')"
+                  @click="showGradeColor = !showGradeColor"
+                >
+                  <i class="fa-solid fa-mountain" aria-hidden="true"></i>
+                  <span>{{ t('strava.grade_color_label') }}</span>
+                </button>
               </div>
               <div v-if="group.streams.includes('watts') && hasPowerZones" class="zone-toggle-row">
                 <button

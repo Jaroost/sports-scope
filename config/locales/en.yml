@@ -1268,7 +1268,6 @@ en:
     offline_delete: "Delete"
     offline_error: "Download failed"
     offline_phase_tiles: "Downloading tiles"
-    offline_phase_fill: "Filling areas without tiles"
     offline_phase_build: "Building the archive"
     offline_phase_write: "Writing to the device"
     remaining_distance: "Distance left"

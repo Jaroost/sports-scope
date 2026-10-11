@@ -18,9 +18,10 @@
 //     près de la frontière avant de basculer en 404 à son tour.
 //   Les deux signalent la même chose (« rien ici ») et sont donc traités pareil : on descend
 //   la pyramide zoom par zoom, une tuile « vide » (au sens de l'un ou l'autre) élague ses
-//   descendants sans les demander ; les niveaux manquants sont ensuite comblés en agrandissant
-//   le quadrant correspondant du plus profond ancêtre réel. La carte reste ainsi lisible (mais
-//   floue) au-delà de la frontière, au lieu de virer au blanc quand on zoome.
+//   descendants sans les demander. Les niveaux ainsi élagués restent ABSENTS de l'archive : au
+//   delà de la frontière la carte s'affiche vide quand on zoome, et il suffit de dézoomer. On
+//   avait essayé de les fabriquer en agrandissant le niveau du dessus (flou mais lisible) ;
+//   c'était beaucoup trop long sur un téléphone pour un long tracé.
 //
 // `swissimage` et `ignortho` font exception : hors de leur pays, ils servent un fond mondial
 // basse résolution au lieu d'une absence de données (vérifié en direct jusqu'en Suisse pour
@@ -31,7 +32,7 @@
 //
 // Format des tuiles : swisstopo et `ignortho` sont du JPEG, `ignplan` du PNG (texte/vecteur,
 // la compression avec perte le rendrait illisible). Le format de chaque couche est porté par
-// `LAYER_SPECS` et suit tout le pipeline — décodage, ré-encodage des niveaux comblés, et
+// `LAYER_SPECS` et suit tout le pipeline — téléchargement, et
 // octet `tileType` de l'archive PMTiles — pour ne jamais mélanger les deux dans une archive.
 import { PMTiles, FileSource, Protocol } from 'pmtiles'
 import { buildPmtilesArchive, type RawTile } from './pmtilesWriter'
@@ -77,28 +78,20 @@ const OPFS_DIR = 'offline-maps'
 // avec le fair use de ces services (la limite ~20 req/min de swisstopo vise la moyenne 24/7,
 // pas un import unique) ; même prudence appliquée à data.geopf.fr, faute de chiffre publié.
 const CONCURRENCY = 6
-// Côté d'une tuile WMTS, en pixels.
-const TILE_PX = 256
 // La tuile « hors couverture » de swisstopo pèse 668 o (JPEG uniforme, toujours identique).
 // Toute tuile aussi légère est traitée comme vide : une tuile réelle mais unie (grand lac)
-// serait de toute façon reconstruite à l'identique depuis son parent. IGN, lui, signale le
+// est gardée dans l'archive telle quelle (seuls ses descendants sont élagués). IGN, lui, signale le
 // hors-couverture par un 404 explicite (cf. en-tête du fichier) : géré à part dans la boucle
 // de téléchargement, ce seuil ne le concerne pas.
 const BLANK_MAX_BYTES = 1024
-// Qualité de ré-encodage des tuiles agrandies. L'image est déjà floue : inutile de monter.
-const UPSCALE_QUALITY = 0.8
-// Tuiles agrandies en parallèle : autant que de cœurs, sans dépasser ce qu'un téléphone tient
-// (chaque travail garde un canvas et une image décodée en mémoire).
-const FILL_CONCURRENCY = Math.max(2, Math.min(6, (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4))
 
 export const OFFLINE_DEFAULTS: CorridorOpts = { minZoom: 10, maxZoom: 17, bufferM: 400 }
 
-// Étapes d'un téléchargement : les tuiles (la barre), puis trois temps de traitement local
-// sans tuile à compter — sur un long itinéraire le comblement par agrandissement et
-// l'assemblage de l'archive prennent bien plus longtemps que le réseau.
-export type DownloadPhase = 'tiles' | 'fill' | 'build' | 'write'
+// Étapes d'un téléchargement : les tuiles (la barre), puis deux temps de traitement local
+// sans tuile à compter — l'assemblage de l'archive et son écriture.
+export type DownloadPhase = 'tiles' | 'build' | 'write'
 
-// `sub` : avancement 0-100 à l'intérieur de l'étape, quand elle sait le dire (comblement).
+// `sub` : avancement 0-100 à l'intérieur de l'étape, quand elle sait le dire.
 export interface DownloadProgress { done: number; total: number; failed: number; phase: DownloadPhase; sub?: number }
 
 // L'OPFS et l'écriture par flux ne sont pas disponibles partout (Safari ancien, contextes
@@ -192,122 +185,6 @@ export function estimateOffline(
 const tileKey = (z: number, x: number, y: number) => `${z}/${x}/${y}`
 
 /**
- * Agrandit le quadrant (`z`,`x`,`y`) de l'image d'un ancêtre situé `d` niveaux au-dessus,
- * pour produire une tuile 256×256 plausible là où le fond ne sert plus de données. Ré-encodée
- * dans le format réel de la couche (`format`) : mélanger JPEG et PNG dans la même archive n'a
- * pas de sens, l'octet `tileType` de l'en-tête PMTiles n'en portant qu'un seul.
- * Le canvas est fourni par l'appelant (un par travailleur) plutôt que recréé à chaque tuile.
- */
-async function upscaleQuadrant(
-  canvas: OffscreenCanvas,
-  ctx: OffscreenCanvasRenderingContext2D,
-  bitmap: ImageBitmap,
-  d: number,
-  x: number,
-  y: number,
-  format: TileFormat,
-): Promise<Uint8Array> {
-  const side = TILE_PX / 2 ** d // côté du quadrant dans l'image de l'ancêtre
-  ctx.clearRect(0, 0, TILE_PX, TILE_PX)
-  ctx.drawImage(bitmap, (x & ((1 << d) - 1)) * side, (y & ((1 << d) - 1)) * side, side, side, 0, 0, TILE_PX, TILE_PX)
-  const mime = `image/${format}`
-  // La qualité de compression n'a de sens que pour le JPEG ; le PNG (sans perte) l'ignorerait.
-  const blob = await canvas.convertToBlob(format === 'jpeg' ? { type: mime, quality: UPSCALE_QUALITY } : { type: mime })
-  return new Uint8Array(await blob.arrayBuffer())
-}
-
-/**
- * Comble les tuiles absentes de `real` en les dérivant du plus profond ancêtre réel.
- * Les tuiles à combler sont regroupées par ancêtre pour ne décoder chaque image qu'une fois.
- */
-async function fillMissingTiles(
-  real: Map<string, Uint8Array>,
-  byZoom: Map<number, Tile[]>,
-  minZoom: number,
-  format: TileFormat,
-  collected: RawTile[],
-  onFill?: (done: number, total: number) => void,
-): Promise<void> {
-  const groups = new Map<string, { tile: Tile; d: number }[]>()
-  for (const [z, tiles] of byZoom) {
-    for (const t of tiles) {
-      if (real.has(tileKey(z, t.x, t.y))) continue
-      for (let d = 1; z - d >= minZoom; d++) {
-        const ancestor = tileKey(z - d, t.x >> d, t.y >> d)
-        if (!real.has(ancestor)) continue
-        const group = groups.get(ancestor)
-        if (group) group.push({ tile: t, d })
-        else groups.set(ancestor, [{ tile: t, d }])
-        break
-      }
-    }
-  }
-
-  let toFill = 0
-  for (const items of groups.values()) toFill += items.length
-  let filled = 0
-  onFill?.(0, toFill)
-  // Sans `OffscreenCanvas` : on stocke simplement moins de niveaux, sans faire échouer le
-  // téléchargement.
-  if (typeof OffscreenCanvas === 'undefined' || toFill === 0) return
-
-  // Un travail par tuile à combler, rangés par ancêtre : l'image d'un ancêtre n'est décodée
-  // qu'une fois, et libérée dès que sa dernière tuile est faite — il n'y en a donc que
-  // quelques-unes en mémoire à la fois. Le gros du temps est le ré-encodage (JPEG, et surtout
-  // PNG), qui part sur un fil à part côté navigateur : plusieurs tuiles en vol en même temps
-  // l'occupent vraiment, là où une par une le laissait presque au repos.
-  const jobs: { ancestor: string; tile: Tile; d: number }[] = []
-  const remaining = new Map<string, number>()
-  for (const [ancestor, items] of groups) {
-    remaining.set(ancestor, items.length)
-    for (const { tile, d } of items) jobs.push({ ancestor, tile, d })
-  }
-  const bitmaps = new Map<string, Promise<ImageBitmap | null>>()
-  const bitmapOf = (ancestor: string): Promise<ImageBitmap | null> => {
-    let p = bitmaps.get(ancestor)
-    if (!p) {
-      const src = real.get(ancestor)
-      // Le type déclaré au Blob n'est qu'une étiquette : le décodeur sniffe les octets réels,
-      // donc ceci reste correct même si `real` contenait par erreur un autre format.
-      p = src
-        ? createImageBitmap(new Blob([src as BlobPart], { type: `image/${format}` })).catch(() => null) // illisible : tuiles laissées absentes
-        : Promise.resolve(null)
-      bitmaps.set(ancestor, p)
-    }
-    return p
-  }
-  const release = async (ancestor: string) => {
-    const left = (remaining.get(ancestor) ?? 1) - 1
-    remaining.set(ancestor, left)
-    if (left > 0) return
-    const bmp = await bitmaps.get(ancestor)
-    bmp?.close()
-    bitmaps.delete(ancestor)
-  }
-
-  let next = 0
-  const worker = async (): Promise<void> => {
-    const canvas = new OffscreenCanvas(TILE_PX, TILE_PX)
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = 'high'
-    while (next < jobs.length) {
-      const { ancestor, tile, d } = jobs[next++]
-      const bitmap = await bitmapOf(ancestor)
-      if (bitmap) {
-        const data = await upscaleQuadrant(canvas, ctx, bitmap, d, tile.x, tile.y, format)
-        collected.push({ z: tile.z, x: tile.x, y: tile.y, data })
-      }
-      await release(ancestor)
-      onFill?.(++filled, toFill)
-    }
-  }
-  const workers = Math.min(FILL_CONCURRENCY, jobs.length)
-  await Promise.all(Array.from({ length: workers }, worker))
-}
-
-/**
  * Télécharge le corridor, construit l'archive PMTiles et la stocke dans l'OPFS.
  * Renvoie le nombre de tuiles effectivement stockées et la taille de l'archive.
  */
@@ -336,8 +213,10 @@ export async function downloadOfflineArchive(
           const res = await fetch(tileUrl(layer, t.z, t.x, t.y), { signal })
           if (res.ok) {
             const data = new Uint8Array(await res.arrayBuffer())
-            if (data.length > BLANK_MAX_BYTES) real.set(tileKey(t.z, t.x, t.y), data)
-            else blank.add(tileKey(t.z, t.x, t.y))
+            // Une tuile légère (hors couverture, ou unie comme un lac) élague ses descendants
+            // mais reste dans l'archive : sans quoi un lac s'afficherait vide à ce niveau.
+            real.set(tileKey(t.z, t.x, t.y), data)
+            if (data.length <= BLANK_MAX_BYTES) blank.add(tileKey(t.z, t.x, t.y))
           } else if (res.status === 404) {
             // Hors-couverture façon IGN (cf. en-tête du fichier) : même sémantique que la
             // tuile vide de swisstopo, donc même élagage — jamais atteint pour swisstopo, qui
@@ -348,7 +227,7 @@ export async function downloadOfflineArchive(
           }
         } catch (e) {
           if (signal?.aborted) throw e
-          failed++ // erreur réseau ponctuelle : on continue, la tuile sera comblée
+          failed++ // erreur réseau ponctuelle : on continue, la tuile restera vide
         }
         done++
         onProgress?.({ done, total, failed, phase: 'tiles' })
@@ -375,19 +254,17 @@ export async function downloadOfflineArchive(
     await fetchTiles(toFetch)
   }
 
-  if (real.size === 0) throw new Error('offline_no_tiles')
+  // Rien que des tuiles vides : tracé hors de la couverture de ce fond, inutile d'archiver du blanc.
+  if (![...real.values()].some((d) => d.length > BLANK_MAX_BYTES)) throw new Error('offline_no_tiles')
 
   const collected: RawTile[] = [...real].map(([key, data]) => {
     const [z, x, y] = key.split('/').map(Number)
     return { z, x, y, data }
   })
-  const report = (phase: DownloadPhase, sub?: number) => onProgress?.({ done, total, failed, phase, sub })
-  report('fill', 0)
-  await fillMissingTiles(
-    real, byZoom, opts.minZoom, LAYER_SPECS[layer].format, collected,
-    (n, all) => report('fill', all ? Math.round((n / all) * 100) : 100),
-  )
-
+  // Les tuiles hors couverture ne sont PAS comblées : elles restent absentes de l'archive et
+  // s'affichent vides. On avait essayé de les fabriquer en agrandissant le niveau du dessus
+  // (flou mais lisible) ; c'était beaucoup trop long sur un téléphone pour un long tracé.
+  const report = (phase: DownloadPhase) => onProgress?.({ done, total, failed, phase })
   report('build')
   const archive = await buildPmtilesArchive(collected, {
     minZoom: opts.minZoom,

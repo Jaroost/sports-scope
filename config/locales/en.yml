@@ -1915,6 +1915,8 @@ en:
       page_leave_button_help: "A one-tap shortcut, next to the ⋮ menu — which still always keeps \"Back to home\"."
       page_hide_workout_badge_label: "Hide the workout badge on this page"
       page_hide_workout_badge_help: "The current-segment badge at the top left is hidden while this page is shown."
+      page_hide_on_data_saver_label: "Hide this page when data saver is on"
+      page_hide_on_data_saver_help: "It is left out of the ⋮ menu (and no longer joins the swipe) while the phone's data saver is on — useful for a page that needs the network, such as weather."
       page_effort: "Effort"
       page_numbers: "Figures"
       page_laps: "Laps"

@@ -468,6 +468,11 @@ export interface Page {
   // (`RidePageSpec.hideWorkoutBadge`, dépôt voisin). Absent vaut « pastille
   // visible », comportement d'avant ce réglage.
   hide_workout_badge?: boolean
+  // Seulement pour une page rangée derrière le menu (`menu`) : n'y figure pas
+  // tant que l'économie de données de l'appli est active
+  // (`RidePageSpec.hideOnDataSaver`, dépôt voisin). Absent vaut « toujours dans
+  // le menu ».
+  hide_on_data_saver?: boolean
 }
 
 // La case « marquer un tour » du bandeau ou de l'encoche — seule case à

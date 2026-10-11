@@ -1915,6 +1915,8 @@ fr:
       page_leave_button_help: "Un raccourci en un tap, à côté du menu ⋮ — qui garde de toute façon toujours « Revenir à l'accueil »."
       page_hide_workout_badge_label: "Cacher la pastille d'entraînement sur cette page"
       page_hide_workout_badge_help: "La pastille du tronçon en cours, en haut à gauche, n'apparaît pas tant que cette page est affichée."
+      page_hide_on_data_saver_label: "Masquer cette page quand l'économie de données est active"
+      page_hide_on_data_saver_help: "Elle disparaît du menu ⋮ (et ne rejoint plus le défilement) tant que l'économie de données du téléphone est activée — utile pour une page qui a besoin du réseau, comme la météo."
       page_effort: "Effort"
       page_numbers: "Chiffres"
       page_laps: "Tours"

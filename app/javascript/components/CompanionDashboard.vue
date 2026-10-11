@@ -625,8 +625,10 @@ function toggleMenuPage(page: Page) {
   if (!canHideBehindMenu(page, preset.value.pages)) return
   // La clé est effacée et non mise à `false` : le document ne porte que ce qui
   // s'écarte du défaut, comme les capteurs coupés.
-  if (page.menu) delete page.menu
-  else page.menu = true
+  if (page.menu) {
+    delete page.menu
+    delete page.hide_on_data_saver
+  } else page.menu = true
 }
 
 // La condition qui fait rejoindre le défilement à une page rangée derrière le
@@ -681,6 +683,14 @@ function toggleLeaveButton(page: Page) {
 function toggleHideWorkoutBadge(page: Page) {
   if (page.hide_workout_badge) delete page.hide_workout_badge
   else page.hide_workout_badge = true
+}
+
+// La page absente du menu quand l'économie de données est active — voir
+// `Page.hide_on_data_saver`. Effacée et non mise à `false`, même règle que
+// `leave_button`.
+function toggleHideOnDataSaver(page: Page) {
+  if (page.hide_on_data_saver) delete page.hide_on_data_saver
+  else page.hide_on_data_saver = true
 }
 
 // Combien de pages restent à faire défiler. Sert à dire, sous la liste, ce que le
@@ -1674,6 +1684,15 @@ async function save() {
               <!-- Seulement pour une page déjà rangée derrière le menu : la
                    condition qui l'en fait ressortir toute seule pendant la
                    sortie, et si on bascule dessus quand elle devient vraie. -->
+              <div v-if="page.menu" class="mb-2 form-check">
+                <input :id="`hide-on-data-saver-${index}`" type="checkbox" class="form-check-input"
+                       :checked="!!page.hide_on_data_saver" @change="toggleHideOnDataSaver(page)">
+                <label class="form-check-label small" :for="`hide-on-data-saver-${index}`">
+                  {{ t('companion.settings.page_hide_on_data_saver_label') }}
+                </label>
+                <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_hide_on_data_saver_help') }}</p>
+              </div>
+
               <div v-if="page.menu" class="mb-2">
                 <label class="small mb-1 d-block">{{ t('companion.settings.menu_condition_label') }}
                   <select class="form-select form-select-sm" :value="page.menu_condition || ''"

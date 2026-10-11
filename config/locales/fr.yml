@@ -1267,6 +1267,7 @@ fr:
     offline_redownload: "Retélécharger"
     offline_delete: "Supprimer"
     offline_error: "Échec du téléchargement"
+    offline_buffer: "Marge autour du tracé"
     offline_phase_tiles: "Téléchargement des tuiles"
     offline_phase_build: "Assemblage de l'archive"
     offline_phase_write: "Écriture sur l'appareil"

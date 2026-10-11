@@ -347,6 +347,9 @@ export interface OfflineMapsBridgeState {
   // Une couche cochée reste à télécharger (même si une autre archive est déjà prête) — absent
   // d'un site plus ancien, l'appli retombe alors sur `ready`/`stale` seuls.
   missing: boolean
+  // Marge de chaque côté du tracé (m) et celles proposées ; absentes d'un site plus ancien.
+  bufferM: number
+  bufferChoices: number[]
   downloading: boolean
   pct: number
   mb: number
@@ -363,6 +366,7 @@ interface OfflineMapsBridgeHandlers {
   cancel(): void
   remove(): void
   toggleLayer(id: string): void
+  setBuffer(m: number): void
 }
 
 let offlineHandlers: OfflineMapsBridgeHandlers | null = null
@@ -399,6 +403,7 @@ export function installCompanionBridge(): void {
       offlineCancel(): void
       offlineRemove(): void
       offlineToggleLayer(id: string): void
+      offlineSetBuffer(m: number): void
       sleepEnter(): void
       sleepExit(): void
       setPoiFilter(visibleKeys: string[]): void
@@ -441,6 +446,7 @@ export function installCompanionBridge(): void {
     offlineCancel() { offlineHandlers?.cancel() },
     offlineRemove() { offlineHandlers?.remove() },
     offlineToggleLayer(id: string) { offlineHandlers?.toggleLayer(id) },
+    offlineSetBuffer(m: number) { offlineHandlers?.setBuffer(Number(m)) },
     sleepEnter() { sleepHandlers?.enter() },
     sleepExit() { sleepHandlers?.exit() },
     // Liste des clés de catégorie à afficher (poiCategories.ts). Une valeur

@@ -31,7 +31,7 @@ const loadFailed = ref(false)
 
 const {
   offlineErrored, offlineDownloading, offlineReady, offlineStale, offlineMissing, offlinePct, bridgeState,
-  syncOfflineState, startOfflineDownload, cancelOfflineDownload, toggleOfflineLayer, removeOfflineMap,
+  syncOfflineState, startOfflineDownload, cancelOfflineDownload, toggleOfflineLayer, removeOfflineMap, setOfflineBuffer,
 } = useOfflineMaps({
   getMap: () => null,
   getMaplibre: () => null,
@@ -48,6 +48,7 @@ registerOfflineMapsHandlers({
   cancel: cancelOfflineDownload,
   remove: () => { void removeOfflineMap() },
   toggleLayer: toggleOfflineLayer,
+  setBuffer: setOfflineBuffer,
 })
 onBeforeUnmount(() => registerOfflineMapsHandlers(null))
 

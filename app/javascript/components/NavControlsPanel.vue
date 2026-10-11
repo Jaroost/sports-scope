@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS } from '../mapStyles'
+import { OFFLINE_BUFFER_CHOICES } from '../offline/offlineMaps'
 import type { PoiCategory } from '../poiCategories'
 import type { Sport } from '../userPreferences'
 import NavRoutingPicker from './NavRoutingPicker.vue'
@@ -44,6 +45,8 @@ const props = defineProps<{
   // Une ligne par fond swisstopo téléchargeable (gris / couleur / satellite).
   offlineLayers?: Array<{ id: string; ready: boolean; stale: boolean; selected: boolean }>
   offlineNothingSelected?: boolean
+  // Marge de chaque côté du tracé (m) pour le prochain téléchargement.
+  offlineBufferM?: number
   offlineDownloading?: boolean
   offlinePct?: number
   offlineEstMb?: string
@@ -79,6 +82,7 @@ const emit = defineEmits<{
   (e: 'cancel-offline'): void
   (e: 'remove-offline'): void
   (e: 'toggle-offline-layer', id: string): void
+  (e: 'set-offline-buffer', m: number): void
   (e: 'update:activePanel', v: string | null): void
 }>()
 
@@ -318,6 +322,17 @@ const styleIconFor = (id: string) => MAP_STYLES.find(s => s.id === id)?.icon ?? 
               <span v-else-if="l.ready" class="nav-setting-value nav-offline-badge--ok">
                 <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
               </span>
+            </label>
+            <label class="nav-setting-row">
+              <i class="fa-solid fa-arrows-left-right nav-setting-icon" aria-hidden="true"></i>
+              <span class="nav-setting-label">{{ t('routes.offline_buffer') }}</span>
+              <select
+                class="form-select form-select-sm nav-offline-buffer"
+                :value="offlineBufferM"
+                @change="$emit('set-offline-buffer', Number(($event.target as HTMLSelectElement).value))"
+              >
+                <option v-for="m in OFFLINE_BUFFER_CHOICES" :key="m" :value="m">{{ m >= 1000 ? `${m / 1000} km` : `${m} m` }}</option>
+              </select>
             </label>
             <div class="nav-offline-status">
               {{ offlineNothingSelected

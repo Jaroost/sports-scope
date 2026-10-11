@@ -21,13 +21,20 @@ function tileGroundSizeM(z: number, lat: number): number {
 }
 
 // Boîte englobante [minLon, minLat, maxLon, maxLat] du tracé.
-export function boundsOf(coords: [number, number][]): [number, number, number, number] {
+export function boundsOf(coords: [number, number][], padM = 0): [number, number, number, number] {
   let minLon = Infinity, minLat = Infinity, maxLon = -Infinity, maxLat = -Infinity
   for (const [lng, lat] of coords) {
     if (lng < minLon) minLon = lng
     if (lng > maxLon) maxLon = lng
     if (lat < minLat) minLat = lat
     if (lat > maxLat) maxLat = lat
+  }
+  if (padM > 0 && Number.isFinite(minLon)) {
+    // Les bornes servent de limite à la carte : sans marge, les tuiles du couloir au-delà de la
+    // boîte du tracé (surtout avec une marge large) ne seraient jamais demandées.
+    const dLat = padM / 111320
+    const dLng = padM / (111320 * Math.cos((((minLat + maxLat) / 2) * Math.PI) / 180))
+    return [minLon - dLng, minLat - dLat, maxLon + dLng, maxLat + dLat]
   }
   return [minLon, minLat, maxLon, maxLat]
 }

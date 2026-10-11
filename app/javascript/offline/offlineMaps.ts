@@ -86,6 +86,12 @@ const CONCURRENCY = 6
 const BLANK_MAX_BYTES = 1024
 
 export const OFFLINE_DEFAULTS: CorridorOpts = { minZoom: 10, maxZoom: 17, bufferM: 400 }
+// Marges proposées de part et d'autre du tracé (m). Le nombre de tuiles croît à peu près
+// comme la marge : au-delà de 1,5 km un long itinéraire devient très lourd.
+export const OFFLINE_BUFFER_CHOICES = [200, 400, 800, 1500] as const
+export function isOfflineBuffer(m: number): boolean {
+  return (OFFLINE_BUFFER_CHOICES as readonly number[]).includes(m)
+}
 
 // Étapes d'un téléchargement : les tuiles (la barre), puis deux temps de traitement local
 // sans tuile à compter — l'assemblage de l'archive et son écriture.
@@ -269,7 +275,7 @@ export async function downloadOfflineArchive(
   const archive = await buildPmtilesArchive(collected, {
     minZoom: opts.minZoom,
     maxZoom: opts.maxZoom,
-    bounds: boundsOf(coords),
+    bounds: boundsOf(coords, opts.bufferM),
     attribution: LAYER_SPECS[layer].attribution,
     tileType: LAYER_SPECS[layer].format,
   })
@@ -311,7 +317,24 @@ export function archiveSignature(token: string, layer: OfflineLayer): string | n
 }
 
 export function deleteArchiveSignature(token: string, layer: OfflineLayer): void {
-  try { localStorage.removeItem(sigKey(token, layer)) } catch {}
+  try { localStorage.removeItem(sigKey(token, layer)); localStorage.removeItem(bufferKey(token, layer)) } catch {}
+}
+
+// Marge du couloir archivé, par couche : pour savoir qu'une marge plus large demandée depuis
+// reste à télécharger. Absente = archive d'avant ce réglage, donc la marge d'alors.
+function bufferKey(token: string, layer: OfflineLayer): string {
+  return `offline-buf-${safe(token)}-${layer}`
+}
+
+export function saveArchiveBuffer(token: string, layer: OfflineLayer, bufferM: number): void {
+  try { localStorage.setItem(bufferKey(token, layer), String(bufferM)) } catch { /* quota */ }
+}
+
+export function archiveBuffer(token: string, layer: OfflineLayer): number {
+  try {
+    const n = Number(localStorage.getItem(bufferKey(token, layer)))
+    return Number.isFinite(n) && n > 0 ? n : OFFLINE_DEFAULTS.bufferM
+  } catch { return OFFLINE_DEFAULTS.bufferM }
 }
 
 // ─── POI hors-ligne (localStorage) ───────────────────────────────────────────

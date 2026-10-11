@@ -172,7 +172,7 @@ const routeMarkersRaw = ref<RouteMarker[]>([])
 const {
   offlineIsSup, offlineDownloading, offlineErrored, bridgeState,
   offlineReady, offlineStale, offlinePct, offlineEst, offlineLayerRows, selectedLayers,
-  toggleOfflineLayer,
+  toggleOfflineLayer, offlineBufferM, setOfflineBuffer,
   resolveBaseStyle, refreshBaseMap, noteBaseReloaded, syncOfflineState,
   startOfflineDownload, cancelOfflineDownload, removeOfflineMap,
 } = useOfflineMaps({
@@ -198,6 +198,7 @@ registerOfflineMapsHandlers({
   cancel: cancelOfflineDownload,
   remove: () => { void removeOfflineMap() },
   toggleLayer: toggleOfflineLayer,
+  setBuffer: setOfflineBuffer,
 })
 onBeforeUnmount(() => registerOfflineMapsHandlers(null))
 
@@ -3360,6 +3361,7 @@ function onScreenOffTap() {
       :offline-errored="offlineErrored"
       :offline-layers="offlineLayerRows"
       :offline-nothing-selected="selectedLayers.length === 0"
+      :offline-buffer-m="offlineBufferM"
       :route-loaded="hasRoute"
       :can-edit="canEditRoute"
       :route-sport="routeSport"
@@ -3400,6 +3402,7 @@ function onScreenOffTap() {
       @cancel-offline="cancelOfflineDownload"
       @remove-offline="removeOfflineMap"
       @toggle-offline-layer="toggleOfflineLayer"
+      @set-offline-buffer="setOfflineBuffer"
       @toggle-debug-climb="toggleDebugClimb"
       @cycle-debug-turn="cycleDebugTurn"
       @toggle-debug-poi="toggleDebugPoi"

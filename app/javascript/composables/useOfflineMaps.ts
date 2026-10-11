@@ -6,7 +6,7 @@ import {
   offlineSupported, hasOfflineArchive, registerOfflineArchive, offlineStyle, OFFLINE_DEFAULTS,
   downloadOfflineArchive, deleteOfflineArchive, estimateOffline, saveOfflinePois, deleteOfflinePois,
   routeSignature, saveArchiveSignature, archiveSignature, deleteArchiveSignature,
-  purgeLegacyArchive, OFFLINE_LAYERS, isOfflineLayer, type OfflineLayer, type DownloadPhase,
+  purgeLegacyArchive, OFFLINE_LAYERS, OFFLINE_BUFFER_CHOICES, isOfflineBuffer, saveArchiveBuffer, archiveBuffer, isOfflineLayer, type OfflineLayer, type DownloadPhase,
 } from '../offline/offlineMaps'
 
 // Chaque fond téléchargeable (swisstopo gris/couleur/satellite, IGN plan/ortho) a sa propre
@@ -50,6 +50,8 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   // plus (IGN) ne doit pas demander de retrouver toutes les initialisations à la main.
   const noLayers = (): LayerFlags =>
     Object.fromEntries(OFFLINE_LAYERS.map((l) => [l, false])) as LayerFlags
+  const noBuffers = (): Record<OfflineLayer, number> =>
+    Object.fromEntries(OFFLINE_LAYERS.map((l) => [l, 0])) as Record<OfflineLayer, number>
   const noSigs = (): LayerSigs =>
     Object.fromEntries(OFFLINE_LAYERS.map((l) => [l, null])) as LayerSigs
 
@@ -72,6 +74,10 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   // Empreinte du tracé au moment du téléchargement, par couche. `null` = archive absente, ou
   // téléchargée avant l'introduction du suivi (on ne réclame alors rien).
   const archivedSigs = ref<LayerSigs>(noSigs())
+  // Marge de chaque côté du tracé pour le prochain téléchargement, et celle de chaque archive
+  // déjà présente (une marge plus large demandée depuis reste « à télécharger »).
+  const offlineBufferM = ref<number>(OFFLINE_DEFAULTS.bufferM)
+  const archivedBuffers = ref<Record<OfflineLayer, number>>(noBuffers())
 
   // Le tracé a changé depuis le téléchargement (reroutage, détour, édition) : l'archive ne
   // couvre plus tout l'itinéraire, il faut la retélécharger.
@@ -86,8 +92,14 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   // Une couche cochée n'est pas encore téléchargée : `offlineReady` (« au moins une archive »)
   // ne suffit plus à dire qu'il n'y a rien à faire — un tracé Suisse + France peut avoir son
   // fond suisse et attendre encore le français.
-  const offlineMissing = computed(() => selectedLayers.value.some((l) => !offlineHas.value[l]))
-  const offlineEst = computed(() => estimateOffline(coords.value, selectedLayers.value))
+  const offlineMissing = computed(() => selectedLayers.value.some(
+    (l) => !offlineHas.value[l] || archivedBuffers.value[l] < offlineBufferM.value,
+  ))
+  function setOfflineBuffer(m: number) {
+    if (isOfflineBuffer(m)) offlineBufferM.value = m
+  }
+  const corridor = () => ({ ...OFFLINE_DEFAULTS, bufferM: offlineBufferM.value })
+  const offlineEst = computed(() => estimateOffline(coords.value, selectedLayers.value, corridor()))
   // Vue à plat pour le panneau : une ligne par fond téléchargeable.
   const offlineLayerRows = computed(() =>
     OFFLINE_LAYERS.map((id) => ({ id, ready: offlineHas.value[id], stale: layerStale(id), selected: offlineSelected.value[id] })),
@@ -119,6 +131,8 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     ready: offlineReady.value,
     stale: offlineStale.value,
     missing: offlineMissing.value,
+    bufferM: offlineBufferM.value,
+    bufferChoices: [...OFFLINE_BUFFER_CHOICES],
     downloading: offlineDownloading.value,
     pct: offlinePct.value,
     mb: offlineEst.value.mb,
@@ -172,21 +186,25 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     offlineRegistered = noLayers()
     offlineHas.value = noLayers()
     archivedSigs.value = noSigs()
+    archivedBuffers.value = noBuffers()
     const token = routeToken.value
     if (token && offlineIsSup) {
       void purgeLegacyArchive(token)
       const has = noLayers()
       const sigs: LayerSigs = noSigs()
+      const buffers = noBuffers()
       for (const l of OFFLINE_LAYERS) {
         if (!await hasOfflineArchive(token, l)) continue
         has[l] = true
         sigs[l] = archiveSignature(token, l)
+        buffers[l] = archiveBuffer(token, l)
         if (maplibre) {
           try { await registerOfflineArchive(token, l, maplibre); offlineRegistered[l] = true } catch { /* archive illisible : on reste en ligne */ }
         }
       }
       offlineHas.value = has
       archivedSigs.value = sigs
+      archivedBuffers.value = buffers
     }
     resetOfflineSelection()
     refreshBaseMap()
@@ -245,10 +263,11 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
   }
 
   // Appelée quand l'archive d'une couche vient d'être écrite, pour le tracé d'empreinte `sig`.
-  async function onOfflineAvailable(layer: OfflineLayer, sig: string) {
+  async function onOfflineAvailable(layer: OfflineLayer, sig: string, bufferM: number) {
     const maplibre = getMaplibre()
     offlineHas.value = { ...offlineHas.value, [layer]: true }
     archivedSigs.value = { ...archivedSigs.value, [layer]: sig }
+    archivedBuffers.value = { ...archivedBuffers.value, [layer]: bufferM }
     // Re-branchement systématique : après un re-téléchargement, la même clé désigne un
     // nouveau fichier, et le protocole doit servir celui-là.
     if (maplibre && routeToken.value) {
@@ -261,6 +280,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     offlineHas.value = noLayers()
     offlineRegistered = noLayers()
     archivedSigs.value = noSigs()
+    archivedBuffers.value = noBuffers()
     resetOfflineSelection()
     refreshBaseMap()
   }
@@ -278,7 +298,9 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     const dlCoords = coords.value
     const archivedPois = pois.value
     const sig = routeSignature(dlCoords)
-    const perLayer = estimateOffline(dlCoords, [layers[0]]).tiles
+    // Figée comme le tracé : un changement de marge pendant le téléchargement vaut pour le suivant.
+    const dlCorridor = corridor()
+    const perLayer = estimateOffline(dlCoords, [layers[0]], dlCorridor).tiles
     offlineErrored.value = false
     offlineDownloading.value = true
     offlineProgress.value = { done: 0, total: perLayer * layers.length, failed: 0 }
@@ -288,7 +310,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
       let failed = 0
       for (const layer of layers) {
         await downloadOfflineArchive(
-          token, layer, dlCoords, undefined,
+          token, layer, dlCoords, dlCorridor,
           (p) => {
             offlineProgress.value = { done: base + p.done, total: perLayer * layers.length, failed: failed + p.failed }
             offlinePhase.value = { phase: p.phase, layer, sub: p.sub ?? null }
@@ -298,9 +320,10 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
         base += perLayer
         failed = offlineProgress.value.failed
         saveArchiveSignature(token, layer, sig)
+        saveArchiveBuffer(token, layer, dlCorridor.bufferM)
         // Le trajet a pu être déchargé/remplacé pendant le téléchargement : ne branche
         // l'archive que si elle correspond toujours au trajet affiché.
-        if (routeToken.value === token) await onOfflineAvailable(layer, sig)
+        if (routeToken.value === token) await onOfflineAvailable(layer, sig, dlCorridor.bufferM)
       }
       if (archivedPois.length > 0) saveOfflinePois(token, archivedPois)
     } catch (e) {
@@ -335,7 +358,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     offlineIsSup,
     offlineDownloading, offlineProgress, offlineErrored, offlinePhase, bridgeState,
     offlineReady, offlineStale, offlineMissing, offlinePct, offlineEst, offlineLayerRows, selectedLayers,
-    toggleOfflineLayer,
+    toggleOfflineLayer, offlineBufferM, setOfflineBuffer,
     resolveBaseStyle, refreshBaseMap, noteBaseReloaded, syncOfflineState,
     startOfflineDownload, cancelOfflineDownload, removeOfflineMap,
   }

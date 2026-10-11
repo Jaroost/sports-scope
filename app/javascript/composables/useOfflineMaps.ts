@@ -1,5 +1,5 @@
 import { ref, computed, watch, type Ref } from 'vue'
-import { mapStyleFor, styleCoversPoint, suggestedStyleForPoint } from '../mapStyles'
+import { mapStyleFor, styleCoversPoint, suggestedStyleForPoint, groupForStyle } from '../mapStyles'
 import { dataSaverActive, type OfflineMapsBridgeState } from '../companionBridge'
 import { t } from '../i18n'
 import {
@@ -28,6 +28,10 @@ export interface UseOfflineMapsOptions {
   // Coordonnées et POI du tracé actif, retenus pour définir le corridor à télécharger.
   coords: Ref<[number, number][]>
   pois: Ref<OfflinePoi[]>
+  // Pays traversés (codes ISO) quand le site les connaît : plus fiable que les rectangles de
+  // `mapStyles.ts`, qui se recouvrent à la frontière — un tracé La Chaux-de-Fonds → Gilley tombe
+  // tout entier dans celui de la Suisse. Absent ou vide : on retombe sur les rectangles.
+  countries?: Ref<string[]>
   // Rappelé après un échange du fond de carte (bascule en/hors-ligne) pour réinstaller
   // les couches de tracé et le marqueur de position (cf. `afterStyleLoad` côté composant).
   onBaseStyleReload: () => void
@@ -40,7 +44,7 @@ export interface UseOfflineMapsOptions {
 // On n'utilise le fond local QUE lorsque le réseau est absent : en ligne, le WMTS reste
 // préféré (tuiles fraîches, couverture au-delà du corridor).
 export function useOfflineMaps(opts: UseOfflineMapsOptions) {
-  const { getMap, getMaplibre, mapStyleId, routeToken, coords, pois, onBaseStyleReload } = opts
+  const { getMap, getMaplibre, mapStyleId, routeToken, coords, pois, onBaseStyleReload, countries } = opts
 
   // Dérivés de `OFFLINE_LAYERS` plutôt que recopiés à chaque site d'usage : une couche de
   // plus (IGN) ne doit pas demander de retrouver toutes les initialisations à la main.
@@ -188,6 +192,22 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     refreshBaseMap()
   }
 
+  // Fond représentant de chaque pays archivable (même choix que `MAP_STYLE_GROUP_DEFAULT`).
+  const COUNTRY_LAYER: Record<string, OfflineLayer> = { CH: 'swisstopo', FR: 'ignplan' }
+
+  // Un fond par pays traversé qu'aucun fond coché ne couvre déjà (même groupe régional).
+  function layersForCountries(selected: OfflineLayer[]): OfflineLayer[] {
+    const added: OfflineLayer[] = []
+    for (const code of countries?.value ?? []) {
+      const layer = COUNTRY_LAYER[code.toUpperCase()]
+      if (!layer || selected.includes(layer) || added.includes(layer)) continue
+      const group = groupForStyle(layer)
+      if ([...selected, ...added].some((l) => groupForStyle(l) === group)) continue
+      added.push(layer)
+    }
+    return added
+  }
+
   // Fonds à ajouter pour que la sélection couvre TOUT le tracé : un itinéraire à cheval sur deux
   // pays (Suisse + France) n'est couvert par aucun fond régional seul — swisstopo hors de Suisse
   // ne sert que du vide, qu'on comble en flou. Pour chaque point échantillonné qu'aucun fond
@@ -218,6 +238,7 @@ export function useOfflineMaps(opts: UseOfflineMapsOptions) {
     const sel = noLayers()
     for (const l of OFFLINE_LAYERS) sel[l] = offlineHas.value[l]
     if (!OFFLINE_LAYERS.some((l) => sel[l]) && isOfflineLayer(mapStyleId.value)) sel[mapStyleId.value] = true
+    for (const l of layersForCountries(OFFLINE_LAYERS.filter((id) => sel[id]))) sel[l] = true
     for (const l of layersMissingFor(OFFLINE_LAYERS.filter((id) => sel[id]))) sel[l] = true
     if (!OFFLINE_LAYERS.some((l) => sel[l])) sel.swissgrau = true
     offlineSelected.value = sel

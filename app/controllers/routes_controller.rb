@@ -445,6 +445,9 @@ class RoutesController < ApplicationController
       # Dans le résumé : la liste des itinéraires règle aussi ce réglage.
       share_map_style: route.share_map_style,
       preview_segments: route.preview_segments,
+      # Pays traversés (codes ISO), déduits des localités près du tracé : sert à pré-cocher
+      # un fond hors-ligne par pays. Peut être vide (tracé jamais traité, aucune localité).
+      countries: route.countries || [],
       map_polyline: route.map_polyline,
       updated_at: route.updated_at.iso8601,
     }

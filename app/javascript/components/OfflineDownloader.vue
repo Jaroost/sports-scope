@@ -26,11 +26,12 @@ const routeToken = ref<string | null>(null)
 const coords = ref<[number, number][]>([])
 const pois = ref<Array<{ name: string; type: string; lat: number; lng: number }>>([])
 const mapStyleId = ref(userPreferences().navigation.default_style as string)
+const countries = ref<string[]>([])
 const loadFailed = ref(false)
 
 const {
   offlineErrored, offlineDownloading, offlineReady, offlineStale, offlineMissing, offlinePct, bridgeState,
-  syncOfflineState, startOfflineDownload, cancelOfflineDownload,
+  syncOfflineState, startOfflineDownload, cancelOfflineDownload, toggleOfflineLayer, removeOfflineMap,
 } = useOfflineMaps({
   getMap: () => null,
   getMaplibre: () => null,
@@ -39,13 +40,14 @@ const {
   coords,
   pois,
   onBaseStyleReload: () => {},
+  countries,
 })
 
 registerOfflineMapsHandlers({
   start: () => { void startOfflineDownload() },
   cancel: cancelOfflineDownload,
-  remove: () => {},
-  toggleLayer: () => {},
+  remove: () => { void removeOfflineMap() },
+  toggleLayer: toggleOfflineLayer,
 })
 onBeforeUnmount(() => registerOfflineMapsHandlers(null))
 
@@ -61,6 +63,7 @@ onMounted(async () => {
     if (geom.length < 2) throw new Error('no_geometry')
     coords.value = geom.map(([lng, lat]) => [lng, lat])
     pois.value = Array.isArray(route.pois) ? route.pois : []
+    countries.value = Array.isArray(route.countries) ? route.countries : []
     // Même choix de fond que la navigation à l'ouverture : le fond préféré du compte s'il
     // couvre le départ, sinon celui du pays — c'est ce qui sera pré-coché.
     const [lng, lat] = geom[0]
@@ -68,10 +71,10 @@ onMounted(async () => {
       ? mapStyleId.value
       : suggestedStyleForPoint({ lng, lat })
     routeToken.value = props.shareToken
-    // Pré-coche (archives déjà là, sinon fond actif) puis décide : une archive à jour n'est
-    // pas refaite (sauf s'il manque le fond d'un autre pays traversé), l'appli le lit dans l'état (`ready && !stale`) et conclut tout de suite.
+    // Pré-coche (archives déjà là, sinon fond actif + un fond par pays traversé) puis ATTEND :
+    // c'est l'appli qui montre ces choix à l'utilisateur et lui laisse les changer avant de
+    // lancer (`start`), exactement comme le panneau de la navigation.
     await syncOfflineState()
-    if (!offlineReady.value || offlineStale.value || offlineMissing.value) await startOfflineDownload()
   } catch {
     loadFailed.value = true
     offlineErrored.value = true

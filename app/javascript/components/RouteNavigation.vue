@@ -161,6 +161,7 @@ const STYLE_LOAD_TIMEOUT_MS = 6000
 const offlineCoords = ref<[number, number][]>([])
 // POI du tracé actif (issues de routes.pois) : passés à NavOfflineButton pour être
 // sauvegardés dans le localStorage au moment du téléchargement hors-ligne.
+const offlineCountries = ref<string[]>([])
 const offlinePois = ref<Array<{ name: string; type: string; lat: number; lng: number }>>([])
 // Repères du tracé actif (routes.markers) tels que reçus : useNavPois les convertit en
 // NavPlace pour l'affichage, on garde ici la forme brute pour la session persistée.
@@ -181,6 +182,7 @@ const {
   routeToken,
   coords: offlineCoords,
   pois: offlinePois,
+  countries: offlineCountries,
   onBaseStyleReload: () => afterStyleLoad(),
 })
 
@@ -1215,6 +1217,7 @@ async function loadSharedRouteData(token: string) {
   rebuildRouteState(geom, (route.voice_hints || []) as VoiceHint[])
   const savedPois = (route.pois || []) as Array<{ name: string; type: string; lat: number; lng: number }>
   offlinePois.value = savedPois
+  offlineCountries.value = Array.isArray(route.countries) ? route.countries : []
   if (savedPois.length > 0) pois.setRoutePlaces(savedPois)
   routeMarkersRaw.value = (route.markers || []) as RouteMarker[]
   pois.setRouteMarkers(routeMarkersRaw.value)

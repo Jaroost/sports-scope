@@ -625,10 +625,8 @@ function toggleMenuPage(page: Page) {
   if (!canHideBehindMenu(page, preset.value.pages)) return
   // La clé est effacée et non mise à `false` : le document ne porte que ce qui
   // s'écarte du défaut, comme les capteurs coupés.
-  if (page.menu) {
-    delete page.menu
-    delete page.hide_on_data_saver
-  } else page.menu = true
+  if (page.menu) delete page.menu
+  else page.menu = true
 }
 
 // La condition qui fait rejoindre le défilement à une page rangée derrière le
@@ -1684,7 +1682,7 @@ async function save() {
               <!-- Seulement pour une page déjà rangée derrière le menu : la
                    condition qui l'en fait ressortir toute seule pendant la
                    sortie, et si on bascule dessus quand elle devient vraie. -->
-              <div v-if="page.menu" class="mb-2 form-check">
+              <div class="mb-2 form-check">
                 <input :id="`hide-on-data-saver-${index}`" type="checkbox" class="form-check-input"
                        :checked="!!page.hide_on_data_saver" @change="toggleHideOnDataSaver(page)">
                 <label class="form-check-label small" :for="`hide-on-data-saver-${index}`">

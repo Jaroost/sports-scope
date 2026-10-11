@@ -1046,11 +1046,10 @@ module CompanionSettings
     true if page["hide_workout_badge"] == true
   end
 
-  # Une page rangée derrière le menu ⋮ qui n'y figure pas tant que l'économie de données
-  # est active (une météo n'a rien à montrer sans réseau). Réservé aux pages `menu` — les
-  # appelants le passent à `nil` sinon, comme `menu_condition` : une page du défilement qui
-  # disparaîtrait au gré d'un interrupteur ferait bouger la carte d'index. Absent vaut
-  # « toujours dans le menu », des deux côtés.
+  # Une page absente (du menu ⋮ comme du défilement) tant que l'économie de données est
+  # active — une météo n'a rien à montrer sans réseau. Pas pour la carte, qui n'en porte
+  # pas. L'appli garde la dernière page hors carte du défilement même ainsi marquée.
+  # Absent vaut « toujours là », des deux côtés.
   def hide_on_data_saver_flag(page)
     true if page["hide_on_data_saver"] == true
   end
@@ -1117,7 +1116,7 @@ module CompanionSettings
     return pages if index.nil?
 
     pages.each_with_index.map do |page, i|
-      i == index ? page.except("menu", "menu_condition", "menu_condition_lap_name", "menu_auto_open", "hide_on_data_saver") : page
+      i == index ? page.except("menu", "menu_condition", "menu_condition_lap_name", "menu_auto_open") : page
     end
   end
 
@@ -1144,7 +1143,7 @@ module CompanionSettings
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page),
       "hide_workout_badge" => hide_workout_badge_flag(page),
-      "hide_on_data_saver" => (menu && hide_on_data_saver_flag(page)) || nil }.compact
+      "hide_on_data_saver" => hide_on_data_saver_flag(page) }.compact
   end
 
   # Les séparateurs qui tiennent dans la grille : une ligne (`"h"`) ou une colonne
@@ -1225,7 +1224,7 @@ module CompanionSettings
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page),
       "hide_workout_badge" => hide_workout_badge_flag(page),
-      "hide_on_data_saver" => (menu && hide_on_data_saver_flag(page)) || nil }.compact
+      "hide_on_data_saver" => hide_on_data_saver_flag(page) }.compact
   end
 
   # Les blocs d'une page `list`, ou d'une page `laps` en liste défilante
@@ -1310,7 +1309,7 @@ module CompanionSettings
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page),
       "hide_workout_badge" => hide_workout_badge_flag(page),
-      "hide_on_data_saver" => (menu && hide_on_data_saver_flag(page)) || nil }.merge(layout).compact
+      "hide_on_data_saver" => hide_on_data_saver_flag(page) }.merge(layout).compact
   end
 
   def sanitize_lap_blocks(page)

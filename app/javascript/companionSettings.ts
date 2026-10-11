@@ -468,10 +468,9 @@ export interface Page {
   // (`RidePageSpec.hideWorkoutBadge`, dépôt voisin). Absent vaut « pastille
   // visible », comportement d'avant ce réglage.
   hide_workout_badge?: boolean
-  // Seulement pour une page rangée derrière le menu (`menu`) : n'y figure pas
-  // tant que l'économie de données de l'appli est active
-  // (`RidePageSpec.hideOnDataSaver`, dépôt voisin). Absent vaut « toujours dans
-  // le menu ».
+  // Page absente, du défilement comme du menu, tant que l'économie de données
+  // de l'appli est active (`RidePageSpec.hideOnDataSaver`, dépôt voisin) — sauf
+  // la dernière page hors carte du défilement. Absent vaut « toujours là ».
   hide_on_data_saver?: boolean
 }
 

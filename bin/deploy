@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Déploie sports-scope en buildant SUR LE SERVEUR : utilisable depuis n'importe quel
+# poste qui peut faire `ssh` vers lui (LAN, VPN, Cloudflare Tunnel…), sans docker local.
+#
+#   bin/deploy            # déploie origin/main
+#   bin/deploy <ref>      # branche, tag ou sha déjà poussé sur GitHub
+#
+# Variables (côté poste) :
+#   DEPLOY_HOST   cible ssh            (défaut : ajaquet@jaroost-server)
+#   DEPLOY_SRC    checkout git serveur (défaut : ~/dev/sports-scope-src)
+#   DEPLOY_ENV    fichier d'env prod   (défaut : ~/dev/sports-scope/.env.prod)
+#   BROUTER_FORCE=1  rebuild l'image BRouter même si le tag existe
+#
+# Le code vient de GitHub (git fetch sur le serveur) : ce qui n'est pas poussé n'est
+# pas déployé. Une image n'est buildée que si son tag n'existe pas déjà :
+#   rails     → tag = sha court du commit
+#   poi-sync  → tag = hash de l'arbre deploy/osm-pois (ne change que si ce dossier change)
+#   brouter   → tag = BROUTER_VERSION (cf. deploy/docker-compose.prod.yml)
+set -euo pipefail
+
+DEPLOY_HOST=${DEPLOY_HOST:-ajaquet@jaroost-server}
+REF=${1:-origin/main}
+
+ssh "$DEPLOY_HOST" \
+  REF="$REF" \
+  DEPLOY_SRC="${DEPLOY_SRC:-\$HOME/dev/sports-scope-src}" \
+  DEPLOY_ENV="${DEPLOY_ENV:-\$HOME/dev/sports-scope/.env.prod}" \
+  BROUTER_FORCE="${BROUTER_FORCE:-0}" \
+  'bash -s' <<'REMOTE'
+set -euo pipefail
+eval "SRC=$DEPLOY_SRC; ENV_FILE=$DEPLOY_ENV"
+REGISTRY=jaroost-server:5000
+
+[ -d "$SRC/.git" ] || { echo "Pas de checkout git dans $SRC (cf. bin/deploy, étape 'git clone')" >&2; exit 1; }
+cd "$SRC"
+git fetch --prune origin
+git checkout --quiet --detach "$REF"
+SHA=$(git rev-parse --short HEAD)
+POI_TAG=$(git rev-parse --short=12 HEAD:deploy/osm-pois)
+BROUTER_VERSION=$(sed -n 's#.*sports-scope-brouter:\${BROUTER_IMAGE_TAG:-\([^}]*\)}.*#\1#p' deploy/docker-compose.prod.yml)
+echo "Déploiement de $REF → $SHA"
+
+build_if_missing() { # image:tag, puis les arguments de docker build
+  local img=$1; shift
+  if [ "${FORCE:-0}" != 1 ] && docker image inspect "$img" >/dev/null 2>&1; then
+    echo "Skip $img (déjà présent)"
+  else
+    echo "Build $img ..."
+    docker build -t "$img" "$@"
+    docker push "$img"
+  fi
+}
+
+build_if_missing "$REGISTRY/sports-scope:$SHA" -f deploy/Dockerfile.prod .
+build_if_missing "$REGISTRY/sports-scope-poi-sync:$POI_TAG" deploy/osm-pois
+FORCE=$BROUTER_FORCE build_if_missing "$REGISTRY/sports-scope-brouter:$BROUTER_VERSION" \
+  --build-arg BROUTER_VERSION="$BROUTER_VERSION" deploy/brouter
+
+# `latest` suit le dernier déployé (retour arrière manuel, anciens scripts).
+docker tag "$REGISTRY/sports-scope:$SHA" "$REGISTRY/sports-scope:latest"
+
+export IMAGE_TAG=$SHA POI_SYNC_IMAGE_TAG=$POI_TAG BROUTER_IMAGE_TAG=$BROUTER_VERSION
+docker compose -f deploy/docker-compose.prod.yml --env-file "$ENV_FILE" up -d --remove-orphans
+docker image prune -f >/dev/null
+echo "Déployé : $SHA"
+REMOTE

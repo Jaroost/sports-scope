@@ -35,6 +35,7 @@ import {
   escapeHtml, googleMapsUrl, popupHeaderHtml, popupLinkHtml, popupMapLinksHtml, popupOpeningHoursHtml,
 } from '../placePopup'
 import { useMapLocation } from '../composables/useMapLocation'
+import { useMapRadar } from '../composables/useMapRadar'
 import { usePlaceSearch, placeShortName, flyToPlace, reverseGeocode } from '../composables/usePlaceSearch'
 import { useMapMeasure, MEASURE_SOURCE, MEASURE_LINE_LAYER } from '../composables/useMapMeasure'
 import {
@@ -85,6 +86,22 @@ let hoverInsert: { lng: number; lat: number; edgeIdx: number } | null = null
 // « Ma position » (point bleu + disque d'incertitude) : voir useMapLocation.
 const { locationVisible, locating, toggle: toggleLocation, reinstallLayers: reinstallLocation } =
   useMapLocation(markerGroupDeps)
+// Radar de précipitations animé (frames RainViewer, comme l'appli compagnon) : voir useMapRadar.
+const {
+  radarVisible, radarLoading, playing: radarPlaying, frames: radarFrames, frameIndex: radarFrameIndex,
+  currentFrame: radarFrame, offsetMinutes: radarOffset,
+  toggle: toggleRadar, togglePlay: toggleRadarPlay, seek: seekRadar, reinstallLayers: reinstallRadar,
+} = useMapRadar({ getMap: () => mapInstance })
+const radarClock = computed(() =>
+  radarFrame.value
+    ? new Date(radarFrame.value.time * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '')
+const radarCaption = computed(() =>
+  radarOffset.value === 0
+    ? t('routes.radar.now')
+    : radarOffset.value > 0
+      ? `+${radarOffset.value} min`
+      : `${radarOffset.value} min`)
 const hoverMarkerVisible = ref(false)
 let suppressNextMapClick = false
 let suppressNextWpClick = false
@@ -2626,6 +2643,7 @@ function applyMapStyle(id: string) {
     installRouteLayer(); installOverlays()
     updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); updateMeasureLayer(); installClimbMarkers(); installPlaceMarkers(); installSavedPoiMarkers()
     reinstallLocation()
+    reinstallRadar()
     if (props.state.is3D) {
       if (!mapInstance.getSource('terrain-dem')) {
         mapInstance.addSource('terrain-dem', { type: 'raster-dem', tiles: [TERRAIN_TILES], encoding: 'terrarium', tileSize: 256, maxzoom: 14 })
@@ -3097,6 +3115,20 @@ defineExpose({
       </div>
     </div>
 
+    <div v-if="radarVisible && radarFrames.length" class="map-radar-bar shadow-sm">
+      <button type="button" class="btn btn-sm btn-light map-radar-play"
+        @click="toggleRadarPlay"
+        :title="radarPlaying ? t('routes.radar.pause') : t('routes.radar.play')">
+        <i :class="radarPlaying ? 'fa-solid fa-pause' : 'fa-solid fa-play'" aria-hidden="true"></i>
+      </button>
+      <input type="range" class="form-range map-radar-range" min="0"
+        :max="radarFrames.length - 1" step="1"
+        :value="radarFrameIndex"
+        :aria-label="t('routes.radar.time')"
+        @input="seekRadar(Number(($event.target as HTMLInputElement).value))">
+      <span class="map-radar-time"><strong>{{ radarClock }}</strong> <small>{{ radarCaption }}</small></span>
+    </div>
+
     <div class="map-controls-right">
       <div class="btn-group-vertical btn-group-sm shadow-sm" role="group">
         <button type="button" class="btn btn-light map-ctrl-btn"
@@ -3113,6 +3145,15 @@ defineExpose({
           :aria-pressed="locationVisible">
           <span v-if="locating" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
           <i v-else class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="btn map-ctrl-btn"
+          :class="radarVisible ? 'btn-warning text-dark active' : 'btn-light'"
+          @click="toggleRadar"
+          :disabled="radarLoading"
+          :title="radarVisible ? t('routes.radar.hide') : t('routes.radar.show')"
+          :aria-pressed="radarVisible">
+          <span v-if="radarLoading" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+          <i v-else class="fa-solid fa-cloud-rain" aria-hidden="true"></i>
         </button>
         <button type="button" class="btn map-ctrl-btn d-none d-md-flex"
           :class="state.mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"

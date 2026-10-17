@@ -1062,6 +1062,13 @@ en:
     list_title: "My routes"
     view_list: "List"
     view_map: "Map"
+    radar:
+      show: "Show precipitation radar"
+      hide: "Hide precipitation radar"
+      play: "Play"
+      pause: "Pause"
+      time: "Radar time"
+      now: "now"
     filters:
       toggle: "Filter"
       close: "Close"

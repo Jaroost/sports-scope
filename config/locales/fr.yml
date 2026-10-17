@@ -1062,6 +1062,13 @@ fr:
     list_title: "Mes itinéraires"
     view_list: "Liste"
     view_map: "Carte"
+    radar:
+      show: "Afficher le radar de précipitations"
+      hide: "Masquer le radar de précipitations"
+      play: "Lecture"
+      pause: "Pause"
+      time: "Heure du radar"
+      now: "maintenant"
     filters:
       toggle: "Filtrer"
       close: "Fermer"

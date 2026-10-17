@@ -95,7 +95,9 @@ const acceptedTurnItems = computed<TurnAnomaly[]>(() => {
   const waypoints = wps.map((w) => [w.lng, w.lat] as LngLat)
   const uturnOk = wps.map((w) => w.uturn_ok === true)
   const accepted = routeStore.acceptedUturns.value.map((u) => [u.lng, u.lat] as LngLat)
-  return detectUturnAnomalies(turns, geom, { waypoints, uturnOk, accepted, includeAccepted: true })
+  const diameterM = turnAnomalyDiameterForSport(routeStore.sport.value)
+  const clusters = detectTurnAnomalies(turns, geom, { diameterM, waypoints, accepted, includeAccepted: true })
+  return [...clusters, ...detectUturnAnomalies(turns, geom, { waypoints, uturnOk, accepted, includeAccepted: true })]
     .filter((a) => a.accepted)
     .sort((a, b) => a.distM - b.distM)
 })
@@ -702,7 +704,7 @@ function computeTurnAnomalies(): TurnAnomaly[] {
   })
   const uturnOk = wps.map((w) => w.uturn_ok === true)
   const accepted = routeStore.acceptedUturns.value.map((u) => [u.lng, u.lat] as LngLat)
-  const clusters = detectTurnAnomalies(turns, geom, { diameterM, waypoints })
+  const clusters = detectTurnAnomalies(turns, geom, { diameterM, waypoints, accepted })
   const claimed = new Set(clusters.map((a) => a.waypointIdx).filter((i) => i >= 0))
   const uturns = detectUturnAnomalies(turns, geom, { waypoints, uturnOk, accepted })
     .filter((a) => a.waypointIdx < 0 || !claimed.has(a.waypointIdx))
@@ -718,9 +720,9 @@ function pruneAcceptedUturns() {
   const acc = routeStore.acceptedUturns.value
   const hints = routeStore.voiceHints.value
   if (!acc.length || !hints.length) return
-  const uturnPts = hints
-    .filter((h) => h.cmd === 10 || h.cmd === 11 || h.cmd === 15)
-    .map((h) => [h.lng, h.lat] as LngLat)
+  // Tout hint compte, pas seulement les demi-tours : un amas de virages assumé est lui aussi
+  // ancré par coordonnée dans cette liste.
+  const uturnPts = hints.map((h) => [h.lng, h.lat] as LngLat)
   const kept = acc.filter((a) => uturnPts.some((u) => haversine(u, [a.lng, a.lat]) <= UTURN_ACCEPT_RADIUS_M))
   if (kept.length !== acc.length) routeStore.acceptedUturns.value = kept
 }
@@ -801,7 +803,7 @@ function reauditUturns() {
 }
 
 function unacceptUturn(a: TurnAnomaly) {
-  if (a.waypointIdx >= 0) {
+  if (a.kind === 'uturn' && a.waypointIdx >= 0) {
     const wps = routeStore.waypoints.value
     if (a.waypointIdx >= wps.length) return
     const next = wps.slice()
@@ -941,7 +943,7 @@ function focusTurnAnomaly(a: TurnAnomaly) {
   // Demi-tour ACTIF (rattaché à un point ou non) : on garde une pastille d'action en tête
   // de carte, pour trancher « c'est voulu » sans rouvrir l'alerte qu'on vient de replier.
   // Un demi-tour déjà assumé n'a pas de pastille — il est déjà réglé.
-  pendingUturnAnomaly.value = a.kind === 'uturn' && !a.accepted ? a : null
+  pendingUturnAnomaly.value = !a.accepted ? a : null
   collapseNotices()
 }
 
@@ -953,8 +955,9 @@ function focusTurnAnomaly(a: TurnAnomaly) {
 //   • rattaché à un point → flag `uturn_ok` sur le waypoint (suit le point s'il bouge) ;
 //   • orphelin → coordonnée dans routeStore.acceptedUturns (réappariée par proximité).
 function markTurnUturnOk(a: TurnAnomaly) {
-  if (a.kind !== 'uturn') return
-  if (a.waypointIdx >= 0) {
+  // Un amas n'a pas de flag de point (uturn_ok ne concerne que les demi-tours) : il est
+  // toujours acquitté par sa coordonnée.
+  if (a.kind === 'uturn' && a.waypointIdx >= 0) {
     const wps = routeStore.waypoints.value
     if (a.waypointIdx >= wps.length) return
     const next = wps.slice()
@@ -2712,7 +2715,7 @@ onBeforeUnmount(() => {
                               : (a.kind === 'uturn' ? 'fa-solid fa-arrows-turn-to-dots' : 'fa-solid fa-location-crosshairs')"></i>
                           {{ turnWarningLabel(a) }}
                         </button>
-                        <button v-if="a.kind === 'uturn'" type="button"
+                        <button type="button"
                           class="map-notice-chip map-notice-chip--uturn map-notice-chip--icon"
                           :title="t('routes.uturn_ok_short')" :aria-label="t('routes.uturn_ok_short')"
                           @click="markTurnUturnOk(a)">

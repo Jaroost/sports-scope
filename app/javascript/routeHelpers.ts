@@ -1394,6 +1394,12 @@ export function detectTurns(
 
 // ─── Turn anomaly detection ──────────────────────────────────────────────────
 
+// Rayon de réappariement d'un crochet assumé « à la coordonnée » (demi-tour hors point
+// d'étape, ou amas de virages) : son sommet se déplace de quelques mètres d'un recalcul à
+// l'autre quand on retouche un point voisin, sans que le crochet change de nature. Reste
+// assez serré pour ne pas absorber un AUTRE crochet proche.
+export const UTURN_ACCEPT_RADIUS_M = 30
+
 // Un « amas de virages » : plusieurs virages rapprochés sur un très court rayon.
 // Symptôme typique d'un point d'étape mal posé (à côté de la route) : BRouter trace
 // un crochet pour aller le chercher puis revenir, ce qui empile 2–3 virages au même
@@ -1489,9 +1495,11 @@ function nearestWaypoint(positions: LngLat[], waypoints: LngLat[], radiusM: numb
 export function detectTurnAnomalies(
   turns: TurnPoint[],
   geometry: Coord[],
-  opts: { diameterM?: number; minTurns?: number; waypoints?: LngLat[] } = {},
+  opts: { diameterM?: number; minTurns?: number; waypoints?: LngLat[]; accepted?: LngLat[]; includeAccepted?: boolean; acceptRadiusM?: number } = {},
 ): TurnAnomaly[] {
   const diameterM = opts.diameterM ?? 100
+  const accepted = opts.accepted ?? []
+  const acceptRadiusM = opts.acceptRadiusM ?? UTURN_ACCEPT_RADIUS_M
   const minTurns = opts.minTurns ?? 3
   const waypoints = opts.waypoints
   const out: TurnAnomaly[] = []
@@ -1524,7 +1532,14 @@ export function detectTurnAnomalies(
         if (waypointIdx < 0) { i = j + 1; continue }
       }
       const [lng, lat] = pos(sharp)
-      out.push({ kind: 'cluster', idx: sharp.idx, lng, lat, distM: sharp.distM, count, waypointIdx })
+      const item: TurnAnomaly = { kind: 'cluster', idx: sharp.idx, lng, lat, distM: sharp.distM, count, waypointIdx }
+      // Amas assumé (boucle fermée sur son départ, carrefour voulu…) : une coordonnée
+      // acquittée à portée de n'importe lequel de ses virages le fait taire. Ses virages
+      // se déplacent de quelques mètres d'un recalcul à l'autre, d'où le test sur tous.
+      const isAccepted = accepted.length > 0 &&
+        sorted.slice(i, j + 1).some((t) => accepted.some((a) => haversine(a, pos(t)) <= acceptRadiusM))
+      if (!isAccepted) out.push(item)
+      else if (opts.includeAccepted) out.push({ ...item, accepted: true })
       i = j + 1
     } else {
       i++
@@ -1537,13 +1552,6 @@ export function detectTurnAnomalies(
 // les demi-tours réels sont à 0–7 m de leur point (BRouter accroche le waypoint sur la
 // voie), 20 m pour le cas extrême ; 25 m couvre donc tout sans mordre sur le point suivant.
 const UTURN_WP_RADIUS_M = 25
-
-// Rayon de réappariement d'un demi-tour assumé « à la coordonnée » (opts.accepted,
-// pour un demi-tour hors point d'étape — cf. routeStore.acceptedUturns). Plus large
-// que UTURN_WP_RADIUS_M : le sommet d'un demi-tour se déplace de quelques mètres d'un
-// recalcul à l'autre quand on retouche un point voisin, sans que l'aller-retour
-// change de nature. Reste assez serré pour ne pas absorber un AUTRE demi-tour proche.
-export const UTURN_ACCEPT_RADIUS_M = 30
 
 // Repère les demi-tours, seconde signature d'un point d'étape mal posé — et la seule que
 // `detectTurnAnomalies` ne peut pas voir. Un point posé sur une impasse fait sortir BRouter

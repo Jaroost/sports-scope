@@ -444,10 +444,14 @@ async function initMap() {
           if (atWaypointLimit()) return
           // On calcule au clic si le point vise plusieurs passes du tracé (superposition).
           // Une seule passe → insertion directe ; plusieurs → on demande laquelle.
-          const cands = insertionCandidatesAt(e.point)
-          if (cands.length > 1) showInsertChoicePopup(cands)
-          else if (cands.length === 1) insertWaypointAt(cands[0].insertAt, cands[0].lng, cands[0].lat)
-          else insertWaypointAtHover(hoverInsert)
+          // Dans tous les cas on propose aussi d'ajouter le point à la fin (aller-retour) :
+          // le popup s'ouvre donc même quand il n'y a qu'une seule passe.
+          let cands = insertionCandidatesAt(e.point)
+          if (!cands.length) {
+            const h = hoverInsert
+            cands = [{ lng: h.lng, lat: h.lat, insertAt: insertPositionForEdge(h.edgeIdx), geomLo: h.edgeIdx, geomHi: h.edgeIdx + 1 }]
+          }
+          showInsertChoicePopup(cands)
         } else {
           addWaypoint(e.lngLat.lng, e.lngLat.lat)
         }
@@ -1937,15 +1941,20 @@ function showInsertChoicePopup(cands: Array<{ lng: number; lat: number; insertAt
     `<div class="insert-choice-row">
        <button type="button" class="wp-tooltip-action insert-choice-btn" data-i="${i}">
          <i class="fa-solid fa-location-dot" aria-hidden="true"></i>
-         <span>${t('routes.insert_as_point', { n: c.insertAt + 1 })}</span>
+         <span>${cands.length > 1 ? t('routes.insert_as_point', { n: c.insertAt + 1 }) : t('routes.insert_between')}</span>
        </button>
-       <button type="button" class="insert-choice-eye" data-i="${i}" aria-label="${t('routes.insert_choice_preview')}" title="${t('routes.insert_choice_preview')}">
+       ${cands.length > 1 ? `<button type="button" class="insert-choice-eye" data-i="${i}" aria-label="${t('routes.insert_choice_preview')}" title="${t('routes.insert_choice_preview')}">
          <i class="fa-regular fa-eye" aria-hidden="true"></i>
+       </button>` : ''}
+     </div>`).join('') + `<div class="insert-choice-row">
+       <button type="button" class="wp-tooltip-action insert-choice-end">
+         <i class="fa-solid fa-right-left" aria-hidden="true"></i>
+         <span>${t('routes.insert_at_end')}</span>
        </button>
-     </div>`).join('')
+     </div>`
   wrap.innerHTML = `
     <div class="place-popup-header">
-      <span class="place-popup-name">${t('routes.insert_choice_title')}</span>
+      <span class="place-popup-name">${t(cands.length > 1 ? 'routes.insert_choice_title' : 'routes.insert_choice_title_single')}</span>
       <button type="button" class="place-popup-close" aria-label="${t('routes.close')}">×</button>
     </div>
     ${rows}
@@ -1962,6 +1971,11 @@ function showInsertChoicePopup(cands: Array<{ lng: number; lat: number; insertAt
       if (c) insertWaypointAt(c.insertAt, c.lng, c.lat)
       closeInsertChoicePopup()
     })
+  })
+  wrap.querySelector('.insert-choice-end')?.addEventListener('click', (ev: any) => {
+    ev.stopPropagation()
+    addWaypoint(anchor.lng, anchor.lat)
+    closeInsertChoicePopup()
   })
   const eyeButtons = wrap.querySelectorAll('.insert-choice-eye')
   eyeButtons.forEach((btn) => {

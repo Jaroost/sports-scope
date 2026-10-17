@@ -493,6 +493,81 @@ async function initMap() {
         showHoverMarker([hit.lng, hit.lat])
       })
       mapInstance.on('mouseout', hideHoverMarker)
+      // Glisser le « + » du tracé : dès que le curseur s'éloigne, un point est inséré entre le
+      // précédent et le suivant (rang de l'arête survolée) et suit le curseur ; au relâchement
+      // il est posé là où on l'a lâché. Un simple clic, lui, garde son comportement d'insertion.
+      // Écouteur DOM en capture sur le conteneur : il passe avant ceux de MapLibre
+      // (preventDefault sur l'évènement 'mousedown' de la carte ne suffit pas à bloquer le
+      // déplacement).
+      mapInstance.getContainer().addEventListener('mousedown', (oe: MouseEvent) => {
+        if (!hoverInsert || routeStore.readOnly.value || overClimbMarker || oe.button !== 0) return
+        if ((oe.target as Element).closest('.maplibregl-marker, .maplibregl-popup, button, a')) return
+        const hit = hoverInsert
+        const startX = oe.clientX, startY = oe.clientY
+        // Désarme le déplacement de la carte AVANT que MapLibre ne traite l'appui, sans lui
+        // cacher l'évènement : il lui faut le mousedown pour émettre ensuite le « click »
+        // qui insère un point (stopPropagation le privait de ce clic).
+        mapInstance.dragPan.disable()
+        let insertAt = -1
+        const toLngLat = (ev: MouseEvent) => {
+          const rect = mapInstance.getContainer().getBoundingClientRect()
+          return mapInstance.unproject([ev.clientX - rect.left, ev.clientY - rect.top])
+        }
+        let cur: { lng: number; lat: number } | null = null
+        let pushed: { lng: number; lat: number } | null = null
+        const stopLive = startLiveReroute(() => {
+          if (insertAt < 0 || !cur || cur === pushed) return
+          const wps = routeStore.waypoints.value
+          if (!wps[insertAt]) return
+          pushed = cur
+          const next = wps.slice()
+          next[insertAt] = { ...next[insertAt], lng: cur.lng, lat: cur.lat }
+          routeStore.waypoints.value = next
+          emit('waypoints-changed')
+        })
+        const onMove = (ev: MouseEvent) => {
+          if (insertAt < 0) {
+            const dx = ev.clientX - startX, dy = ev.clientY - startY
+            if (dx * dx + dy * dy < 16 || atWaypointLimit()) return
+            deselectAll()
+            insertAt = insertPositionForEdge(hit.edgeIdx)
+            insertWaypointAt(insertAt, hit.lng, hit.lat)
+            mapInstance.getCanvas().style.cursor = 'grabbing'
+          }
+          const ll = toLngLat(ev)
+          cur = { lng: ll.lng, lat: ll.lat }
+          // Le recalcul du tracé déclenché par l'insertion reconstruit les marqueurs : on
+          // relit donc le marqueur à chaque mouvement plutôt que de garder l'ancien, détruit.
+          const m = waypointMarkers[insertAt]
+          if (m) {
+            m.setLngLat([ll.lng, ll.lat])
+            const el = m.getElement()
+            el.style.display = ''
+            el.style.zIndex = '9999'
+          }
+        }
+        const onUp = (ev: MouseEvent) => {
+          window.removeEventListener('mousemove', onMove)
+          window.removeEventListener('mouseup', onUp)
+          stopLive()
+          mapInstance.dragPan.enable()
+          if (insertAt < 0) return
+          mapInstance.getCanvas().style.cursor = 'crosshair'
+          suppressNextMapClick = true
+          suppressNextWpClick = true
+          setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 50)
+          const ll = toLngLat(ev)
+          const wps = routeStore.waypoints.value
+          if (!wps[insertAt]) return
+          const next = wps.slice()
+          next[insertAt] = { ...next[insertAt], lng: ll.lng, lat: ll.lat }
+          routeStore.waypoints.value = next
+          refreshWaypointMarkers()
+          emit('waypoints-changed')
+        }
+        window.addEventListener('mousemove', onMove)
+        window.addEventListener('mouseup', onUp)
+      }, true)
       // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View.
       mapInstance.on('contextmenu', (e: any) => {
         e.preventDefault?.()
@@ -2385,17 +2460,26 @@ function refreshWaypointMarkers() {
 // l'amas en silence — on croit déplacer ce qu'on voit, c'est-à-dire l'ensemble, et les
 // points restés en arrière ne réapparaîtraient qu'en zoomant, le tracé déjà refait.
 // Le point saisi, lui, atterrit exactement sous le curseur.
-function dropWaypointAt(idx: number, lng: number, lat: number) {
+function dropWaypointAt(idx: number, lng: number, lat: number, members: number[] = clusterMembers(idx)) {
   const wps = routeStore.waypoints.value
   const from = wps[idx]
   if (!from) return
   const dLng = lng - from.lng, dLat = lat - from.lat
   const next = wps.slice()
-  for (const i of clusterMembers(idx)) {
+  for (const i of members) {
     next[i] = { ...next[i], lng: next[i].lng + dLng, lat: next[i].lat + dLat }
   }
   routeStore.waypoints.value = next
   emit('waypoints-changed')
+}
+
+// Pendant un glisser, relance le routage toutes les secondes avec la position courante
+// (`push` ne fait rien si le curseur n'a pas bougé depuis). Renvoie la fonction d'arrêt.
+// recomputeRoute annule le calcul précédent : un routage lent ne s'empile pas.
+const LIVE_REROUTE_MS = 1000
+function startLiveReroute(push: () => void): () => void {
+  const timer = setInterval(push, LIVE_REROUTE_MS)
+  return () => clearInterval(timer)
 }
 
 function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
@@ -2404,6 +2488,16 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
     if ((ev.target as Element).closest('.wp-tooltip')) return
     ev.preventDefault(); ev.stopPropagation()
     let moved = false
+    // Membres figés au départ : le rerouting périodique déplace les points en cours de route,
+    // l'amas ne doit pas être recalculé sur leurs positions intermédiaires.
+    const members = clusterMembers(idx)
+    let cur: { lng: number; lat: number } | null = null
+    let pushed: { lng: number; lat: number } | null = null
+    const stopLive = startLiveReroute(() => {
+      if (!cur || cur === pushed) return
+      pushed = cur
+      dropWaypointAt(idx, cur.lng, cur.lat, members)
+    })
     mapInstance.dragPan.disable()
     mapInstance.getCanvas().style.cursor = 'grabbing'
     el.style.cursor = 'grabbing'
@@ -2411,11 +2505,14 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       moved = true
       const rect = mapInstance.getContainer().getBoundingClientRect()
       const ll = mapInstance.unproject([e.clientX - rect.left, e.clientY - rect.top])
-      marker.setLngLat([ll.lng, ll.lat])
+      cur = { lng: ll.lng, lat: ll.lat }
+      // Le marqueur est recréé à chaque routage : on relit le courant.
+      ;(waypointMarkers[idx] ?? marker).setLngLat([ll.lng, ll.lat])
     }
     const onUp = () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      stopLive()
       mapInstance.dragPan.enable()
       mapInstance.getCanvas().style.cursor = 'crosshair'
       el.style.cursor = ''
@@ -2423,8 +2520,7 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       suppressNextMapClick = true
       suppressNextWpClick = true
       setTimeout(() => { suppressNextMapClick = false; suppressNextWpClick = false }, 50)
-      const pos = marker.getLngLat()
-      dropWaypointAt(idx, pos.lng, pos.lat)
+      if (cur) dropWaypointAt(idx, cur.lng, cur.lat, members)
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -2436,6 +2532,14 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
     ev.preventDefault(); ev.stopPropagation()
     const startTouch = ev.touches[0]
     let moved = false
+    const members = clusterMembers(idx)
+    let cur: { lng: number; lat: number } | null = null
+    let pushed: { lng: number; lat: number } | null = null
+    const stopLive = startLiveReroute(() => {
+      if (!cur || cur === pushed) return
+      pushed = cur
+      dropWaypointAt(idx, cur.lng, cur.lat, members)
+    })
     mapInstance.dragPan.disable()
     const onTouchMove = (e: TouchEvent) => {
       if (e.touches.length !== 1) return
@@ -2446,9 +2550,11 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       moved = true
       const rect = mapInstance.getContainer().getBoundingClientRect()
       const ll = mapInstance.unproject([touch.clientX - rect.left, touch.clientY - rect.top])
-      marker.setLngLat([ll.lng, ll.lat])
+      cur = { lng: ll.lng, lat: ll.lat }
+      ;(waypointMarkers[idx] ?? marker).setLngLat([ll.lng, ll.lat])
     }
     const onTouchEnd = () => {
+      stopLive()
       el.removeEventListener('touchmove', onTouchMove)
       el.removeEventListener('touchend', onTouchEnd)
       el.removeEventListener('touchcancel', onTouchEnd)
@@ -2456,8 +2562,7 @@ function attachWaypointDrag(el: HTMLElement, marker: any, idx: number) {
       if (!moved) { activateWaypoint(idx); return }
       suppressNextWpClick = true
       setTimeout(() => { suppressNextWpClick = false }, 50)
-      const pos = marker.getLngLat()
-      dropWaypointAt(idx, pos.lng, pos.lat)
+      if (cur) dropWaypointAt(idx, cur.lng, cur.lat, members)
     }
     el.addEventListener('touchmove', onTouchMove, { passive: false })
     el.addEventListener('touchend', onTouchEnd)

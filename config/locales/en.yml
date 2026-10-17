@@ -1063,6 +1063,7 @@ en:
     view_list: "List"
     view_map: "Map"
     radar:
+      label: "Precipitation radar"
       show: "Show precipitation radar"
       hide: "Hide precipitation radar"
       play: "Play"

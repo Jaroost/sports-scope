@@ -3041,6 +3041,14 @@ defineExpose({
               <i class="fa-solid fa-cube fa-fw" aria-hidden="true"></i>{{ t('strava.map_3d') }}
             </button>
           </li>
+          <li>
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: radarVisible }" :disabled="radarLoading" @click="toggleRadar">
+              <span v-if="radarLoading" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+              <i v-else class="fa-solid" :class="radarVisible ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-cloud-rain fa-fw" aria-hidden="true"></i>{{ t('routes.radar.label') }}
+            </button>
+          </li>
           <template v-if="!routeStore.shareLocked.value">
             <li><hr class="dropdown-divider" /></li>
             <li>
@@ -3145,15 +3153,6 @@ defineExpose({
           :aria-pressed="locationVisible">
           <span v-if="locating" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
           <i v-else class="fa-solid fa-location-crosshairs" aria-hidden="true"></i>
-        </button>
-        <button type="button" class="btn map-ctrl-btn"
-          :class="radarVisible ? 'btn-warning text-dark active' : 'btn-light'"
-          @click="toggleRadar"
-          :disabled="radarLoading"
-          :title="radarVisible ? t('routes.radar.hide') : t('routes.radar.show')"
-          :aria-pressed="radarVisible">
-          <span v-if="radarLoading" class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-          <i v-else class="fa-solid fa-cloud-rain" aria-hidden="true"></i>
         </button>
         <button type="button" class="btn map-ctrl-btn d-none d-md-flex"
           :class="state.mapExpanded ? 'btn-warning text-dark active' : 'btn-light'"

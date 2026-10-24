@@ -141,9 +141,15 @@ watch(selectedDivider, (divider) => { if (divider) selected.value = null })
 // redevient alors entièrement vide, aussi grand qu'il était.
 const swapping = ref(false)
 
+// Dupliquer partage le geste de l'échange (choisir une case d'arrivée) mais ne
+// touche pas à la source : le composant est recopié en entier — couleurs,
+// seuils, emplacement des éléments — sur une case vide (1 × 1) ou à la place
+// de celui d'une case remplie (qui garde sa position et son étendue).
+const duplicating = ref(false)
+
 // Toute nouvelle sélection éteint un échange resté armé : il n'a de sens que
 // pour la cellule qu'on vient de quitter.
-watch(selected, () => { swapping.value = false })
+watch(selected, () => { swapping.value = false; duplicating.value = false })
 
 // Où ira le composant que la dialogue va rendre. Quatre destinations et pas une
 // seule : poser dans une case vide n'est pas remplacer une cellule, et ajouter à
@@ -885,6 +891,22 @@ function canSwapTo(cell: Cell | null): boolean {
 }
 
 function tapSlot(page: Page, row: number, col: number, cell: Cell | null) {
+  if (duplicating.value) {
+    const source = selected.value
+    if (!source || cell === source) { duplicating.value = false; return }
+    // Copie profonde : `source.block` est un proxy réactif, et les deux cases ne
+    // doivent surtout pas partager les mêmes tableaux (seuils, couleurs).
+    const copy = JSON.parse(JSON.stringify(source.block)) as Block
+    if (cell) {
+      cell.block = copy
+      selected.value = cell
+    } else {
+      page.cells = [...(page.cells || []), { row, col, row_span: 1, col_span: 1, block: copy }]
+      selected.value = page.cells[page.cells.length - 1]
+    }
+    duplicating.value = false
+    return
+  }
   if (swapping.value) {
     const target = selected.value
     // Se retoucher soi-même annule l'échange plutôt que de ne rien faire :
@@ -929,7 +951,7 @@ function tapSlot(page: Page, row: number, col: number, cell: Cell | null) {
 // pendant un échange ou sur une case vide (le simple clic y ouvre déjà la
 // dialogue).
 function dblTapSlot(page: Page, cell: Cell | null) {
-  if (swapping.value || !cell) return
+  if (swapping.value || duplicating.value || !cell) return
   selected.value = cell
   picker.value = { at: 'cell', page, cell }
 }
@@ -1847,9 +1869,9 @@ async function save() {
                   <button v-for="slot in slots(page)" :key="slot.key" type="button"
                           class="companion-cell"
                           :class="{ filled: !!slot.cell, selected: !!slot.cell && slot.cell === selected,
-                                    'swap-target': swapping && canSwapTo(slot.cell),
-                                    'swap-source': swapping && slot.cell === selected,
-                                    'cell-muted': !!selected && !swapping && !!slot.cell && slot.cell !== selected }"
+                                    'swap-target': (swapping || duplicating) && canSwapTo(slot.cell),
+                                    'swap-source': (swapping || duplicating) && slot.cell === selected,
+                                    'cell-muted': !!selected && !swapping && !duplicating && !!slot.cell && slot.cell !== selected }"
                           :style="styleFor(page, slot.cell, slot.row, slot.col)"
                           :title="slot.cell ? labelFor(slot.cell.block) : t('companion.settings.add_block')"
                           @click="tapSlot(page, slot.row, slot.col, slot.cell)"
@@ -1877,6 +1899,9 @@ async function save() {
                    téléphone) : c'est la seule phrase qui dit ce que touchent
                    maintenant les cases, y compris celles restées ternes (pas de
                    cible valable). -->
+              <p v-if="duplicating" class="text-primary small mb-2">
+                <i class="fa-regular fa-clone me-1" aria-hidden="true"></i>{{ t('companion.settings.duplicate_hint') }}
+              </p>
               <p v-if="swapping" class="text-primary small mb-2">
                 <i class="fa-solid fa-right-left me-1" aria-hidden="true"></i>{{ t('companion.settings.swap_hint') }}
               </p>
@@ -1911,8 +1936,13 @@ async function save() {
                     </button>
                     <button class="btn btn-sm btn-outline-secondary" type="button"
                             :class="{ active: swapping }"
-                            @click="swapping = !swapping">
+                            @click="swapping = !swapping; duplicating = false">
                       <i class="fa-solid fa-right-left me-1" aria-hidden="true"></i>{{ t('companion.settings.swap_cell') }}
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" type="button"
+                            :class="{ active: duplicating }"
+                            @click="duplicating = !duplicating; swapping = false">
+                      <i class="fa-regular fa-clone me-1" aria-hidden="true"></i>{{ t('companion.settings.duplicate_cell') }}
                     </button>
                   </div>
                 </div>

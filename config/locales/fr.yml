@@ -1970,6 +1970,8 @@ fr:
       change_block: "Changer"
       swap_cell: "Échanger"
       swap_hint: "Touchez un autre composant ou une case vide pour y échanger celui-ci — ou touchez-le à nouveau pour annuler."
+      duplicate_cell: "Dupliquer"
+      duplicate_hint: "Touchez une case vide ou un autre composant pour y copier celui-ci (couleurs, seuils, disposition) — ou touchez-le à nouveau pour annuler."
       divider_hint: "Tapez pour poser ou sélectionner un séparateur — il traverse toute la grille, sans changer la taille des cases."
       divider_color: "Couleur du séparateur"
       remove_divider: "Retirer"

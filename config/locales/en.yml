@@ -1970,6 +1970,8 @@ en:
       change_block: "Change"
       swap_cell: "Swap"
       swap_hint: "Tap another component or an empty cell to swap it with this one — or tap it again to cancel."
+      duplicate_cell: "Duplicate"
+      duplicate_hint: "Tap an empty cell or another component to copy this one onto it (colours, thresholds, layout) — or tap it again to cancel."
       divider_hint: "Tap to add or select a divider — it spans the whole grid, without changing the cells' size."
       divider_color: "Divider color"
       remove_divider: "Remove"

@@ -585,6 +585,50 @@ function setLapLayout(page: Page, layout: 'list' | 'grid') {
   selected.value = null
 }
 
+// Passe une page `list`/`grid` en page de tours, ou l'inverse, **sans toucher
+// à son contenu** : la disposition (liste ou grille, `rows`/`cols`/`cells` ou
+// `blocks`) est celle qu'elle avait, seul le genre change. Les composants
+// `lap_*` sont plaçables sur n'importe quelle page (voir `BLOCKS` côté Rails),
+// donc revenir en arrière ne retire rien : ils lisent alors la sortie entière
+// ou restent vides, à l'éditeur de les enlever.
+//
+// Vers les tours, on ajoute un `lap_selector` s'il n'y en a pas — sans lui la
+// page ne montrerait jamais que le tour le plus récent. En grille, seulement
+// s'il reste une case libre : on ne déplace ni ne rétrécit rien pour lui.
+function setPageLaps(page: Page, laps: boolean) {
+  const grid = isGridLayout(page)
+  if (laps) {
+    if (page.kind === 'laps') return
+    page.kind = 'laps'
+    page.series = page.series || 'default'
+    if (grid) {
+      page.layout = 'grid'
+      const cells = page.cells || (page.cells = [])
+      if (!cells.some((c) => c.block.kind === 'lap_selector')) {
+        const taken = (r: number, c: number) => cells.some((cell) =>
+          r >= cell.row && r < cell.row + cell.row_span &&
+          c >= cell.col && c < cell.col + cell.col_span)
+        for (let r = 0; r < (page.rows || 1); r++) {
+          const c = Array.from({ length: page.cols || 1 }, (_, i) => i).find((i) => !taken(r, i))
+          if (c !== undefined) {
+            cells.push({ row: r, col: c, row_span: 1, col_span: 1, block: { kind: 'lap_selector' } })
+            break
+          }
+        }
+      }
+    } else {
+      const blocks = page.blocks || (page.blocks = [])
+      if (!blocks.some((b) => b.kind === 'lap_selector')) blocks.unshift({ kind: 'lap_selector' })
+    }
+  } else {
+    if (page.kind !== 'laps') return
+    page.kind = grid ? 'grid' : 'list'
+    delete page.layout
+    delete page.series
+  }
+  selected.value = null
+}
+
 function movePage(index: number, delta: number) {
   const target = index + delta
   if (target < 0 || target >= preset.value.pages.length) return
@@ -1717,6 +1761,20 @@ async function save() {
                 </div>
               </div>
             </template>
+
+            <!-- Page de tours ou non : même contenu, même disposition, seul le
+                 genre change — voir `setPageLaps`. -->
+            <div v-if="page.kind !== 'map'" class="mb-2">
+              <div class="form-check form-switch">
+                <input type="checkbox" class="form-check-input" role="switch"
+                       :id="`page-laps-${index}`" :checked="page.kind === 'laps'"
+                       @change="setPageLaps(page, ($event.target as HTMLInputElement).checked)">
+                <label class="form-check-label small" :for="`page-laps-${index}`">
+                  {{ t('companion.settings.page_laps_mode') }}
+                </label>
+              </div>
+              <p class="text-body-secondary small mb-0">{{ t('companion.settings.page_laps_mode_help') }}</p>
+            </div>
 
             <!-- Une page de tours : la série qu'elle affiche. Un bouton
                  « Marquer un tour » posé ailleurs doit porter la même clé

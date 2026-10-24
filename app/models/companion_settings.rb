@@ -253,6 +253,12 @@ module CompanionSettings
     # d'une WebView : sans tracé il se rabat sur la sortie enregistrée par le
     # téléphone, qui existe même hors navigation.
     "altitude_profile" => [],
+    # Le même graphique, borné au tour choisi sur une page `laps` : D+ et distance
+    # **du tour**, profil tiré de sa propre piste (`RideLap.elevationTrack`, côté
+    # appli). Même famille que `lap_metric_trend` — un genre à part, parce qu'il
+    # n'a de sens que sur une page qui porte un tour sélectionné. Ni mode ni
+    # `window_km` : le tour ouvert tient lieu de fenêtre.
+    "lap_altitude_profile" => [],
     # La courbe de puissance : la meilleure moyenne tenue depuis le départ, pour
     # onze durées standard (5 s à 90 min, mêmes bornes que `PeakPowerCurve::DURATIONS`
     # côté site — la sortie ne doit pas afficher deux jeux de chiffres selon l'écran

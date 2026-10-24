@@ -1590,12 +1590,18 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
          un tracé chargé donne ce même graphique sur toute la distance, sans
          tracé l'appli le rebâtit sur la sortie déjà enregistrée. Un seul mode :
          c'est le contexte de la sortie qui choisit l'allure, pas l'éditeur. -->
-    <div v-else-if="block.kind === 'altitude_profile'" class="cbp-card cbp-climb-profile" :style="overrideStyle">
-      <div class="cbp-title">Profil d'altitude</div>
+    <div
+      v-else-if="block.kind === 'altitude_profile' || block.kind === 'lap_altitude_profile'"
+      class="cbp-card cbp-climb-profile"
+      :style="overrideStyle"
+    >
+      <div class="cbp-title">{{ lapScope }}Profil d'altitude</div>
       <div class="cbp-climb-profile-header">
         <span class="cbp-climb-profile-progress">
           <span class="cbp-climb-profile-gain">+{{ Math.round(altitudeProfileSample.remainingGainM) }} m</span>
-          <span class="cbp-climb-profile-pct">{{ Math.round(altitudeProfileSample.ratio * 100) }} %</span>
+          <span v-if="block.kind === 'altitude_profile'" class="cbp-climb-profile-pct">
+            {{ Math.round(altitudeProfileSample.ratio * 100) }} %
+          </span>
         </span>
         <span class="cbp-climb-profile-aside">
           <span class="cbp-climb-profile-dist">
@@ -1618,9 +1624,18 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
           </defs>
           <path v-for="(seg, i) in altitudeProfileSample.segments" :key="i" :d="seg.d" :fill="seg.color" />
           <!-- Portion déjà parcourue : l'aire entière redessinée en gris, clippée au curseur. -->
-          <path :d="altitudeProfileSample.areaD" fill="#9ca3af" :clip-path="`url(#${altitudeProfileClipId})`" />
+          <path
+            v-if="block.kind === 'altitude_profile'"
+            :d="altitudeProfileSample.areaD"
+            fill="#9ca3af"
+            :clip-path="`url(#${altitudeProfileClipId})`"
+          />
         </svg>
-        <div class="cbp-climb-profile-cursor" :style="{ left: `${altitudeProfileSample.posX}%` }">
+        <div
+          v-if="block.kind === 'altitude_profile'"
+          class="cbp-climb-profile-cursor"
+          :style="{ left: `${altitudeProfileSample.posX}%` }"
+        >
           <span
             class="cbp-climb-profile-remain"
             :style="{
@@ -1771,7 +1786,7 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
 /* Le badge « Ce tour » d'une mesure posée sur une page Tours — voir la doc de
    `showLapBadge`. Un coin plutôt qu'un titre : une mesure `metric` n'a pas
    forcément de rangée d'étiquette dans sa disposition, contrairement à
-   `lap_zones`/`lap_averages`/`lap_metric_trend` qui préfixent la leur
+   `lap_zones`/`lap_averages`/`lap_metric_trend`/`lap_altitude_profile` qui préfixent la leur
    (`lapScope`). */
 .cbp-lap-badge {
   position: absolute;

@@ -106,7 +106,7 @@ const timerSound = ref<string>(props.block?.kind === 'timer' ? (props.block?.sou
 const format = ref(
   props.block?.kind === 'clock' ? (props.block?.mode || 'hm') : (props.block?.format || 'hm'),
 )
-// La fenêtre roulante d'un bloc `altitude_profile` — vide par défaut (`0` ne
+// La fenêtre roulante d'un bloc `altitude_profile`/`lap_altitude_profile` — vide par défaut (`0` ne
 // sort jamais du composant, voir plus bas et `blockFor`) : le profil entier
 // du tracé, comportement d'avant ce réglage, plutôt qu'une fenêtre choisie
 // pour personne.
@@ -949,7 +949,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
               </label>
             </template>
 
-            <label v-if="group.kind === 'altitude_profile'" class="cbpk-param small">
+            <label v-if="group.kind === 'altitude_profile' || group.kind === 'lap_altitude_profile'" class="cbpk-param small">
               {{ t('companion.settings.altitude_window_km') }}
               <input
                 v-model.number="windowKm"
@@ -957,7 +957,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
                 min="1"
                 max="50"
                 step="1"
-                :placeholder="t('companion.settings.altitude_window_km_placeholder')"
+                :placeholder="t(group.kind === 'lap_altitude_profile'
+                  ? 'companion.settings.lap_altitude_window_km_placeholder'
+                  : 'companion.settings.altitude_window_km_placeholder')"
                 class="form-control form-control-sm"
               >
             </label>
@@ -1104,6 +1106,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
           <p v-if="group.kind === 'altitude_profile'" class="text-body-secondary small mb-2">
             {{ t('companion.settings.altitude_window_km_hint') }}
+          </p>
+          <p v-if="group.kind === 'lap_altitude_profile'" class="text-body-secondary small mb-2">
+            {{ t('companion.settings.lap_altitude_window_km_hint') }}
           </p>
 
           <p v-if="group.kind === 'metric_trend'" class="text-body-secondary small mb-2">

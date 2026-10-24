@@ -256,8 +256,11 @@ module CompanionSettings
     # Le même graphique, borné au tour choisi sur une page `laps` : D+ et distance
     # **du tour**, profil tiré de sa propre piste (`RideLap.elevationTrack`, côté
     # appli). Même famille que `lap_metric_trend` — un genre à part, parce qu'il
-    # n'a de sens que sur une page qui porte un tour sélectionné. Ni mode ni
-    # `window_km` : le tour ouvert tient lieu de fenêtre.
+    # n'a de sens que sur une page qui porte un tour sélectionné. Pas de mode.
+    # `window_km` ne joue que sur le tour **en cours** pendant un suivi de
+    # tracé : le tour (fait, grisé) puis le reste du tracé, tout le reste si
+    # absent, sinon les `window_km` prochains kilomètres. Tour clos ou sans
+    # tracé, il n'a aucun effet.
     "lap_altitude_profile" => [],
     # La courbe de puissance : la meilleure moyenne tenue depuis le départ, pour
     # onze durées standard (5 s à 90 min, mêmes bornes que `PeakPowerCurve::DURATIONS`
@@ -1516,7 +1519,7 @@ module CompanionSettings
       block["series"] = sanitize_series(raw["series"])
     when "bell"
       block["sound"] = BELL_SOUNDS.include?(raw["sound"]) ? raw["sound"] : BELL_SOUNDS.first
-    when "altitude_profile"
+    when "altitude_profile", "lap_altitude_profile"
       # Absent (`nil`) plutôt qu'un repli : c'est le profil entier, le
       # comportement d'avant ce réglage, et pas une fenêtre à moitié devinée —
       # même raisonnement que `sanitize_range` pour la jauge à plage libre.

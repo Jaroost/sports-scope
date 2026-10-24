@@ -105,7 +105,7 @@ export interface Block {
   // la sortie, comportement d'avant ce réglage ; `> 0` : les N dernières
   // secondes — voir `CompanionSettings::WINDOWABLE_METRICS` côté Rails.
   compute_window_s?: number
-  // La fenêtre « roulante » d'un bloc `altitude_profile`, en km à venir depuis
+  // La fenêtre « roulante » d'un bloc `altitude_profile` ou `lap_altitude_profile`, en km à venir depuis
   // la position courante — seulement quand un tracé est suivi (voir
   // `sanitize_block`). Absente : le profil entier du tracé, fait/restant,
   // comportement d'avant ce réglage.
@@ -897,7 +897,7 @@ export function blockFor(
   if (choice.kind === 'mark_lap') block.series = params.series || 'default'
   // Absent (`undefined`) plutôt qu'un repli : c'est le profil entier, pas une
   // fenêtre à moitié réglée — même raisonnement que `min`/`max` de la jauge.
-  if (choice.kind === 'altitude_profile' && params.windowKm) block.window_km = params.windowKm
+  if ((choice.kind === 'altitude_profile' || choice.kind === 'lap_altitude_profile') && params.windowKm) block.window_km = params.windowKm
   // Même raisonnement, en secondes : absent vaut toute la sortie.
   if (choice.kind === 'metric_trend' && params.windowS) block.window_s = params.windowS
   // Toujours écrits, contrairement à `window_km`/`window_s` : le bloc `fueling`

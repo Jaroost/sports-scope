@@ -1978,6 +1978,8 @@ en:
       pick_block: "Choose a component"
       pick_block_help: "Each tile shows what the phone will draw. The display mode is the choice: the same content does not fit a quarter of the screen and a two-cell strip the same way. Pick the metric or the source above its tiles — they redraw at once."
       pick_block_cell: "Tiles are drawn at the size of the cell: %{width} × %{height} px. The smaller the cell, the smaller the component is scaled down."
+      filter_blocks: "Filter components…"
+      filter_blocks_empty: "No component matches."
       cancel: "Cancel"
       block: "Component"
       metric: "Metric"

@@ -729,6 +729,39 @@ const groups = computed(() => {
   return order.map((kind) => ({ kind, tiles: tilesByGroup.get(kind)! }))
 })
 
+// Le filtre de la dialogue : une saisie libre qui ne garde que les sections
+// dont le titre, l'aide ou une vignette (ou, pour « Une mesure », une mesure du
+// catalogue) la contient — sans accents ni casse, tous les mots devant se
+// retrouver. Une section dont le titre ou l'aide répond garde toutes ses
+// vignettes ; sinon seules celles qui répondent restent. Les réglages d'une
+// section (mesure, source…) restent ceux de `groups` : filtrer n'en change aucun.
+const filter = ref('')
+
+function normalize(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+const filteredGroups = computed(() => {
+  const words = normalize(filter.value).split(/\s+/).filter(Boolean)
+  if (!words.length) return groups.value
+  const matches = (text: string) => {
+    const hay = normalize(text)
+    return words.every((w) => hay.includes(w))
+  }
+
+  return groups.value
+    .map((group) => {
+      const own = [
+        groupLabel(group.kind),
+        blockHelp(group.kind),
+        ...(group.kind === 'metric' ? primaryMetricChoices.value.map(metricLabel) : []),
+      ].join(' ')
+      if (matches(own)) return group
+      return { ...group, tiles: group.tiles.filter((tile) => matches(tile.label)) }
+    })
+    .filter((group) => group.tiles.length > 0)
+})
+
 // Ce que la case fait comme place dans la tuile.
 //
 // La vignette garde **le rapport de la case et sa taille l'une par rapport à
@@ -847,7 +880,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
           </label>
         </div>
 
-        <section v-for="group in groups" :key="group.kind" class="cbpk-group">
+        <input
+          v-model="filter"
+          type="search"
+          class="form-control form-control-sm mb-3"
+          :placeholder="t('companion.settings.filter_blocks')"
+          :aria-label="t('companion.settings.filter_blocks')"
+        >
+        <p v-if="filter && !filteredGroups.length" class="text-body-secondary small">
+          {{ t('companion.settings.filter_blocks_empty') }}
+        </p>
+
+        <section v-for="group in filteredGroups" :key="group.kind" class="cbpk-group">
           <div class="cbpk-group-head">
             <h3 class="h6 mb-0">{{ groupLabel(group.kind) }}</h3>
 

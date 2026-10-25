@@ -25,6 +25,12 @@ export const MAP_STYLES: MapStyle[] = [
   { id: 'degrau',     icon: 'fa-circle-half-stroke', group: 'germany' },
 ]
 
+// Emoji de chaque groupe, pour préfixer les choix là où les en-têtes <optgroup> ne se
+// voient pas une fois l'option sélectionnée (fonds de secours du profil).
+export const MAP_STYLE_GROUP_FLAG: Record<MapStyleGroup, string> = {
+  world: '🌍', swiss: '🇨🇭', france: '🇫🇷', austria: '🇦🇹', germany: '🇩🇪',
+}
+
 // Ordre des en-têtes de groupe dans le dropdown.
 export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss', 'france', 'austria', 'germany']
 

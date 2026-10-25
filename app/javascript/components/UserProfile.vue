@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
-import { MAP_STYLES, MAP_STYLE_GROUPS, mapStyleFor } from '../mapStyles'
+import { MAP_STYLES, MAP_STYLE_GROUPS, MAP_STYLE_GROUP_FLAG, mapStyleFor } from '../mapStyles'
 import { POI_CATEGORIES } from '../poiCategories'
 import { ALL_COUNTRY_CODES, countryName, countryFlag } from '../countries'
 import { usePointerSort } from '../composables/usePointerSort'
@@ -638,7 +638,7 @@ function placePreviewMarker(coords: [number, number]) {
               <optgroup v-for="g in groupedStyles" :key="g.group" :label="t(`profile.map.group_${g.group}`)">
                 <option v-for="style in g.styles" :key="style.id" :value="style.id"
                   :disabled="style.id === sport.map.default_style || ((sport.map.fallback_styles as string[]).includes(style.id) && sport.map.fallback_styles[i] !== style.id)">
-                  {{ t(`profile.map.style_${style.id}`) }}
+                  {{ MAP_STYLE_GROUP_FLAG[g.group] }} {{ t(`profile.map.group_${g.group}`) }} · {{ t(`profile.map.style_${style.id}`) }}
                 </option>
               </optgroup>
             </select>

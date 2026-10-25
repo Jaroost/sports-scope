@@ -27,6 +27,8 @@ class User < ApplicationRecord
       "snap_warn_m" => 25,
       "map" => {
         "default_style" => map_style,
+        "fallback_style" => nil,  # fond de secours quand le favori n'a plus de tuiles lisibles (cf. auto_switch)
+        "auto_switch" => false,   # basculer seul entre favori et secours selon la couverture de la vue
         "overlays" => [],   # couches transparentes actives (SuisseMobile/swisstopo)
       },
       # Tracé de l'itinéraire dans le créateur (hors mode pente pour la couleur).

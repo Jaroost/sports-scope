@@ -10,7 +10,7 @@ import {
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
-import { persistDefaultMapStyle, persistOverlays, sportPreferences, userPreferences } from '../userPreferences'
+import { persistDefaultMapStyle, persistAutoSwitch, persistOverlays, sportPreferences, userPreferences } from '../userPreferences'
 import type { MapStyleId } from '../userPreferences'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
@@ -616,13 +616,15 @@ async function initMap() {
       mapInstance.on('zoom', () => { liveZoom.value = mapInstance.getZoom() })
       // Centre et zoom de la vue courante, tenus à jour pour la notice « fond hors zone »
       // (cf. styleCoverageWarn, COVERAGE_WARN_MIN_ZOOM dans mapStyles.ts).
-      mapInstance.on('moveend', () => {
+      const publishView = () => {
         const c = mapInstance.getCenter()
         props.state.viewCenter = { lng: c.lng, lat: c.lat }
         props.state.viewZoom = mapInstance.getZoom()
         const b = mapInstance.getBounds()
         props.state.viewBounds = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }
-      })
+      }
+      mapInstance.on('moveend', publishView)
+      publishView()
       // Facteur d'échelle des marqueurs, publié pour le CSS ET pour les groupes de
       // marqueurs, qui le réappliquent après chaque repositionnement (cf. mapMarkerGroup).
       const applyMarkerScale = () => {
@@ -2636,9 +2638,38 @@ function setMapStyle(id: string) {
   if (combo && !current.includes(combo.overlay)) next = [...current, combo.overlay]
   if (!combo && current.some((o) => governed.includes(o))) next = current.filter((o) => !governed.includes(o))
   if (next) setOverlays(next)
+  // Bascule automatique active : choisir le fond de SECOURS à la main est une dérogation
+  // (elle se met en pause, sinon le favori qui répond encore ramènerait l'ancien fond) ;
+  // tout autre fond devient le nouveau favori et la bascule continue avec lui.
+  const { map } = sportPreferences(routeStore.sport.value)
+  const auto = props.state.autoSwitch && !!map.fallback_style && map.fallback_style !== map.default_style
+  const override = auto && styleId === map.fallback_style
+  props.state.autoSwitchPaused = override
   if (styleId === props.state.mapStyleId) return
-  persistDefaultMapStyle(styleId as MapStyleId, routeStore.sport.value)
+  if (!override) {
+    persistDefaultMapStyle(styleId as MapStyleId, routeStore.sport.value)
+    props.state.prefsRev++
+  }
   applyMapStyle(styleId)
+}
+
+// Interrupteur collé au sélecteur de fond : n'a de sens qu'avec un fond de secours distinct
+// du favori (réglé dans le profil).
+const hasFallbackStyle = computed(() => {
+  void props.state.prefsRev
+  const { map } = sportPreferences(routeStore.sport.value)
+  return !!map.fallback_style && map.fallback_style !== map.default_style
+})
+function toggleAutoSwitch() {
+  if (!hasFallbackStyle.value) return
+  // En pause (fond de secours choisi à la main) : le clic reprend la bascule au lieu de l'éteindre.
+  if (props.state.autoSwitch && props.state.autoSwitchPaused) {
+    props.state.autoSwitchPaused = false
+    return
+  }
+  props.state.autoSwitch = !props.state.autoSwitch
+  props.state.autoSwitchPaused = false
+  persistAutoSwitch(props.state.autoSwitch, routeStore.sport.value)
 }
 
 function applyMapStyle(id: string) {
@@ -2747,6 +2778,8 @@ watch(routeStore.sport, (sport) => {
   const { map, route } = sportPreferences(sport)
   const styleChanged = map.default_style !== props.state.mapStyleId
   props.state.overlays = props.state.defaultOverlays(sport)
+  props.state.autoSwitchPaused = false
+  props.state.autoSwitch = map.auto_switch
   // Le réglage d'opacité du menu « Affichage » repart de la préférence du nouveau sport :
   // c'est un ajustement de séance, pas une valeur qui suit l'utilisateur d'un sport à l'autre.
   props.state.routeOpacity = route.opacity
@@ -2976,9 +3009,18 @@ defineExpose({
     <div v-if="liveZoom !== null" class="map-zoom-level" aria-hidden="true">z{{ liveZoom.toFixed(1) }}</div>
 
     <div ref="mapControlsEl" class="map-controls">
-      <MapStyleDropdown :model-value="state.mapStyleId" :active-overlays="state.overlays"
-        :mobile-label="t('strava.map_style_short')" @update:model-value="setMapStyle"
-        :open="openMenu === 'style'" @update:open="(v) => openMenu = v ? 'style' : null" />
+      <div class="map-style-row d-flex shadow-sm">
+        <MapStyleDropdown :model-value="state.mapStyleId" :active-overlays="state.overlays"
+          :mobile-label="t('strava.map_style_short')" @update:model-value="setMapStyle"
+          :open="openMenu === 'style'" @update:open="(v) => openMenu = v ? 'style' : null" />
+        <button type="button" class="btn btn-sm map-auto-toggle"
+          :class="state.autoSwitch && hasFallbackStyle && !state.autoSwitchPaused ? 'btn-warning text-dark' : state.autoSwitch && hasFallbackStyle ? 'btn-outline-warning' : 'btn-light'"
+          :disabled="!hasFallbackStyle" :aria-pressed="state.autoSwitch && hasFallbackStyle"
+          :title="hasFallbackStyle ? t(!state.autoSwitch ? 'routes.auto_switch_off' : state.autoSwitchPaused ? 'routes.auto_switch_paused' : 'routes.auto_switch_on') : t('routes.auto_switch_unavailable')"
+          @click="toggleAutoSwitch">
+          <i class="fa-solid fa-shuffle" aria-hidden="true"></i>
+        </button>
+      </div>
       <!-- Menu « Affichage » : bascules de calques regroupées (façon menu des couches).
            Les actions de pose (POI / repère) restent des boutons dédiés, hors de ce menu. -->
       <div class="position-relative shadow-sm">

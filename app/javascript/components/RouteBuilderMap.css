@@ -88,6 +88,23 @@
 @media (min-width: 768px) {
   .map-controls :deep(.map-ctrl-btn) { width: 11rem; }
 }
+/* Rangée « Fond de carte » + interrupteur de bascule automatique collé à sa droite : les
+   autres menus prennent la largeur de la rangée entière (bouton + interrupteur) pour que
+   toute la colonne reste alignée. */
+.map-controls > :not(.map-style-row) :deep(.map-ctrl-btn),
+.map-controls > :deep(.map-ctrl-btn) { width: calc(8.5rem + 34px); }
+@media (min-width: 768px) {
+  .map-controls > :not(.map-style-row) :deep(.map-ctrl-btn),
+  .map-controls > :deep(.map-ctrl-btn) { width: calc(11rem + 34px); }
+}
+.map-style-row :deep(.map-ctrl-btn) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.map-auto-toggle {
+  width: 34px;
+  padding: 0;
+  border-color: rgba(0,0,0,0.08);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
 .map-ctrl-btn.active,
 .map-ctrl-btn.active:hover,
 .map-ctrl-btn.active:focus {

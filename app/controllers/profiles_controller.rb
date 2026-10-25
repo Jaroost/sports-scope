@@ -292,6 +292,8 @@ class ProfilesController < ApplicationController
       "snap_warn_m" => clamp_int(raw[:snap_warn_m], SNAP_WARN_RANGE, defaults["snap_warn_m"]),
       "map" => {
         "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, defaults.dig("map", "default_style")),
+        "fallback_style" => allowed(map[:fallback_style], ALLOWED_MAP_STYLES, nil),
+        "auto_switch" => to_bool(map[:auto_switch], false),
         "overlays" => sanitize_overlays(map[:overlays]),
       },
       "route" => {

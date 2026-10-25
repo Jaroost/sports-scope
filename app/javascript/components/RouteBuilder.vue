@@ -11,7 +11,7 @@ import { POI_CATEGORIES, isPointType, categoryForType } from '../poiCategories'
 import { haversine, buildDistancesM, buildVertexGrid, downsample, densifyGeometry, formatDuration, formatDistancePrecise, geomIdxForKm, computeGainLoss, turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies, UTURN_ACCEPT_RADIUS_M, nearestGeomIndex, projectOnRoute, shareVersionParam, fillDefaultClimbNames } from '../routeHelpers'
 import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
-import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport } from '../userPreferences'
+import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport, sportPreferences } from '../userPreferences'
 import { profilesForSport } from '../brouter'
 import { routeLegs, LegRoutingError } from '../brouterLegs'
 import { fetchSegmentAlternatives, fetchBlockedAlternatives, equivalentGeometry, usableWidenLevels, widenRadiusForStep, BLOCK_RADIUS_M } from '../routeAlternatives'
@@ -205,6 +205,19 @@ const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismiss
 // n'intervient plus qu'en repli (sonde en échec) et pour les fonds sans sonde. Pendant
 // qu'une sonde est en vol, on garde le dernier verdict plutôt que de clignoter.
 const styleCoverageProbe = ref<boolean | null>(null)
+// Fond que la dernière sonde a réellement interrogé : avec la bascule automatique on sonde le
+// favori même quand c'est le secours qui est affiché, et ce verdict ne vaut alors rien pour
+// la notice « fond hors zone » du fond affiché.
+const styleCoverageProbed = ref<string | null>(null)
+// Bascule automatique favori ↔ secours (préférences du sport : map.fallback_style /
+// auto_switch). Aucune écriture de préférence : c'est un état de vue, pas un choix.
+const autoSwitch = computed(() => {
+  void state.prefsRev
+  const { map } = sportPreferences(routeStore.sport.value)
+  return !state.autoSwitchPaused && state.autoSwitch && map.fallback_style && map.fallback_style !== map.default_style
+    ? { favorite: map.default_style as string, fallback: map.fallback_style as string }
+    : null
+})
 let coverageProbeAbort: AbortController | null = null
 let coverageProbeTimer: ReturnType<typeof setTimeout> | undefined
 function scheduleCoverageProbe() {
@@ -212,24 +225,39 @@ function scheduleCoverageProbe() {
   coverageProbeAbort?.abort()
   const bounds = state.viewBounds
   const z = state.viewZoom
-  if (!bounds || z === null || z < COVERAGE_WARN_MIN_ZOOM || !hasCoverageProbe(state.mapStyleId)) {
+  const auto = autoSwitch.value
+  // Avec la bascule, on sonde toujours le favori : c'est lui qui décide d'aller au secours
+  // ou d'en revenir. Hors bascule, on sonde le fond affiché pour la notice.
+  const styleId = auto && (state.mapStyleId === auto.favorite || state.mapStyleId === auto.fallback)
+    ? auto.favorite
+    : state.mapStyleId
+  if (!bounds || z === null || z < COVERAGE_WARN_MIN_ZOOM || !hasCoverageProbe(styleId)) {
     styleCoverageProbe.value = null
+    styleCoverageProbed.value = null
     return
   }
-  const styleId = state.mapStyleId
   coverageProbeTimer = setTimeout(async () => {
     const ctrl = (coverageProbeAbort = new AbortController())
     const result = await probeStyleCoverage(styleId, bounds, z, ctrl.signal)
-    if (!ctrl.signal.aborted) styleCoverageProbe.value = result
+    if (ctrl.signal.aborted) return
+    styleCoverageProbe.value = result
+    styleCoverageProbed.value = styleId
+    // `null` (sonde en échec) ne change rien : mieux vaut garder le fond courant que clignoter.
+    if (auto && result !== null) {
+      const want = result ? auto.favorite : auto.fallback
+      if (want !== state.mapStyleId && (state.mapStyleId === auto.favorite || state.mapStyleId === auto.fallback)) {
+        mapRef.value?.applyMapStyle(want)
+      }
+    }
   }, 250)
 }
-watch(() => [state.viewBounds, state.viewZoom, state.mapStyleId], scheduleCoverageProbe)
+watch(() => [state.viewBounds, state.viewZoom, state.mapStyleId, autoSwitch.value?.favorite, autoSwitch.value?.fallback], scheduleCoverageProbe)
 onBeforeUnmount(() => { clearTimeout(coverageProbeTimer); coverageProbeAbort?.abort() })
 
 const styleCoverageWarn = computed(() => {
   if (state.viewZoom !== null && state.viewZoom < COVERAGE_WARN_MIN_ZOOM) return false
   const c = state.viewCenter
-  if (hasCoverageProbe(state.mapStyleId) && styleCoverageProbe.value !== null) return !styleCoverageProbe.value
+  if (hasCoverageProbe(state.mapStyleId) && styleCoverageProbe.value !== null && styleCoverageProbed.value === state.mapStyleId) return !styleCoverageProbe.value
   return !!c && !styleCoversPoint(state.mapStyleId, c.lng, c.lat)
 })
 const styleCoverageRegion = computed(() => {

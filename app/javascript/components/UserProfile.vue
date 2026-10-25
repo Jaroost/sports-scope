@@ -615,6 +615,22 @@ function placePreviewMarker(coords: [number, number]) {
             </div>
           </div>
         </div>
+        <div class="mt-3">
+          <label for="map-fallback-style" class="form-label mb-1">{{ t('profile.map.fallback_title') }}</label>
+          <select id="map-fallback-style" v-model="sport.map.fallback_style" class="form-select">
+            <option :value="null">{{ t('profile.map.fallback_none') }}</option>
+            <optgroup v-for="g in groupedStyles" :key="g.group" :label="t(`profile.map.group_${g.group}`)">
+              <option v-for="style in g.styles" :key="style.id" :value="style.id" :disabled="style.id === sport.map.default_style">
+                {{ t(`profile.map.style_${style.id}`) }}
+              </option>
+            </optgroup>
+          </select>
+          <div class="form-check form-switch mt-2">
+            <input id="map-auto-switch" v-model="sport.map.auto_switch" class="form-check-input" type="checkbox" role="switch" :disabled="!sport.map.fallback_style">
+            <label for="map-auto-switch" class="form-check-label">{{ t('profile.map.auto_switch') }}</label>
+          </div>
+          <p class="text-muted small mb-0">{{ t('profile.map.auto_switch_help') }}</p>
+        </div>
       </div>
     </section>
 

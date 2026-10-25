@@ -121,6 +121,16 @@ export class RouteBuilderState extends MapPageState {
   // avant le premier rendu de la carte. Jamais persistés : un instantané de la session.
   viewCenter: { lng: number; lat: number } | null = null
   viewZoom: number | null = null
+  // Vrai quand l'utilisateur a choisi à la main un fond autre que son favori alors que la
+  // bascule automatique favori ↔ secours est active : elle se met en pause (sinon elle
+  // ramènerait aussitôt le favori) jusqu'au retour sur le favori ou au changement de sport.
+  autoSwitchPaused = false
+  // Bascule automatique active pour le sport courant : copie réactive de
+  // `map.auto_switch` (les préférences ne le sont pas), réalignée au changement de sport.
+  autoSwitch = false
+  // Incrémenté quand le favori change dans les préférences (non réactives) : les computed qui
+  // lisent `sportPreferences().map` le lisent pour se réévaluer.
+  prefsRev = 0
   // Emprise visible, pour échantillonner les tuiles du fond (cf. probeStyleCoverage).
   viewBounds: { west: number; south: number; east: number; north: number } | null = null
 
@@ -138,6 +148,7 @@ export class RouteBuilderState extends MapPageState {
     this.showElevationChart = prefs.display.show_elevation_chart
     this.overlays = this.defaultOverlays()
     this.routeOpacity = sportPreferences().route.opacity
+    this.autoSwitch = sportPreferences().map.auto_switch
   }
 
   // Couches actives par défaut pour un sport : celles du profil, moins ce que la vue

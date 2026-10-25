@@ -24,7 +24,9 @@ export interface SportPreferences {
   turn_anomaly_m: number
   // Écart (m) au-delà duquel un point d'étape accroché loin du clic est signalé.
   snap_warn_m: number
-  map: { default_style: MapStyleId; overlays: string[] }
+  // `fallback_style` : fond de secours, pris automatiquement quand `auto_switch` est actif
+  // et que le favori (`default_style`) n'a plus de tuiles lisibles sous la vue.
+  map: { default_style: MapStyleId; fallback_style: MapStyleId | null; auto_switch: boolean; overlays: string[] }
   route: { color: string; opacity: number; width: number }
   climb_detection: {
     min_grade: number
@@ -135,7 +137,7 @@ function sportDefaults(
     route_profile,
     turn_anomaly_m,
     snap_warn_m: 25,
-    map: { default_style: map_style, overlays: [] },
+    map: { default_style: map_style, fallback_style: null, auto_switch: false, overlays: [] },
     route: { color: '#7c3aed', opacity: 0.8, width: 5 },
     climb_detection,
     navigation: {
@@ -260,6 +262,16 @@ export function persistDefaultMapStyle(styleId: MapStyleId, sport: Sport = curre
   const map = prefs.sports[sport].map
   if (map.default_style === styleId) return
   map.default_style = styleId
+  patchPreferencesQuietly(prefs)
+}
+
+// Interrupteur « bascule automatique » du créateur (même réglage que dans le profil).
+export function persistAutoSwitch(value: boolean, sport: Sport = currentSport()): void {
+  if (!isLoggedIn()) return
+  const prefs = userPreferences()
+  const map = prefs.sports[sport].map
+  if (map.auto_switch === value) return
+  map.auto_switch = value
   patchPreferencesQuietly(prefs)
 }
 

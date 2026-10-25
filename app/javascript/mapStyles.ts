@@ -1,4 +1,4 @@
-export type MapStyleGroup = 'world' | 'swiss' | 'france' | 'austria'
+export type MapStyleGroup = 'world' | 'swiss' | 'france' | 'austria' | 'germany'
 
 export interface MapStyle {
   id: string
@@ -12,6 +12,7 @@ export const MAP_STYLES: MapStyle[] = [
   { id: 'cyclosm',    icon: 'fa-bicycle',          group: 'world' },
   { id: 'topo',       icon: 'fa-mountain-sun',     group: 'world' },
   { id: 'liberty',    icon: 'fa-map',              group: 'world' },
+  { id: 'detopplus',  icon: 'fa-mountain-sun',     group: 'world' },
   { id: 'swissgrau',  icon: 'fa-circle-half-stroke', group: 'swiss' },
   { id: 'swisstopo',  icon: 'fa-flag-checkered',   group: 'swiss' },
   { id: 'swissimage', icon: 'fa-satellite',        group: 'swiss' },
@@ -20,10 +21,12 @@ export const MAP_STYLES: MapStyle[] = [
   { id: 'atbasemap',  icon: 'fa-map',              group: 'austria' },
   { id: 'atgrau',     icon: 'fa-circle-half-stroke', group: 'austria' },
   { id: 'atortho',    icon: 'fa-satellite',        group: 'austria' },
+  { id: 'debasemap',  icon: 'fa-map',              group: 'germany' },
+  { id: 'degrau',     icon: 'fa-circle-half-stroke', group: 'germany' },
 ]
 
 // Ordre des en-têtes de groupe dans le dropdown.
-export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss', 'france', 'austria']
+export const MAP_STYLE_GROUPS: MapStyleGroup[] = ['world', 'swiss', 'france', 'austria', 'germany']
 
 // ─── Couverture géographique approximative des groupes régionaux ─────────────
 // Bbox large [minLng, minLat, maxLng, maxLat], pas les frontières réelles — sert
@@ -47,6 +50,7 @@ export const MAP_STYLE_GROUP_BBOX: Partial<Record<MapStyleGroup, [number, number
     [6.7, 47.55, 8.3, 49.2],   // Alsace : au nord-est du rectangle principal
   ],
   austria: [[9.4, 46.3, 17.3, 49.1]],
+  germany: [[5.8, 47.2, 15.1, 55.1]],
 }
 
 // Portions suisses de la bbox France (angle mort ci-dessus) : polygone grossier de la
@@ -132,6 +136,8 @@ const ignProbe = (layer: string, format: string, needsRoads = false): CoveragePr
   maxzoom: 19,
   needsRoads,
 })
+const BKG_BASE = 'https://sgx.geodatenzentrum.de'
+
 // basemap.at hors d'Autriche : 404, ou 200 avec une tuile vide (PNG de 190 octets, JPEG
 // d'orthophoto de 2419 octets — vérifié à Munich, Bolzano, Zurich).
 const atProbe = (layer: string, ext: 'png' | 'jpeg', blankMaxBytes: number): CoverageProbe => ({
@@ -139,10 +145,20 @@ const atProbe = (layer: string, ext: 'png' | 'jpeg', blankMaxBytes: number): Cov
   maxzoom: 19,
   blankMaxBytes,
 })
+// BKG (Allemagne) : basemap.de répond 200 avec une tuile vide de 334 octets (Suisse) ou 854
+// octets (Autriche, France) hors d'Allemagne. Vérifié à Zurich, Vienne, Lyon. TopPlusOpen,
+// qui répond partout, est rangé dans le groupe Monde et n'a donc pas de sonde.
+const bkgProbe = (path: string): CoverageProbe => ({
+  url: `${BKG_BASE}/${path}/{z}/{y}/{x}.png`,
+  maxzoom: 18,
+  blankMaxBytes: 1000,
+})
 const COVERAGE_PROBES: Record<string, CoverageProbe> = {
   atbasemap:  atProbe('geolandbasemap', 'png', 300),
   atgrau:     atProbe('bmapgrau', 'png', 300),
   atortho:    atProbe('bmaporthofoto30cm', 'jpeg', 3000),
+  debasemap:  bkgProbe('wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR'),
+  degrau:     bkgProbe('wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_grau/default/GLOBAL_WEBMERCATOR'),
   swisstopo:  swissProbe('ch.swisstopo.pixelkarte-farbe', 'jpeg'),
   swissgrau:  swissProbe('ch.swisstopo.pixelkarte-grau', 'jpeg'),
   swissimage: swissProbe('ch.swisstopo.swissimage', 'jpeg'),
@@ -307,6 +323,7 @@ export const MAP_STYLE_GROUP_DEFAULT: Partial<Record<MapStyleGroup, string>> = {
   swiss:   'swisstopo',
   france:  'ignplan',
   austria: 'atbasemap',
+  germany: 'debasemap',
 }
 export const DEFAULT_WORLD_STYLE = 'cyclosm'
 
@@ -580,6 +597,9 @@ export const EXPORT_TILE_INFO: Record<string, ExportTileInfo> = {
   atbasemap:  { maxzoom: 19, tileSize: 256 },
   atgrau:     { maxzoom: 19, tileSize: 256 },
   atortho:    { maxzoom: 19, tileSize: 256 },
+  debasemap:  { maxzoom: 18, tileSize: 256 },
+  degrau:     { maxzoom: 18, tileSize: 256 },
+  detopplus:  { maxzoom: 18, tileSize: 256 },
 }
 export function exportTileInfoFor(id: string): ExportTileInfo {
   return EXPORT_TILE_INFO[id] ?? { maxzoom: 17, tileSize: 256 }
@@ -599,6 +619,9 @@ export function mapStyleFor(id: string): string | object {
   if (id === 'atbasemap')  return atBasemapStyle()
   if (id === 'atgrau')     return atGrauStyle()
   if (id === 'atortho')    return atOrthoStyle()
+  if (id === 'debasemap')  return bkgRasterStyle('debasemap', 'wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR')
+  if (id === 'degrau')     return bkgRasterStyle('degrau', 'wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_grau/default/GLOBAL_WEBMERCATOR')
+  if (id === 'detopplus')  return bkgRasterStyle('detopplus', 'wmts_topplus_open/tile/1.0.0/web/default/WEBMERCATOR')
   return cyclOsmStyle()
 }
 
@@ -824,6 +847,28 @@ export function atGrauStyle(): object {
       },
     },
     layers: [{ id: 'atgrau-base', type: 'raster', source: 'atgrau-raster' }],
+  }
+}
+
+// ─── Allemagne — BKG (basemap.de, TopPlusOpen) ─────────────────────────────
+// Géoservices du BKG, libres avec mention de la source. Les tuiles sont en {z}/{y}/{x}.
+const BKG_ATTRIBUTION =
+  '© GeoBasis-DE / <a href="https://www.bkg.bund.de" target="_blank" rel="noopener">BKG</a>'
+
+function bkgRasterStyle(id: string, path: string): object {
+  return {
+    version: 8,
+    glyphs: GLYPHS_URL,
+    sources: {
+      [`${id}-raster`]: {
+        type: 'raster',
+        tiles: [`${BKG_BASE}/${path}/{z}/{y}/{x}.png`],
+        tileSize: 256,
+        maxzoom: 18,
+        attribution: BKG_ATTRIBUTION,
+      },
+    },
+    layers: [{ id: `${id}-base`, type: 'raster', source: `${id}-raster` }],
   }
 }
 

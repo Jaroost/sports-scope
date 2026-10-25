@@ -13,6 +13,7 @@ const GROUP_FLAG: Record<MapStyleGroup, string> = {
   swiss: countryFlag('ch'),
   france: countryFlag('fr'),
   austria: countryFlag('at'),
+  germany: countryFlag('de'),
 }
 
 const props = defineProps({
@@ -106,7 +107,7 @@ useDismissOnOutside(() => rootEl.value, () => {
       <span class="d-none d-md-inline">{{ t('strava.map_style_label') }}</span>
       <i class="fa-solid fa-caret-down" aria-hidden="true"></i>
     </button>
-    <ul v-if="isOpen" class="dropdown-menu show mt-1" style="min-width: 9rem; width: max-content; max-width: min(34rem, 95vw); z-index: 10;">
+    <ul v-if="isOpen" class="dropdown-menu show mt-1 map-style-menu" style="min-width: 9rem; width: max-content; max-width: min(34rem, 95vw); z-index: 10;">
       <template v-for="(g, gi) in groupedStyles" :key="g.group">
         <li v-if="gi > 0"><hr class="dropdown-divider" /></li>
         <li>
@@ -148,6 +149,15 @@ useDismissOnOutside(() => rootEl.value, () => {
 </template>
 
 <style scoped>
+/* Cinq groupes de fonds (Monde, Suisse, France, Autriche, Allemagne) dépassent la hauteur de
+   la carte : on plafonne le menu et on le fait défiler plutôt que de perdre les dernières
+   entrées hors écran. */
+.map-style-menu {
+  max-height: min(70vh, 28rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .map-style-desc {
   font-size: 0.7em;
   color: var(--bs-secondary-color);

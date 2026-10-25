@@ -1,4 +1,7 @@
 # Le service worker ne doit jamais être servi avec une expiration lointaine.
+# Le manifeste non plus : il garde son nom, et avec un an de cache Chrome ne voyait
+# jamais un changement de couleur (`background_color`, `theme_color`…), même après
+# désinstallation et réinstallation de l'appli.
 #
 # `config.public_file_server.headers` (cf. environments/production.rb) pose un an
 # d'expiration sur tout `public/`, ce qui est juste pour des fichiers estampillés
@@ -14,7 +17,7 @@
 # Le middleware est inséré AVANT ActionDispatch::Static : il l'enveloppe, et voit
 # donc passer la réponse du serveur de fichiers pour en corriger l'en-tête.
 class ServiceWorkerCacheControl
-  PATH = "/service-worker.js".freeze
+  PATHS = [ "/service-worker.js", "/manifest.webmanifest" ].freeze
 
   def initialize(app)
     @app = app
@@ -24,7 +27,7 @@ class ServiceWorkerCacheControl
     status, headers, body = @app.call(env)
     # `must-revalidate` plutôt que `no-store` : le fichier peut rester en cache, mais
     # sa fraîcheur est revérifiée à chaque fois — un 304 ne coûte presque rien.
-    headers["cache-control"] = "public, max-age=0, must-revalidate" if env["PATH_INFO"] == PATH
+    headers["cache-control"] = "public, max-age=0, must-revalidate" if PATHS.include?(env["PATH_INFO"])
     [status, headers, body]
   end
 end

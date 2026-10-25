@@ -49,6 +49,39 @@ export const MAP_STYLE_GROUP_BBOX: Partial<Record<MapStyleGroup, [number, number
   austria: [[9.4, 46.3, 17.3, 49.1]],
 }
 
+// Portions suisses de la bbox France (angle mort ci-dessus) : polygone grossier de la
+// frontière de Genève au Jura (lng, lat). Un point dedans n'est PAS couvert par le fond
+// France — c'est là que le plan IGN reste lisible à bas zoom (tuiles voisines) puis se vide
+// en zoomant, sans que la bbox rectangulaire ne le signale.
+const FRANCE_EXCLUDED_POLYGONS: [number, number][][] = [[
+  [5.95, 46.12], [6.10, 46.38], [6.30, 46.62], [6.45, 46.85], [6.75, 47.08],
+  [6.95, 47.30], [7.10, 47.35], [7.10, 45.95], [6.88, 46.05], [6.80, 46.20],
+  [6.82, 46.38], [6.50, 46.44], [6.25, 46.30],
+]]
+
+// Contour grossier de la Suisse (lng, lat), marge comprise : la bbox rectangulaire
+// engloutissait la Haute-Savoie, le pays de Gex, le Doubs, le Haut-Rhin, le sud de
+// l'Allemagne et la Lombardie — swisstopo y reste lisible à bas zoom puis se vide.
+// Le tracé ouest reprend la frontière de FRANCE_EXCLUDED_POLYGONS.
+const SWISS_OUTLINE: [number, number][] = [
+  [5.95, 46.12], [6.10, 46.38], [6.30, 46.62], [6.45, 46.85], [6.75, 47.08],
+  [6.95, 47.30], [7.05, 47.52], [7.60, 47.62], [8.40, 47.68], [8.65, 47.82],
+  [9.20, 47.72], [9.55, 47.55], [9.60, 47.20], [9.65, 46.90], [10.10, 46.85],
+  [10.55, 46.95], [10.55, 46.55], [10.20, 46.20], [9.40, 46.30], [9.20, 45.80],
+  [8.70, 45.90], [8.40, 46.10], [7.70, 45.90], [7.10, 45.85], [6.88, 46.05],
+  [6.80, 46.20], [6.82, 46.38], [6.50, 46.44], [6.25, 46.30],
+]
+
+function pointInPolygon(lng: number, lat: number, poly: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i]
+    const [xj, yj] = poly[j]
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+
 export function groupForStyle(id: string): MapStyleGroup | undefined {
   return MAP_STYLES.find((s) => s.id === id)?.group ?? MAP_STYLE_COMBOS.find((c) => c.id === id)?.group
 }
@@ -74,8 +107,91 @@ function pointInAnyBbox(lng: number, lat: number, bboxes: [number, number, numbe
 export const COVERAGE_WARN_MIN_ZOOM = 9
 
 export function styleCoversPoint(styleId: string, lng: number, lat: number): boolean {
-  const bboxes = MAP_STYLE_GROUP_BBOX[groupForStyle(styleId) as MapStyleGroup]
-  return !bboxes || pointInAnyBbox(lng, lat, bboxes)
+  const group = groupForStyle(styleId) as MapStyleGroup
+  const bboxes = MAP_STYLE_GROUP_BBOX[group]
+  if (!bboxes) return true
+  if (group === 'swiss') return pointInPolygon(lng, lat, SWISS_OUTLINE)
+  if (group === 'france' && FRANCE_EXCLUDED_POLYGONS.some((poly) => pointInPolygon(lng, lat, poly))) return false
+  return pointInAnyBbox(lng, lat, bboxes)
+}
+
+// ─── Sonde de couverture ──────────────────────────────────────────────────────
+// Les bbox ci-dessus ne sont qu'une approximation (faux positifs à la frontière) : pour les
+// fonds dont on sait reconnaître une tuile vide, on interroge le serveur sur la tuile du
+// centre de la vue. Vérifié en direct : le plan IGN répond 404 hors couverture, swisstopo
+// répond 200 avec un JPEG blanc de 668 octets (d'où `blankMaxBytes`). Les fonds sans entrée
+// ici (Autriche) restent sur la bbox.
+interface CoverageProbe { url: string; maxzoom: number; blankMaxBytes?: number }
+const swissProbe = (layer: string, ext: string): CoverageProbe => ({
+  url: `https://wmts.geo.admin.ch/1.0.0/${layer}/default/current/3857/{z}/{x}/{y}.${ext}`,
+  maxzoom: 18,
+  blankMaxBytes: 700,
+})
+const ignProbe = (layer: string, format: string): CoverageProbe => ({
+  url: `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=normal&FORMAT=${format}&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`,
+  maxzoom: 19,
+})
+const COVERAGE_PROBES: Record<string, CoverageProbe> = {
+  swisstopo:  swissProbe('ch.swisstopo.pixelkarte-farbe', 'jpeg'),
+  swissgrau:  swissProbe('ch.swisstopo.pixelkarte-grau', 'jpeg'),
+  swissimage: swissProbe('ch.swisstopo.swissimage', 'jpeg'),
+  ignplan:    ignProbe('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'),
+  ignortho:   ignProbe('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'),
+}
+
+function baseStyleId(id: string): string {
+  return MAP_STYLE_COMBOS.find((c) => c.id === id)?.style ?? id
+}
+
+export function hasCoverageProbe(styleId: string): boolean {
+  return baseStyleId(styleId) in COVERAGE_PROBES
+}
+
+export interface ViewBounds { west: number; south: number; east: number; north: number }
+
+// Part de tuiles vides à partir de laquelle on avertit : une vue à cheval sur la frontière
+// dont la moitié reste lisible n'est pas « hors zone », mais un tiers de blanc se voit.
+const COVERAGE_BLANK_SHARE = 1 / 3
+
+// true = la vue est lisible, false = au moins un tiers des tuiles échantillonnées sont
+// vides/absentes, null = indéterminé (réseau, CORS, pas de sonde) — l'appelant retombe
+// alors sur la bbox. On échantillonne une grille 3 × 3 de la vue, pas son seul centre : à
+// la frontière, la tuile du centre est souvent pleine alors que le bord de l'écran est blanc.
+export async function probeStyleCoverage(
+  styleId: string, bounds: ViewBounds, zoom: number, signal?: AbortSignal,
+): Promise<boolean | null> {
+  const probe = COVERAGE_PROBES[baseStyleId(styleId)]
+  if (!probe) return null
+  // Les sources raster sont en tuiles de 256 px (une tuile de 512 px logiques = deux de
+  // 256, d'où le +1) et MapLibre ARRONDIT leur niveau (`roundZoom`) au lieu de le tronquer :
+  // à z15.6 il charge du z17, pas du z16 — c'est le blanc de ce niveau qu'on voit.
+  const z = Math.min(Math.max(Math.round(zoom) + 1, 0), probe.maxzoom)
+  const n = 2 ** z
+  const clamp = (v: number) => Math.min(n - 1, Math.max(0, Math.floor(v)))
+  const urls = new Set<string>()
+  for (const fx of [0.1, 0.5, 0.9]) {
+    for (const fy of [0.1, 0.5, 0.9]) {
+      const lng = bounds.west + (bounds.east - bounds.west) * fx
+      const lat = bounds.south + (bounds.north - bounds.south) * fy
+      const x = clamp(((lng + 180) / 360) * n)
+      const y = clamp(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n)
+      urls.add(probe.url.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)))
+    }
+  }
+  const verdicts = await Promise.all([...urls].map(async (url) => {
+    try {
+      const res = await fetch(url, { signal })
+      if (res.status === 404 || res.status === 400) return false
+      if (!res.ok) return null
+      if (probe.blankMaxBytes && (await res.arrayBuffer()).byteLength <= probe.blankMaxBytes) return false
+      return true
+    } catch {
+      return null
+    }
+  }))
+  const known = verdicts.filter((v): v is boolean => v !== null)
+  if (known.length === 0) return null
+  return known.filter((v) => !v).length / known.length < COVERAGE_BLANK_SHARE
 }
 
 // Fond « représentant » de chaque groupe régional, proposé par le bouton de la notice
@@ -94,7 +210,7 @@ export const DEFAULT_WORLD_STYLE = 'cyclosm'
 export function suggestedStyleForPoint(point: { lng: number; lat: number } | null): string {
   if (!point) return DEFAULT_WORLD_STYLE
   const group = (Object.keys(MAP_STYLE_GROUP_BBOX) as MapStyleGroup[])
-    .find((g) => pointInAnyBbox(point.lng, point.lat, MAP_STYLE_GROUP_BBOX[g]!))
+    .find((g) => styleCoversPoint(MAP_STYLE_GROUP_DEFAULT[g]!, point.lng, point.lat))
   return (group && MAP_STYLE_GROUP_DEFAULT[group]) || DEFAULT_WORLD_STYLE
 }
 

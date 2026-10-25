@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick, toRaw } from 'vue'
 import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
-import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, COVERAGE_WARN_MIN_ZOOM } from '../mapStyles'
+import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, COVERAGE_WARN_MIN_ZOOM, hasCoverageProbe, probeStyleCoverage } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
@@ -200,9 +200,36 @@ const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismiss
 // vérifié en direct sur les trois services, une vue dézoomée reste servie (pas vide)
 // bien au-delà de la bbox du pays — en dessous de ce zoom, la comparer donnerait un
 // faux positif. Purement informatif, la sauvegarde n'est pas concernée.
+// Pour les fonds qu'on sait sonder (swisstopo, IGN), un échantillon de tuiles de la vue tranche :
+// 404 ou JPEG blanc = vide, sinon la carte s'affiche et on ne dit rien — la bbox
+// n'intervient plus qu'en repli (sonde en échec) et pour les fonds sans sonde. Pendant
+// qu'une sonde est en vol, on garde le dernier verdict plutôt que de clignoter.
+const styleCoverageProbe = ref<boolean | null>(null)
+let coverageProbeAbort: AbortController | null = null
+let coverageProbeTimer: ReturnType<typeof setTimeout> | undefined
+function scheduleCoverageProbe() {
+  clearTimeout(coverageProbeTimer)
+  coverageProbeAbort?.abort()
+  const bounds = state.viewBounds
+  const z = state.viewZoom
+  if (!bounds || z === null || z < COVERAGE_WARN_MIN_ZOOM || !hasCoverageProbe(state.mapStyleId)) {
+    styleCoverageProbe.value = null
+    return
+  }
+  const styleId = state.mapStyleId
+  coverageProbeTimer = setTimeout(async () => {
+    const ctrl = (coverageProbeAbort = new AbortController())
+    const result = await probeStyleCoverage(styleId, bounds, z, ctrl.signal)
+    if (!ctrl.signal.aborted) styleCoverageProbe.value = result
+  }, 250)
+}
+watch(() => [state.viewBounds, state.viewZoom, state.mapStyleId], scheduleCoverageProbe)
+onBeforeUnmount(() => { clearTimeout(coverageProbeTimer); coverageProbeAbort?.abort() })
+
 const styleCoverageWarn = computed(() => {
   if (state.viewZoom !== null && state.viewZoom < COVERAGE_WARN_MIN_ZOOM) return false
   const c = state.viewCenter
+  if (hasCoverageProbe(state.mapStyleId) && styleCoverageProbe.value !== null) return !styleCoverageProbe.value
   return !!c && !styleCoversPoint(state.mapStyleId, c.lng, c.lat)
 })
 const styleCoverageRegion = computed(() => {

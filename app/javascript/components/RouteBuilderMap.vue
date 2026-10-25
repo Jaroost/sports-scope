@@ -103,6 +103,8 @@ const radarCaption = computed(() =>
       ? `+${radarOffset.value} min`
       : `${radarOffset.value} min`)
 const hoverMarkerVisible = ref(false)
+// Niveau de zoom affiché en bas à droite de la carte, suivi en continu pendant le geste.
+const liveZoom = ref<number | null>(null)
 let suppressNextMapClick = false
 let suppressNextWpClick = false
 let overClimbMarker = false
@@ -610,12 +612,16 @@ async function initMap() {
       // Le chevauchement des marqueurs de points ne dépend que de la caméra : on le
       // réévalue quand elle s'immobilise (cf. regroupWaypointMarkers).
       mapInstance.on('moveend', regroupWaypointMarkers)
+      liveZoom.value = mapInstance.getZoom()
+      mapInstance.on('zoom', () => { liveZoom.value = mapInstance.getZoom() })
       // Centre et zoom de la vue courante, tenus à jour pour la notice « fond hors zone »
       // (cf. styleCoverageWarn, COVERAGE_WARN_MIN_ZOOM dans mapStyles.ts).
       mapInstance.on('moveend', () => {
         const c = mapInstance.getCenter()
         props.state.viewCenter = { lng: c.lng, lat: c.lat }
         props.state.viewZoom = mapInstance.getZoom()
+        const b = mapInstance.getBounds()
+        props.state.viewBounds = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }
       })
       // Facteur d'échelle des marqueurs, publié pour le CSS ET pour les groupes de
       // marqueurs, qui le réappliquent après chaque repositionnement (cf. mapMarkerGroup).
@@ -2967,6 +2973,7 @@ defineExpose({
 <template>
   <div class="map-wrap" :class="{ expanded: state.mapExpanded, 'map-wrap--grey-basemap': state.mapStyleId === 'swissgrau' }">
     <div ref="mapEl" class="route-builder-map"></div>
+    <div v-if="liveZoom !== null" class="map-zoom-level" aria-hidden="true">z{{ liveZoom.toFixed(1) }}</div>
 
     <div ref="mapControlsEl" class="map-controls">
       <MapStyleDropdown :model-value="state.mapStyleId" :active-overlays="state.overlays"

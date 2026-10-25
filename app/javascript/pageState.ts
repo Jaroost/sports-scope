@@ -121,6 +121,8 @@ export class RouteBuilderState extends MapPageState {
   // avant le premier rendu de la carte. Jamais persistés : un instantané de la session.
   viewCenter: { lng: number; lat: number } | null = null
   viewZoom: number | null = null
+  // Emprise visible, pour échantillonner les tuiles du fond (cf. probeStyleCoverage).
+  viewBounds: { west: number; south: number; east: number; north: number } | null = null
 
   // Vue en lecture seule (lien de partage) : les calques y sont forcés à un rendu
   // « invité » (repères + pentes seuls). Ces réglages ne doivent PAS atterrir dans la

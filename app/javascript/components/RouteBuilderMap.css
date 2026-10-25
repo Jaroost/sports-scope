@@ -315,3 +315,16 @@
 .map-radar-range { flex: 1; margin: 0; min-width: 0; }
 .map-radar-time { white-space: nowrap; font-size: 0.85rem; min-width: 5.5rem; text-align: right; }
 .map-radar-time small { color: #6c757d; }
+
+.map-zoom-level {
+  position: absolute;
+  right: 8px;
+  bottom: 30px;
+  z-index: 2;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.8);
+  color: #333;
+  font: 11px/1.4 monospace;
+  pointer-events: none;
+}

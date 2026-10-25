@@ -10,7 +10,7 @@ import {
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import { routeStore, MAX_WAYPOINTS } from '../stores/routeStore'
-import { persistDefaultMapStyle, persistAutoSwitch, persistOverlays, sportPreferences, userPreferences } from '../userPreferences'
+import { persistDefaultMapStyle, persistAutoSwitch, persistOverlays, sportPreferences, mapStyleChain, userPreferences } from '../userPreferences'
 import type { MapStyleId } from '../userPreferences'
 import { selectionStore } from '../stores/selectionStore'
 import { placesStore } from '../stores/placesStore'
@@ -2641,9 +2641,9 @@ function setMapStyle(id: string) {
   // Bascule automatique active : choisir le fond de SECOURS à la main est une dérogation
   // (elle se met en pause, sinon le favori qui répond encore ramènerait l'ancien fond) ;
   // tout autre fond devient le nouveau favori et la bascule continue avec lui.
-  const { map } = sportPreferences(routeStore.sport.value)
-  const auto = props.state.autoSwitch && !!map.fallback_style && map.fallback_style !== map.default_style
-  const override = auto && styleId === map.fallback_style
+  const chain = mapStyleChain(routeStore.sport.value)
+  const auto = props.state.autoSwitch && chain.length > 1
+  const override = auto && chain.includes(styleId) && styleId !== chain[0]
   props.state.autoSwitchPaused = override
   if (styleId === props.state.mapStyleId) return
   if (!override) {
@@ -2657,8 +2657,7 @@ function setMapStyle(id: string) {
 // du favori (réglé dans le profil).
 const hasFallbackStyle = computed(() => {
   void props.state.prefsRev
-  const { map } = sportPreferences(routeStore.sport.value)
-  return !!map.fallback_style && map.fallback_style !== map.default_style
+  return mapStyleChain(routeStore.sport.value).length > 1
 })
 function toggleAutoSwitch() {
   if (!hasFallbackStyle.value) return

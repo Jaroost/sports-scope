@@ -120,7 +120,7 @@ export function styleCoversPoint(styleId: string, lng: number, lat: number): boo
 // fonds dont on sait reconnaître une tuile vide, on interroge le serveur sur la tuile du
 // centre de la vue. Vérifié en direct : le plan IGN répond 404 hors couverture, swisstopo
 // répond 200 avec un JPEG blanc de 668 octets (d'où `blankMaxBytes`). Les fonds sans entrée
-// ici (Autriche) restent sur la bbox.
+// ici (fonds mondiaux) restent sur la bbox.
 interface CoverageProbe { url: string; maxzoom: number; blankMaxBytes?: number; needsRoads?: boolean }
 const swissProbe = (layer: string, ext: string): CoverageProbe => ({
   url: `https://wmts.geo.admin.ch/1.0.0/${layer}/default/current/3857/{z}/{x}/{y}.${ext}`,
@@ -132,7 +132,17 @@ const ignProbe = (layer: string, format: string, needsRoads = false): CoveragePr
   maxzoom: 19,
   needsRoads,
 })
+// basemap.at hors d'Autriche : 404, ou 200 avec une tuile vide (PNG de 190 octets, JPEG
+// d'orthophoto de 2419 octets — vérifié à Munich, Bolzano, Zurich).
+const atProbe = (layer: string, ext: 'png' | 'jpeg', blankMaxBytes: number): CoverageProbe => ({
+  url: `https://maps.wien.gv.at/basemap/${layer}/normal/google3857/{z}/{y}/{x}.${ext}`,
+  maxzoom: 19,
+  blankMaxBytes,
+})
 const COVERAGE_PROBES: Record<string, CoverageProbe> = {
+  atbasemap:  atProbe('geolandbasemap', 'png', 300),
+  atgrau:     atProbe('bmapgrau', 'png', 300),
+  atortho:    atProbe('bmaporthofoto30cm', 'jpeg', 3000),
   swisstopo:  swissProbe('ch.swisstopo.pixelkarte-farbe', 'jpeg'),
   swissgrau:  swissProbe('ch.swisstopo.pixelkarte-grau', 'jpeg'),
   swissimage: swissProbe('ch.swisstopo.swissimage', 'jpeg'),
@@ -218,6 +228,18 @@ export async function probeStyleCoverage(
   const known = verdicts.filter((v): v is boolean => v !== null)
   if (known.length === 0) return null
   return known.filter((v) => !v).length / known.length < COVERAGE_BLANK_SHARE
+}
+
+// Le fond est-il lisible sous la vue ? Sonde de tuiles quand on sait la faire, bbox du
+// groupe sinon (Autriche) ou si la sonde échoue ; un fond mondial l'est toujours.
+export async function styleUsableForView(
+  styleId: string, bounds: ViewBounds, zoom: number, signal?: AbortSignal,
+): Promise<boolean> {
+  if (hasCoverageProbe(styleId)) {
+    const probed = await probeStyleCoverage(styleId, bounds, zoom, signal)
+    if (probed !== null) return probed
+  }
+  return styleCoversPoint(styleId, (bounds.west + bounds.east) / 2, (bounds.south + bounds.north) / 2)
 }
 
 // Fond « représentant » de chaque groupe régional, proposé par le bouton de la notice

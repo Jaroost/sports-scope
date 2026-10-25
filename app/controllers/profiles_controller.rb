@@ -292,7 +292,7 @@ class ProfilesController < ApplicationController
       "snap_warn_m" => clamp_int(raw[:snap_warn_m], SNAP_WARN_RANGE, defaults["snap_warn_m"]),
       "map" => {
         "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, defaults.dig("map", "default_style")),
-        "fallback_style" => allowed(map[:fallback_style], ALLOWED_MAP_STYLES, nil),
+        "fallback_styles" => sanitize_fallback_styles(map[:fallback_styles] || map[:fallback_style]),
         "auto_switch" => to_bool(map[:auto_switch], false),
         "overlays" => sanitize_overlays(map[:overlays]),
       },
@@ -336,6 +336,13 @@ class ProfilesController < ApplicationController
   end
 
   # Garde uniquement les ids d'overlay connus, dédoublonnés et dans l'ordre reçu.
+  # Fonds de secours de la bascule automatique : l'ordre reçu est l'ordre d'essai. Le
+  # premier élément (ancien `fallback_style`, chaîne seule) est toléré.
+  MAX_FALLBACK_STYLES = 4
+  def sanitize_fallback_styles(value)
+    Array(value).map(&:to_s).uniq.select { |id| ALLOWED_MAP_STYLES.include?(id) }.first(MAX_FALLBACK_STYLES)
+  end
+
   def sanitize_overlays(value)
     return [] unless value.is_a?(Array)
     value.map(&:to_s).uniq.select { |id| ALLOWED_OVERLAYS.include?(id) }

@@ -24,9 +24,10 @@ export interface SportPreferences {
   turn_anomaly_m: number
   // Écart (m) au-delà duquel un point d'étape accroché loin du clic est signalé.
   snap_warn_m: number
-  // `fallback_style` : fond de secours, pris automatiquement quand `auto_switch` est actif
-  // et que le favori (`default_style`) n'a plus de tuiles lisibles sous la vue.
-  map: { default_style: MapStyleId; fallback_style: MapStyleId | null; auto_switch: boolean; overlays: string[] }
+  // `fallback_styles` : fonds de secours par ordre de préférence, pris automatiquement
+  // quand `auto_switch` est actif et que le favori (`default_style`) n'a plus de tuiles
+  // lisibles sous la vue ; le premier lisible gagne, le dernier sert de dernier recours.
+  map: { default_style: MapStyleId; fallback_styles: MapStyleId[]; auto_switch: boolean; overlays: string[] }
   route: { color: string; opacity: number; width: number }
   climb_detection: {
     min_grade: number
@@ -137,7 +138,7 @@ function sportDefaults(
     route_profile,
     turn_anomaly_m,
     snap_warn_m: 25,
-    map: { default_style: map_style, fallback_style: null, auto_switch: false, overlays: [] },
+    map: { default_style: map_style, fallback_styles: [], auto_switch: false, overlays: [] },
     route: { color: '#7c3aed', opacity: 0.8, width: 5 },
     climb_detection,
     navigation: {
@@ -263,6 +264,13 @@ export function persistDefaultMapStyle(styleId: MapStyleId, sport: Sport = curre
   if (map.default_style === styleId) return
   map.default_style = styleId
   patchPreferencesQuietly(prefs)
+}
+
+// Chaîne d'essai de la bascule automatique : favori, puis secours dans l'ordre, sans doublon.
+// Moins de deux éléments = rien à basculer.
+export function mapStyleChain(sport: Sport = currentSport()): string[] {
+  const { default_style, fallback_styles } = sportPreferences(sport).map
+  return [...new Set([default_style as string, ...(fallback_styles as string[])])]
 }
 
 // Interrupteur « bascule automatique » du créateur (même réglage que dans le profil).
@@ -465,6 +473,7 @@ function parseSport(defaults: SportPreferences, incoming?: Partial<SportPreferen
     map: {
       ...defaults.map,
       ...incoming?.map,
+      fallback_styles: Array.isArray(incoming?.map?.fallback_styles) ? incoming.map.fallback_styles : [],
       overlays: Array.isArray(incoming?.map?.overlays) ? incoming.map.overlays : defaults.map.overlays,
     },
     route: { ...defaults.route, ...incoming?.route },

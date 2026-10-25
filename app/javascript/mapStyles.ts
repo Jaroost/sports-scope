@@ -121,21 +121,22 @@ export function styleCoversPoint(styleId: string, lng: number, lat: number): boo
 // centre de la vue. Vérifié en direct : le plan IGN répond 404 hors couverture, swisstopo
 // répond 200 avec un JPEG blanc de 668 octets (d'où `blankMaxBytes`). Les fonds sans entrée
 // ici (Autriche) restent sur la bbox.
-interface CoverageProbe { url: string; maxzoom: number; blankMaxBytes?: number }
+interface CoverageProbe { url: string; maxzoom: number; blankMaxBytes?: number; needsRoads?: boolean }
 const swissProbe = (layer: string, ext: string): CoverageProbe => ({
   url: `https://wmts.geo.admin.ch/1.0.0/${layer}/default/current/3857/{z}/{x}/{y}.${ext}`,
   maxzoom: 18,
   blankMaxBytes: 700,
 })
-const ignProbe = (layer: string, format: string): CoverageProbe => ({
+const ignProbe = (layer: string, format: string, needsRoads = false): CoverageProbe => ({
   url: `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=normal&FORMAT=${format}&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`,
   maxzoom: 19,
+  needsRoads,
 })
 const COVERAGE_PROBES: Record<string, CoverageProbe> = {
   swisstopo:  swissProbe('ch.swisstopo.pixelkarte-farbe', 'jpeg'),
   swissgrau:  swissProbe('ch.swisstopo.pixelkarte-grau', 'jpeg'),
   swissimage: swissProbe('ch.swisstopo.swissimage', 'jpeg'),
-  ignplan:    ignProbe('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'),
+  ignplan:    ignProbe('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png', true),
   ignortho:   ignProbe('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'),
 }
 
@@ -145,6 +146,29 @@ function baseStyleId(id: string): string {
 
 export function hasCoverageProbe(styleId: string): boolean {
   return baseStyleId(styleId) in COVERAGE_PROBES
+}
+
+// Hors de France, le plan IGN sert encore des tuiles à partir d'un certain zoom (z14 en
+// Suisse) mais réduites au relief, aux altitudes et à l'eau : ni routes ni chemins, donc rien
+// de lisible, et pourtant un 200. Mesuré sur des tuiles suisses : 0 % de pixels « de route »
+// (orange/jaune, r - b > 45 et r > 180) contre 6 à 16 % sur une tuile pleine ; une tuile
+// française quasi vide (Camargue, Beauce) reste à 0,3 à 2 %. Seuil bas, et appliqué seulement
+// hors de la zone France (cf. probeStyleCoverage) : en France, une tuile sans route est
+// juste une zone vide (mer, marais).
+const ROAD_PIXEL_MIN_SHARE = 0.0005
+
+async function hasRoadPixels(blob: Blob): Promise<boolean> {
+  const bitmap = await createImageBitmap(blob)
+  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return true
+  ctx.drawImage(bitmap, 0, 0)
+  const { data } = ctx.getImageData(0, 0, bitmap.width, bitmap.height)
+  let roads = 0
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] > 180 && data[i] - data[i + 2] > 45) roads++
+  }
+  return roads / (data.length / 4) >= ROAD_PIXEL_MIN_SHARE
 }
 
 export interface ViewBounds { west: number; south: number; east: number; north: number }
@@ -168,22 +192,24 @@ export async function probeStyleCoverage(
   const z = Math.min(Math.max(Math.round(zoom) + 1, 0), probe.maxzoom)
   const n = 2 ** z
   const clamp = (v: number) => Math.min(n - 1, Math.max(0, Math.floor(v)))
-  const urls = new Set<string>()
+  const urls = new Map<string, boolean>() // url → l'échantillon tombe hors de la zone du fond
   for (const fx of [0.1, 0.5, 0.9]) {
     for (const fy of [0.1, 0.5, 0.9]) {
       const lng = bounds.west + (bounds.east - bounds.west) * fx
       const lat = bounds.south + (bounds.north - bounds.south) * fy
       const x = clamp(((lng + 180) / 360) * n)
       const y = clamp(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n)
-      urls.add(probe.url.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)))
+      const url = probe.url.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y))
+      if (!urls.has(url)) urls.set(url, !styleCoversPoint(styleId, lng, lat))
     }
   }
-  const verdicts = await Promise.all([...urls].map(async (url) => {
+  const verdicts = await Promise.all([...urls].map(async ([url, outside]) => {
     try {
       const res = await fetch(url, { signal })
       if (res.status === 404 || res.status === 400) return false
       if (!res.ok) return null
       if (probe.blankMaxBytes && (await res.arrayBuffer()).byteLength <= probe.blankMaxBytes) return false
+      if (probe.needsRoads && outside) return await hasRoadPixels(await res.blob())
       return true
     } catch {
       return null

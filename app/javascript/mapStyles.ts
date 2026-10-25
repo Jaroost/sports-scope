@@ -181,6 +181,28 @@ async function hasRoadPixels(blob: Blob): Promise<boolean> {
   return roads / (data.length / 4) >= ROAD_PIXEL_MIN_SHARE
 }
 
+// Verdict par tuile (URL + « hors zone » qui conditionne le test des routes) : une tuile
+// vide ou pleine le reste, inutile de la re-télécharger à chaque geste. Les échecs
+// (null) ne sont jamais retenus. Borné, les plus anciens partent d'abord.
+const TILE_VERDICTS = new Map<string, boolean>()
+const TILE_VERDICTS_MAX = 600
+function rememberTileVerdict(key: string, verdict: boolean) {
+  TILE_VERDICTS.delete(key)
+  TILE_VERDICTS.set(key, verdict)
+  if (TILE_VERDICTS.size > TILE_VERDICTS_MAX) TILE_VERDICTS.delete(TILE_VERDICTS.keys().next().value as string)
+}
+
+async function fetchTileVerdict(
+  probe: CoverageProbe, url: string, outside: boolean, signal?: AbortSignal,
+): Promise<boolean | null> {
+  const res = await fetch(url, { signal })
+  if (res.status === 404 || res.status === 400) return false
+  if (!res.ok) return null
+  if (probe.blankMaxBytes && (await res.arrayBuffer()).byteLength <= probe.blankMaxBytes) return false
+  if (probe.needsRoads && outside) return await hasRoadPixels(await res.blob())
+  return true
+}
+
 export interface ViewBounds { west: number; south: number; east: number; north: number }
 
 // Part de tuiles vides à partir de laquelle on avertit : une vue à cheval sur la frontière
@@ -214,13 +236,13 @@ export async function probeStyleCoverage(
     }
   }
   const verdicts = await Promise.all([...urls].map(async ([url, outside]) => {
+    const key = `${url}|${outside}`
+    const cached = TILE_VERDICTS.get(key)
+    if (cached !== undefined) return cached
     try {
-      const res = await fetch(url, { signal })
-      if (res.status === 404 || res.status === 400) return false
-      if (!res.ok) return null
-      if (probe.blankMaxBytes && (await res.arrayBuffer()).byteLength <= probe.blankMaxBytes) return false
-      if (probe.needsRoads && outside) return await hasRoadPixels(await res.blob())
-      return true
+      const verdict = await fetchTileVerdict(probe, url, outside, signal)
+      if (verdict !== null) rememberTileVerdict(key, verdict)
+      return verdict
     } catch {
       return null
     }
@@ -230,11 +252,46 @@ export async function probeStyleCoverage(
   return known.filter((v) => !v).length / known.length < COVERAGE_BLANK_SHARE
 }
 
-// Le fond est-il lisible sous la vue ? Sonde de tuiles quand on sait la faire, bbox du
-// groupe sinon (Autriche) ou si la sonde échoue ; un fond mondial l'est toujours.
+// Marges du pré-filtre par zone (en degrés). Les serveurs servent des tuiles lisibles au-delà
+// de leur frontière, d'autant plus loin que le zoom est bas (vérifié : swisstopo sert encore
+// Lyon à z9 et Morteau jusqu'à z16) : on ne déclare « nettement hors zone » qu'à 1° (~100 km)
+// de la bbox du groupe. Côté intérieur, les contours sont grossiers (quelques km) : on ne
+// déclare « nettement dedans » qu'à 0,2° (~20 km) du bord.
+const ZONE_OUTSIDE_MARGIN_DEG = 1
+const ZONE_INSIDE_MARGIN_DEG = 0.2
+
+// Seule la Suisse a un contour assez fin pour certifier l'intérieur : les rectangles de
+// France et d'Autriche englobent des bouts de pays voisins (Belgique, Catalogne, Bavière).
+const PRECISE_INSIDE_GROUPS: MapStyleGroup[] = ['swiss']
+
+type ZoneRelation = 'outside' | 'inside' | 'near'
+
+function viewRelationToStyle(styleId: string, bounds: ViewBounds): ZoneRelation {
+  const group = groupForStyle(styleId)
+  const bboxes = group && MAP_STYLE_GROUP_BBOX[group]
+  if (!group || !bboxes) return 'inside' // fond mondial
+  const m = ZONE_OUTSIDE_MARGIN_DEG
+  const touches = bboxes.some(([minLng, minLat, maxLng, maxLat]) =>
+    bounds.west <= maxLng + m && bounds.east >= minLng - m && bounds.south <= maxLat + m && bounds.north >= minLat - m)
+  if (!touches) return 'outside'
+  if (PRECISE_INSIDE_GROUPS.includes(group)) {
+    const i = ZONE_INSIDE_MARGIN_DEG
+    const xs = [bounds.west - i, (bounds.west + bounds.east) / 2, bounds.east + i]
+    const ys = [bounds.south - i, (bounds.south + bounds.north) / 2, bounds.north + i]
+    if (xs.every((x) => ys.every((y) => styleCoversPoint(styleId, x, y)))) return 'inside'
+  }
+  return 'near'
+}
+
+// Le fond est-il lisible sous la vue ? D'abord le pré-filtre par zone, sans requête : nettement
+// hors zone → non, nettement dedans (Suisse) ou fond mondial → oui. Entre les deux, sonde de
+// tuiles quand on sait la faire, bbox du groupe sinon ou si la sonde échoue.
 export async function styleUsableForView(
   styleId: string, bounds: ViewBounds, zoom: number, signal?: AbortSignal,
 ): Promise<boolean> {
+  const relation = viewRelationToStyle(styleId, bounds)
+  if (relation === 'outside') return false
+  if (relation === 'inside') return true
   if (hasCoverageProbe(styleId)) {
     const probed = await probeStyleCoverage(styleId, bounds, zoom, signal)
     if (probed !== null) return probed

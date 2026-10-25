@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick, toRaw } from 'vue'
 import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
-import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, COVERAGE_WARN_MIN_ZOOM, hasCoverageProbe, probeStyleCoverage, styleUsableForView } from '../mapStyles'
+import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, COVERAGE_WARN_MIN_ZOOM, hasCoverageProbe, styleUsableForView } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
@@ -240,7 +240,7 @@ function scheduleCoverageProbe() {
   coverageProbeTimer = setTimeout(async () => {
     const ctrl = (coverageProbeAbort = new AbortController())
     if (!auto) {
-      const result = await probeStyleCoverage(shown, bounds, z, ctrl.signal)
+      const result = await styleUsableForView(shown, bounds, z, ctrl.signal)
       if (ctrl.signal.aborted) return
       styleCoverageProbe.value = result
       styleCoverageProbed.value = shown

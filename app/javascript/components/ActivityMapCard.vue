@@ -2,7 +2,7 @@
 import { reactive, ref, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
 import { type PropType } from 'vue'
 import { t } from '../i18n'
-import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT } from '../mapStyles'
+import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, coverageWarnMinZoom, styleUsableForView } from '../mapStyles'
 import { ActivityMapState, type ActivityColorMode } from '../pageState'
 import { HR_ZONES, POWER_ZONES, intensityZoneColor, zoneKeyForValue, type ZoneBound } from '../composables/useTrainingPlan'
 import MapStyleDropdown from './MapStyleDropdown.vue'
@@ -25,7 +25,7 @@ import {
   buildOffsetDisplayLine, haversine,
 } from '../routeHelpers'
 import type { LngLat, Climb } from '../routeHelpers'
-import { sportPreferences, routeProfileForSport, turnAnomalyDiameterForSport } from '../userPreferences'
+import { sportPreferences, routeProfileForSport, turnAnomalyDiameterForSport, mapStyleChain } from '../userPreferences'
 import { repairAgainstTrack } from '../routeRepair'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -248,7 +248,56 @@ function latLngToIndex(lng, lat) {
   return bestIdx
 }
 
+// Bascule automatique des fonds (préférences du sport de l'activité : favori puis secours,
+// `map.auto_switch`), comme dans le créateur d'itinéraire : le premier fond de la chaîne
+// lisible sous la vue est affiché, le dernier servant de recours. Choisir un fond à la main
+// met la bascule en pause jusqu'au prochain clic sur le bouton.
+const autoPaused = ref(false)
+const autoSport = computed(() => routeSportFor(props.activity as Record<string, unknown> | null))
+const autoChain = computed(() => {
+  const sport = autoSport.value
+  if (!sportPreferences(sport).map.auto_switch) return null
+  const chain = mapStyleChain(sport)
+  return chain.length > 1 ? chain : null
+})
+let coverageProbeAbort: AbortController | null = null
+let coverageProbeTimer: ReturnType<typeof setTimeout> | undefined
+function scheduleCoverageProbe() {
+  clearTimeout(coverageProbeTimer)
+  coverageProbeAbort?.abort()
+  const chain = autoChain.value
+  if (!mapInstance || !chain || autoPaused.value || !chain.includes(state.mapStyleId)) return
+  const z = mapInstance.getZoom()
+  // Vue très dézoomée : tout est servi, on revient sur le favori.
+  if (z < coverageWarnMinZoom(state.mapStyleId)) {
+    if (state.mapStyleId !== chain[0]) applyMapStyle(chain[0])
+    return
+  }
+  const b = mapInstance.getBounds()
+  const bounds = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }
+  coverageProbeTimer = setTimeout(async () => {
+    const ctrl = (coverageProbeAbort = new AbortController())
+    let want = chain[chain.length - 1]
+    for (const id of chain) {
+      const usable = await styleUsableForView(id, bounds, z, ctrl.signal)
+      if (ctrl.signal.aborted) return
+      if (usable) { want = id; break }
+    }
+    if (want !== state.mapStyleId && chain.includes(state.mapStyleId)) applyMapStyle(want)
+  }, 250)
+}
+watch([autoChain, autoPaused], scheduleCoverageProbe)
+
+function toggleAutoSwitch() {
+  autoPaused.value = !autoPaused.value
+}
+
 function setMapStyle(id) {
+  if (id !== state.mapStyleId && autoChain.value) autoPaused.value = true
+  applyMapStyle(id)
+}
+
+function applyMapStyle(id) {
   if (!mapInstance || id === state.mapStyleId) return
   state.mapStyleId = id
   // `diff: false` forces a full wipe — without it, maplibre preserves custom
@@ -980,6 +1029,12 @@ async function renderMap() {
     [[coords[0][0], coords[0][1]], [coords[0][0], coords[0][1]]],
   )
 
+  // Le fond mémorisé (localStorage) est commun à toutes les activités : un choix ancien hors de
+  // la chaîne du profil (ou le défaut `cyclosm`) échapperait à la bascule pour toujours. On
+  // repart donc du favori du profil, la bascule choisira ensuite selon la vue.
+  const chain = autoChain.value
+  if (chain && !chain.includes(state.mapStyleId)) state.mapStyleId = chain[0]
+
   mapInstance = new maplibregl.Map({
     container: mapEl.value,
     style: mapStyleFor(state.mapStyleId) as any,
@@ -995,6 +1050,8 @@ async function renderMap() {
     installClimbMarkers(maplibregl)
     installPhotoMarkers(maplibregl)
     installMapHoverTooltip()
+    mapInstance.on('moveend', scheduleCoverageProbe)
+    scheduleCoverageProbe()
   })
 }
 
@@ -1184,6 +1241,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(coverageProbeTimer); coverageProbeAbort?.abort()
   stopRouteFlow()
   if (mapResizeObserver) { mapResizeObserver.disconnect(); mapResizeObserver = null }
   if (cardResizeObserver) { cardResizeObserver.disconnect(); cardResizeObserver = null }
@@ -1271,7 +1329,15 @@ onBeforeUnmount(() => {
         <div ref="mapEl" class="activity-map"></div>
         <div class="map-controls">
           <!-- Groupe 1 : style de fond -->
+          <div class="d-flex align-items-stretch gap-1">
           <MapStyleDropdown class="map-dropdown-btn" :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
+          <button v-if="autoChain" type="button" class="btn btn-sm shadow-sm"
+            :class="autoPaused ? 'btn-outline-warning' : 'btn-warning text-dark'" :aria-pressed="!autoPaused"
+            :title="t(autoPaused ? 'routes.auto_switch_paused' : 'routes.auto_switch_on')"
+            @click="toggleAutoSwitch">
+            <i class="fa-solid fa-shuffle" aria-hidden="true"></i>
+          </button>
+          </div>
 
           <!-- Groupe 2 : coloration du tracé -->
           <ColorModeDropdown

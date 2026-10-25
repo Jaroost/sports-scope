@@ -110,6 +110,16 @@ function pointInAnyBbox(lng: number, lat: number, bboxes: [number, number, numbe
 // réellement.
 export const COVERAGE_WARN_MIN_ZOOM = 9
 
+// Les fonds qu'on sait sonder n'ont pas ce problème : la sonde regarde les tuiles réellement
+// servies, donc un fond encore lisible à bas zoom ne déclenche rien. Ils avertissent dès
+// z5 (à Paris, swisstopo se vide dès z7) ; en dessous, la vue couvre un pays entier et une
+// tuile ne dit plus rien.
+export const PROBED_COVERAGE_WARN_MIN_ZOOM = 5
+
+export function coverageWarnMinZoom(styleId: string): number {
+  return hasCoverageProbe(styleId) ? PROBED_COVERAGE_WARN_MIN_ZOOM : COVERAGE_WARN_MIN_ZOOM
+}
+
 export function styleCoversPoint(styleId: string, lng: number, lat: number): boolean {
   const group = groupForStyle(styleId) as MapStyleGroup
   const bboxes = MAP_STYLE_GROUP_BBOX[group]
@@ -306,7 +316,11 @@ export async function styleUsableForView(
   styleId: string, bounds: ViewBounds, zoom: number, signal?: AbortSignal,
 ): Promise<boolean> {
   const relation = viewRelationToStyle(styleId, bounds)
-  if (relation === 'outside') return false
+  // Le pré-filtre « nettement hors zone » suppose un zoom d'édition : en dessous de
+  // COVERAGE_WARN_MIN_ZOOM les fonds sont encore servis bien au-delà de leur frontière, c'est
+  // la sonde qui tranche.
+  const lowZoom = zoom < COVERAGE_WARN_MIN_ZOOM && hasCoverageProbe(styleId)
+  if (relation === 'outside' && !lowZoom) return false
   if (relation === 'inside') return true
   if (hasCoverageProbe(styleId)) {
     const probed = await probeStyleCoverage(styleId, bounds, zoom, signal)
@@ -368,6 +382,7 @@ export function combosOverlaysForStyle(styleId: string): string[] {
 // Couches empilées par-dessus le fond actif quel qu'il soit — utiles surtout sur
 // l'imagerie satellite, qui ne porte aucun tracé. Deux familles :
 //   - `wmts`   : tuiles PNG transparentes swisstopo/ASTRA (SuisseMobile), Suisse seule
+//   - `raster` : tuiles PNG transparentes d'un service tiers à URL libre (Waymarked Trails)
 //   - `vector` : tuiles vectorielles OpenFreeMap (OpenMapTiles), couverture mondiale
 // Plusieurs peuvent être actives simultanément — cf. le menu « Affichage » de
 // RouteBuilderMap. Le groupe ne sert qu'à l'affichage (en-têtes du menu).
@@ -377,13 +392,20 @@ export interface MapOverlay {
   id: string
   icon: string
   group: MapOverlayGroup
-  kind: 'wmts' | 'vector'
+  kind: 'wmts' | 'vector' | 'raster'
   layer?: string // identifiant de couche WMTS geo.admin.ch (kind: 'wmts')
+  url?: string // gabarit d'URL de tuiles {z}/{x}/{y} (kind: 'raster')
+  attribution?: string
 }
 
 export const MAP_OVERLAYS: MapOverlay[] = [
   { id: 'paths',            icon: 'fa-road',          group: 'world', kind: 'vector' },
   { id: 'labels',           icon: 'fa-font',          group: 'world', kind: 'vector' },
+  // Waymarked Trails : itinéraires cyclables balisés d'OpenStreetMap, Europe entière (service
+  // bénévole, sans garantie de disponibilité). Tuiles transparentes jusqu'en z18.
+  { id: 'waymarked_cycling', icon: 'fa-route', group: 'world', kind: 'raster',
+    url: 'https://tile.waymarkedtrails.org/cycling/{z}/{x}/{y}.png',
+    attribution: '© <a href="https://waymarkedtrails.org" target="_blank" rel="noopener">Waymarked Trails</a> | © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>' },
   { id: 'veloland',         icon: 'fa-bicycle',       group: 'swiss', kind: 'wmts', layer: 'ch.astra.veloland' },
   { id: 'mountainbikeland', icon: 'fa-person-biking', group: 'swiss', kind: 'wmts', layer: 'ch.astra.mountainbikeland' },
   { id: 'wanderland',       icon: 'fa-person-hiking', group: 'swiss', kind: 'wmts', layer: 'ch.astra.wanderland' },
@@ -418,6 +440,9 @@ export function overlayLayerId(id: string, suffix = ''): string {
 export function overlaySource(overlay: MapOverlay): object {
   if (overlay.kind === 'vector') {
     return { type: 'vector', url: OPENMAPTILES_URL, attribution: OSM_ATTRIBUTION }
+  }
+  if (overlay.kind === 'raster') {
+    return { type: 'raster', tiles: [overlay.url], tileSize: 256, maxzoom: 18, attribution: overlay.attribution }
   }
   return {
     type: 'raster',

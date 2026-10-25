@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick, toRaw } from 'vue'
 import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
-import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, COVERAGE_WARN_MIN_ZOOM, hasCoverageProbe, styleUsableForView } from '../mapStyles'
+import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, coverageWarnMinZoom, hasCoverageProbe, styleUsableForView } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
@@ -230,11 +230,11 @@ function scheduleCoverageProbe() {
   const shown = state.mapStyleId
   // Une dérogation manuelle hors chaîne n'est jamais remplacée.
   const auto = chain && chain.includes(shown) ? chain : null
-  if (!bounds || z === null || z < COVERAGE_WARN_MIN_ZOOM || (!auto && !hasCoverageProbe(shown))) {
+  if (!bounds || z === null || z < coverageWarnMinZoom(shown) || (!auto && !hasCoverageProbe(shown))) {
     styleCoverageProbe.value = null
     styleCoverageProbed.value = null
     // Vue très dézoomée : tout est servi, on revient sur le favori.
-    if (auto && z !== null && z < COVERAGE_WARN_MIN_ZOOM && shown !== auto[0]) mapRef.value?.applyMapStyle(auto[0])
+    if (auto && z !== null && z < coverageWarnMinZoom(shown) && shown !== auto[0]) mapRef.value?.applyMapStyle(auto[0])
     return
   }
   coverageProbeTimer = setTimeout(async () => {
@@ -264,7 +264,7 @@ watch(() => [state.viewBounds, state.viewZoom, state.mapStyleId, autoChain.value
 onBeforeUnmount(() => { clearTimeout(coverageProbeTimer); coverageProbeAbort?.abort() })
 
 const styleCoverageWarn = computed(() => {
-  if (state.viewZoom !== null && state.viewZoom < COVERAGE_WARN_MIN_ZOOM) return false
+  if (state.viewZoom !== null && state.viewZoom < coverageWarnMinZoom(state.mapStyleId)) return false
   const c = state.viewCenter
   if (hasCoverageProbe(state.mapStyleId) && styleCoverageProbe.value !== null && styleCoverageProbed.value === state.mapStyleId) return !styleCoverageProbe.value
   return !!c && !styleCoversPoint(state.mapStyleId, c.lng, c.lat)

@@ -529,6 +529,15 @@ export interface Buttons {
   channel2?: ButtonChannel
   channel3?: ButtonChannel
   channel4?: ButtonChannel
+  // Les touches d'une télécommande Bluetooth — voir `CompanionSettings::REMOTE_KEYS`.
+  // Absent vaut rien (et non un comportement d'origine, comme les canaux 1 et 2) :
+  // l'appli ne prend les touches que si l'une d'elles est assignée. Le volume ne
+  // porte que `click`.
+  remote_volume_up?: ButtonChannel
+  remote_volume_down?: ButtonChannel
+  remote_next?: ButtonChannel
+  remote_previous?: ButtonChannel
+  remote_play_pause?: ButtonChannel
 }
 
 // La bande de l'encoche : une mesure au plus de chaque côté, dans un jeu.

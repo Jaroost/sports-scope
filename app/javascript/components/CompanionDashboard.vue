@@ -265,7 +265,7 @@ const lapSeries = computed(() => {
   // Un bouton Di2 « marquer un tour » (`start_lap:<série>`) porte la même
   // série libre — mêmes suggestions que les autres endroits qui en tapent une.
   const buttons = preset.value.buttons
-  BUTTON_CHANNELS.forEach((channel) => {
+  ;[...BUTTON_CHANNELS, ...REMOTE_KEYS].forEach((channel) => {
     Object.values(buttons?.[channel] || {}).forEach((action) => {
       const series = buttonActionLapSeries(action)
       if (series !== null) keys.add(series)
@@ -1380,6 +1380,34 @@ function setReminderStartAfter(reminder: Reminder, raw: string) {
 // du D-Fly, pas un réglage qui pourrait évoluer sans toucher au code.
 const BUTTON_CHANNELS = ['channel1', 'channel2', 'channel3', 'channel4'] as const
 
+// Les touches de la télécommande Bluetooth, rangées dans le même `buttons` —
+// voir `CompanionSettings::REMOTE_KEYS`. Constante locale pour la même raison
+// que les canaux : c'est une propriété du matériel, pas un réglage serveur.
+const REMOTE_KEYS = [
+  'remote_volume_up', 'remote_volume_down', 'remote_next', 'remote_previous', 'remote_play_pause',
+] as const
+
+// Le volume ne livre qu'une impulsion par pression, sans relâchement : le clic
+// est son seul geste, comme côté serveur (`REMOTE_VOLUME_KEYS`).
+const REMOTE_VOLUME_KEYS: readonly string[] = ['remote_volume_up', 'remote_volume_down']
+
+// Les commandes de l'éditeur, canaux du D-Fly puis télécommande, dans l'ordre
+// où elles s'affichent.
+const BUTTON_CONTROLS = computed(() => [
+  ...BUTTON_CHANNELS.map((key, index) => ({
+    key: key as keyof Buttons,
+    label: t('companion.settings.button_channel', { n: index + 1 }),
+    gestures: props.catalog.button_gestures,
+  })),
+  ...REMOTE_KEYS.map((key) => ({
+    key: key as keyof Buttons,
+    label: t(`companion.settings.remote_keys.${key}`),
+    gestures: REMOTE_VOLUME_KEYS.includes(key)
+      ? props.catalog.button_gestures.filter((gesture) => gesture === 'click')
+      : props.catalog.button_gestures,
+  })),
+])
+
 // Seules les pages déjà enregistrées (qui ont donc une clé — voir `Page.key`)
 // peuvent être visées par « Aller à… » : le serveur est ce qui fabrique la
 // clé, une page qui vient d'être ajoutée n'en a pas encore.
@@ -2477,12 +2505,11 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.buttons_help') }}</p>
 
         <div class="row g-2 mb-1">
-          <div v-for="(channel, index) in BUTTON_CHANNELS" :key="channel" class="col-12 col-md-6">
-            <div class="small text-body-secondary mb-1">
-              {{ t('companion.settings.button_channel', { n: index + 1 }) }}
-            </div>
+          <div v-for="{ key: channel, label, gestures } in BUTTON_CONTROLS" :key="channel"
+               class="col-12 col-md-6">
+            <div class="small text-body-secondary mb-1">{{ label }}</div>
             <div class="row g-1 mb-3">
-              <div v-for="gesture in catalog.button_gestures" :key="gesture" class="col-4">
+              <div v-for="gesture in gestures" :key="gesture" class="col-4">
                 <label class="form-label small mb-1">
                   {{ t(`companion.settings.button_gestures.${gesture}`) }}
                 </label>

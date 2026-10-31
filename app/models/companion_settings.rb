@@ -342,6 +342,15 @@ module CompanionSettings
     map_zoom_in map_zoom_out map_pan_up map_pan_down map_pan_left map_pan_right map_recenter
   ].freeze
 
+  # Commandes du lecteur de musique d'Android (volume, piste suivante/précédente,
+  # lecture/pause), partagées par les touches (`BUTTON_ACTIONS`) et les cases de
+  # bandeau/encoche (`BAND_ACTIONS`). Côté Dart : `MediaCommand`
+  # (`ride_preset.dart`). Sans état : l'appli les relaie au système
+  # (`MediaControl.kt`), qui les adresse à la session média d'une autre appli.
+  MEDIA_COMMANDS = %w[
+    media_volume_up media_volume_down media_next media_previous media_play_pause
+  ].freeze
+
   # Les commandes qu'une case du bandeau ou de la bande de l'encoche peut
   # porter à la place d'une mesure — des boutons, pas des mesures, même
   # raison que `BLOCKS["sleep"]` sur une page. Liste à part de `METRICS` et
@@ -377,7 +386,7 @@ module CompanionSettings
   # `next_button_set` passe au set de commandes suivant (`Preset#button_sets`,
   # voir `MAX_BUTTON_SETS`) : la case prend l'icône et la couleur du set en
   # cours côté appli (`ButtonSetControl`), sauf couleur de fond réglée.
-  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause next_button_set] + MAP_COMMANDS).freeze
+  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause next_button_set] + MAP_COMMANDS + MEDIA_COMMANDS).freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`
@@ -477,7 +486,7 @@ module CompanionSettings
   # décide lequel des deux gestes il pose (`TogglePauseAction`, `ride_preset.dart`).
   BUTTON_ACTIONS = (
     %w[next_page previous_page] + BELL_SOUNDS +
-    %w[start_lap sleep wake toggle_sleep toggle_pause next_button_set] + MAP_COMMANDS
+    %w[start_lap sleep wake toggle_sleep toggle_pause next_button_set] + MAP_COMMANDS + MEDIA_COMMANDS
   ).freeze
 
   # Les sets de commandes d'un profil : chacun est un jeu complet de réactions

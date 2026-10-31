@@ -213,7 +213,14 @@ reprogrammé, regroupé sur 2 min (`ExploredDistance.schedule`), quand `track_ce
 change, et refait par « Recalculer les stats & seuils ». Rattrapage en masse :
 `bin/rails explored:backfill` (après `segments:backfill`). Écrit par `update_all` pour ne
 pas bumper `updated_at` (donc `UserActivities.data_version`). Affiché dans
-`ActivityStats.vue` (section « overview ») et filtrable dans la liste (`min_new`/`max_new`).
+`ActivityStats.vue` (section « overview »), sur chaque ligne de la liste
+(`HelloStrava.vue`, distance + %) et filtrable dans la liste (`min_new`/`max_new`).
+
+La même passe écrit `new_ranges` (`[[début, fin], …]`, indices de stream, plages contiguës
+fusionnées) : cliquer la carte « Nouvelles routes » des stats surligne ces tronçons en
+magenta sur la carte (`explored-route` dans `ActivityMapCard.vue`). Servi par `show` hors
+liste (la liste n'en a pas besoin). Après un changement de l'algorithme, relancer
+`explored:backfill` : il réécrit aussi les plages.
 
 ## Base de données
 

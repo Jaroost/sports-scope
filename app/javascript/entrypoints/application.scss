@@ -156,6 +156,19 @@ body.fullscreen-page {
   flex-shrink: 0;
 }
 
+// Carte cliquable (ex. « Nouvelles routes » : surligne les tronçons sur la carte).
+.stat-card-clickable {
+  cursor: pointer;
+
+  &:hover { border-color: rgba(0, 0, 0, 0.25); }
+  &:focus-visible { outline: 2px solid #e5007d; outline-offset: 2px; }
+}
+
+.stat-card-active {
+  border-color: #e5007d;
+  box-shadow: 0 0 0 1px #e5007d;
+}
+
 .stat-card {
   background: #fff;
   border: 1px solid rgba(0, 0, 0, 0.06);

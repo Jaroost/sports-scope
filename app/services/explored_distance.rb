@@ -14,7 +14,9 @@
 #     (aller-retour sur un chemin neuf = un seul sens, pas de double compte aux bords
 #     de cellule) ;
 #   • la distance d'une cellule est celle parcourue entre son entrée et l'entrée de la
-#     suivante (`d` de l'empreinte) ; la dernière cellule (< 60 m) ne compte pas.
+#     suivante (`d` de l'empreinte) ; la dernière cellule (< 60 m) ne compte pas ;
+#   • on garde aussi, pour la carte, les plages d'indices de stream correspondantes
+#     (`new_ranges`, `[[début, fin], …]`, plages contiguës fusionnées).
 #
 # Le résultat dépend de l'ORDRE de l'historique : ajouter une sortie ancienne change
 # celles qui la suivent. D'où un calcul global par utilisateur (une passe chronologique,
@@ -60,8 +62,8 @@ class ExploredDistance
         fp = fingerprints[[ref[:klass], ref[:id]]]
         next unless fp
 
-        value = process(fp[:cells], fp[:d], visited[ref[:sport]])
-        changed += 1 if store(ref, value)
+        value, ranges = process(fp[:cells], fp[:d], fp[:i], visited[ref[:sport]])
+        changed += 1 if store(ref, value, ranges)
       end
     end
     changed
@@ -73,31 +75,35 @@ class ExploredDistance
   def ordered_refs
     refs = [StravaActivity, ImportedActivity].flat_map do |klass|
       klass.where(user_id: @user.id).where.not(started_at: nil).where.not(track_cells: {})
-           .pluck(:id, :started_at, :activity_type, :new_distance_m).map do |id, at, type, current|
-        { klass: klass, id: id, at: at, sport: PerformanceRecords.sport_category(type), current: current }
+           .pluck(:id, :started_at, :activity_type, :new_distance_m, :new_ranges).map do |id, at, type, current, ranges|
+        { klass: klass, id: id, at: at, sport: PerformanceRecords.sport_category(type),
+          current: current, current_ranges: ranges }
       end
     end
     refs.sort_by { |r| [r[:at], r[:klass].name, r[:id]] }
   end
 
-  # `cells` et `d` seulement : on n'a pas besoin du reste de l'empreinte (index,
-  # temps, grille grossière), ce qui divise nettement la mémoire.
+  # `cells`, `d` et `i` seulement : on n'a pas besoin du reste de l'empreinte (temps,
+  # grille grossière), ce qui divise nettement la mémoire.
   def load_fingerprints(refs)
     refs.group_by { |r| r[:klass] }.each_with_object({}) do |(klass, group), out|
       klass.where(id: group.map { |r| r[:id] })
-           .pluck(:id, Arel.sql("track_cells -> 'cells'"), Arel.sql("track_cells -> 'd'")).each do |id, cells, d|
-        out[[klass, id]] = { cells: cells, d: d }
+           .pluck(:id, Arel.sql("track_cells -> 'cells'"), Arel.sql("track_cells -> 'd'"),
+                  Arel.sql("track_cells -> 'i'")).each do |id, cells, d, i|
+        out[[klass, id]] = { cells: cells, d: d, i: i }
       end
     end
   end
 
-  # Distance nouvelle (m) de la sortie ; ajoute ses cellules à `visited` ensuite
+  # [distance nouvelle (m), plages d'indices de stream] de la sortie ; ajoute ses cellules à `visited` ensuite
   # (jamais pendant : sinon chaque cellule serait voisine de la précédente).
-  def process(cells, dists, visited)
+  def process(cells, dists, idx, visited)
     cells = parse(cells)
     dists = parse(dists)
+    idx = parse(idx)
     own = Set.new
     total = 0.0
+    ranges = []
 
     cells.each_with_index do |key_str, i|
       key = encode(key_str)
@@ -108,10 +114,22 @@ class ExploredDistance
       next unless fresh && dists[i + 1] && dists[i]
 
       total += [dists[i + 1].to_f - dists[i].to_f, 0].max
+      add_range(ranges, idx[i], idx[i + 1])
     end
 
     visited.merge(own)
-    total.round
+    [total.round, ranges]
+  end
+
+  # Ajoute [from, to] en prolongeant la plage précédente quand elle la touche.
+  def add_range(ranges, from, to)
+    return if from.nil? || to.nil?
+
+    if ranges.any? && ranges.last[1] >= from
+      ranges.last[1] = to
+    else
+      ranges << [from, to]
+    end
   end
 
   # La colonne jsonb arrive soit déjà décodée, soit en texte selon le type renvoyé par
@@ -130,10 +148,10 @@ class ExploredDistance
   # `update_column` : pas de callbacks et surtout pas de bump d'`updated_at`, qui
   # invaliderait les caches FTP / records / charge (`UserActivities.data_version`) pour
   # une valeur qui n'y entre pas.
-  def store(ref, value)
-    return false if ref[:current] == value
+  def store(ref, value, ranges)
+    return false if ref[:current] == value && ref[:current_ranges] == ranges
 
-    ref[:klass].where(id: ref[:id]).update_all(new_distance_m: value)
+    ref[:klass].where(id: ref[:id]).update_all(new_distance_m: value, new_ranges: ranges)
     true
   end
 end

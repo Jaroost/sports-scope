@@ -186,8 +186,17 @@ const globalVam = computed(() => {
 const explored = computed(() => {
   const a = activity.value
   if (!a || !Number.isFinite(a.new_distance_m)) return null
-  return { newM: a.new_distance_m, totalM: Number.isFinite(a.distance) ? a.distance : null }
+  return {
+    newM: a.new_distance_m,
+    totalM: Number.isFinite(a.distance) ? a.distance : null,
+    hasRanges: exploredRanges.value.length > 0,
+  }
 })
+
+// Plages d'indices de stream sur de nouvelles routes — surlignées sur la carte quand on
+// clique la carte « Nouvelles routes » des stats.
+const showExplored = ref(false)
+const exploredRanges = computed(() => (Array.isArray(activity.value?.new_ranges) ? activity.value.new_ranges : []))
 
 const trainingMetrics = computed(() => {
   const a = activity.value
@@ -518,6 +527,7 @@ onMounted(async () => {
         :photos="photos"
         :selection="selection"
         :preview-range="hoveredSegmentRange"
+        :explored-ranges="showExplored ? exploredRanges : null"
         :visible-streams="visibleStreams"
         :x-axis="xAxis"
         v-model:hovered-climb-start-idx="hoveredClimbStartIdx"
@@ -613,6 +623,8 @@ onMounted(async () => {
         class="mb-3"
         :moving-stats="movingStats"
         :explored="explored"
+        :explored-active="showExplored"
+        @toggle-explored="showExplored = !showExplored"
         :global-vam="globalVam"
         :training-metrics="trainingMetrics"
         :decoupling="decoupling"

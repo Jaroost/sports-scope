@@ -30,7 +30,9 @@ const props = defineProps({
   movingStats: { type: Object as PropType<{ moving: number; elapsed: number; stopped: number; stopPct: number } | null>, default: null },
   globalVam: { type: Number, default: null },
   // Distance sur de nouvelles routes (jamais faites avant dans ce sport) : { newM, totalM }.
-  explored: { type: Object as PropType<{ newM: number; totalM: number | null } | null>, default: null },
+  explored: { type: Object as PropType<{ newM: number; totalM: number | null; hasRanges: boolean } | null>, default: null },
+  // Surbrillance des nouvelles routes active sur la carte (état tenu par le parent).
+  exploredActive: { type: Boolean, default: false },
   // Métriques d'entraînement de la sortie : NP / IF / TSS / VI (serveur + dérivé).
   trainingMetrics: { type: Object as PropType<{ np: number | null; intensity: number | null; tss: number | null; tssSource: string | null; vi: number | null } | null>, default: null },
   // Découplage aérobie { pct, basis } — dérive cardiaque 1re vs 2e moitié.
@@ -76,6 +78,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'toggle-explored',
   'select-segment',
   'update:hoveredClimbStartIdx',
   'update:hoveredPeakDuration',
@@ -930,8 +933,19 @@ watch(
                   </div>
                 </div>
                 <div v-if="explored" class="col-6 col-md-3">
-                  <div class="stat-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.new_roads_hint')">
-                    <span class="stat-icon"><i class="fa-solid fa-compass text-info" aria-hidden="true"></i></span>
+                  <div
+                    class="stat-card"
+                    :class="{ 'stat-card-clickable': explored.hasRanges, 'stat-card-active': exploredActive }"
+                    :role="explored.hasRanges ? 'button' : undefined"
+                    :tabindex="explored.hasRanges ? 0 : undefined"
+                    :aria-pressed="explored.hasRanges ? exploredActive : undefined"
+                    data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip"
+                    :data-bs-title="t('strava.stats.new_roads_hint')"
+                    @click="explored.hasRanges && emit('toggle-explored')"
+                    @keydown.enter.prevent="explored.hasRanges && emit('toggle-explored')"
+                    @keydown.space.prevent="explored.hasRanges && emit('toggle-explored')"
+                  >
+                    <span class="stat-icon"><i class="fa-solid fa-compass" :class="exploredActive ? 'text-danger' : 'text-info'" aria-hidden="true"></i></span>
                     <div>
                       <div class="text-muted small">
                         {{ t('strava.stats.new_roads') }}

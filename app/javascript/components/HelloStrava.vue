@@ -442,6 +442,10 @@ function formatDistance(meters) {
   return `${(meters / 1000).toFixed(2)} km`
 }
 
+function newRoadsPercent(activity) {
+  return Math.min(100, Math.round((activity.new_distance_m / activity.distance) * 100))
+}
+
 function formatDuration(seconds) {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -795,6 +799,12 @@ function hasThumb(activity) {
                 <small class="text-muted">
                   <i class="fa-regular fa-clock me-1" aria-hidden="true"></i>{{ formatDuration(activity.moving_time) }}
                 </small>
+                <!-- Distance sur de nouvelles routes + part de la sortie. Absente tant que
+                     la valeur n'est pas calculée (sans tracé, ou avant le recalcul). -->
+                <small v-if="activity.new_distance_m != null && activity.distance" class="text-muted activity-new-roads" :title="t('strava.stats.new_roads_hint_short')">
+                  <i class="fa-solid fa-compass me-1" aria-hidden="true"></i>{{ formatDistance(activity.new_distance_m) }}
+                  <span>· {{ newRoadsPercent(activity) }} %</span>
+                </small>
               </div>
             </div>
           </a>
@@ -874,7 +884,7 @@ function hasThumb(activity) {
    « 1h 05min ») — alignées à droite, leurs icônes se décalaient à chaque ligne. */
 .activity-metrics {
   min-width: 6.5rem;
-  min-height: 2.75rem;
+  min-height: 4.1rem;
   display: flex;
   flex-direction: column;
   justify-content: center;

@@ -550,6 +550,7 @@ class StravaController < ApplicationController
     extra = {}
     # Distance sur de nouvelles routes (`ExploredDistance`) : colonne, hors cache.
     extra['new_distance_m'] = record.new_distance_m if record&.new_distance_m
+    extra['new_ranges'] = record.new_ranges if record&.new_ranges.present?
 
     tss = TrainingLoad.tss_for(current_user, source, external_id)
     if tss

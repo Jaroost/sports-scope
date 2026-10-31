@@ -150,6 +150,7 @@ class ImportedActivitiesController < ApplicationController
       intensity_factor: tss&.dig(:intensity),
       normalized_power: a.normalized_power,
       new_distance_m: a.new_distance_m,
+      new_ranges: with_laps ? a.new_ranges : nil,
       filename: a.filename,
       name: a.name,
       type: a.activity_type,

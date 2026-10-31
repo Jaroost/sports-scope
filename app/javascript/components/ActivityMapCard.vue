@@ -47,6 +47,9 @@ const props = defineProps({
   // Segments) : même rendu que la sélection, mais sans la committer ni zoomer —
   // exactement ce que fait le survol d'un marqueur de col sur la carte.
   previewRange: { type: Object, default: null },
+  // Plages d'indices de stream [[début, fin], …] sur de nouvelles routes, à surligner.
+  // Vide / null = rien (l'utilisateur n'a pas activé la surbrillance).
+  exploredRanges: { type: Array as PropType<[number, number][] | null>, default: null },
   // v-model:hovered-climb-start-idx — synchronizes hover state with
   // ActivityStats so pointing at a row highlights the corresponding marker
   // and vice versa.
@@ -527,6 +530,21 @@ function installRouteLayers() {
   })
   startRouteFlow()
 
+  // Nouvelles routes : sous la sélection (qui reste la couche la plus en vue), au-dessus
+  // du tracé. Magenta : ne se confond ni avec le bleu de la sélection ni avec les
+  // dégradés de pente / zones.
+  mapInstance.addSource('explored-route', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  })
+  mapInstance.addLayer({
+    id: 'explored-route-line',
+    type: 'line',
+    source: 'explored-route',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#e5007d', 'line-width': SELECTED_LINE_WIDTH },
+  })
+
   mapInstance.addSource('selected-route', {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
@@ -553,6 +571,7 @@ function installRouteLayers() {
     mapInstance.setTerrain({ source: 'terrain-dem', exaggeration: 1.4 })
   }
 
+  refreshExploredRoute()
   refreshSelectedRoute()
 }
 
@@ -841,6 +860,22 @@ function syncFromMarkers() {
 // sinon `props.selection`. Même logique que le créateur d'itinéraire.
 const previewSelection = ref<{ startIdx: number; endIdx: number } | null>(null)
 const effectiveSelection = computed(() => previewSelection.value || props.previewRange || props.selection)
+
+// Dessine les plages de « nouvelles routes » (une LineString par plage).
+function refreshExploredRoute() {
+  if (!mapInstance || !mapInstance.getSource('explored-route')) return
+  const ranges = props.exploredRanges
+  const data = props.streams?.latlng?.data
+  if (!ranges?.length || !Array.isArray(data)) {
+    mapInstance.getSource('explored-route').setData({ type: 'FeatureCollection', features: [] })
+    return
+  }
+  const features = ranges
+    .map(([from, to]) => data.slice(from, to + 1).map(([lat, lng]) => [lng, lat]))
+    .filter((coords) => coords.length >= 2)
+    .map((coords) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }))
+  mapInstance.getSource('explored-route').setData({ type: 'FeatureCollection', features })
+}
 
 function refreshSelectedRoute() {
   if (!mapInstance || !mapInstance.getSource('selected-route')) return
@@ -1163,6 +1198,8 @@ watch(effectiveSelection, () => {
   refreshSelectedRoute()
   syncMarkersFromSelection()
 })
+
+watch(() => props.exploredRanges, refreshExploredRoute)
 
 // Toute sélection committée venue d'ailleurs (clic sur un col / un pic de puissance dans
 // le panneau stats, drag sur un graphique…) zoome la carte sur le tronçon, comme le clic

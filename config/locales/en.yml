@@ -2220,6 +2220,8 @@ en:
       button_sets_title: "Command sets"
       button_sets_help: "A set is a complete group of key reactions, with a name, an icon and a colour. The order below is the rotation order: the \"Next command set\" action (on a key or in a band/notch slot) moves to the next one and the app announces it with a message. The band slot takes the icon and colour of the current set. With no set, the keys below form the only group."
       button_set_add: "Add a set"
+      button_set_duplicate: "Duplicate this set"
+      button_set_copy_name: "%{name} (copy)"
       button_set_remove: "Remove this set"
       button_set_move_left: "Move this set earlier"
       button_set_move_right: "Move this set later"

@@ -1461,6 +1461,20 @@ function addButtonSet() {
   activeSetIndex.value = sets.length - 1
 }
 
+// Copie le set en cours, touches comprises, juste après lui. Copie profonde
+// (`structuredClone` sur du brut) : les deux sets s'éditent ensuite séparément.
+// Sans `key` : le serveur en fabrique une (unicité).
+function duplicateButtonSet(index: number) {
+  const source = buttonSets.value[index]
+  if (!source || buttonSets.value.length >= maxButtonSets.value) return
+  const { key: _key, ...rest } = structuredClone(toRaw(source))
+  const copy: ButtonSet = { ...rest, name: t('companion.settings.button_set_copy_name', { name: source.name }).slice(0, 30) }
+  const sets = [...buttonSets.value]
+  sets.splice(index + 1, 0, copy)
+  preset.value.button_sets = sets
+  activeSetIndex.value = index + 1
+}
+
 function removeButtonSet(index: number) {
   const sets = buttonSets.value.filter((_, i) => i !== index)
   if (sets.length === 0) {
@@ -2622,6 +2636,12 @@ async function save() {
                         :title="t('companion.settings.button_set_move_right')"
                         @click="moveButtonSet(activeSetIndex, 1)">
                   <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="btn btn-outline-secondary"
+                        :disabled="buttonSets.length >= maxButtonSets"
+                        :title="t('companion.settings.button_set_duplicate')"
+                        @click="duplicateButtonSet(activeSetIndex)">
+                  <i class="fa-solid fa-copy" aria-hidden="true"></i>
                 </button>
                 <button type="button" class="btn btn-outline-danger"
                         :title="t('companion.settings.button_set_remove')"

@@ -2220,6 +2220,8 @@ fr:
       button_sets_title: "Sets de commandes"
       button_sets_help: "Un set est un jeu complet de réactions aux touches, avec un nom, une icône et une couleur. L'ordre ci-dessous est l'ordre de rotation : l'action « Set de commandes suivant » (sur une touche ou en case de bandeau/encoche) passe au suivant et l'appli l'annonce par un message. La case de bandeau prend l'icône et la couleur du set en cours. Sans set, les touches ci-dessous forment l'unique jeu."
       button_set_add: "Ajouter un set"
+      button_set_duplicate: "Dupliquer ce set"
+      button_set_copy_name: "%{name} (copie)"
       button_set_remove: "Supprimer ce set"
       button_set_move_left: "Avancer ce set"
       button_set_move_right: "Reculer ce set"

@@ -321,6 +321,26 @@ le pont (`zoomMap` / `panMap` / `recenterMap`, `companionBridge.ts`) puis
 n'a pas d'`originalEvent` : le handler détache lui-même la caméra (`following=false`)
 et, pour le zoom, met aussi `camZoom` à jour — sinon la boucle de suivi l'annulerait.
 
+### Sets de commandes (télécommande, Di2)
+
+Un profil peut porter plusieurs jeux de réactions aux touches : `button_sets`
+(`MAX_BUTTON_SETS` = 6), chacun `{key, name, icon?, color?, buttons}` où `buttons`
+a la forme historique (canaux Di2 + `REMOTE_KEYS`). L'ordre du tableau est l'ordre de
+rotation du jeton `next_button_set`, présent dans **les deux** catalogues
+`BUTTON_ACTIONS` (touche) et `BAND_ACTIONS` (case de bandeau/encoche). Côté appli,
+la case prend l'icône et la couleur du set en cours (`ButtonSetControl`) et un
+toast annonce le set choisi (`ButtonSetToast`) ; le set en cours n'est pas persisté
+(le premier à chaque sortie).
+
+- **`buttons` reste émis**, en miroir du premier set (`sanitize_preset`) : une appli
+  plus ancienne ignore `button_sets` et garde un comportement cohérent. Sans
+  `button_sets`, rien ne change (un set implicite, `next_button_set` sans effet).
+- L'éditeur (`CompanionDashboard.vue`) édite les touches du **set actif** ; ajouter le
+  premier set y recueille les touches déjà réglées.
+- La session média de la télécommande est prise si **un** set au moins assigne une
+  touche (pas seulement le set en cours), sinon changer de set en roulant ne
+  captait plus rien.
+
 ### Colonnes d'une page qui défile
 
 Une page `list` — ou une page `laps` en liste défilante, la même disposition

@@ -11,6 +11,8 @@ const props = defineProps({
   // l'onglet Zones (ActivityZones.vue) pour les mêmes raisons.
   hasHr: { type: Boolean, default: false },
   hasPower: { type: Boolean, default: false },
+  // L'activité porte des tronçons sur de nouvelles routes (`new_ranges`).
+  hasExplored: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -19,6 +21,7 @@ const MODE_ICON: Record<ActivityColorMode, string> = {
   grade: 'fa-palette',
   hr: 'fa-heart-pulse',
   power: 'fa-bolt',
+  explored: 'fa-compass',
   none: 'fa-ban',
 }
 
@@ -83,6 +86,17 @@ useDismissOnOutside(() => rootEl.value, () => { internalOpen.value = false })
         >
           <i class="fa-solid fa-bolt" aria-hidden="true"></i>
           {{ t('strava.color_mode_power') }}
+        </button>
+      </li>
+      <li v-if="hasExplored">
+        <button
+          type="button"
+          class="dropdown-item d-flex align-items-center gap-2"
+          :class="{ active: modelValue === 'explored' }"
+          @click="select('explored')"
+        >
+          <i class="fa-solid fa-compass" aria-hidden="true"></i>
+          {{ t('strava.color_mode_explored') }}
         </button>
       </li>
       <li>

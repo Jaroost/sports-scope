@@ -50,6 +50,9 @@ const props = defineProps({
   // Plages d'indices de stream [[début, fin], …] sur de nouvelles routes, à surligner.
   // Vide / null = rien (l'utilisateur n'a pas activé la surbrillance).
   exploredRanges: { type: Array as PropType<[number, number][] | null>, default: null },
+  // Les mêmes plages, toujours fournies : elles alimentent le mode de coloration
+  // « nouvelles routes » (le surlignage ci-dessus, lui, se bascule depuis les stats).
+  newRanges: { type: Array as PropType<[number, number][]>, default: () => [] },
   // v-model:hovered-climb-start-idx — synchronizes hover state with
   // ActivityStats so pointing at a row highlights the corresponding marker
   // and vice versa.
@@ -144,14 +147,18 @@ const DISPLAY_SIMPLIFY_TOLERANCE_M = 3
 // streams pleine résolution — cette simplification est purement visuelle.
 const displayRoute = computed(() => {
   const coords = routeCoords.value
+  // `idx` : indice de stream de chaque point affiché (identité quand rien n'est simplifié) —
+  // c'est ce qui permet de reporter des plages d'indices de stream sur le tracé simplifié.
+  const identity = () => coords.map((_, i) => i)
   const altitudes = props.streams?.altitude?.data
   const distances = props.streams?.distance?.data
   const heartrates = props.streams?.heartrate?.data
   const watts = props.streams?.watts?.data
-  if (coords.length < 3) return { coords, altitudes, distances, heartrates, watts }
+  if (coords.length < 3) return { coords, altitudes, distances, heartrates, watts, idx: identity() }
   const idx = simplifyIndices(coords as [number, number][], DISPLAY_SIMPLIFY_TOLERANCE_M)
-  if (idx.length >= coords.length) return { coords, altitudes, distances, heartrates, watts }
+  if (idx.length >= coords.length) return { coords, altitudes, distances, heartrates, watts, idx: identity() }
   return {
+    idx,
     coords: idx.map((i) => coords[i]),
     altitudes: Array.isArray(altitudes) ? idx.map((i) => altitudes[i]) : altitudes,
     distances: Array.isArray(distances) ? idx.map((i) => distances[i]) : distances,
@@ -334,6 +341,59 @@ function intensityPaintExpression(zones: ZoneBound[]) {
   return expr
 }
 
+// Mode « nouvelles routes » : un segment par plage de couleur constante, comme les zones,
+// mais la propriété est binaire (`explored` 1 = route nouvelle, 0 = déjà faite). `streamIdx`
+// donne l'indice de stream de chaque point affiché ; `ranges` sont des plages d'indices de
+// stream. Un segment affiché (qui peut enjamber plusieurs points du stream, après
+// simplification) est « nouveau » quand la moitié au moins de ses arêtes l'est.
+function buildExploredSegments(coords: LngLat[], streamIdx: number[], ranges: [number, number][]): any[] {
+  if (!coords || coords.length < 2 || !ranges.length || streamIdx.length !== coords.length) return []
+  const size = streamIdx[streamIdx.length - 1] + 2
+  const diff = new Int32Array(size + 1)
+  for (const [from, to] of ranges) {
+    if (to <= from || from < 0 || to >= size) continue
+    diff[from] += 1
+    diff[to] -= 1
+  }
+  // cum[j] = nombre d'arêtes nouvelles parmi les arêtes 0..j-1 (arête j = point j → j+1).
+  const cum = new Int32Array(size + 1)
+  let cover = 0
+  for (let j = 0; j < size; j++) {
+    cover += diff[j]
+    cum[j + 1] = cum[j] + (cover > 0 ? 1 : 0)
+  }
+  const flagOf = (k: number): number => {
+    const a = streamIdx[k]
+    const b = streamIdx[k + 1]
+    const span = b - a
+    if (span <= 0) return 0
+    return (cum[b] - cum[a]) * 2 >= span ? 1 : 0
+  }
+  const features: any[] = []
+  let current = [coords[0]]
+  let curFlag = flagOf(0)
+  for (let k = 1; k < coords.length; k++) {
+    current.push(coords[k])
+    const next = k < coords.length - 1 ? flagOf(k) : curFlag
+    if (next !== curFlag && current.length >= 2) {
+      features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: current.slice() }, properties: { explored: curFlag } })
+      current = [coords[k]]
+      curFlag = next
+    }
+  }
+  if (current.length >= 2) {
+    features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: current }, properties: { explored: curFlag } })
+  }
+  return features
+}
+
+// Neuf = magenta (même couleur que la surbrillance des stats), déjà fait = gris neutre.
+const EXPLORED_NEW_COLOR = '#e5007d'
+const EXPLORED_OLD_COLOR = '#8a94a6'
+function exploredPaintExpression() {
+  return ['case', ['==', ['get', 'explored'], 1], EXPLORED_NEW_COLOR, EXPLORED_OLD_COLOR]
+}
+
 // Lissage FC/puissance sur une fenêtre de distance, même principe que gradeForIndex
 // (routeHelpers.ts) : sans lui, le tracé se découperait en une multitude de
 // micro-segments à chaque sursaut du capteur au lieu de zones de couleur lisibles.
@@ -402,7 +462,7 @@ function installRouteLayers() {
   if (!mapInstance) return
   // Géométrie simplifiée pour l'affichage (cf. displayRoute) — coords/altitude/distance/
   // heartrate/watts restent alignées par index.
-  const { coords, altitudes, distances, heartrates, watts } = displayRoute.value
+  const { coords, altitudes, distances, heartrates, watts, idx: streamIdx } = displayRoute.value
   if (!coords.length) return
   // Ligne d'AFFICHAGE dédoublée sur les portions parcourues plusieurs fois (aller-retour) —
   // même algorithme que le créateur d'itinéraire (buildOffsetDisplayLine). Sans elle le
@@ -438,6 +498,12 @@ function installRouteLayers() {
     if (segments.length > 0) {
       coloredSegments = segments
       colorExpression = intensityPaintExpression(POWER_ZONES)
+    }
+  } else if (state.colorMode === 'explored' && hasLatLngStream.value) {
+    const segments = buildExploredSegments(dispCoords, streamIdx, props.newRanges as [number, number][])
+    if (segments.length > 0) {
+      coloredSegments = segments
+      colorExpression = exploredPaintExpression()
     }
   }
   const hasColoredSegments = coloredSegments.length > 0
@@ -1096,9 +1162,9 @@ async function renderMap() {
 // ni l'autre de rejouer les marqueurs de cols/photos ou les poignées A/B.
 function reinstallRouteColorLayers() {
   if (!mapInstance) return
-  const layers = ['route-direction', FLOW_LAYER, FLOW_HALO_LAYER, 'route-line', 'route-border', 'selected-route-line']
+  const layers = ['route-direction', FLOW_LAYER, FLOW_HALO_LAYER, 'route-line', 'route-border', 'explored-route-line', 'selected-route-line']
   layers.forEach((id) => { if (mapInstance.getLayer(id)) mapInstance.removeLayer(id) })
-  const sources = ['route', 'route-graded', 'selected-route']
+  const sources = ['route', 'route-graded', 'explored-route', 'selected-route']
   sources.forEach((id) => { if (mapInstance.getSource(id)) mapInstance.removeSource(id) })
   if (mapInstance.hasImage('route-arrow')) mapInstance.removeImage('route-arrow')
   installRouteLayers()
@@ -1200,6 +1266,12 @@ watch(effectiveSelection, () => {
 })
 
 watch(() => props.exploredRanges, refreshExploredRoute)
+
+// Les plages arrivent avec le détail de l'activité, parfois après la carte : si le mode
+// « nouvelles routes » est celui choisi, on redessine à leur arrivée.
+watch(() => props.newRanges, () => {
+  if (mapInstance && state.colorMode === 'explored') reinstallRouteColorLayers()
+})
 
 // Toute sélection committée venue d'ailleurs (clic sur un col / un pic de puissance dans
 // le panneau stats, drag sur un graphique…) zoome la carte sur le tronçon, comme le clic
@@ -1382,6 +1454,7 @@ onBeforeUnmount(() => {
             :model-value="state.colorMode"
             :has-hr="hasHrZones"
             :has-power="hasPowerZones"
+            :has-explored="hasLatLngStream && newRanges.length > 0"
             @update:model-value="setColorMode"
           />
 

@@ -219,7 +219,10 @@ pas bumper `updated_at` (donc `UserActivities.data_version`). Affiché dans
 La même passe écrit `new_ranges` (`[[début, fin], …]`, indices de stream, plages contiguës
 fusionnées) : cliquer la carte « Nouvelles routes » des stats surligne ces tronçons en
 magenta sur la carte (`explored-route` dans `ActivityMapCard.vue`). Servi par `show` hors
-liste (la liste n'en a pas besoin). Après un changement de l'algorithme, relancer
+liste (la liste n'en a pas besoin). Elles alimentent aussi le mode de coloration
+« nouvelles routes » du menu de la carte (`ColorModeDropdown.vue`, `buildExploredSegments`) :
+neuf en magenta, déjà fait en gris ; les indices de stream sont reportés sur le tracé
+simplifié via `displayRoute.idx`. Après un changement de l'algorithme, relancer
 `explored:backfill` : il réécrit aussi les plages.
 
 ## Base de données

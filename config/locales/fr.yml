@@ -619,6 +619,7 @@ fr:
     color_mode_grade: "En fonction de la pente"
     color_mode_hr: "En fonction des zones de fréquence cardiaque"
     color_mode_power: "En fonction des zones de puissance"
+    color_mode_explored: "En fonction des nouvelles routes"
     color_mode_none: "Ne pas colorier"
     surface_label: "Revêtement"
     show_surface: "Afficher les couleurs de revêtement"

@@ -619,6 +619,7 @@ en:
     color_mode_grade: "By grade"
     color_mode_hr: "By heart-rate zone"
     color_mode_power: "By power zone"
+    color_mode_explored: "Based on new roads"
     color_mode_none: "Don't colour"
     surface_label: "Surface"
     show_surface: "Show surface colours"

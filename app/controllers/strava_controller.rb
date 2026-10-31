@@ -551,6 +551,10 @@ class StravaController < ApplicationController
     # Distance sur de nouvelles routes (`ExploredDistance`) : colonne, hors cache.
     extra['new_distance_m'] = record.new_distance_m if record&.new_distance_m
     extra['new_ranges'] = record.new_ranges if record&.new_ranges.present?
+    # Valeur calculée avant l'ajout des plages (`new_ranges` NULL) : on relance le calcul,
+    # regroupé et en tâche de fond, plutôt que de laisser la carte sans surbrillance
+    # jusqu'au prochain « Recalculer ». Les plages arrivent à la consultation suivante.
+    ExploredDistance.schedule(current_user.id) if record&.new_distance_m && record.new_ranges.nil?
 
     tss = TrainingLoad.tss_for(current_user, source, external_id)
     if tss

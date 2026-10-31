@@ -528,6 +528,7 @@ onMounted(async () => {
         :selection="selection"
         :preview-range="hoveredSegmentRange"
         :explored-ranges="showExplored ? exploredRanges : null"
+        :new-ranges="exploredRanges"
         :visible-streams="visibleStreams"
         :x-axis="xAxis"
         v-model:hovered-climb-start-idx="hoveredClimbStartIdx"

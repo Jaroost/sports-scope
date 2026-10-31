@@ -29,6 +29,8 @@ interface PeakPower {
 const props = defineProps({
   movingStats: { type: Object as PropType<{ moving: number; elapsed: number; stopped: number; stopPct: number } | null>, default: null },
   globalVam: { type: Number, default: null },
+  // Distance sur de nouvelles routes (jamais faites avant dans ce sport) : { newM, totalM }.
+  explored: { type: Object as PropType<{ newM: number; totalM: number | null } | null>, default: null },
   // Métriques d'entraînement de la sortie : NP / IF / TSS / VI (serveur + dérivé).
   trainingMetrics: { type: Object as PropType<{ np: number | null; intensity: number | null; tss: number | null; tssSource: string | null; vi: number | null } | null>, default: null },
   // Découplage aérobie { pct, basis } — dérive cardiaque 1re vs 2e moitié.
@@ -114,7 +116,7 @@ function effortValue(key: string, value: number): string {
 }
 
 const hasContent = computed(() =>
-  props.movingStats || props.globalVam != null
+  props.movingStats || props.globalVam != null || props.explored != null
   || props.trainingMetrics != null || props.decoupling != null
   || props.efficiency != null || props.gradeAdjusted != null
   || props.segmentSummary != null || props.splits.length > 0
@@ -428,7 +430,7 @@ const sectionAvailable = computed<Record<ActivityStatsSectionKey, boolean>>(() =
   efforts: hasEfforts.value,
   segment: props.segmentSummary != null,
   training: !!(props.trainingMetrics || props.decoupling),
-  overview: !!(props.movingStats || props.globalVam != null),
+  overview: !!(props.movingStats || props.globalVam != null || props.explored),
   laps: props.laps.length > 0,
   climbs: props.climbsWithVam.length > 0,
   thresholds: hasThresholds.value,
@@ -924,6 +926,18 @@ watch(
                     <div>
                       <div class="text-muted small">{{ t('strava.stats.vam_global') }}</div>
                       <strong>{{ Math.round(globalVam) }} m/h</strong>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="explored" class="col-6 col-md-3">
+                  <div class="stat-card" data-bs-toggle="tooltip" data-bs-html="true" data-bs-custom-class="stat-tooltip" :data-bs-title="t('strava.stats.new_roads_hint')">
+                    <span class="stat-icon"><i class="fa-solid fa-compass text-info" aria-hidden="true"></i></span>
+                    <div>
+                      <div class="text-muted small">
+                        {{ t('strava.stats.new_roads') }}
+                        <span v-if="explored.totalM > 0" class="text-muted">· {{ Math.min(100, (explored.newM / explored.totalM) * 100).toFixed(0) }} %</span>
+                      </div>
+                      <strong>{{ formatKm(explored.newM) }}</strong>
                     </div>
                   </div>
                 </div>

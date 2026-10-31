@@ -341,6 +341,8 @@ class StravaController < ApplicationController
     scope = scope.where(device_name: params[:device]) if params[:device].present?
     scope = scope.where(strava_activities: { distance_m: params[:min_dist].to_f * 1000.. }) if params[:min_dist].present?
     scope = scope.where(strava_activities: { distance_m: ..(params[:max_dist].to_f * 1000) }) if params[:max_dist].present?
+    scope = scope.where(strava_activities: { new_distance_m: params[:min_new].to_f * 1000.. }) if params[:min_new].present?
+    scope = scope.where(strava_activities: { new_distance_m: ..(params[:max_new].to_f * 1000) }) if params[:max_new].present?
     scope = scope.where(strava_activities: { total_elevation_gain: params[:min_elev].to_f.. }) if params[:min_elev].present?
     scope = scope.where(strava_activities: { total_elevation_gain: ..params[:max_elev].to_f }) if params[:max_elev].present?
     scope = scope.where(strava_activities: { moving_time_s: (params[:min_dur].to_f * 60).. }) if params[:min_dur].present?
@@ -533,7 +535,8 @@ class StravaController < ApplicationController
     # Vignettes des photos (URLs Strava en 256 px) : la liste les fait défiler avec
     # le tracé. `nil` tant que le backfill n'est pas passé — la vignette montre
     # alors le seul tracé, sans trou d'affichage.
-    base = base.merge('photo_thumbs' => a.photo_thumbs, 'ignored' => a.ignored)
+    base = base.merge('photo_thumbs' => a.photo_thumbs, 'ignored' => a.ignored,
+                      'new_distance_m' => a.new_distance_m)
     # TSS ajouté au vol (non persisté) : dépend de seuils modifiables, se recalcule
     # à chaque lecture. Absent si l'activité n'a pas pu être notée.
     tss ? base.merge('tss' => tss[:tss], 'tss_source' => tss[:source]) : base
@@ -545,6 +548,8 @@ class StravaController < ApplicationController
   def with_activity_tss(payload, source, external_id)
     record = current_user.strava_activities.find_by(strava_id: external_id)
     extra = {}
+    # Distance sur de nouvelles routes (`ExploredDistance`) : colonne, hors cache.
+    extra['new_distance_m'] = record.new_distance_m if record&.new_distance_m
 
     tss = TrainingLoad.tss_for(current_user, source, external_id)
     if tss

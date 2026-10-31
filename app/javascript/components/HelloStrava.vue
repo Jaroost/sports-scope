@@ -43,6 +43,8 @@ const gearFilter = ref('') // gear_id Strava (vélo ou chaussure)
 const deviceFilter = ref('') // matériel d'enregistrement (device_name)
 const minDistance = ref(null) // km
 const maxDistance = ref(null)
+const minNewDistance = ref(null) // km parcourus sur de nouvelles routes
+const maxNewDistance = ref(null)
 const minElevation = ref(null) // m
 const maxElevation = ref(null)
 const minDuration = ref(null) // min
@@ -89,6 +91,8 @@ const activeFilterCount = computed(() => {
   if (deviceFilter.value) n++
   if (isSet(minDistance.value)) n++
   if (isSet(maxDistance.value)) n++
+  if (isSet(minNewDistance.value)) n++
+  if (isSet(maxNewDistance.value)) n++
   if (isSet(minElevation.value)) n++
   if (isSet(maxElevation.value)) n++
   if (isSet(minDuration.value)) n++
@@ -113,6 +117,8 @@ function clearFilters() {
   deviceFilter.value = ''
   minDistance.value = null
   maxDistance.value = null
+  minNewDistance.value = null
+  maxNewDistance.value = null
   minElevation.value = null
   maxElevation.value = null
   minDuration.value = null
@@ -200,6 +206,8 @@ function filterParams() {
   if (deviceFilter.value) p.set('device', deviceFilter.value)
   if (isSet(minDistance.value)) p.set('min_dist', String(minDistance.value))
   if (isSet(maxDistance.value)) p.set('max_dist', String(maxDistance.value))
+  if (isSet(minNewDistance.value)) p.set('min_new', String(minNewDistance.value))
+  if (isSet(maxNewDistance.value)) p.set('max_new', String(maxNewDistance.value))
   if (isSet(minElevation.value)) p.set('min_elev', String(minElevation.value))
   if (isSet(maxElevation.value)) p.set('max_elev', String(maxElevation.value))
   if (isSet(minDuration.value)) p.set('min_dur', String(minDuration.value))
@@ -310,6 +318,8 @@ function loadPersisted() {
     if (typeof s.device === 'string') deviceFilter.value = s.device
     if (s.minDistance != null) minDistance.value = s.minDistance
     if (s.maxDistance != null) maxDistance.value = s.maxDistance
+    if (s.minNewDistance != null) minNewDistance.value = s.minNewDistance
+    if (s.maxNewDistance != null) maxNewDistance.value = s.maxNewDistance
     if (s.minElevation != null) minElevation.value = s.minElevation
     if (s.maxElevation != null) maxElevation.value = s.maxElevation
     if (s.minDuration != null) minDuration.value = s.minDuration
@@ -330,6 +340,8 @@ function persist() {
       device: deviceFilter.value,
       minDistance: minDistance.value,
       maxDistance: maxDistance.value,
+      minNewDistance: minNewDistance.value,
+      maxNewDistance: maxNewDistance.value,
       minElevation: minElevation.value,
       maxElevation: maxElevation.value,
       minDuration: minDuration.value,
@@ -347,7 +359,7 @@ function persist() {
 // la liste corresponde exactement à ce qui a été cliqué, sans filtre résiduel invisible.
 function applyUrlFilters() {
   const p = new URLSearchParams(window.location.search)
-  const keys = ['q', 'sport', 'sport_category', 'gear', 'device', 'min_dist', 'max_dist', 'min_elev', 'max_elev', 'min_dur', 'max_dur', 'from', 'to']
+  const keys = ['q', 'sport', 'sport_category', 'gear', 'device', 'min_dist', 'max_dist', 'min_new', 'max_new', 'min_elev', 'max_elev', 'min_dur', 'max_dur', 'from', 'to']
   if (!keys.some((k) => p.has(k))) return false
 
   clearFilters()
@@ -364,6 +376,8 @@ function applyUrlFilters() {
   deviceFilter.value = p.get('device') || ''
   minDistance.value = num('min_dist')
   maxDistance.value = num('max_dist')
+  minNewDistance.value = num('min_new')
+  maxNewDistance.value = num('max_new')
   minElevation.value = num('min_elev')
   maxElevation.value = num('max_elev')
   minDuration.value = num('min_dur')
@@ -394,7 +408,7 @@ function onFilterChange() {
 }
 
 watch(
-  [search, sportFilter, gearFilter, deviceFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
+  [search, sportFilter, gearFilter, deviceFilter, minDistance, maxDistance, minNewDistance, maxNewDistance, minElevation, maxElevation, minDuration, maxDuration, dateFrom, dateTo],
   onFilterChange,
 )
 
@@ -406,7 +420,7 @@ watch(view, (v) => {
 
 // Mémorise l'état (filtres + vue + panneau) à chaque changement.
 watch(
-  [search, sportFilter, gearFilter, deviceFilter, minDistance, maxDistance, minElevation, maxElevation, minDuration, maxDuration,
+  [search, sportFilter, gearFilter, deviceFilter, minDistance, maxDistance, minNewDistance, maxNewDistance, minElevation, maxElevation, minDuration, maxDuration,
     dateFrom, dateTo, view, showFilters],
   persist,
 )
@@ -605,6 +619,14 @@ function hasThumb(activity) {
               <input v-model="minDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
               <span class="text-muted">–</span>
               <input v-model="maxDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
+            </div>
+          </div>
+          <div class="col-6 col-md-4">
+            <label class="form-label small mb-1" :title="t('strava.filters.new_distance_hint')">{{ t('strava.filters.new_distance') }}</label>
+            <div class="d-flex align-items-center gap-1">
+              <input v-model="minNewDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.min')" />
+              <span class="text-muted">–</span>
+              <input v-model="maxNewDistance" type="number" min="0" step="1" class="form-control form-control-sm" :placeholder="t('strava.filters.max')" />
             </div>
           </div>
           <div class="col-6 col-md-4">

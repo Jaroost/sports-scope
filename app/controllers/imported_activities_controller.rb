@@ -149,6 +149,7 @@ class ImportedActivitiesController < ApplicationController
       tss_source: tss&.dig(:source),
       intensity_factor: tss&.dig(:intensity),
       normalized_power: a.normalized_power,
+      new_distance_m: a.new_distance_m,
       filename: a.filename,
       name: a.name,
       type: a.activity_type,

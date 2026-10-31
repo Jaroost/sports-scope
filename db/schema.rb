@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_09_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_31_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -57,6 +57,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_140000) do
     t.float "max_watts"
     t.integer "moving_time_s"
     t.string "name", null: false
+    t.float "new_distance_m"
     t.float "normalized_power"
     t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
@@ -229,6 +230,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_140000) do
     t.float "max_watts"
     t.integer "moving_time_s"
     t.string "name", null: false
+    t.float "new_distance_m"
     t.float "normalized_power"
     t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
@@ -251,6 +253,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_140000) do
     t.index ["name"], name: "index_strava_activities_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
     t.index ["user_id", "device_name"], name: "index_strava_activities_on_user_id_and_device_name", where: "((device_name IS NOT NULL) AND ((device_name)::text <> ''::text))"
     t.index ["user_id", "gear_id"], name: "index_strava_activities_on_user_id_and_gear_id"
+    t.index ["user_id", "new_distance_m"], name: "index_strava_activities_on_user_id_and_new_distance_m"
     t.index ["user_id", "started_at"], name: "index_strava_activities_on_user_id_and_started_at"
     t.index ["user_id", "strava_id"], name: "index_strava_activities_on_user_id_and_strava_id", unique: true
     t.index ["user_id", "streams_fetched_at"], name: "index_strava_activities_on_user_id_and_streams_fetched_at"

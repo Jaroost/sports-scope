@@ -198,6 +198,23 @@ Options : `USER_ID=<id>`, `LIMIT=<n>` (par type), `SCOPE=routes|activities`.
 L'extraction est faite en ligne, pas via les jobs : chaque enregistrement n'est qu'une
 requête SQL locale (~5 ms). Ordre de grandeur mesuré : 730 activités en 4 s.
 
+## Distance sur de nouvelles routes
+
+`ExploredDistance` (service) pose `new_distance_m` sur `strava_activities` et
+`imported_activities` : la distance parcourue sur des cellules de `track_cells` jamais
+traversées lors d'une sortie **antérieure du même sport** (catégorie de
+`PerformanceRecords.sport_category` — les sports ne se mélangent pas ; Strava et FIT
+forment un seul historique). Tolérance d'une cellule voisine (~100 m) contre la dérive
+GPS ; une cellule répétée dans la même sortie ne compte qu'une fois.
+
+Le résultat dépend de l'ordre de l'historique (une sortie ancienne ajoutée décale les
+suivantes) : le calcul est donc **global par utilisateur**, jamais incrémental. Il est
+reprogrammé, regroupé sur 2 min (`ExploredDistance.schedule`), quand `track_cells`
+change, et refait par « Recalculer les stats & seuils ». Rattrapage en masse :
+`bin/rails explored:backfill` (après `segments:backfill`). Écrit par `update_all` pour ne
+pas bumper `updated_at` (donc `UserActivities.data_version`). Affiché dans
+`ActivityStats.vue` (section « overview ») et filtrable dans la liste (`min_new`/`max_new`).
+
 ## Base de données
 
 PostgreSQL. Credentials par défaut en dev : `postgres/postgres` sur `localhost:5432`, base `sports_scope_development`.

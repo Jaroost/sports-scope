@@ -28,3 +28,16 @@ namespace :segments do
     end
   end
 end
+
+# Distance parcourue sur de nouvelles routes (`ExploredDistance`), par utilisateur.
+#
+#   bin/rails explored:backfill   # (re)calcule pour tous les utilisateurs
+namespace :explored do
+  desc "Calcule la distance sur de nouvelles routes de chaque activité (après segments:backfill)"
+  task backfill: :environment do
+    User.find_each do |user|
+      changed = ExploredDistance.call(user)
+      puts "user ##{user.id} : #{changed} activité(s) mise(s) à jour"
+    end
+  end
+end

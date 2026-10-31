@@ -39,6 +39,10 @@ module Activityable
   included do
     # Activités porteuses de streams détaillés (cible des recalculs dérivés).
     scope :with_streams, -> { where.not(streams: {}) }
+
+    # Le tracé a changé (nouveaux streams, exclusions) : la distance « nouvelle » de
+    # cette sortie et de toutes les suivantes est à refaire (`ExploredDistance`).
+    after_commit :schedule_explored_distance, on: %i[create update], if: :saved_change_to_track_cells?
   end
 
   # Write-through of a detailed streams hash (the key_by_type shape returned by
@@ -95,6 +99,10 @@ module Activityable
   end
 
   private
+
+  def schedule_explored_distance
+    ExploredDistance.schedule(user_id)
+  end
 
   def assign_derivations
     visible = effective_streams

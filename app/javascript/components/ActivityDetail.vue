@@ -181,6 +181,14 @@ const globalVam = computed(() => {
 // NP, IF et TSS viennent du serveur (dépendent de seuils : FTP/LTHR). VI = NP /
 // puissance moyenne se déduit ici. IF n'est montré que quand le TSS est basé sur
 // la puissance (le facteur d'intensité est une notion de puissance).
+// Part du tracé sur de nouvelles routes (`ExploredDistance`) : { newM, totalM }. Absent
+// tant que la distance n'est pas calculée (sans tracé, ou avant le recalcul).
+const explored = computed(() => {
+  const a = activity.value
+  if (!a || !Number.isFinite(a.new_distance_m)) return null
+  return { newM: a.new_distance_m, totalM: Number.isFinite(a.distance) ? a.distance : null }
+})
+
 const trainingMetrics = computed(() => {
   const a = activity.value
   if (!a) return null
@@ -604,6 +612,7 @@ onMounted(async () => {
         v-if="effectiveTab === 'power'"
         class="mb-3"
         :moving-stats="movingStats"
+        :explored="explored"
         :global-vam="globalVam"
         :training-metrics="trainingMetrics"
         :decoupling="decoupling"

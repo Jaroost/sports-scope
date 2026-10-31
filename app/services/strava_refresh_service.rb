@@ -52,7 +52,11 @@ class StravaRefreshService
   # qu'en job, contrairement aux backfills qui, eux, tapent l'API Strava. Renvoie
   # le nombre d'activités dont au moins une dérivée a changé.
   def recompute_derivations
-    ActivityDerivationsBackfill.call(user: @user)[:updated]
+    updated = ActivityDerivationsBackfill.call(user: @user)[:updated]
+    # Après les empreintes : la distance « nouvelle » en dépend, et elle se lit sur tout
+    # l'historique (un ajout ou une suppression déplace les sorties suivantes).
+    ExploredDistance.call(@user)
+    updated
   end
 
   # Résumés d'activités. `full` : true = repagine tout l'historique, false =

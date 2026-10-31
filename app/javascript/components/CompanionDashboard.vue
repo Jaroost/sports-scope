@@ -12,7 +12,8 @@ import {
   fitDividers, fitListBlocks, gaugeThresholdColor, gridSideOf, gutterRect, isGridLayout, listSegments,
   maxSpan, metricDropdownLabel, metricSample, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
-  type Band, type BandMarkLapSlot, type BandSlotValue, type Block, type Buttons, type ButtonChannel, type Catalog,
+  type Band, type BandMarkLapSlot, type BandSlotValue, type Block, type Buttons, type ButtonChannel, type ButtonSet,
+  type Catalog,
   type Cell,
   type CellSize, type Divider, type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch,
   type Page, type Preset, type Reminder, type Viewport,
@@ -220,7 +221,7 @@ function sectionBadge(name: string): string | null {
       return `${on}/${props.catalog.sensors.length}`
     }
     case 'buttons': {
-      const channels = Object.values(preset.value.buttons || {})
+      const channels = allButtons().flatMap((buttons) => Object.values(buttons || {}))
       return String(channels.reduce<number>((sum, ch) => sum + Object.keys(ch || {}).length, 0))
     }
     case 'reminders':
@@ -264,11 +265,12 @@ const lapSeries = computed(() => {
   })
   // Un bouton Di2 « marquer un tour » (`start_lap:<série>`) porte la même
   // série libre — mêmes suggestions que les autres endroits qui en tapent une.
-  const buttons = preset.value.buttons
-  ;[...BUTTON_CHANNELS, ...REMOTE_KEYS].forEach((channel) => {
-    Object.values(buttons?.[channel] || {}).forEach((action) => {
-      const series = buttonActionLapSeries(action)
-      if (series !== null) keys.add(series)
+  allButtons().forEach((buttons) => {
+    ;[...BUTTON_CHANNELS, ...REMOTE_KEYS].forEach((channel) => {
+      Object.values(buttons?.[channel] || {}).forEach((action) => {
+        const series = buttonActionLapSeries(action)
+        if (series !== null) keys.add(series)
+      })
     })
   })
   return [...keys]
@@ -416,6 +418,7 @@ function pageLabel(page: Page): string {
 // ── les profils ─────────────────────────────────────────────────────────────
 
 function select(index: number) {
+  activeSetIndex.value = 0
   current.value = index
   openPage.value = null
   selected.value = null
@@ -1407,19 +1410,98 @@ const BUTTON_CONTROLS = computed(() => [
 // clé, une page qui vient d'être ajoutée n'en a pas encore.
 const goToPageTargets = computed(() => preset.value.pages.filter((page) => page.key))
 
+// ── les sets de commandes ───────────────────────────────────────────────────
+//
+// Sans `button_sets`, les touches sont celles de `preset.buttons` (un seul jeu
+// implicite, comme avant). Dès qu'il y a des sets, l'éditeur de touches vise
+// ceux du set actif, et `preset.buttons` n'est plus que le miroir du premier
+// que le serveur reconstruit à l'enregistrement.
+
+const activeSetIndex = ref(0)
+
+// Repli sur la borne du serveur (`MAX_BUTTON_SETS`) pour un catalogue qui ne la porte pas.
+const maxButtonSets = computed(() => props.catalog.max_button_sets ?? 6)
+
+const buttonSets = computed<ButtonSet[]>(() => preset.value.button_sets || [])
+
+const activeSet = computed<ButtonSet | undefined>(
+  () => buttonSets.value[Math.min(activeSetIndex.value, buttonSets.value.length - 1)],
+)
+
+// Tous les jeux de touches du profil, pour le décompte et les suggestions de séries.
+function allButtons(): (Buttons | undefined)[] {
+  return buttonSets.value.length > 0 ? buttonSets.value.map((set) => set.buttons) : [preset.value.buttons]
+}
+
+function currentButtons(): Buttons | undefined {
+  return activeSet.value ? activeSet.value.buttons : preset.value.buttons
+}
+
+function writeButtons(buttons: Buttons | undefined) {
+  const value = buttons && Object.keys(buttons).length > 0 ? buttons : undefined
+  if (activeSet.value) {
+    if (value) activeSet.value.buttons = value
+    else delete activeSet.value.buttons
+  } else {
+    preset.value.buttons = value
+  }
+}
+
+function addButtonSet() {
+  const max = maxButtonSets.value
+  if (buttonSets.value.length >= max) return
+  // Le premier set recueille les touches déjà composées : ajouter un set ne
+  // doit pas faire perdre ce qui était réglé.
+  const sets: ButtonSet[] = buttonSets.value.length > 0 ? [...buttonSets.value] : [{
+    name: t('companion.settings.button_set_default_name', { n: 1 }),
+    ...(preset.value.buttons ? { buttons: preset.value.buttons } : {}),
+  }]
+  sets.push({ name: t('companion.settings.button_set_default_name', { n: sets.length + 1 }) })
+  preset.value.button_sets = sets
+  activeSetIndex.value = sets.length - 1
+}
+
+function removeButtonSet(index: number) {
+  const sets = buttonSets.value.filter((_, i) => i !== index)
+  if (sets.length === 0) {
+    // Le dernier set retiré : on revient au jeu unique, avec ses touches.
+    preset.value.buttons = buttonSets.value[index]?.buttons
+    delete preset.value.button_sets
+  } else {
+    preset.value.button_sets = sets
+  }
+  activeSetIndex.value = Math.max(0, Math.min(index, sets.length - 1))
+}
+
+function moveButtonSet(index: number, delta: number) {
+  const target = index + delta
+  const sets = [...buttonSets.value]
+  if (target < 0 || target >= sets.length) return
+  ;[sets[index], sets[target]] = [sets[target], sets[index]]
+  preset.value.button_sets = sets
+  activeSetIndex.value = target
+}
+
+function setButtonSetField(field: 'name' | 'icon' | 'color', value: string | null | undefined) {
+  const set = activeSet.value
+  if (!set) return
+  if (value) set[field] = value
+  else if (field !== 'name') delete set[field]
+}
+
 function buttonAction(channel: keyof Buttons, gesture: keyof ButtonChannel): string {
-  return preset.value.buttons?.[channel]?.[gesture] || ''
+  return currentButtons()?.[channel]?.[gesture] || ''
 }
 
 function setButtonAction(channel: keyof Buttons, gesture: keyof ButtonChannel, value: string) {
-  const buttons: Buttons = { ...(preset.value.buttons || {}) }
+  const buttons: Buttons = { ...(currentButtons() || {}) }
   const channelActions: ButtonChannel = { ...(buttons[channel] || {}) }
   if (value) channelActions[gesture] = value
   else delete channelActions[gesture]
 
   if (Object.keys(channelActions).length > 0) buttons[channel] = channelActions
   else delete buttons[channel]
-  preset.value.buttons = Object.keys(buttons).length > 0 ? buttons : undefined
+  writeButtons(buttons)
 }
 
 // `start_lap` (seul, ou `start_lap:<série>`) est le seul token de
@@ -2497,6 +2579,72 @@ async function save() {
         </h2>
         <div v-if="openSections.buttons" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.buttons_help') }}</p>
+
+        <!-- Les sets de commandes : une pastille par set (icône + couleur), dans
+             l'ordre de rotation. Les touches ci-dessous sont celles du set actif. -->
+        <div class="mb-3">
+          <div class="small text-body-secondary mb-1">{{ t('companion.settings.button_sets_title') }}</div>
+          <p class="text-body-secondary small">{{ t('companion.settings.button_sets_help') }}</p>
+          <div class="d-flex flex-wrap align-items-center gap-1 mb-2">
+            <button v-for="(set, index) in buttonSets" :key="set.key || index" type="button"
+                    class="btn btn-sm"
+                    :class="index === activeSetIndex ? 'btn-primary' : 'btn-outline-secondary'"
+                    :style="set.color ? { borderColor: set.color, boxShadow: `inset 0 -3px 0 ${set.color}` } : undefined"
+                    @click="activeSetIndex = index">
+              <i v-if="set.icon" :class="set.icon" class="me-1" aria-hidden="true"></i>{{ set.name }}
+            </button>
+            <button v-if="buttonSets.length < maxButtonSets" type="button"
+                    class="btn btn-sm btn-outline-secondary" @click="addButtonSet">
+              <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.button_set_add') }}
+            </button>
+          </div>
+          <div v-if="activeSet" class="border rounded p-2">
+            <div class="d-flex flex-wrap align-items-end gap-2 mb-2">
+              <div class="flex-grow-1">
+                <label class="form-label small mb-1">{{ t('companion.settings.button_set_name') }}</label>
+                <input class="form-control form-control-sm" maxlength="30" :value="activeSet.name"
+                       @input="setButtonSetField('name', ($event.target as HTMLInputElement).value)">
+              </div>
+              <div>
+                <label class="form-label small mb-1 d-block">{{ t('companion.settings.button_set_color') }}</label>
+                <CompanionColorPicker :model-value="activeSet.color || null" fallback="#1f2226"
+                                       :label="t('companion.settings.button_set_color')"
+                                       @update:model-value="(v) => setButtonSetField('color', v)" />
+              </div>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-secondary" :disabled="activeSetIndex === 0"
+                        :title="t('companion.settings.button_set_move_left')"
+                        @click="moveButtonSet(activeSetIndex, -1)">
+                  <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="btn btn-outline-secondary"
+                        :disabled="activeSetIndex >= buttonSets.length - 1"
+                        :title="t('companion.settings.button_set_move_right')"
+                        @click="moveButtonSet(activeSetIndex, 1)">
+                  <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+                </button>
+                <button type="button" class="btn btn-outline-danger"
+                        :title="t('companion.settings.button_set_remove')"
+                        @click="removeButtonSet(activeSetIndex)">
+                  <i class="fa-solid fa-trash" aria-hidden="true"></i>
+                </button>
+              </div>
+            </div>
+            <label class="form-label small mb-1">{{ t('companion.settings.button_set_icon') }}</label>
+            <div class="cdb-icons">
+              <button type="button" class="cdb-icon-btn" :class="{ 'cdb-icon-btn--selected': !activeSet.icon }"
+                      :title="t('companion.settings.default_icon')"
+                      @click="setButtonSetField('icon', null)">
+                <i class="fa-solid fa-ban" aria-hidden="true"></i>
+              </button>
+              <button v-for="ic in catalog.icons" :key="ic" type="button"
+                      class="cdb-icon-btn" :class="{ 'cdb-icon-btn--selected': activeSet.icon === ic }"
+                      @click="setButtonSetField('icon', ic)">
+                <i :class="ic" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+        </div>
 
         <div class="row g-2 mb-1">
           <div v-for="{ key: channel, label, gestures } in BUTTON_CONTROLS" :key="channel"

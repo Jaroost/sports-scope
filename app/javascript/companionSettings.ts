@@ -539,6 +539,18 @@ export interface Buttons {
   remote_play_pause?: ButtonChannel
 }
 
+// Un set de commandes : un jeu complet de réactions aux touches, avec son nom,
+// son icône et sa couleur — voir `CompanionSettings.sanitize_button_sets` (Rails)
+// et `ButtonSet` (Dart). L'ordre de `Preset.button_sets` est l'ordre de rotation
+// de l'action `next_button_set`.
+export interface ButtonSet {
+  key?: string
+  name: string
+  icon?: string
+  color?: string
+  buttons?: Buttons
+}
+
 // La bande de l'encoche : une mesure au plus de chaque côté, dans un jeu.
 // `Preset.notch` est une liste de jeux — même forme que `bands`, entre
 // lesquels un glissé fait défiler côté appli. Contrairement à `bands`,
@@ -609,6 +621,9 @@ export interface Preset {
   // `TraveledPathSettings` (Dart).
   traveled_path?: Record<string, number | string>
   buttons?: Buttons
+  // Les sets de commandes ; absent = un seul jeu implicite (`buttons`). Avec des
+  // sets, `buttons` est le miroir du premier (rempli par le serveur).
+  button_sets?: ButtonSet[]
   reminders?: Reminder[]
 }
 
@@ -682,6 +697,7 @@ export interface Catalog {
   // l'éditeur ajoute `:<série>` via un champ à part (`lapSeries`), même
   // principe que la case de bandeau « marquer un tour ».
   button_actions: string[]
+  max_button_sets?: number
   sensors: string[]
   activities: string[]
   max_band_metrics: number

@@ -373,7 +373,11 @@ module CompanionSettings
   # Pas de bouton d'arrêt à côté : une case de bandeau/encoche n'est pas
   # l'endroit pour clore la sortie, ça reste un geste de l'écran des capteurs
   # (voir `RecordingControl`/`RecordingBlock` pour le bouton de page, à part).
-  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause] + MAP_COMMANDS).freeze
+  #
+  # `next_button_set` passe au set de commandes suivant (`Preset#button_sets`,
+  # voir `MAX_BUTTON_SETS`) : la case prend l'icône et la couleur du set en
+  # cours côté appli (`ButtonSetControl`), sauf couleur de fond réglée.
+  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause next_button_set] + MAP_COMMANDS).freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`
@@ -473,8 +477,17 @@ module CompanionSettings
   # décide lequel des deux gestes il pose (`TogglePauseAction`, `ride_preset.dart`).
   BUTTON_ACTIONS = (
     %w[next_page previous_page] + BELL_SOUNDS +
-    %w[start_lap sleep wake toggle_sleep toggle_pause] + MAP_COMMANDS
+    %w[start_lap sleep wake toggle_sleep toggle_pause next_button_set] + MAP_COMMANDS
   ).freeze
+
+  # Les sets de commandes d'un profil : chacun est un jeu complet de réactions
+  # aux touches (`buttons`) avec un nom, une icône et une couleur, et l'ordre du
+  # tableau est l'ordre de rotation du jeton `next_button_set`. Six au plus : au
+  # delà, on ne sait plus où l'on en est à force de les parcourir au guidon.
+  MAX_BUTTON_SETS = 6
+
+  # Nom d'un set : ce que le toast de l'appli annonce, donc une ligne courte.
+  MAX_BUTTON_SET_NAME_LENGTH = 30
 
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc
   # `metric` (HH:MM ou HH:MM:SS) — voir `sanitize_block`.
@@ -826,6 +839,7 @@ module CompanionSettings
       "bell_sounds" => BELL_SOUNDS,
       "button_gestures" => BUTTON_GESTURES,
       "button_actions" => BUTTON_ACTIONS,
+      "max_button_sets" => MAX_BUTTON_SETS,
       "sensors" => SENSORS,
       "activities" => ACTIVITIES,
       "max_band_metrics" => MAX_BAND_METRICS,
@@ -924,6 +938,8 @@ module CompanionSettings
     pages = sanitize_pages(raw["pages"]).presence || [ builtin_effort_page ]
     bands = sanitize_bands(raw["bands"])
     activities = sanitize_activities(raw["activities"])
+    page_keys = pages.filter_map { |p| p["key"] }
+    button_sets = sanitize_button_sets(raw["button_sets"], page_keys)
 
     {
       "key" => key,
@@ -954,7 +970,10 @@ module CompanionSettings
       "lighting" => sanitize_lighting(raw["lighting"]),
       "screen" => sanitize_screen(raw["screen"]),
       "traveled_path" => sanitize_traveled_path(raw["traveled_path"]),
-      "buttons" => sanitize_buttons(raw["buttons"], pages.filter_map { |p| p["key"] }),
+      "button_sets" => button_sets.presence,
+      # Avec des sets, `buttons` est le miroir du premier : une appli plus
+      # ancienne que `button_sets` ignore la clé et garde le set d'entrée.
+      "buttons" => button_sets.any? ? button_sets.first["buttons"] : sanitize_buttons(raw["buttons"], page_keys),
       "reminders" => sanitize_reminders(raw["reminders"])
     }.compact
   end
@@ -1901,6 +1920,27 @@ module CompanionSettings
     end.to_h
 
     channels.presence
+  end
+
+  # Les sets de commandes (`MAX_BUTTON_SETS`), dans l'ordre du document. Clé
+  # unique fabriquée au besoin (`unique_key`), nom tronqué plutôt que rejeté.
+  # Un set sans aucune touche reste un set (`buttons` absent, l'appli applique
+  # alors ses réglages d'origine) : le supprimer ferait sauter un cran de la
+  # rotation que l'utilisateur vient de composer.
+  def sanitize_button_sets(raw, page_keys)
+    return [] unless raw.is_a?(Array)
+
+    seen = []
+    raw.select { |entry| entry.is_a?(Hash) }.first(MAX_BUTTON_SETS).each_with_index.map do |entry, index|
+      name = entry["name"].to_s.strip[0, MAX_BUTTON_SET_NAME_LENGTH]
+      {
+        "key" => unique_key(entry["key"], name, index, seen, fallback_prefix: "set"),
+        "name" => name.presence || "Set #{index + 1}",
+        "icon" => sanitize_preset_icon(entry),
+        "color" => sanitize_hex_color(entry["color"]),
+        "buttons" => sanitize_buttons(entry["buttons"], page_keys)
+      }.compact
+    end
   end
 
   def sanitize_button_gestures(raw, page_keys)

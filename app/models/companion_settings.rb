@@ -333,6 +333,15 @@ module CompanionSettings
     wprime_balance
   ].freeze
 
+  # Commandes de la carte (zoom, déplacement, recentrage), partagées par les
+  # touches de télécommande/Di2 (`BUTTON_ACTIONS`) et les cases de bandeau/encoche
+  # (`BAND_ACTIONS`). Même jetons des deux côtés, et côté Dart (`MapCommand`,
+  # `ride_preset.dart`). Chacune est un pas, sans état : l'appli la relaie au
+  # WebView (`zoomMap`/`panMap`/`recenterMap`, companionBridge.ts).
+  MAP_COMMANDS = %w[
+    map_zoom_in map_zoom_out map_pan_up map_pan_down map_pan_left map_pan_right map_recenter
+  ].freeze
+
   # Les commandes qu'une case du bandeau ou de la bande de l'encoche peut
   # porter à la place d'une mesure — des boutons, pas des mesures, même
   # raison que `BLOCKS["sleep"]` sur une page. Liste à part de `METRICS` et
@@ -364,7 +373,7 @@ module CompanionSettings
   # Pas de bouton d'arrêt à côté : une case de bandeau/encoche n'est pas
   # l'endroit pour clore la sortie, ça reste un geste de l'écran des capteurs
   # (voir `RecordingControl`/`RecordingBlock` pour le bouton de page, à part).
-  BAND_ACTIONS = %w[sleep toggle_workout leave_ride route toggle_pause].freeze
+  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause] + MAP_COMMANDS).freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`
@@ -464,7 +473,7 @@ module CompanionSettings
   # décide lequel des deux gestes il pose (`TogglePauseAction`, `ride_preset.dart`).
   BUTTON_ACTIONS = (
     %w[next_page previous_page] + BELL_SOUNDS +
-    %w[start_lap sleep wake toggle_sleep toggle_pause]
+    %w[start_lap sleep wake toggle_sleep toggle_pause] + MAP_COMMANDS
   ).freeze
 
   # Les mesures de durée, seules concernées par le réglage `format` d'un bloc

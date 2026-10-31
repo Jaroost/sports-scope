@@ -215,6 +215,24 @@ export function registerPoiHandlers(handlers: PoiBridgeHandlers | null): void {
   poiHandlers = handlers
 }
 
+// ─── Caméra : zoom, déplacement, recentrage commandés depuis l'appli ─────────
+//
+// Touches de télécommande, boutons du D-Fly (Di2) et cases des bandes : tout ce
+// qui ne passe pas par le doigt sur la carte. Chaque appel est un pas, transitoire
+// (jamais rejoué après un rechargement). `pan` prend des fractions de la taille
+// visible de la carte (-1..1) et non des pixels : l'appli ne connaît pas la taille
+// du WebView.
+interface MapCameraBridgeHandlers {
+  zoom(delta: number): void
+  pan(fx: number, fy: number): void
+  recenter(): void
+}
+let mapCameraHandlers: MapCameraBridgeHandlers | null = null
+
+export function registerMapCameraHandlers(handlers: MapCameraBridgeHandlers | null): void {
+  mapCameraHandlers = handlers
+}
+
 // ─── Économie de données : commande venue de l'appli ─────────────────────────
 //
 // Interrupteur posé par l'appli (feuille « Économie de données », en dehors de la
@@ -410,6 +428,9 @@ export function installCompanionBridge(): void {
       focusPoi(lat: number, lng: number): void
       setMapStyle(id: string): void
       setDataSaver(active: boolean): void
+      zoomMap(delta: number): void
+      panMap(fx: number, fy: number): void
+      recenterMap(): void
     }
   }
 
@@ -479,6 +500,27 @@ export function installCompanionBridge(): void {
     },
     setDataSaver(active: boolean) {
       dataSaverActive.value = active === true
+    },
+    zoomMap(delta: number) {
+      try {
+        if (typeof delta === 'number' && Number.isFinite(delta)) mapCameraHandlers?.zoom(delta)
+      } catch {
+        // Pas de carte prête : rien à zoomer.
+      }
+    },
+    panMap(fx: number, fy: number) {
+      try {
+        if (Number.isFinite(fx) && Number.isFinite(fy)) mapCameraHandlers?.pan(fx, fy)
+      } catch {
+        // Idem : un pas perdu vaut mieux qu'une exception dans la navigation.
+      }
+    },
+    recenterMap() {
+      try {
+        mapCameraHandlers?.recenter()
+      } catch {
+        // Idem.
+      }
     },
   }
 

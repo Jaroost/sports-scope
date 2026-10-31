@@ -309,6 +309,18 @@ ailleurs. Une alerte referme d'ailleurs la page (`_setMenuPage(null)` dans
 `_decideReturn`) **avant** que la politique ne décide : elle juge sur `currentPage`,
 et un bilan ouvert par-dessus la carte se serait lu « il y est déjà, rien à faire ».
 
+### Commandes de la carte (zoom, déplacement, recentrer)
+
+Sept jetons (`CompanionSettings::MAP_COMMANDS` : `map_zoom_in`, `map_zoom_out`,
+`map_pan_up|down|left|right`, `map_recenter`) sont dans **les deux** catalogues
+`BUTTON_ACTIONS` (touches de télécommande, D-Fly Di2) et `BAND_ACTIONS` (cases du
+bandeau et de l'encoche). Côté Dart ils ne forment qu'un enum, `MapCommand`
+(`ride_preset.dart`), porté par `MapCommandAction` et `BandMapSlot`. Le pas passe par
+le pont (`zoomMap` / `panMap` / `recenterMap`, `companionBridge.ts`) puis
+`registerMapCameraHandlers` dans `RouteNavigation.vue`. Un mouvement programmatique
+n'a pas d'`originalEvent` : le handler détache lui-même la caméra (`following=false`)
+et, pour le zoom, met aussi `camZoom` à jour — sinon la boucle de suivi l'annulerait.
+
 ### Colonnes d'une page qui défile
 
 Une page `list` — ou une page `laps` en liste défilante, la même disposition

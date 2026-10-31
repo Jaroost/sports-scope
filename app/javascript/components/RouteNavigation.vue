@@ -41,7 +41,7 @@ import {
   companionScreen, companionNav, companionClimbProfile, companionRouteClimbs, companionRouteProfile,
   companionPois, companionResupply, registerPoiHandlers,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
-  registerMapStyleHandlers, dataSaverActive,
+  registerMapStyleHandlers, registerMapCameraHandlers, dataSaverActive,
 } from '../companionBridge'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
@@ -339,6 +339,37 @@ onBeforeUnmount(() => registerPoiHandlers(null))
 // l'existence de ce second chemin, à côté de `PATCH /api/companion_settings/map_style`.
 registerMapStyleHandlers({ set: setMapStyle })
 onBeforeUnmount(() => registerMapStyleHandlers(null))
+
+// Zoom, déplacement et recentrage demandés depuis l'appli (télécommande, Di2,
+// cases des bandes). Un mouvement programmatique n'a pas d'`originalEvent`, donc
+// `onManualMove` ne détache pas la caméra : on le fait nous-mêmes, sinon la boucle
+// de suivi annulerait le pas à la frame suivante. Muets pendant la veille (carte
+// non rendue), la recherche/édition de lieu et le parcours des POI, comme le
+// bouton « Recentrer » qu'ils masquent.
+function mapCameraBusy(): boolean {
+  return !map || screenOff.value || placeNavActive.value || editMode.value || poiBrowseActive.value
+}
+registerMapCameraHandlers({
+  zoom: (delta) => {
+    if (mapCameraBusy()) return
+    following.value = false
+    cameraUnlocked.value = true
+    const target = map.getZoom() + delta
+    camZoom.value = target
+    map.easeTo({ zoom: target, duration: 250 })
+  },
+  pan: (fx, fy) => {
+    if (mapCameraBusy()) return
+    following.value = false
+    cameraUnlocked.value = true
+    const canvas = map.getCanvas()
+    map.panBy([fx * canvas.clientWidth, fy * canvas.clientHeight], { duration: 250 })
+  },
+  // Même geste que le bouton : a besoin d'un fix, mais pas de garde `mapCameraBusy`
+  // — recentrer clôt justement le parcours des POI.
+  recenter: () => { if (!screenOff.value && !placeNavActive.value && !editMode.value) recenter() },
+})
+onBeforeUnmount(() => registerMapCameraHandlers(null))
 
 // ─── Parcours des POI ──────────────────────────────────────────────────────────
 // Enchaîne les POI visibles en volant de l'un à l'autre (cf. usePoiBrowse) : consomme les

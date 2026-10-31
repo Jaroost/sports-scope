@@ -1387,10 +1387,6 @@ const REMOTE_KEYS = [
   'remote_volume_up', 'remote_volume_down', 'remote_next', 'remote_previous', 'remote_play_pause',
 ] as const
 
-// Le volume ne livre qu'une impulsion par pression, sans relâchement : le clic
-// est son seul geste, comme côté serveur (`REMOTE_VOLUME_KEYS`).
-const REMOTE_VOLUME_KEYS: readonly string[] = ['remote_volume_up', 'remote_volume_down']
-
 // Les commandes de l'éditeur, canaux du D-Fly puis télécommande, dans l'ordre
 // où elles s'affichent.
 const BUTTON_CONTROLS = computed(() => [
@@ -1402,9 +1398,7 @@ const BUTTON_CONTROLS = computed(() => [
   ...REMOTE_KEYS.map((key) => ({
     key: key as keyof Buttons,
     label: t(`companion.settings.remote_keys.${key}`),
-    gestures: REMOTE_VOLUME_KEYS.includes(key)
-      ? props.catalog.button_gestures.filter((gesture) => gesture === 'click')
-      : props.catalog.button_gestures,
+    gestures: props.catalog.button_gestures,
   })),
 ])
 

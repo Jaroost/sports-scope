@@ -438,11 +438,6 @@ module CompanionSettings
     remote_volume_up remote_volume_down remote_next remote_previous remote_play_pause
   ].freeze
 
-  # Le volume n'a pas de relâchement côté Android : une impulsion par pression,
-  # donc ni double-clic ni appui long à y régler. Le serveur les écarte plutôt
-  # que de garder un réglage que l'appli ne déclenchera jamais.
-  REMOTE_VOLUME_KEYS = %w[remote_volume_up remote_volume_down].freeze
-
   # Ce qu'un geste sur un canal du D-Fly peut déclencher — jetons de chaîne
   # plutôt qu'une liste de composants (`BLOCKS`) : ce ne sont pas des mesures à
   # poser sur une page. `BELL_SOUNDS` composé directement dedans plutôt que
@@ -1893,7 +1888,6 @@ module CompanionSettings
 
     channels = (%w[channel1 channel2 channel3 channel4] + REMOTE_KEYS).filter_map do |channel|
       gestures = sanitize_button_gestures(raw[channel], page_keys)
-      gestures = gestures.slice("click").presence if gestures && REMOTE_VOLUME_KEYS.include?(channel)
       [ channel, gestures ] if gestures
     end.to_h
 

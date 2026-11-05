@@ -19,7 +19,7 @@ module PerformanceRecords
   SUMMARY_COLUMNS = %w[
     name started_at activity_type distance_m moving_time_s elapsed_time_s
     total_elevation_gain max_speed average_speed max_heartrate max_watts
-    average_watts max_cadence peak_powers
+    average_watts max_cadence peak_powers new_distance_m
   ].freeze
 
   # Regroupement des `activity_type` Strava/FIT hétérogènes en catégories de sport
@@ -36,6 +36,7 @@ module PerformanceRecords
   # Ce sont tous des maxima (« higher is better »).
   ABSOLUTE_METRICS = [
     { key: 'longest_distance',  column: 'distance_m',           unit: 'distance' },
+    { key: 'most_new_distance', column: 'new_distance_m',        unit: 'distance' },
     { key: 'longest_duration',  column: 'moving_time_s',        unit: 'duration' },
     { key: 'biggest_elevation', column: 'total_elevation_gain', unit: 'elevation' },
     { key: 'max_speed',         column: 'max_speed',            unit: 'speed' },
@@ -289,7 +290,19 @@ module PerformanceRecords
       distance_m: sum(rows, 'distance_m'),
       elevation: sum(rows, 'total_elevation_gain'),
       moving_time_s: sum(rows, 'moving_time_s').round
-    }
+    }.merge(new_roads(rows))
+  end
+
+  # Distance découverte (cf. `ExploredDistance`) et sa part. La part se mesure sur
+  # les seules sorties déjà calculées (`new_distance_m` non nul) : une sortie pas
+  # encore traitée ne doit pas tirer le pourcentage vers le bas. nil si aucune.
+  def new_roads(rows)
+    measured = rows.select { |r| numeric(r['new_distance_m']) }
+    return { new_distance_m: nil, new_share: nil } if measured.empty?
+
+    new_m = sum(measured, 'new_distance_m')
+    total_m = sum(measured, 'distance_m')
+    { new_distance_m: new_m, new_share: total_m.positive? ? (new_m / total_m * 100).round(1) : nil }
   end
 
   # Un agrégat par année civile (décroissant), pour un mini-historique.
@@ -302,7 +315,7 @@ module PerformanceRecords
         distance_m: sum(yr_rows, 'distance_m'),
         elevation: sum(yr_rows, 'total_elevation_gain'),
         moving_time_s: sum(yr_rows, 'moving_time_s').round
-      }
+      }.merge(new_roads(yr_rows))
     end.sort_by { |h| -h[:year] }
   end
 

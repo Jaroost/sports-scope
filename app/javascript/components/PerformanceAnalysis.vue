@@ -30,6 +30,8 @@ interface Totals {
   distance_m: number
   elevation: number
   moving_time_s: number
+  new_distance_m: number | null
+  new_share: number | null
 }
 interface YearRow {
   year: number
@@ -37,6 +39,8 @@ interface YearRow {
   distance_m: number
   elevation: number
   moving_time_s: number
+  new_distance_m: number | null
+  new_share: number | null
 }
 interface Bucket {
   label: string | number
@@ -434,6 +438,7 @@ function activityHref(a: { source: string; external_id: string }): string {
 // Icône FontAwesome par type de record.
 const RECORD_ICONS: Record<string, string> = {
   longest_distance: 'fa-route',
+  most_new_distance: 'fa-compass',
   longest_duration: 'fa-clock',
   biggest_elevation: 'fa-mountain',
   max_speed: 'fa-gauge-high',
@@ -453,6 +458,15 @@ const totalsCards = computed(() => {
     { icon: 'fa-route', label: t('performance.totals.distance'), value: formatDistanceKm(tot.distance_m) },
     { icon: 'fa-mountain', label: t('performance.totals.elevation'), value: `${Math.round(tot.elevation).toLocaleString()} m` },
     { icon: 'fa-clock', label: t('performance.totals.time'), value: formatDuration(tot.moving_time_s) },
+    ...(tot.new_distance_m != null
+      ? [{
+          icon: 'fa-compass',
+          label: t('performance.totals.new_roads'),
+          value: tot.new_share != null
+            ? `${formatDistanceKm(tot.new_distance_m)} · ${tot.new_share.toLocaleString(undefined, { maximumFractionDigits: 1 })} %`
+            : formatDistanceKm(tot.new_distance_m),
+        }]
+      : []),
   ]
 })
 
@@ -948,6 +962,7 @@ onBeforeUnmount(() => {
                   <th class="text-end">{{ t('performance.totals.distance') }}</th>
                   <th class="text-end">{{ t('performance.totals.elevation') }}</th>
                   <th class="text-end">{{ t('performance.totals.time') }}</th>
+                  <th class="text-end">{{ t('performance.totals.new_roads') }}</th>
                 </tr>
               </thead>
               <tbody>
@@ -975,6 +990,13 @@ onBeforeUnmount(() => {
                   <td class="text-end">{{ formatDistanceKm(row.distance_m) }}</td>
                   <td class="text-end">{{ Math.round(row.elevation).toLocaleString() }} m</td>
                   <td class="text-end">{{ formatDuration(row.moving_time_s) }}</td>
+                  <td class="text-end">
+                    <template v-if="row.new_distance_m != null">
+                      {{ formatDistanceKm(row.new_distance_m) }}
+                      <small v-if="row.new_share != null" class="text-muted">· {{ row.new_share.toLocaleString(undefined, { maximumFractionDigits: 1 }) }} %</small>
+                    </template>
+                    <span v-else class="text-muted">–</span>
+                  </td>
                 </tr>
               </tbody>
             </table>

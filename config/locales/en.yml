@@ -89,9 +89,11 @@ en:
       distance: "Total distance"
       elevation: "Total elevation"
       time: "Total time"
+      new_roads: "New roads"
     records:
       title: "All-time records"
       longest_distance: "Longest ride"
+      most_new_distance: "Most new roads in one ride"
       longest_duration: "Longest duration"
       biggest_elevation: "Biggest climb"
       max_speed: "Top speed"

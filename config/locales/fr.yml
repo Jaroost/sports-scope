@@ -89,9 +89,11 @@ fr:
       distance: "Distance totale"
       elevation: "Dénivelé total"
       time: "Temps total"
+      new_roads: "Routes nouvelles"
     records:
       title: "Records absolus"
       longest_distance: "Plus longue sortie"
+      most_new_distance: "Plus grande distance découverte"
       longest_duration: "Plus longue durée"
       biggest_elevation: "Plus grande ascension"
       max_speed: "Vitesse maximale"

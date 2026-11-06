@@ -107,6 +107,10 @@ module CompanionSettings
     # de plus, jamais retiré du menu. Rien à sanitizer au-delà du mode, même
     # raison que `sleep`/`clear_route` : un bouton, pas une mesure.
     "leave_ride" => %w[full compact],
+    # Allume/éteint la lampe torche du téléphone (flash) — sans état côté
+    # profil, l'appli suit l'état réel. Rien à sanitizer au-delà du mode, même
+    # raison que `sleep`/`leave_ride` : un bouton, pas une mesure.
+    "torch" => %w[full compact],
     # Fait sonner fort le téléphone (son + vibration), pour le retrouver dans
     # un sac ou une poche — l'appli choisit un flux audio d'alarme plutôt que
     # média, pour traverser le mode silencieux comme le ferait un réveil. Le
@@ -383,10 +387,13 @@ module CompanionSettings
   # l'endroit pour clore la sortie, ça reste un geste de l'écran des capteurs
   # (voir `RecordingControl`/`RecordingBlock` pour le bouton de page, à part).
   #
+  # `toggle_torch` allume/éteint la lampe torche du téléphone (`TorchControl`
+  # côté appli) — même jeton pour une touche et une case de bandeau/encoche.
+  #
   # `next_button_set` passe au set de commandes suivant (`Preset#button_sets`,
   # voir `MAX_BUTTON_SETS`) : la case prend l'icône et la couleur du set en
   # cours côté appli (`ButtonSetControl`), sauf couleur de fond réglée.
-  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause next_button_set] + MAP_COMMANDS + MEDIA_COMMANDS).freeze
+  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause toggle_torch next_button_set] + MAP_COMMANDS + MEDIA_COMMANDS).freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`
@@ -486,7 +493,7 @@ module CompanionSettings
   # décide lequel des deux gestes il pose (`TogglePauseAction`, `ride_preset.dart`).
   BUTTON_ACTIONS = (
     %w[next_page previous_page] + BELL_SOUNDS +
-    %w[start_lap sleep wake toggle_sleep toggle_pause next_button_set] + MAP_COMMANDS + MEDIA_COMMANDS
+    %w[start_lap sleep wake toggle_sleep toggle_pause toggle_torch next_button_set] + MAP_COMMANDS + MEDIA_COMMANDS
   ).freeze
 
   # Les sets de commandes d'un profil : chacun est un jeu complet de réactions

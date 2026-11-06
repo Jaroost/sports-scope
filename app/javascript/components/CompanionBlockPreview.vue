@@ -1142,6 +1142,23 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
       </div>
     </template>
 
+    <!-- Lampe torche -----------------------------------------------------------
+         Allume/éteint le flash du téléphone ; l'icône suit l'état réel côté
+         appli, l'aperçu montre l'état éteint. -->
+    <template v-else-if="block.kind === 'torch'">
+      <div v-if="shape.torchCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
+          <i class="fa-solid fa-lightbulb" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button" :style="overrideStyle">
+          <i class="fa-solid fa-lightbulb" aria-hidden="true"></i>
+          Lampe
+        </span>
+      </div>
+    </template>
+
     <!-- Sonnette --------------------------------------------------------------
          Fait sonner fort le téléphone (son + vibration), pour le retrouver
          dans un sac ou une poche — même famille de bouton que « Mettre en

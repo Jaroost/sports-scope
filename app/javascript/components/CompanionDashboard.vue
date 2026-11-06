@@ -1496,6 +1496,24 @@ function moveButtonSet(index: number, delta: number) {
   activeSetIndex.value = target
 }
 
+// Glisser-déposer des onglets de sets : même effet que les flèches, l'ordre du
+// tableau étant l'ordre de rotation de `next_button_set`.
+const dragSetIndex = ref<number | null>(null)
+const dragOverSetIndex = ref<number | null>(null)
+
+function dropButtonSet(target: number) {
+  const from = dragSetIndex.value
+  dragSetIndex.value = null
+  dragOverSetIndex.value = null
+  if (from === null || from === target) return
+  const sets = [...buttonSets.value]
+  if (target < 0 || target >= sets.length) return
+  const [moved] = sets.splice(from, 1)
+  sets.splice(target, 0, moved)
+  preset.value.button_sets = sets
+  activeSetIndex.value = target
+}
+
 function setButtonSetField(field: 'name' | 'icon' | 'color', value: string | null | undefined) {
   const set = activeSet.value
   if (!set) return
@@ -2602,8 +2620,15 @@ async function save() {
           <div class="d-flex flex-wrap align-items-center gap-1 mb-2">
             <button v-for="(set, index) in buttonSets" :key="set.key || index" type="button"
                     class="btn btn-sm"
-                    :class="index === activeSetIndex ? 'btn-primary' : 'btn-outline-secondary'"
+                    :class="[index === activeSetIndex ? 'btn-primary' : 'btn-outline-secondary',
+                             { 'opacity-50': dragSetIndex === index, 'border-primary border-2': dragOverSetIndex === index && dragSetIndex !== index }]"
                     :style="set.color ? { borderColor: set.color, boxShadow: `inset 0 -3px 0 ${set.color}` } : undefined"
+                    :draggable="buttonSets.length > 1"
+                    @dragstart="dragSetIndex = index"
+                    @dragover.prevent="dragOverSetIndex = index"
+                    @dragleave="dragOverSetIndex = null"
+                    @drop.prevent="dropButtonSet(index)"
+                    @dragend="dragSetIndex = null; dragOverSetIndex = null"
                     @click="activeSetIndex = index">
               <i v-if="set.icon" :class="set.icon" class="me-1" aria-hidden="true"></i>{{ set.name }}
             </button>

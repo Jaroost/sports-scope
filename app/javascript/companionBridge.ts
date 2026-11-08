@@ -106,6 +106,26 @@ export function registerSleepHandlers(handlers: SleepBridgeHandlers | null): voi
   sleepHandlers = handlers
 }
 
+// Position simulée (page de débug `/routes/:token/simulate`, voir gpsSimulator.ts).
+//
+// Dans l'appli, `navigator.geolocation` est remplacé côté page : la carte voit donc
+// la position simulée, mais Flutter, lui, continuerait de lire le vrai GPS pour le
+// tableau de bord, l'enregistrement et le trajet parcouru. On lui renvoie chaque
+// fix émis pour qu'il bascule sur la même source que la page.
+export interface CompanionSimFix {
+  lat: number
+  lng: number
+  altitudeM: number | null
+  speedMps: number | null
+  headingDeg: number | null
+  accuracyM: number | null
+  at: number
+}
+
+export function companionSimFix(fix: CompanionSimFix): void {
+  channel()?.postMessage(JSON.stringify({ type: 'sim_fix', ...fix }))
+}
+
 // Dernier état de navigation publié, pour n'envoyer que ce qui change.
 let lastNavJson = ''
 let lastNavAt = 0

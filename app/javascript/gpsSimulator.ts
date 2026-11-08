@@ -1,4 +1,5 @@
 import { buildDistancesM, bearingBetween, type Coord } from './routeHelpers'
+import { companionSimFix } from './companionBridge'
 
 // Position simulée le long d'un tracé, et faux `navigator.geolocation` qui la diffuse.
 // Aucune dépendance à Vue : la logique de projection vit ici, le panneau dans GpsSimulator.vue.
@@ -72,6 +73,12 @@ export function installFakeGeolocation() {
     } as unknown as GeolocationPosition
     last = pos
     watchers.forEach((cb) => cb(pos))
+    // Dans l'appli compagnon, Flutter doit voir la même position (no-op dans un navigateur).
+    companionSimFix({
+      lat: p.lat, lng: p.lng, altitudeM: p.alt, accuracyM: s.accuracyM,
+      speedMps: s.speedKmh / 3.6, headingDeg: s.speedKmh > 0 ? p.heading : null,
+      at: pos.timestamp,
+    })
   }
 
   function restore() {

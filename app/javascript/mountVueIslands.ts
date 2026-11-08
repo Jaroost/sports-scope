@@ -5,6 +5,7 @@ import ActivityDetail from './components/ActivityDetail.vue'
 import RoutesList from './components/RoutesList.vue'
 import RouteBuilder from './components/RouteBuilder.vue'
 import RouteNavigation from './components/RouteNavigation.vue'
+import GpsSimulator from './components/GpsSimulator.vue'
 import OfflineDownloader from './components/OfflineDownloader.vue'
 import ImportFitActivity from './components/ImportFitActivity.vue'
 import ImportFitLanding from './components/ImportFitLanding.vue'
@@ -31,6 +32,7 @@ const registry: Record<string, Component> = {
   RoutesList,
   RouteBuilder,
   RouteNavigation,
+  GpsSimulator,
   OfflineDownloader,
   ImportFitActivity,
   ImportFitLanding,

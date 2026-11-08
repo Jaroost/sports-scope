@@ -25,6 +25,9 @@ Rails.application.routes.draw do
     # Navigation is addressed by share_token (not id) so the link is shareable
     # and unguessable; the page and its API are public.
     get "/routes/:token/navigate", to: "pages#route_navigation", as: :navigate_route
+    # Page de débug (admin) : la navigation d'un itinéraire, mais avec une position GPS
+    # simulée qui rejoue le tracé (vitesse, écart latéral, perte de signal réglables).
+    get "/routes/:token/simulate", to: "pages#route_simulate", as: :simulate_route
     # Téléchargement de la carte hors-ligne seul, sans navigation : page minimale que
     # l'appli compagnon charge hors écran depuis sa liste d'itinéraires.
     get "/routes/:token/offline", to: "pages#route_offline", as: :offline_route

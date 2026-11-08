@@ -362,7 +362,7 @@ export interface Climb {
   name?: string
 }
 
-function climbCategory(lengthKm: number, avgGrade: number): string | null {
+export function climbCategory(lengthKm: number, avgGrade: number): string | null {
   const score = lengthKm * Math.pow(Math.max(0, avgGrade), 2)
   if (score >= 400) return 'HC'
   if (score >= 200) return '1'

@@ -96,6 +96,14 @@ class PagesController < ApplicationController
     @share_token = token
   end
 
+  # Page de débug : navigation + faux GPS qui rejoue le tracé. Réservée aux admins.
+  def route_simulate
+    require_admin!
+    token = params[:token]
+    return redirect_to root_path, alert: t("routes.error_shared_not_found") unless Route.exists?(share_token: token)
+    @share_token = token
+  end
+
   # Télécharge la carte hors-ligne d'un itinéraire sans ouvrir la navigation (voir
   # OfflineDownloader.vue) : adressé par share_token comme la navigation, donc public.
   def route_offline

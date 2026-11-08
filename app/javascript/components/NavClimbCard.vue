@@ -38,8 +38,9 @@ defineEmits<{ (e: 'resume'): void }>()
           </clipPath>
         </defs>
         <path v-for="(seg, i) in climbInfo.segments" :key="i" :d="seg.d" :fill="seg.color" />
-        <!-- Done section: the profile redrawn in a flat grey, clipped up to the rider. -->
-        <path :d="climbInfo.areaD" fill="#9ca3af" clip-path="url(#nav-climb-done-clip)" />
+        <!-- Done section: same grade colours, washed out with a translucent white veil up to
+             the rider — a hard stretch stays visibly more intense than an easy one. -->
+        <path :d="climbInfo.areaD" fill="#fff" fill-opacity="0.6" clip-path="url(#nav-climb-done-clip)" />
       </svg>
       <div class="nav-climb-cursor" :style="{ left: `${climbInfo.posX}%` }">
         <!-- Remaining vertical gain: from the rider's altitude up to the summit. -->

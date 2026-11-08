@@ -45,6 +45,11 @@ export interface ClimbProfile {
 // Données complètes de la carte de col (climbInfo).
 export interface ClimbInfo {
   climb: Climb
+  /** Clé de dédoublonnage publiée à l'appli à la place de `climb.startIdx`. Absente sur
+   *  itinéraire (le col est identifié par son index dans le tracé) ; posée par le profil
+   *  de col deviné en navigation libre (freeClimbProfile), dont chaque recalcul est un
+   *  profil neuf et ne doit pas être pris pour « le même col déjà affiché ». */
+  profileId?: number
   ratio: number
   remainingGainM: number
   segments: ProfileSegment[]
@@ -164,9 +169,12 @@ export function navStateFor(input: {
     // auquel la position est accrochée peut retomber n'importe où sur le
     // tracé (GPS instable avant de rejoindre l'itinéraire, par exemple) — le
     // col qu'il désigne alors n'est pas celui qu'on est en train de grimper.
-    climb: hasRoute && !offRoute && climb
+    // Exception : en navigation libre, le profil d'un col deviné (freeClimbProfile) est
+    // publié comme un col réel — l'appelant ne le passe que s'il existe, et son `profileId`
+    // tient lieu d'identifiant.
+    climb: (!hasRoute || !offRoute) && climb
       ? {
-          id: climb.climb.startIdx,
+          id: climb.profileId ?? climb.climb.startIdx,
           ratio: climb.ratio,
           remainingGainM: climb.remainingGainM,
           grade: climb.grade,

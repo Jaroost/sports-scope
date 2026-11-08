@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
+import { findSummitAhead, summitStillAhead } from '../freeClimbSummit'
 import { ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, styleCoversPoint, suggestedStyleForPoint } from '../mapStyles'
 import { useNavLineWidth, widthRunsCollection } from '../navLineWidth'
 import {
@@ -49,6 +50,7 @@ import type { Sport } from '../userPreferences'
 import { catalogDefaultForSport, isProfileValidForSport } from '../brouter'
 import NavRoutingPicker from './NavRoutingPicker.vue'
 import { useNavPois } from '../composables/useNavPois'
+import { useFreeClimbProfile } from '../composables/useFreeClimbProfile'
 import type { NavPlace } from '../composables/useNavPois'
 import type { RouteMarker } from '../routeMarkers'
 import { useScreenWakeLock } from '../composables/useScreenWakeLock'
@@ -696,6 +698,15 @@ let freeClimbSince = 0
 // dégradation propre en cas d'altitude absente ou de fenêtre trop courte.
 let freeClimbLastGradeAt = 0
 const FREE_CLIMB_GRACE_MS = 30_000
+// Profil du col deviné (itinéraire BRouter vers le sommet + historique de la montée),
+// écrit dans `climbInfo` comme une montée sur itinéraire. Voir useFreeClimbProfile.
+const freeClimbProfile = useFreeClimbProfile({
+  climbInfo,
+  getRoutingProfile: () => routeProfile.value,
+  getBearing: () => currentBearing,
+  isRouteActive: () => hasRoute.value,
+  isPinned: () => dbgClimb.value,
+})
 // Noms donnés à la main aux cols de CE tracé (routes.climb_names), réappariés à
 // chaque recalcul par attachClimbNames — voir rebuildRouteState. Vide pour une
 // destination ad hoc ou un reroutage hors-trace : attachClimbNames n'y change alors
@@ -1619,6 +1630,7 @@ function unloadRoute() {
   freeClimbSince = 0
   freeClimbLastGradeAt = 0
   freeClimbGuess.value = null
+  freeClimbProfile.reset()
   companionRouteClimbs(buildCompanionRouteClimbs([], [], []))
   companionRouteProfile(buildCompanionRouteProfile([], []))
   companionResupply(buildCompanionResupply([], [], [], 0))
@@ -2530,6 +2542,7 @@ function updateFreeClimbGuess(pos: GeolocationPosition, here: LngLat) {
     if (freeClimbLastGradeAt && now - freeClimbLastGradeAt > FREE_CLIMB_GRACE_MS) {
       freeClimbState = 'unknown'
       freeClimbGuess.value = null
+      freeClimbProfile.reset()
     }
     return
   }
@@ -2574,6 +2587,7 @@ function updateFreeClimbGuess(pos: GeolocationPosition, here: LngLat) {
 
   if (freeClimbState !== 'climbing') {
     freeClimbGuess.value = null
+    feedFreeClimbProfile(pos, here, now)
     return
   }
 
@@ -2592,7 +2606,50 @@ function updateFreeClimbGuess(pos: GeolocationPosition, here: LngLat) {
   }
   freeClimbGuess.value = best
     ? { name: best.place.name, lat: best.place.lat, lng: best.place.lng, distanceM: best.distM }
-    : null
+    : summitFallbackGuess(here, now)
+  feedFreeClimbProfile(pos, here, now)
+}
+
+// Repli : aucun col OSM dans l'axe → sommet du relief devant nous (freeClimbSummit).
+// La recherche est asynchrone (tuiles de terrain) : on garde le dernier résultat tant
+// qu'il reste devant, et on relance au plus toutes les SUMMIT_SEARCH_MS.
+const SUMMIT_SEARCH_MS = 20_000
+let summitFallback: { lng: number; lat: number; at: number } | null = null
+let summitSearchAt = 0
+let summitSearching = false
+
+function summitFallbackGuess(here: LngLat, now: number) {
+  if (summitFallback && !summitStillAhead(here, currentBearing, summitFallback)) summitFallback = null
+  if (!summitSearching && now - summitSearchAt >= SUMMIT_SEARCH_MS) {
+    summitSearching = true
+    summitSearchAt = now
+    const bearing = currentBearing
+    findSummitAhead(here, bearing)
+      .then((s) => { summitFallback = s ? { lng: s.lng, lat: s.lat, at: Date.now() } : null })
+      .finally(() => { summitSearching = false })
+  }
+  // Une devinette ancienne n'est plus fiable (on a pu changer de vallée).
+  if (!summitFallback || now - summitFallback.at > 90_000) return null
+  return {
+    name: t('nav.free_climb_summit'),
+    lat: summitFallback.lat,
+    lng: summitFallback.lng,
+    distanceM: haversine(here, [summitFallback.lng, summitFallback.lat]),
+  }
+}
+
+// Passe le fix au profil de col deviné. La devinette peut être nulle (pas de col dans
+// l'axe, pente retombée) : le profil déjà construit tient alors un moment avant de
+// s'effacer, plutôt que de clignoter avec elle.
+function feedFreeClimbProfile(pos: GeolocationPosition, here: LngLat, now: number) {
+  const g = freeClimbGuess.value
+  freeClimbProfile.onFix({
+    here,
+    alt: pos.coords.altitude,
+    now,
+    guess: g ? { name: g.name, lat: g.lat, lng: g.lng } : null,
+    recent: freeClimbSamples.map((s) => ({ lng: s.lng, lat: s.lat, alt: s.alt })),
+  })
 }
 
 // Navigation libre (sans tracé) : aucun snapping ni virage. L'ancre est le GPS brut ;

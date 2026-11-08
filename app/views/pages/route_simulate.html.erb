@@ -1,0 +1,11 @@
+<% content_for :title, "Simulation GPS" %>
+<% content_for :container_class, "container-fluid p-0" %>
+<% content_for :hide_navbar, true %>
+<% content_for :body_class, "fullscreen-page" %>
+<%# Le simulateur passe AVANT la navigation : son setup remplace navigator.geolocation
+    avant que RouteNavigation ne démarre son suivi. %>
+<%# `?free=1` : on rejoue le tracé comme faux GPS, mais la navigation démarre en libre (sans
+    itinéraire chargé ni session restaurée) pour tester le suivi sans tracé. %>
+<% free = params[:free].present? %>
+<div data-vue-component="GpsSimulator" data-vue-props='<%= { shareToken: @share_token, free: free }.to_json %>'></div>
+<div data-vue-component="RouteNavigation" data-vue-props='<%= (free ? { canDebug: true, fresh: true } : { shareToken: @share_token, canDebug: true }).to_json %>'></div>

@@ -1240,6 +1240,12 @@ onMounted(() => {
                         <span>{{ t('routes.export_gpx_dense') }}</span>
                       </a>
                     </li>
+                    <li v-if="props.canDense">
+                      <a :href="`${localePrefix}/routes/${r.share_token}/simulate`" class="dropdown-item d-flex align-items-center gap-2">
+                        <i class="fa-solid fa-satellite-dish" aria-hidden="true"></i>
+                        <span>{{ t('routes.simulate_gps') }}</span>
+                      </a>
+                    </li>
                     <li><hr class="dropdown-divider"></li>
                     <li><h6 class="dropdown-header">{{ t('routes.group_edit') }}</h6></li>
                     <li>

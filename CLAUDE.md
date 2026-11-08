@@ -198,6 +198,23 @@ Options : `USER_ID=<id>`, `LIMIT=<n>` (par type), `SCOPE=routes|activities`.
 L'extraction est faite en ligne, pas via les jobs : chaque enregistrement n'est qu'une
 requête SQL locale (~5 ms). Ordre de grandeur mesuré : 730 activités en 4 s.
 
+## Profil du col en navigation libre
+
+Sans tracé, `updateFreeClimbGuess` (`RouteNavigation.vue`) devine *quel* col on monte (pente
+soutenue + col OSM dans l'axe). `useFreeClimbProfile` + `freeClimbProfile.ts` en tirent le
+**profil** : un itinéraire BRouter de la position au sommet deviné (cap de l'utilisateur
+passé en `heading`), recollé à l'historique GPS de la montée (altitudes recalées sur celles
+de BRouter à la jonction). Le résultat est écrit dans le même `climbInfo` que sur
+itinéraire, donc carte de col et publication à l'appli (`climb_profile` + `nav.climb`)
+fonctionnent sans contrat nouveau ; `ClimbInfo.profileId` (≥ 1 000 000) remplace
+`startIdx` comme clé de dédoublonnage, chaque recalcul étant un profil neuf.
+
+Hypothèse corrigée au fil de l'eau : recalcul si le col deviné change ou si on s'écarte de
+plus de 60 m de la ligne prédite (pas plus d'un calcul toutes les 15 s) ; itinéraire rejeté s'il part
+à l'envers (> 100° d'écart de cap sur 150 m) ou n'a plus de dénivelé ; profil effacé 20 s
+après la disparition de la devinette, ou au sommet (25 m), ce col n'étant plus re-deviné
+pendant 10 min. Pas de profil hors réseau (BRouter requis).
+
 ## Distance sur de nouvelles routes
 
 `ExploredDistance` (service) pose `new_distance_m` sur `strava_activities` et

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -57,8 +57,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
     t.float "max_watts"
     t.integer "moving_time_s"
     t.string "name", null: false
-    t.float "new_distance_m"
-    t.jsonb "new_ranges"
     t.float "normalized_power"
     t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
@@ -66,13 +64,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
     t.string "source", default: "fit", null: false
     t.jsonb "start_latlng"
     t.datetime "started_at"
-    t.jsonb "stream_exclusions", default: {}, null: false
     t.jsonb "streams", default: {}, null: false
     t.float "total_elevation_gain"
     t.jsonb "track_cells", default: {}, null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.jsonb "stream_exclusions", default: {}, null: false
+    t.float "new_distance_m"
+    t.jsonb "new_ranges"
+    t.bigint "strava_upload_id"
+    t.bigint "strava_activity_id"
+    t.string "strava_upload_status"
+    t.string "strava_upload_error"
+    t.datetime "strava_uploaded_at"
     t.index "((track_cells -> 'coarse'::text))", name: "index_imported_activities_on_track_coarse_cells", using: :gin
+    t.index ["strava_activity_id"], name: "index_imported_activities_on_strava_activity_id", where: "(strava_activity_id IS NOT NULL)"
     t.index ["user_id", "started_at"], name: "index_imported_activities_on_user_id_and_started_at"
     t.index ["user_id"], name: "index_imported_activities_on_user_id"
   end
@@ -167,7 +173,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
   end
 
   create_table "routes", force: :cascade do |t|
-    t.jsonb "accepted_uturns", default: [], null: false
     t.string "activity", default: "cycling", null: false
     t.float "avg_speed_kmh"
     t.jsonb "climb_names", default: [], null: false
@@ -190,6 +195,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
     t.bigint "user_id", null: false
     t.jsonb "voice_hints", default: [], null: false
     t.jsonb "waypoints", default: [], null: false
+    t.jsonb "accepted_uturns", default: [], null: false
     t.index "((localities)::text) gin_trgm_ops", name: "index_routes_on_localities_trgm", using: :gin
     t.index ["name"], name: "index_routes_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
     t.index ["share_token"], name: "index_routes_on_share_token", unique: true
@@ -223,7 +229,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
     t.jsonb "end_latlng"
     t.string "gear_id"
     t.jsonb "hr_histogram", default: {}, null: false
-    t.boolean "ignored", default: false, null: false
     t.jsonb "localities"
     t.float "max_cadence"
     t.float "max_heartrate"
@@ -231,8 +236,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
     t.float "max_watts"
     t.integer "moving_time_s"
     t.string "name", null: false
-    t.float "new_distance_m"
-    t.jsonb "new_ranges"
     t.float "normalized_power"
     t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
@@ -243,13 +246,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
     t.jsonb "start_latlng"
     t.datetime "started_at"
     t.bigint "strava_id", null: false
-    t.jsonb "stream_exclusions", default: {}, null: false
     t.jsonb "streams", default: {}, null: false
     t.datetime "streams_fetched_at"
     t.float "total_elevation_gain"
     t.jsonb "track_cells", default: {}, null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.boolean "ignored", default: false, null: false
+    t.jsonb "stream_exclusions", default: {}, null: false
+    t.float "new_distance_m"
+    t.jsonb "new_ranges"
     t.index "((localities)::text) gin_trgm_ops", name: "index_strava_activities_on_localities_trgm", using: :gin
     t.index "((track_cells -> 'coarse'::text))", name: "index_strava_activities_on_track_coarse_cells", using: :gin
     t.index ["name"], name: "index_strava_activities_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
@@ -288,12 +294,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
 
   create_table "training_programs", force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.jsonb "items", default: [], null: false
     t.string "name", null: false
     t.string "share_token", null: false
-    t.string "sport", default: "cycling", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.string "sport", default: "cycling", null: false
+    t.jsonb "items", default: [], null: false
     t.index ["share_token"], name: "index_training_programs_on_share_token", unique: true
     t.index ["user_id", "updated_at"], name: "index_training_programs_on_user_id_and_updated_at"
     t.index ["user_id"], name: "index_training_programs_on_user_id"
@@ -318,6 +324,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_31_110000) do
     t.string "strava_uid"
     t.jsonb "training_budget"
     t.datetime "updated_at", null: false
+    t.string "strava_scope"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["keycloak_uid"], name: "index_users_on_keycloak_uid", unique: true
     t.index ["last_chart_layout_id"], name: "index_users_on_last_chart_layout_id"

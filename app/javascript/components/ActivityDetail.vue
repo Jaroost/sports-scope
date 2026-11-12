@@ -33,6 +33,7 @@ import ActivityZones from './ActivityZones.vue'
 import ActivityStreamExclusions from './ActivityStreamExclusions.vue'
 import ActivitySegments from './ActivitySegments.vue'
 import SegmentCompare from './SegmentCompare.vue'
+import StravaUploadButton from './StravaUploadButton.vue'
 
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
@@ -544,6 +545,18 @@ onMounted(async () => {
         :activity="activity"
         :weather="weather"
         :weather-loading="weatherLoading"
+      />
+
+      <!-- Envoi de la sortie importée vers Strava (TCX reconstruit côté serveur). -->
+      <StravaUploadButton
+        v-if="props.source === 'imported'"
+        :activity-id="props.activityId"
+        :status="activity.strava_upload_status || null"
+        :strava-activity-id="activity.strava_activity_id || null"
+        :upload-error="activity.strava_upload_error || null"
+        :can-upload="!!activity.strava_can_upload"
+        :strava-linked="!!activity.strava_linked"
+        @refresh="fetchActivity"
       />
 
       <!-- Signalement discret des anomalies d'enregistrement (n'altère aucun calcul). -->

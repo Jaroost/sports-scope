@@ -52,6 +52,7 @@ class StravaSyncService
     end
 
     prune_deleted(seen_strava_ids) if full
+    ignore_uploaded_copies
 
     count
   end
@@ -64,6 +65,16 @@ class StravaSyncService
   # `PerformanceRecords`, keyed off `UserActivities.data_version`) refresh.
   def prune_deleted(seen_strava_ids)
     @user.strava_activities.where.not(strava_id: seen_strava_ids).destroy_all
+  end
+
+  # Les sorties envoyées depuis une activité importée (`StravaUploader`) reviennent ici
+  # comme activités Strava : on écarte la copie des calculs, l'import fait foi.
+  def ignore_uploaded_copies
+    ids = @user.imported_activities.where.not(strava_activity_id: nil).pluck(:strava_activity_id)
+    return if ids.empty?
+
+    @user.strava_activities.where(strava_id: ids, ignored: false)
+         .update_all(ignored: true, updated_at: Time.current)
   end
 
   def incremental_after

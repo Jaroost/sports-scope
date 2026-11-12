@@ -13,7 +13,7 @@ module OmniAuth
 
       option :authorize_options, [:scope, :approval_prompt]
 
-      option :scope, "read,activity:read_all"
+      option :scope, "read,activity:read_all,activity:write"
       option :approval_prompt, "auto"
 
       uid { raw_info["id"].to_s }

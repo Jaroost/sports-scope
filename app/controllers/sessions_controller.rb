@@ -20,7 +20,7 @@ class SessionsController < ApplicationController
         redirect_to root_path, alert: t("auth.login_first") and return
       end
       authorize! :link, :strava
-      current_user.attach_strava!(auth)
+      current_user.attach_strava!(auth, scope: params[:scope].to_s.presence)
       redirect_to root_path, notice: t("auth.strava_linked")
     else
       redirect_to root_path, alert: "Unknown provider: #{auth.provider}"

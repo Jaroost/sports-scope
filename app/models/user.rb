@@ -327,13 +327,20 @@ class User < ApplicationRecord
     []
   end
 
-  def attach_strava!(auth)
+  def attach_strava!(auth, scope: nil)
     update!(
       strava_uid: auth.uid,
       strava_access_token: auth.credentials.token,
       strava_refresh_token: auth.credentials.refresh_token,
-      strava_expires_at: Time.at(auth.credentials.expires_at).utc
+      strava_expires_at: Time.at(auth.credentials.expires_at).utc,
+      strava_scope: scope
     )
+  end
+
+  # Strava renvoie les scopes réellement accordés au callback (l'utilisateur peut en
+  # décocher) ; sans `activity:write`, `POST /uploads` répond 401.
+  def strava_can_upload?
+    strava_linked? && strava_scope.to_s.split(",").include?("activity:write")
   end
 
   # Préférences fusionnées avec les valeurs par défaut : garantit que toute clé

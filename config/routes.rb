@@ -218,6 +218,7 @@ Rails.application.routes.draw do
   post   "/api/named_segments", to: "named_segments#create"
   patch  "/api/named_segments/:id", to: "named_segments#update", constraints: { id: /\d+/ }
   delete "/api/named_segments/:id", to: "named_segments#destroy", constraints: { id: /\d+/ }
+  post "/api/imported_activities/:id/strava_upload", to: "imported_activities#strava_upload", constraints: { id: /\d+/ }
   delete "/api/imported_activities/:id", to: "imported_activities#destroy", constraints: { id: /\d+/ }
 
   # Bike parts wear tracker — chain waxing + generic wear (JSON consumed by Vue components)

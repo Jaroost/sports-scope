@@ -215,6 +215,21 @@ plus de 60 m de la ligne prédite (pas plus d'un calcul toutes les 15 s) ; itin�
 après la disparition de la devinette, ou au sommet (25 m), ce col n'étant plus re-deviné
 pendant 10 min. Pas de profil hors réseau (BRouter requis).
 
+## Envoi d'une activité importée vers Strava
+
+`POST /api/imported_activities/:id/strava_upload` → `StravaUploadJob` → `StravaUploader`
+(`POST /api/v3/uploads`, puis polling de `GET /uploads/:id` toutes les 5 s). Le `.fit`
+d'origine n'est pas conservé : `TcxBuilder` reconstruit un TCX gzippé depuis les
+`streams` (puissance en extension `ns3:TPX`). Requiert le scope `activity:write`,
+stocké dans `users.strava_scope` au callback (`User#strava_can_upload?`) : les comptes
+liés avant cet ajout doivent se reconnecter. Suivi dans `imported_activities.strava_*`
+(`pending|done|duplicate|error`) ; un doublon Strava compte comme un succès.
+
+La copie qui revient au sync Strava est passée en `ignored` (`ImportedActivity#ignore_strava_copy!`,
+`StravaSyncService#ignore_uploaded_copies`) pour ne pas compter la sortie deux fois
+dans la charge, les seuils et les records. Multipart via `Net::HTTP#set_form` (la gem
+`faraday-multipart` n'est pas dans le projet). Bouton : `StravaUploadButton.vue`.
+
 ## Distance sur de nouvelles routes
 
 `ExploredDistance` (service) pose `new_distance_m` sur `strava_activities` et

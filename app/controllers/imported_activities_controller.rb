@@ -128,6 +128,23 @@ class ImportedActivitiesController < ApplicationController
                                                    params[:start_idx].to_i, params[:end_idx].to_i) }
   end
 
+  # POST /api/imported_activities/:id/strava_upload
+  # Envoie la sortie à Strava (TCX reconstruit des streams). Asynchrone : 202 tout de
+  # suite, le front relit `strava_upload_status` sur la fiche.
+  def strava_upload
+    activity = current_user.imported_activities.find_by(id: params[:id])
+    return head :not_found unless activity
+    return render json: { error: 'strava_not_linked' }, status: :unprocessable_entity unless current_user.strava_linked?
+    return render json: { error: 'scope_missing' }, status: :forbidden unless current_user.strava_can_upload?
+    return render json: { error: 'already_uploaded' }, status: :conflict if activity.strava_uploaded?
+    return render json: { error: 'no_track_data' }, status: :unprocessable_entity unless TcxBuilder.new(activity).buildable?
+
+    # Reprise après erreur : on repart de zéro (nouvel upload).
+    activity.update!(strava_upload_id: nil, strava_upload_status: 'pending', strava_upload_error: nil)
+    StravaUploadJob.perform_later(activity.id)
+    render json: { activity: summary_json(activity) }, status: :accepted
+  end
+
   # DELETE /api/imported_activities/:id
   def destroy
     activity = current_user.imported_activities.find_by(id: params[:id])
@@ -172,7 +189,12 @@ class ImportedActivitiesController < ApplicationController
       start_latlng: a.start_latlng,
       end_latlng: a.end_latlng,
       created_at: a.created_at.iso8601,
-      stream_exclusions: a.stream_exclusions
+      stream_exclusions: a.stream_exclusions,
+      strava_upload_status: a.strava_upload_status,
+      strava_upload_error: a.strava_upload_error,
+      strava_activity_id: a.strava_activity_id,
+      strava_can_upload: current_user.strava_can_upload?,
+      strava_linked: current_user.strava_linked?
     }.merge(a.excluded_summary_overrides).tap { |h| h[:laps] = a.laps if with_laps }
   end
 

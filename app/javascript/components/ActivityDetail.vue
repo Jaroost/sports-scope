@@ -13,6 +13,7 @@
 
 import { ref, shallowRef, markRaw, onMounted, computed, watch } from 'vue'
 import { t } from '../i18n'
+import { csrfToken } from '../csrf'
 import {
   PEAK_POWER_DURATIONS, POWER_CURVE_DURATIONS, peakPowerCurve,
   detectPauses, totalPausedSeconds, aerobicDecoupling,
@@ -38,20 +39,33 @@ import StravaUploadButton from './StravaUploadButton.vue'
 const props = defineProps({
   activityId: { type: [String, Number], required: true },
   source: { type: String, default: 'strava' }, // 'strava' or 'imported'
+  // Sortie d'un ami (lecture seule) : id de l'utilisateur ami. `activityId` est alors l'id
+  // local de la sortie. Tout ce qui dépend des seuils ou des données du compte courant
+  // (zones, segments, rangs, envoi Strava, masque de capteurs) est coupé.
+  friendId: { type: [String, Number], default: null },
 })
+const friendMode = computed(() => props.friendId != null)
+// `null` en mode ami : les cartes/graphiques n'interrogent alors pas /zones (seuils du
+// compte courant, qui ne valent pas pour la sortie d'un autre).
+const ownActivityId = computed(() => (friendMode.value ? null : props.activityId))
 
 const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
 const localePrefix = lang ? `/${lang}` : ''
 
 // ─── Endpoint URLs (Strava vs FIT-imported) ──────────────────────────────
-const activityUrl = computed(() => props.source === 'imported'
-  ? `/api/imported_activities/${props.activityId}`
-  : `/strava/activities/${props.activityId}`)
-const streamsUrl = computed(() => props.source === 'imported'
-  ? `/api/imported_activities/${props.activityId}/streams`
-  : `/strava/activities/${props.activityId}/streams`)
+const friendBase = computed(() => `/api/friends/${props.friendId}/activities/${props.source}/${props.activityId}`)
+const activityUrl = computed(() => friendMode.value
+  ? friendBase.value
+  : props.source === 'imported'
+    ? `/api/imported_activities/${props.activityId}`
+    : `/strava/activities/${props.activityId}`)
+const streamsUrl = computed(() => friendMode.value
+  ? `${friendBase.value}/streams`
+  : props.source === 'imported'
+    ? `/api/imported_activities/${props.activityId}/streams`
+    : `/strava/activities/${props.activityId}/streams`)
 const exclusionsUrl = computed(() => `${streamsUrl.value.replace(/\/streams$/, '')}/stream_exclusions`)
-const photosUrl = computed(() => props.source === 'imported'
+const photosUrl = computed(() => props.source === 'imported' || friendMode.value
   ? null // imported (FIT) has no photos
   : `/strava/activities/${props.activityId}/photos`)
 const peakPowerRanksUrl = computed(() => props.source === 'imported'
@@ -126,13 +140,17 @@ const hoveredPeakDuration = ref(null)
 // graphiques basculent dans des onglets pour libérer de la place verticale.
 // L'onglet actif est persisté comme les toggles « collapsed » ci-dessus.
 const TABS = ['photos', 'power', 'analysis', 'zones', 'segments']
+// Onglets qui reposent sur les données du compte courant : absents sur la sortie d'un ami.
+const OWN_DATA_TABS = ['zones', 'segments']
 const savedTab = (typeof localStorage !== 'undefined' && localStorage.getItem('sportsScope.activityTab')) || ''
 const activeTab = ref(TABS.includes(savedTab) ? savedTab : 'analysis')
 const hasPhotos = computed(() => photos.value.length > 0)
 // L'onglet photos n'existe que s'il y a des photos : si l'onglet demandé est
 // « photos » alors qu'il n'y en a pas, on affiche les graphiques à la place.
 const effectiveTab = computed(() =>
-  activeTab.value === 'photos' && !hasPhotos.value ? 'analysis' : activeTab.value,
+  (activeTab.value === 'photos' && !hasPhotos.value) || (friendMode.value && OWN_DATA_TABS.includes(activeTab.value))
+    ? 'analysis'
+    : activeTab.value,
 )
 watch(activeTab, (v) => {
   try { localStorage.setItem('sportsScope.activityTab', v) } catch { /* ignore */ }
@@ -331,6 +349,26 @@ function clearSelection() {
   selection.value = null
 }
 
+// ─── Visibilité auprès des amis (mes sorties) ───────────────────────────
+// `friends_visible` : null = suit le défaut du compte, true = amis, false = privée.
+const friendsVisibility = ref<'default' | 'shared' | 'private'>('default')
+const visibilityError = ref(false)
+
+async function saveVisibility() {
+  visibilityError.value = false
+  try {
+    const res = await fetch(`/api/activities/${props.source}/${props.activityId}/friend_visibility`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+      credentials: 'same-origin',
+      body: JSON.stringify({ visibility: friendsVisibility.value }),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  } catch {
+    visibilityError.value = true
+  }
+}
+
 // ─── Fetches ─────────────────────────────────────────────────────────────
 async function fetchActivity() {
   try {
@@ -345,6 +383,8 @@ async function fetchActivity() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     activity.value = payload.activity
+    const fv = payload.activity?.friends_visible
+    friendsVisibility.value = fv === true ? 'shared' : fv === false ? 'private' : 'default'
   } catch (e) {
     error.value = e.message
   } finally {
@@ -446,6 +486,7 @@ async function fetchWeather() {
 // imported (persisted alongside the FIT data).
 async function fetchPeakPowerRanks() {
   peakPowerRanks.value = null
+  if (friendMode.value) return
   try {
     const res = await fetch(peakPowerRanksUrl.value, {
       headers: { Accept: 'application/json' },
@@ -462,6 +503,7 @@ async function fetchPeakPowerRanks() {
 // Best-effort — the medals section simply stays hidden without it.
 async function fetchBestEfforts() {
   bestEfforts.value = null
+  if (friendMode.value) return
   try {
     const res = await fetch(bestEffortsUrl.value, {
       headers: { Accept: 'application/json' },
@@ -521,7 +563,7 @@ onMounted(async () => {
       <ActivityMapCard
         :sticky="effectiveTab === 'segments'"
         :activity="activity"
-        :activity-id="props.activityId"
+        :activity-id="ownActivityId"
         :source="props.source"
         :streams="streams"
         :climbs="climbs"
@@ -547,9 +589,20 @@ onMounted(async () => {
         :weather-loading="weatherLoading"
       />
 
+      <!-- Visibilité de la sortie auprès des amis (défaut du compte, ou forcée dans un sens). -->
+      <div v-if="!friendMode" class="d-flex align-items-center gap-2 mb-2">
+        <label for="friends-visibility" class="small text-muted mb-0">{{ t('friends.visibility') }}</label>
+        <select id="friends-visibility" v-model="friendsVisibility" class="form-select form-select-sm w-auto" @change="saveVisibility">
+          <option value="default">{{ t('friends.visibility_default') }}</option>
+          <option value="shared">{{ t('friends.visibility_shared') }}</option>
+          <option value="private">{{ t('friends.visibility_private') }}</option>
+        </select>
+        <span v-if="visibilityError" class="text-danger small">{{ t('friends.error') }}</span>
+      </div>
+
       <!-- Envoi de la sortie importée vers Strava (TCX reconstruit côté serveur). -->
       <StravaUploadButton
-        v-if="props.source === 'imported'"
+        v-if="props.source === 'imported' && !friendMode"
         :activity-id="props.activityId"
         :status="activity.strava_upload_status || null"
         :strava-activity-id="activity.strava_activity_id || null"
@@ -599,6 +652,7 @@ onMounted(async () => {
           <span class="tab-label">{{ t('strava.tabs.analysis') }}</span>
         </button>
         <button
+          v-if="!friendMode"
           type="button"
           class="btn d-flex align-items-center gap-2"
           :class="effectiveTab === 'zones' ? 'btn-warning' : 'btn-outline-secondary'"
@@ -610,6 +664,7 @@ onMounted(async () => {
           <span class="tab-label">{{ t('strava.tabs.zones') }}</span>
         </button>
         <button
+          v-if="!friendMode"
           type="button"
           class="btn d-flex align-items-center gap-2"
           :class="effectiveTab === 'segments' ? 'btn-warning' : 'btn-outline-secondary'"
@@ -663,7 +718,7 @@ onMounted(async () => {
       />
 
       <ActivityStreamExclusions
-        v-if="effectiveTab === 'analysis' && streams"
+        v-if="effectiveTab === 'analysis' && streams && !friendMode"
         :url="exclusionsUrl"
         :streams="streams"
         :exclusions="streamExclusions"
@@ -674,7 +729,7 @@ onMounted(async () => {
       <ActivityCharts
         v-if="effectiveTab === 'analysis'"
         class="mb-3"
-        :activity-id="props.activityId"
+        :activity-id="ownActivityId"
         :source="props.source"
         :streams="streams"
         :activity="activity"
@@ -733,7 +788,7 @@ onMounted(async () => {
       <!-- Contribution à la cible hebdomadaire — seulement si la sortie tombe dans la
            semaine en cours (silencieux sinon, cf. le composant). En fin de page :
            contexte secondaire, pas une métrique de la sortie elle-même. -->
-      <ActivityWeekProgress :activity-date="activity?.start_date_local || activity?.start_date || ''" />
+      <ActivityWeekProgress v-if="!friendMode" :activity-date="activity?.start_date_local || activity?.start_date || ''" />
     </div>
   </div>
 </template>

@@ -182,6 +182,10 @@ class ProfilesController < ApplicationController
       # Même contrat de préservation : le formulaire de profil ne connaît pas la
       # disposition de l'onglet Statistiques, qui se compose sur la page d'activité.
       "activity_stats" => sanitize_activity_stats(incoming[:activity_stats], current_user),
+      "friends" => {
+        "default_visibility" => allowed((incoming[:friends] || {})[:default_visibility], User::FRIEND_VISIBILITIES,
+                                        current_user.friends_default_visibility),
+      },
     }
   end
 

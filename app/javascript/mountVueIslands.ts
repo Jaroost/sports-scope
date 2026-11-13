@@ -23,6 +23,7 @@ import SharedRoutePreviewMap from './components/SharedRoutePreviewMap.vue'
 import CompanionDashboard from './components/CompanionDashboard.vue'
 import CompanionNavigateAction from './components/CompanionNavigateAction.vue'
 import TrainingProgramsList from './components/TrainingProgramsList.vue'
+import FriendsPage from './components/FriendsPage.vue'
 import TrainingProgramBuilder from './components/TrainingProgramBuilder.vue'
 
 const registry: Record<string, Component> = {
@@ -51,6 +52,7 @@ const registry: Record<string, Component> = {
   CompanionNavigateAction,
   TrainingProgramsList,
   TrainingProgramBuilder,
+  FriendsPage,
 }
 
 export function mountVueIslands(): void {

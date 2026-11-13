@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -35,6 +35,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
     t.bigint "user_id", null: false
     t.index ["user_id", "name"], name: "index_chart_layouts_on_user_id_and_name", unique: true
     t.index ["user_id"], name: "index_chart_layouts_on_user_id"
+  end
+
+  create_table "friendships", force: :cascade do |t|
+    t.datetime "accepted_at"
+    t.bigint "addressee_id", null: false
+    t.datetime "created_at", null: false
+    t.bigint "requester_id", null: false
+    t.string "status", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.index "LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id)", name: "index_friendships_on_unordered_pair", unique: true
+    t.index ["addressee_id"], name: "index_friendships_on_addressee_id"
+    t.index ["requester_id"], name: "index_friendships_on_requester_id"
   end
 
   create_table "imported_activities", force: :cascade do |t|
@@ -77,6 +89,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
     t.string "strava_upload_status"
     t.string "strava_upload_error"
     t.datetime "strava_uploaded_at"
+    t.boolean "friends_visible"
     t.index "((track_cells -> 'coarse'::text))", name: "index_imported_activities_on_track_coarse_cells", using: :gin
     t.index ["strava_activity_id"], name: "index_imported_activities_on_strava_activity_id", where: "(strava_activity_id IS NOT NULL)"
     t.index ["user_id", "started_at"], name: "index_imported_activities_on_user_id_and_started_at"
@@ -172,6 +185,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
     t.index ["user_id"], name: "index_pois_on_user_id"
   end
 
+  create_table "route_shares", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "route_id", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["route_id", "user_id"], name: "index_route_shares_on_route_id_and_user_id", unique: true
+    t.index ["route_id"], name: "index_route_shares_on_route_id"
+    t.index ["user_id"], name: "index_route_shares_on_user_id"
+  end
+
   create_table "routes", force: :cascade do |t|
     t.string "activity", default: "cycling", null: false
     t.float "avg_speed_kmh"
@@ -256,6 +279,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
     t.jsonb "stream_exclusions", default: {}, null: false
     t.float "new_distance_m"
     t.jsonb "new_ranges"
+    t.boolean "friends_visible"
     t.index "((localities)::text) gin_trgm_ops", name: "index_strava_activities_on_localities_trgm", using: :gin
     t.index "((track_cells -> 'coarse'::text))", name: "index_strava_activities_on_track_coarse_cells", using: :gin
     t.index ["name"], name: "index_strava_activities_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
@@ -325,7 +349,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
     t.jsonb "training_budget"
     t.datetime "updated_at", null: false
     t.string "strava_scope"
+    t.string "friend_invite_token"
     t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["friend_invite_token"], name: "index_users_on_friend_invite_token", unique: true
     t.index ["keycloak_uid"], name: "index_users_on_keycloak_uid", unique: true
     t.index ["last_chart_layout_id"], name: "index_users_on_last_chart_layout_id"
     t.index ["strava_uid"], name: "index_users_on_strava_uid", unique: true, where: "(strava_uid IS NOT NULL)"
@@ -333,6 +359,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
 
   add_foreign_key "bikes", "users"
   add_foreign_key "chart_layouts", "users"
+  add_foreign_key "friendships", "users", column: "addressee_id"
+  add_foreign_key "friendships", "users", column: "requester_id"
   add_foreign_key "imported_activities", "users"
   add_foreign_key "named_segments", "users"
   add_foreign_key "opened_routes", "routes"
@@ -345,6 +373,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_12_100000) do
   add_foreign_key "planned_rides", "routes"
   add_foreign_key "planned_rides", "users"
   add_foreign_key "pois", "users"
+  add_foreign_key "route_shares", "routes"
+  add_foreign_key "route_shares", "users"
   add_foreign_key "routes", "users"
   add_foreign_key "session_handoffs", "users"
   add_foreign_key "strava_activities", "users"

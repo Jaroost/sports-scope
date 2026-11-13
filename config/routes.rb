@@ -7,6 +7,10 @@ Rails.application.routes.draw do
     get "/activities/:id", to: "activities#show", as: :activity, constraints: { id: /\d+/ }
     get "/imported_activities/:id", to: "activities#show_imported", as: :imported_activity, constraints: { id: /\d+/ }
     get "/routes", to: "pages#routes_index", as: :routes_index
+    get "/friends", to: "pages#friends", as: :friends
+    get "/friends/invite/:token", to: "friends#invite", as: :friend_invite
+    get "/friends/:friend_id/activities/:source/:id", to: "activities#show_friend", as: :friend_activity,
+        constraints: { friend_id: /\d+/, id: /\d+/, source: /strava|imported/ }
     get "/training_programs", to: "pages#training_programs_index", as: :training_programs_index
     get "/training_programs/new", to: "pages#training_program_builder", as: :new_training_program
     get "/training_programs/:id/edit", to: "pages#training_program_builder", as: :edit_training_program, constraints: { id: /\d+/ }
@@ -180,6 +184,19 @@ Rails.application.routes.draw do
 
   # Training programs builder (JSON CRUD consumed by Vue components) — same shape
   # as the route builder API above, minus GPX/carte (a program has no track).
+  # Amis (cf. FriendsController, FriendVisibility)
+  get "/api/friends", to: "friends#index"
+  post "/api/friends", to: "friends#create"
+  get "/api/friends/feed", to: "friends#feed"
+  patch "/api/friends/:id", to: "friends#update", constraints: { id: /\d+/ }
+  delete "/api/friends/:id", to: "friends#destroy", constraints: { id: /\d+/ }
+  get "/api/friends/:id/routes/:route_id", to: "friends#route", constraints: { id: /\d+/, route_id: /\d+/ }
+  get "/api/friends/:id/activities/:source/:activity_id", to: "friends#activity", constraints: { id: /\d+/, activity_id: /\d+/, source: /strava|imported/ }
+  get "/api/friends/:id/activities/:source/:activity_id/streams", to: "friends#activity_streams", constraints: { id: /\d+/, activity_id: /\d+/, source: /strava|imported/ }
+  post "/api/routes/:id/shares", to: "friends#share_route", constraints: { id: /\d+/ }
+  delete "/api/routes/:id/shares/:user_id", to: "friends#unshare_route", constraints: { id: /\d+/, user_id: /\d+/ }
+  get "/api/routes/:id/shares", to: "friends#route_shares", constraints: { id: /\d+/ }
+  patch "/api/activities/:source/:id/friend_visibility", to: "friends#activity_visibility", constraints: { id: /\d+/, source: /strava|imported/ }
   get "/api/training_programs", to: "training_programs#index"
   post "/api/training_programs", to: "training_programs#create"
   get "/api/training_programs/shared/:token", to: "training_programs#shared"

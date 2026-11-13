@@ -17,6 +17,8 @@ class Route < ApplicationRecord
   has_many :planned_rides, dependent: :destroy
   # Unguessable token for public, shareable navigation links.
   has_secure_token :share_token
+  # Partages explicites à des amis (cf. RouteShare, FriendVisibility).
+  has_many :route_shares, dependent: :destroy
   validates :name, presence: true, length: { maximum: 80 }
   validates :waypoints, presence: true
   validates :activity, inclusion: { in: ACTIVITIES }

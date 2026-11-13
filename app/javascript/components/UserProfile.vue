@@ -157,6 +157,7 @@ const NAVBAR_ICONS: Record<string, string> = {
   free_navigate: 'fa-location-crosshairs',
   chains: 'fa-link',
   training_programs: 'fa-stopwatch',
+  friends: 'fa-user-group',
 }
 
 function navIcon(key: string): string {
@@ -948,6 +949,14 @@ function placePreviewMarker(coords: [number, number]) {
             <select id="disp-sport" v-model="prefs.display.default_sport" class="form-select">
               <option v-for="s in SPORTS" :key="s" :value="s">{{ t(`profile.display.sport_${s}`) }}</option>
             </select>
+          </div>
+          <div class="col-sm-6">
+            <label for="friends-visibility" class="form-label">{{ t('friends.default_visibility') }}</label>
+            <select id="friends-visibility" v-model="prefs.friends.default_visibility" class="form-select">
+              <option value="private">{{ t('friends.default_visibility_private') }}</option>
+              <option value="friends">{{ t('friends.default_visibility_friends') }}</option>
+            </select>
+            <div class="form-text">{{ t('friends.default_visibility_hint') }}</div>
           </div>
         </div>
         <hr class="my-3">

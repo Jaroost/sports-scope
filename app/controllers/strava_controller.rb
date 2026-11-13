@@ -550,6 +550,8 @@ class StravaController < ApplicationController
     extra = {}
     # Distance sur de nouvelles routes (`ExploredDistance`) : colonne, hors cache.
     extra['new_distance_m'] = record.new_distance_m if record&.new_distance_m
+    # Visibilité auprès des amis (null = défaut du compte) : colonne, hors cache.
+    extra['friends_visible'] = record.friends_visible unless record.nil? || record.friends_visible.nil?
     extra['new_ranges'] = record.new_ranges if record&.new_ranges.present?
     # Valeur calculée avant l'ajout des plages (`new_ranges` NULL) : on relance le calcul,
     # regroupé et en tâche de fond, plutôt que de laisser la carte sans surbrillance

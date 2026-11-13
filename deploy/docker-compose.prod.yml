@@ -27,6 +27,11 @@ services:
   keycloak:
     image: keycloak/keycloak:latest
     restart: always
+    # Keycloak appelle Google (oauth2.googleapis.com) côté serveur : même piège DNS
+    # au reboot que pour rails.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     entrypoint: ["/opt/keycloak/templates/docker-entrypoint.sh"]
     command: ["start", "--import-realm"]
     environment:

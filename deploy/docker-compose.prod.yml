@@ -64,6 +64,12 @@ services:
   rails:
     image: jaroost-server:5000/sports-scope:${IMAGE_TAG:-latest}
     restart: always
+    # Résolveurs explicites : au reboot du serveur Docker démarre avant le résolveur
+    # de l'hôte, et le resolv.conf hérité ne résout plus rien (« Temporary failure in
+    # name resolution » vers Keycloak, Strava, Geofabrik…).
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     entrypoint: ["docker-entrypoint-rails"]
     command: ["bundle", "exec", "rails", "server", "-b", "0.0.0.0", "-p", "3000"]
     environment:
@@ -147,6 +153,12 @@ services:
   brouter-sync:
     image: alpine:3.20
     restart: always
+    # Résolveurs explicites : au reboot du serveur Docker démarre avant le résolveur
+    # de l'hôte, et le resolv.conf hérité ne résout plus rien (« Temporary failure in
+    # name resolution » vers Keycloak, Strava, Geofabrik…).
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       BROUTER_BBOX: ${BROUTER_BBOX:--30,30,45,70}
       BROUTER_SYNC_INTERVAL: ${BROUTER_SYNC_INTERVAL:-604800}
@@ -181,6 +193,12 @@ services:
   poi-sync:
     image: jaroost-server:5000/sports-scope-poi-sync:${POI_SYNC_IMAGE_TAG:-latest}
     restart: always
+    # Résolveurs explicites : au reboot du serveur Docker démarre avant le résolveur
+    # de l'hôte, et le resolv.conf hérité ne résout plus rien (« Temporary failure in
+    # name resolution » vers Keycloak, Strava, Geofabrik…).
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       PGHOST: db
       PGUSER: ${POSTGRES_USER:-postgres}

@@ -1619,6 +1619,12 @@ en:
     default_visibility_private: "Private (I share by hand)"
     default_visibility_friends: "Visible to my friends (I hide by hand)"
     default_visibility_hint: "Each activity can override this setting."
+    discoverable: "Appear in friend search"
+    discoverable_hint: "When on, other members can find me by typing part of my name or email address (only my name is shown). Otherwise I can only be added with my exact email address or my invite link."
+    search_placeholder: "Name, first name or email"
+    search_hint: "Type at least 3 characters: members who allow it are suggested. A full email address always works."
+    search_none: "No suggestions. Try the full email address or the invite link."
+    add: "Add"
     friend_activity: "%{name}'s activity"
     error: "Something went wrong."
   training_programs:

@@ -98,7 +98,7 @@ export interface ActivityStatsSection {
 export interface UserPreferences {
   training: TrainingPreferences
   activity_stats: { sections: ActivityStatsSection[] }
-  friends: { default_visibility: 'private' | 'friends' }
+  friends: { default_visibility: 'private' | 'friends'; discoverable: boolean }
   points_of_interest: {
     show_cemeteries: boolean
     show_bakeries: boolean
@@ -168,7 +168,7 @@ function sportDefaults(
 export const DEFAULT_PREFERENCES: UserPreferences = {
   training: { goal: 'improve_slow', event: null },
   activity_stats: { sections: ACTIVITY_STATS_SECTION_KEYS.map((key) => ({ key, visible: true })) },
-  friends: { default_visibility: 'private' },
+  friends: { default_visibility: 'private', discoverable: false },
   points_of_interest: {
     show_cemeteries: true,
     show_bakeries: true,
@@ -429,6 +429,7 @@ function parse(): UserPreferences {
       activity_stats: { sections: normalizeActivityStatsSections(incoming.activity_stats?.sections) },
       friends: {
         default_visibility: incoming.friends?.default_visibility === 'friends' ? 'friends' : 'private',
+        discoverable: incoming.friends?.discoverable === true,
       },
       points_of_interest: { ...d.points_of_interest, ...incoming.points_of_interest },
       search: {

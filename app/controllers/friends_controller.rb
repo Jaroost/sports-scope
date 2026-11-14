@@ -25,10 +25,24 @@ class FriendsController < ApplicationController
     }
   end
 
-  # POST /api/friends { email }
+  # GET /api/friends/search?q= — suggestions parmi les comptes « découvrables ».
+  # Seuls l'id et le nom sont renvoyés : jamais l'e-mail (ni même un fragment).
+  def search
+    users = User.friend_suggestions(params[:q], for_user: current_user)
+    render json: { users: users.map { |u| { user_id: u.id, display_name: u.display_name.presence || "—" } } }
+  end
+
+  # POST /api/friends { email } ou { user_id } (choix d'une suggestion)
   # Réponse toujours neutre : on ne révèle pas si une adresse correspond à un compte.
   def create
-    target = User.find_by(email: params[:email].to_s.strip.downcase)
+    target =
+      if params[:user_id].present?
+        # Une suggestion ne vaut que pour un compte découvrable : on ne laisse pas
+        # énumérer des ids pour contourner le réglage.
+        User.where(id: params[:user_id]).detect(&:friends_discoverable?)
+      else
+        User.find_by(email: params[:email].to_s.strip.downcase)
+      end
     request_friendship(target) if target
     render json: { ok: true }, status: :accepted
   end

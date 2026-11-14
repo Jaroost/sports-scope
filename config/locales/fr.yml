@@ -1619,6 +1619,12 @@ fr:
     default_visibility_private: "Privées (je partage à la main)"
     default_visibility_friends: "Visibles par mes amis (je masque à la main)"
     default_visibility_hint: "Chaque sortie peut déroger à ce réglage."
+    discoverable: "Apparaître dans la recherche d'amis"
+    discoverable_hint: "Si activé, les autres membres peuvent me trouver en tapant une partie de mon nom ou de mon adresse e-mail (seul mon nom est affiché). Sinon, on ne peut m'ajouter qu'avec mon adresse e-mail exacte ou mon lien d'invitation."
+    search_placeholder: "Nom, prénom ou e-mail"
+    search_hint: "Saisissez au moins 3 caractères : les membres qui acceptent d'être trouvés sont proposés. Une adresse e-mail complète fonctionne toujours."
+    search_none: "Aucune suggestion. Essayez l'adresse e-mail complète ou le lien d'invitation."
+    add: "Ajouter"
     friend_activity: "Sortie de %{name}"
     error: "Une erreur est survenue."
   training_programs:

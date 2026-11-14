@@ -227,8 +227,11 @@ class User < ApplicationRecord
     # Amis : visibilité par défaut des sorties (`private` | `friends`). Une sortie peut
     # surcharger ce défaut dans les deux sens (`friends_visible`, cf. FriendVisibility).
     # Privé par défaut : rien n'est vu sans décision explicite.
+    # `discoverable` : n'apparaît dans la recherche d'amis (nom / e-mail partiel) que si
+    # vrai. Faux par défaut ; l'ajout par adresse e-mail exacte reste possible.
     "friends" => {
       "default_visibility" => "private",
+      "discoverable" => false,
     },
   }.freeze
 
@@ -332,6 +335,32 @@ class User < ApplicationRecord
 
   def friends_with?(other)
     other.present? && other.id != id && Friendship.accepted.between(self, other).present?
+  end
+
+  def friends_discoverable?
+    preferences_with_defaults.dig("friends", "discoverable") == true
+  end
+
+  MIN_FRIEND_SEARCH_LENGTH = 3
+  FRIEND_SEARCH_LIMIT = 8
+
+  # Suggestions d'amis pour une saisie libre (prénom, nom, fragment d'e-mail). Ne
+  # renvoie que les comptes qui ont accepté d'apparaître (`friends.discoverable`),
+  # jamais moi-même ni quelqu'un déjà lié à moi (ami ou demande en cours).
+  # Chaque mot de la saisie doit se retrouver dans le nom OU l'e-mail, dans n'importe
+  # quel ordre (« jaquet antoine » trouve « Antoine Jaquet »).
+  def self.friend_suggestions(query, for_user:)
+    terms = query.to_s.strip.split(/\s+/).first(4)
+    return none if terms.sum(&:length) < MIN_FRIEND_SEARCH_LENGTH
+
+    linked = Friendship.involving(for_user).pluck(:requester_id, :addressee_id).flatten.uniq
+    scope = where("(users.preferences #> '{friends,discoverable}') = 'true'::jsonb")
+              .where.not(id: linked + [for_user.id])
+    terms.each do |term|
+      like = "%#{sanitize_sql_like(term)}%"
+      scope = scope.where("users.display_name ILIKE :q OR users.email ILIKE :q", q: like)
+    end
+    scope.order(:display_name).limit(FRIEND_SEARCH_LIMIT)
   end
 
   # Visibilité par défaut de mes sorties auprès de mes amis.

@@ -958,6 +958,13 @@ function placePreviewMarker(coords: [number, number]) {
             </select>
             <div class="form-text">{{ t('friends.default_visibility_hint') }}</div>
           </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input id="friends-discoverable" v-model="prefs.friends.discoverable" class="form-check-input" type="checkbox" role="switch">
+              <label for="friends-discoverable" class="form-check-label">{{ t('friends.discoverable') }}</label>
+            </div>
+            <div class="form-text">{{ t('friends.discoverable_hint') }}</div>
+          </div>
         </div>
         <hr class="my-3">
         <div class="form-check form-switch mb-2">

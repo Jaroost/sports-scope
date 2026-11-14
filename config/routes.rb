@@ -188,6 +188,7 @@ Rails.application.routes.draw do
   get "/api/friends", to: "friends#index"
   post "/api/friends", to: "friends#create"
   get "/api/friends/feed", to: "friends#feed"
+  get "/api/friends/search", to: "friends#search"
   patch "/api/friends/:id", to: "friends#update", constraints: { id: /\d+/ }
   delete "/api/friends/:id", to: "friends#destroy", constraints: { id: /\d+/ }
   get "/api/friends/:id/routes/:route_id", to: "friends#route", constraints: { id: /\d+/, route_id: /\d+/ }

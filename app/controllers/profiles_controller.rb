@@ -185,6 +185,7 @@ class ProfilesController < ApplicationController
       "friends" => {
         "default_visibility" => allowed((incoming[:friends] || {})[:default_visibility], User::FRIEND_VISIBILITIES,
                                         current_user.friends_default_visibility),
+        "discoverable" => to_bool((incoming[:friends] || {})[:discoverable], current_user.friends_discoverable?),
       },
     }
   end

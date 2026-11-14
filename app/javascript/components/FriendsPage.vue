@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
 
 interface Friend { id: number; user_id: number; display_name: string; since?: string | null }
+interface Suggestion { user_id: number; display_name: string }
 interface FeedItem {
   kind: 'activity' | 'route'
   source?: 'strava' | 'imported'
@@ -32,6 +33,10 @@ const loading = ref(true)
 const error = ref('')
 const requestSent = ref(false)
 const copied = ref(false)
+const suggestions = ref<Suggestion[]>([])
+const searched = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let searchSeq = 0
 
 const headers = () => ({ 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrfToken() })
 
@@ -61,6 +66,34 @@ async function send(): Promise<void> {
   const res = await fetch('/api/friends', { method: 'POST', headers: headers(), body: JSON.stringify({ email: email.value }) })
   if (!res.ok) { error.value = t('friends.error'); return }
   email.value = ''
+  requestSent.value = true
+  await load()
+}
+
+watch(email, (q) => {
+  clearTimeout(searchTimer)
+  const value = q.trim()
+  if (value.length < 3 || value.includes('@') && /^\S+@\S+\.\S+$/.test(value)) {
+    suggestions.value = []
+    searched.value = false
+    return
+  }
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq
+    try {
+      const res = await fetch(`/api/friends/search?q=${encodeURIComponent(value)}`, { headers: { Accept: 'application/json' } })
+      if (!res.ok || seq !== searchSeq) return
+      suggestions.value = (await res.json()).users
+      searched.value = true
+    } catch { /* suggestions facultatives */ }
+  }, 250)
+})
+
+async function addSuggestion(s: Suggestion): Promise<void> {
+  const res = await fetch('/api/friends', { method: 'POST', headers: headers(), body: JSON.stringify({ user_id: s.user_id }) })
+  if (!res.ok) { error.value = t('friends.error'); return }
+  email.value = ''
+  suggestions.value = []
   requestSent.value = true
   await load()
 }
@@ -110,9 +143,17 @@ onMounted(load)
         <section class="mb-4">
           <h2 class="h5">{{ t('friends.add_title') }}</h2>
           <form class="input-group mb-2" @submit.prevent="send">
-            <input v-model="email" type="email" class="form-control" :placeholder="t('friends.email_placeholder')" />
+            <input v-model="email" type="text" autocomplete="off" class="form-control" :placeholder="t('friends.search_placeholder')" />
             <button class="btn btn-primary" type="submit">{{ t('friends.send_request') }}</button>
           </form>
+          <ul v-if="suggestions.length" class="list-group mb-2">
+            <li v-for="s in suggestions" :key="s.user_id" class="list-group-item d-flex align-items-center justify-content-between">
+              <span>{{ s.display_name }}</span>
+              <button class="btn btn-sm btn-outline-primary" type="button" @click="addSuggestion(s)">{{ t('friends.add') }}</button>
+            </li>
+          </ul>
+          <p v-else-if="searched" class="small text-muted">{{ t('friends.search_none') }}</p>
+          <p v-else class="small text-muted">{{ t('friends.search_hint') }}</p>
           <p v-if="requestSent" class="small text-muted">{{ t('friends.request_sent_hint') }}</p>
           <label class="form-label small fw-semibold mb-1" for="invite-link">{{ t('friends.invite_link') }}</label>
           <div class="input-group input-group-sm">

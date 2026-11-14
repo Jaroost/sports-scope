@@ -83,6 +83,7 @@ Rails.application.routes.draw do
 
   # User preferences profile (JSON consumed by Vue)
   patch "/api/profile/preferences", to: "profiles#update"
+  patch "/api/profile/friends", to: "profiles#update_friends"
   patch "/api/profile/activity_stats", to: "profiles#update_activity_stats"
 
   # OmniAuth (POST entry points, GET callbacks)

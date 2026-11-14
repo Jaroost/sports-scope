@@ -2,6 +2,7 @@
 import { ref, watch, onMounted } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
+import FriendsSettingsDialog, { type FriendsSettings } from './FriendsSettingsDialog.vue'
 
 interface Friend { id: number; user_id: number; display_name: string; since?: string | null }
 interface Suggestion { user_id: number; display_name: string }
@@ -33,6 +34,8 @@ const loading = ref(true)
 const error = ref('')
 const requestSent = ref(false)
 const copied = ref(false)
+const settings = ref<FriendsSettings>({ default_visibility: 'private', discoverable: false })
+const showSettings = ref(false)
 const suggestions = ref<Suggestion[]>([])
 const searched = ref(false)
 let searchTimer: ReturnType<typeof setTimeout> | undefined
@@ -52,6 +55,7 @@ async function load(): Promise<void> {
     incoming.value = data.incoming
     outgoing.value = data.outgoing
     inviteUrl.value = data.invite_url
+    if (data.settings) settings.value = data.settings
     feed.value = (await feedRes.json()).items
     error.value = ''
   } catch {
@@ -135,7 +139,13 @@ onMounted(load)
 
 <template>
   <div class="container py-3">
-    <h1 class="h3 mb-3">{{ t('friends.title') }}</h1>
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h1 class="h3 mb-0">{{ t('friends.title') }}</h1>
+      <button class="btn btn-sm btn-outline-secondary" type="button" @click="showSettings = true">
+        <i class="fa-solid fa-user-shield me-1"></i>{{ t('friends.settings_button') }}
+      </button>
+    </div>
+    <FriendsSettingsDialog v-if="showSettings" :settings="settings" @close="showSettings = false" @saved="settings = $event" />
     <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
     <div class="row g-4">

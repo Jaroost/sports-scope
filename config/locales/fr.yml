@@ -428,6 +428,9 @@ fr:
     other_parts: "Usure des composants"
   parts:
     loading: "Chargement…"
+    settings_button: "Confidentialité"
+    settings_title: "Confidentialité et recherche"
+    save: "Enregistrer"
     add: "Ajouter"
     add_confirm: "Ajouter"
     cancel: "Annuler"
@@ -1917,6 +1920,13 @@ fr:
       preview_help: "Aperçu en direct centré sur votre position actuelle."
       locating: "Localisation en cours…"
       location_error: "Position indisponible — aperçu centré sur la Suisse."
+    tabs:
+      general: "Général"
+      map: "Carte et lieux"
+      sport: "Sport et navigation"
+      privacy: "Confidentialité"
+    privacy:
+      title: "Confidentialité"
     display:
       title: "Préférences d'affichage"
       default_sport: "Type d'itinéraire par défaut"

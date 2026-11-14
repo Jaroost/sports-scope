@@ -22,6 +22,8 @@ class FriendsController < ApplicationController
       incoming: pending.select { |f| f.addressee_id == current_user.id }.map { |f| friend_json(f) },
       outgoing: pending.select { |f| f.requester_id == current_user.id }.map { |f| friend_json(f) },
       invite_url: friend_invite_url(token: current_user.friend_invite_token),
+      settings: { default_visibility: current_user.friends_default_visibility,
+                  discoverable: current_user.friends_discoverable? },
     }
   end
 

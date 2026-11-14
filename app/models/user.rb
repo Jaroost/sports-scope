@@ -224,13 +224,24 @@ class User < ApplicationRecord
     "activity_stats" => {
       "sections" => ACTIVITY_STATS_SECTION_KEYS.map { |key| { "key" => key, "visible" => true } },
     },
+    # Amis : visibilité par défaut des sorties (`private` | `friends`). Une sortie peut
+    # surcharger ce défaut dans les deux sens (`friends_visible`, cf. FriendVisibility).
+    # Privé par défaut : rien n'est vu sans décision explicite.
+    # `discoverable` : n'apparaît dans la recherche d'amis (nom / e-mail partiel) que si
+    # vrai. Faux par défaut ; l'ajout par adresse e-mail exacte reste possible.
+    "friends" => {
+      "default_visibility" => "private",
+      "discoverable" => false,
+    },
   }.freeze
+
+  FRIEND_VISIBILITIES = %w[private friends].freeze
 
   # Menus de navigation configurables, dans leur ordre par défaut. Source de vérité des
   # clés autorisées : la définition (chemin, icône, libellé) vit côté vue (NavbarHelper)
   # et côté éditeur (UserProfile.vue). Ajouter un menu : une clé ici + l'entrée
   # correspondante dans NavbarHelper::NAVBAR_ITEM_DEFS et UserProfile.vue.
-  NAVBAR_ITEM_KEYS = %w[dashboard performance routes new_route free_navigate chains training_programs].freeze
+  NAVBAR_ITEM_KEYS = %w[dashboard performance routes new_route free_navigate chains training_programs friends].freeze
 
   # Assainit/normalise un tableau d'items de navbar reçu (front ou base) : ne garde que
   # les clés connues, dédoublonnées, dans l'ordre reçu, en coercant `visible` et `home`
@@ -303,8 +314,60 @@ class User < ApplicationRecord
   # Noms donnés aux segments découverts automatiquement (cf. NamedSegment).
   has_many :named_segments, dependent: :destroy
 
+  # Amitié : une ligne `Friendship` par paire, dans un sens ou dans l'autre.
+  has_many :sent_friendships, class_name: "Friendship", foreign_key: :requester_id, dependent: :destroy, inverse_of: :requester
+  has_many :received_friendships, class_name: "Friendship", foreign_key: :addressee_id, dependent: :destroy, inverse_of: :addressee
+  # Itinéraires d'autrui partagés explicitement avec moi (cf. RouteShare).
+  has_many :route_shares, dependent: :destroy
+  has_secure_token :friend_invite_token
+
   validates :keycloak_uid, presence: true, uniqueness: true
   validates :email, presence: true, uniqueness: true
+
+  # Ids des amis (amitiés acceptées uniquement).
+  def friend_ids
+    Friendship.accepted.involving(self).pluck(:requester_id, :addressee_id).flatten.uniq - [id]
+  end
+
+  def friends
+    User.where(id: friend_ids)
+  end
+
+  def friends_with?(other)
+    other.present? && other.id != id && Friendship.accepted.between(self, other).present?
+  end
+
+  def friends_discoverable?
+    preferences_with_defaults.dig("friends", "discoverable") == true
+  end
+
+  MIN_FRIEND_SEARCH_LENGTH = 3
+  FRIEND_SEARCH_LIMIT = 8
+
+  # Suggestions d'amis pour une saisie libre (prénom, nom, fragment d'e-mail). Ne
+  # renvoie que les comptes qui ont accepté d'apparaître (`friends.discoverable`),
+  # jamais moi-même ni quelqu'un déjà lié à moi (ami ou demande en cours).
+  # Chaque mot de la saisie doit se retrouver dans le nom OU l'e-mail, dans n'importe
+  # quel ordre (« jaquet antoine » trouve « Antoine Jaquet »).
+  def self.friend_suggestions(query, for_user:)
+    terms = query.to_s.strip.split(/\s+/).first(4)
+    return none if terms.sum(&:length) < MIN_FRIEND_SEARCH_LENGTH
+
+    linked = Friendship.involving(for_user).pluck(:requester_id, :addressee_id).flatten.uniq
+    scope = where("(users.preferences #> '{friends,discoverable}') = 'true'::jsonb")
+              .where.not(id: linked + [for_user.id])
+    terms.each do |term|
+      like = "%#{sanitize_sql_like(term)}%"
+      scope = scope.where("users.display_name ILIKE :q OR users.email ILIKE :q", q: like)
+    end
+    scope.order(:display_name).limit(FRIEND_SEARCH_LIMIT)
+  end
+
+  # Visibilité par défaut de mes sorties auprès de mes amis.
+  def friends_default_visibility
+    value = preferences_with_defaults.dig("friends", "default_visibility")
+    FRIEND_VISIBILITIES.include?(value) ? value : "private"
+  end
 
   def self.from_keycloak(auth)
     user = find_or_initialize_by(keycloak_uid: auth.uid)

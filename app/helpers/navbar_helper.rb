@@ -15,6 +15,7 @@ module NavbarHelper
     "free_navigate" => { icon: "fa-location-crosshairs", label: "nav.free_navigate", path: :free_navigate_path, params: { fresh: 1 } },
     "chains" => { icon: "fa-link", label: "nav.chains", path: :chains_path },
     "training_programs" => { icon: "fa-stopwatch", label: "nav.training_programs", path: :training_programs_index_path },
+    "friends" => { icon: "fa-user-group", label: "nav.friends", path: :friends_path },
   }.freeze
 
   # Menus visibles dans la barre de navigation, dans l'ordre choisi par l'utilisateur.

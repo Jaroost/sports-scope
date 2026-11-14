@@ -1,13 +1,15 @@
 <% content_for :title, t("strava.activity_summary") %>
 
 <div class="mb-3">
-  <%= link_to dashboard_path, class: "btn btn-link p-0 d-inline-flex align-items-center gap-1" do %>
+  <%= link_to (@friend_id ? friends_path : dashboard_path), class: "btn btn-link p-0 d-inline-flex align-items-center gap-1" do %>
     <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-    <span><%= t("strava.back_to_dashboard") %></span>
+    <span><%= @friend_id ? t("friends.title") : t("strava.back_to_dashboard") %></span>
   <% end %>
 </div>
 
-<% if @source == "imported" %>
+<% if @friend_id %>
+  <div data-vue-component="ActivityDetail" data-vue-props='<%= { activityId: @activity_id, source: @source, friendId: @friend_id }.to_json %>'></div>
+<% elsif @source == "imported" %>
   <div data-vue-component="ActivityDetail" data-vue-props='<%= { activityId: @activity_id, source: "imported" }.to_json %>'></div>
 <% elsif @strava_linked %>
   <div data-vue-component="ActivityDetail" data-vue-props='<%= { activityId: @activity_id, source: "strava" }.to_json %>'></div>

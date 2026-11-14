@@ -13,6 +13,7 @@ import { useStickyListHeader } from '../composables/useStickyListHeader'
 import { MAP_STYLES } from '../mapStyles'
 import NewRouteModal from './NewRouteModal.vue'
 import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
+import ShareWithFriendsDialog from './ShareWithFriendsDialog.vue'
 import CompanionNavigateModal from './CompanionNavigateModal.vue'
 import RoutesOverviewMap from './RoutesOverviewMap.vue'
 import { csrfToken } from '../csrf'
@@ -472,6 +473,9 @@ async function removeRoute(route) {
     error.value = e.message
   }
 }
+
+// Itinéraire dont on règle le partage avec les amis (null = dialogue fermé).
+const friendShareRoute = ref<{ id: number; name: string } | null>(null)
 
 async function duplicateRoute(route) {
   const proposed = `${route.name} (copie)`.slice(0, 80)
@@ -1260,6 +1264,12 @@ onMounted(() => {
                         <span>{{ t('routes.duplicate') }}</span>
                       </button>
                     </li>
+                    <li>
+                      <button type="button" class="dropdown-item d-flex align-items-center gap-2" @click="friendShareRoute = { id: r.id, name: r.name }">
+                        <i class="fa-solid fa-user-group" aria-hidden="true"></i>
+                        <span>{{ t('friends.share_with') }}</span>
+                      </button>
+                    </li>
                   </ul>
                 </div>
 
@@ -1318,6 +1328,13 @@ onMounted(() => {
       @close="shareStyleRoute = null"
       @saved="onShareMapStyleSaved"
       @error="error = $event"
+    />
+
+    <ShareWithFriendsDialog
+      v-if="friendShareRoute"
+      :route-id="friendShareRoute.id"
+      :route-name="friendShareRoute.name"
+      @close="friendShareRoute = null"
     />
 
     <CompanionNavigateModal ref="navigateModal" />

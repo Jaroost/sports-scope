@@ -28,6 +28,10 @@ class PagesController < ApplicationController
     require_login!
   end
 
+  def friends
+    require_login!
+  end
+
   def training_program_builder
     require_login!
     @training_program_id = params[:id]

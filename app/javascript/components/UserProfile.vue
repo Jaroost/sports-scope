@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, nextTick, reactive, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { MAP_STYLES, MAP_STYLE_GROUPS, MAP_STYLE_GROUP_FLAG, mapStyleFor } from '../mapStyles'
 import { POI_CATEGORIES } from '../poiCategories'
@@ -145,6 +145,22 @@ const PER_SPORT_SECTIONS = ['sport', 'map', 'climb', 'navigation']
 
 const showSportPicker = computed(() => PER_SPORT_SECTIONS.some(showSection))
 
+// ─── Onglets ────────────────────────────────────────────────────────────────
+// Chaque carte appartient à un onglet. Tout reste monté (v-show) : les réglages non
+// affichés sont quand même enregistrés, et l'aperçu MapLibre n'est pas recréé.
+const TABS = [
+  { key: 'general', icon: 'fa-sliders', sections: ['navbar', 'display'] },
+  { key: 'map', icon: 'fa-map', sections: ['poi', 'map', 'search'] },
+  { key: 'sport', icon: 'fa-person-biking', sections: ['navigation', 'climb', 'sport'] },
+  { key: 'privacy', icon: 'fa-user-shield', sections: ['privacy'] },
+]
+// Un onglet n'existe que si au moins une de ses cartes est affichée (ProfileDialog
+// n'en ouvre parfois qu'un sous-ensemble) ; un seul onglet ⇒ pas de barre.
+const visibleTabs = computed(() => TABS.filter((tab) => tab.sections.some(showSection)))
+const activeTab = ref(TABS[0].key)
+const currentTab = computed(() => (visibleTabs.value.some((tab) => tab.key === activeTab.value) ? activeTab.value : visibleTabs.value[0]?.key))
+const inTab = (section: string): boolean => TABS.find((tab) => tab.sections.includes(section))?.key === currentTab.value
+
 // ─── Barre de navigation : ordre et visibilité des menus ────────────────────
 // Liste réordonnable par glisser-déposer ; chaque menu peut être masqué via son
 // interrupteur. Les icônes reflètent celles de la navbar (cf. NavbarHelper) et les
@@ -157,6 +173,7 @@ const NAVBAR_ICONS: Record<string, string> = {
   free_navigate: 'fa-location-crosshairs',
   chains: 'fa-link',
   training_programs: 'fa-stopwatch',
+  friends: 'fa-user-group',
 }
 
 function navIcon(key: string): string {
@@ -367,6 +384,8 @@ let previewMaplibre: any = null
 let previewCenter: [number, number] = SWITZERLAND_CENTER
 
 onMounted(() => { void initPreview() })
+// Le conteneur de l'aperçu est en display:none tant que l'onglet Sport est fermé.
+watch(currentTab, (tab) => { if (tab === 'sport') void nextTick(() => previewMap?.resize()) })
 
 onBeforeUnmount(() => {
   if (previewMap) { previewMap.remove(); previewMap = null }
@@ -444,8 +463,23 @@ function placePreviewMarker(coords: [number, number]) {
 
 <template>
   <form class="user-profile" @submit.prevent="save" @pointerdown="onRangePointerDown" @pointercancel="onRangePointerCancel">
+    <ul v-if="visibleTabs.length > 1" class="nav nav-tabs profile-tabs mb-3" role="tablist">
+      <li v-for="tab in visibleTabs" :key="tab.key" class="nav-item" role="presentation">
+        <button
+          type="button"
+          class="nav-link"
+          :class="{ active: currentTab === tab.key }"
+          role="tab"
+          :aria-selected="currentTab === tab.key"
+          @click="activeTab = tab.key"
+        >
+          <i :class="`fa-solid ${tab.icon} me-1`" aria-hidden="true"></i>{{ t(`profile.tabs.${tab.key}`) }}
+        </button>
+      </li>
+    </ul>
+
     <!-- Sport dont on édite les réglages : pilote toutes les sections qui en dépendent -->
-    <section v-if="showSportPicker" class="card mb-3 shadow-sm sport-picker">
+    <section v-if="showSportPicker" v-show="currentTab === 'sport'" class="card mb-3 shadow-sm sport-picker">
       <div class="card-body py-2">
         <div class="d-flex flex-wrap align-items-center gap-2">
           <span class="text-muted small fw-semibold me-1">{{ t('profile.sport.picker') }}</span>
@@ -468,7 +502,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Barre de navigation : ordre et visibilité des menus -->
-    <section v-if="showSection('navbar')" class="card mb-3 shadow-sm">
+    <section v-if="showSection('navbar')" v-show="inTab('navbar')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-bars text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.navbar.title') }}</h2>
@@ -570,7 +604,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Points d'intérêt -->
-    <section v-if="showSection('poi')" class="card mb-3 shadow-sm">
+    <section v-if="showSection('poi')" v-show="inTab('poi')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-location-dot text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.poi.title') }}</h2>
@@ -600,7 +634,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Type de carte -->
-    <section v-if="showSection('map')" class="card mb-3 shadow-sm">
+    <section v-if="showSection('map')" v-show="inTab('map')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-map text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.map.title') }}</h2>
@@ -659,7 +693,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Recherche de lieux : pays privilégiés -->
-    <section v-if="showSection('search')" class="card mb-3 shadow-sm">
+    <section v-if="showSection('search')" v-show="inTab('search')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-magnifying-glass text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.search.title') }}</h2>
@@ -716,7 +750,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Navigation (mode GPS) -->
-    <section v-if="showSection('navigation')" class="card mb-3 shadow-sm">
+    <section v-if="showSection('navigation')" v-show="inTab('navigation')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-location-arrow text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.navigation.title') }}</h2>
@@ -936,7 +970,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Préférences d'affichage -->
-    <section v-if="showSection('display')" class="card mb-3 shadow-sm">
+    <section v-if="showSection('display')" v-show="inTab('display')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-eye text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.display.title') }}</h2>
@@ -962,8 +996,31 @@ function placePreviewMarker(coords: [number, number]) {
       </div>
     </section>
 
+    <!-- Confidentialité -->
+    <section v-if="showSection('privacy')" v-show="inTab('privacy')" class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-user-shield text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.privacy.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label for="friends-visibility" class="form-label">{{ t('friends.default_visibility') }}</label>
+          <select id="friends-visibility" v-model="prefs.friends.default_visibility" class="form-select">
+            <option value="private">{{ t('friends.default_visibility_private') }}</option>
+            <option value="friends">{{ t('friends.default_visibility_friends') }}</option>
+          </select>
+          <div class="form-text">{{ t('friends.default_visibility_hint') }}</div>
+        </div>
+        <div class="form-check form-switch">
+          <input id="friends-discoverable" v-model="prefs.friends.discoverable" class="form-check-input" type="checkbox" role="switch">
+          <label for="friends-discoverable" class="form-check-label">{{ t('friends.discoverable') }}</label>
+        </div>
+        <div class="form-text">{{ t('friends.discoverable_hint') }}</div>
+      </div>
+    </section>
+
     <!-- Détection de cols -->
-    <section v-if="showSection('climb')" class="card mb-3 shadow-sm">
+    <section v-if="showSection('climb')" v-show="inTab('climb')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i class="fa-solid fa-mountain text-primary" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.climb.title') }}</h2>
@@ -1011,7 +1068,7 @@ function placePreviewMarker(coords: [number, number]) {
     </section>
 
     <!-- Réglages propres au sport sélectionné -->
-    <section v-if="showSection('sport')" class="card mb-3 shadow-sm">
+    <section v-if="showSection('sport')" v-show="inTab('sport')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
         <i :class="`fa-solid ${sportIcon(editedSport)} text-primary`" aria-hidden="true"></i>
         <h2 class="h5 mb-0">{{ t('profile.sport.title') }}</h2>
@@ -1135,6 +1192,13 @@ function placePreviewMarker(coords: [number, number]) {
 </template>
 
 <style scoped>
+.profile-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.profile-tabs .nav-link {
+  white-space: nowrap;
+}
 .user-profile {
 
 }

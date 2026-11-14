@@ -109,6 +109,15 @@ class ProfilesController < ApplicationController
     render json: { default_style: current_user.preferences_with_defaults.dig("navigation", "default_style") }
   end
 
+  # PATCH /api/profile/friends — réglages d'amis (visibilité par défaut, recherche), en
+  # fusion comme `update_athlete` : la page Amis n'a pas l'objet complet de préférences.
+  def update_friends
+    prefs = current_user.preferences.is_a?(Hash) ? current_user.preferences.deep_dup : {}
+    prefs["friends"] = sanitize_friends(params[:friends], current_user)
+    current_user.update!(preferences: prefs)
+    render json: { friends: current_user.preferences_with_defaults["friends"] }
+  end
+
   # PATCH /api/profile/activity_stats — ordre et visibilité des sections de l'onglet
   # Statistiques d'une activité. En fusion, comme `update_athlete` : l'éditeur de
   # disposition n'a pas l'objet complet de préférences sous la main.
@@ -182,6 +191,16 @@ class ProfilesController < ApplicationController
       # Même contrat de préservation : le formulaire de profil ne connaît pas la
       # disposition de l'onglet Statistiques, qui se compose sur la page d'activité.
       "activity_stats" => sanitize_activity_stats(incoming[:activity_stats], current_user),
+      "friends" => sanitize_friends(incoming[:friends], current_user),
+    }
+  end
+
+  def sanitize_friends(raw, user)
+    raw = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : (raw || {})
+    raw = raw.with_indifferent_access
+    {
+      "default_visibility" => allowed(raw[:default_visibility], User::FRIEND_VISIBILITIES, user.friends_default_visibility),
+      "discoverable" => to_bool(raw[:discoverable], user.friends_discoverable?),
     }
   end
 

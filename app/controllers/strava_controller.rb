@@ -75,7 +75,7 @@ class StravaController < ApplicationController
   def ignore
     activity = current_user.strava_activities.find_by!(strava_id: params[:id])
     activity.update!(ignored: ActiveModel::Type::Boolean.new.cast(params[:ignored]) ? true : false)
-    render json: { id: activity.strava_id, ignored: activity.ignored }
+    render json: { id: activity.strava_id.to_s, ignored: activity.ignored }
   end
 
   # PATCH /strava/activities/:id/stream_exclusions { channels: [...], ranges: [...] } —
@@ -516,7 +516,7 @@ class StravaController < ApplicationController
     return nil unless poly
 
     {
-      'id' => a.strava_id,
+      'id' => a.strava_id.to_s,
       'name' => a.name,
       'type' => a.activity_type,
       'distance' => a.distance_m,
@@ -529,6 +529,10 @@ class StravaController < ApplicationController
   def summary_json(a, tss: nil)
     raw = a.raw.is_a?(Hash) ? a.raw : {}
     base = raw.present? ? raw : built_summary(a)
+    # L'id Strava passe en 64 bits (après le 1er juin 2027) : un nombre JSON serait
+    # arrondi par `JSON.parse` au-delà de 2^53. On sert une chaîne au front, y compris
+    # quand `raw` porte encore l'ancien entier.
+    base = base.merge('id' => a.strava_id.to_s)
     # Aperçu SVG du tracé (segments pré-calculés, colorés par le dénivelé) pour
     # la vignette de la liste — mêmes données que la liste des itinéraires.
     base = base.merge('preview_segments' => a.preview_segments)
@@ -548,6 +552,8 @@ class StravaController < ApplicationController
   def with_activity_tss(payload, source, external_id)
     record = current_user.strava_activities.find_by(strava_id: external_id)
     extra = {}
+    # Même raison que `summary_json` : l'id Strava voyage en chaîne (voir là-bas).
+    extra['id'] = external_id.to_s if source == 'strava'
     # Distance sur de nouvelles routes (`ExploredDistance`) : colonne, hors cache.
     extra['new_distance_m'] = record.new_distance_m if record&.new_distance_m
     # Visibilité auprès des amis (null = défaut du compte) : colonne, hors cache.
@@ -585,7 +591,7 @@ class StravaController < ApplicationController
 
   def built_summary(a)
     {
-      'id' => a.strava_id,
+      'id' => a.strava_id.to_s,
       'name' => a.name,
       'type' => a.activity_type,
       'sport_type' => a.activity_type,

@@ -193,7 +193,7 @@ class ImportedActivitiesController < ApplicationController
       stream_exclusions: a.stream_exclusions,
       strava_upload_status: a.strava_upload_status,
       strava_upload_error: a.strava_upload_error,
-      strava_activity_id: a.strava_activity_id,
+      strava_activity_id: a.strava_activity_id&.to_s, # chaîne : id Strava 64 bits, cf. StravaController#summary_json
       strava_can_upload: current_user.strava_can_upload?,
       strava_linked: current_user.strava_linked?
     }.merge(a.excluded_summary_overrides).tap { |h| h[:laps] = a.laps if with_laps }

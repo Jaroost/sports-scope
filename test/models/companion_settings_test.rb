@@ -519,6 +519,17 @@ class CompanionSettingsTest < ActiveSupport::TestCase
     assert_equal %w[gauge distance distance], blocks.map { |block| block["mode"] }
   end
 
+  test "brake_level est un composant posable, avec son mode" do
+    page = { "kind" => "list", "title" => "Frein", "blocks" => [
+      { "kind" => "brake_level", "mode" => "compact" },
+      { "kind" => "brake_level", "mode" => "renversée" }
+    ] }
+    blocks = only([ preset("pages" => [ page ]) ])["pages"].first["blocks"]
+
+    assert_equal %w[brake_level brake_level], blocks.map { |block| block["kind"] }
+    assert_equal %w[compact full], blocks.map { |block| block["mode"] }
+  end
+
   # ── outils ──────────────────────────────────────────────────────────────────
 
   def list_page(extra = {})

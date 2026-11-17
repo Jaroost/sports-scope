@@ -111,6 +111,12 @@ module CompanionSettings
     # profil, l'appli suit l'état réel. Rien à sanitizer au-delà du mode, même
     # raison que `sleep`/`leave_ride` : un bouton, pas une mesure.
     "torch" => %w[full compact],
+    # Affiche et règle à la main le niveau du frein d'un vélo d'appartement qui
+    # ne le publie pas (pas de FTMS) — il sert à corriger la puissance selon la
+    # cadence côté appli (`TrainerCalibrationStore`). Rien à sanitizer au-delà
+    # du mode : un niveau n'est pas une donnée du profil, l'appli le garde par
+    # appareil. Même raison que `torch` : un bouton, pas une mesure.
+    "brake_level" => %w[full compact],
     # Fait sonner fort le téléphone (son + vibration), pour le retrouver dans
     # un sac ou une poche — l'appli choisit un flux audio d'alarme plutôt que
     # média, pour traverser le mode silencieux comme le ferait un réveil. Le

@@ -1723,6 +1723,7 @@ export interface BlockShape {
   sleepCompact: boolean
   leaveRideCompact: boolean
   torchCompact: boolean
+  brakeLevelCompact: boolean
   bellCompact: boolean
   navFull: boolean
   radarGauge: boolean
@@ -1767,6 +1768,7 @@ export function blockShape(block: Block): BlockShape {
     sleepCompact: block.kind === 'sleep' && block.mode === 'compact',
     leaveRideCompact: block.kind === 'leave_ride' && block.mode === 'compact',
     torchCompact: block.kind === 'torch' && block.mode === 'compact',
+    brakeLevelCompact: block.kind === 'brake_level' && block.mode === 'compact',
     bellCompact: block.kind === 'bell' && block.mode === 'compact',
     navFull: block.kind === 'nav_state' && block.mode !== 'compact',
     radarGauge: block.kind === 'radar' && block.mode === 'gauge',

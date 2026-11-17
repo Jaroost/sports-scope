@@ -1159,6 +1159,26 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
       </div>
     </template>
 
+    <!-- Niveau du frein --------------------------------------------------------
+         Un vélo d'appartement sans FTMS ne publie pas son niveau : l'appli le
+         fait régler à la main (− / +). L'aperçu montre un niveau d'exemple. -->
+    <template v-else-if="block.kind === 'brake_level'">
+      <div v-if="shape.brakeLevelCompact" class="cbp-card cbp-center">
+        <span class="cbp-action-compact" :style="overrideStyle">
+          <i class="fa-solid fa-minus" aria-hidden="true"></i>
+          3
+          <i class="fa-solid fa-plus" aria-hidden="true"></i>
+        </span>
+      </div>
+      <div v-else class="cbp-center cbp-plain">
+        <span class="cbp-action-button" :style="overrideStyle">
+          <i class="fa-solid fa-minus" aria-hidden="true"></i>
+          Frein 3
+          <i class="fa-solid fa-plus" aria-hidden="true"></i>
+        </span>
+      </div>
+    </template>
+
     <!-- Sonnette --------------------------------------------------------------
          Fait sonner fort le téléphone (son + vibration), pour le retrouver
          dans un sac ou une poche — même famille de bouton que « Mettre en

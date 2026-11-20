@@ -2011,6 +2011,7 @@ en:
       new_preset: "New profile"
       duplicate: "Duplicate"
       move_to_preset: "Move to…"
+      copy_to_preset: "Copy to…"
       pages: "Pages"
       pages_help: "In the order you swipe through them. The map is optional and goes wherever you want — an indoor profile does without it, and the app then opens no web page at all."
       behind_menu: "Menu"

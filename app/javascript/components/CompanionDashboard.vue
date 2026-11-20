@@ -1196,6 +1196,15 @@ function duplicateBand(index: number) {
   preset.value.bands.splice(index + 1, 0, copy)
 }
 
+// Déplace un jeu de bandeau vers un autre profil. Le profil d'origine garde
+// toujours au moins un bandeau (même règle que le bouton corbeille).
+function moveBandToPreset(index: number, target: number) {
+  if (Number.isNaN(target) || target === current.value || !presets[target]) return
+  if (preset.value.bands.length <= 1) return
+  const [band] = preset.value.bands.splice(index, 1)
+  presets[target].bands.push(band)
+}
+
 function setBandMetric(band: Band, index: number, value: BandSlotValue) {
   // Écrit en place plutôt que de retirer la case : un `splice` décalerait
   // tout ce qui suit vers la gauche, et une case vidée au milieu se
@@ -1292,6 +1301,14 @@ function moveNotchSet(index: number, delta: number) {
   if (target < 0 || target >= notch.length) return
   const [set] = notch.splice(index, 1)
   notch.splice(target, 0, set)
+}
+
+function moveNotchSetToPreset(index: number, target: number) {
+  const notch = preset.value.notch
+  if (!notch || Number.isNaN(target) || target === current.value || !presets[target]) return
+  const [set] = notch.splice(index, 1)
+  if (notch.length === 0) preset.value.notch = undefined
+  ;(presets[target].notch ||= []).push(set)
 }
 
 function duplicateNotchSet(index: number) {
@@ -1494,6 +1511,25 @@ function duplicateButtonSet(index: number) {
   sets.splice(index + 1, 0, copy)
   preset.value.button_sets = sets
   activeSetIndex.value = index + 1
+}
+
+// Envoie le set vers un autre profil, en le copiant (`move: false`) ou en le
+// retirant de celui-ci. Le profil d'arrivée sans `button_sets` voit ses touches
+// actuelles devenir son premier set (comme `addButtonSet`), pour ne rien
+// perdre. Sans `key` : le serveur en fabrique une dans le profil d'arrivée.
+function sendButtonSetToPreset(index: number, target: number, move: boolean) {
+  const source = buttonSets.value[index]
+  const dest = presets[target]
+  if (!source || !dest || Number.isNaN(target) || target === current.value) return
+  const destSets: ButtonSet[] = dest.button_sets?.length ? [...dest.button_sets] : [{
+    name: t('companion.settings.button_set_default_name', { n: 1 }),
+    ...(dest.buttons ? { buttons: dest.buttons } : {}),
+  }]
+  if (destSets.length >= maxButtonSets.value) return
+  const { key: _key, ...rest } = structuredClone(toRaw(source))
+  destSets.push(rest as ButtonSet)
+  dest.button_sets = destSets
+  if (move) removeButtonSet(index)
 }
 
 function removeButtonSet(index: number) {
@@ -2483,6 +2519,15 @@ async function save() {
                   @click="duplicateNotchSet(index)">
             <i class="fa-regular fa-copy" aria-hidden="true"></i>
           </button>
+          <select v-if="presets.length > 1" class="form-select form-select-sm w-auto"
+                  :title="t('companion.settings.move_to_preset')"
+                  :aria-label="t('companion.settings.move_to_preset')"
+                  @change="moveNotchSetToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+            <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
+            <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
+              {{ other.name }}
+            </option>
+          </select>
           <button class="btn btn-sm btn-link text-danger p-1" type="button" @click="removeNotchSet(index)">
             <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
           </button>
@@ -2590,6 +2635,15 @@ async function save() {
                   @click="duplicateBand(index)">
             <i class="fa-regular fa-copy" aria-hidden="true"></i>
           </button>
+          <select v-if="presets.length > 1 && preset.bands.length > 1" class="form-select form-select-sm w-auto"
+                  :title="t('companion.settings.move_to_preset')"
+                  :aria-label="t('companion.settings.move_to_preset')"
+                  @change="moveBandToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+            <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
+            <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
+              {{ other.name }}
+            </option>
+          </select>
           <button class="btn btn-sm btn-link text-danger p-1" type="button"
                   :disabled="preset.bands.length <= 1" @click="preset.bands.splice(index, 1)">
             <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
@@ -2704,6 +2758,24 @@ async function save() {
                   <i class="fa-solid fa-trash" aria-hidden="true"></i>
                 </button>
               </div>
+                <select v-if="presets.length > 1" class="form-select form-select-sm w-auto"
+                        :title="t('companion.settings.move_to_preset')"
+                        :aria-label="t('companion.settings.move_to_preset')"
+                        @change="sendButtonSetToPreset(activeSetIndex, Number(($event.target as HTMLSelectElement).value), true); ($event.target as HTMLSelectElement).value = ''">
+                  <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
+                  <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
+                    {{ other.name }}
+                  </option>
+                </select>
+                <select v-if="presets.length > 1" class="form-select form-select-sm w-auto"
+                        :title="t('companion.settings.copy_to_preset')"
+                        :aria-label="t('companion.settings.copy_to_preset')"
+                        @change="sendButtonSetToPreset(activeSetIndex, Number(($event.target as HTMLSelectElement).value), false); ($event.target as HTMLSelectElement).value = ''">
+                  <option value="" selected>{{ t('companion.settings.copy_to_preset') }}</option>
+                  <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
+                    {{ other.name }}
+                  </option>
+                </select>
             </div>
             <label class="form-label small mb-1">{{ t('companion.settings.button_set_icon') }}</label>
             <div class="cdb-icons">

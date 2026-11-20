@@ -663,6 +663,27 @@ function duplicatePage(index: number) {
   selected.value = null
 }
 
+// Déplace une page vers un autre profil. Sans clé, comme une page dupliquée :
+// le serveur en refabrique une dans le profil d'accueil (`page_key`), la garder
+// pourrait la mettre en double avec une page de même clé. La carte ne bouge
+// jamais, et la dernière page du défilement non plus (sinon le profil d'origine
+// n'aurait plus rien à glisser — voir `canHideBehindMenu`).
+function canMovePageToPreset(page: Page): boolean {
+  return presets.length > 1 && page.kind !== 'map'
+    && (page.menu || canHideBehindMenu(page, preset.value.pages))
+}
+
+function movePageToPreset(index: number, target: number) {
+  if (Number.isNaN(target) || target === current.value || !presets[target]) return
+  const page = preset.value.pages[index]
+  if (!canMovePageToPreset(page)) return
+  const [moved] = preset.value.pages.splice(index, 1)
+  delete moved.key
+  presets[target].pages.push(moved)
+  openPage.value = null
+  selected.value = null
+}
+
 function togglePage(index: number) {
   openPage.value = openPage.value === index ? null : index
   selected.value = null
@@ -1805,6 +1826,15 @@ async function save() {
                       @click="duplicatePage(index)">
                 <i class="fa-regular fa-copy" aria-hidden="true"></i>
               </button>
+              <select v-if="canMovePageToPreset(page)" class="form-select form-select-sm w-auto"
+                      :title="t('companion.settings.move_to_preset')"
+                      :aria-label="t('companion.settings.move_to_preset')"
+                      @change="movePageToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+                <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
+                <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
+                  {{ other.name }}
+                </option>
+              </select>
               <button class="btn btn-sm btn-link text-danger p-1" type="button"
                       @click="removePage(index)">
                 <i class="fa-regular fa-trash-can" aria-hidden="true"></i>

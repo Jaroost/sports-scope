@@ -2010,6 +2010,7 @@ fr:
       add_preset: "Ajouter un profil"
       new_preset: "Nouveau profil"
       duplicate: "Dupliquer"
+      move_to_preset: "Déplacer vers…"
       pages: "Pages"
       pages_help: "Dans l'ordre où on les fait défiler. La carte est facultative et se place où l'on veut — un profil de home-trainer s'en passe, et l'appli n'ouvre alors aucune page web."
       behind_menu: "Menu"

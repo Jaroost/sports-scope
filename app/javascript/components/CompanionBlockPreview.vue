@@ -1368,7 +1368,7 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
         <span>Maintenant</span>
         <span>+12h</span>
       </div>
-      <div class="cbp-weather-tiles">
+      <div v-if="block.mode !== 'chart_only'" class="cbp-weather-tiles">
         <div
           v-for="row in weatherCompactRows"
           :key="row.label"

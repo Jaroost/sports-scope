@@ -2489,6 +2489,7 @@ en:
         zone: "Zone fill"
         bar: "Bar and legend"
         bar_only: "Bar only"
+        chart_only: "Chart only"
         legend: "Legend only"
         cards: "As cards"
         list: "As a list"

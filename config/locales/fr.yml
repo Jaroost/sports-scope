@@ -2489,6 +2489,7 @@ fr:
         zone: "Aplat de zone"
         bar: "Barre et légende"
         bar_only: "Barre seule"
+        chart_only: "Graphique seul"
         legend: "Légende seule"
         cards: "En cartes"
         list: "En liste"

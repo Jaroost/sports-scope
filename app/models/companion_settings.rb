@@ -150,12 +150,13 @@ module CompanionSettings
     # Prévisions météo horaires (Open-Meteo, 12h) sur la position GPS du
     # cycliste — température, vent et précipitations sur un même graphique,
     # pour lire la tendance de toute la sortie plutôt qu'une seule averse qui
-    # approche (`precip_forecast`). Même raisonnement que les deux blocs
+    # approche (`precip_forecast`). Deux modes : `full` (graphique + tuiles des
+    # valeurs actuelles, le défaut) et `chart_only` (graphique seul). Même raisonnement que les deux blocs
     # précipitations pour le reste : un seul mode (le graphique, rien à faire
     # varier selon la case), et la donnée vient du GPS et non de la page de
     # navigation — un profil de home-trainer sans capteur GPS affichera
     # simplement l'état vide.
-    "weather_forecast" => [],
+    "weather_forecast" => %w[full chart_only],
     # Les mêmes valeurs météo que `weather_forecast`, en compact : température,
     # vent et pluie tels que maintenant, chacun avec une flèche de tendance à
     # 6h plutôt qu'un graphique — pour la case qui n'a pas la place de l'un

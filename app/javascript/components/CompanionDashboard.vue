@@ -1822,27 +1822,34 @@ async function save() {
                  titre, puis le genre et « rangée derrière le menu » en
                  pastilles discrètes. Sur téléphone, « Menu » n'est plus que
                  son icône : le texte seul doublait l'information. -->
-            <i v-if="page.icon" :class="page.icon" class="text-body-secondary" aria-hidden="true"></i>
-            <span class="flex-grow-1 text-truncate fw-semibold" style="min-width: 5rem">
-              {{ page.title || t('companion.settings.page_kinds.map') }}
+            <span class="cdb-page-icon" aria-hidden="true">
+              <i :class="page.icon || 'fa-regular fa-file'"></i>
             </span>
-            <span v-if="page.menu" class="badge text-bg-light border"
-                  :title="t('companion.settings.behind_menu')">
-              <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">{{ t('companion.settings.behind_menu') }}</span>
-            </span>
-            <span class="badge text-bg-secondary">{{ t(`companion.settings.page_kinds.${page.kind}`) }}</span>
+            <div class="flex-grow-1 min-w-0" style="min-width: 5rem">
+              <div class="text-truncate fw-semibold lh-sm">
+                {{ page.title || t('companion.settings.page_kinds.map') }}
+              </div>
+              <div class="small text-body-secondary text-truncate">
+                {{ t(`companion.settings.page_kinds.${page.kind}`) }}
+                <span v-if="page.menu" :title="t('companion.settings.behind_menu')">
+                  · <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">{{ t('companion.settings.behind_menu') }}</span>
+                </span>
+              </div>
+            </div>
             <!-- Les actions groupées et poussées à droite (`ms-auto`) : sur un
                  écran étroit, le groupe passe entier sous le titre au lieu de
                  déborder l'en-tête bouton par bouton. -->
-            <div class="d-flex align-items-center flex-wrap justify-content-end gap-1 ms-auto cdb-page-actions">
-              <button class="btn btn-sm btn-link p-1" type="button"
-                      :disabled="index === 0" @click="movePage(index, -1)">
-                <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
-              </button>
-              <button class="btn btn-sm btn-link p-1" type="button"
-                      :disabled="index === preset.pages.length - 1" @click="movePage(index, 1)">
-                <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
-              </button>
+            <div class="d-flex align-items-center flex-wrap justify-content-end gap-2 ms-auto cdb-page-actions">
+              <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary" type="button"
+                        :disabled="index === 0" @click="movePage(index, -1)">
+                  <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+                </button>
+                <button class="btn btn-outline-secondary" type="button"
+                        :disabled="index === preset.pages.length - 1" @click="movePage(index, 1)">
+                  <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+                </button>
+              </div>
               <!-- Le bouton s'éteint sur la dernière page du défilement : tout
                    ranger derrière le menu ne laisserait aucune page où l'ouvrir. -->
               <button v-if="page.kind !== 'map'" class="btn btn-sm btn-link p-1"
@@ -2691,7 +2698,7 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.sensors_help') }}</p>
 
         <div class="row g-2 mb-4">
-          <div v-for="sensor in catalog.sensors" :key="sensor" class="col-12 col-sm-6 col-md-4">
+          <div v-for="sensor in catalog.sensors" :key="sensor" class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" :id="`sensor-${sensor}`"
                      :checked="sensorOn(sensor)"
@@ -2830,11 +2837,11 @@ async function save() {
                class="col-12 col-md-6">
             <div class="small text-body-secondary mb-1">{{ label }}</div>
             <div class="row g-1 mb-3">
-              <div v-for="gesture in gestures" :key="gesture" class="col-12 col-sm-4">
-                <label class="form-label small mb-1">
+              <div v-for="gesture in gestures" :key="gesture" class="col-12 d-flex flex-wrap align-items-center gap-2">
+                <label class="form-label small mb-0 cdb-gesture-label">
                   {{ t(`companion.settings.button_gestures.${gesture}`) }}
                 </label>
-                <select class="form-select form-select-sm"
+                <select class="form-select form-select-sm flex-grow-1" style="min-width: 0; width: auto"
                         :value="buttonActionKind(buttonAction(channel, gesture as keyof ButtonChannel))"
                         @change="setButtonActionKind(channel, gesture as keyof ButtonChannel,
                                                       ($event.target as HTMLSelectElement).value)">
@@ -2851,7 +2858,7 @@ async function save() {
                   </optgroup>
                 </select>
                 <input v-if="buttonActionLapSeries(buttonAction(channel, gesture as keyof ButtonChannel)) !== null"
-                       class="form-control form-control-sm mt-1"
+                       class="form-control form-control-sm ms-auto" style="flex: 1 1 100%"
                        :value="buttonActionLapSeries(buttonAction(channel, gesture as keyof ButtonChannel))"
                        @change="setButtonActionLapSeries(channel, gesture as keyof ButtonChannel,
                                                           ($event.target as HTMLInputElement).value)"
@@ -2896,7 +2903,7 @@ async function save() {
                les tonalités restent, le réveil d'écran aussi, et le radar ne se
                voit plus que là où on l'a posé — d'où la mention du composant, le
                seul moyen d'en garder quelque chose à l'œil. -->
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="radar-overlay"
                      :checked="preset.radar?.overlay !== false"
@@ -2906,7 +2913,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="radar-sounds"
                      :checked="preset.radar?.sounds !== false"
@@ -2916,7 +2923,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="radar-wake"
                      :checked="preset.radar?.wake_screen !== false"
@@ -2949,7 +2956,7 @@ async function save() {
                    :value="batteryValue('threshold_percent', 20)"
                    @input="setBattery('threshold_percent', Number(($event.target as HTMLInputElement).value))">
           </div>
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="battery-sounds"
                      :checked="preset.battery?.sounds !== false"
@@ -2975,7 +2982,7 @@ async function save() {
         <div v-if="openSections.climb" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.climb_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="climb-sounds"
                      :checked="preset.climb?.sounds !== false"
@@ -2985,7 +2992,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="climb-expanded"
                      :checked="preset.climb?.expanded_by_default === true"
@@ -3011,7 +3018,7 @@ async function save() {
         <div v-if="openSections.workout" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.workout_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="workout-badge"
                      :checked="preset.workout?.badge !== false"
@@ -3021,7 +3028,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="workout-popup"
                      :checked="preset.workout?.popup !== false"
@@ -3031,7 +3038,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="workout-sounds"
                      :checked="preset.workout?.sounds !== false"
@@ -3079,7 +3086,7 @@ async function save() {
         <div v-if="openSections.laps" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.laps_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
-          <div class="col-12 col-sm-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="laps-toast"
                      :checked="preset.laps?.toast === true"
@@ -3297,12 +3304,26 @@ async function save() {
 }
 /* Sur téléphone en portrait, les actions prennent toute la largeur sous le
    titre et passent à la ligne autant que nécessaire. */
+.cdb-page-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.5rem;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
+}
 @media (max-width: 575.98px) {
   .cdb-page-actions {
     flex: 1 1 100%;
     margin-left: 0 !important;
     justify-content: flex-start !important;
   }
+}
+.cdb-gesture-label {
+  flex: 0 0 6.5rem;
 }
 .cdb-send-select {
   width: 6.5rem;

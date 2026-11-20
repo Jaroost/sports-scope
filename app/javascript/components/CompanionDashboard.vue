@@ -1862,7 +1862,7 @@ async function save() {
                       @click="duplicatePage(index)">
                 <i class="fa-regular fa-copy" aria-hidden="true"></i>
               </button>
-              <select v-if="canMovePageToPreset(page)" class="form-select form-select-sm w-auto"
+              <select v-if="canMovePageToPreset(page)" class="form-select form-select-sm cdb-send-select"
                       :title="t('companion.settings.move_to_preset')"
                       :aria-label="t('companion.settings.move_to_preset')"
                       @change="movePageToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
@@ -2379,7 +2379,7 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.notch_help') }}</p>
 
         <div v-for="(set, index) in preset.notch || []" :key="index"
-             class="d-flex align-items-center gap-2 mb-2">
+             class="cdb-set-row d-flex align-items-center gap-2 mb-2">
           <div class="row g-1 flex-grow-1">
             <div class="col-6">
               <div class="d-flex gap-1 align-items-center">
@@ -2519,7 +2519,7 @@ async function save() {
                   @click="duplicateNotchSet(index)">
             <i class="fa-regular fa-copy" aria-hidden="true"></i>
           </button>
-          <select v-if="presets.length > 1" class="form-select form-select-sm w-auto"
+          <select v-if="presets.length > 1" class="form-select form-select-sm cdb-send-select"
                   :title="t('companion.settings.move_to_preset')"
                   :aria-label="t('companion.settings.move_to_preset')"
                   @change="moveNotchSetToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
@@ -2552,7 +2552,7 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.bands_help') }}</p>
 
         <div v-for="(band, index) in preset.bands" :key="index"
-             class="d-flex align-items-center gap-2 mb-2">
+             class="cdb-set-row d-flex align-items-center gap-2 mb-2">
           <div class="row g-1 flex-grow-1">
             <div v-for="slot in catalog.max_band_metrics" :key="slot" class="col-6 col-sm-3">
               <div class="d-flex gap-1 align-items-center">
@@ -2635,7 +2635,7 @@ async function save() {
                   @click="duplicateBand(index)">
             <i class="fa-regular fa-copy" aria-hidden="true"></i>
           </button>
-          <select v-if="presets.length > 1 && preset.bands.length > 1" class="form-select form-select-sm w-auto"
+          <select v-if="presets.length > 1 && preset.bands.length > 1" class="form-select form-select-sm cdb-send-select"
                   :title="t('companion.settings.move_to_preset')"
                   :aria-label="t('companion.settings.move_to_preset')"
                   @change="moveBandToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
@@ -2758,7 +2758,7 @@ async function save() {
                   <i class="fa-solid fa-trash" aria-hidden="true"></i>
                 </button>
               </div>
-                <select v-if="presets.length > 1" class="form-select form-select-sm w-auto"
+                <select v-if="presets.length > 1" class="form-select form-select-sm cdb-send-select"
                         :title="t('companion.settings.move_to_preset')"
                         :aria-label="t('companion.settings.move_to_preset')"
                         @change="sendButtonSetToPreset(activeSetIndex, Number(($event.target as HTMLSelectElement).value), true); ($event.target as HTMLSelectElement).value = ''">
@@ -2767,7 +2767,7 @@ async function save() {
                     {{ other.name }}
                   </option>
                 </select>
-                <select v-if="presets.length > 1" class="form-select form-select-sm w-auto"
+                <select v-if="presets.length > 1" class="form-select form-select-sm cdb-send-select"
                         :title="t('companion.settings.copy_to_preset')"
                         :aria-label="t('companion.settings.copy_to_preset')"
                         @change="sendButtonSetToPreset(activeSetIndex, Number(($event.target as HTMLSelectElement).value), false); ($event.target as HTMLSelectElement).value = ''">
@@ -3246,6 +3246,22 @@ async function save() {
    jeu : les pastilles de `CompanionColorPicker` restent sur le blanc de la
    carte (utiles pour re-choisir une couleur), ce fond-ci sert uniquement à
    juger le rendu tel qu'il apparaîtra en roulant. */
+/* Une ligne de bandeau/encoche = les cases + aperçu + actions. Sur téléphone
+   les cases prennent toute la largeur et les actions passent dessous, au lieu
+   d'écraser les listes de cases côte à côte. */
+.cdb-set-row {
+  flex-wrap: wrap;
+}
+@media (max-width: 767.98px) {
+  .cdb-set-row > .row {
+    flex: 1 1 100%;
+  }
+}
+.cdb-send-select {
+  width: 6.5rem;
+  max-width: 100%;
+  flex: 0 0 auto;
+}
 .cdb-band-preview {
   display: flex;
   flex-shrink: 0;

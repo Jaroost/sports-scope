@@ -219,6 +219,16 @@ function weatherLinePoints(values: number[], padding = 6) {
 const weatherTempPoints = computed(() => weatherLinePoints(WEATHER_FORECAST_SAMPLE.temperature))
 const weatherWindPoints = computed(() => weatherLinePoints(WEATHER_FORECAST_SAMPLE.windSpeed))
 
+// Les bornes affichées sur les échelles (même règle que l'appli : pas de
+// borne de pluie si la fenêtre reste sèche).
+const weatherScale = {
+  tempMin: Math.round(Math.min(...WEATHER_FORECAST_SAMPLE.temperature)),
+  tempMax: Math.round(Math.max(...WEATHER_FORECAST_SAMPLE.temperature)),
+  windMin: Math.round(Math.min(...WEATHER_FORECAST_SAMPLE.windSpeed)),
+  windMax: Math.round(Math.max(...WEATHER_FORECAST_SAMPLE.windSpeed)),
+  precipMax: Math.max(...WEATHER_FORECAST_SAMPLE.precipitation),
+}
+
 const weatherBarStepX = WEATHER_CHART_WIDTH / WEATHER_FORECAST_SAMPLE.precipitation.length
 const weatherBarWidth = weatherBarStepX * 0.7
 
@@ -1328,6 +1338,7 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
          vraie prévision. -->
     <div v-else-if="block.kind === 'weather_forecast'" class="cbp-card cbp-weather" :style="overrideStyle">
       <div class="cbp-title">Prévisions météo</div>
+      <div class="cbp-weather-chart-wrap">
       <svg class="cbp-weather-chart" viewBox="0 0 120 60" preserveAspectRatio="none">
         <rect
           v-for="(mm, i) in WEATHER_FORECAST_SAMPLE.precipitation"
@@ -1342,6 +1353,17 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
         <polyline :points="weatherWindPoints" fill="none" stroke="#8fd3ff" stroke-width="1.5" stroke-dasharray="3,2" />
         <polyline :points="weatherTempPoints" fill="none" stroke="#ff8a3d" stroke-width="2" />
       </svg>
+      <!-- Les bornes de chaque échelle, en HTML par-dessus le SVG (étiré,
+           il déformerait le texte) : miroir de `_paintScaleLabels`. -->
+      <span class="cbp-weather-scale" style="left: 0; top: 0; color: #ff8a3d">{{ weatherScale.tempMax }}°</span>
+      <span class="cbp-weather-scale" style="left: 0; bottom: 0; color: #ff8a3d">{{ weatherScale.tempMin }}°</span>
+      <span class="cbp-weather-scale" style="right: 0; top: 0; color: #8fd3ff">{{ weatherScale.windMax }}</span>
+      <span class="cbp-weather-scale" style="right: 0; bottom: 0; color: #8fd3ff">{{ weatherScale.windMin }}</span>
+      <span
+        class="cbp-weather-scale cbp-weather-scale-precip"
+        :style="{ bottom: `${(weatherBarHeight(weatherScale.precipMax) / WEATHER_CHART_HEIGHT) * 100}%` }"
+      >{{ weatherScale.precipMax.toFixed(1) }}mm</span>
+      </div>
       <div class="cbp-weather-labels">
         <span>Maintenant</span>
         <span>+12h</span>
@@ -2578,11 +2600,27 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
   display: flex;
   flex-direction: column;
 }
-.cbp-weather-chart {
+.cbp-weather-chart-wrap {
+  position: relative;
   flex: 1;
   min-height: 0;
-  width: 100%;
   margin-top: 0.4em;
+}
+.cbp-weather-chart {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.cbp-weather-scale {
+  position: absolute;
+  font-size: 0.85em;
+  font-weight: 700;
+  line-height: 1;
+  color: #2e6fd6;
+}
+.cbp-weather-scale-precip {
+  left: 50%;
+  transform: translate(-50%, 50%);
 }
 .cbp-weather-labels {
   display: flex;
@@ -2599,23 +2637,6 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
 .cbp-weather-tiles .cbp-wc-tile-icon,
 .cbp-weather-tiles .cbp-wc-tile-trend {
   font-size: 1.4em;
-}
-.cbp-weather-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6em;
-  margin-top: 0.3em;
-  font-size: 0.7em;
-  color: rgba(255, 255, 255, 0.75);
-}
-.cbp-weather-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 0.3em;
-}
-.cbp-weather-legend-item .cbp-dot {
-  width: 0.6em;
-  height: 0.6em;
 }
 
 /* Météo compacte : trois lignes centrées verticalement, taille naturelle —

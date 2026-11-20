@@ -1430,18 +1430,27 @@ const REMOTE_KEYS = [
 
 // Les commandes de l'éditeur, canaux du D-Fly puis télécommande, dans l'ordre
 // où elles s'affichent.
-const BUTTON_CONTROLS = computed(() => [
-  ...BUTTON_CHANNELS.map((key, index) => ({
+const DI2_CONTROLS = computed(() =>
+  BUTTON_CHANNELS.map((key, index) => ({
     key: key as keyof Buttons,
     label: t('companion.settings.button_channel', { n: index + 1 }),
     gestures: props.catalog.button_gestures,
   })),
-  ...REMOTE_KEYS.map((key) => ({
+)
+const REMOTE_CONTROLS = computed(() =>
+  REMOTE_KEYS.map((key) => ({
     key: key as keyof Buttons,
     label: t(`companion.settings.remote_keys.${key}`),
     gestures: props.catalog.button_gestures,
   })),
-])
+)
+
+// Deux sous-pages par set : le D-Fly (Di2) et la télécommande Bluetooth. Un
+// simple choix d'affichage — les deux écrivent dans le même `buttons`.
+const buttonTab = ref<'di2' | 'remote'>('di2')
+const BUTTON_CONTROLS = computed(() =>
+  buttonTab.value === 'di2' ? DI2_CONTROLS.value : REMOTE_CONTROLS.value,
+)
 
 // Seules les pages déjà enregistrées (qui ont donc une clé — voir `Page.key`)
 // peuvent être visées par « Aller à… » : le serveur est ce qui fabrique la
@@ -1809,24 +1818,23 @@ async function save() {
 
         <div v-for="(page, index) in preset.pages" :key="index" class="border rounded mb-2">
           <div class="d-flex align-items-center flex-wrap gap-2 p-2">
-            <span class="badge text-bg-secondary">{{ t(`companion.settings.page_kinds.${page.kind}`) }}</span>
-            <!-- Là où elle se trouve, et pas seulement le fait qu'elle soit
-                 rangée : « Menu » à côté du genre est le seul endroit où l'on
-                 relit la composition du défilement sans ouvrir chaque page. -->
-            <span v-if="page.menu" class="badge text-bg-light border">
-              <i class="fa-solid fa-ellipsis-vertical me-1" aria-hidden="true"></i>{{ t('companion.settings.behind_menu') }}
-            </span>
-            <!-- Le même repère qu'on ira relire dans le menu ⋮ du téléphone :
-                 le voir déjà ici aide à choisir une icône qui distingue
-                 vraiment cette page des pages voisines. -->
+            <!-- Ligne 1 : l'icône (le repère du menu ⋮ du téléphone) et le
+                 titre, puis le genre et « rangée derrière le menu » en
+                 pastilles discrètes. Sur téléphone, « Menu » n'est plus que
+                 son icône : le texte seul doublait l'information. -->
             <i v-if="page.icon" :class="page.icon" class="text-body-secondary" aria-hidden="true"></i>
-            <span class="flex-grow-1 text-truncate" style="min-width: 5rem">
+            <span class="flex-grow-1 text-truncate fw-semibold" style="min-width: 5rem">
               {{ page.title || t('companion.settings.page_kinds.map') }}
             </span>
+            <span v-if="page.menu" class="badge text-bg-light border"
+                  :title="t('companion.settings.behind_menu')">
+              <i class="fa-solid fa-ellipsis-vertical" aria-hidden="true"></i><span class="d-none d-sm-inline ms-1">{{ t('companion.settings.behind_menu') }}</span>
+            </span>
+            <span class="badge text-bg-secondary">{{ t(`companion.settings.page_kinds.${page.kind}`) }}</span>
             <!-- Les actions groupées et poussées à droite (`ms-auto`) : sur un
                  écran étroit, le groupe passe entier sous le titre au lieu de
                  déborder l'en-tête bouton par bouton. -->
-            <div class="d-flex align-items-center gap-1 ms-auto">
+            <div class="d-flex align-items-center flex-wrap justify-content-end gap-1 ms-auto cdb-page-actions">
               <button class="btn btn-sm btn-link p-1" type="button"
                       :disabled="index === 0" @click="movePage(index, -1)">
                 <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
@@ -1862,7 +1870,7 @@ async function save() {
                       @click="duplicatePage(index)">
                 <i class="fa-regular fa-copy" aria-hidden="true"></i>
               </button>
-              <select v-if="canMovePageToPreset(page)" class="form-select form-select-sm cdb-send-select"
+              <select v-if="canMovePageToPreset(page)" class="form-select form-select-sm cdb-send-select d-none d-sm-block"
                       :title="t('companion.settings.move_to_preset')"
                       :aria-label="t('companion.settings.move_to_preset')"
                       @change="movePageToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
@@ -1879,6 +1887,14 @@ async function save() {
           </div>
 
           <div v-if="openPage === index" class="border-top p-2">
+            <select v-if="canMovePageToPreset(page)" class="form-select form-select-sm mb-2 d-sm-none"
+                    :aria-label="t('companion.settings.move_to_preset')"
+                    @change="movePageToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+              <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
+              <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
+                {{ other.name }}
+              </option>
+            </select>
             <!-- Réglages de page repliés ici pour alléger le panneau : nom,
                  icône, bouton retour, condition de retour au défilement +
                  bascule auto, et (plus bas, même `v-if`) le nombre de lignes /
@@ -2379,10 +2395,39 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.notch_help') }}</p>
 
         <div v-for="(set, index) in preset.notch || []" :key="index"
-             class="cdb-set-row d-flex align-items-center gap-2 mb-2">
+             class="cdb-set-row border rounded p-2 mb-2">
+          <div class="cdb-set-toolbar d-flex align-items-center flex-wrap gap-1">
+            <span class="fw-semibold small me-auto">{{ t('companion.settings.band_set_title', { n: index + 1 }) }}</span>
+            <button class="btn btn-sm btn-link p-1" type="button"
+                    :disabled="index === 0" @click="moveNotchSet(index, -1)">
+              <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+            </button>
+            <button class="btn btn-sm btn-link p-1" type="button"
+                    :disabled="index === (preset.notch || []).length - 1" @click="moveNotchSet(index, 1)">
+              <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+            </button>
+            <button class="btn btn-sm btn-link p-1" type="button"
+                    :title="t('companion.settings.duplicate')"
+                    :aria-label="t('companion.settings.duplicate')"
+                    @click="duplicateNotchSet(index)">
+              <i class="fa-regular fa-copy" aria-hidden="true"></i>
+            </button>
+            <select v-if="presets.length > 1" class="form-select form-select-sm cdb-send-select"
+                    :title="t('companion.settings.move_to_preset')"
+                    :aria-label="t('companion.settings.move_to_preset')"
+                    @change="moveNotchSetToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+              <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
+              <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
+                {{ other.name }}
+              </option>
+            </select>
+            <button class="btn btn-sm btn-link text-danger p-1" type="button" @click="removeNotchSet(index)">
+              <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+            </button>
+          </div>
           <div class="row g-1 flex-grow-1">
-            <div class="col-6">
-              <div class="d-flex gap-1 align-items-center">
+            <div class="col-12 col-sm-6">
+              <div class="d-flex flex-nowrap gap-1 align-items-center">
                 <select class="form-select form-select-sm flex-grow-1" :value="bandSlotKind(set.left)"
                         @change="setNotchSlotKind(set, 'left', ($event.target as HTMLSelectElement).value)">
                   <option value="">—</option>
@@ -2437,8 +2482,8 @@ async function save() {
                                          :metric="bandSlotKind(set.left)" :model-value="bandSlotThresholds(set.left)"
                                          @update:model-value="(v) => setNotchSlotThresholds(set, 'left', v)" />
             </div>
-            <div class="col-6">
-              <div class="d-flex gap-1 align-items-center">
+            <div class="col-12 col-sm-6">
+              <div class="d-flex flex-nowrap gap-1 align-items-center">
                 <select class="form-select form-select-sm flex-grow-1" :value="bandSlotKind(set.right)"
                         @change="setNotchSlotKind(set, 'right', ($event.target as HTMLSelectElement).value)">
                   <option value="">—</option>
@@ -2505,32 +2550,6 @@ async function save() {
             <span v-if="bandSlotKind(set.right)" class="cdb-band-preview-seg"
                   :style="{ background: bandSlotPreviewColor(set.right) }"></span>
           </div>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :disabled="index === 0" @click="moveNotchSet(index, -1)">
-            <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :disabled="index === (preset.notch || []).length - 1" @click="moveNotchSet(index, 1)">
-            <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :title="t('companion.settings.duplicate')"
-                  :aria-label="t('companion.settings.duplicate')"
-                  @click="duplicateNotchSet(index)">
-            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-          </button>
-          <select v-if="presets.length > 1" class="form-select form-select-sm cdb-send-select"
-                  :title="t('companion.settings.move_to_preset')"
-                  :aria-label="t('companion.settings.move_to_preset')"
-                  @change="moveNotchSetToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
-            <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
-            <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
-              {{ other.name }}
-            </option>
-          </select>
-          <button class="btn btn-sm btn-link text-danger p-1" type="button" @click="removeNotchSet(index)">
-            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-          </button>
         </div>
         <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addNotchSet">
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_notch_set') }}
@@ -2552,10 +2571,40 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.bands_help') }}</p>
 
         <div v-for="(band, index) in preset.bands" :key="index"
-             class="cdb-set-row d-flex align-items-center gap-2 mb-2">
+             class="cdb-set-row border rounded p-2 mb-2">
+          <div class="cdb-set-toolbar d-flex align-items-center flex-wrap gap-1">
+            <span class="fw-semibold small me-auto">{{ t('companion.settings.band_set_title', { n: index + 1 }) }}</span>
+            <button class="btn btn-sm btn-link p-1" type="button"
+                    :disabled="index === 0" @click="moveBand(index, -1)">
+              <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
+            </button>
+            <button class="btn btn-sm btn-link p-1" type="button"
+                    :disabled="index === preset.bands.length - 1" @click="moveBand(index, 1)">
+              <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
+            </button>
+            <button class="btn btn-sm btn-link p-1" type="button"
+                    :title="t('companion.settings.duplicate')"
+                    :aria-label="t('companion.settings.duplicate')"
+                    @click="duplicateBand(index)">
+              <i class="fa-regular fa-copy" aria-hidden="true"></i>
+            </button>
+            <select v-if="presets.length > 1 && preset.bands.length > 1" class="form-select form-select-sm cdb-send-select"
+                    :title="t('companion.settings.move_to_preset')"
+                    :aria-label="t('companion.settings.move_to_preset')"
+                    @change="moveBandToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
+              <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
+              <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
+                {{ other.name }}
+              </option>
+            </select>
+            <button class="btn btn-sm btn-link text-danger p-1" type="button"
+                    :disabled="preset.bands.length <= 1" @click="preset.bands.splice(index, 1)">
+              <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+            </button>
+          </div>
           <div class="row g-1 flex-grow-1">
-            <div v-for="slot in catalog.max_band_metrics" :key="slot" class="col-6 col-sm-3">
-              <div class="d-flex gap-1 align-items-center">
+            <div v-for="slot in catalog.max_band_metrics" :key="slot" class="col-12 col-sm-6 col-lg-3">
+              <div class="d-flex flex-nowrap gap-1 align-items-center">
                 <select class="form-select form-select-sm flex-grow-1"
                         :value="bandSlotKind(band.metrics[slot - 1])"
                         @change="setBandSlotKind(band, slot - 1, ($event.target as HTMLSelectElement).value)">
@@ -2621,33 +2670,6 @@ async function save() {
                     :style="{ background: bandSlotPreviewColor(band.metrics[slot - 1]) }"></span>
             </template>
           </div>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :disabled="index === 0" @click="moveBand(index, -1)">
-            <i class="fa-solid fa-arrow-up" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :disabled="index === preset.bands.length - 1" @click="moveBand(index, 1)">
-            <i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
-          </button>
-          <button class="btn btn-sm btn-link p-1" type="button"
-                  :title="t('companion.settings.duplicate')"
-                  :aria-label="t('companion.settings.duplicate')"
-                  @click="duplicateBand(index)">
-            <i class="fa-regular fa-copy" aria-hidden="true"></i>
-          </button>
-          <select v-if="presets.length > 1 && preset.bands.length > 1" class="form-select form-select-sm cdb-send-select"
-                  :title="t('companion.settings.move_to_preset')"
-                  :aria-label="t('companion.settings.move_to_preset')"
-                  @change="moveBandToPreset(index, Number(($event.target as HTMLSelectElement).value)); ($event.target as HTMLSelectElement).value = ''">
-            <option value="" selected>{{ t('companion.settings.move_to_preset') }}</option>
-            <option v-for="(other, i) in presets" :key="i" :value="i" :disabled="i === current">
-              {{ other.name }}
-            </option>
-          </select>
-          <button class="btn btn-sm btn-link text-danger p-1" type="button"
-                  :disabled="preset.bands.length <= 1" @click="preset.bands.splice(index, 1)">
-            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-          </button>
         </div>
         <button class="btn btn-sm btn-outline-secondary mb-4" type="button" @click="addBand">
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_band') }}
@@ -2669,7 +2691,7 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.sensors_help') }}</p>
 
         <div class="row g-2 mb-4">
-          <div v-for="sensor in catalog.sensors" :key="sensor" class="col-6 col-md-4">
+          <div v-for="sensor in catalog.sensors" :key="sensor" class="col-12 col-sm-6 col-md-4">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" :id="`sensor-${sensor}`"
                      :checked="sensorOn(sensor)"
@@ -2793,12 +2815,22 @@ async function save() {
           </div>
         </div>
 
+        <ul class="nav nav-tabs nav-fill mb-3" role="tablist">
+          <li v-for="tab in (['di2', 'remote'] as const)" :key="tab" class="nav-item" role="presentation">
+            <button type="button" class="nav-link" role="tab"
+                    :class="{ active: buttonTab === tab }" :aria-selected="buttonTab === tab"
+                    @click="buttonTab = tab">
+              <i :class="tab === 'di2' ? 'fa-solid fa-bicycle' : 'fa-solid fa-gamepad'" class="me-1" aria-hidden="true"></i>{{ t(`companion.settings.button_tabs.${tab}`) }}
+            </button>
+          </li>
+        </ul>
+
         <div class="row g-2 mb-1">
           <div v-for="{ key: channel, label, gestures } in BUTTON_CONTROLS" :key="channel"
                class="col-12 col-md-6">
             <div class="small text-body-secondary mb-1">{{ label }}</div>
             <div class="row g-1 mb-3">
-              <div v-for="gesture in gestures" :key="gesture" class="col-4">
+              <div v-for="gesture in gestures" :key="gesture" class="col-12 col-sm-4">
                 <label class="form-label small mb-1">
                   {{ t(`companion.settings.button_gestures.${gesture}`) }}
                 </label>
@@ -2848,13 +2880,13 @@ async function save() {
         <div v-if="openSections.radar" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.radar_overlay_help') }}</p>
         <div class="row g-2 align-items-end">
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <label class="form-label small mb-1">{{ t('companion.settings.close_m') }}</label>
             <input class="form-control form-control-sm" type="number" min="1"
                    :value="radarValue('close_m', 40)"
                    @input="setRadar('close_m', Number(($event.target as HTMLInputElement).value))">
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <label class="form-label small mb-1">{{ t('companion.settings.range_m') }}</label>
             <input class="form-control form-control-sm" type="number" min="1"
                    :value="radarValue('range_m', 140)"
@@ -2864,7 +2896,7 @@ async function save() {
                les tonalités restent, le réveil d'écran aussi, et le radar ne se
                voit plus que là où on l'a posé — d'où la mention du composant, le
                seul moyen d'en garder quelque chose à l'œil. -->
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="radar-overlay"
                      :checked="preset.radar?.overlay !== false"
@@ -2874,7 +2906,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="radar-sounds"
                      :checked="preset.radar?.sounds !== false"
@@ -2884,7 +2916,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="radar-wake"
                      :checked="preset.radar?.wake_screen !== false"
@@ -2911,13 +2943,13 @@ async function save() {
         <div v-if="openSections.battery" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.battery_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <label class="form-label small mb-1">{{ t('companion.settings.battery_threshold') }}</label>
             <input class="form-control form-control-sm" type="number" min="1" max="100"
                    :value="batteryValue('threshold_percent', 20)"
                    @input="setBattery('threshold_percent', Number(($event.target as HTMLInputElement).value))">
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="battery-sounds"
                      :checked="preset.battery?.sounds !== false"
@@ -2943,7 +2975,7 @@ async function save() {
         <div v-if="openSections.climb" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.climb_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="climb-sounds"
                      :checked="preset.climb?.sounds !== false"
@@ -2953,7 +2985,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="climb-expanded"
                      :checked="preset.climb?.expanded_by_default === true"
@@ -2979,7 +3011,7 @@ async function save() {
         <div v-if="openSections.workout" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.workout_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="workout-badge"
                      :checked="preset.workout?.badge !== false"
@@ -2989,7 +3021,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="workout-popup"
                      :checked="preset.workout?.popup !== false"
@@ -2999,7 +3031,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="workout-sounds"
                      :checked="preset.workout?.sounds !== false"
@@ -3009,7 +3041,7 @@ async function save() {
               </label>
             </div>
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <label class="form-label small mb-1" for="workout-voice-style">
               {{ t('companion.settings.workout_voice_style') }}
             </label>
@@ -3047,7 +3079,7 @@ async function save() {
         <div v-if="openSections.laps" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.laps_help') }}</p>
         <div class="row g-2 align-items-end mb-4">
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" id="laps-toast"
                      :checked="preset.laps?.toast === true"
@@ -3075,15 +3107,21 @@ async function save() {
         <p class="text-body-secondary small">{{ t('companion.settings.reminders_help') }}</p>
 
         <div v-for="(reminder, index) in preset.reminders || []" :key="index"
-             class="d-flex align-items-start gap-2 mb-2">
-          <div class="row g-1 flex-grow-1">
-            <div class="col-2">
+             class="card card-body p-2 mb-2">
+          <div class="d-flex align-items-center mb-1">
+            <span class="fw-semibold small me-auto">{{ t('companion.settings.reminder_title', { n: index + 1 }) }}</span>
+            <button class="btn btn-sm btn-link text-danger p-1" type="button" @click="removeReminder(index)">
+              <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="row g-1">
+            <div class="col-12 col-sm-4 col-md-2">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_interval') }}</label>
               <input class="form-control form-control-sm" type="number" min="1" max="360"
                      :value="reminder.interval_minutes"
                      @input="reminder.interval_minutes = Number(($event.target as HTMLInputElement).value)">
             </div>
-            <div class="col-2">
+            <div class="col-12 col-sm-4 col-md-2">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_start_after') }}</label>
               <input class="form-control form-control-sm" type="number" min="0"
                      :max="catalog.max_reminder_start_after_minutes"
@@ -3091,7 +3129,7 @@ async function save() {
                      :value="reminder.start_after_minutes ?? ''"
                      @input="setReminderStartAfter(reminder, ($event.target as HTMLInputElement).value)">
             </div>
-            <div class="col-2">
+            <div class="col-12 col-sm-4 col-md-2">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_count') }}</label>
               <input class="form-control form-control-sm" type="number" min="1"
                      :max="catalog.max_reminder_count"
@@ -3099,14 +3137,14 @@ async function save() {
                      :value="reminder.count ?? ''"
                      @input="setReminderCount(reminder, ($event.target as HTMLInputElement).value)">
             </div>
-            <div class="col-4">
+            <div class="col-12 col-md-4">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_message') }}</label>
               <input class="form-control form-control-sm" type="text"
                      :maxlength="catalog.max_reminder_message_length"
                      :placeholder="t('companion.settings.reminder_message_placeholder')"
                      v-model="reminder.message">
             </div>
-            <div class="col-2">
+            <div class="col-12 col-sm-4 col-md-2">
               <label class="form-label small mb-1">{{ t('companion.settings.reminder_sound') }}</label>
               <select class="form-select form-select-sm" v-model="reminder.sound">
                 <option v-for="sound in catalog.reminder_sounds" :key="sound" :value="sound">
@@ -3115,9 +3153,6 @@ async function save() {
               </select>
             </div>
           </div>
-          <button class="btn btn-sm btn-link text-danger p-1 mt-4" type="button" @click="removeReminder(index)">
-            <i class="fa-regular fa-trash-can" aria-hidden="true"></i>
-          </button>
         </div>
         <button class="btn btn-sm btn-outline-secondary mb-4" type="button"
                 :disabled="(preset.reminders || []).length >= catalog.max_reminders" @click="addReminder">
@@ -3138,18 +3173,18 @@ async function save() {
         <div v-if="openSections.traveled_path" class="cdb-sec-body">
         <p class="text-body-secondary small">{{ t('companion.settings.traveled_path_help') }}</p>
         <div class="row g-2 align-items-end">
-          <div class="col-6 col-md-3 d-flex align-items-center gap-2">
+          <div class="col-12 col-sm-6 col-md-3 d-flex align-items-center gap-2">
             <span class="small">{{ t('companion.settings.traveled_path_color') }}</span>
             <CompanionColorPicker v-model="traveledPathColor" :fallback="DEFAULT_TRAVELED_PATH_COLOR"
                                    :label="t('companion.settings.traveled_path_color')" />
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <label class="form-label small mb-1">{{ t('companion.settings.traveled_path_width') }}</label>
             <input class="form-control form-control-sm" type="number" min="1" step="1"
                    :value="traveledPathValue('width', 4)"
                    @input="setTraveledPath('width', Number(($event.target as HTMLInputElement).value))">
           </div>
-          <div class="col-6 col-md-3">
+          <div class="col-12 col-sm-6 col-md-3">
             <label class="form-label small mb-1">{{ t('companion.settings.traveled_path_opacity') }}</label>
             <input class="form-control form-control-sm" type="number" min="0" max="1" step="0.05"
                    :value="traveledPathValue('opacity', 0.85)"
@@ -3249,12 +3284,24 @@ async function save() {
 /* Une ligne de bandeau/encoche = les cases + aperçu + actions. Sur téléphone
    les cases prennent toute la largeur et les actions passent dessous, au lieu
    d'écraser les listes de cases côte à côte. */
-.cdb-set-row {
-  flex-wrap: wrap;
+.cdb-set-row > .row {
+  margin-top: 0.25rem;
 }
-@media (max-width: 767.98px) {
-  .cdb-set-row > .row {
+.cdb-set-toolbar {
+  justify-content: flex-end;
+}
+.cdb-set-row .cdb-band-preview {
+  display: flex;
+  width: fit-content;
+  margin-top: 0.5rem;
+}
+/* Sur téléphone en portrait, les actions prennent toute la largeur sous le
+   titre et passent à la ligne autant que nécessaire. */
+@media (max-width: 575.98px) {
+  .cdb-page-actions {
     flex: 1 1 100%;
+    margin-left: 0 !important;
+    justify-content: flex-start !important;
   }
 }
 .cdb-send-select {

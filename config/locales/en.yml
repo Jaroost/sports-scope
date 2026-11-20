@@ -2269,6 +2269,7 @@ en:
       no_recent_colors: "No colors used yet."
       bands: "Bottom band"
       bands_help: "The value sets a swipe cycles through, without changing page. Four slots at most: beyond that the figures cannot be read at a glance while riding."
+      band_set_title: "Set %{n}"
       add_band: "Add a set"
       notch: "Camera notch band"
       notch_help: "The sets of values a swipe scrolls through, one value on each side of the camera notch. The radar alert frame is drawn on top of it."
@@ -2307,6 +2308,9 @@ en:
       button_set_default_name: "Set %{n}"
       button_set_icon: "Icon"
       button_set_color: "Colour"
+      button_tabs:
+        di2: "Di2 (D-Fly)"
+        remote: "Remote"
       button_channel: "Channel %{n}"
       remote_keys:
         remote_volume_up: "Remote · Volume +"
@@ -2393,6 +2397,7 @@ en:
       reminder_message_placeholder: "Drink some water"
       new_reminder_message: "New reminder"
       reminder_sound: "Sound"
+      reminder_title: "Reminder %{n}"
       add_reminder: "Add a reminder"
       traveled_path_title: "Traveled path"
       traveled_path_help: "The line drawn live on the map to show where you actually rode — on top of the planned route."

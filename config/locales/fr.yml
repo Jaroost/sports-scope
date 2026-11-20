@@ -2269,6 +2269,7 @@ fr:
       no_recent_colors: "Aucune couleur utilisée pour l'instant."
       bands: "Bandeau du bas"
       bands_help: "Les jeux de valeurs entre lesquels un glissé fait défiler, sans changer de page. Quatre cases au plus : au-delà, les chiffres ne se lisent plus d'un coup d'œil en roulant."
+      band_set_title: "Jeu %{n}"
       add_band: "Ajouter un jeu"
       notch: "Bande de l'encoche"
       notch_help: "Les jeux de valeurs entre lesquels un glissé fait défiler, une mesure de chaque côté de l'encoche caméra. Le cadre d'alerte radar s'affiche par-dessus."
@@ -2307,6 +2308,9 @@ fr:
       button_set_default_name: "Set %{n}"
       button_set_icon: "Icône"
       button_set_color: "Couleur"
+      button_tabs:
+        di2: "Di2 (D-Fly)"
+        remote: "Télécommande"
       button_channel: "Canal %{n}"
       remote_keys:
         remote_volume_up: "Télécommande · Volume +"
@@ -2393,6 +2397,7 @@ fr:
       reminder_message_placeholder: "Bois de l'eau"
       new_reminder_message: "Nouveau rappel"
       reminder_sound: "Son"
+      reminder_title: "Rappel %{n}"
       add_reminder: "Ajouter un rappel"
       traveled_path_title: "Trajet parcouru"
       traveled_path_help: "La ligne dessinée sur la carte, en direct, pour montrer où vous êtes réellement passé — par-dessus le tracé prévu."

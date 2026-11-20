@@ -1655,6 +1655,89 @@ const traveledPathColor = computed<string | null>({
   set: (value) => setTraveledPath('color', value || DEFAULT_TRAVELED_PATH_COLOR),
 })
 
+// ── exporter / importer ─────────────────────────────────────────────────────
+
+// Le fichier d'export est le document tel que l'éditeur le tient (profils +
+// dispositions enregistrées), pas ce que le serveur a déjà gardé : on exporte ce
+// qu'on voit. À la réimportation tout repasse par `sanitize` au « Enregistrer »,
+// donc un fichier trafiqué ne peut rien introduire que l'éditeur n'accepterait.
+const EXPORT_FORMAT = 'sports-scope-companion'
+
+function exportSettings() {
+  const body = JSON.stringify(
+    { format: EXPORT_FORMAT, presets: toRaw(presets), metric_layouts: toRaw(metricLayouts) },
+    null,
+    2,
+  )
+  const url = URL.createObjectURL(new Blob([body], { type: 'application/json' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `companion-profiles-${new Date().toISOString().slice(0, 10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+interface ImportState {
+  presets: Preset[]
+  chosen: boolean[]
+  layouts: MetricLayoutPreset[]
+  withLayouts: boolean
+}
+
+const importState = ref<ImportState | null>(null)
+const importError = ref<string | null>(null)
+
+async function onImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importError.value = null
+  importState.value = null
+  try {
+    const data = JSON.parse(await file.text())
+    const list = Array.isArray(data?.presets) ? (data.presets as unknown[]) : []
+    const found = list.filter((p): p is Preset => !!p && typeof p === 'object' && !Array.isArray(p))
+    if (found.length === 0) throw new Error('empty')
+    const layouts = Array.isArray(data.metric_layouts)
+      ? (data.metric_layouts as MetricLayoutPreset[]).filter((l) => l && typeof l === 'object')
+      : []
+    importState.value = {
+      presets: found,
+      chosen: found.map(() => true),
+      layouts,
+      withLayouts: layouts.length > 0,
+    }
+  } catch {
+    importError.value = t('companion.settings.import_invalid')
+  }
+}
+
+function confirmImport() {
+  const state = importState.value
+  if (!state) return
+  const picked = state.presets.filter((_, i) => state.chosen[i])
+  const claimed = new Set(presets.flatMap((p) => p.default_for || []))
+  picked.forEach((raw) => {
+    // Sans clé : le serveur en fabriquera une, suffixée si elle existe déjà — un
+    // profil importé s'ajoute, il n'écrase jamais celui qui porte le même nom.
+    const copy = structuredClone({ ...raw, key: undefined }) as Preset
+    // Un type n'a qu'un seul profil par défaut : l'importé ne détrône pas
+    // celui qu'on a déjà, il perd seulement sa revendication.
+    if (copy.default_for) {
+      copy.default_for = copy.default_for.filter((a) => !claimed.has(a))
+      if (copy.default_for.length === 0) delete copy.default_for
+      else copy.default_for.forEach((a) => claimed.add(a))
+    }
+    presets.push(copy)
+  })
+  if (state.withLayouts) {
+    state.layouts.forEach((l) => metricLayouts.push({ ...structuredClone(l), key: crypto.randomUUID() }))
+  }
+  if (picked.length > 0) select(presets.length - picked.length)
+  importState.value = null
+}
+
 // ── enregistrer ─────────────────────────────────────────────────────────────
 
 async function save() {
@@ -1709,7 +1792,45 @@ async function save() {
           <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('companion.settings.add_preset') }}
         </button>
       </li>
+      <li class="nav-item ms-auto d-flex gap-1">
+        <button class="btn btn-sm btn-outline-secondary" type="button" @click="exportSettings">
+          <i class="fa-solid fa-file-export me-1" aria-hidden="true"></i>{{ t('companion.settings.export') }}
+        </button>
+        <label class="btn btn-sm btn-outline-secondary mb-0">
+          <i class="fa-solid fa-file-import me-1" aria-hidden="true"></i>{{ t('companion.settings.import') }}
+          <input type="file" accept="application/json,.json" class="d-none" @change="onImportFile">
+        </label>
+      </li>
     </ul>
+
+    <p v-if="importError" class="text-danger small">{{ importError }}</p>
+    <div v-if="importState" class="card mb-3">
+      <div class="card-body">
+        <h2 class="h6">{{ t('companion.settings.import_title') }}</h2>
+        <p class="text-body-secondary small">{{ t('companion.settings.import_help') }}</p>
+        <div v-for="(p, i) in importState.presets" :key="i" class="form-check">
+          <input :id="`import-preset-${i}`" v-model="importState.chosen[i]" class="form-check-input" type="checkbox">
+          <label class="form-check-label" :for="`import-preset-${i}`">
+            <i v-if="p.icon" :class="p.icon" class="me-1" aria-hidden="true"></i>{{ p.name || t('companion.settings.new_preset') }}
+          </label>
+        </div>
+        <div v-if="importState.layouts.length > 0" class="form-check mt-2">
+          <input id="import-layouts" v-model="importState.withLayouts" class="form-check-input" type="checkbox">
+          <label class="form-check-label" for="import-layouts">
+            {{ t('companion.settings.import_layouts', { count: importState.layouts.length }) }}
+          </label>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+          <button class="btn btn-sm btn-primary" type="button"
+                  :disabled="!importState.chosen.some(Boolean) && !importState.withLayouts" @click="confirmImport">
+            {{ t('companion.settings.import_confirm') }}
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" type="button" @click="importState = null">
+            {{ t('companion.settings.import_cancel') }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="preset" class="card mb-3">
       <div class="card-body">

@@ -252,18 +252,21 @@ const weatherCompactRows = computed(() => {
   return [
     {
       label: 'Température',
+      glyph: 'fa-temperature-half',
       value: `${Math.round(temperature[0])}°C`,
       color: '#ff8a3d',
       trend: weatherCompactTrend(temperature[0], temperature[later], 1.0),
     },
     {
       label: 'Vent',
+      glyph: 'fa-wind',
       value: `${Math.round(windSpeed[0])} km/h`,
       color: '#8fd3ff',
       trend: weatherCompactTrend(windSpeed[0], windSpeed[later], 3.0),
     },
     {
       label: 'Pluie',
+      glyph: 'fa-droplet',
       value: `${precipitation[0].toFixed(1)} mm/h`,
       color: '#2e6fd6',
       trend: weatherCompactTrend(precipitation[0], precipitation[later], 0.2),
@@ -1343,10 +1346,19 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
         <span>Maintenant</span>
         <span>+12h</span>
       </div>
-      <div class="cbp-weather-legend">
-        <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #ff8a3d"></span>Température</span>
-        <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #8fd3ff"></span>Vent</span>
-        <span class="cbp-weather-legend-item"><span class="cbp-dot" style="background: #2e6fd6"></span>Précipitations</span>
+      <div class="cbp-weather-tiles">
+        <div
+          v-for="row in weatherCompactRows"
+          :key="row.label"
+          class="cbp-wc-tile"
+          :style="{ background: row.color, color: textColorOn(row.color) }"
+        >
+          <span class="cbp-wc-tile-head">
+            <i :class="['fa-solid', row.glyph, 'cbp-wc-tile-icon']" :title="row.label" aria-hidden="true"></i>
+            <i :class="['fa-solid', row.icon, 'cbp-wc-tile-trend']" aria-hidden="true"></i>
+          </span>
+          <span class="cbp-wc-tile-value">{{ row.value }}</span>
+        </div>
       </div>
     </div>
 
@@ -1357,13 +1369,32 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
          encore dire trois chiffres. Un seul mode, mêmes raisons que
          `weather_forecast` : rien à faire varier dans l'éditeur, pas de
          capteur pour en tirer une vraie prévision. -->
-    <div v-else-if="block.kind === 'weather_compact'" class="cbp-card cbp-weather-compact" :style="overrideStyle">
-      <div class="cbp-title">Météo</div>
-      <div v-for="row in weatherCompactRows" :key="row.label" class="cbp-weather-compact-row">
-        <span class="cbp-dot" :style="{ background: row.color }"></span>
-        <span class="cbp-weather-compact-label">{{ row.label }}</span>
-        <span class="cbp-weather-compact-value">{{ row.value }}</span>
-        <i :class="['fa-solid', row.icon, 'cbp-weather-compact-trend']" aria-hidden="true"></i>
+    <div v-else-if="block.kind === 'weather_compact'" class="cbp-weather-compact-wrap">
+      <div class="cbp-card cbp-weather-compact cbp-wc-stacked" :style="overrideStyle">
+        <div class="cbp-title">Météo</div>
+        <div v-for="row in weatherCompactRows" :key="row.label" class="cbp-weather-compact-row">
+          <span class="cbp-dot" :style="{ background: row.color }"></span>
+          <span class="cbp-weather-compact-label">{{ row.label }}</span>
+          <span class="cbp-weather-compact-value">{{ row.value }}</span>
+          <i :class="['fa-solid', row.icon, 'cbp-weather-compact-trend']" aria-hidden="true"></i>
+        </div>
+      </div>
+      <!-- Case plus large que haute : trois tuiles colorées (miroir de
+           `_buildTiles`, appli). Choisi en CSS par requête de conteneur, la
+           vignette ne connaissant pas la taille de sa case. -->
+      <div class="cbp-wc-tiles">
+        <div
+          v-for="row in weatherCompactRows"
+          :key="row.label"
+          class="cbp-wc-tile"
+          :style="{ background: row.color, color: textColorOn(row.color) }"
+        >
+          <span class="cbp-wc-tile-head">
+            <i :class="['fa-solid', row.glyph, 'cbp-wc-tile-icon']" :title="row.label" aria-hidden="true"></i>
+            <i :class="['fa-solid', row.icon, 'cbp-wc-tile-trend']" aria-hidden="true"></i>
+          </span>
+          <span class="cbp-wc-tile-value">{{ row.value }}</span>
+        </div>
       </div>
     </div>
 
@@ -2560,6 +2591,15 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
   font-size: 0.75em;
   color: rgba(255, 255, 255, 0.6);
 }
+.cbp-weather-tiles {
+  display: flex;
+  gap: 0.3em;
+  margin-top: 0.4em;
+}
+.cbp-weather-tiles .cbp-wc-tile-icon,
+.cbp-weather-tiles .cbp-wc-tile-trend {
+  font-size: 1.4em;
+}
 .cbp-weather-legend {
   display: flex;
   flex-wrap: wrap;
@@ -2586,6 +2626,54 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
   flex-direction: column;
   justify-content: center;
   height: 100%;
+}
+.cbp-weather-compact-wrap {
+  height: 100%;
+  container-type: size;
+}
+.cbp-wc-tiles {
+  display: none;
+}
+@container (aspect-ratio > 1) {
+  .cbp-wc-stacked {
+    display: none;
+  }
+  .cbp-wc-tiles {
+    display: flex;
+    gap: 0.3em;
+    height: 100%;
+  }
+}
+.cbp-wc-tile {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  padding: 0.4em;
+  text-align: center;
+  overflow: hidden;
+}
+.cbp-wc-tile-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+}
+.cbp-wc-tile-trend {
+  font-size: 2em;
+  opacity: 0.85;
+}
+.cbp-wc-tile-icon {
+  font-size: 2em;
+  margin-bottom: 0.1em;
+  opacity: 0.85;
+}
+.cbp-wc-tile-value {
+  font-size: 1.3em;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .cbp-weather-compact-row {
   display: flex;

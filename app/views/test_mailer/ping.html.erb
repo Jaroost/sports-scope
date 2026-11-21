@@ -1,0 +1,7 @@
+<h1><%= t("test_mailer.title") %></h1>
+<p><%= t("test_mailer.body") %></p>
+<ul>
+  <li><%= t("test_mailer.sent_at") %> : <%= l(@sent_at, format: "%d/%m/%Y %H:%M") %></li>
+  <li><%= t("test_mailer.from") %> : <%= @from %></li>
+  <li><%= t("test_mailer.smtp") %> : <%= @smtp_host %></li>
+</ul>

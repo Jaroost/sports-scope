@@ -148,6 +148,9 @@ Rails.application.routes.draw do
   # Maintenance réservée aux administrateurs (déclenchée depuis l'UI)
   namespace :admin do
     post "/maintenance/backfill_derivations", to: "maintenance#backfill_derivations"
+    # Mail de test pour vérifier le SMTP
+    get "/test_mail", to: "test_mails#new", as: :test_mail
+    post "/test_mail", to: "test_mails#create"
   end
 
   # Geocoding proxy (avoids CORS when calling Nominatim from the browser)

@@ -58,16 +58,13 @@ Rails.application.configure do
   # config.action_mailer.raise_delivery_errors = false
 
   # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
+  # APP_HOST porte le protocole (https://host), comme pour OmniAuth.
+  app_uri = URI.parse(ENV.fetch("APP_HOST", "https://example.com"))
+  config.action_mailer.default_url_options = { host: app_uri.host, protocol: app_uri.scheme }
 
-  # Specify outgoing SMTP server. Remember to add smtp/* credentials via bin/rails credentials:edit.
-  # config.action_mailer.smtp_settings = {
-  #   user_name: Rails.application.credentials.dig(:smtp, :user_name),
-  #   password: Rails.application.credentials.dig(:smtp, :password),
-  #   address: "smtp.example.com",
-  #   port: 587,
-  #   authentication: :plain
-  # }
+  # Le SMTP (Google) est configuré dans config/application.rb, via SMTP_*.
+  # Un échec d'envoi doit se voir (page admin de test) plutôt qu'être avalé.
+  config.action_mailer.raise_delivery_errors = true
 
   # Enable locale fallbacks for I18n (makes lookups for any locale fall back to
   # the I18n.default_locale when a translation cannot be found).

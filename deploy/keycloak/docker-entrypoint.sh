@@ -66,6 +66,28 @@ provision_login_settings() {
   fi
 }
 
+# Serveur SMTP du realm (mot de passe oublié, vérification d'email…). Même raison que
+# ci-dessus : realm-export.json ne s'applique qu'à la création du realm. Sans SMTP_USER,
+# on ne touche à rien (une config faite à la main dans la console reste intacte).
+provision_smtp() {
+  [ -n "${SMTP_USER:-}" ] || { echo "[smtp] SMTP_USER absent, skip"; return 0; }
+
+  if "$KCADM" update "realms/${REALM}" --config "$KCADM_CONFIG" \
+       -s "smtpServer.host=${SMTP_HOST:-smtp.gmail.com}" \
+       -s "smtpServer.port=${SMTP_PORT:-587}" \
+       -s "smtpServer.from=${SMTP_FROM:-$SMTP_USER}" \
+       -s "smtpServer.fromDisplayName=${SMTP_FROM_NAME:-Sports Scope}" \
+       -s smtpServer.auth=true \
+       -s smtpServer.starttls=true \
+       -s smtpServer.ssl=false \
+       -s "smtpServer.user=${SMTP_USER}" \
+       -s "smtpServer.password=${SMTP_PASSWORD}"; then
+    echo "[smtp] serveur SMTP configuré (${SMTP_HOST:-smtp.gmail.com})"
+  else
+    echo "[smtp] échec configuration SMTP (réessai au prochain démarrage)"
+  fi
+}
+
 for template in "$TEMPLATE_DIR"/*.json; do
   filename=$(basename "$template")
   output="$IMPORT_DIR/$filename"
@@ -81,6 +103,6 @@ done
 
 # Provisioning en arrière-plan (attend que le serveur soit prêt), puis le serveur
 # reste au premier plan via exec (PID principal → signaux/arrêt gracieux intacts).
-{ wait_for_realm; provision_roles; provision_login_settings; } &
+{ wait_for_realm; provision_roles; provision_login_settings; provision_smtp; } &
 
 exec /opt/keycloak/bin/kc.sh "$@"

@@ -49,6 +49,12 @@ services:
       APP_HOST: https://${APP_HOST:-app.localtest.me}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Sports Scope}
     volumes:
       - ./deploy/keycloak:/opt/keycloak/templates:ro
     networks:
@@ -92,6 +98,11 @@ services:
       APP_HOST: https://${APP_HOST:-app.localtest.me}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       VITE_PUBLIC_HOST: ${VITE_HOST:-vite.localtest.me}
       EXTRA_CA_CERT: /etc/ssl/extra/traefik.crt
     volumes:

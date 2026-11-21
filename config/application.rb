@@ -27,5 +27,20 @@ module SportsScope
     config.i18n.default_locale = :en
 
     config.generators.system_tests = nil
+
+    # SMTP Google (Gmail / Google Workspace) : STARTTLS sur 587, mot de passe d'application.
+    # Sans SMTP_USER, rien n'est configuré plutôt que de planter au démarrage. Commun au dev
+    # et à la prod ; les tests gardent le delivery_method :test de leur environnement.
+    if ENV["SMTP_USER"].present? && !Rails.env.test?
+      config.action_mailer.delivery_method = :smtp
+      config.action_mailer.smtp_settings = {
+        address: ENV.fetch("SMTP_HOST", "smtp.gmail.com"),
+        port: ENV.fetch("SMTP_PORT", 587).to_i,
+        user_name: ENV["SMTP_USER"],
+        password: ENV["SMTP_PASSWORD"],
+        authentication: :plain,
+        enable_starttls_auto: true
+      }
+    end
   end
 end

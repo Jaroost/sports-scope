@@ -98,6 +98,13 @@
                       <i class="fa-brands fa-android me-2" aria-hidden="true"></i><%= t("companion.title") %>
                     <% end %>
                   </li>
+                  <% if can?(:manage, :all) %>
+                    <li>
+                      <%= link_to admin_test_mail_path, class: "dropdown-item" do %>
+                        <i class="fa-solid fa-envelope-circle-check me-2" aria-hidden="true"></i><%= t("test_mailer.page_title") %>
+                      <% end %>
+                    </li>
+                  <% end %>
                   <li>
                     <%= button_to logout_path, method: :delete, class: "dropdown-item", data: { turbo: false } do %>
                       <i class="fa-solid fa-right-from-bracket me-2" aria-hidden="true"></i><%= t("nav.logout") %>

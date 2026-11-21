@@ -1,0 +1,23 @@
+<% content_for :title, t("test_mailer.page_title") %>
+<% content_for :head do %>
+  <meta name="robots" content="noindex, nofollow">
+<% end %>
+
+<div class="mx-auto" style="max-width: 36rem;">
+  <h1 class="h3 mb-3"><%= t("test_mailer.page_title") %></h1>
+  <p class="text-body-secondary"><%= t("test_mailer.intro") %></p>
+
+  <% if @error %>
+    <div class="alert alert-danger" role="alert"><%= @error %></div>
+  <% end %>
+
+  <%= form_with url: admin_test_mail_path, method: :post do |f| %>
+    <div class="mb-3">
+      <%= f.label :to, t("test_mailer.recipient"), class: "form-label" %>
+      <%= f.email_field :to, value: @to, required: true, class: "form-control" %>
+    </div>
+    <%= f.button type: "submit", class: "btn btn-primary" do %>
+      <i class="fa-solid fa-paper-plane me-2" aria-hidden="true"></i><%= t("test_mailer.send") %>
+    <% end %>
+  <% end %>
+</div>

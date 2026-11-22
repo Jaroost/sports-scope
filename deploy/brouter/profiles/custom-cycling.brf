@@ -313,6 +313,7 @@ assign roadbase =
   else if ( highway=pedestrian               ) then cost_way_pedestrian
   else if ( highway=bridleway                ) then cost_way_bridleway
   else if ( highway=cycleway                 ) then cost_way_cycleway
+  else if ( and highway=path|footway bicycle=designated ) then cost_way_cycleway
   else if ( isresidentialorliving            ) then cost_road_residential
   else if ( highway=service                  ) then cost_road_service
   else if ( highway=track|road               ) then cost_way_track
@@ -333,6 +334,7 @@ assign surface_soft   = surface=sand|mud
 assign surface_rough  = or surface=wood|rock|stone
                            smoothness=bad|very_bad|horrible|very_horrible|impassable
 assign unknownsurface = and highway=track|path|footway|road|bridleway
+                        and not bicycle=designated
                         and surface=
                         and tracktype=
                             smoothness=

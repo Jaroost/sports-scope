@@ -609,6 +609,8 @@ export interface Preset {
   battery?: Record<string, number | boolean>
   // Tonalités de début/fin de col — même forme que `battery`.
   climb?: Record<string, boolean>
+  // Boussole verrouillée au départ + sport/profil de routage — `sanitize_navigation` (Rails).
+  navigation?: { compass_locked?: boolean; routing_sport?: string; routing_profile?: string }
   // Pastille de tronçon (haut d'écran) et popup de changement de tronçon —
   // même forme que `climb`.
   workout?: Record<string, boolean | string>

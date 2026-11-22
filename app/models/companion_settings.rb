@@ -988,6 +988,7 @@ module CompanionSettings
       "radar" => sanitize_radar(raw["radar"]),
       "battery" => sanitize_battery(raw["battery"]),
       "climb" => sanitize_climb(raw["climb"]),
+      "navigation" => sanitize_navigation(raw["navigation"]),
       "workout" => sanitize_workout(raw["workout"]),
       "laps" => sanitize_lap_toast(raw["laps"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
@@ -2117,6 +2118,27 @@ module CompanionSettings
       # profil d'avant ce réglage garde le comportement qu'il avait.
       "free_profile" => raw["free_profile"] != false
     }
+  end
+
+  # Réglages de navigation : boussole verrouillée au départ, et profil de
+  # routage (sport + spec BRouter) des calculs faits en roulant. Absent vaut
+  # « comme avant » (cap GPS, profil du compte) : on n'écrit donc que ce qui
+  # s'écarte du défaut. Le profil est validé par `RoutingProfileSpec` contre les
+  # profils proposés pour son sport (les mêmes que les préférences du compte) ;
+  # sport ou spec inexploitable = les deux omis, jamais un profil sans son sport.
+  def sanitize_navigation(raw)
+    return nil unless raw.is_a?(Hash)
+
+    out = {}
+    out["compass_locked"] = true if raw["compass_locked"] == true
+    sport = raw["routing_sport"]
+    allowed = ProfilesController::ALLOWED_ROUTE_PROFILES[sport]
+    spec = allowed && RoutingProfileSpec.normalize(raw["routing_profile"], allowed)
+    if spec.present?
+      out["routing_sport"] = sport
+      out["routing_profile"] = spec
+    end
+    out.presence
   end
 
   # Les tons de la voix des entraînements (hauteur et débit réglés côté

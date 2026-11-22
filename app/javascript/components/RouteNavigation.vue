@@ -43,7 +43,7 @@ import {
   companionPois, companionResupply, registerPoiHandlers,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
   registerMapStyleHandlers, registerMapCameraHandlers, dataSaverActive,
-  registerVoiceDestinationHandlers,
+  registerVoiceDestinationHandlers, navigationRouting,
 } from '../companionBridge'
 import { usePlaceSearch, placeShortName } from '../composables/usePlaceSearch'
 import { nearestPoiIntent, findNearestPoi, spokenDistance } from '../nearestPoi'
@@ -731,6 +731,17 @@ let rawHints: VoiceHint[] = []
 const routeSport = ref<Sport>(userPreferences().display.default_sport)
 const routeProfile = ref<string>(routeProfileForSport(routeSport.value))
 const routeName = ref('')
+
+// Profil de routage du profil de sortie de l'appli compagnon. Ne s'applique que sans
+// tracé chargé (un tracé se reroute comme il a été créé, adoptRouteRouting), et n'écrase
+// pas un choix fait à la main ensuite : la valeur n'est rejouée qu'au `ready`.
+watch(navigationRouting, (r) => {
+  if (!r || hasRoute.value) return
+  const sport = r.sport as Sport
+  if (!isProfileValidForSport(r.profile, sport)) return
+  routeSport.value = sport
+  routeProfile.value = r.profile
+}, { immediate: true })
 
 // ─── Navigation vers un lieu choisi sur la carte ───────────────────────────────
 // Mode « cible » : on affiche une recherche (recadrage carte) + une consigne, puis chaque

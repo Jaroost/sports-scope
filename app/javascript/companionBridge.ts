@@ -298,6 +298,13 @@ export const dataSaverActive = ref(false)
 // d'avant. Lu par useFreeClimbProfile à chaque fix.
 export const freeClimbProfileEnabled = ref(true)
 
+// ─── Profil de routage imposé par le profil de sortie ────────────────────────
+//
+// `navigation.routing_sport` / `routing_profile` (CompanionSettings). Rejoué par
+// l'appli à chaque `ready`. `null` tant qu'elle n'a rien dit : on garde alors le
+// profil des préférences du compte. RouteNavigation l'applique hors tracé chargé.
+export const navigationRouting = ref<{ sport: string; profile: string } | null>(null)
+
 // ─── Fond de carte : commande venue de l'appli ───────────────────────────────
 //
 // Choisi hors sortie via `PATCH /api/companion_settings/map_style`
@@ -479,6 +486,7 @@ export function installCompanionBridge(): void {
       setMapStyle(id: string): void
       setDataSaver(active: boolean): void
       setFreeClimbProfile(enabled: boolean): void
+      setNavigationRouting(sport: string, profile: string): void
       zoomMap(delta: number): void
       panMap(fx: number, fy: number): void
       recenterMap(): void
@@ -557,6 +565,9 @@ export function installCompanionBridge(): void {
     // Seul `false` coupe : toute autre valeur garde le comportement par défaut.
     setFreeClimbProfile(enabled: boolean) {
       freeClimbProfileEnabled.value = enabled !== false
+    },
+    setNavigationRouting(sport: string, profile: string) {
+      navigationRouting.value = sport && profile ? { sport, profile } : null
     },
     zoomMap(delta: number) {
       try {

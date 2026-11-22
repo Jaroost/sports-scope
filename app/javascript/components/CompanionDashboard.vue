@@ -5,6 +5,10 @@ import { csrfToken } from '../csrf'
 import CompanionBlockPicker from './CompanionBlockPicker.vue'
 import CompanionBlockPreview from './CompanionBlockPreview.vue'
 import CompanionColorPicker from './CompanionColorPicker.vue'
+import RoutingProfileSelect from './RoutingProfileSelect.vue'
+import { catalogDefaultForSport } from '../brouter'
+import { routeProfileForSport, SPORTS } from '../userPreferences'
+import type { Sport } from '../userPreferences'
 import CompanionThresholdEditor from './CompanionThresholdEditor.vue'
 import {
   bandThresholdsEligible, canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR,
@@ -97,7 +101,7 @@ const showPresetConfig = ref(false)
 // remis à `false` au changement de profil (`select`).
 const SECTIONS = [
   'pages', 'notch', 'bands', 'sensors', 'buttons', 'radar', 'battery',
-  'climb', 'workout', 'laps', 'reminders', 'traveled_path',
+  'navigation', 'climb', 'workout', 'laps', 'reminders', 'traveled_path',
 ] as const
 const openSections = reactive<Record<string, boolean>>(
   Object.fromEntries(SECTIONS.map((name) => [name, false])),
@@ -118,6 +122,7 @@ const SECTION_ICONS: Record<string, string> = {
   buttons: 'fa-solid fa-hand-pointer',
   radar: 'fa-solid fa-car-rear',
   battery: 'fa-solid fa-battery-half',
+  navigation: 'fa-solid fa-compass',
   climb: 'fa-solid fa-mountain',
   workout: 'fa-solid fa-dumbbell',
   laps: 'fa-solid fa-stopwatch',
@@ -1349,6 +1354,25 @@ function batteryValue(key: string, fallback: number): number {
 
 function setBattery(key: string, value: number | boolean) {
   preset.value.battery = { ...(preset.value.battery || {}), [key]: value }
+}
+
+// Navigation : boussole verrouillée au départ, profil de routage. Seul ce qui s'écarte
+// du défaut est écrit (cf. `sanitize_navigation`) : décocher / « profil du compte »
+// efface la clé, et un objet vide disparaît.
+function setNavigation(patch: Record<string, unknown>) {
+  const nav: Record<string, unknown> = { ...(preset.value.navigation || {}), ...patch }
+  for (const key of Object.keys(nav)) if (nav[key] === undefined || nav[key] === false) delete nav[key]
+  preset.value.navigation = Object.keys(nav).length > 0 ? nav : undefined
+}
+const navRoutingOn = computed(() => !!preset.value.navigation?.routing_profile)
+const navSport = computed<Sport>(() => (preset.value.navigation?.routing_sport as Sport) || 'cycling')
+function setNavRoutingOn(on: boolean) {
+  if (!on) return setNavigation({ routing_sport: undefined, routing_profile: undefined })
+  const sport = navSport.value
+  setNavigation({ routing_sport: sport, routing_profile: routeProfileForSport(sport) })
+}
+function setNavSport(sport: Sport) {
+  setNavigation({ routing_sport: sport, routing_profile: catalogDefaultForSport(sport) })
 }
 
 function setClimb(key: string, value: boolean) {
@@ -3087,6 +3111,59 @@ async function save() {
               </label>
             </div>
           </div>
+        </div>
+
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.navigation"
+                  @click="toggleSection('navigation')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.navigation }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.navigation" aria-hidden="true"></i>
+            {{ t('companion.settings.navigation_title') }}
+          </button>
+        </h2>
+        <div v-if="openSections.navigation" class="cdb-sec-body">
+        <p class="text-body-secondary small">{{ t('companion.settings.navigation_help') }}</p>
+        <div class="row g-2 align-items-start mb-4">
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="nav-compass-locked"
+                     :checked="preset.navigation?.compass_locked === true"
+                     @change="setNavigation({ compass_locked: ($event.target as HTMLInputElement).checked })">
+              <label class="form-check-label small" for="nav-compass-locked">
+                {{ t('companion.settings.navigation_compass_locked') }}
+              </label>
+              <div class="form-text">{{ t('companion.settings.navigation_compass_locked_help') }}</div>
+            </div>
+          </div>
+          <div class="col-12">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="nav-routing-on"
+                     :checked="navRoutingOn"
+                     @change="setNavRoutingOn(($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="nav-routing-on">
+                {{ t('companion.settings.navigation_routing') }}
+              </label>
+              <div class="form-text">{{ t('companion.settings.navigation_routing_help') }}</div>
+            </div>
+          </div>
+          <template v-if="navRoutingOn">
+            <div class="col-12 col-sm-5 col-lg-3">
+              <select class="form-select form-select-sm" :value="navSport"
+                      :aria-label="t('companion.settings.navigation_routing_sport')"
+                      @change="setNavSport(($event.target as HTMLSelectElement).value as Sport)">
+                <option v-for="sport in SPORTS" :key="sport" :value="sport">{{ t(`routes.wt_sport_${sport}`) }}</option>
+              </select>
+            </div>
+            <div class="col-12 col-sm-7 col-lg-5">
+              <RoutingProfileSelect :model-value="preset.navigation?.routing_profile || ''" :sport="navSport"
+                                    select-class="form-select-sm"
+                                    :aria-label="t('companion.settings.navigation_routing')"
+                                    @update:model-value="setNavigation({ routing_profile: $event })" />
+            </div>
+          </template>
         </div>
 
         </div>

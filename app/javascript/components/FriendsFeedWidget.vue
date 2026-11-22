@@ -22,6 +22,7 @@ const localePrefix = lang ? `/${lang}` : ''
 const fetched = ref<FeedItem[]>([])
 const sportFilter = ref('')
 const friendFilter = ref('')
+const showFilters = ref(false)
 
 const all = computed(() => {
   const list = props.items ?? fetched.value
@@ -48,6 +49,11 @@ const shown = computed(() => {
 })
 
 const visible = computed(() => !props.compact || all.value.length > 0)
+const activeFilterCount = computed(() => (sportFilter.value ? 1 : 0) + (friendFilter.value ? 1 : 0))
+function clearFilters() {
+  sportFilter.value = ''
+  friendFilter.value = ''
+}
 const hasFilters = computed(() => sportOptions.value.length > 1 || friendOptions.value.length > 1)
 
 onMounted(async () => {
@@ -65,9 +71,32 @@ onMounted(async () => {
       <h2 class="h5 mb-0 d-flex align-items-center gap-2">
         <i class="fa-solid fa-user-group text-warning" aria-hidden="true"></i>
         <a v-if="compact" :href="`${localePrefix}/friends`" class="text-reset text-decoration-none">{{ t('friends.home_feed') }}</a>
-        <span v-else>{{ t('friends.feed') }}</span>
+        <span v-else>{{ t('friends.home_feed') }}</span>
       </h2>
-      <div v-if="hasFilters" class="ms-auto d-flex flex-wrap gap-2">
+      <div v-if="hasFilters" class="ms-auto btn-group btn-group-sm">
+        <button
+          type="button"
+          class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+          :class="{ active: showFilters }"
+          :aria-expanded="showFilters"
+          @click="showFilters = !showFilters"
+        >
+          <i class="fa-solid fa-filter" aria-hidden="true"></i>
+          <span>{{ t('friends.filter_toggle') }}</span>
+          <span v-if="activeFilterCount" class="badge rounded-pill text-bg-warning">{{ activeFilterCount }}</span>
+        </button>
+        <button
+          v-if="activeFilterCount"
+          type="button"
+          class="btn btn-sm btn-danger d-flex align-items-center"
+          :title="t('friends.filter_reset')"
+          :aria-label="t('friends.filter_reset')"
+          @click="clearFilters"
+        >
+          <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div v-if="hasFilters && showFilters" class="w-100 d-flex flex-wrap gap-2">
         <select v-if="sportOptions.length > 1" v-model="sportFilter" class="form-select form-select-sm w-auto" :aria-label="t('friends.filter_sport')">
           <option value="">{{ t('friends.filter_all_sports') }}</option>
           <option v-for="s in sportOptions" :key="s" :value="s">{{ s }}</option>

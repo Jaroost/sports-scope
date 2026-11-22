@@ -1611,6 +1611,8 @@ en:
     filter_all_sports: "All sports"
     filter_all_friends: "All friends"
     filter_none: "No activity matches the filters."
+    filter_toggle: "Filter"
+    filter_reset: "Reset filters"
     manage_title: "Manage friends"
     feed_empty: "Nothing shared yet."
     feed_route: "shared a route"

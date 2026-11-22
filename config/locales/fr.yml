@@ -1611,6 +1611,8 @@ fr:
     filter_all_sports: "Tous les sports"
     filter_all_friends: "Tous les amis"
     filter_none: "Aucune activité ne correspond aux filtres."
+    filter_toggle: "Filtrer"
+    filter_reset: "Réinitialiser les filtres"
     manage_title: "Gestion des amis"
     feed_empty: "Rien de partagé pour l'instant."
     feed_route: "a partagé un itinéraire"

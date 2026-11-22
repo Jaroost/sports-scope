@@ -2,7 +2,7 @@
 import { reactive, ref, computed, onMounted, onBeforeUnmount, useTemplateRef, watch, nextTick } from 'vue'
 import { type PropType } from 'vue'
 import { t } from '../i18n'
-import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, coverageWarnMinZoom, styleUsableForView } from '../mapStyles'
+import { mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, styleUsableForView } from '../mapStyles'
 import { ActivityMapState, type ActivityColorMode } from '../pageState'
 import { HR_ZONES, POWER_ZONES, intensityZoneColor, zoneKeyForValue, type ZoneBound } from '../composables/useTrainingPlan'
 import MapStyleDropdown from './MapStyleDropdown.vue'
@@ -270,27 +270,18 @@ const autoChain = computed(() => {
   const chain = mapStyleChain(sport)
   return chain.length > 1 ? chain : null
 })
-let coverageProbeAbort: AbortController | null = null
 let coverageProbeTimer: ReturnType<typeof setTimeout> | undefined
 function scheduleCoverageProbe() {
   clearTimeout(coverageProbeTimer)
-  coverageProbeAbort?.abort()
   const chain = autoChain.value
   if (!mapInstance || !chain || autoPaused.value || !chain.includes(state.mapStyleId)) return
   const z = mapInstance.getZoom()
-  // Vue très dézoomée : tout est servi, on revient sur le favori.
-  if (z < coverageWarnMinZoom(state.mapStyleId)) {
-    if (state.mapStyleId !== chain[0]) applyMapStyle(chain[0])
-    return
-  }
   const b = mapInstance.getBounds()
   const bounds = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }
-  coverageProbeTimer = setTimeout(async () => {
-    const ctrl = (coverageProbeAbort = new AbortController())
+  coverageProbeTimer = setTimeout(() => {
     let want = chain[chain.length - 1]
     for (const id of chain) {
-      const usable = await styleUsableForView(id, bounds, z, ctrl.signal)
-      if (ctrl.signal.aborted) return
+      const usable = styleUsableForView(id, bounds, z)
       if (usable) { want = id; break }
     }
     if (want !== state.mapStyleId && chain.includes(state.mapStyleId)) applyMapStyle(want)
@@ -1350,7 +1341,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  clearTimeout(coverageProbeTimer); coverageProbeAbort?.abort()
+  clearTimeout(coverageProbeTimer)
   stopRouteFlow()
   if (mapResizeObserver) { mapResizeObserver.disconnect(); mapResizeObserver = null }
   if (cardResizeObserver) { cardResizeObserver.disconnect(); cardResizeObserver = null }

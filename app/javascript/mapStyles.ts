@@ -1,3 +1,5 @@
+import coverageJson from './styleCoverage.json'
+
 export type MapStyleGroup = 'world' | 'swiss' | 'france' | 'austria' | 'germany'
 
 export interface MapStyle {
@@ -80,6 +82,7 @@ const SWISS_OUTLINE: [number, number][] = [
   [10.55, 46.95], [10.55, 46.55], [10.20, 46.20], [9.40, 46.30], [9.20, 45.80],
   [8.70, 45.90], [8.40, 46.10], [7.70, 45.90], [7.10, 45.85], [6.88, 46.05],
   [6.80, 46.20], [6.82, 46.38], [6.50, 46.44], [6.25, 46.30],
+  [6.28, 46.17], [6.15, 46.12], // canton de Genève : sans ces deux points l'arête coupait la ville
 ]
 
 function pointInPolygon(lng: number, lat: number, poly: [number, number][]): boolean {
@@ -116,17 +119,19 @@ function pointInAnyBbox(lng: number, lat: number, bboxes: [number, number, numbe
 // réellement.
 export const COVERAGE_WARN_MIN_ZOOM = 9
 
-// Les fonds qu'on sait sonder n'ont pas ce problème : la sonde regarde les tuiles réellement
-// servies, donc un fond encore lisible à bas zoom ne déclenche rien. Ils avertissent dès
-// z5 (à Paris, swisstopo se vide dès z7) ; en dessous, la vue couvre un pays entier et une
-// tuile ne dit plus rien.
-export const PROBED_COVERAGE_WARN_MIN_ZOOM = 5
+// Les fonds qui ont une table de couverture (cf. plus bas) n'ont pas ce problème : elle dit où
+// de vraies tuiles existent, pas où le serveur en renvoie par politesse à bas zoom. Ils
+// avertissent dès z7 ; en dessous, la vue dépasse le pays (la Suisse entière tient à z5,7 avec la moitié
+// de l'Europe autour) et le tiers de points vides déclenchait la notice à tort.
+export const PROBED_COVERAGE_WARN_MIN_ZOOM = 7
 
 export function coverageWarnMinZoom(styleId: string): number {
-  return hasCoverageProbe(styleId) ? PROBED_COVERAGE_WARN_MIN_ZOOM : COVERAGE_WARN_MIN_ZOOM
+  return hasCoverageTable(styleId) ? PROBED_COVERAGE_WARN_MIN_ZOOM : COVERAGE_WARN_MIN_ZOOM
 }
 
 export function styleCoversPoint(styleId: string, lng: number, lat: number): boolean {
+  const index = coverageIndexFor(styleId)
+  if (index) return coverageMaxZoomAt(index, lng, lat) > 0
   const group = groupForStyle(styleId) as MapStyleGroup
   const bboxes = MAP_STYLE_GROUP_BBOX[group]
   if (!bboxes) return true
@@ -135,204 +140,112 @@ export function styleCoversPoint(styleId: string, lng: number, lat: number): boo
   return pointInAnyBbox(lng, lat, bboxes)
 }
 
-// ─── Sonde de couverture ──────────────────────────────────────────────────────
-// Les bbox ci-dessus ne sont qu'une approximation (faux positifs à la frontière) : pour les
-// fonds dont on sait reconnaître une tuile vide, on interroge le serveur sur la tuile du
-// centre de la vue. Vérifié en direct : le plan IGN répond 404 hors couverture, swisstopo
-// répond 200 avec un JPEG blanc de 668 octets (d'où `blankMaxBytes`). Les fonds sans entrée
-// ici (fonds mondiaux) restent sur la bbox.
-interface CoverageProbe { url: string; maxzoom: number; blankMaxBytes?: number; needsRoads?: boolean }
-const swissProbe = (layer: string, ext: string): CoverageProbe => ({
-  url: `https://wmts.geo.admin.ch/1.0.0/${layer}/default/current/3857/{z}/{x}/{y}.${ext}`,
-  maxzoom: 18,
-  blankMaxBytes: 700,
-})
-const ignProbe = (layer: string, format: string, needsRoads = false): CoverageProbe => ({
-  url: `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=normal&FORMAT=${format}&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`,
-  maxzoom: 19,
-  needsRoads,
-})
 const BKG_BASE = 'https://sgx.geodatenzentrum.de'
 
-// basemap.at hors d'Autriche : 404, ou 200 avec une tuile vide (PNG de 190 octets, JPEG
-// d'orthophoto de 2419 octets — vérifié à Munich, Bolzano, Zurich).
-const atProbe = (layer: string, ext: 'png' | 'jpeg', blankMaxBytes: number): CoverageProbe => ({
-  url: `https://maps.wien.gv.at/basemap/${layer}/normal/google3857/{z}/{y}/{x}.${ext}`,
-  maxzoom: 19,
-  blankMaxBytes,
-})
-// BKG (Allemagne) : basemap.de répond 200 avec une tuile vide de 334 octets (Suisse) ou 854
-// octets (Autriche, France) hors d'Allemagne. Vérifié à Zurich, Vienne, Lyon. TopPlusOpen,
-// qui répond partout, est rangé dans le groupe Monde et n'a donc pas de sonde.
-const bkgProbe = (path: string): CoverageProbe => ({
-  url: `${BKG_BASE}/${path}/{z}/{y}/{x}.png`,
-  maxzoom: 18,
-  blankMaxBytes: 1000,
-})
-const COVERAGE_PROBES: Record<string, CoverageProbe> = {
-  atbasemap:  atProbe('geolandbasemap', 'png', 300),
-  atgrau:     atProbe('bmapgrau', 'png', 300),
-  atortho:    atProbe('bmaporthofoto30cm', 'jpeg', 3000),
-  debasemap:  bkgProbe('wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_farbe/default/GLOBAL_WEBMERCATOR'),
-  degrau:     bkgProbe('wmts_basemapde/tile/1.0.0/de_basemapde_web_raster_grau/default/GLOBAL_WEBMERCATOR'),
-  swisstopo:  swissProbe('ch.swisstopo.pixelkarte-farbe', 'jpeg'),
-  swissgrau:  swissProbe('ch.swisstopo.pixelkarte-grau', 'jpeg'),
-  swissimage: swissProbe('ch.swisstopo.swissimage', 'jpeg'),
-  ignplan:    ignProbe('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png', true),
-  ignortho:   ignProbe('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'),
+// ─── Table de couverture précalculée ──────────────────────────────────────────
+// `styleCoverage.json` (généré par `script/build-style-coverage.mjs`) dit, pour chaque fond
+// régional, où il distribue de vraies tuiles et jusqu'à quel zoom : un quadtree de cellules
+// z8 à z11, chacune avec le plus haut zoom qui a du contenu. Mesuré une fois, hors ligne, avec
+// des délais et des essais que le navigateur ne peut pas se permettre — plutôt que de sonder
+// des tuiles en roulant, avec un résultat qui dépend du temps de réponse du serveur.
+// Les fonds mondiaux et ceux absents de la table retombent sur les bbox ci-dessus.
+interface CoverageTable { startZoom: number; endZoom: number; styles: Record<string, number[]> }
+
+const COVERAGE = coverageJson as CoverageTable
+
+interface CoverageIndex { cells: Map<number, number>; maxZoom: number }
+const COVERAGE_INDEX = new Map<string, CoverageIndex>()
+const cellKey = (z: number, x: number, y: number) => (z * 16384 + x) * 16384 + y
+
+function coverageIndexFor(styleId: string): CoverageIndex | null {
+  const name = baseStyleId(styleId)
+  const cached = COVERAGE_INDEX.get(name)
+  if (cached) return cached
+  const flat = COVERAGE.styles?.[name]
+  if (!flat?.length) return null
+  const cells = new Map<number, number>()
+  let maxZoom = 0
+  for (let i = 0; i < flat.length; i += 4) {
+    cells.set(cellKey(flat[i], flat[i + 1], flat[i + 2]), flat[i + 3])
+    if (flat[i + 3] > maxZoom) maxZoom = flat[i + 3]
+  }
+  const index = { cells, maxZoom }
+  COVERAGE_INDEX.set(name, index)
+  return index
 }
 
 function baseStyleId(id: string): string {
   return MAP_STYLE_COMBOS.find((c) => c.id === id)?.style ?? id
 }
 
-export function hasCoverageProbe(styleId: string): boolean {
-  return baseStyleId(styleId) in COVERAGE_PROBES
+// Les fonds pour lesquels on a une table (les régionaux). Les autres : bbox, ou mondial.
+export function hasCoverageTable(styleId: string): boolean {
+  return coverageIndexFor(styleId) !== null
 }
 
-// Hors de France, le plan IGN sert encore des tuiles à partir d'un certain zoom (z14 en
-// Suisse) mais réduites au relief, aux altitudes et à l'eau : ni routes ni chemins, donc rien
-// de lisible, et pourtant un 200. Mesuré sur des tuiles suisses : 0 % de pixels « de route »
-// (orange/jaune, r - b > 45 et r > 180) contre 6 à 16 % sur une tuile pleine ; une tuile
-// française quasi vide (Camargue, Beauce) reste à 0,3 à 2 %. Seuil bas, et appliqué seulement
-// hors de la zone France (cf. probeStyleCoverage) : en France, une tuile sans route est
-// juste une zone vide (mer, marais).
-const ROAD_PIXEL_MIN_SHARE = 0.0005
-
-async function hasRoadPixels(blob: Blob): Promise<boolean> {
-  const bitmap = await createImageBitmap(blob)
-  const canvas = new OffscreenCanvas(bitmap.width, bitmap.height)
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) return true
-  ctx.drawImage(bitmap, 0, 0)
-  const { data } = ctx.getImageData(0, 0, bitmap.width, bitmap.height)
-  let roads = 0
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i] > 180 && data[i] - data[i + 2] > 45) roads++
+// Plus haut zoom servi au point : 0 = rien, null = pas de table pour ce fond.
+function coverageMaxZoomAt(index: CoverageIndex, lng: number, lat: number): number {
+  const y = Math.min(1, Math.max(0, (1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2))
+  const x = ((lng + 180) / 360)
+  if (x < 0 || x >= 1) return 0
+  for (let z = COVERAGE.startZoom; z <= COVERAGE.endZoom; z++) {
+    const n = 2 ** z
+    const mz = index.cells.get(cellKey(z, Math.floor(x * n), Math.min(n - 1, Math.floor(y * n))))
+    if (mz !== undefined) return mz
   }
-  return roads / (data.length / 4) >= ROAD_PIXEL_MIN_SHARE
+  return 0
 }
 
-// Verdict par tuile (URL + « hors zone » qui conditionne le test des routes) : une tuile
-// vide ou pleine le reste, inutile de la re-télécharger à chaque geste. Les échecs
-// (null) ne sont jamais retenus. Borné, les plus anciens partent d'abord.
-const TILE_VERDICTS = new Map<string, boolean>()
-const TILE_VERDICTS_MAX = 600
-function rememberTileVerdict(key: string, verdict: boolean) {
-  TILE_VERDICTS.delete(key)
-  TILE_VERDICTS.set(key, verdict)
-  if (TILE_VERDICTS.size > TILE_VERDICTS_MAX) TILE_VERDICTS.delete(TILE_VERDICTS.keys().next().value as string)
-}
-
-async function fetchTileVerdict(
-  probe: CoverageProbe, url: string, outside: boolean, signal?: AbortSignal,
-): Promise<boolean | null> {
-  const res = await fetch(url, { signal })
-  if (res.status === 404 || res.status === 400) return false
-  if (!res.ok) return null
-  if (probe.blankMaxBytes && (await res.arrayBuffer()).byteLength <= probe.blankMaxBytes) return false
-  if (probe.needsRoads && outside) return await hasRoadPixels(await res.blob())
-  return true
+// Cellules de la table du fond, en GeoJSON, pour les dessiner sur la carte (couche « couverture »
+// du créateur d'itinéraire). `served` : la cellule a des tuiles au niveau que MapLibre va
+// demander au zoom courant (même règle que styleUsableForView) ; sinon elle en a, mais pas
+// aussi profond. Ce qui n'est pas dans la table n'a aucune tuile : pas de polygone.
+export function styleCoverageGeoJSON(styleId: string, zoom: number): { type: 'FeatureCollection'; features: any[] } | null {
+  const index = coverageIndexFor(styleId)
+  const flat = COVERAGE.styles?.[baseStyleId(styleId)]
+  if (!index || !flat) return null
+  const need = Math.min(Math.max(Math.round(zoom) + 1, 0), index.maxZoom)
+  const lng = (x: number, z: number) => (x / 2 ** z) * 360 - 180
+  const lat = (y: number, z: number) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / 2 ** z))) * 180) / Math.PI
+  const features: any[] = []
+  for (let i = 0; i < flat.length; i += 4) {
+    const [z, x, y, maxZoom] = [flat[i], flat[i + 1], flat[i + 2], flat[i + 3]]
+    const w = lng(x, z), e = lng(x + 1, z), n = lat(y, z), s = lat(y + 1, z)
+    features.push({
+      type: 'Feature',
+      properties: { served: maxZoom >= need, maxZoom },
+      geometry: { type: 'Polygon', coordinates: [[[w, n], [e, n], [e, s], [w, s], [w, n]]] },
+    })
+  }
+  return { type: 'FeatureCollection', features }
 }
 
 export interface ViewBounds { west: number; south: number; east: number; north: number }
 
-// Part de tuiles vides à partir de laquelle on avertit : une vue à cheval sur la frontière
-// dont la moitié reste lisible n'est pas « hors zone », mais un tiers de blanc se voit.
+// Part des points échantillonnés sans tuile à partir de laquelle on déclare la vue hors zone :
+// une vue à cheval sur la frontière dont la moitié reste lisible n'est pas « hors zone »,
+// mais un tiers de blanc se voit.
 const COVERAGE_BLANK_SHARE = 1 / 3
 
-// true = la vue est lisible, false = au moins un tiers des tuiles échantillonnées sont
-// vides/absentes, null = indéterminé (réseau, CORS, pas de sonde) — l'appelant retombe
-// alors sur la bbox. On échantillonne une grille 3 × 3 de la vue, pas son seul centre : à
-// la frontière, la tuile du centre est souvent pleine alors que le bord de l'écran est blanc.
-export async function probeStyleCoverage(
-  styleId: string, bounds: ViewBounds, zoom: number, signal?: AbortSignal,
-): Promise<boolean | null> {
-  const probe = COVERAGE_PROBES[baseStyleId(styleId)]
-  if (!probe) return null
-  // Les sources raster sont en tuiles de 256 px (une tuile de 512 px logiques = deux de
-  // 256, d'où le +1) et MapLibre ARRONDIT leur niveau (`roundZoom`) au lieu de le tronquer :
-  // à z15.6 il charge du z17, pas du z16 — c'est le blanc de ce niveau qu'on voit.
-  const z = Math.min(Math.max(Math.round(zoom) + 1, 0), probe.maxzoom)
-  const n = 2 ** z
-  const clamp = (v: number) => Math.min(n - 1, Math.max(0, Math.floor(v)))
-  const urls = new Map<string, boolean>() // url → l'échantillon tombe hors de la zone du fond
+// Le fond est-il lisible sous la vue ? Consultation locale de la table, sans requête : on
+// échantillonne une grille 3 × 3 de la vue (pas son seul centre : à la frontière, le centre est
+// souvent plein alors que le bord de l'écran est blanc) et on exige que chaque point soit servi
+// au niveau de tuile que MapLibre va demander. Les sources raster sont en tuiles de 256 px
+// (une tuile de 512 px logiques = deux de 256, d'où le +1) et MapLibre ARRONDIT leur niveau :
+// à z15.6 il charge du z17. Fond sans table : bbox du groupe, au centre de la vue.
+export function styleUsableForView(styleId: string, bounds: ViewBounds, zoom: number): boolean {
+  const index = coverageIndexFor(styleId)
+  if (!index) return styleCoversPoint(styleId, (bounds.west + bounds.east) / 2, (bounds.south + bounds.north) / 2)
+  const need = Math.min(Math.max(Math.round(zoom) + 1, 0), index.maxZoom)
+  let blank = 0
   for (const fx of [0.1, 0.5, 0.9]) {
     for (const fy of [0.1, 0.5, 0.9]) {
       const lng = bounds.west + (bounds.east - bounds.west) * fx
       const lat = bounds.south + (bounds.north - bounds.south) * fy
-      const x = clamp(((lng + 180) / 360) * n)
-      const y = clamp(((1 - Math.asinh(Math.tan((lat * Math.PI) / 180)) / Math.PI) / 2) * n)
-      const url = probe.url.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y))
-      if (!urls.has(url)) urls.set(url, !styleCoversPoint(styleId, lng, lat))
+      if (coverageMaxZoomAt(index, lng, lat) < need) blank++
     }
   }
-  const verdicts = await Promise.all([...urls].map(async ([url, outside]) => {
-    const key = `${url}|${outside}`
-    const cached = TILE_VERDICTS.get(key)
-    if (cached !== undefined) return cached
-    try {
-      const verdict = await fetchTileVerdict(probe, url, outside, signal)
-      if (verdict !== null) rememberTileVerdict(key, verdict)
-      return verdict
-    } catch {
-      return null
-    }
-  }))
-  const known = verdicts.filter((v): v is boolean => v !== null)
-  if (known.length === 0) return null
-  return known.filter((v) => !v).length / known.length < COVERAGE_BLANK_SHARE
-}
-
-// Marges du pré-filtre par zone (en degrés). Les serveurs servent des tuiles lisibles au-delà
-// de leur frontière, d'autant plus loin que le zoom est bas (vérifié : swisstopo sert encore
-// Lyon à z9 et Morteau jusqu'à z16) : on ne déclare « nettement hors zone » qu'à 1° (~100 km)
-// de la bbox du groupe. Côté intérieur, les contours sont grossiers (quelques km) : on ne
-// déclare « nettement dedans » qu'à 0,2° (~20 km) du bord.
-const ZONE_OUTSIDE_MARGIN_DEG = 1
-const ZONE_INSIDE_MARGIN_DEG = 0.2
-
-// Seule la Suisse a un contour assez fin pour certifier l'intérieur : les rectangles de
-// France et d'Autriche englobent des bouts de pays voisins (Belgique, Catalogne, Bavière).
-const PRECISE_INSIDE_GROUPS: MapStyleGroup[] = ['swiss']
-
-type ZoneRelation = 'outside' | 'inside' | 'near'
-
-function viewRelationToStyle(styleId: string, bounds: ViewBounds): ZoneRelation {
-  const group = groupForStyle(styleId)
-  const bboxes = group && MAP_STYLE_GROUP_BBOX[group]
-  if (!group || !bboxes) return 'inside' // fond mondial
-  const m = ZONE_OUTSIDE_MARGIN_DEG
-  const touches = bboxes.some(([minLng, minLat, maxLng, maxLat]) =>
-    bounds.west <= maxLng + m && bounds.east >= minLng - m && bounds.south <= maxLat + m && bounds.north >= minLat - m)
-  if (!touches) return 'outside'
-  if (PRECISE_INSIDE_GROUPS.includes(group)) {
-    const i = ZONE_INSIDE_MARGIN_DEG
-    const xs = [bounds.west - i, (bounds.west + bounds.east) / 2, bounds.east + i]
-    const ys = [bounds.south - i, (bounds.south + bounds.north) / 2, bounds.north + i]
-    if (xs.every((x) => ys.every((y) => styleCoversPoint(styleId, x, y)))) return 'inside'
-  }
-  return 'near'
-}
-
-// Le fond est-il lisible sous la vue ? D'abord le pré-filtre par zone, sans requête : nettement
-// hors zone → non, nettement dedans (Suisse) ou fond mondial → oui. Entre les deux, sonde de
-// tuiles quand on sait la faire, bbox du groupe sinon ou si la sonde échoue.
-export async function styleUsableForView(
-  styleId: string, bounds: ViewBounds, zoom: number, signal?: AbortSignal,
-): Promise<boolean> {
-  const relation = viewRelationToStyle(styleId, bounds)
-  // Le pré-filtre « nettement hors zone » suppose un zoom d'édition : en dessous de
-  // COVERAGE_WARN_MIN_ZOOM les fonds sont encore servis bien au-delà de leur frontière, c'est
-  // la sonde qui tranche.
-  const lowZoom = zoom < COVERAGE_WARN_MIN_ZOOM && hasCoverageProbe(styleId)
-  if (relation === 'outside' && !lowZoom) return false
-  if (relation === 'inside') return true
-  if (hasCoverageProbe(styleId)) {
-    const probed = await probeStyleCoverage(styleId, bounds, zoom, signal)
-    if (probed !== null) return probed
-  }
-  return styleCoversPoint(styleId, (bounds.west + bounds.east) / 2, (bounds.south + bounds.north) / 2)
+  return blank / 9 < COVERAGE_BLANK_SHARE
 }
 
 // Fond « représentant » de chaque groupe régional, proposé par le bouton de la notice
@@ -354,6 +267,25 @@ export function suggestedStyleForPoint(point: { lng: number; lat: number } | nul
   const group = (Object.keys(MAP_STYLE_GROUP_BBOX) as MapStyleGroup[])
     .find((g) => styleCoversPoint(MAP_STYLE_GROUP_DEFAULT[g]!, point.lng, point.lat))
   return (group && MAP_STYLE_GROUP_DEFAULT[group]) || DEFAULT_WORLD_STYLE
+}
+
+// Fond à proposer pour la vue courante : parmi les fonds « représentants » de chaque pays, celui
+// qui sert les tuiles au niveau demandé et va le plus profond sous le centre (à égalité, l'ordre
+// de MAP_STYLE_GROUP_DEFAULT). Contrairement à suggestedStyleForPoint, qui ne regarde que la
+// présence de tuiles à n'importe quel zoom, tient compte du zoom : à la frontière, swisstopo
+// « couvre » un point français mais seulement jusqu'à z16, là où le plan IGN va à z19.
+export function suggestedStyleForView(bounds: ViewBounds | null, zoom: number | null): string {
+  if (!bounds || zoom === null) return DEFAULT_WORLD_STYLE
+  const lng = (bounds.west + bounds.east) / 2, lat = (bounds.south + bounds.north) / 2
+  let best: string | null = null
+  let bestDepth = -1
+  for (const id of Object.values(MAP_STYLE_GROUP_DEFAULT)) {
+    if (!id || !styleUsableForView(id, bounds, zoom)) continue
+    const index = coverageIndexFor(id)
+    const depth = index ? coverageMaxZoomAt(index, lng, lat) : 0
+    if (depth > bestDepth) { best = id; bestDepth = depth }
+  }
+  return best ?? DEFAULT_WORLD_STYLE
 }
 
 // ─── Entrées composées du menu « fond de carte » ──────────────────────────────

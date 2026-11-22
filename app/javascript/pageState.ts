@@ -128,10 +128,13 @@ export class RouteBuilderState extends MapPageState {
   // Bascule automatique active pour le sport courant : copie réactive de
   // `map.auto_switch` (les préférences ne le sont pas), réalignée au changement de sport.
   autoSwitch = false
+  // Dessine sur la carte les zones où le fond affiché distribue des tuiles au zoom courant
+  // (table styleCoverage.json). Purement visuel, jamais persisté.
+  showCoverage = false
   // Incrémenté quand le favori change dans les préférences (non réactives) : les computed qui
   // lisent `sportPreferences().map` le lisent pour se réévaluer.
   prefsRev = 0
-  // Emprise visible, pour échantillonner les tuiles du fond (cf. probeStyleCoverage).
+  // Emprise visible, pour échantillonner les tuiles du fond (cf. styleUsableForView).
   viewBounds: { west: number; south: number; east: number; north: number } | null = null
 
   // Vue en lecture seule (lien de partage) : les calques y sont forcés à un rendu

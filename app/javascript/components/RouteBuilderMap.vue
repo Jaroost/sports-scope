@@ -5,7 +5,7 @@ import {
   mapStyleFor, ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT,
   MAP_OVERLAYS, MAP_OVERLAY_GROUPS, overlaysInGroup,
   overlaySource, overlaySourceId, overlayLayers,
-  mapStyleComboFor, combosOverlaysForStyle,
+  mapStyleComboFor, combosOverlaysForStyle, styleCoverageGeoJSON, hasCoverageTable,
 } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import MapStyleDropdown from './MapStyleDropdown.vue'
@@ -624,6 +624,7 @@ async function initMap() {
         props.state.viewBounds = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }
       }
       mapInstance.on('moveend', publishView)
+      mapInstance.on('zoomend', () => updateCoverageLayer())
       publishView()
       // Facteur d'échelle des marqueurs, publié pour le CSS ET pour les groupes de
       // marqueurs, qui le réappliquent après chaque repositionnement (cf. mapMarkerGroup).
@@ -2676,7 +2677,7 @@ function applyMapStyle(id: string) {
   if (!mapInstance) return
   mapInstance.setStyle(mapStyleFor(id), { diff: false })
   mapInstance.once('style.load', () => {
-    installRouteLayer(); installOverlays()
+    installRouteLayer(); installOverlays(); updateCoverageLayer()
     updateRouteLayer(); updateDivergentLayer(); updateSelectionLayer(); updateMeasureLayer(); installClimbMarkers(); installPlaceMarkers(); installSavedPoiMarkers()
     reinstallLocation()
     reinstallRadar()
@@ -2688,6 +2689,32 @@ function applyMapStyle(id: string) {
     }
   })
 }
+
+// Couche « couverture du fond » : cellules de la table précalculée du fond affiché, vertes là où
+// il a des tuiles au zoom courant, orange là où il en a mais pas aussi profond. Insérée sous le
+// tracé, comme les overlays. Idempotente ; réappelée au changement de fond (style.load), de zoom
+// et de l'interrupteur. Les fonds sans table (mondiaux) n'ont rien à montrer.
+const COVERAGE_SOURCE = 'style-coverage'
+const coverageAvailable = computed(() => hasCoverageTable(props.state.mapStyleId))
+function updateCoverageLayer() {
+  if (!mapInstance) return
+  // Entre setStyle et style.load la carte refuse toute modification : style.load rappelle cette fonction.
+  try { if (!mapInstance.getStyle()) return } catch { return }
+  const data = props.state.showCoverage ? styleCoverageGeoJSON(props.state.mapStyleId, mapInstance.getZoom()) : null
+  if (!data) {
+    for (const id of ['style-coverage-line', 'style-coverage-fill']) if (mapInstance.getLayer(id)) mapInstance.removeLayer(id)
+    if (mapInstance.getSource(COVERAGE_SOURCE)) mapInstance.removeSource(COVERAGE_SOURCE)
+    return
+  }
+  const source = mapInstance.getSource(COVERAGE_SOURCE) as any
+  if (source) { source.setData(data); return }
+  mapInstance.addSource(COVERAGE_SOURCE, { type: 'geojson', data })
+  const beforeId = mapInstance.getLayer('builder-route-border') ? 'builder-route-border' : undefined
+  const color = ['case', ['get', 'served'], '#198754', '#fd7e14'] as any
+  mapInstance.addLayer({ id: 'style-coverage-fill', type: 'fill', source: COVERAGE_SOURCE, paint: { 'fill-color': color, 'fill-opacity': 0.22 } }, beforeId)
+  mapInstance.addLayer({ id: 'style-coverage-line', type: 'line', source: COVERAGE_SOURCE, paint: { 'line-color': color, 'line-width': 1, 'line-opacity': 0.6 } }, beforeId)
+}
+watch(() => [props.state.showCoverage, props.state.mapStyleId], () => updateCoverageLayer())
 
 // Réconcilie les couches overlay (chemins mondiaux, SuisseMobile/swisstopo) avec
 // props.state.overlays : ajoute les actives manquantes, retire les inactives présentes.
@@ -3108,6 +3135,15 @@ defineExpose({
             </li>
           </template>
           <li><hr class="dropdown-divider" /></li>
+          <li>
+            <button type="button" class="dropdown-item d-flex align-items-center gap-2"
+              :class="{ active: state.showCoverage && coverageAvailable }" :disabled="!coverageAvailable"
+              :title="coverageAvailable ? undefined : t('routes.layer_coverage_unavailable')"
+              @click="state.showCoverage = !state.showCoverage">
+              <i class="fa-solid" :class="state.showCoverage && coverageAvailable ? 'fa-square-check' : 'fa-square'" aria-hidden="true"></i>
+              <i class="fa-solid fa-vector-square fa-fw" aria-hidden="true"></i>{{ t('routes.layer_coverage') }}
+            </button>
+          </li>
           <template v-for="g in MAP_OVERLAY_GROUPS" :key="g">
             <li><h6 class="dropdown-header">{{ t(`strava.overlay_group_${g}`) }}</h6></li>
             <li v-for="o in overlaysInGroup(g)" :key="o.id">

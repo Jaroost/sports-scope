@@ -2,7 +2,7 @@
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, useTemplateRef, nextTick, toRaw } from 'vue'
 import { Dropdown } from 'bootstrap'
 import { t } from '../i18n'
-import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForPoint, coverageWarnMinZoom, hasCoverageProbe, styleUsableForView } from '../mapStyles'
+import { mapStyleFor, exportTileInfoFor, MAP_STYLES, groupForStyle, styleCoversPoint, suggestedStyleForView, coverageWarnMinZoom, hasCoverageTable, styleUsableForView } from '../mapStyles'
 import { RouteBuilderState } from '../pageState'
 import { routeStore } from '../stores/routeStore'
 import { selectionStore } from '../stores/selectionStore'
@@ -200,15 +200,8 @@ const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismiss
 // vérifié en direct sur les trois services, une vue dézoomée reste servie (pas vide)
 // bien au-delà de la bbox du pays — en dessous de ce zoom, la comparer donnerait un
 // faux positif. Purement informatif, la sauvegarde n'est pas concernée.
-// Pour les fonds qu'on sait sonder (swisstopo, IGN), un échantillon de tuiles de la vue tranche :
-// 404 ou JPEG blanc = vide, sinon la carte s'affiche et on ne dit rien — la bbox
-// n'intervient plus qu'en repli (sonde en échec) et pour les fonds sans sonde. Pendant
-// qu'une sonde est en vol, on garde le dernier verdict plutôt que de clignoter.
-const styleCoverageProbe = ref<boolean | null>(null)
-// Fond que la dernière sonde a réellement interrogé : avec la bascule automatique on sonde le
-// favori même quand c'est le secours qui est affiché, et ce verdict ne vaut alors rien pour
-// la notice « fond hors zone » du fond affiché.
-const styleCoverageProbed = ref<string | null>(null)
+// Pour les fonds régionaux (swisstopo, IGN, basemap.at, BKG), la table de couverture précalculée
+// (styleCoverage.json) tranche, sans requête : la bbox n'intervient que pour les fonds sans table.
 // Bascule automatique (préférences du sport : map.fallback_styles / auto_switch) : le premier
 // fond de la chaîne favori → secours… qui est lisible sous la vue est affiché, le dernier
 // servant de dernier recours (un fond mondial, par exemple). Aucune écriture de préférence :
@@ -219,55 +212,42 @@ const autoChain = computed(() => {
   const chain = mapStyleChain(routeStore.sport.value)
   return chain.length > 1 ? chain : null
 })
-let coverageProbeAbort: AbortController | null = null
 let coverageProbeTimer: ReturnType<typeof setTimeout> | undefined
 function scheduleCoverageProbe() {
   clearTimeout(coverageProbeTimer)
-  coverageProbeAbort?.abort()
   const bounds = state.viewBounds
   const z = state.viewZoom
   const chain = autoChain.value
   const shown = state.mapStyleId
   // Une dérogation manuelle hors chaîne n'est jamais remplacée.
   const auto = chain && chain.includes(shown) ? chain : null
-  if (!bounds || z === null || z < coverageWarnMinZoom(shown) || (!auto && !hasCoverageProbe(shown))) {
-    styleCoverageProbe.value = null
-    styleCoverageProbed.value = null
-    // Vue très dézoomée : tout est servi, on revient sur le favori.
-    if (auto && z !== null && z < coverageWarnMinZoom(shown) && shown !== auto[0]) mapRef.value?.applyMapStyle(auto[0])
-    return
-  }
-  coverageProbeTimer = setTimeout(async () => {
-    const ctrl = (coverageProbeAbort = new AbortController())
-    if (!auto) {
-      const result = await styleUsableForView(shown, bounds, z, ctrl.signal)
-      if (ctrl.signal.aborted) return
-      styleCoverageProbe.value = result
-      styleCoverageProbed.value = shown
-      return
-    }
+  if (!auto || !bounds || z === null) return
+  // Pas de seuil de zoom ici (contrairement à la notice) : la table dit si le fond sert la vue à
+  // n'importe quel niveau, et c'est justement vue dézoomée sur un pays et ses voisins qu'on veut
+  // retomber sur le fond mondial de la chaîne. Revenir au favori en dessous d'un seuil l'empêchait.
+  // Consultation locale : le debounce ne sert plus qu'à ne pas rebasculer à chaque image du geste.
+  coverageProbeTimer = setTimeout(() => {
     // Essai dans l'ordre, arrêt au premier fond lisible ; faute de mieux, le dernier.
     let want = auto[auto.length - 1]
     for (const id of auto) {
-      const usable = await styleUsableForView(id, bounds, z, ctrl.signal)
-      if (ctrl.signal.aborted) return
-      if (id === shown && hasCoverageProbe(id)) {
-        styleCoverageProbe.value = usable
-        styleCoverageProbed.value = id
-      }
-      if (usable) { want = id; break }
+      if (styleUsableForView(id, bounds, z)) { want = id; break }
     }
     if (want !== state.mapStyleId && auto.includes(state.mapStyleId)) mapRef.value?.applyMapStyle(want)
   }, 250)
 }
 watch(() => [state.viewBounds, state.viewZoom, state.mapStyleId, autoChain.value?.join(',')], scheduleCoverageProbe)
-onBeforeUnmount(() => { clearTimeout(coverageProbeTimer); coverageProbeAbort?.abort() })
+onBeforeUnmount(() => clearTimeout(coverageProbeTimer))
 
+// Synchrone et sans état : la table de couverture répond sans réseau, donc la notice se déduit
+// directement de la vue. Un verdict asynchrone gardé en `ref` laissait la notice retomber sur la
+// bbox du centre entre deux gestes, puis réapparaître 250 ms plus tard (clignotement).
 const styleCoverageWarn = computed(() => {
-  if (state.viewZoom !== null && state.viewZoom < coverageWarnMinZoom(state.mapStyleId)) return false
+  const id = state.mapStyleId
+  const z = state.viewZoom
+  if (z !== null && z < coverageWarnMinZoom(id)) return false
+  if (state.viewBounds && z !== null && hasCoverageTable(id)) return !styleUsableForView(id, state.viewBounds, z)
   const c = state.viewCenter
-  if (hasCoverageProbe(state.mapStyleId) && styleCoverageProbe.value !== null && styleCoverageProbed.value === state.mapStyleId) return !styleCoverageProbe.value
-  return !!c && !styleCoversPoint(state.mapStyleId, c.lng, c.lat)
+  return !!c && !styleCoversPoint(id, c.lng, c.lat)
 })
 const styleCoverageRegion = computed(() => {
   const group = groupForStyle(state.mapStyleId)
@@ -277,7 +257,7 @@ const styleCoverageVisible = computed(() => styleCoverageWarn.value && !styleCov
 // Fond proposé par le bouton de la notice : celui du pays où tombe la vue courante, ou
 // le repli Monde si aucun groupe régional ne la couvre. Recalculé au fil du pan, pas
 // figé au premier affichage.
-const styleCoverageSuggestion = computed(() => suggestedStyleForPoint(state.viewCenter))
+const styleCoverageSuggestion = computed(() => suggestedStyleForView(state.viewBounds, state.viewZoom))
 function applyStyleCoverageSuggestion() {
   mapRef.value?.setMapStyle(styleCoverageSuggestion.value)
 }

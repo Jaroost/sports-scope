@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { findSummitAhead, summitStillAhead } from '../freeClimbSummit'
-import { ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, styleCoversPoint, suggestedStyleForPoint } from '../mapStyles'
+import { ROUTE_LINE_LAYOUT, ROUTE_BORDER_PAINT, styleUsableForView, suggestedStyleForView, type ViewBounds } from '../mapStyles'
 import { useNavLineWidth, widthRunsCollection } from '../navLineWidth'
 import {
   buildDistancesM, detectClimbs, detectTurns, turnsFromVoiceHints, computeGainLoss,
@@ -1788,8 +1788,8 @@ async function initMap() {
   // mode itinéraire, la Suisse en mode libre (avant le premier fix). Sans ça, les tuiles
   // hors couverture peuvent bloquer l'événement `load` de la carte indéfiniment. Le
   // suivi en roulant est fait par maybeAdjustBaseForCoverage.
-  if (hasRoute.value && geometry.length) {
-    mapStyleId.value = coverageAwareStyle(mapStyleId.value, geometry[0][0], geometry[0][1])
+  if (hasRoute.value && geometry.length && navPrefs.auto_map_style !== false) {
+    mapStyleId.value = coverageAwareStyle(geometry[0][0], geometry[0][1])
   }
 
   // Branche l'archive hors-ligne du trajet (si déjà téléchargée) AVANT de construire le
@@ -2363,10 +2363,31 @@ function setMapStyle(id: string) {
   applyMapStyle(id, true)
 }
 
-// Fond à utiliser pour cadrer `[lng,lat]` : le fond `preferred` s'il couvre le point,
-// sinon le fond régional du pays concerné (ou le fond mondial par défaut).
-function coverageAwareStyle(preferred: string, lng: number, lat: number): string {
-  return styleCoversPoint(preferred, lng, lat) ? preferred : suggestedStyleForPoint({ lng, lat })
+// Chaîne d'essai de la bascule automatique : le fond de navigation du profil, puis les fonds de
+// secours du sport en cours (les mêmes que ceux du créateur), sans doublon.
+function navStyleChain(): string[] {
+  const fallbacks = sportPreferences(routeSport.value).map.fallback_styles as string[]
+  return [...new Set([navPrefs.default_style as string, ...fallbacks])]
+}
+
+// Fond à utiliser pour cadrer `[lng,lat]` : le premier de la chaîne que la table de couverture
+// dit servir la vue (emprise et zoom de la carte — niveau de tuile compris, pas seulement la
+// présence de tuiles). Même règle que le créateur (cf. RouteBuilder.vue). Aucun ne convient :
+// le fond régional du pays le plus profond sous la vue, ou le fond mondial. Avant que la carte
+// n'existe, on juge sur une petite emprise autour du point, au zoom de navigation.
+function coverageAwareStyle(lng: number, lat: number): string {
+  let bounds: ViewBounds, zoom: number
+  if (map) {
+    const b = map.getBounds()
+    bounds = { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() }
+    zoom = map.getZoom()
+  } else {
+    const d = 0.002
+    bounds = { west: lng - d, south: lat - d, east: lng + d, north: lat + d }
+    zoom = navPrefs.zoom ?? 16.5
+  }
+  for (const id of navStyleChain()) if (styleUsableForView(id, bounds, zoom)) return id
+  return suggestedStyleForView(bounds, zoom)
 }
 
 // En roulant, garde le fond de carte cohérent avec la zone traversée : bascule sur le
@@ -2376,7 +2397,7 @@ function coverageAwareStyle(preferred: string, lng: number, lat: number): string
 // ajustement de vue), et sans rien faire si l'utilisateur a choisi un fond lui-même.
 function maybeAdjustBaseForCoverage(lng: number, lat: number) {
   if (userPickedStyle || !map || navPrefs.auto_map_style === false) return
-  const want = coverageAwareStyle(navPrefs.default_style as string, lng, lat)
+  const want = coverageAwareStyle(lng, lat)
   if (want === mapStyleId.value) return
   const now = performance.now()
   if (now - lastBaseAutoSwitch < BASE_AUTO_SWITCH_COOLDOWN_MS) return

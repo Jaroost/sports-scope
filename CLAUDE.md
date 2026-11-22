@@ -198,6 +198,35 @@ Options : `USER_ID=<id>`, `LIMIT=<n>` (par type), `SCOPE=routes|activities`.
 L'extraction est faite en ligne, pas via les jobs : chaque enregistrement n'est qu'une
 requête SQL locale (~5 ms). Ordre de grandeur mesuré : 730 activités en 4 s.
 
+## Couverture des fonds de carte régionaux
+
+Le basculement automatique selon la couverture (créateur, carte d'activité, navigation) ne
+sonde plus de tuiles en roulant : `app/javascript/styleCoverage.json` dit, pour chaque fond
+régional (swiss*, ign*, at*, de*), où il distribue de vraies tuiles et jusqu'à quel zoom
+(quadtree z8→z13, `[z, x, y, maxZoom, …]` à plat). Lu par `styleCoversPoint` /
+`styleUsableForView` (`mapStyles.ts`), synchrones, sans réseau. Les fonds mondiaux et ceux
+sans entrée retombent sur les bbox de groupe.
+
+Trois consommateurs, même règle (`styleUsableForView`, emprise + zoom) : le créateur
+(`RouteBuilder.vue`), la carte d'activité (`ActivityMapCard.vue`) et la navigation
+(`RouteNavigation.vue`, `coverageAwareStyle`). Chaîne : favori puis `fallback_styles` du sport
+(la navigation part de `navigation.default_style`), premier fond qui sert la vue, repli
+`suggestedStyleForView`. Interrupteurs du profil : `map.auto_switch` (créateur, activité),
+`navigation.auto_map_style` (navigation, y compris le fond de départ) ; un choix manuel en
+séance coupe la bascule. L'appli compagnon affiche la navigation du site : même comportement.
+
+Régénérer (rare — un fournisseur étend sa couverture ; sinon on perd juste l'occasion de
+basculer plus tard) : `node script/build-style-coverage.mjs [fond…]` (~quelques minutes par
+fond, `CONCURRENCY=4` pour ménager les serveurs). Les critères de « tuile vide » (404, taille
+sous `blankMaxBytes`, routes du plan IGN) y sont recopiés de l'ancienne sonde ; une tuile
+illisible fait échouer le script au lieu d'être écrite comme vide. Ajouter un fond régional :
+l'entrée dans `STYLES` du script, puis relancer pour ce fond.
+
+Piège : SWISSIMAGE sert hors de Suisse une mosaïque basse résolution (vraie tuile, ni 404 ni
+blanche, mais en gros pixels) — indétectable par taille d'octets. Le script le borne donc au
+contour suisse (`clip` dans `STYLES`) ; un autre fond d'imagerie au même comportement demande
+le même `clip`.
+
 ## Profil du col en navigation libre
 
 Sans tracé, `updateFreeClimbGuess` (`RouteNavigation.vue`) devine *quel* col on monte (pente

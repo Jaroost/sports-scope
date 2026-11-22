@@ -1,0 +1,8 @@
+<%# Dernières sorties des amis (l'îlot se masque seul s'il n'y en a pas). %>
+<% if current_user.preferences_with_defaults.dig("display", "show_friends_feed") %>
+  <div class="row justify-content-center mb-5">
+    <div class="col-lg-8">
+      <div data-vue-component="FriendsFeedWidget"></div>
+    </div>
+  </div>
+<% end %>

@@ -11,53 +11,23 @@
   </div>
 
   <% if user_signed_in? %>
-    <%# Rangée d'actions. L'îlot RefreshAll porte deux boutons : « Rafraîchir les
-        activités » (résumés + vélos + backfills streams) et « Recalculer stats &
-        seuils » (FTP, records, charge) ; chacun notifie les widgets ci-dessous (via
-        un événement window) de se recharger — sans Strava lié, il n'y a rien à
-        synchroniser. « Reprendre la navigation » : l'îlot ne s'affiche que s'il
-        trouve une séance en cours dans le localStorage (invisible côté serveur),
-        d'où un montage inconditionnel. %>
-    <div class="mb-4 d-flex flex-wrap justify-content-center align-items-center gap-2">
-      <% if current_user.strava_linked? %>
-        <div data-vue-component="RefreshAll"></div>
-      <% end %>
-      <div data-vue-component="ResumeNavigation" data-vue-props='<%= { href: free_navigate_path }.to_json %>'></div>
-    </div>
-    <%# Sans Strava lié, les km des chaînes ne peuvent pas être rafraîchis : widget masqué.
-        Avec Strava, il reste masquable depuis le profil (display.show_chain_widget). %>
-    <% if current_user.strava_linked? && current_user.preferences_with_defaults.dig("display", "show_chain_widget") %>
+    <% pending_friend_requests = current_user.received_friendships.pending.count %>
+    <% if pending_friend_requests.positive? %>
       <div class="row justify-content-center mb-4">
         <div class="col-lg-8">
-          <div data-vue-component="ChainWax" data-vue-props='<%= { compact: true, stravaLinked: current_user.strava_linked? }.to_json %>'></div>
+          <div class="alert alert-info d-flex flex-wrap justify-content-center align-items-center gap-2 mb-0" role="alert">
+            <i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+            <span><%= t("pages.pending_friend_requests", count: pending_friend_requests) %></span>
+            <%= link_to t("pages.pending_friend_requests_link"), friends_path, class: "alert-link fw-bold" %>
+          </div>
         </div>
       </div>
     <% end %>
-    <%# Plan du jour : sortie objectif + « que faire aujourd'hui » (charge d'entraînement).
-        Nécessite des activités (Strava ou .fit) ET l'interrupteur du profil (masquable). %>
-    <% if (current_user.strava_linked? || current_user.imported_activities.exists?) &&
-          current_user.preferences_with_defaults.dig("display", "show_performance_widget") %>
-      <div class="row justify-content-center mb-5">
-        <div class="col-lg-8">
-          <div data-vue-component="TodayPlanWidget" data-vue-props='<%= { stravaLinked: current_user.strava_linked? }.to_json %>'></div>
-        </div>
-      </div>
+    <%# Blocs de l'accueil dans l'ordre choisi au profil (display.home_order) ;
+        chacun gère lui-même sa condition d'affichage (cf. pages/home/_*.erb). %>
+    <% current_user.home_order.each do |key| %>
+      <%= render "pages/home/#{key}" %>
     <% end %>
-    <%# Boutons d'accueil : mêmes menus que la barre de navigation, mais pilotés par
-        l'interrupteur « accueil » du profil (cf. NavbarHelper#home_menu_items), distinct
-        de la visibilité dans la navbar. Le premier bouton ressort en « primary », sauf
-        « créer un itinéraire » qui garde sa modale (îlot NewRouteButton). %>
-    <p class="d-flex flex-wrap justify-content-center gap-2">
-      <% home_menu_items(current_user).each_with_index do |item, i| %>
-        <% if item[:key] == "new_route" %>
-          <span data-vue-component="NewRouteButton"></span>
-        <% else %>
-          <%= link_to item[:path], class: "btn btn-lg home-button #{i.zero? ? 'btn-primary' : 'btn-outline-secondary'}" do %>
-            <i class="fa-solid <%= item[:icon] %> me-2" aria-hidden="true"></i><%= item[:label] %>
-          <% end %>
-        <% end %>
-      <% end %>
-    </p>
   <% else %>
 
     <p class="lead text-muted"><%= t("pages.home_lead") %></p>

@@ -191,6 +191,24 @@ const { dragIndex: dragNavIndex, overIndex: dragOverNavIndex, onDown: onNavSortD
     arr.splice(to, 0, moved)
   })
 
+// ─── Page d'accueil : ordre des blocs ───────────────────────────────────────
+// Même glisser-déposer que la navbar. La visibilité de chaque bloc reste réglée
+// ailleurs (interrupteurs de la navbar ci-dessus) : ici, seulement l'ordre.
+const HOME_BLOCK_ICONS: Record<string, string> = {
+  actions: 'fa-rotate',
+  chain: 'fa-link',
+  plan: 'fa-heart-pulse',
+  friends_feed: 'fa-user-group',
+  buttons: 'fa-table-cells-large',
+}
+
+const { dragIndex: dragHomeIndex, overIndex: dragOverHomeIndex, onDown: onHomeSortDown } =
+  usePointerSort((from, to) => {
+    const arr = prefs.display.home_order
+    const [moved] = arr.splice(from, 1)
+    arr.splice(to, 0, moved)
+  })
+
 // ─── Recherche de lieux : pays privilégiés (ordre = priorité) ───────────────
 // Liste réordonnable par glisser-déposer ; chaque pays peut être retiré, et on
 // peut en ajouter depuis le sélecteur (pays absents de la liste, triés par nom).
@@ -501,6 +519,34 @@ function placePreviewMarker(coords: [number, number]) {
       </div>
     </section>
 
+    <!-- Page d'accueil : ordre des blocs -->
+    <section v-if="showSection('navbar')" v-show="inTab('navbar')" class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-house text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.home_order.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small mb-3">{{ t('profile.home_order.help') }}</p>
+        <ul class="navbar-items list-unstyled mb-0">
+          <li
+            v-for="(key, i) in prefs.display.home_order"
+            :key="key"
+            class="navbar-item"
+            :class="{ dragging: dragHomeIndex === i, dragover: dragOverHomeIndex === i && dragHomeIndex !== i }"
+            :data-sort-index="i"
+          >
+            <i
+              class="fa-solid fa-grip-vertical navbar-item-grip"
+              aria-hidden="true"
+              @pointerdown="onHomeSortDown(i, $event)"
+            ></i>
+            <i class="fa-solid navbar-item-icon" :class="HOME_BLOCK_ICONS[key] ?? 'fa-circle'" aria-hidden="true"></i>
+            <span class="navbar-item-label">{{ t(`profile.home_order.${key}`) }}</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+
     <!-- Barre de navigation : ordre et visibilité des menus -->
     <section v-if="showSection('navbar')" v-show="inTab('navbar')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
@@ -595,6 +641,25 @@ function placePreviewMarker(coords: [number, number]) {
                 >
                   <i class="fa-solid fa-heart-pulse" aria-hidden="true"></i>
                   <span>{{ t('profile.navbar.performance_widget') }}</span>
+                </label>
+              </div>
+              <!-- Idem pour « friends » : les activités des amis sur l'accueil. -->
+              <div v-if="item.key === 'friends'" class="form-check form-switch m-0">
+                <input
+                  id="navbar-friends-feed"
+                  v-model="prefs.display.show_friends_feed"
+                  class="form-check-input"
+                  type="checkbox"
+                  role="switch"
+                  :aria-label="t('profile.display.show_friends_feed')"
+                >
+                <label
+                  class="form-check-label navbar-toggle-label"
+                  for="navbar-friends-feed"
+                  :title="t('profile.navbar.friends_feed_hint')"
+                >
+                  <i class="fa-solid fa-user-group" aria-hidden="true"></i>
+                  <span>{{ t('profile.navbar.friends_feed') }}</span>
                 </label>
               </div>
             </div>

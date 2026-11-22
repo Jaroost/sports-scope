@@ -78,6 +78,10 @@ class User < ApplicationRecord
     efforts segment training overview laps climbs thresholds power_curve peak_powers splits intervals
   ].freeze
 
+  # Blocs de la page d'accueil (connecté), dans leur ordre par défaut : chaque clé est un
+  # partiel `pages/home/_<clé>`. Défini avant DEFAULT_PREFERENCES, qui s'en sert.
+  HOME_BLOCK_KEYS = %w[actions chain plan friends_feed buttons].freeze
+
   DEFAULT_PREFERENCES = {
     # Menus de la barre de navigation : liste ordonnée (l'ordre = ordre d'affichage)
     # d'items {clé, visible}. L'utilisateur peut réordonner et masquer chaque menu
@@ -139,6 +143,10 @@ class User < ApplicationRecord
       # Widget « plan du jour » (charge d'entraînement) sur l'accueil (n'apparaît que
       # s'il y a des activités — cf. pages/home.html.erb).
       "show_performance_widget" => true,
+      # Activités des amis sur l'accueil (cf. pages/home.html.erb).
+      "show_friends_feed" => true,
+      # Ordre des blocs de l'accueil (HOME_BLOCK_KEYS).
+      "home_order" => HOME_BLOCK_KEYS,
     },
     # Réglages dépendant de la pratique. Le sport courant est celui de l'itinéraire
     # ouvert (Route#activity), ou `display.default_sport` à défaut — cf. sportPreferences()
@@ -234,6 +242,13 @@ class User < ApplicationRecord
       "discoverable" => false,
     },
   }.freeze
+
+  # Ne garde que les clés connues, dédoublonnées, dans l'ordre reçu ; un bloc connu absent
+  # (ajouté depuis l'enregistrement) est réinjecté en fin de liste.
+  def self.normalize_home_order(raw)
+    keys = Array(raw).map(&:to_s).select { |k| HOME_BLOCK_KEYS.include?(k) }.uniq
+    keys + (HOME_BLOCK_KEYS - keys)
+  end
 
   FRIEND_VISIBILITIES = %w[private friends].freeze
 
@@ -425,6 +440,7 @@ class User < ApplicationRecord
     # La navbar est une liste ordonnée (pas un simple hash de clés) : on la normalise
     # pour garantir des items valides et complets, même après l'ajout d'un nouveau menu.
     result["navbar"]["items"] = self.class.normalize_navbar_items(result.dig("navbar", "items"))
+    result["display"]["home_order"] = self.class.normalize_home_order(result.dig("display", "home_order"))
     result["activity_stats"]["sections"] =
       self.class.normalize_activity_stats_sections(result.dig("activity_stats", "sections"))
     result
@@ -440,6 +456,11 @@ class User < ApplicationRecord
       value = stored.is_a?(Hash) ? stored[key] : nil
       result[key] = default.is_a?(Hash) ? merge_defaults(default, value) : (value.nil? ? default : value)
     end
+  end
+
+  # Ordre des blocs de l'accueil (liste complète et valide).
+  def home_order
+    preferences_with_defaults.dig("display", "home_order")
   end
 
   # Items de navbar normalisés (ordre + visibilité) pour le rendu de la barre.

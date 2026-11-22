@@ -10,6 +10,9 @@ class FriendsController < ApplicationController
   FEED_LIMIT = 40
   # Colonnes légères du fil : jamais `streams` / `raw` / `track_cells`.
   FEED_COLUMNS = %i[id user_id name activity_type started_at distance_m moving_time_s total_elevation_gain].freeze
+  # Vignette de la liste (tracé + photos) : colonnes des seules sorties Strava, les
+  # `.fit` importés n'en ont pas.
+  FEED_THUMB_COLUMNS = %i[preview_segments photo_thumbs].freeze
 
   # GET /api/friends
   def index
@@ -85,7 +88,7 @@ class FriendsController < ApplicationController
     current_user.friends.find_each do |friend|
       FriendVisibility::SOURCES.each do |source, model|
         FriendVisibility.activities(model, friend, current_user)
-                        .order(started_at: :desc).limit(FEED_LIMIT).select(*FEED_COLUMNS).each do |a|
+                        .order(started_at: :desc).limit(FEED_LIMIT).select(*feed_columns(source)).each do |a|
           items << feed_activity(a, source, friend)
         end
       end
@@ -213,11 +216,18 @@ class FriendsController < ApplicationController
       since: friendship.accepted_at&.iso8601 }
   end
 
+  def feed_columns(source)
+    source.to_s == "strava" ? FEED_COLUMNS + FEED_THUMB_COLUMNS : FEED_COLUMNS
+  end
+
   def feed_activity(record, source, friend)
-    { kind: "activity", source: source, id: record.id, friend_id: friend.id, friend_name: friend.display_name,
+    item = { kind: "activity", source: source, id: record.id, friend_id: friend.id, friend_name: friend.display_name,
       name: record.name, type: record.activity_type, date: record.started_at&.iso8601,
       distance_m: record.distance_m, moving_time_s: record.moving_time_s,
       elevation_gain_m: record.total_elevation_gain }
+    return item unless record.has_attribute?(:preview_segments)
+
+    item.merge(preview_segments: record.preview_segments, photo_thumbs: record.photo_thumbs)
   end
 
   # Résumé construit depuis les colonnes seules (jamais `raw` : il porte des champs du

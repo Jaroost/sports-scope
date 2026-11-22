@@ -1605,6 +1605,7 @@ fr:
     remove: "Retirer"
     remove_confirm: "Retirer cet ami ? Les partages d'itinéraires entre vous seront supprimés."
     feed: "Fil d'activité"
+    home_feed: "Activités de mes amis"
     feed_empty: "Rien de partagé pour l'instant."
     feed_route: "a partagé un itinéraire"
     shared_with_me: "Partagés avec moi"
@@ -1762,6 +1763,10 @@ fr:
     target_speed: "Vitesse (km/h)"
     target_pace: "Allure (min/km)"
   pages:
+    pending_friend_requests:
+      one: "Vous avez %{count} demande d'ami en attente."
+      other: "Vous avez %{count} demandes d'ami en attente."
+    pending_friend_requests_link: "Voir mes amis"
     home_lead: "Planifiez vos itinéraires, suivez-les en navigation, et analysez vos sorties Strava sur des cartes interactives — le tout au même endroit."
     feature_builder_title: "Créateur d'itinéraire"
     feature_builder_body: "Planifiez vos sorties vélo : snap aux routes, profil d'altitude, cols détectés, couleurs de pente/revêtement, export GPX."
@@ -1795,6 +1800,14 @@ fr:
       contact_title: "Contact"
       contact_body: "Pour toute question ou demande relative à vos données : antoine.jaquet@logicraft.ch"
   profile:
+    home_order:
+      title: "Page d'accueil"
+      help: "Glissez les blocs pour choisir leur ordre sur la page d'accueil. Leur affichage se règle avec les interrupteurs de la barre de navigation."
+      actions: "Actions (rafraîchir, reprendre)"
+      chain: "Cirage de chaîne"
+      plan: "Plan du jour"
+      friends_feed: "Activités des amis"
+      buttons: "Boutons de menu"
     title: "Préférences"
     lead: "Personnalisez le créateur d'itinéraire selon vos habitudes."
     save: "Enregistrer les préférences"
@@ -1814,6 +1827,8 @@ fr:
       chain_widget_hint: "Afficher le suivi de cirage sur l'accueil. Nécessite un compte Strava lié."
       performance_widget: "Widget"
       performance_widget_hint: "Afficher le plan du jour (sortie objectif et que faire aujourd'hui) sur l'accueil. Nécessite des activités."
+      friends_feed: "Widget"
+      friends_feed_hint: "Afficher les activités de mes amis sur l'accueil."
     strava:
       title: "Compte Strava"
       help: "Liez votre compte Strava pour importer et analyser vos activités."
@@ -1937,6 +1952,7 @@ fr:
       show_elevation_chart: "Afficher le profil d'altitude par défaut"
       show_chain_widget: "Afficher le cirage de chaîne sur l'accueil"
       show_performance_widget: "Afficher le plan du jour sur l'accueil"
+      show_friends_feed: "Afficher les activités de mes amis sur l'accueil"
       route_color: "Couleur du tracé"
       route_color_help: "Utilisée quand les couleurs de pente sont désactivées."
       route_opacity: "Opacité du tracé"

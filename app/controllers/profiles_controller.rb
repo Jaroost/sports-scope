@@ -177,6 +177,8 @@ class ProfilesController < ApplicationController
         "show_elevation_chart" => to_bool(display[:show_elevation_chart], true),
         "show_chain_widget" => to_bool(display[:show_chain_widget], true),
         "show_performance_widget" => to_bool(display[:show_performance_widget], true),
+        "show_friends_feed" => to_bool(display[:show_friends_feed], true),
+        "home_order" => User.normalize_home_order(display[:home_order]),
       },
       "sports" => sanitize_sports(incoming[:sports] || {}),
       # Le formulaire de profil (UserProfile.vue) n'envoie pas les seuils athlète :

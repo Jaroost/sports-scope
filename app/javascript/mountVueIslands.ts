@@ -24,6 +24,7 @@ import CompanionDashboard from './components/CompanionDashboard.vue'
 import CompanionNavigateAction from './components/CompanionNavigateAction.vue'
 import TrainingProgramsList from './components/TrainingProgramsList.vue'
 import FriendsPage from './components/FriendsPage.vue'
+import FriendsFeedWidget from './components/FriendsFeedWidget.vue'
 import TrainingProgramBuilder from './components/TrainingProgramBuilder.vue'
 
 const registry: Record<string, Component> = {
@@ -53,6 +54,7 @@ const registry: Record<string, Component> = {
   TrainingProgramsList,
   TrainingProgramBuilder,
   FriendsPage,
+  FriendsFeedWidget,
 }
 
 export function mountVueIslands(): void {

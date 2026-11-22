@@ -1,0 +1,15 @@
+<%# Boutons d'accueil : mêmes menus que la barre de navigation, mais pilotés par
+    l'interrupteur « accueil » du profil (cf. NavbarHelper#home_menu_items), distinct
+    de la visibilité dans la navbar. Le premier bouton ressort en « primary », sauf
+    « créer un itinéraire » qui garde sa modale (îlot NewRouteButton). %>
+<p class="d-flex flex-wrap justify-content-center gap-2">
+  <% home_menu_items(current_user).each_with_index do |item, i| %>
+    <% if item[:key] == "new_route" %>
+      <span data-vue-component="NewRouteButton"></span>
+    <% else %>
+      <%= link_to item[:path], class: "btn btn-lg home-button #{i.zero? ? 'btn-primary' : 'btn-outline-secondary'}" do %>
+        <i class="fa-solid <%= item[:icon] %> me-2" aria-hidden="true"></i><%= item[:label] %>
+      <% end %>
+    <% end %>
+  <% end %>
+</p>

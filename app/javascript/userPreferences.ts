@@ -121,6 +121,8 @@ export interface UserPreferences {
     show_elevation_chart: boolean
     show_chain_widget: boolean
     show_performance_widget: boolean
+    show_friends_feed: boolean
+    home_order: string[]
   }
   sports: Record<Sport, SportPreferences>
 }
@@ -194,6 +196,8 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
     show_elevation_chart: true,
     show_chain_widget: true,
     show_performance_widget: true,
+    show_friends_feed: true,
+    home_order: ['actions', 'chain', 'plan', 'friends_feed', 'buttons'],
   },
   // Sur climb_detection, `min_grade` ouvre et ferme une montée en comparant la pente lissée
   // point par point. L'altitude étant quantifiée au mètre, une fenêtre de w mètres laisse un

@@ -2805,7 +2805,7 @@ watch(routeStore.sport, (sport) => {
   const styleChanged = map.default_style !== props.state.mapStyleId
   props.state.overlays = props.state.defaultOverlays(sport)
   props.state.autoSwitchPaused = false
-  props.state.autoSwitch = map.auto_switch
+  props.state.autoSwitch = userPreferences().map_switch.auto_switch
   // Le réglage d'opacité du menu « Affichage » repart de la préférence du nouveau sport :
   // c'est un ajustement de séance, pas une valeur qui suit l'utilisateur d'un sport à l'autre.
   props.state.routeOpacity = route.opacity

@@ -25,7 +25,7 @@ import {
   buildOffsetDisplayLine, haversine,
 } from '../routeHelpers'
 import type { LngLat, Climb } from '../routeHelpers'
-import { sportPreferences, routeProfileForSport, turnAnomalyDiameterForSport, mapStyleChain } from '../userPreferences'
+import { sportPreferences, userPreferences, routeProfileForSport, turnAnomalyDiameterForSport, mapStyleChain, persistAutoSwitch } from '../userPreferences'
 import { repairAgainstTrack } from '../routeRepair'
 import { buildTooltipHtml } from '../activityTooltip'
 
@@ -264,10 +264,13 @@ function latLngToIndex(lng, lat) {
 // met la bascule en pause jusqu'au prochain clic sur le bouton.
 const autoPaused = ref(false)
 const autoSport = computed(() => routeSportFor(props.activity as Record<string, unknown> | null))
+// `null` = suit le profil ; sinon le choix fait ici via le bouton (persisté, comme dans le créateur).
+const autoOverride = ref<boolean | null>(null)
+const autoEnabled = computed(() => autoOverride.value ?? userPreferences().map_switch.auto_switch)
+const hasFallbackStyle = computed(() => mapStyleChain(autoSport.value).length > 1)
 const autoChain = computed(() => {
-  const sport = autoSport.value
-  if (!sportPreferences(sport).map.auto_switch) return null
-  const chain = mapStyleChain(sport)
+  if (!autoEnabled.value) return null
+  const chain = mapStyleChain(autoSport.value)
   return chain.length > 1 ? chain : null
 })
 let coverageProbeTimer: ReturnType<typeof setTimeout> | undefined
@@ -290,7 +293,17 @@ function scheduleCoverageProbe() {
 watch([autoChain, autoPaused], scheduleCoverageProbe)
 
 function toggleAutoSwitch() {
-  autoPaused.value = !autoPaused.value
+  if (!autoEnabled.value) {
+    autoOverride.value = true
+    autoPaused.value = false
+    persistAutoSwitch(true, autoSport.value)
+  } else if (autoPaused.value) {
+    autoPaused.value = false
+  } else {
+    autoOverride.value = false
+    persistAutoSwitch(false, autoSport.value)
+  }
+  scheduleCoverageProbe()
 }
 
 function setMapStyle(id) {
@@ -1431,9 +1444,10 @@ onBeforeUnmount(() => {
           <!-- Groupe 1 : style de fond -->
           <div class="d-flex align-items-stretch gap-1">
           <MapStyleDropdown class="map-dropdown-btn" :model-value="state.mapStyleId" @update:model-value="setMapStyle" />
-          <button v-if="autoChain" type="button" class="btn btn-sm shadow-sm"
-            :class="autoPaused ? 'btn-outline-warning' : 'btn-warning text-dark'" :aria-pressed="!autoPaused"
-            :title="t(autoPaused ? 'routes.auto_switch_paused' : 'routes.auto_switch_on')"
+          <button type="button" class="btn btn-sm shadow-sm"
+            :class="autoChain ? (autoPaused ? 'btn-outline-warning' : 'btn-warning text-dark') : 'btn-light'"
+            :disabled="!hasFallbackStyle" :aria-pressed="!!autoChain && !autoPaused"
+            :title="t(!hasFallbackStyle ? 'routes.auto_switch_unavailable' : !autoChain ? 'routes.auto_switch_off' : autoPaused ? 'routes.auto_switch_paused' : 'routes.auto_switch_on')"
             @click="toggleAutoSwitch">
             <i class="fa-solid fa-shuffle" aria-hidden="true"></i>
           </button>

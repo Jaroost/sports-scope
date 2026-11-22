@@ -27,8 +27,6 @@ class User < ApplicationRecord
       "snap_warn_m" => 25,
       "map" => {
         "default_style" => map_style,
-        "fallback_styles" => [],  # fonds de secours, par ordre de préférence, quand le favori n'a plus de tuiles lisibles (cf. auto_switch)
-        "auto_switch" => false,   # basculer seul entre favori et secours selon la couverture de la vue
         "overlays" => [],   # couches transparentes actives (SuisseMobile/swisstopo)
       },
       # Tracé de l'itinéraire dans le créateur (hors mode pente pour la couleur).
@@ -116,6 +114,14 @@ class User < ApplicationRecord
     # Navigation guidée (mode GPS) — réglages propres, indépendants du créateur : fond de
     # carte, caméra qui suit le coureur, son et recalcul. L'aspect du tracé, les indicateurs
     # de direction et les distances d'annonce, eux, sont propres au sport (cf. sport_defaults).
+    # Bascule automatique des fonds de carte : réglage COMMUN à tous les sports (le fond
+    # favori, lui, reste par sport). `fallback_styles` : fonds de secours par ordre
+    # d'essai, pris quand le favori n'a plus de tuiles lisibles sous la vue ; `auto_switch` :
+    # basculer seul selon la couverture.
+    "map_switch" => {
+      "fallback_styles" => [],
+      "auto_switch" => false,
+    },
     "navigation" => {
       "default_style" => "swissgrau",
       "zoom" => 17,      # zoom de la caméra de suivi
@@ -437,7 +443,7 @@ class User < ApplicationRecord
   # absente (utilisateur ancien, nouvelle préférence ajoutée depuis) est présente
   # côté front avec sa valeur par défaut.
   def preferences_with_defaults
-    result = self.class.merge_defaults(DEFAULT_PREFERENCES, preferences)
+    result = self.class.merge_defaults(DEFAULT_PREFERENCES, preferences_with_legacy_map_switch)
     # La navbar est une liste ordonnée (pas un simple hash de clés) : on la normalise
     # pour garantir des items valides et complets, même après l'ajout d'un nouveau menu.
     result["navbar"]["items"] = self.class.normalize_navbar_items(result.dig("navbar", "items"))
@@ -445,6 +451,25 @@ class User < ApplicationRecord
     result["activity_stats"]["sections"] =
       self.class.normalize_activity_stats_sections(result.dig("activity_stats", "sections"))
     result
+  end
+
+  # Avant `map_switch`, fonds de secours et bascule étaient réglés par sport. À la première
+  # lecture d'un compte ancien, on reprend ceux du sport par défaut s'il en a, sinon du
+  # premier sport qui en a ; la bascule reste active si elle l'était quelque part.
+  def preferences_with_legacy_map_switch
+    prefs = preferences.is_a?(Hash) ? preferences : {}
+    return prefs if prefs["map_switch"].is_a?(Hash)
+
+    sports = prefs["sports"].is_a?(Hash) ? prefs["sports"] : {}
+    default_sport = prefs.dig("display", "default_sport")
+    maps = ([default_sport] + SPORTS).uniq.filter_map { |sp| sports.dig(sp, "map") if sports[sp].is_a?(Hash) }
+    source = maps.find { |m| Array(m["fallback_styles"]).any? }
+    return prefs unless source || maps.any? { |m| m["auto_switch"] == true }
+
+    prefs.merge("map_switch" => {
+      "fallback_styles" => Array(source && source["fallback_styles"]),
+      "auto_switch" => maps.any? { |m| m["auto_switch"] == true },
+    })
   end
 
   # Fusion récursive des valeurs stockées dans le schéma des défauts : seules les clés

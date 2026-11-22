@@ -182,6 +182,7 @@ class ProfilesController < ApplicationController
         "home_order" => User.normalize_home_order(display[:home_order]),
       },
       "sports" => sanitize_sports(incoming[:sports] || {}),
+      "map_switch" => sanitize_map_switch(incoming[:map_switch], current_user),
       # Le formulaire de profil (UserProfile.vue) n'envoie pas les seuils athlète :
       # sanitize_athlete retombe alors sur les valeurs déjà stockées pour ne pas les
       # effacer. Ils se modifient via PATCH /api/athlete (update_athlete).
@@ -314,8 +315,6 @@ class ProfilesController < ApplicationController
       "snap_warn_m" => clamp_int(raw[:snap_warn_m], SNAP_WARN_RANGE, defaults["snap_warn_m"]),
       "map" => {
         "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, defaults.dig("map", "default_style")),
-        "fallback_styles" => sanitize_fallback_styles(map[:fallback_styles] || map[:fallback_style]),
-        "auto_switch" => to_bool(map[:auto_switch], false),
         "overlays" => sanitize_overlays(map[:overlays]),
       },
       "route" => {
@@ -355,6 +354,15 @@ class ProfilesController < ApplicationController
       "turn_green_hold_m" => clamp_int(navigation[:turn_green_hold_m], NAV_TURN_GREEN_HOLD_RANGE, defaults["turn_green_hold_m"]),
       "turn_green_hold_s" => clamp_int(navigation[:turn_green_hold_s], NAV_TURN_GREEN_HOLD_S_RANGE, defaults["turn_green_hold_s"]),
     }
+  end
+
+  # Réglage commun à tous les sports : fonds de secours (ordre d'essai) et bascule auto.
+  # Clé absente du payload (client plus ancien) ⇒ réglage déjà stocké, pas un effacement.
+  def sanitize_map_switch(raw, user)
+    raw = user.preferences_with_defaults["map_switch"] unless raw.is_a?(Hash)
+    raw = raw.with_indifferent_access
+    fallbacks = sanitize_fallback_styles(raw[:fallback_styles])
+    { "fallback_styles" => fallbacks, "auto_switch" => fallbacks.any? && to_bool(raw[:auto_switch], false) }
   end
 
   # Garde uniquement les ids d'overlay connus, dédoublonnés et dans l'ordre reçu.

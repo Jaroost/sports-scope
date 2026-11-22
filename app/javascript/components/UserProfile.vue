@@ -14,12 +14,12 @@ import { csrfToken } from '../csrf'
 // Fonds de secours de la bascule automatique : liste ordonnée (ordre d'essai), sans doublon
 // ni le favori.
 const nextFallbackCandidate = computed(() =>
-  MAP_STYLES.find(s => s.id !== sport.value.map.default_style && !(sport.value.map.fallback_styles as string[]).includes(s.id))?.id)
+  MAP_STYLES.find(s => s.id !== sport.value.map.default_style && !(prefs.map_switch.fallback_styles as string[]).includes(s.id))?.id)
 function addFallback() {
-  if (nextFallbackCandidate.value) sport.value.map.fallback_styles.push(nextFallbackCandidate.value as MapStyleId)
+  if (nextFallbackCandidate.value) prefs.map_switch.fallback_styles.push(nextFallbackCandidate.value as MapStyleId)
 }
 function moveFallback(i: number, delta: number) {
-  const list = sport.value.map.fallback_styles
+  const list = prefs.map_switch.fallback_styles
   const j = i + delta
   if (j < 0 || j >= list.length) return
   ;[list[i], list[j]] = [list[j], list[i]]
@@ -758,25 +758,25 @@ function placePreviewMarker(coords: [number, number]) {
         <div class="mt-3">
           <label class="form-label mb-1">{{ t('profile.map.fallback_title') }}</label>
           <p class="text-muted small mb-2">{{ t('profile.map.fallback_help') }}</p>
-          <div v-for="(_, i) in sport.map.fallback_styles" :key="i" class="input-group mb-2">
+          <div v-for="(_, i) in prefs.map_switch.fallback_styles" :key="i" class="input-group mb-2">
             <span class="input-group-text">{{ i + 1 }}</span>
-            <select v-model="sport.map.fallback_styles[i]" class="form-select">
+            <select v-model="prefs.map_switch.fallback_styles[i]" class="form-select">
               <optgroup v-for="g in groupedStyles" :key="g.group" :label="t(`profile.map.group_${g.group}`)">
                 <option v-for="style in g.styles" :key="style.id" :value="style.id"
-                  :disabled="style.id === sport.map.default_style || ((sport.map.fallback_styles as string[]).includes(style.id) && sport.map.fallback_styles[i] !== style.id)">
+                  :disabled="style.id === sport.map.default_style || ((prefs.map_switch.fallback_styles as string[]).includes(style.id) && prefs.map_switch.fallback_styles[i] !== style.id)">
                   {{ MAP_STYLE_GROUP_FLAG[g.group] }} {{ t(`profile.map.group_${g.group}`) }} · {{ t(`profile.map.style_${style.id}`) }}
                 </option>
               </optgroup>
             </select>
             <button type="button" class="btn btn-outline-secondary" :disabled="i === 0" :aria-label="t('profile.map.fallback_up')" @click="moveFallback(i, -1)"><i class="fa-solid fa-arrow-up" aria-hidden="true"></i></button>
-            <button type="button" class="btn btn-outline-secondary" :disabled="i === sport.map.fallback_styles.length - 1" :aria-label="t('profile.map.fallback_down')" @click="moveFallback(i, 1)"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i></button>
-            <button type="button" class="btn btn-outline-danger" :aria-label="t('profile.map.fallback_remove')" @click="sport.map.fallback_styles.splice(i, 1)"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn-outline-secondary" :disabled="i === prefs.map_switch.fallback_styles.length - 1" :aria-label="t('profile.map.fallback_down')" @click="moveFallback(i, 1)"><i class="fa-solid fa-arrow-down" aria-hidden="true"></i></button>
+            <button type="button" class="btn btn-outline-danger" :aria-label="t('profile.map.fallback_remove')" @click="prefs.map_switch.fallback_styles.splice(i, 1)"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
           </div>
-          <button type="button" class="btn btn-sm btn-outline-primary" :disabled="!nextFallbackCandidate || sport.map.fallback_styles.length >= 4" @click="addFallback">
+          <button type="button" class="btn btn-sm btn-outline-primary" :disabled="!nextFallbackCandidate || prefs.map_switch.fallback_styles.length >= 4" @click="addFallback">
             <i class="fa-solid fa-plus" aria-hidden="true"></i> {{ t('profile.map.fallback_add') }}
           </button>
           <div class="form-check form-switch mt-2">
-            <input id="map-auto-switch" v-model="sport.map.auto_switch" class="form-check-input" type="checkbox" role="switch" :disabled="!sport.map.fallback_styles.length">
+            <input id="map-auto-switch" v-model="prefs.map_switch.auto_switch" class="form-check-input" type="checkbox" role="switch" :disabled="!prefs.map_switch.fallback_styles.length">
             <label for="map-auto-switch" class="form-check-label">{{ t('profile.map.auto_switch') }}</label>
           </div>
           <p class="text-muted small mb-0">{{ t('profile.map.auto_switch_help') }}</p>

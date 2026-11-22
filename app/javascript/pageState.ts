@@ -151,7 +151,7 @@ export class RouteBuilderState extends MapPageState {
     this.showElevationChart = prefs.display.show_elevation_chart
     this.overlays = this.defaultOverlays()
     this.routeOpacity = sportPreferences().route.opacity
-    this.autoSwitch = sportPreferences().map.auto_switch
+    this.autoSwitch = userPreferences().map_switch.auto_switch
   }
 
   // Couches actives par défaut pour un sport : celles du profil, moins ce que la vue

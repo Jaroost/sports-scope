@@ -24,10 +24,7 @@ export interface SportPreferences {
   turn_anomaly_m: number
   // Écart (m) au-delà duquel un point d'étape accroché loin du clic est signalé.
   snap_warn_m: number
-  // `fallback_styles` : fonds de secours par ordre de préférence, pris automatiquement
-  // quand `auto_switch` est actif et que le favori (`default_style`) n'a plus de tuiles
-  // lisibles sous la vue ; le premier lisible gagne, le dernier sert de dernier recours.
-  map: { default_style: MapStyleId; fallback_styles: MapStyleId[]; auto_switch: boolean; overlays: string[] }
+  map: { default_style: MapStyleId; overlays: string[] }
   route: { color: string; opacity: number; width: number }
   climb_detection: {
     min_grade: number
@@ -96,6 +93,11 @@ export interface ActivityStatsSection {
 }
 
 export interface UserPreferences {
+  // Bascule automatique des fonds, commune à tous les sports (le favori reste par sport) :
+  // `fallback_styles` = fonds de secours par ordre de préférence, pris quand `auto_switch` est
+  // actif et que le favori (`default_style`) n'a plus de tuiles lisibles sous la vue ; le
+  // premier lisible gagne, le dernier sert de dernier recours.
+  map_switch: { fallback_styles: MapStyleId[]; auto_switch: boolean }
   training: TrainingPreferences
   activity_stats: { sections: ActivityStatsSection[] }
   friends: { default_visibility: 'private' | 'friends'; discoverable: boolean }
@@ -141,7 +143,7 @@ function sportDefaults(
     route_profile,
     turn_anomaly_m,
     snap_warn_m: 25,
-    map: { default_style: map_style, fallback_styles: [], auto_switch: false, overlays: [] },
+    map: { default_style: map_style, overlays: [] },
     route: { color: '#7c3aed', opacity: 0.8, width: 5 },
     climb_detection,
     navigation: {
@@ -168,6 +170,7 @@ function sportDefaults(
 }
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
+  map_switch: { fallback_styles: [], auto_switch: false },
   training: { goal: 'improve_slow', event: null },
   activity_stats: { sections: ACTIVITY_STATS_SECTION_KEYS.map((key) => ({ key, visible: true })) },
   friends: { default_visibility: 'private', discoverable: false },
@@ -275,15 +278,15 @@ export function persistDefaultMapStyle(styleId: MapStyleId, sport: Sport = curre
 // Chaîne d'essai de la bascule automatique : favori, puis secours dans l'ordre, sans doublon.
 // Moins de deux éléments = rien à basculer.
 export function mapStyleChain(sport: Sport = currentSport()): string[] {
-  const { default_style, fallback_styles } = sportPreferences(sport).map
-  return [...new Set([default_style as string, ...(fallback_styles as string[])])]
+  const { default_style } = sportPreferences(sport).map
+  return [...new Set([default_style as string, ...(userPreferences().map_switch.fallback_styles as string[])])]
 }
 
 // Interrupteur « bascule automatique » du créateur (même réglage que dans le profil).
-export function persistAutoSwitch(value: boolean, sport: Sport = currentSport()): void {
+export function persistAutoSwitch(value: boolean, _sport?: Sport): void {
   if (!isLoggedIn()) return
   const prefs = userPreferences()
-  const map = prefs.sports[sport].map
+  const map = prefs.map_switch
   if (map.auto_switch === value) return
   map.auto_switch = value
   patchPreferencesQuietly(prefs)
@@ -429,6 +432,10 @@ function parse(): UserPreferences {
     const incoming = JSON.parse(raw) as Partial<UserPreferences>
     const d = DEFAULT_PREFERENCES
     return {
+      map_switch: {
+        fallback_styles: Array.isArray(incoming.map_switch?.fallback_styles) ? incoming.map_switch.fallback_styles : [],
+        auto_switch: incoming.map_switch?.auto_switch === true,
+      },
       training: parseTraining(incoming.training),
       activity_stats: { sections: normalizeActivityStatsSections(incoming.activity_stats?.sections) },
       friends: {
@@ -483,7 +490,6 @@ function parseSport(defaults: SportPreferences, incoming?: Partial<SportPreferen
     map: {
       ...defaults.map,
       ...incoming?.map,
-      fallback_styles: Array.isArray(incoming?.map?.fallback_styles) ? incoming.map.fallback_styles : [],
       overlays: Array.isArray(incoming?.map?.overlays) ? incoming.map.overlays : defaults.map.overlays,
     },
     route: { ...defaults.route, ...incoming?.route },

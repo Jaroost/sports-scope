@@ -2366,7 +2366,7 @@ function setMapStyle(id: string) {
 // Chaîne d'essai de la bascule automatique : le fond de navigation du profil, puis les fonds de
 // secours du sport en cours (les mêmes que ceux du créateur), sans doublon.
 function navStyleChain(): string[] {
-  const fallbacks = sportPreferences(routeSport.value).map.fallback_styles as string[]
+  const fallbacks = userPreferences().map_switch.fallback_styles as string[]
   return [...new Set([navPrefs.default_style as string, ...fallbacks])]
 }
 

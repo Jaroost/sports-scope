@@ -2,7 +2,7 @@
 <% if current_user.preferences_with_defaults.dig("display", "show_friends_feed") %>
   <div class="row justify-content-center mb-5">
     <div class="col-lg-8">
-      <div data-vue-component="FriendsFeedWidget"></div>
+      <div data-vue-component="FriendsFeedWidget" data-vue-props='{"compact":true}'></div>
     </div>
   </div>
 <% end %>

@@ -2,7 +2,8 @@
 import { ref, watch, onMounted } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
-import FriendsFeedRow, { type FeedItem } from './FriendsFeedRow.vue'
+import FriendsFeedWidget from './FriendsFeedWidget.vue'
+import type { FeedItem } from './FriendsFeedRow.vue'
 import FriendsSettingsDialog, { type FriendsSettings } from './FriendsSettingsDialog.vue'
 
 interface Friend { id: number; user_id: number; display_name: string; since?: string | null }
@@ -110,19 +111,29 @@ onMounted(load)
 
 <template>
   <div class="container py-3">
-    <div class="d-flex align-items-center justify-content-between mb-3">
-      <h1 class="h3 mb-0">{{ t('friends.title') }}</h1>
-      <button class="btn btn-sm btn-outline-secondary" type="button" @click="showSettings = true">
-        <i class="fa-solid fa-user-shield me-1"></i>{{ t('friends.settings_button') }}
-      </button>
-    </div>
+    <h1 class="h3 mb-3">{{ t('friends.title') }}</h1>
     <FriendsSettingsDialog v-if="showSettings" :settings="settings" @close="showSettings = false" @saved="settings = $event" />
     <div v-if="error" class="alert alert-danger">{{ error }}</div>
 
     <div class="row g-4">
+      <div class="col-lg-7">
+        <FriendsFeedWidget :items="feed" :loading="loading" />
+      </div>
+
       <div class="col-lg-5">
+        <div class="card border-0 shadow-sm">
+        <div class="card-header activity-card-header d-flex align-items-center gap-2">
+          <h2 class="h5 mb-0 d-flex align-items-center gap-2">
+            <i class="fa-solid fa-user-gear text-warning" aria-hidden="true"></i>
+            <span>{{ t('friends.manage_title') }}</span>
+          </h2>
+          <button class="btn btn-sm btn-outline-secondary ms-auto" type="button" @click="showSettings = true">
+            <i class="fa-solid fa-user-shield me-1"></i>{{ t('friends.settings_button') }}
+          </button>
+        </div>
+        <div class="card-body">
         <section class="mb-4">
-          <h2 class="h5">{{ t('friends.add_title') }}</h2>
+          <h3 class="h6">{{ t('friends.add_title') }}</h3>
           <form class="input-group mb-2" @submit.prevent="send">
             <input v-model="email" type="text" autocomplete="off" class="form-control" :placeholder="t('friends.search_placeholder')" />
             <button class="btn btn-primary" type="submit">{{ t('friends.send_request') }}</button>
@@ -147,7 +158,7 @@ onMounted(load)
         </section>
 
         <section v-if="incoming.length" class="mb-4">
-          <h2 class="h5">{{ t('friends.incoming') }}</h2>
+          <h3 class="h6">{{ t('friends.incoming') }}</h3>
           <ul class="list-group">
             <li v-for="f in incoming" :key="f.id" class="list-group-item d-flex align-items-center justify-content-between">
               <span>{{ f.display_name }}</span>
@@ -160,7 +171,7 @@ onMounted(load)
         </section>
 
         <section v-if="outgoing.length" class="mb-4">
-          <h2 class="h5">{{ t('friends.outgoing') }}</h2>
+          <h3 class="h6">{{ t('friends.outgoing') }}</h3>
           <ul class="list-group">
             <li v-for="f in outgoing" :key="f.id" class="list-group-item d-flex align-items-center justify-content-between">
               <span>{{ f.display_name }}</span>
@@ -170,7 +181,7 @@ onMounted(load)
         </section>
 
         <section>
-          <h2 class="h5">{{ t('friends.my_friends') }}</h2>
+          <h3 class="h6">{{ t('friends.my_friends') }}</h3>
           <p v-if="!loading && !friends.length" class="text-muted">{{ t('friends.no_friends') }}</p>
           <ul v-else class="list-group">
             <li v-for="f in friends" :key="f.id" class="list-group-item d-flex align-items-center justify-content-between">
@@ -179,16 +190,8 @@ onMounted(load)
             </li>
           </ul>
         </section>
-      </div>
-
-      <div class="col-lg-7">
-        <h2 class="h5">{{ t('friends.feed') }}</h2>
-        <p v-if="!loading && !feed.length" class="text-muted">{{ t('friends.feed_empty') }}</p>
-        <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1">
-          <li v-for="(item, i) in feed" :key="`${item.kind}-${item.source ?? ''}-${item.id}`">
-            <FriendsFeedRow :item="item" :index="i" />
-          </li>
-        </ul>
+        </div>
+        </div>
       </div>
     </div>
   </div>

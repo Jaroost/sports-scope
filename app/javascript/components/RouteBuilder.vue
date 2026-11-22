@@ -24,6 +24,7 @@ import RouteBuilderChart from './RouteBuilderChart.vue'
 import RouteBuilderMap from './RouteBuilderMap.vue'
 import MapStyleDropdown from './MapStyleDropdown.vue'
 import RouteAlternativesDialog from './RouteAlternativesDialog.vue'
+import RoutingDebugDialog from './RoutingDebugDialog.vue'
 import ShareMapStyleDialog from './ShareMapStyleDialog.vue'
 import { csrfToken } from '../csrf'
 
@@ -1292,6 +1293,8 @@ interface MenuAction {
 interface MenuGroup { key: string; label?: string; items: MenuAction[] }
 
 const mobileActionsOpen = ref(false)
+// Dialogue de débogage du profil de routage (RoutingDebugDialog).
+const showRoutingDebug = ref(false)
 
 function closeActionsMenu() {
   mobileActionsOpen.value = false
@@ -1407,6 +1410,17 @@ const menuGroups = computed<MenuGroup[]>(() => {
           run: fetchImportantPlaces,
         },
       ],
+    })
+    // Diagnostic du profil de routage : pourquoi le tracé passe ici et pas là.
+    groups.push({
+      key: 'routing-debug',
+      items: [{
+        key: 'routing-debug',
+        icon: 'fa-solid fa-bug',
+        label: t('routes.routing_debug.menu'),
+        disabled: routeStore.waypoints.value.length < 2,
+        run: () => { showRoutingDebug.value = true },
+      }],
     })
     groups.push({
       key: 'profile',
@@ -2897,6 +2911,19 @@ onBeforeUnmount(() => {
         @update:profile="onAlternativesProfile"
         @widen="widenAlternatives"
         @close="cancelAlternatives"
+      />
+    </Transition>
+
+    <!-- Débogage du profil de routage : coût par voie, passage forcé, réglages responsables -->
+    <Transition name="modal">
+      <RoutingDebugDialog
+        v-if="showRoutingDebug"
+        :waypoints="routeStore.waypoints.value"
+        :spec="routeStore.profile.value"
+        :sport="routeStore.sport.value"
+        :map-style-id="state.mapStyleId"
+        @apply="onChangeProfile"
+        @close="showRoutingDebug = false"
       />
     </Transition>
 

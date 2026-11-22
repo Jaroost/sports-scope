@@ -14,8 +14,6 @@
 assign validForBikes = true
 
 # Use the following switches to change behaviour
-assign   allow_steps              = true   # %allow_steps% | Set false to disallow steps | boolean
-assign   allow_ferries            = true   # %allow_ferries% | Set false to disallow ferries | boolean
 assign   allow_motorways          = false  # %allow_motorways% | Set true to allow motorways (coût = celui des routes à grand trafic) | boolean
 assign   ignore_cycleroutes       = false  # %ignore_cycleroutes% | Set true for better elevation results | boolean
 assign   stick_to_cycleroutes     = false  # %stick_to_cycleroutes% | Set true to just follow cycleroutes | boolean
@@ -310,8 +308,8 @@ assign isroadclass = highway=motorway|motorway_link|trunk|trunk_link|primary|pri
 assign bikediscount = if isbike then ( add 1.0 ( multiply -1.0 bike_infra_trust ) ) else 1.0
 
 assign roadbase =
-  if      ( highway=steps ) then ( if allow_steps then cost_way_steps else 10000 )
-  else if ( route=ferry   ) then ( if allow_ferries then cost_way_ferry else 10000 )
+  if      ( highway=steps ) then cost_way_steps
+  else if ( route=ferry   ) then cost_way_ferry
   else if ( is_ldcr       ) then 1
   else if ( highway=trunk|trunk_link|motorway|motorway_link ) then cost_road_trunk
   else if ( highway=primary|primary_link     ) then cost_road_primary
@@ -334,9 +332,9 @@ assign classcost =
   else roadbase
 
 assign surface_gravel = or surface=gravel|fine_gravel|compacted|pebblestone
-                           tracktype=grade2|grade3
+                           and surface= tracktype=grade2|grade3
 assign surface_ground = or surface=ground|dirt|earth|grass|unpaved|clay|grass_paver
-                           tracktype=grade4|grade5
+                           and surface= tracktype=grade4|grade5
 assign surface_soft   = surface=sand|mud
 assign surface_rough  = or surface=wood|rock|stone
                            smoothness=bad|very_bad|horrible|very_horrible|impassable

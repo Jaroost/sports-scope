@@ -4,7 +4,7 @@ import { t } from '../i18n'
 import { profilesForSport } from '../brouter'
 import type { Sport } from '../userPreferences'
 import { specBase } from '../routingProfile'
-import { customProfilesForSport, loadRoutingProfiles, saveRoutingProfile } from '../routingProfiles'
+import { customProfilesForSport, deleteRoutingProfile, loadRoutingProfiles, saveRoutingProfile } from '../routingProfiles'
 import type { CustomRoutingProfile } from '../routingProfiles'
 import RoutingProfileEditor from './RoutingProfileEditor.vue'
 
@@ -54,6 +54,35 @@ function freeName(base: string): string {
   }
 }
 
+async function removeProfile(p: CustomRoutingProfile) {
+  if (busy.value || !window.confirm(t('routes.routing_profile.confirm_delete', { name: p.name }))) return
+  message.value = null
+  busy.value = true
+  try {
+    await deleteRoutingProfile(p.id)
+  } catch {
+    message.value = { kind: 'danger', text: t('profile.routing.delete_failed') }
+  } finally {
+    busy.value = false
+  }
+}
+
+// Copie d'un profil (même spec, même sport) sous un nom libre : « Nom (copie) », « Nom (copie) (2) »…
+async function duplicateProfile(p: CustomRoutingProfile) {
+  if (busy.value) return
+  message.value = null
+  busy.value = true
+  try {
+    const name = freeName(`${p.name.slice(0, 60 - ` (${t('profile.routing.copy_suffix')})`.length)} (${t('profile.routing.copy_suffix')})`)
+    const saved = await saveRoutingProfile(null, { name, spec: p.spec, sport: p.sport })
+    message.value = { kind: 'success', text: t('profile.routing.duplicate_ok', { name: saved.name }) }
+  } catch {
+    message.value = { kind: 'danger', text: t('profile.routing.duplicate_failed') }
+  } finally {
+    busy.value = false
+  }
+}
+
 async function onFile(e: Event) {
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
@@ -90,11 +119,17 @@ const newSpec = computed(() => profilesForSport(props.sport)[0])
           <div class="fw-semibold text-truncate">{{ p.name }}</div>
           <div class="text-muted small text-truncate">{{ t(`routes.brouter_profile.${specBase(p.spec)}`) }}</div>
         </div>
+        <button type="button" class="btn btn-outline-secondary btn-sm" :disabled="busy" :title="t('profile.routing.duplicate')" :aria-label="t('profile.routing.duplicate')" @click="duplicateProfile(p)">
+          <i class="fa-solid fa-copy" aria-hidden="true"></i>
+        </button>
         <button type="button" class="btn btn-outline-secondary btn-sm" :title="t('profile.routing.export')" :aria-label="t('profile.routing.export')" @click="exportProfile(p)">
           <i class="fa-solid fa-file-export" aria-hidden="true"></i>
         </button>
         <button type="button" class="btn btn-outline-secondary btn-sm" @click="open(p.spec, false)">
           <i class="fa-solid fa-sliders me-1" aria-hidden="true"></i>{{ t('profile.routing.edit') }}
+        </button>
+        <button type="button" class="btn btn-outline-danger btn-sm" :disabled="busy" :title="t('routes.routing_profile.delete')" :aria-label="t('routes.routing_profile.delete')" @click="removeProfile(p)">
+          <i class="fa-solid fa-trash" aria-hidden="true"></i>
         </button>
       </li>
     </ul>

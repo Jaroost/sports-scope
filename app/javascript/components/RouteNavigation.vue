@@ -46,6 +46,7 @@ import {
   registerVoiceDestinationHandlers,
 } from '../companionBridge'
 import { usePlaceSearch, placeShortName } from '../composables/usePlaceSearch'
+import { nearestPoiIntent, findNearestPoi, spokenDistance } from '../nearestPoi'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
@@ -763,6 +764,18 @@ const {
 const voiceSearch = usePlaceSearch()
 registerVoiceDestinationHandlers({
   find: async (query) => {
+    // « La boulangerie la plus proche » : une catégorie de POI autour de la position,
+    // pas un nom de lieu. Sans fix GPS, rien à chercher autour de soi (→ non trouvé).
+    const poiKey = nearestPoiIntent(query)
+    if (poiKey) {
+      if (!lastPos) return null
+      const poi = await findNearestPoi(poiKey, lastPos)
+      if (!poi) return null
+      return {
+        name: poi.name, label: poi.name, lat: poi.lat, lng: poi.lng,
+        spoken: `${poi.name}, à ${spokenDistance(poi.distM)}`,
+      }
+    }
     await voiceSearch.searchPlaces(query)
     const best = voiceSearch.searchResults.value[0]
     voiceSearch.clearSearch()

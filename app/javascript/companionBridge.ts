@@ -264,7 +264,9 @@ export function registerMapCameraHandlers(handlers: MapCameraBridgeHandlers | nu
 //      le trajet depuis la position GPS et le suit (même chemin que « Naviguer ici »).
 // Même modèle que registerPoiHandlers : valable tant que la page est montée.
 interface VoiceDestinationBridgeHandlers {
-  find(query: string): Promise<{ name: string; label: string; lat: number; lng: number } | null>
+  // `spoken` : la phrase que l'appli lit pour confirmer (« Boulangerie X, à 850 mètres ») ;
+  // absente, elle lit `name`.
+  find(query: string): Promise<{ name: string; label: string; lat: number; lng: number; spoken?: string } | null>
   navigate(name: string, lat: number, lng: number): void
 }
 let voiceDestinationHandlers: VoiceDestinationBridgeHandlers | null = null
@@ -578,7 +580,7 @@ export function installCompanionBridge(): void {
       }
     },
     voiceFindPlace(query: string) {
-      const reply = (place: { name: string; label: string; lat: number; lng: number } | null) =>
+      const reply = (place: { name: string; label: string; lat: number; lng: number; spoken?: string } | null) =>
         channel()?.postMessage(JSON.stringify({ type: 'voice_place', query, found: place !== null, ...place }))
       if (typeof query !== 'string' || !query.trim() || !voiceDestinationHandlers) { reply(null); return }
       // Réponse toujours envoyée, même sur erreur : l'appli attend un verdict pour

@@ -30,8 +30,8 @@ export interface ParamDef {
   step?: number
   values?: number[]
   // Jeu de libellés d'un choix : 'cost' (autorisé/évité/interdit), 'level' (idéal … interdit),
-  // 'sac' (T0…T6), 'mtb' (S0…S6).
-  labels?: 'cost' | 'level' | 'sac' | 'mtb'
+  // 'sac' (T0…T6), 'mtb' (S0…S6), 'ambiance' (non / un peu / beaucoup : poids 0 / 0,5 / 1).
+  labels?: 'cost' | 'level' | 'sac' | 'mtb' | 'ambiance'
 }
 
 interface ProfileDef {
@@ -88,6 +88,11 @@ function coerce(key: string, raw: unknown): ParamValue | undefined {
     if (raw === true || raw === 'true') return true
     if (raw === false || raw === 'false') return false
     return undefined
+  }
+  // Les réglages d'ambiance étaient des booléens : un spec ancien porte encore true / false.
+  if (def.labels === 'ambiance') {
+    if (raw === true || raw === 'true') return 1
+    if (raw === false || raw === 'false') return 0
   }
   const n = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(n)) return undefined

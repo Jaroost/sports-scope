@@ -7,7 +7,8 @@ module RoutingProfileSpec
   CATALOG = JSON.parse(Rails.root.join("app/javascript/routingProfileParams.json").read).freeze
   PARAMS = CATALOG.fetch("params")
   PROFILES = CATALOG.fetch("profiles")
-  MAX_LENGTH = 400
+  # Pire cas : tous les réglages d'un profil écartés du défaut (~800 car. aujourd'hui, VTT atelier).
+  MAX_LENGTH = 2000
 
   module_function
 
@@ -52,6 +53,8 @@ module RoutingProfileSpec
     when "bool"
       { "true" => true, "false" => false }[raw.to_s]
     when "choice"
+      # Les réglages d'ambiance étaient des booléens : un spec ancien porte encore true / false.
+      raw = { "true" => "1", "false" => "0" }.fetch(raw.to_s, raw) if def_["labels"] == "ambiance"
       n = Float(raw.to_s, exception: false)
       n && def_["values"].include?(n) ? n : nil
     else

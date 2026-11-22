@@ -1534,6 +1534,10 @@ fr:
         roads: "Chaque type de route a son coût : « idéal » la recherche, « interdit » ne l'emprunte jamais. Un aménagement cyclable (ou un trottoir) adoucit le coût d'une route à hauteur de son poids."
         surface: "Un revêtement interdit n'est jamais emprunté ; évité, il ne l'est qu'en dernier recours. Les voies sans information de revêtement ne sont pas touchées."
         difficulty: "Échelles OSM : SAC T1 (sentier facile) à T6 (alpinisme difficile) ; VTT S0 (facile) à S6. Au-delà du maximum, la voie est interdite."
+      ambiance_level:
+        none: "Non"
+        some: "Un peu"
+        strong: "Beaucoup"
       cost:
         allowed: "Autorisé"
         avoided: "Évité"
@@ -1548,6 +1552,9 @@ fr:
         elevation: "Dénivelé"
         ambiance: "Ambiance"
         access: "Accès"
+      param_help:
+        avoid_unsafe: "Ajoute une pénalité aux routes (autoroute, trunk, nationale, secondaire, tertiaire, non classée) qui n'ont ni aménagement cyclable (bande, piste) ni itinéraire vélo. Aucun critère de trafic ou de vitesse : seule compte la classe OSM de la route. Les rues résidentielles, voies de service, pistes et chemins ne sont pas touchés, et la pénalité est la même pour toutes les classes concernées (elle s'ajoute aux réglages par type de route)."
+        consider_traffic: "Utilise l'estimation de trafic (classe 0 à 7) fournie par les données BRouter pour chaque tronçon : pénalité de +0,2 (classes 1-2) à +1 (classes 6-7), nulle sans estimation. Elle s'ajoute au coût de la voie, quel que soit son type, et pas seulement aux routes : un tronçon fréquenté sur une route de quartier compte aussi. Les aménagements cyclables ne l'atténuent pas."
       param:
         cost_road_trunk: "Routes à grand trafic (trunk)"
         cost_road_primary: "Routes nationales"

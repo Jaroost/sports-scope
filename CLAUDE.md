@@ -131,7 +131,7 @@ plutôt qu'un build-arg.
 
 Un profil personnalisé = profil BRouter de base + surcharges de variables
 (`&profile:<variable>=<valeur>`). Il voyage partout comme une **chaîne « spec »** :
-`preset-cycling-trekking~cost_surface_soft=10000~consider_noise=true` (clés triées, seules les
+`preset-cycling-trekking~cost_surface_soft=10000~consider_noise=1` (clés triées, seules les
 valeurs ≠ défaut du profil ; sans surcharge, le spec est le nom du profil de base). C'est ce
 que stockent `routes.profile` et `sports.<sport>.route_profile` — un itinéraire reste
 reproductible si le profil nommé change. `RoutingProfile` (table `routing_profiles`,
@@ -157,6 +157,7 @@ reproductible si le profil nommé change. `RoutingProfile` (table `routing_profi
   uniques, itinéraires cyclables) ; le VTT ajoute `mtb_scale_*`. La rando dérive de
   `hiking-mountain.brf` (difficulté SAC, trottoirs via `sidewalk_trust`). Un coût de 10000 sur
   la seule voie possible fait calculer longtemps puis échouer (comme `SAC_scale_limit` amont).
+- **Ambiance** (`consider_noise|river|forest`) : trois niveaux 0 / 0.5 / 1 (non / un peu / beaucoup), le poids multiplie la pénalité dans le `.brf`. D'anciens specs portent encore `true`/`false` : lus comme 1/0 (`coerce` TS et `RoutingProfileSpec.coerce`).
 - **Booléens** : le spec garde `true`/`false`, mais BRouter les veut en `1`/`0` (`true` → 500) ;
   la conversion est dans `brouterProfileQuery`.
 - **Ajouter une variable** : la déclarer (globale) dans le `.brf`, l'ajouter à `params` et à

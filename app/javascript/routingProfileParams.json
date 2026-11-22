@@ -82,18 +82,24 @@
       "group": "elevation"
     },
     "consider_noise": {
-      "type": "bool",
-      "default": false,
+      "type": "choice",
+      "values": [0, 0.5, 1],
+      "labels": "ambiance",
+      "default": 0,
       "group": "ambiance"
     },
     "consider_river": {
-      "type": "bool",
-      "default": false,
+      "type": "choice",
+      "values": [0, 0.5, 1],
+      "labels": "ambiance",
+      "default": 0,
       "group": "ambiance"
     },
     "consider_forest": {
-      "type": "bool",
-      "default": false,
+      "type": "choice",
+      "values": [0, 0.5, 1],
+      "labels": "ambiance",
+      "default": 0,
       "group": "ambiance"
     },
     "consider_town": {

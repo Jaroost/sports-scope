@@ -1534,6 +1534,10 @@ en:
         roads: "Each road type has its own cost: “ideal” seeks it out, “forbidden” never uses it. A cycling facility (or a sidewalk) softens a road's cost by its weight."
         surface: "A forbidden surface is never used; an avoided one only as a last resort. Ways with no surface information are not affected."
         difficulty: "OSM scales: SAC T1 (easy trail) to T6 (difficult alpine); MTB S0 (easy) to S6. Above the maximum the way is forbidden."
+      ambiance_level:
+        none: "No"
+        some: "A little"
+        strong: "A lot"
       cost:
         allowed: "Allowed"
         avoided: "Avoided"
@@ -1548,6 +1552,9 @@ en:
         elevation: "Elevation"
         ambiance: "Ambiance"
         access: "Access"
+      param_help:
+        avoid_unsafe: "Adds a penalty to roads (motorway, trunk, primary, secondary, tertiary, unclassified) that have neither a cycling facility (lane, track) nor a cycle route. There is no traffic or speed criterion: only the road's OSM class counts. Residential streets, service roads, tracks and paths are not affected, and the penalty is the same for every class concerned (it comes on top of the per-road-type settings)."
+        consider_traffic: "Uses the traffic estimate (class 0 to 7) that BRouter data provides for each segment: a penalty from +0.2 (classes 1-2) to +1 (classes 6-7), none when there is no estimate. It is added to the way's cost whatever its type, not only to roads: a busy stretch on a neighbourhood street counts too. Cycling facilities do not soften it."
       param:
         cost_road_trunk: "High-traffic roads (trunk)"
         cost_road_primary: "Main roads"

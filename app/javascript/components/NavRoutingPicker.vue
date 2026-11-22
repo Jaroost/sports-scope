@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { t } from '../i18n'
-import { profilesForSport } from '../brouter'
+import RoutingProfileSelect from './RoutingProfileSelect.vue'
 import { routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 
@@ -55,23 +55,14 @@ function selectProfile(p: string) {
         <span class="ms-1">{{ t(`routes.wt_sport_${s}`) }}</span>
       </button>
     </div>
-    <select
-      class="form-select form-select-sm nav-routing-profile"
-      :value="profile"
+    <RoutingProfileSelect
+      :model-value="profile"
+      :sport="sport"
       :disabled="disabled"
       :aria-label="t('routes.profile_label')"
-      :title="t(`routes.brouter_profile.${profile}_desc`)"
-      @change="selectProfile(($event.target as HTMLSelectElement).value)"
-    >
-      <option
-        v-for="p in profilesForSport(sport)"
-        :key="p"
-        :value="p"
-        :title="t(`routes.brouter_profile.${p}_desc`)"
-      >
-        {{ t(`routes.brouter_profile.${p}`) }}
-      </option>
-    </select>
+      select-class="form-select-sm fw-medium nav-routing-profile"
+      @update:model-value="selectProfile"
+    />
   </div>
 </template>
 

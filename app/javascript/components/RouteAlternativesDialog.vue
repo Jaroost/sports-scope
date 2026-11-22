@@ -8,7 +8,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { t } from '../i18n'
 import { mapStyleFor } from '../mapStyles'
-import { profilesForSport } from '../brouter'
+import RoutingProfileSelect from './RoutingProfileSelect.vue'
 import { computeGainLoss, formatDistancePrecise, formatDistanceShort, haversine } from '../routeHelpers'
 import type { Coord } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
@@ -400,23 +400,14 @@ onBeforeUnmount(() => {
               <i :class="`fa-solid ${sportIcon(s)}`" aria-hidden="true"></i>
             </button>
           </div>
-          <select
-            class="form-select form-select-sm raltd-profile-select"
-            :value="profile"
-            :aria-label="t('routes.profile_label')"
-            :title="t(`routes.brouter_profile.${profile}_desc`)"
+          <RoutingProfileSelect
+            :model-value="profile"
+            :sport="sport"
             :disabled="loading"
-            @change="emit('update:profile', ($event.target as HTMLSelectElement).value)"
-          >
-            <option
-              v-for="p in profilesForSport(sport)"
-              :key="p"
-              :value="p"
-              :title="t(`routes.brouter_profile.${p}_desc`)"
-            >
-              {{ t(`routes.brouter_profile.${p}`) }}
-            </option>
-          </select>
+            :aria-label="t('routes.profile_label')"
+            class="raltd-profile-select" select-class="form-select-sm"
+            @update:model-value="emit('update:profile', $event)"
+          />
         </div>
 
         <button type="button" class="raltd-close" :aria-label="t('routes.close')" @click="emit('close')">×</button>

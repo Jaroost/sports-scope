@@ -168,7 +168,7 @@ class User < ApplicationRecord
       # Sur route, tout ce qui dépasse le faux plat (3 %) monte. Les cols enchaînent des
       # rampes séparées de replats parfois longs : on fusionne large (500 m).
       "cycling" => sport_defaults(
-        speed: 18, route_profile: "trekking-paved", turn_anomaly_m: 100,
+        speed: 18, route_profile: "preset-cycling-trekking", turn_anomaly_m: 100,
         climb_detection: {
           "min_grade" => 3,        # pente lissée au-delà de laquelle « ça monte » (%)
           "min_gain_m" => 50,      # dénivelé positif minimal (m)
@@ -183,7 +183,7 @@ class User < ApplicationRecord
       # Sur chemin, les montées sont plus courtes et plus hachées : on abaisse la longueur
       # minimale et on fusionne moins loin, sous peine d'agréger deux bosses distinctes.
       "mtb" => sport_defaults(
-        speed: 14, route_profile: "gravel", turn_anomaly_m: 80,
+        speed: 14, route_profile: "preset-mtb-gravel", turn_anomaly_m: 80,
         climb_detection: {
           "min_grade" => 4, "min_gain_m" => 50, "min_length_m" => 300,
           "grade_smoothing_m" => 40, "merge_gap_m" => 300,
@@ -193,7 +193,7 @@ class User < ApplicationRecord
       # 15 %) et bien plus courtes : sans seuils propres, tout le tracé serait un col. Sous
       # 6 % on marche à plat, et une bosse de moins de 100 m de D+ n'est pas une montée.
       "hiking" => sport_defaults(
-        speed: 4.5, route_profile: "hiking-mountain", turn_anomaly_m: 60,
+        speed: 4.5, route_profile: "preset-hiking-mountain", turn_anomaly_m: 60,
         climb_detection: {
           "min_grade" => 6, "min_gain_m" => 100, "min_length_m" => 250,
           "grade_smoothing_m" => 30, "merge_gap_m" => 200,
@@ -318,6 +318,7 @@ class User < ApplicationRecord
   end
 
   has_many :chart_layouts, dependent: :destroy
+  has_many :routing_profiles, dependent: :destroy
   has_many :routes, dependent: :destroy
   has_many :training_programs, dependent: :destroy
   # Itinéraires d'autrui ouverts via un lien partagé (cf. OpenedRoute).

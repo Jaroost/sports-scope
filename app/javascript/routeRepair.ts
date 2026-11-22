@@ -32,6 +32,7 @@
 // point ajouté.
 
 import { BROUTER_URL } from './brouter'
+import { brouterProfileQuery } from './routingProfile'
 import {
   haversine, simplifyTrack, buildDistancesM,
   turnsFromVoiceHints, detectTurnAnomalies, detectUturnAnomalies,
@@ -183,7 +184,7 @@ function lengthBeyond(pts: Pt[], ref: SegmentIndex, thr = DIVERGENCE_M): number 
 async function routeVia(wps: LngLat[], profile: string, signal: AbortSignal): Promise<Routed | null> {
   const lonlats = wps.map((w) => `${w[0].toFixed(6)},${w[1].toFixed(6)}`).join('|')
   // timode=2 : BRouter joint ses voicehints, d'où l'on tire les demi-tours à purger.
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2`
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&${brouterProfileQuery(profile)}&alternativeidx=0&format=geojson&timode=2`
   const res = await fetch(url, { signal })
   if (!res.ok) return null
   const json = await res.json()

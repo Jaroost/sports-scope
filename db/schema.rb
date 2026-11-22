@@ -10,18 +10,18 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
 
   create_table "bikes", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.boolean "is_default", default: false, null: false
+    t.bigint "user_id", null: false
     t.string "name", null: false
     t.string "strava_gear_id"
+    t.boolean "is_default", default: false, null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
     t.boolean "uses_wax", default: true, null: false
     t.index ["user_id", "strava_gear_id"], name: "index_bikes_on_user_id_and_strava_gear_id", unique: true
     t.index ["user_id"], name: "index_bikes_on_user_id"
@@ -38,10 +38,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
   end
 
   create_table "friend_invitations", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "email", null: false
     t.bigint "inviter_id", null: false
+    t.string "email", null: false
     t.datetime "last_sent_at", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["email"], name: "index_friend_invitations_on_email"
     t.index ["inviter_id", "email"], name: "index_friend_invitations_on_inviter_id_and_email", unique: true
@@ -49,11 +49,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
   end
 
   create_table "friendships", force: :cascade do |t|
-    t.datetime "accepted_at"
-    t.bigint "addressee_id", null: false
-    t.datetime "created_at", null: false
     t.bigint "requester_id", null: false
+    t.bigint "addressee_id", null: false
     t.string "status", default: "pending", null: false
+    t.datetime "accepted_at"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index "LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id)", name: "index_friendships_on_unordered_pair", unique: true
     t.index ["addressee_id"], name: "index_friendships_on_addressee_id"
@@ -72,26 +72,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
     t.integer "elapsed_time_s"
     t.jsonb "end_latlng"
     t.string "filename"
-    t.jsonb "hr_histogram", default: {}, null: false
-    t.jsonb "laps", default: [], null: false
     t.float "max_cadence"
     t.float "max_heartrate"
     t.float "max_speed"
     t.float "max_watts"
     t.integer "moving_time_s"
     t.string "name", null: false
-    t.float "normalized_power"
-    t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
-    t.jsonb "power_histogram", default: {}, null: false
     t.string "source", default: "fit", null: false
     t.jsonb "start_latlng"
     t.datetime "started_at"
     t.jsonb "streams", default: {}, null: false
     t.float "total_elevation_gain"
-    t.jsonb "track_cells", default: {}, null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.float "normalized_power"
+    t.jsonb "hr_histogram", default: {}, null: false
+    t.jsonb "power_histogram", default: {}, null: false
+    t.jsonb "laps", default: [], null: false
+    t.jsonb "track_cells", default: {}, null: false
+    t.jsonb "peak_heartrates", default: {}, null: false
     t.jsonb "stream_exclusions", default: {}, null: false
     t.float "new_distance_m"
     t.jsonb "new_ranges"
@@ -108,23 +108,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
   end
 
   create_table "named_segments", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "name", null: false
     t.jsonb "cells", default: [], null: false
     t.jsonb "coarse", default: [], null: false
-    t.datetime "created_at", null: false
     t.float "distance_m"
-    t.string "name", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
     t.index ["coarse"], name: "index_named_segments_on_coarse", using: :gin
     t.index ["user_id"], name: "index_named_segments_on_user_id"
   end
 
   create_table "opened_routes", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.datetime "last_opened_at", null: false
-    t.bigint "route_id", null: false
-    t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.bigint "route_id", null: false
+    t.datetime "last_opened_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["route_id"], name: "index_opened_routes_on_route_id"
     t.index ["user_id", "last_opened_at"], name: "index_opened_routes_on_user_id_and_last_opened_at"
     t.index ["user_id", "route_id"], name: "index_opened_routes_on_user_id_and_route_id", unique: true
@@ -133,51 +133,51 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
 
   create_table "part_mounts", force: :cascade do |t|
     t.bigint "bike_id", null: false
-    t.datetime "created_at", null: false
-    t.datetime "mounted_at", null: false
     t.bigint "part_id", null: false
-    t.datetime "unmounted_at"
+    t.datetime "mounted_at", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "unmounted_at"
     t.index ["bike_id", "mounted_at"], name: "index_part_mounts_on_bike_id_and_mounted_at"
     t.index ["bike_id"], name: "index_part_mounts_on_bike_id"
     t.index ["part_id"], name: "index_part_mounts_on_part_id"
   end
 
   create_table "part_types", force: :cascade do |t|
-    t.boolean "allow_multiple_mounted", default: false, null: false
-    t.datetime "created_at", null: false
-    t.integer "default_wear_threshold_km", null: false
+    t.bigint "user_id"
     t.string "key"
     t.string "name"
+    t.integer "default_wear_threshold_km", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id"
+    t.boolean "allow_multiple_mounted", default: false, null: false
     t.index ["user_id", "name"], name: "index_part_types_on_user_id_and_name", unique: true
     t.index ["user_id"], name: "index_part_types_on_user_id"
   end
 
   create_table "parts", force: :cascade do |t|
     t.bigint "bike_id", null: false
-    t.datetime "created_at", null: false
-    t.datetime "discarded_at"
-    t.datetime "last_waxed_at"
     t.string "name", null: false
-    t.boolean "needs_wax", default: false, null: false
-    t.text "notes"
-    t.bigint "part_type_id", null: false
-    t.datetime "updated_at", null: false
     t.integer "wax_threshold_km", default: 300, null: false
+    t.datetime "last_waxed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.boolean "needs_wax", default: false, null: false
+    t.bigint "part_type_id", null: false
     t.integer "wear_threshold_km", default: 3000, null: false
+    t.text "notes"
+    t.datetime "discarded_at"
     t.index ["bike_id"], name: "index_parts_on_bike_id"
     t.index ["part_type_id"], name: "index_parts_on_part_type_id"
   end
 
   create_table "planned_rides", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.date "planned_on", null: false
-    t.integer "position", default: 0, null: false
-    t.bigint "route_id", null: false
-    t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.bigint "route_id", null: false
+    t.date "planned_on", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.integer "position", default: 0, null: false
     t.index ["route_id"], name: "index_planned_rides_on_route_id"
     t.index ["user_id", "planned_on"], name: "index_planned_rides_on_user_id_and_planned_on"
     t.index ["user_id", "route_id", "planned_on"], name: "index_planned_rides_on_user_id_and_route_id_and_planned_on", unique: true
@@ -185,50 +185,50 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
   end
 
   create_table "pois", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "name", null: false
     t.string "category", null: false
-    t.datetime "created_at", null: false
     t.float "lat", null: false
     t.float "lng", null: false
-    t.string "name", null: false
     t.string "source", default: "custom", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
     t.index ["user_id"], name: "index_pois_on_user_id"
   end
 
   create_table "route_shares", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.bigint "route_id", null: false
-    t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["route_id", "user_id"], name: "index_route_shares_on_route_id_and_user_id", unique: true
     t.index ["route_id"], name: "index_route_shares_on_route_id"
     t.index ["user_id"], name: "index_route_shares_on_user_id"
   end
 
   create_table "routes", force: :cascade do |t|
-    t.string "activity", default: "cycling", null: false
-    t.float "avg_speed_kmh"
-    t.jsonb "climb_names", default: [], null: false
-    t.jsonb "countries", default: [], null: false
     t.datetime "created_at", null: false
     t.float "distance_m"
     t.float "elevation_gain_m"
     t.float "elevation_loss_m"
     t.jsonb "geometry", default: [], null: false
-    t.jsonb "localities", default: [], null: false
-    t.jsonb "map_polyline"
-    t.jsonb "markers", default: [], null: false
     t.string "name", null: false
-    t.jsonb "pois", default: [], null: false
-    t.jsonb "preview_segments"
     t.string "profile", default: "trekking"
-    t.string "share_map_style"
-    t.string "share_token", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
-    t.jsonb "voice_hints", default: [], null: false
     t.jsonb "waypoints", default: [], null: false
+    t.jsonb "voice_hints", default: [], null: false
+    t.string "share_token", null: false
+    t.string "activity", default: "cycling", null: false
+    t.jsonb "pois", default: [], null: false
+    t.jsonb "preview_segments"
+    t.jsonb "map_polyline"
+    t.jsonb "localities", default: [], null: false
+    t.jsonb "markers", default: [], null: false
+    t.float "avg_speed_kmh"
+    t.string "share_map_style"
+    t.jsonb "countries", default: [], null: false
+    t.jsonb "climb_names", default: [], null: false
     t.jsonb "accepted_uturns", default: [], null: false
     t.index "((localities)::text) gin_trgm_ops", name: "index_routes_on_localities_trgm", using: :gin
     t.index ["name"], name: "index_routes_on_name_trgm", opclass: :gin_trgm_ops, using: :gin
@@ -237,55 +237,66 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
     t.index ["user_id"], name: "index_routes_on_user_id"
   end
 
+  create_table "routing_profiles", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "name", null: false
+    t.string "spec", null: false
+    t.string "sport", default: "cycling", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_id", "name"], name: "index_routing_profiles_on_user_id_and_name", unique: true
+    t.index ["user_id"], name: "index_routing_profiles_on_user_id"
+  end
+
   create_table "session_handoffs", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "token_digest", null: false
+    t.datetime "expires_at", null: false
     t.datetime "consumed_at"
     t.datetime "created_at", null: false
-    t.datetime "expires_at", null: false
-    t.string "token_digest", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
     t.index ["expires_at"], name: "index_session_handoffs_on_expires_at"
     t.index ["token_digest"], name: "index_session_handoffs_on_token_digest", unique: true
     t.index ["user_id"], name: "index_session_handoffs_on_user_id"
   end
 
   create_table "strava_activities", force: :cascade do |t|
-    t.string "activity_type"
-    t.float "average_cadence"
-    t.float "average_heartrate"
-    t.float "average_speed"
-    t.float "average_temp"
-    t.float "average_watts"
-    t.datetime "created_at", null: false
-    t.string "device_name"
-    t.float "distance_m"
-    t.integer "elapsed_time_s"
-    t.jsonb "end_latlng"
-    t.string "gear_id"
-    t.jsonb "hr_histogram", default: {}, null: false
-    t.jsonb "localities"
-    t.float "max_cadence"
-    t.float "max_heartrate"
-    t.float "max_speed"
-    t.float "max_watts"
-    t.integer "moving_time_s"
+    t.bigint "user_id", null: false
+    t.bigint "strava_id", null: false
     t.string "name", null: false
-    t.float "normalized_power"
-    t.jsonb "peak_heartrates", default: {}, null: false
+    t.string "activity_type"
+    t.datetime "started_at"
+    t.float "distance_m"
+    t.integer "moving_time_s"
+    t.integer "elapsed_time_s"
+    t.float "total_elevation_gain"
+    t.float "average_speed"
+    t.float "max_speed"
+    t.float "average_heartrate"
+    t.float "max_heartrate"
+    t.float "average_watts"
+    t.float "max_watts"
+    t.float "average_cadence"
+    t.float "max_cadence"
+    t.float "average_temp"
+    t.jsonb "start_latlng"
+    t.jsonb "end_latlng"
+    t.jsonb "raw", default: {}, null: false
+    t.jsonb "streams", default: {}, null: false
     t.jsonb "peak_powers", default: {}, null: false
-    t.jsonb "photo_thumbs"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "gear_id"
+    t.datetime "streams_fetched_at"
+    t.float "normalized_power"
+    t.jsonb "hr_histogram", default: {}, null: false
     t.jsonb "power_histogram", default: {}, null: false
     t.jsonb "preview_segments"
-    t.jsonb "raw", default: {}, null: false
-    t.jsonb "start_latlng"
-    t.datetime "started_at"
-    t.bigint "strava_id", null: false
-    t.jsonb "streams", default: {}, null: false
-    t.datetime "streams_fetched_at"
-    t.float "total_elevation_gain"
+    t.jsonb "localities"
+    t.string "device_name"
+    t.jsonb "photo_thumbs"
     t.jsonb "track_cells", default: {}, null: false
-    t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
+    t.jsonb "peak_heartrates", default: {}, null: false
     t.boolean "ignored", default: false, null: false
     t.jsonb "stream_exclusions", default: {}, null: false
     t.float "new_distance_m"
@@ -304,35 +315,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
   end
 
   create_table "strava_backfill_runs", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "kind", default: "streams", null: false
-    t.string "last_error"
-    t.datetime "rate_limited_until"
+    t.bigint "user_id", null: false
     t.string "status", default: "pending", null: false
     t.integer "total", default: 0, null: false
+    t.datetime "rate_limited_until"
+    t.string "last_error"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
+    t.string "kind", default: "streams", null: false
     t.index ["user_id", "status"], name: "index_strava_backfill_runs_on_user_id_and_status"
     t.index ["user_id"], name: "index_strava_backfill_runs_on_user_id"
   end
 
   create_table "strava_gears", force: :cascade do |t|
-    t.datetime "created_at", null: false
+    t.bigint "user_id", null: false
     t.string "gear_id", null: false
     t.string "gear_type", default: "shoe", null: false
     t.string "name", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
     t.index ["user_id", "gear_id"], name: "index_strava_gears_on_user_id_and_gear_id", unique: true
     t.index ["user_id"], name: "index_strava_gears_on_user_id"
   end
 
   create_table "training_programs", force: :cascade do |t|
-    t.datetime "created_at", null: false
+    t.bigint "user_id", null: false
     t.string "name", null: false
     t.string "share_token", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
     t.string "sport", default: "cycling", null: false
     t.jsonb "items", default: [], null: false
     t.index ["share_token"], name: "index_training_programs_on_share_token", unique: true
@@ -341,24 +352,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
   end
 
   create_table "users", force: :cascade do |t|
-    t.boolean "admin", default: false, null: false
     t.jsonb "chart_layout"
-    t.jsonb "companion_settings", default: {}, null: false
-    t.jsonb "companion_viewport"
     t.datetime "created_at", null: false
     t.string "display_name"
     t.string "email", null: false
     t.string "keycloak_uid", null: false
     t.bigint "last_chart_layout_id"
-    t.jsonb "preferences", default: {}, null: false
-    t.jsonb "roles", default: [], null: false
     t.string "strava_access_token"
     t.datetime "strava_expires_at"
-    t.datetime "strava_full_synced_at"
     t.string "strava_refresh_token"
     t.string "strava_uid"
-    t.jsonb "training_budget"
     t.datetime "updated_at", null: false
+    t.jsonb "preferences", default: {}, null: false
+    t.boolean "admin", default: false, null: false
+    t.jsonb "roles", default: [], null: false
+    t.jsonb "companion_settings", default: {}, null: false
+    t.jsonb "companion_viewport"
+    t.jsonb "training_budget"
+    t.datetime "strava_full_synced_at"
     t.string "strava_scope"
     t.string "friend_invite_token"
     t.index ["email"], name: "index_users_on_email", unique: true
@@ -388,6 +399,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
   add_foreign_key "route_shares", "routes"
   add_foreign_key "route_shares", "users"
   add_foreign_key "routes", "users"
+  add_foreign_key "routing_profiles", "users"
   add_foreign_key "session_handoffs", "users"
   add_foreign_key "strava_activities", "users"
   add_foreign_key "strava_backfill_runs", "users"

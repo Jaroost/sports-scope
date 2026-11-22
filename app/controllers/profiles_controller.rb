@@ -52,9 +52,9 @@ class ProfilesController < ApplicationController
   # Profils BRouter proposés par sport (miroir du catalogue front brouter.ts /
   # PROFILES_BY_SPORT). Un profil n'est accepté que s'il est proposé pour son sport.
   ALLOWED_ROUTE_PROFILES = {
-    "cycling" => %w[trekking-paved trekking fastbike fastbike-lowtraffic fastbike-quiet-paved shortest],
-    "mtb" => %w[gravel trekking shortest],
-    "hiking" => %w[hiking-mountain trekking shortest],
+    "cycling" => %w[preset-cycling-trekking preset-cycling-fast preset-cycling-fast-quiet preset-cycling-shortest custom-cycling],
+    "mtb" => %w[preset-mtb-gravel preset-mtb-trekking preset-mtb-shortest custom-mtb],
+    "hiking" => %w[preset-hiking-mountain preset-hiking-easy preset-hiking-shortest custom-hiking],
   }.freeze
 
   # GET /profile — page HTML qui monte l'îlot Vue UserProfile.
@@ -395,8 +395,7 @@ class ProfilesController < ApplicationController
   # N'accepte qu'un profil proposé pour ce sport, sinon repli sur le défaut : pas de
   # combinaison incohérente type rando + profil vélo.
   def sanitize_route_profile(sport, value, default)
-    value = value.to_s
-    ALLOWED_ROUTE_PROFILES.fetch(sport, []).include?(value) ? value : default
+    RoutingProfileSpec.normalize(value, ALLOWED_ROUTE_PROFILES.fetch(sport, [])) || default
   end
 
   def to_bool(value, default)

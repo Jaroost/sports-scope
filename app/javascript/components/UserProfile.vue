@@ -5,7 +5,9 @@ import { MAP_STYLES, MAP_STYLE_GROUPS, MAP_STYLE_GROUP_FLAG, mapStyleFor } from 
 import { POI_CATEGORIES } from '../poiCategories'
 import { ALL_COUNTRY_CODES, countryName, countryFlag } from '../countries'
 import { usePointerSort } from '../composables/usePointerSort'
-import { profilesForSport } from '../brouter'
+import RoutingProfileSelect from './RoutingProfileSelect.vue'
+import RoutingProfilesManager from './RoutingProfilesManager.vue'
+import { profileDescription } from '../routingProfiles'
 import { SPORTS } from '../userPreferences'
 import type { Sport, UserPreferences, MapStyleId } from '../userPreferences'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
@@ -141,7 +143,7 @@ function applySpeedSuggestion() {
 
 // Sections dont le contenu dépend du sport : le sélecteur n'apparaît que si l'une d'elles
 // est affichée (ProfileDialog peut n'en ouvrir qu'un sous-ensemble).
-const PER_SPORT_SECTIONS = ['sport', 'map', 'climb', 'navigation']
+const PER_SPORT_SECTIONS = ['sport', 'map', 'climb', 'navigation', 'routing']
 
 const showSportPicker = computed(() => PER_SPORT_SECTIONS.some(showSection))
 
@@ -152,6 +154,7 @@ const TABS = [
   { key: 'general', icon: 'fa-sliders', sections: ['navbar', 'display'] },
   { key: 'map', icon: 'fa-map', sections: ['poi', 'map', 'search'] },
   { key: 'sport', icon: 'fa-person-biking', sections: ['navigation', 'climb', 'sport'] },
+  { key: 'routing', icon: 'fa-route', sections: ['routing'] },
   { key: 'privacy', icon: 'fa-user-shield', sections: ['privacy'] },
 ]
 // Un onglet n'existe que si au moins une de ses cartes est affichée (ProfileDialog
@@ -506,7 +509,7 @@ function placePreviewMarker(coords: [number, number]) {
     </ul>
 
     <!-- Sport dont on édite les réglages : pilote toutes les sections qui en dépendent -->
-    <section v-if="showSportPicker" v-show="currentTab === 'sport'" class="card mb-3 shadow-sm sport-picker">
+    <section v-if="showSportPicker" v-show="currentTab === 'sport' || currentTab === 'routing'" class="card mb-3 shadow-sm sport-picker">
       <div class="card-body py-2">
         <div class="d-flex flex-wrap align-items-center gap-2">
           <span class="text-muted small fw-semibold me-1">{{ t('profile.sport.picker') }}</span>
@@ -1164,6 +1167,17 @@ function placePreviewMarker(coords: [number, number]) {
       </div>
     </section>
 
+    <!-- Profils de routage personnalisés du sport sélectionné -->
+    <section v-if="showSection('routing')" v-show="inTab('routing')" class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i :class="`fa-solid ${sportIcon(editedSport)} text-primary`" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.routing.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <RoutingProfilesManager :sport="editedSport" />
+      </div>
+    </section>
+
     <!-- Réglages propres au sport sélectionné -->
     <section v-if="showSection('sport')" v-show="inTab('sport')" class="card mb-3 shadow-sm">
       <div class="card-header d-flex align-items-center gap-2">
@@ -1194,22 +1208,8 @@ function placePreviewMarker(coords: [number, number]) {
           </div>
           <div class="col-sm-6">
             <label for="sport-route-profile" class="form-label mb-1">{{ t('profile.sport.route_profile') }}</label>
-            <select
-              id="sport-route-profile"
-              v-model="sport.route_profile"
-              class="form-select"
-              :title="t(`routes.brouter_profile.${sport.route_profile}_desc`)"
-            >
-              <option
-                v-for="p in profilesForSport(editedSport)"
-                :key="p"
-                :value="p"
-                :title="t(`routes.brouter_profile.${p}_desc`)"
-              >
-                {{ t(`routes.brouter_profile.${p}`) }}
-              </option>
-            </select>
-            <p class="form-text mb-0">{{ t(`routes.brouter_profile.${sport.route_profile}_desc`) }}</p>
+            <RoutingProfileSelect id="sport-route-profile" v-model="sport.route_profile" :sport="editedSport" />
+            <p class="form-text mb-0">{{ profileDescription(sport.route_profile) }}</p>
           </div>
         </div>
 

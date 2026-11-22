@@ -127,6 +127,45 @@ plutôt qu'un build-arg.
   dans `deploy/docker-compose.prod.yml` + `docker-compose.yml`. `bin/release` ne rebuild
   l'image BRouter que si le tag est absent du registry (`BROUTER_FORCE=1` pour forcer).
 
+### Profils de routage personnalisés
+
+Un profil personnalisé = profil BRouter de base + surcharges de variables
+(`&profile:<variable>=<valeur>`). Il voyage partout comme une **chaîne « spec »** :
+`preset-cycling-trekking~cost_surface_soft=10000~consider_noise=true` (clés triées, seules les
+valeurs ≠ défaut du profil ; sans surcharge, le spec est le nom du profil de base). C'est ce
+que stockent `routes.profile` et `sports.<sport>.route_profile` — un itinéraire reste
+reproductible si le profil nommé change. `RoutingProfile` (table `routing_profiles`,
+`/api/routing_profiles`) ne fait que nommer un spec.
+
+- **Catalogue unique** : `app/javascript/routingProfileParams.json`, lu par le front
+  (`routingProfile.ts`, seul point qui fabrique l'URL : `brouterProfileQuery`) ET par Rails
+  (`RoutingProfileSpec`, liste blanche à l'enregistrement). Une variable n'y figure pour un
+  profil que si son `.brf` la déclare dans la section **`---context:global`** : le moteur
+  refuse de surcharger une variable déclarée dans `context:way` (« readonly variable », 500).
+- **Presets** (`preset-*` dans le JSON, clé `extends`) : profils de l'atelier dont seules les
+  valeurs par défaut changent ; ils remplacent les profils amont (`trekking`, `fastbike`…) et les
+  anciens `.brf` maison `trekking-paved` / `fastbike-quiet-paved` (supprimés, alias vers
+  `preset-cycling-trekking` / `-fast-quiet` dans `routingProfile.ts`). BRouter ne connaît que
+  le profil d'atelier : `brouterProfileQuery` envoie `profile=custom-*` + les valeurs qui
+  s'écartent de l'atelier. Valeurs estimées, non validées contre les anciens profils.
+- **Revêtement par type** : `cost_surface_gravel|ground|soft|rough` — 1 indifférent, 2 évité,
+  ≥ 10000 interdit. Une voie sans tag de revêtement n'est jamais touchée.
+- **Profils « atelier »** (`custom-cycling|mtb|hiking.brf`, « Partir de zéro » dans l'éditeur,
+  `WORKSHOP_BY_SPORT` dans `brouter.ts`) : aucun coût de voie figé, chaque type de route
+  (`cost_road_*`), de voie spéciale (`cost_way_*`) et de revêtement a sa variable, sur l'échelle
+  1 idéal / 1.5 / 3 / 10 / 10000 interdit. Vélo et VTT dérivent de `trekking.brf` (accès, sens
+  uniques, itinéraires cyclables) ; le VTT ajoute `mtb_scale_*`. La rando dérive de
+  `hiking-mountain.brf` (difficulté SAC, trottoirs via `sidewalk_trust`). Un coût de 10000 sur
+  la seule voie possible fait calculer longtemps puis échouer (comme `SAC_scale_limit` amont).
+- **Booléens** : le spec garde `true`/`false`, mais BRouter les veut en `1`/`0` (`true` → 500) ;
+  la conversion est dans `brouterProfileQuery`.
+- **Ajouter une variable** : la déclarer (globale) dans le `.brf`, l'ajouter à `params` et à
+  `profiles.<base>.params` du JSON, puis les libellés `routes.routing_profile.param.<clé>`.
+- UI : `RoutingProfileSelect.vue` (remplace tout `<select>` de profils) + `RoutingProfileEditor.vue`.
+- Tester un `.brf` sans resynchro complète : copier l'overlay dans le volume
+  (`docker exec …brouter-sync-1 cp /profiles-overlay/X.brf /profiles2/X.brf`), puis
+  `curl 'localhost:17777/brouter?lonlats=…&profile=X&profile:var=val'` depuis le conteneur `brouter`.
+
 La synchro écrit en `.part` puis renomme : aucun redémarrage de `brouter` n'est nécessaire
 après une mise à jour des données.
 

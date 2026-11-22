@@ -18,4 +18,8 @@ d'atteindre BRouter :
 
 Après ajout : `docker compose run --rm brouter-sync bash /sync.sh`
 
+`custom-cycling`, `custom-mtb` et `custom-hiking` sont les profils « atelier » du site (réglables
+variable par variable, cf. CLAUDE.md § Profils de routage personnalisés) : leurs variables doivent
+rester déclarées dans `---context:global`, sinon le moteur refuse de les surcharger.
+
 Le dossier peut rester vide (ce fichier suffit à le versionner).

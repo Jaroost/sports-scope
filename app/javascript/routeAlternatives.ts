@@ -1,4 +1,5 @@
 import { BROUTER_URL } from './brouter'
+import { brouterProfileQuery } from './routingProfile'
 import { computeGainLoss, haversine } from './routeHelpers'
 import type { Coord, LngLat } from './routeHelpers'
 
@@ -87,7 +88,7 @@ async function fetchOne(
 ): Promise<RouteAlternative | null> {
   const lonlats = `${p0[0]},${p0[1]}|${p1[0]},${p1[1]}`
   const nogos = nogo ? `&nogos=${nogo.at[0]},${nogo.at[1]},${Math.round(nogo.radiusM)}` : ''
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=${idx}&format=geojson&timode=2${nogos}`
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&${brouterProfileQuery(profile)}&alternativeidx=${idx}&format=geojson&timode=2${nogos}`
   const res = await fetch(url)
   if (!res.ok) return null
   const data = await res.json()

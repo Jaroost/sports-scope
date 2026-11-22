@@ -1,4 +1,5 @@
 import { BROUTER_URL } from './brouter'
+import { brouterProfileQuery } from './routingProfile'
 import type { Coord, VoiceHint } from './routeHelpers'
 
 // Routage BRouter **jambe par jambe** : une requête à 2 points par tronçon
@@ -113,7 +114,7 @@ async function fetchLeg(
   // tronçon possible est le 0.
   const straightParam = straight ? '&straight=0' : ''
   // timode=2 fait émettre à BRouter ses voicehints dans les propriétés du GeoJSON.
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${straightParam}`
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&${brouterProfileQuery(profile)}&alternativeidx=0&format=geojson&timode=2${straightParam}`
 
   let res: Response
   try {

@@ -1,13 +1,12 @@
-# trekking-paved — cyclotourisme, mais sur le bitume
+# custom-mtb — profil « atelier » VTT (de zéro, tout se règle).
 #
-# Dérivé de trekking.brf (miroir brouter.de). Voir le bloc « Préférence pour le
-# revêtement » plus bas pour la seule différence de fond, et deploy/brouter/profiles/
-# README.md pour la procédure de déploiement.
-#
-# *** The trekking profile is for slow travel
-# *** and avoiding car traffic, but still with
-# *** a focus on approaching your destination
-# *** efficiently.
+# Squelette (accès, sens uniques, itinéraires cyclables, signalétique) repris de trekking.brf ;
+# en revanche AUCUN coût de voie n'y est figé : chaque type de route, de chemin et de
+# revêtement a sa variable `cost_*`, déclarée en section globale pour être surchargeable
+# (`&profile:cost_road_primary=10`, cf. app/javascript/routingProfileParams.json).
+# Les défauts donnent un VTT raisonnable ; c'est l'éditeur de profils du site qui
+# les règle. Les trois .brf atelier (vélo, VTT, randonnée) partagent leurs noms de variables
+# et le catalogue JSON : en toucher un demande de garder les autres cohérents.
 
 ---context:global   # following code refers to global config
 
@@ -17,6 +16,7 @@ assign validForBikes = true
 # Use the following switches to change behaviour
 assign   allow_steps              = true   # %allow_steps% | Set false to disallow steps | boolean
 assign   allow_ferries            = true   # %allow_ferries% | Set false to disallow ferries | boolean
+assign   allow_motorways          = false  # %allow_motorways% | Set true to allow motorways (coût = celui des routes à grand trafic) | boolean
 assign   ignore_cycleroutes       = false  # %ignore_cycleroutes% | Set true for better elevation results | boolean
 assign   stick_to_cycleroutes     = false  # %stick_to_cycleroutes% | Set true to just follow cycleroutes | boolean
 assign   use_proposed_cycleroutes = false  # %use_proposed_cycleroutes% | Set to true to consider proposed and regular cycleroutes as equals | boolean
@@ -57,10 +57,42 @@ assign turnInstructionRoundabouts   = true  # %turnInstructionRoundabouts% | Set
 assign considerTurnRestrictions     = true  # %considerTurnRestrictions% | Set true to take turn restrictions into account | boolean
 
 # with engine defaults, long parts of routing to via points may be removed
-assign correctMisplacedViaPoints = false # %correctMisplacedViaPoints% | Set to true to remove detours due to via points (going back and forth on the same route) | boolean
+assign correctMisplacedViaPoints = true # %correctMisplacedViaPoints% | Set to true to remove detours due to via points (going back and forth on the same route) | boolean
 assign correctMisplacedViaPointsDistance = 400 # %correctMisplacedViaPointsDistance% | Only remove detours shorter than this (one-way) distance (in m) (engine defaults to 0 which removes detours whatever their length) | number
 
 assign processUnusedTags            = false # %processUnusedTags% | Set true to output unused tags in data tab | boolean
+
+# ─── Atelier : coût de chaque type de voie ─────────────────────────────────────
+# Facteur multiplicatif sur la distance (1 = idéal). 10000 interdit la voie.
+# Les défauts sont un point de départ raisonnable, pas un profil validé : tout se règle.
+assign cost_road_trunk          = 10  # %cost_road_trunk% | Routes à grand trafic (trunk) (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_road_primary        = 10  # %cost_road_primary% | Routes nationales (primary) (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_road_secondary      = 3  # %cost_road_secondary% | Routes secondaires (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_road_tertiary       = 3  # %cost_road_tertiary% | Routes tertiaires (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_road_minor          = 1.5  # %cost_road_minor% | Routes non classées (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_road_residential    = 1.5  # %cost_road_residential% | Rues résidentielles (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_road_service        = 1  # %cost_road_service% | Voies de service (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_way_cycleway        = 1  # %cost_way_cycleway% | Pistes cyclables (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_way_pedestrian      = 3  # %cost_way_pedestrian% | Zones piétonnes (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_way_bridleway       = 1.5  # %cost_way_bridleway% | Chemins équestres (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_way_track           = 1  # %cost_way_track% | Pistes et chemins carrossables (track) (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_way_path            = 1  # %cost_way_path% | Sentiers (path, footway) (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_way_steps           = 10  # %cost_way_steps% | Escaliers (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+assign cost_way_ferry           = 3  # %cost_way_ferry% | Bacs (1 = idéal, 1.5 = légèrement évité, 3 = évité, 10 = très évité, 10000 = interdit) | number
+
+# Revêtement par type (1 = indifférent, 2 = évité, 10000 = interdit)
+assign cost_surface_gravel    = 1  # %cost_surface_gravel% | Gravier et pistes de grade 2-3 (1 = indifférent, 2 = évité, 10000 = interdit) | number
+assign cost_surface_ground    = 1  # %cost_surface_ground% | Terre, herbe, pistes de grade 4-5 (1 = indifférent, 2 = évité, 10000 = interdit) | number
+assign cost_surface_soft      = 2  # %cost_surface_soft% | Sable et boue (1 = indifférent, 2 = évité, 10000 = interdit) | number
+assign cost_surface_rough     = 1  # %cost_surface_rough% | Roche, bois, mauvais état annoncé (1 = indifférent, 2 = évité, 10000 = interdit) | number
+assign cost_surface_unknown   = 1  # %cost_surface_unknown% | Voie non revêtue par défaut (track, path…) sans aucun tag de revêtement (1 = indifférent, 2 = évité, 10000 = interdit) | number
+assign bike_infra_trust = 0.5  # %bike_infra_trust% | Confiance accordée à un aménagement cyclable sur une route (0 = ignoré, 1 = la route devient idéale) | number
+
+# Difficulté VTT (mtb:scale). Au-delà de la limite : interdit ; au-dessus du niveau préféré :
+# surcoût de `mtb_scale_penalty` par niveau.
+assign mtb_scale_limit     = 3  # %mtb_scale_limit% | Difficulté VTT maximale acceptée (mtb:scale 0 à 6) | number
+assign mtb_scale_preferred = 1  # %mtb_scale_preferred% | Difficulté VTT préférée (mtb:scale) | number
+assign mtb_scale_penalty   = 0.3  # %mtb_scale_penalty% | Surcoût par niveau au-dessus du préféré | number
 
 ---context:way   # following code refers to way-tags
 
@@ -106,41 +138,6 @@ assign isbike = or hasbikerouteoraccess hascycleway
 assign ispaved = or surface=paved|asphalt|concrete|paving_stones|sett smoothness=excellent|good
 assign isunpaved = not or ispaved or ( and surface= smoothness= ) or surface=fine_gravel|cobblestone smoothness=intermediate|bad
 assign probablyGood = or ispaved and ( or isbike highway=footway ) not isunpaved
-
-#
-# ─── Préférence pour le revêtement (spécifique à ce profil) ───────────────────
-#
-# `trekking` ne regarde presque pas le revêtement : une piste cyclable (costfactor 1),
-# un itinéraire cyclable longue distance (`is_ldcr`, « toujours parfait ») et une route
-# de grade1 coûtent tous 1.0, qu'ils soient goudronnés ou en gravier. D'où des sorties
-# route qui partent sur du chemin blanc — courant en Suisse, où beaucoup d'itinéraires
-# Veloland sont non revêtus.
-#
-# On garde donc tout le comportement de `trekking` (petites routes, évitement du trafic,
-# pistes cyclables, relief) et on multiplie son coût par une pénalité de revêtement. La
-# multiplication s'applique APRÈS coup, volontairement : c'est le seul moyen d'atteindre
-# aussi les branches qui court-circuitent le calcul à 1.0 (`is_ldcr`, `highway=cycleway`).
-#
-# 2.0 : réglage mesuré sur quatre itinéraires du Jura et du Seeland. Il fait tomber la
-# part de non-bitumé de 15.8 % à 1.8 % pour 13 % de distance en plus. Au-delà (2.5) le
-# résultat devient indiscernable de `fastbike-lowtraffic` et le profil perdrait sa raison
-# d'être ; en deçà (1.5) il reste 9.5 % de non-bitumé, soit le problème à moitié réglé.
-assign avoid_unpaved = 2.0  # %avoid_unpaved% | Facteur de pénalité sur les voies connues comme non revêtues | number
-
-# `isunpaved` de trekking est trop indulgent pour notre usage : il est FAUX dès que les
-# tags manquent, et il laisse passer `fine_gravel`. On reclasse donc à part.
-# Valeurs reprises telles quelles de lookups.dat : le moteur refuse de charger un profil
-# citant une valeur inconnue (il rejette tout le fichier, pas seulement la ligne).
-assign surface_is_bad = or surface=gravel|fine_gravel|compacted|ground|dirt|earth|grass|sand|unpaved|pebblestone|mud|wood|rock|stone|clay|grass_paver
-                        or tracktype=grade2|grade3|grade4|grade5
-                           smoothness=bad|very_bad|horrible|very_horrible|impassable
-
-# Une voie sans information de revêtement n'est PAS pénalisée. Testé : une pénalité de
-# 1.1 à 1.25 sur ces voies ne déplace rien (moins de 1 % sur les quatre itinéraires) —
-# elle n'aurait ajouté qu'un réglage de plus à comprendre. En Suisse la grande majorité
-# des voies non revêtues portent un tag exploitable, `surface` ou `tracktype`.
-assign surfacepenalty = if surface_is_bad then avoid_unpaved else 1.0
-
 
 
 #
@@ -304,31 +301,75 @@ assign town_penalty
      switch estimated_town_class=6  1.6 99 0
 
 #
-# calculate the cost-factor, which is the factor
-# by which the distance of a way-segment is multiplied
-# to calculate the cost of that segment. The costfactor
-# must be >=1 and it's supposed to be close to 1 for
-# the type of way the routing profile is searching for
+# ─── Atelier : coût des voies ────────────────────────────────────────────────
+# Chaque type de voie a son facteur (variables `cost_*` ci-dessus). Les routes (trunk à
+# unclassified) bénéficient d'un aménagement cyclable à hauteur de `bike_infra_trust`.
 #
 assign isresidentialorliving = or highway=residential|living_street living_street=yes
-assign basecostfactor
+assign isroadclass = highway=motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|unclassified
+assign bikediscount = if isbike then ( add 1.0 ( multiply -1.0 bike_infra_trust ) ) else 1.0
 
-  #
-  # exclude rivers, rails etc.
-  #
-  if ( and highway= not route=ferry ) then 10000
+assign roadbase =
+  if      ( highway=steps ) then ( if allow_steps then cost_way_steps else 10000 )
+  else if ( route=ferry   ) then ( if allow_ferries then cost_way_ferry else 10000 )
+  else if ( is_ldcr       ) then 1
+  else if ( highway=trunk|trunk_link|motorway|motorway_link ) then cost_road_trunk
+  else if ( highway=primary|primary_link     ) then cost_road_primary
+  else if ( highway=secondary|secondary_link ) then cost_road_secondary
+  else if ( highway=tertiary|tertiary_link   ) then cost_road_tertiary
+  else if ( highway=unclassified             ) then cost_road_minor
+  else if ( highway=pedestrian               ) then cost_way_pedestrian
+  else if ( highway=bridleway                ) then cost_way_bridleway
+  else if ( highway=cycleway                 ) then cost_way_cycleway
+  else if ( isresidentialorliving            ) then cost_road_residential
+  else if ( highway=service                  ) then cost_road_service
+  else if ( highway=track|road               ) then cost_way_track
+  else if ( highway=path|footway             ) then cost_way_path
+  else 2.0
 
-  #
-  # exclude motorways and proposed, abandoned under construction roads
-  #
-  else if ( highway=motorway|motorway_link          ) then   10000
-  else if ( highway=proposed|abandoned|construction ) then   10000
+# Une route interdite le reste, quel que soit l'aménagement cyclable.
+assign classcost =
+  if ( and isroadclass greater 9999 roadbase )
+  then ( add 1.0 multiply bikediscount add roadbase -1.0 )
+  else roadbase
 
-  #
-  # all other exclusions below (access, steps, ferries,..)
-  # should not be deleted by the decoder, to be available
-  # in voice-hint-processing
-  #
+assign surface_gravel = or surface=gravel|fine_gravel|compacted|pebblestone
+                           tracktype=grade2|grade3
+assign surface_ground = or surface=ground|dirt|earth|grass|unpaved|clay|grass_paver
+                           tracktype=grade4|grade5
+assign surface_soft   = surface=sand|mud
+assign surface_rough  = or surface=wood|rock|stone
+                           smoothness=bad|very_bad|horrible|very_horrible|impassable
+assign unknownsurface = and highway=track|path|footway|road|bridleway
+                        and surface=
+                        and tracktype=
+                            smoothness=
+
+assign surfacepenalty = max switch surface_gravel cost_surface_gravel 1.0
+                        max switch surface_ground cost_surface_ground 1.0
+                        max switch surface_soft   cost_surface_soft   1.0
+                            switch surface_rough  cost_surface_rough  1.0
+assign unknownpenalty = switch unknownsurface cost_surface_unknown 1.0
+
+# Difficulté VTT. Une voie sans mtb:scale vaut 0.
+assign MTB =
+  if      mtb:scale=        then 0
+  else if mtb:scale=6       then 6
+  else if mtb:scale=5       then 5
+  else if mtb:scale=4       then 4
+  else if mtb:scale=3       then 3
+  else if mtb:scale=2-|2|2+ then 2
+  else if mtb:scale=1+|1    then 1
+  else 0
+assign mtbpenalty =
+  if greater MTB mtb_scale_limit then 10000
+  else add 1.0 multiply mtb_scale_penalty max 0.0 add MTB multiply -1.0 mtb_scale_preferred
+
+assign basecostfactor =
+  if      ( and highway= not route=ferry )          then 10000
+  else if ( and highway=motorway|motorway_link not allow_motorways ) then 10000
+  else if ( highway=proposed|abandoned|construction ) then 10000
+  else if ( greater classcost 9999                  ) then 10000
   else min 9999
 
   add town_penalty
@@ -336,77 +377,14 @@ assign basecostfactor
   add no_river_penalty
   add noise_penalty
   add traffic_penalty
-
-  #
-  # apply oneway-and access-penalties
-  #
   add max onewaypenalty accesspenalty
+  add ( if is_ldcr then 0 else if stick_to_cycleroutes then 0.5 else 0.05 )
+  add ( if ( and avoid_unsafe and not isbike isroadclass ) then 2 else 0 )
+  classcost
 
-  #
-  # steps and ferries are special. Note this is handled
-  # before the cycleroute-switch, to be able
-  # to really exclude them be setting cost to infinity
-  #
-  if ( highway=steps ) then ( if allow_steps then 40 else 10000 )
-  else if ( route=ferry   ) then ( if allow_ferries then 5.67 else 10000 )
-
-  #
-  # handle long-distance cycle-routes.
-  #
-  else if ( is_ldcr ) then 1                   # always treated as perfect (=1)
-  else
-  add ( if stick_to_cycleroutes then 0.5 else 0.05 )  # everything else somewhat up
-
-  #
-  # some other highway types
-  #
-  if      ( highway=pedestrian                ) then ( if isbike then ( if hascycleway then 1.1 else 2.2 ) else 3 )
-  else if ( highway=bridleway                 ) then 5
-  else if ( highway=cycleway                  ) then 1
-  else if ( isresidentialorliving             ) then ( if isunpaved then 1.5 else 1.1 )
-  else if ( highway=service                   ) then ( if isunpaved then 1.6 else 1.3 )
-
-  #
-  # tracks and track-like ways are rated mainly be tracktype/grade
-  # But note that if no tracktype is given (mainly for road/path/footway)
-  # it can be o.k. if there's any other hint for quality
-  #
-  else if ( highway=track|road|path|footway ) then
-  (
-    if      ( tracktype=grade1 ) then ( if probablyGood then 1.0 else 1.3 )
-    else if ( tracktype=grade2 ) then ( if probablyGood then 1.1 else 2.0 )
-    else if ( tracktype=grade3 ) then ( if probablyGood then 1.5 else 3.0 )
-    else if ( tracktype=grade4 ) then ( if probablyGood then 2.0 else 5.0 )
-    else if ( tracktype=grade5 ) then ( if probablyGood then 3.0 else 5.0 )
-    else                              ( if probablyGood then 1.0 else 5.0 )
-  )
-
-  #
-  # When avoiding unsafe ways, avoid highways without a bike hint
-  #
-  else add ( if ( and avoid_unsafe not isbike ) then 2 else 0 )
-
-  #
-  # actuals roads are o.k. if we have a bike hint
-  #
-       if ( highway=trunk|trunk_link         ) then ( if isbike then 1.5 else 10  )
-  else if ( highway=primary|primary_link     ) then ( if isbike then 1.2 else  3  )
-  else if ( highway=secondary|secondary_link ) then ( if isbike then 1.1 else 1.6 )
-  else if ( highway=tertiary|tertiary_link   ) then ( if isbike then 1.0 else 1.4 )
-  else if ( highway=unclassified             ) then ( if isbike then 1.0 else 1.3 )
-
-  #
-  # default for any other highway type not handled above
-  #
-  else 2.0
-
-#
-# Coût final = coût trekking × pénalité de revêtement. Une voie interdite (10000) le
-# reste : la multiplication ne peut que l'éloigner davantage du seuil de 9999.
-#
-assign costfactor = multiply basecostfactor surfacepenalty
-
-
+# Les surcoûts de revêtement (et de difficulté) multiplient APRÈS le plafond de 9999 :
+# c'est ce qui permet à une valeur de 10000 de rendre la voie impassable.
+assign costfactor = multiply multiply multiply basecostfactor surfacepenalty unknownpenalty mtbpenalty
 
 # way priorities used for voice hint generation
 

@@ -12,7 +12,8 @@ import { haversine, buildDistancesM, buildVertexGrid, downsample, densifyGeometr
 import type { Coord, LngLat, TurnAnomaly } from '../routeHelpers'
 import type { Sport } from '../userPreferences'
 import { turnAnomalyDiameterForSport, snapWarnDistanceForSport, routeProfileForSport, mapStyleChain } from '../userPreferences'
-import { profilesForSport } from '../brouter'
+import RoutingProfileSelect from './RoutingProfileSelect.vue'
+import { profileDescription } from '../routingProfiles'
 import { routeLegs, LegRoutingError } from '../brouterLegs'
 import { fetchSegmentAlternatives, fetchBlockedAlternatives, equivalentGeometry, usableWidenLevels, widenRadiusForStep, BLOCK_RADIUS_M } from '../routeAlternatives'
 import type { RouteAlternative } from '../routeAlternatives'
@@ -2442,20 +2443,13 @@ onBeforeUnmount(() => {
               <label class="form-label small text-muted mb-1 mt-2" for="mobile-route-profile-select">
                 {{ t('routes.profile_label') }}
               </label>
-              <select
+              <RoutingProfileSelect
                 id="mobile-route-profile-select"
-                class="form-select form-select-sm"
-                :value="routeStore.profile.value"
-                @change="onChangeProfile(($event.target as HTMLSelectElement).value)"
-              >
-                <option
-                  v-for="p in profilesForSport(routeStore.sport.value)"
-                  :key="p"
-                  :value="p"
-                >
-                  {{ t(`routes.brouter_profile.${p}`) }}
-                </option>
-              </select>
+                select-class="form-select-sm"
+                :model-value="routeStore.profile.value"
+                :sport="routeStore.sport.value"
+                @update:model-value="onChangeProfile"
+              />
               <hr class="dropdown-divider">
             </template>
             <template v-for="g in menuGroups" :key="g.key">
@@ -2556,24 +2550,15 @@ onBeforeUnmount(() => {
                   <label class="form-label small text-muted mb-1 mt-2" for="route-profile-select">
                     {{ t('routes.profile_label') }}
                   </label>
-                  <select
+                  <RoutingProfileSelect
                     id="route-profile-select"
-                    class="form-select form-select-sm"
-                    :value="routeStore.profile.value"
-                    :title="t(`routes.brouter_profile.${routeStore.profile.value}_desc`)"
-                    @change="onChangeProfile(($event.target as HTMLSelectElement).value)"
-                  >
-                    <option
-                      v-for="p in profilesForSport(routeStore.sport.value)"
-                      :key="p"
-                      :value="p"
-                      :title="t(`routes.brouter_profile.${p}_desc`)"
-                    >
-                      {{ t(`routes.brouter_profile.${p}`) }}
-                    </option>
-                  </select>
+                    select-class="form-select-sm"
+                    :model-value="routeStore.profile.value"
+                    :sport="routeStore.sport.value"
+                    @update:model-value="onChangeProfile"
+                  />
                   <p class="profile-desc small text-muted mb-0 mt-1">
-                    {{ t(`routes.brouter_profile.${routeStore.profile.value}_desc`) }}
+                    {{ profileDescription(routeStore.profile.value) }}
                   </p>
                 </li>
                 <li><hr class="dropdown-divider"></li>

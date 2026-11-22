@@ -3,7 +3,8 @@ import { ref, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { userPreferences, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
-import { profilesForSport } from '../brouter'
+import RoutingProfileSelect from './RoutingProfileSelect.vue'
+import { profileDescription } from '../routingProfiles'
 
 // Modale réutilisable demandée à la création d'un itinéraire (page home, liste,
 // import GPX) : récupère le nom et le type d'activité avant d'ouvrir le créateur.
@@ -105,23 +106,9 @@ function submit() {
             <label for="new-route-profile" class="form-label small fw-semibold mb-1 d-block">
               {{ t('routes.profile_label') }}
             </label>
-            <select
-              id="new-route-profile"
-              v-model="profile"
-              class="form-select"
-              :title="t(`routes.brouter_profile.${profile}_desc`)"
-            >
-              <option
-                v-for="p in profilesForSport(sport)"
-                :key="p"
-                :value="p"
-                :title="t(`routes.brouter_profile.${p}_desc`)"
-              >
-                {{ t(`routes.brouter_profile.${p}`) }}
-              </option>
-            </select>
+            <RoutingProfileSelect id="new-route-profile" v-model="profile" :sport="sport" />
             <p class="small text-muted mb-0 mt-1">
-              {{ t(`routes.brouter_profile.${profile}_desc`) }}
+              {{ profileDescription(profile) }}
             </p>
           </div>
         </div>

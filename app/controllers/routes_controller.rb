@@ -11,9 +11,10 @@ class RoutesController < ApplicationController
   MAX_WAYPOINTS = 500
   MAX_GEOMETRY_POINTS = 10_000
   MAX_NAME_LEN = 80
-  # Profils de routage BRouter acceptés — union du catalogue front (brouter.ts /
+  # Profils de routage BRouter acceptés (profils de BASE : un profil personnalisé est
+  # `base~variable=valeur`, validé par RoutingProfileSpec) — union du catalogue front (brouter.ts /
   # PROFILES_BY_SPORT). Le profil enregistré pilote le tracé BRouter au rechargement.
-  ALLOWED_PROFILES = %w[trekking trekking-paved fastbike fastbike-lowtraffic fastbike-quiet-paved shortest gravel hiking-mountain].freeze
+  ALLOWED_PROFILES = %w[trekking trekking-paved fastbike fastbike-lowtraffic fastbike-quiet-paved shortest gravel hiking-mountain custom-cycling custom-mtb custom-hiking preset-cycling-trekking preset-cycling-fast preset-cycling-fast-quiet preset-cycling-shortest preset-mtb-gravel preset-mtb-trekking preset-mtb-shortest preset-hiking-mountain preset-hiking-easy preset-hiking-shortest].freeze
   ALLOWED_ACTIVITIES = Route::ACTIVITIES
   # Repères posés à la main (cf. routeMarkers.ts côté front) — types acceptés et
   # libellé GPX associé (repli quand l'utilisateur n'a pas saisi de libellé).
@@ -217,7 +218,7 @@ class RoutesController < ApplicationController
     # not clobber waypoints/geometry with empty defaults.
     out = {}
     out[:name] = p[:name].to_s.strip.first(MAX_NAME_LEN).presence if p.key?(:name)
-    out[:profile] = ALLOWED_PROFILES.include?(p[:profile].to_s) ? p[:profile] : "trekking" if p.key?(:profile)
+    out[:profile] = RoutingProfileSpec.normalize(p[:profile], ALLOWED_PROFILES) || "trekking" if p.key?(:profile)
     out[:activity] = ALLOWED_ACTIVITIES.include?(p[:activity].to_s) ? p[:activity] : "cycling" if p.key?(:activity)
     out[:waypoints] = clean_waypoints(p[:waypoints]) if p.key?(:waypoints)
     out[:geometry] = clean_geometry(p[:geometry]) if p.key?(:geometry)

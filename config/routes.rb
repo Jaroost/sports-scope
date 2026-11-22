@@ -174,6 +174,12 @@ Rails.application.routes.draw do
   # vent, précipitations sur les heures qui viennent).
   get "/api/weather_forecast", to: "weather_forecast#show"
 
+  # Profils de routage personnalisés (profil BRouter de base + réglages)
+  get "/api/routing_profiles", to: "routing_profiles#index"
+  post "/api/routing_profiles", to: "routing_profiles#create"
+  patch "/api/routing_profiles/:id", to: "routing_profiles#update", constraints: { id: /\d+/ }
+  delete "/api/routing_profiles/:id", to: "routing_profiles#destroy", constraints: { id: /\d+/ }
+
   # Route builder (JSON CRUD consumed by Vue components)
   get "/api/routes", to: "routes#index"
   post "/api/routes", to: "routes#create"

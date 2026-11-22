@@ -1,4 +1,5 @@
 import { BROUTER_URL } from './brouter'
+import { brouterProfileQuery } from './routingProfile'
 import { routeLegs } from './brouterLegs'
 import { densifyGeometry, nearestGeomIndex } from './routeHelpers'
 import type { Coord, LngLat, VoiceHint } from './routeHelpers'
@@ -85,7 +86,7 @@ export async function fetchRouteVia(
   heading?: number,
 ): Promise<{ geometry: Coord[]; hints: VoiceHint[] }> {
   const lonlats = points.map((p) => `${p[0]},${p[1]}`).join('|')
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${profile}&alternativeidx=0&format=geojson&timode=2${headingParam(heading)}`
+  const url = `${BROUTER_URL}?lonlats=${lonlats}&${brouterProfileQuery(profile)}&alternativeidx=0&format=geojson&timode=2${headingParam(heading)}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`BRouter HTTP ${res.status}`)
   const data = await res.json()

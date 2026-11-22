@@ -2072,6 +2072,12 @@ fr:
       none: "Aucun profil personnalisé pour ce sport."
       new: "Nouveau profil"
       edit: "Régler"
+      export: "Exporter ce profil (fichier JSON)"
+      import: "Importer un profil"
+      imported_default: "Profil importé"
+      import_ok: "Profil « %{name} » importé."
+      import_invalid: "Fichier invalide : ce n'est pas un profil de routage exporté."
+      import_failed: "Import refusé : profil de base ou réglages non reconnus pour ce sport."
     privacy:
       title: "Confidentialité"
     display:

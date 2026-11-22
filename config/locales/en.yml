@@ -2072,6 +2072,12 @@ en:
       none: "No custom profile for this sport."
       new: "New profile"
       edit: "Adjust"
+      export: "Export this profile (JSON file)"
+      import: "Import a profile"
+      imported_default: "Imported profile"
+      import_ok: "Profile “%{name}” imported."
+      import_invalid: "Invalid file: not an exported routing profile."
+      import_failed: "Import rejected: base profile or settings not recognised for this sport."
     privacy:
       title: "Privacy"
     display:

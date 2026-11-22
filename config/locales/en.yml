@@ -1591,8 +1591,6 @@ en:
         consider_river: "Prefer waterside"
         consider_forest: "Prefer forests and parks"
         consider_town: "Bypass towns"
-        allow_steps: "Allow steps"
-        allow_ferries: "Allow boats"
         allow_motorways: "Allow motorways"
     brouter_profile:
       preset-cycling-trekking: "Touring"

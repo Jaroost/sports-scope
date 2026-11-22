@@ -101,16 +101,6 @@
       "default": false,
       "group": "ambiance"
     },
-    "allow_steps": {
-      "type": "bool",
-      "default": true,
-      "group": "access"
-    },
-    "allow_ferries": {
-      "type": "bool",
-      "default": true,
-      "group": "access"
-    },
     "allow_motorways": {
       "type": "bool",
       "default": false,
@@ -450,9 +440,7 @@
         "consider_noise",
         "consider_river",
         "consider_forest",
-        "consider_town",
-        "allow_steps",
-        "allow_ferries"
+        "consider_town"
       ],
       "defaults": {}
     },
@@ -463,8 +451,6 @@
         "consider_river",
         "consider_forest",
         "consider_town",
-        "allow_steps",
-        "allow_ferries",
         "allow_motorways"
       ],
       "defaults": {}
@@ -477,8 +463,6 @@
         "consider_river",
         "consider_forest",
         "consider_town",
-        "allow_steps",
-        "allow_ferries",
         "allow_motorways"
       ],
       "defaults": {

@@ -1591,8 +1591,6 @@ fr:
         consider_river: "Préférer le bord de l'eau"
         consider_forest: "Préférer forêts et parcs"
         consider_town: "Contourner les villes"
-        allow_steps: "Autoriser les escaliers"
-        allow_ferries: "Autoriser les bateaux"
         allow_motorways: "Autoriser les autoroutes"
     brouter_profile:
       preset-cycling-trekking: "Cyclotourisme"

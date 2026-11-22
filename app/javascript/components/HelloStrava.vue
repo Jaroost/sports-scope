@@ -780,16 +780,6 @@ function hasThumb(activity) {
                 <span class="tss-value">{{ Math.round(activity.tss) }}</span>
                 <span class="tss-unit">{{ t('strava.tss_label') }}</span>
               </span>
-              <button
-                type="button"
-                class="btn btn-sm btn-link text-muted p-1"
-                :title="activity.ignored ? t('strava.unignore_hint') : t('strava.ignore_hint')"
-                :aria-label="activity.ignored ? t('strava.unignore_hint') : t('strava.ignore_hint')"
-                :aria-pressed="!!activity.ignored"
-                @click.prevent.stop="toggleIgnored(activity)"
-              >
-                <i :class="activity.ignored ? 'fa-solid fa-eye-slash' : 'fa-regular fa-eye'" aria-hidden="true"></i>
-              </button>
               <div class="text-start activity-metrics">
                 <!-- Distance masquée à 0 : une activité sans GPS (squash, muscu…) n'en a pas,
                      et « 0.00 km » se lit comme une mesure alors qu'il n'y a rien à mesurer. -->
@@ -806,6 +796,16 @@ function hasThumb(activity) {
                   <span>· {{ newRoadsPercent(activity) }} %</span>
                 </small>
               </div>
+              <button
+                type="button"
+                class="btn btn-sm btn-outline-secondary activity-ignore-btn"
+                :title="activity.ignored ? t('strava.unignore_hint') : t('strava.ignore_hint')"
+                :aria-label="activity.ignored ? t('strava.unignore_hint') : t('strava.ignore_hint')"
+                :aria-pressed="!!activity.ignored"
+                @click.prevent.stop="toggleIgnored(activity)"
+              >
+                <i :class="activity.ignored ? 'fa-solid fa-eye-slash' : 'fa-regular fa-eye'" aria-hidden="true"></i>
+              </button>
             </div>
           </a>
         </li>
@@ -892,6 +892,13 @@ function hasThumb(activity) {
   flex-shrink: 0;
 }
 
+.activity-ignore-btn {
+  min-width: 2rem;
+  line-height: 1.2;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .min-width-0 {
   min-width: 0;
 }
@@ -915,15 +922,20 @@ function hasThumb(activity) {
   .activity-row__stats {
     width: 100%;
     justify-content: flex-start;
+    flex-wrap: wrap;
+    row-gap: 0.25rem;
+    column-gap: 0.75rem;
   }
   /* Distance et durée côte à côte : elles partagent la rangée avec le TSS, plus
      besoin de les empiler. */
   .activity-row__stats .activity-metrics {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.25rem 0.75rem;
     min-width: 0;
     min-height: 0;
+    flex-shrink: 1;
   }
 }
 </style>

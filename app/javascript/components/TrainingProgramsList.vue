@@ -228,7 +228,7 @@ onMounted(fetchPrograms)
 
 <template>
   <div class="container py-4">
-    <div class="d-flex align-items-center justify-content-between mb-3">
+    <div class="d-flex flex-column flex-sm-row align-items-sm-center justify-content-sm-between gap-2 mb-3">
       <h1 class="h4 mb-0">{{ t('training_programs.list_title') }}</h1>
       <div class="d-flex gap-2">
         <button type="button" class="btn btn-outline-secondary" @click="importInput?.click()">
@@ -367,9 +367,9 @@ onMounted(fetchPrograms)
   color: var(--bs-warning, #ffc107);
 }
 /* Téléphone : le graphique passe sur sa propre ligne, pleine largeur, sous le nom et
-   les boutons. À partir de md il reprend sa place entre le nom et les boutons. */
+   avant les boutons, qui prennent la dernière ligne. À partir de md tout tient sur
+   une rangée : nom, graphique, boutons. */
 .program-chart {
-  order: 3;
   flex: 1 0 100%;
 }
 .program-actions {
@@ -378,7 +378,6 @@ onMounted(fetchPrograms)
 }
 @media (min-width: 768px) {
   .program-chart {
-    order: 0;
     flex: 0 0 18rem;
   }
   .program-chart :deep(.tp-profile-svg) {

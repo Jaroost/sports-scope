@@ -139,6 +139,17 @@ body.fullscreen-page {
   }
 }
 
+/* Fond alterné d'une ligne à l'autre (liste des activités et des itinéraires).
+   Gris translucide : suit le thème clair comme sombre. */
+li:nth-child(even) > .activity-row,
+.list-group-item.activity-row:nth-child(even) {
+  background-color: rgba(128, 128, 128, 0.08);
+
+  &:hover {
+    background-color: rgba(252, 76, 2, 0.08);
+  }
+}
+
 .activity-type-badge {
   display: inline-flex;
   align-items: center;

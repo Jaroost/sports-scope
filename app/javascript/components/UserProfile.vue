@@ -1287,6 +1287,12 @@ function placePreviewMarker(coords: [number, number]) {
 .profile-tabs {
   flex-wrap: nowrap;
   overflow-x: auto;
+  /* Le margin-bottom: -1px des onglets Bootstrap déborde de 1px et fait
+     apparaître un mini-ascenseur sur desktop : on garde le défilement, sans barre. */
+  scrollbar-width: none;
+}
+.profile-tabs::-webkit-scrollbar {
+  display: none;
 }
 .profile-tabs .nav-link {
   white-space: nowrap;

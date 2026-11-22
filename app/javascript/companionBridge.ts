@@ -268,6 +268,14 @@ export function registerMapCameraHandlers(handlers: MapCameraBridgeHandlers | nu
 // pour le régler correctement depuis un guidon.
 export const dataSaverActive = ref(false)
 
+// ─── Profil du col en navigation libre : réglage venu du profil de sortie ────
+//
+// `climb.free_profile` (CompanionSettings). L'appli le rejoue à chaque `ready`,
+// la page repartant de zéro à chaque chargement ; vrai tant qu'elle n'a rien dit
+// (hors appli, ou appli plus ancienne que le réglage) : c'est le comportement
+// d'avant. Lu par useFreeClimbProfile à chaque fix.
+export const freeClimbProfileEnabled = ref(true)
+
 // ─── Fond de carte : commande venue de l'appli ───────────────────────────────
 //
 // Choisi hors sortie via `PATCH /api/companion_settings/map_style`
@@ -448,6 +456,7 @@ export function installCompanionBridge(): void {
       focusPoi(lat: number, lng: number): void
       setMapStyle(id: string): void
       setDataSaver(active: boolean): void
+      setFreeClimbProfile(enabled: boolean): void
       zoomMap(delta: number): void
       panMap(fx: number, fy: number): void
       recenterMap(): void
@@ -520,6 +529,10 @@ export function installCompanionBridge(): void {
     },
     setDataSaver(active: boolean) {
       dataSaverActive.value = active === true
+    },
+    // Seul `false` coupe : toute autre valeur garde le comportement par défaut.
+    setFreeClimbProfile(enabled: boolean) {
+      freeClimbProfileEnabled.value = enabled !== false
     },
     zoomMap(delta: number) {
       try {

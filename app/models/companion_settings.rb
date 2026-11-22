@@ -2111,7 +2111,11 @@ module CompanionSettings
       # Repli inverse de `sounds` : c'est l'affichage replié (pastille) qui est
       # le comportement d'avant ce réglage, absent doit donc rester replié et
       # non l'ouvrir en grand.
-      "expanded_by_default" => raw["expanded_by_default"] == true
+      "expanded_by_default" => raw["expanded_by_default"] == true,
+      # Le profil du col deviné en navigation libre (itinéraire BRouter vers le
+      # sommet, `useFreeClimbProfile`). Absent vaut activé, comme `sounds` : un
+      # profil d'avant ce réglage garde le comportement qu'il avait.
+      "free_profile" => raw["free_profile"] != false
     }
   end
 

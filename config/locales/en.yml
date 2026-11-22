@@ -2391,6 +2391,8 @@ en:
       climb_help: "What happens at the start and end of every climb on the route."
       climb_sounds: "Tones"
       climb_expanded: "Graph expanded by default"
+      climb_free_profile: "Climb profile in free navigation"
+      climb_free_profile_help: "With no route, computes the profile of the guessed climb (route to the summit). Off: no computation and no profile; the guessed climb is still flagged."
       workout_title: "Training"
       workout_help: "Visual cues for the current segment of a training program, on top of the sounds."
       weather_group_title: "Weather"

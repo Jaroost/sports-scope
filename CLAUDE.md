@@ -215,6 +215,12 @@ plus de 60 m de la ligne prédite (pas plus d'un calcul toutes les 15 s) ; itin�
 après la disparition de la devinette, ou au sommet (25 m), ce col n'étant plus re-deviné
 pendant 10 min. Pas de profil hors réseau (BRouter requis).
 
+Désactivable dans le profil de sortie de l'appli compagnon (`climb.free_profile`, section
+« Cols » de l'éditeur ; absent = activé). L'appli le rejoue à chaque `ready` via
+`setFreeClimbProfile` (`freeClimbProfileEnabled`, `companionBridge.ts`) ; coupé,
+`useFreeClimbProfile.onFix` ne calcule rien et retire sa carte. La devinette du col
+(`updateFreeClimbGuess`) n'est pas touchée.
+
 ## Envoi d'une activité importée vers Strava
 
 `POST /api/imported_activities/:id/strava_upload` → `StravaUploadJob` → `StravaUploader`

@@ -2391,6 +2391,8 @@ fr:
       climb_help: "Ce qui se passe à l'entrée et à la sortie de chaque col du tracé."
       climb_sounds: "Tonalités"
       climb_expanded: "Graphique déployé par défaut"
+      climb_free_profile: "Profil du col en navigation libre"
+      climb_free_profile_help: "Sans tracé, calcule le profil du col deviné (itinéraire jusqu'au sommet). Coupé, plus de calcul ni de profil : le col deviné reste signalé."
       workout_title: "Entraînement"
       workout_help: "Repères visuels du tronçon en cours d'un programme d'entraînement, en plus des sons."
       weather_group_title: "Météo"

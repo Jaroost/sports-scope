@@ -4,7 +4,7 @@ import type { Coord, LngLat } from '../routeHelpers'
 import { buildCompanionClimbProfile } from '../navHelpers'
 import type { ClimbInfo } from '../navHelpers'
 import { fetchRouteToPlace } from '../navRoute'
-import { companionClimbProfile } from '../companionBridge'
+import { companionClimbProfile, freeClimbProfileEnabled } from '../companionBridge'
 import {
   aheadGainM, buildFreeClimbProfile, freeClimbInfoAt, startHeadingGap,
 } from '../freeClimbProfile'
@@ -177,6 +177,12 @@ export function useFreeClimbProfile(opts: UseFreeClimbProfileOptions) {
   /** À appeler à chaque fix de la navigation libre. */
   function onFix({ here, alt, now, guess, recent }: FreeClimbFix) {
     if (isRouteActive() || isPinned()) return
+    // Coupé dans le profil de sortie : aucun calcul BRouter, et on retire la carte
+    // si le réglage est tombé en cours de montée.
+    if (!freeClimbProfileEnabled.value) {
+      if (ahead || owns || trail.length) reset()
+      return
+    }
     // Plus de fix depuis longtemps (mode itinéraire entre-temps, application en veille) :
     // l'historique ne se raccorde plus à la position.
     if (lastFixAt && now - lastFixAt > 60_000) reset()

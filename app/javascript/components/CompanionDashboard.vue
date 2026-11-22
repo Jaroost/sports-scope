@@ -3123,6 +3123,17 @@ async function save() {
               </label>
             </div>
           </div>
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="climb-free-profile"
+                     :checked="preset.climb?.free_profile !== false"
+                     @change="setClimb('free_profile', ($event.target as HTMLInputElement).checked)">
+              <label class="form-check-label small" for="climb-free-profile">
+                {{ t('companion.settings.climb_free_profile') }}
+              </label>
+              <div class="form-text">{{ t('companion.settings.climb_free_profile_help') }}</div>
+            </div>
+          </div>
         </div>
 
         </div>

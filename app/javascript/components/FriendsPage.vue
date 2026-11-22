@@ -2,27 +2,11 @@
 import { ref, watch, onMounted } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
+import FriendsFeedRow, { type FeedItem } from './FriendsFeedRow.vue'
 import FriendsSettingsDialog, { type FriendsSettings } from './FriendsSettingsDialog.vue'
 
 interface Friend { id: number; user_id: number; display_name: string; since?: string | null }
 interface Suggestion { user_id: number; display_name: string }
-interface FeedItem {
-  kind: 'activity' | 'route'
-  source?: 'strava' | 'imported'
-  id: number
-  friend_id: number
-  friend_name: string
-  name: string
-  type?: string | null
-  date: string | null
-  distance_m: number | null
-  moving_time_s?: number | null
-  elevation_gain_m: number | null
-  share_token?: string
-}
-
-const lang = (typeof document !== 'undefined' && document.documentElement.lang) || ''
-const localePrefix = lang ? `/${lang}` : ''
 
 const friends = ref<Friend[]>([])
 const incoming = ref<Friend[]>([])
@@ -121,19 +105,6 @@ async function copyLink(): Promise<void> {
   } catch { /* presse-papiers indisponible : le lien reste sélectionnable */ }
 }
 
-function href(item: FeedItem): string {
-  if (item.kind === 'route') return `${localePrefix}/routes/${item.share_token}`
-  return `${localePrefix}/friends/${item.friend_id}/activities/${item.source}/${item.id}`
-}
-
-function km(m: number | null): string {
-  return m == null ? '' : `${(m / 1000).toFixed(1)} km`
-}
-
-function day(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleDateString(lang || undefined) : ''
-}
-
 onMounted(load)
 </script>
 
@@ -213,17 +184,9 @@ onMounted(load)
       <div class="col-lg-7">
         <h2 class="h5">{{ t('friends.feed') }}</h2>
         <p v-if="!loading && !feed.length" class="text-muted">{{ t('friends.feed_empty') }}</p>
-        <ul v-else class="list-group">
-          <li v-for="item in feed" :key="`${item.kind}-${item.source ?? ''}-${item.id}`" class="list-group-item">
-            <a :href="href(item)" class="text-decoration-none">
-              <div class="fw-semibold">{{ item.name }}</div>
-              <div class="small text-muted">
-                {{ item.friend_name }}
-                <template v-if="item.kind === 'route'"> · {{ t('friends.feed_route') }}</template>
-                · {{ day(item.date) }} · {{ km(item.distance_m) }}
-                <template v-if="item.elevation_gain_m != null"> · {{ Math.round(item.elevation_gain_m) }} m ↑</template>
-              </div>
-            </a>
+        <ul v-else class="list-unstyled mb-0 d-flex flex-column gap-1">
+          <li v-for="(item, i) in feed" :key="`${item.kind}-${item.source ?? ''}-${item.id}`">
+            <FriendsFeedRow :item="item" :index="i" />
           </li>
         </ul>
       </div>

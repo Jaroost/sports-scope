@@ -314,7 +314,6 @@ class ProfilesController < ApplicationController
       "turn_anomaly_m" => clamp_int(raw[:turn_anomaly_m], TURN_ANOMALY_RANGE, defaults["turn_anomaly_m"]),
       "snap_warn_m" => clamp_int(raw[:snap_warn_m], SNAP_WARN_RANGE, defaults["snap_warn_m"]),
       "map" => {
-        "default_style" => allowed(map[:default_style], ALLOWED_MAP_STYLES, defaults.dig("map", "default_style")),
         "overlays" => sanitize_overlays(map[:overlays]),
       },
       "route" => {
@@ -356,13 +355,18 @@ class ProfilesController < ApplicationController
     }
   end
 
-  # Réglage commun à tous les sports : fonds de secours (ordre d'essai) et bascule auto.
+  # Réglage commun à tous les sports : fond favori, fonds de secours (ordre d'essai) et bascule auto.
   # Clé absente du payload (client plus ancien) ⇒ réglage déjà stocké, pas un effacement.
   def sanitize_map_switch(raw, user)
     raw = user.preferences_with_defaults["map_switch"] unless raw.is_a?(Hash)
     raw = raw.with_indifferent_access
     fallbacks = sanitize_fallback_styles(raw[:fallback_styles])
-    { "fallback_styles" => fallbacks, "auto_switch" => fallbacks.any? && to_bool(raw[:auto_switch], false) }
+    current = user.preferences_with_defaults["map_switch"]["default_style"]
+    {
+      "default_style" => allowed(raw[:default_style], ALLOWED_MAP_STYLES, current),
+      "fallback_styles" => fallbacks,
+      "auto_switch" => fallbacks.any? && to_bool(raw[:auto_switch], false),
+    }
   end
 
   # Garde uniquement les ids d'overlay connus, dédoublonnés et dans l'ordre reçu.

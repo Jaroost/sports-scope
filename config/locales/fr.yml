@@ -1872,7 +1872,7 @@ fr:
       alert_help: "En navigation, un point d'intérêt situé à cette distance ou moins déclenche une notification en bas de l'écran."
     map:
       title: "Type de carte"
-      help: "Fond de carte affiché par défaut à l'ouverture du créateur d'itinéraire, pour le sport sélectionné ci-dessus."
+      help: "Fond de carte favori, commun à tous les sports : affiché par défaut à l'ouverture du créateur d'itinéraire et des cartes d'activité."
       fallback_title: "Fond de secours"
       fallback_help: "Essayés dans l'ordre : le premier fond lisible sous la vue est affiché. Mets un fond mondial en dernier recours (il est utilisé même s'il n'est pas « lisible »)."
       fallback_add: "Ajouter un fond de secours"

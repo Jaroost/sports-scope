@@ -202,14 +202,14 @@ const noMarkersVisible = computed(() => noMarkersWarn.value && !noMarkersDismiss
 // faux positif. Purement informatif, la sauvegarde n'est pas concernée.
 // Pour les fonds régionaux (swisstopo, IGN, basemap.at, BKG), la table de couverture précalculée
 // (styleCoverage.json) tranche, sans requête : la bbox n'intervient que pour les fonds sans table.
-// Bascule automatique (préférences du sport : map.fallback_styles / auto_switch) : le premier
+// Bascule automatique (préférences : map_switch.fallback_styles / auto_switch) : le premier
 // fond de la chaîne favori → secours… qui est lisible sous la vue est affiché, le dernier
 // servant de dernier recours (un fond mondial, par exemple). Aucune écriture de préférence :
 // c'est un état de vue, pas un choix.
 const autoChain = computed(() => {
   void state.prefsRev
   if (state.autoSwitchPaused || !state.autoSwitch) return null
-  const chain = mapStyleChain(routeStore.sport.value)
+  const chain = mapStyleChain()
   return chain.length > 1 ? chain : null
 })
 let coverageProbeTimer: ReturnType<typeof setTimeout> | undefined

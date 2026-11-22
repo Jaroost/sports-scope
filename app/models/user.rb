@@ -4,7 +4,7 @@ class User < ApplicationRecord
   # un « col » à vélo n'est pas un col à pied, et le fond de carte utile n'est pas le
   # même. Les arguments sont les réglages que l'on différencie d'un sport à l'autre ;
   # le reste part sur des valeurs communes, à charge de l'utilisateur de les ajuster.
-  def self.sport_defaults(speed:, route_profile:, turn_anomaly_m:, map_style:, climb_detection:)
+  def self.sport_defaults(speed:, route_profile:, turn_anomaly_m:, climb_detection:)
     {
       # Vitesse moyenne (km/h) — estimation du temps de parcours.
       "speed" => speed,
@@ -26,7 +26,6 @@ class User < ApplicationRecord
       # (données OSM plus lacunaires) se révèlent trop bavards.
       "snap_warn_m" => 25,
       "map" => {
-        "default_style" => map_style,
         "overlays" => [],   # couches transparentes actives (SuisseMobile/swisstopo)
       },
       # Tracé de l'itinéraire dans le créateur (hors mode pente pour la couleur).
@@ -114,11 +113,12 @@ class User < ApplicationRecord
     # Navigation guidée (mode GPS) — réglages propres, indépendants du créateur : fond de
     # carte, caméra qui suit le coureur, son et recalcul. L'aspect du tracé, les indicateurs
     # de direction et les distances d'annonce, eux, sont propres au sport (cf. sport_defaults).
-    # Bascule automatique des fonds de carte : réglage COMMUN à tous les sports (le fond
-    # favori, lui, reste par sport). `fallback_styles` : fonds de secours par ordre
+    # Fond de carte favori et bascule automatique : réglages COMMUNS à tous les sports
+    # (`default_style` = le favori). `fallback_styles` : fonds de secours par ordre
     # d'essai, pris quand le favori n'a plus de tuiles lisibles sous la vue ; `auto_switch` :
     # basculer seul selon la couverture.
     "map_switch" => {
+      "default_style" => "cyclosm",
       "fallback_styles" => [],
       "auto_switch" => false,
     },
@@ -168,7 +168,7 @@ class User < ApplicationRecord
       # Sur route, tout ce qui dépasse le faux plat (3 %) monte. Les cols enchaînent des
       # rampes séparées de replats parfois longs : on fusionne large (500 m).
       "cycling" => sport_defaults(
-        speed: 18, route_profile: "trekking-paved", turn_anomaly_m: 100, map_style: "cyclosm",
+        speed: 18, route_profile: "trekking-paved", turn_anomaly_m: 100,
         climb_detection: {
           "min_grade" => 3,        # pente lissée au-delà de laquelle « ça monte » (%)
           "min_gain_m" => 50,      # dénivelé positif minimal (m)
@@ -183,7 +183,7 @@ class User < ApplicationRecord
       # Sur chemin, les montées sont plus courtes et plus hachées : on abaisse la longueur
       # minimale et on fusionne moins loin, sous peine d'agréger deux bosses distinctes.
       "mtb" => sport_defaults(
-        speed: 14, route_profile: "gravel", turn_anomaly_m: 80, map_style: "topo",
+        speed: 14, route_profile: "gravel", turn_anomaly_m: 80,
         climb_detection: {
           "min_grade" => 4, "min_gain_m" => 50, "min_length_m" => 300,
           "grade_smoothing_m" => 40, "merge_gap_m" => 300,
@@ -193,7 +193,7 @@ class User < ApplicationRecord
       # 15 %) et bien plus courtes : sans seuils propres, tout le tracé serait un col. Sous
       # 6 % on marche à plat, et une bosse de moins de 100 m de D+ n'est pas une montée.
       "hiking" => sport_defaults(
-        speed: 4.5, route_profile: "hiking-mountain", turn_anomaly_m: 60, map_style: "topo",
+        speed: 4.5, route_profile: "hiking-mountain", turn_anomaly_m: 60,
         climb_detection: {
           "min_grade" => 6, "min_gain_m" => 100, "min_length_m" => 250,
           "grade_smoothing_m" => 30, "merge_gap_m" => 200,
@@ -453,23 +453,28 @@ class User < ApplicationRecord
     result
   end
 
-  # Avant `map_switch`, fonds de secours et bascule étaient réglés par sport. À la première
-  # lecture d'un compte ancien, on reprend ceux du sport par défaut s'il en a, sinon du
-  # premier sport qui en a ; la bascule reste active si elle l'était quelque part.
+  # Avant `map_switch`, favori, fonds de secours et bascule étaient réglés par sport. À la
+  # première lecture d'un compte ancien, on reprend ceux du sport par défaut s'il en a, sinon
+  # du premier sport qui en a ; la bascule reste active si elle l'était quelque part. Un
+  # `map_switch` déjà présent mais sans `default_style` (créé avant le favori commun) reprend
+  # le favori du sport par défaut.
   def preferences_with_legacy_map_switch
     prefs = preferences.is_a?(Hash) ? preferences : {}
-    return prefs if prefs["map_switch"].is_a?(Hash)
+    existing = prefs["map_switch"].is_a?(Hash) ? prefs["map_switch"] : nil
+    return prefs if existing && existing["default_style"].present?
 
     sports = prefs["sports"].is_a?(Hash) ? prefs["sports"] : {}
     default_sport = prefs.dig("display", "default_sport")
     maps = ([default_sport] + SPORTS).uniq.filter_map { |sp| sports.dig(sp, "map") if sports[sp].is_a?(Hash) }
-    source = maps.find { |m| Array(m["fallback_styles"]).any? }
-    return prefs unless source || maps.any? { |m| m["auto_switch"] == true }
+    favorite = maps.map { |m| m["default_style"] }.find(&:present?)
+    return prefs if existing.nil? && favorite.nil? && maps.none? { |m| m["auto_switch"] == true || Array(m["fallback_styles"]).any? }
 
-    prefs.merge("map_switch" => {
-      "fallback_styles" => Array(source && source["fallback_styles"]),
-      "auto_switch" => maps.any? { |m| m["auto_switch"] == true },
-    })
+    base = existing || begin
+      source = maps.find { |m| Array(m["fallback_styles"]).any? }
+      { "fallback_styles" => Array(source && source["fallback_styles"]),
+        "auto_switch" => maps.any? { |m| m["auto_switch"] == true } }
+    end
+    prefs.merge("map_switch" => base.merge("default_style" => favorite).compact)
   end
 
   # Fusion récursive des valeurs stockées dans le schéma des défauts : seules les clés

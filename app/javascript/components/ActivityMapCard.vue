@@ -267,10 +267,10 @@ const autoSport = computed(() => routeSportFor(props.activity as Record<string, 
 // `null` = suit le profil ; sinon le choix fait ici via le bouton (persisté, comme dans le créateur).
 const autoOverride = ref<boolean | null>(null)
 const autoEnabled = computed(() => autoOverride.value ?? userPreferences().map_switch.auto_switch)
-const hasFallbackStyle = computed(() => mapStyleChain(autoSport.value).length > 1)
+const hasFallbackStyle = computed(() => mapStyleChain().length > 1)
 const autoChain = computed(() => {
   if (!autoEnabled.value) return null
-  const chain = mapStyleChain(autoSport.value)
+  const chain = mapStyleChain()
   return chain.length > 1 ? chain : null
 })
 let coverageProbeTimer: ReturnType<typeof setTimeout> | undefined

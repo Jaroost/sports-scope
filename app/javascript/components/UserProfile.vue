@@ -14,7 +14,7 @@ import { csrfToken } from '../csrf'
 // Fonds de secours de la bascule automatique : liste ordonnée (ordre d'essai), sans doublon
 // ni le favori.
 const nextFallbackCandidate = computed(() =>
-  MAP_STYLES.find(s => s.id !== sport.value.map.default_style && !(prefs.map_switch.fallback_styles as string[]).includes(s.id))?.id)
+  MAP_STYLES.find(s => s.id !== prefs.map_switch.default_style && !(prefs.map_switch.fallback_styles as string[]).includes(s.id))?.id)
 function addFallback() {
   if (nextFallbackCandidate.value) prefs.map_switch.fallback_styles.push(nextFallbackCandidate.value as MapStyleId)
 }
@@ -744,9 +744,9 @@ function placePreviewMarker(coords: [number, number]) {
                   v-for="style in g.styles"
                   :key="style.id"
                   class="map-style-option"
-                  :class="{ active: sport.map.default_style === style.id }"
+                  :class="{ active: prefs.map_switch.default_style === style.id }"
                 >
-                  <input v-model="sport.map.default_style" class="visually-hidden" type="radio" name="map-style" :value="style.id">
+                  <input v-model="prefs.map_switch.default_style" class="visually-hidden" type="radio" name="map-style" :value="style.id">
                   <i :class="`fa-solid ${style.icon}`" aria-hidden="true"></i>
                   <span>{{ t(`profile.map.style_${style.id}`) }}</span>
                   <small class="map-style-desc text-body-secondary">{{ t(`strava.map_style_desc_${style.id}`) }}</small>
@@ -763,7 +763,7 @@ function placePreviewMarker(coords: [number, number]) {
             <select v-model="prefs.map_switch.fallback_styles[i]" class="form-select">
               <optgroup v-for="g in groupedStyles" :key="g.group" :label="t(`profile.map.group_${g.group}`)">
                 <option v-for="style in g.styles" :key="style.id" :value="style.id"
-                  :disabled="style.id === sport.map.default_style || ((prefs.map_switch.fallback_styles as string[]).includes(style.id) && prefs.map_switch.fallback_styles[i] !== style.id)">
+                  :disabled="style.id === prefs.map_switch.default_style || ((prefs.map_switch.fallback_styles as string[]).includes(style.id) && prefs.map_switch.fallback_styles[i] !== style.id)">
                   {{ MAP_STYLE_GROUP_FLAG[g.group] }} {{ t(`profile.map.group_${g.group}`) }} · {{ t(`profile.map.style_${style.id}`) }}
                 </option>
               </optgroup>

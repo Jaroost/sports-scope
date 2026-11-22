@@ -1872,7 +1872,7 @@ en:
       alert_help: "While navigating, a point of interest within this distance triggers a notification at the bottom of the screen."
     map:
       title: "Map type"
-      help: "Default base map shown when opening the route builder, for the sport selected above."
+      help: "Favorite base map, shared by all sports: shown by default when opening the route builder and activity maps."
       fallback_title: "Fallback map"
       fallback_help: "Tried in order: the first base map readable under the view is shown. Put a world map last as a last resort (it is used even when nothing is readable)."
       fallback_add: "Add a fallback map"

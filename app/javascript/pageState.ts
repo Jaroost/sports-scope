@@ -144,7 +144,7 @@ export class RouteBuilderState extends MapPageState {
   readonly shared: boolean
 
   constructor(shared = false) {
-    super(sportPreferences().map.default_style)
+    super(userPreferences().map_switch.default_style)
     this.shared = shared
     const prefs = userPreferences()
     this.colorMode = prefs.display.show_grade_colors ? 'grade' : 'none'

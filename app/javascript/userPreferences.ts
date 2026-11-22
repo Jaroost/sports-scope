@@ -24,7 +24,7 @@ export interface SportPreferences {
   turn_anomaly_m: number
   // Écart (m) au-delà duquel un point d'étape accroché loin du clic est signalé.
   snap_warn_m: number
-  map: { default_style: MapStyleId; overlays: string[] }
+  map: { overlays: string[] }
   route: { color: string; opacity: number; width: number }
   climb_detection: {
     min_grade: number
@@ -93,11 +93,11 @@ export interface ActivityStatsSection {
 }
 
 export interface UserPreferences {
-  // Bascule automatique des fonds, commune à tous les sports (le favori reste par sport) :
+  // Fond favori et bascule automatique, communs à tous les sports : `default_style` = favori,
   // `fallback_styles` = fonds de secours par ordre de préférence, pris quand `auto_switch` est
   // actif et que le favori (`default_style`) n'a plus de tuiles lisibles sous la vue ; le
   // premier lisible gagne, le dernier sert de dernier recours.
-  map_switch: { fallback_styles: MapStyleId[]; auto_switch: boolean }
+  map_switch: { default_style: MapStyleId; fallback_styles: MapStyleId[]; auto_switch: boolean }
   training: TrainingPreferences
   activity_stats: { sections: ActivityStatsSection[] }
   friends: { default_visibility: 'private' | 'friends'; discoverable: boolean }
@@ -135,7 +135,6 @@ function sportDefaults(
   speed: number,
   route_profile: string,
   turn_anomaly_m: number,
-  map_style: MapStyleId,
   climb_detection: SportPreferences['climb_detection'],
 ): SportPreferences {
   return {
@@ -143,7 +142,7 @@ function sportDefaults(
     route_profile,
     turn_anomaly_m,
     snap_warn_m: 25,
-    map: { default_style: map_style, overlays: [] },
+    map: { overlays: [] },
     route: { color: '#7c3aed', opacity: 0.8, width: 5 },
     climb_detection,
     navigation: {
@@ -170,7 +169,7 @@ function sportDefaults(
 }
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
-  map_switch: { fallback_styles: [], auto_switch: false },
+  map_switch: { default_style: 'cyclosm', fallback_styles: [], auto_switch: false },
   training: { goal: 'improve_slow', event: null },
   activity_stats: { sections: ACTIVITY_STATS_SECTION_KEYS.map((key) => ({ key, visible: true })) },
   friends: { default_visibility: 'private', discoverable: false },
@@ -208,11 +207,11 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   // min_grade ≈ 2 × 100/grade_smoothing_m, sinon le bruit hache la montée. Miroir de
   // User::DEFAULT_PREFERENCES.
   sports: {
-    cycling: sportDefaults(18, 'trekking-paved', 100, 'cyclosm',
+    cycling: sportDefaults(18, 'trekking-paved', 100,
       { min_grade: 3, min_gain_m: 50, min_length_m: 500, grade_smoothing_m: 60, merge_gap_m: 500 }),
-    mtb: sportDefaults(14, 'gravel', 80, 'topo',
+    mtb: sportDefaults(14, 'gravel', 80,
       { min_grade: 4, min_gain_m: 50, min_length_m: 300, grade_smoothing_m: 40, merge_gap_m: 300 }),
-    hiking: sportDefaults(4.5, 'hiking-mountain', 60, 'topo',
+    hiking: sportDefaults(4.5, 'hiking-mountain', 60,
       { min_grade: 6, min_gain_m: 100, min_length_m: 250, grade_smoothing_m: 30, merge_gap_m: 200 }),
   },
 }
@@ -261,15 +260,14 @@ export function isLoggedIn(): boolean {
 }
 
 // Reporte sur le profil le style de carte choisi dans le créateur d'itinéraire : il
-// devient le réglage par défaut du compte POUR LE SPORT COURANT — on ne roule pas avec
-// le même fond de carte qu'on ne marche. Met à jour le cache local puis envoie l'objet
+// devient le fond favori du compte, commun à tous les sports. Met à jour le cache local puis envoie l'objet
 // complet de préférences (PATCH /api/profile/preferences attend tout l'objet et assainit
 // le reste). Best-effort : silencieux pour les visiteurs déconnectés et tolérant aux
 // erreurs réseau — ce n'est qu'un miroir d'un réglage de vue.
-export function persistDefaultMapStyle(styleId: MapStyleId, sport: Sport = currentSport()): void {
+export function persistDefaultMapStyle(styleId: MapStyleId): void {
   if (!isLoggedIn()) return
   const prefs = userPreferences()
-  const map = prefs.sports[sport].map
+  const map = prefs.map_switch
   if (map.default_style === styleId) return
   map.default_style = styleId
   patchPreferencesQuietly(prefs)
@@ -277,9 +275,9 @@ export function persistDefaultMapStyle(styleId: MapStyleId, sport: Sport = curre
 
 // Chaîne d'essai de la bascule automatique : favori, puis secours dans l'ordre, sans doublon.
 // Moins de deux éléments = rien à basculer.
-export function mapStyleChain(sport: Sport = currentSport()): string[] {
-  const { default_style } = sportPreferences(sport).map
-  return [...new Set([default_style as string, ...(userPreferences().map_switch.fallback_styles as string[])])]
+export function mapStyleChain(): string[] {
+  const { default_style, fallback_styles } = userPreferences().map_switch
+  return [...new Set([default_style as string, ...(fallback_styles as string[])])]
 }
 
 // Interrupteur « bascule automatique » du créateur (même réglage que dans le profil).
@@ -433,6 +431,7 @@ function parse(): UserPreferences {
     const d = DEFAULT_PREFERENCES
     return {
       map_switch: {
+        default_style: incoming.map_switch?.default_style || d.map_switch.default_style,
         fallback_styles: Array.isArray(incoming.map_switch?.fallback_styles) ? incoming.map_switch.fallback_styles : [],
         auto_switch: incoming.map_switch?.auto_switch === true,
       },

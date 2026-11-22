@@ -2642,13 +2642,13 @@ function setMapStyle(id: string) {
   // Bascule automatique active : choisir le fond de SECOURS à la main est une dérogation
   // (elle se met en pause, sinon le favori qui répond encore ramènerait l'ancien fond) ;
   // tout autre fond devient le nouveau favori et la bascule continue avec lui.
-  const chain = mapStyleChain(routeStore.sport.value)
+  const chain = mapStyleChain()
   const auto = props.state.autoSwitch && chain.length > 1
   const override = auto && chain.includes(styleId) && styleId !== chain[0]
   props.state.autoSwitchPaused = override
   if (styleId === props.state.mapStyleId) return
   if (!override) {
-    persistDefaultMapStyle(styleId as MapStyleId, routeStore.sport.value)
+    persistDefaultMapStyle(styleId as MapStyleId)
     props.state.prefsRev++
   }
   applyMapStyle(styleId)
@@ -2658,7 +2658,7 @@ function setMapStyle(id: string) {
 // du favori (réglé dans le profil).
 const hasFallbackStyle = computed(() => {
   void props.state.prefsRev
-  return mapStyleChain(routeStore.sport.value).length > 1
+  return mapStyleChain().length > 1
 })
 function toggleAutoSwitch() {
   if (!hasFallbackStyle.value) return
@@ -2801,18 +2801,13 @@ function toggleOverlay(id: string) {
 // en cours d'édition réaligne la carte sur les préférences de cette pratique. Un
 // changement de style réinstalle tout (style.load) ; sinon on repeint sur place.
 watch(routeStore.sport, (sport) => {
-  const { map, route } = sportPreferences(sport)
-  const styleChanged = map.default_style !== props.state.mapStyleId
+  const { route } = sportPreferences(sport)
   props.state.overlays = props.state.defaultOverlays(sport)
   props.state.autoSwitchPaused = false
   props.state.autoSwitch = userPreferences().map_switch.auto_switch
   // Le réglage d'opacité du menu « Affichage » repart de la préférence du nouveau sport :
   // c'est un ajustement de séance, pas une valeur qui suit l'utilisateur d'un sport à l'autre.
   props.state.routeOpacity = route.opacity
-  if (styleChanged) {
-    applyMapStyle(map.default_style)
-    return
-  }
   installOverlays()
   if (!mapInstance) return
   applyRouteOpacity()

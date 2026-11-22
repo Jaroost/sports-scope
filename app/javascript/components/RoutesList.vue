@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import { t } from '../i18n'
-import { speedForSport, persistSportSpeed, isLoggedIn, sportPreferences, SPORTS } from '../userPreferences'
+import { speedForSport, persistSportSpeed, isLoggedIn, sportPreferences, userPreferences, SPORTS } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import { buildNewRouteUrl, shareVersionParam } from '../routeHelpers'
 import { useAthleteState, speedSuggestionFor } from '../composables/useAthleteState'
@@ -1324,7 +1324,7 @@ onMounted(() => {
       :show="!!shareStyleRoute"
       :route-id="shareStyleRoute?.id ?? null"
       :style-id="shareStyleRoute?.share_map_style ?? null"
-      :default-style-id="sportPreferences(shareStyleRoute?.activity).map.default_style"
+      :default-style-id="userPreferences().map_switch.default_style"
       @close="shareStyleRoute = null"
       @saved="onShareMapStyleSaved"
       @error="error = $event"

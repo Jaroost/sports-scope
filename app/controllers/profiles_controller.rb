@@ -164,6 +164,7 @@ class ProfilesController < ApplicationController
         "nav_fps" => clamp_float(navigation[:nav_fps], NAV_FPS_RANGE, 8),
         "sound_volume" => clamp_int(navigation[:sound_volume], NAV_SOUND_VOLUME_RANGE, 100),
         "show_climb_card" => to_bool(navigation[:show_climb_card], true),
+        "auto_map_style" => to_bool(navigation[:auto_map_style], true),
         "auto_reroute" => to_bool(navigation[:auto_reroute], true),
         "auto_reroute_cooldown_s" => clamp_int(navigation[:auto_reroute_cooldown_s], NAV_AUTO_REROUTE_COOLDOWN_RANGE, 10),
       },

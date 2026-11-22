@@ -2375,7 +2375,7 @@ function coverageAwareStyle(preferred: string, lng: number, lat: number): string
 // et revient au fond préféré dès qu'il redevient pertinent. Sans persistance (c'est un
 // ajustement de vue), et sans rien faire si l'utilisateur a choisi un fond lui-même.
 function maybeAdjustBaseForCoverage(lng: number, lat: number) {
-  if (userPickedStyle || !map) return
+  if (userPickedStyle || !map || navPrefs.auto_map_style === false) return
   const want = coverageAwareStyle(navPrefs.default_style as string, lng, lat)
   if (want === mapStyleId.value) return
   const now = performance.now()

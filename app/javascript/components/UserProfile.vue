@@ -780,6 +780,11 @@ function placePreviewMarker(coords: [number, number]) {
             <label for="map-auto-switch" class="form-check-label">{{ t('profile.map.auto_switch') }}</label>
           </div>
           <p class="text-muted small mb-0">{{ t('profile.map.auto_switch_help') }}</p>
+          <div class="form-check form-switch mt-3">
+            <input id="nav-auto-map-style" v-model="prefs.navigation.auto_map_style" class="form-check-input" type="checkbox" role="switch">
+            <label for="nav-auto-map-style" class="form-check-label">{{ t('profile.map.nav_auto_style') }}</label>
+          </div>
+          <p class="text-muted small mb-0">{{ t('profile.map.nav_auto_style_help') }}</p>
         </div>
       </div>
     </section>

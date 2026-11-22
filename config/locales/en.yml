@@ -1880,6 +1880,8 @@ en:
       fallback_none: "None"
       auto_switch: "Switch automatically based on coverage"
       auto_switch_help: "When the favourite base map no longer has readable tiles (outside its country, zoomed in too far), the route builder switches to the fallback by itself, then back to the favourite as soon as it responds again."
+      nav_auto_style: "Automatic map change during navigation"
+      nav_auto_style_help: "During guided navigation, switches to the background of the country you are in when the favourite no longer covers the area, then switches back. When off, the background stays the one chosen (tiles may be blank outside its area). Applies to all sports."
       group_world: "World"
       group_swiss: "Switzerland & nearby"
       group_france: "France"

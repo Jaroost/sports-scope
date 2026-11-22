@@ -1880,6 +1880,8 @@ fr:
       fallback_none: "Aucun"
       auto_switch: "Bascule automatique selon la couverture"
       auto_switch_help: "Quand le fond favori n'a plus de tuiles lisibles (hors de son pays, trop zoomé), le créateur passe seul sur le fond de secours, puis revient au favori dès qu'il répond de nouveau."
+      nav_auto_style: "Changement de fond automatique en navigation"
+      nav_auto_style_help: "Pendant la navigation guidée, bascule sur le fond du pays traversé quand le fond favori ne couvre plus la zone, puis y revient. Désactivé, le fond reste celui choisi (tuiles possiblement vides hors de sa zone). Réglage commun à tous les sports."
       group_world: "Monde"
       group_swiss: "Suisse et alentours"
       group_france: "France"

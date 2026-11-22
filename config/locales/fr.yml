@@ -1590,7 +1590,7 @@ fr:
     add_title: "Ajouter un ami"
     email_placeholder: "Adresse e-mail de votre ami"
     send_request: "Envoyer la demande"
-    request_sent_hint: "Si cette adresse correspond à un compte, une demande a été envoyée."
+    request_sent_hint: "Si cette adresse correspond à un compte, une demande a été envoyée. Sinon, un mail d'invitation a été envoyé et la demande suivra à la création du compte."
     invite_link: "Votre lien d'invitation"
     copy_link: "Copier le lien"
     copied: "Lien copié"
@@ -1996,6 +1996,17 @@ fr:
     sent_at: "Envoyé le"
     from: "Expéditeur"
     smtp: "Serveur SMTP"
+    previews_title: "Aperçus de mails"
+    friend_invitation_preview: "Invitation d'ami"
+    open_preview: "Ouvrir dans un nouvel onglet"
+  friend_mailer:
+    invitation:
+      subject: "%{name} t'invite à devenir ami sur Sports Scope"
+      title: "%{name} t'invite sur Sports Scope"
+      body: "%{name} aimerait t'ajouter à ses amis sur Sports Scope pour partager des itinéraires et des sorties."
+      cta: "Voir l'invitation"
+      privacy: "Rien n'est partagé tant que tu n'as pas accepté la demande, et tu choisis ensuite ce que tes amis voient."
+      ignore: "Tu ne connais pas cette personne ? Ignore simplement ce message."
   companion:
     title: "Application Android"
     intro: "L'app compagnon apporte à la navigation ce qu'un navigateur ne sait pas faire : les capteurs Bluetooth (cardio, puissance, cadence, Di2, radar), l'enregistrement d'une sortie en .fit et le rétroéclairage. Elle se connecte à ce compte."

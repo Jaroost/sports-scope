@@ -20,4 +20,12 @@
       <i class="fa-solid fa-paper-plane me-2" aria-hidden="true"></i><%= t("test_mailer.send") %>
     <% end %>
   <% end %>
+
+  <h2 class="h5 mt-5 mb-3"><%= t("test_mailer.previews_title") %></h2>
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <strong><%= t("test_mailer.friend_invitation_preview") %></strong>
+    <%= link_to t("test_mailer.open_preview"), admin_friend_invitation_preview_path, target: "_blank", rel: "noopener", class: "small" %>
+  </div>
+  <iframe src="<%= admin_friend_invitation_preview_path %>" title="<%= t("test_mailer.friend_invitation_preview") %>"
+          class="w-100 border rounded bg-white" style="height: 24rem;"></iframe>
 </div>

@@ -45,7 +45,11 @@ class FriendsController < ApplicationController
       else
         User.find_by(email: params[:email].to_s.strip.downcase)
       end
-    request_friendship(target) if target
+    if target
+      request_friendship(target)
+    elsif params[:user_id].blank?
+      invite_by_mail(params[:email])
+    end
     render json: { ok: true }, status: :accepted
   end
 
@@ -182,6 +186,19 @@ class FriendsController < ApplicationController
     else
       Friendship.create!(requester: current_user, addressee: other)
     end
+  end
+
+  # Adresse sans compte : on garde l'invitation (elle deviendra une demande à la création
+  # du compte) et on envoie le mail. Même réponse neutre qu'avec un compte existant.
+  def invite_by_mail(raw_email)
+    invitation = FriendInvitation.find_or_initialize_by(inviter: current_user, email: raw_email.to_s.strip.downcase)
+    return unless invitation.valid?
+    return if invitation.persisted? && invitation.last_sent_at > FriendInvitation::RESEND_AFTER.ago
+    return unless FriendInvitation.quota_left?(current_user)
+
+    invitation.last_sent_at = Time.current
+    invitation.save!
+    FriendMailer.invitation(current_user, invitation.email, locale: I18n.locale).deliver_later
   end
 
   def visible_activity

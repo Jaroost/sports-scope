@@ -1590,7 +1590,7 @@ en:
     add_title: "Add a friend"
     email_placeholder: "Your friend's e-mail address"
     send_request: "Send request"
-    request_sent_hint: "If this address matches an account, a request has been sent."
+    request_sent_hint: "If this address matches an account, a request has been sent. Otherwise an invitation e-mail has been sent, and the request will follow when the person signs up."
     invite_link: "Your invitation link"
     copy_link: "Copy link"
     copied: "Link copied"
@@ -1996,6 +1996,17 @@ en:
     sent_at: "Sent at"
     from: "Sender"
     smtp: "SMTP server"
+    previews_title: "Mail previews"
+    friend_invitation_preview: "Friend invitation"
+    open_preview: "Open in a new tab"
+  friend_mailer:
+    invitation:
+      subject: "%{name} invites you to become friends on Sports Scope"
+      title: "%{name} invites you to Sports Scope"
+      body: "%{name} would like to add you as a friend on Sports Scope to share routes and rides."
+      cta: "View the invitation"
+      privacy: "Nothing is shared until you accept the request, and you then choose what your friends see."
+      ignore: "Don't know this person? Just ignore this message."
   companion:
     title: "Android app"
     intro: "The companion app brings navigation what a browser cannot: Bluetooth sensors (heart rate, power, cadence, Di2, radar), ride recording as .fit, and backlight control. It connects to this account."

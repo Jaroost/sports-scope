@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_22_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -35,6 +35,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
     t.bigint "user_id", null: false
     t.index ["user_id", "name"], name: "index_chart_layouts_on_user_id_and_name", unique: true
     t.index ["user_id"], name: "index_chart_layouts_on_user_id"
+  end
+
+  create_table "friend_invitations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email", null: false
+    t.bigint "inviter_id", null: false
+    t.datetime "last_sent_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["email"], name: "index_friend_invitations_on_email"
+    t.index ["inviter_id", "email"], name: "index_friend_invitations_on_inviter_id_and_email", unique: true
+    t.index ["inviter_id"], name: "index_friend_invitations_on_inviter_id"
   end
 
   create_table "friendships", force: :cascade do |t|
@@ -359,6 +370,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_13_100000) do
 
   add_foreign_key "bikes", "users"
   add_foreign_key "chart_layouts", "users"
+  add_foreign_key "friend_invitations", "users", column: "inviter_id"
   add_foreign_key "friendships", "users", column: "addressee_id"
   add_foreign_key "friendships", "users", column: "requester_id"
   add_foreign_key "imported_activities", "users"

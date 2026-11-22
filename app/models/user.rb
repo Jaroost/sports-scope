@@ -320,9 +320,20 @@ class User < ApplicationRecord
   # Itinéraires d'autrui partagés explicitement avec moi (cf. RouteShare).
   has_many :route_shares, dependent: :destroy
   has_secure_token :friend_invite_token
+  has_many :friend_invitations, foreign_key: :inviter_id, dependent: :destroy, inverse_of: :inviter
+  after_create :claim_friend_invitations
 
   validates :keycloak_uid, presence: true, uniqueness: true
   validates :email, presence: true, uniqueness: true
+
+  # Les invitations par mail faites avant que ce compte n'existe deviennent des demandes
+  # d'ami (de l'invitant vers moi), à accepter comme n'importe quelle demande.
+  def claim_friend_invitations
+    FriendInvitation.where(email: email.to_s.downcase).includes(:inviter).find_each do |invitation|
+      Friendship.create(requester: invitation.inviter, addressee: self)
+      invitation.destroy
+    end
+  end
 
   # Ids des amis (amitiés acceptées uniquement).
   def friend_ids

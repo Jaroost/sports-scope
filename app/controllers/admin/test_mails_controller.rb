@@ -26,6 +26,17 @@ module Admin
       render :new, status: :unprocessable_entity
     end
 
+    # GET /admin/mail_previews/friend_invitation — rendu du mail d'invitation d'ami,
+    # sans l'envoyer : l'invitant est l'admin connecté. `?format=text` pour la version texte.
+    def friend_invitation
+      mail = FriendMailer.invitation(current_user, current_user.email)
+      if params[:format_part] == "text"
+        render plain: mail.text_part.body.decoded
+      else
+        render html: mail.html_part.body.decoded.html_safe, layout: false
+      end
+    end
+
     private
 
     def require_full_access!

@@ -151,6 +151,7 @@ Rails.application.routes.draw do
     # Mail de test pour vérifier le SMTP
     get "/test_mail", to: "test_mails#new", as: :test_mail
     post "/test_mail", to: "test_mails#create"
+    get "/mail_previews/friend_invitation", to: "test_mails#friend_invitation", as: :friend_invitation_preview
   end
 
   # Geocoding proxy (avoids CORS when calling Nominatim from the browser)

@@ -253,6 +253,26 @@ export function registerMapCameraHandlers(handlers: MapCameraBridgeHandlers | nu
   mapCameraHandlers = handlers
 }
 
+// ─── Destination dictée : « itinéraire vers X » ──────────────────────────────
+//
+// L'appli transcrit la phrase, en extrait le lieu et le confie à la page en deux
+// temps, pour pouvoir faire confirmer à voix haute avant de partir :
+//   1. `voiceFindPlace(query)` : la page cherche (même recherche que la barre de
+//      lieu : pays du profil, repli mondial) et répond par un message
+//      `voice_place` (`found: false` si rien, ou si la recherche est coupée).
+//   2. `voiceNavigateTo(name, lat, lng)` : l'appli a eu son « oui », la page calcule
+//      le trajet depuis la position GPS et le suit (même chemin que « Naviguer ici »).
+// Même modèle que registerPoiHandlers : valable tant que la page est montée.
+interface VoiceDestinationBridgeHandlers {
+  find(query: string): Promise<{ name: string; label: string; lat: number; lng: number } | null>
+  navigate(name: string, lat: number, lng: number): void
+}
+let voiceDestinationHandlers: VoiceDestinationBridgeHandlers | null = null
+
+export function registerVoiceDestinationHandlers(handlers: VoiceDestinationBridgeHandlers | null): void {
+  voiceDestinationHandlers = handlers
+}
+
 // ─── Économie de données : commande venue de l'appli ─────────────────────────
 //
 // Interrupteur posé par l'appli (feuille « Économie de données », en dehors de la
@@ -460,6 +480,8 @@ export function installCompanionBridge(): void {
       zoomMap(delta: number): void
       panMap(fx: number, fy: number): void
       recenterMap(): void
+      voiceFindPlace(query: string): void
+      voiceNavigateTo(name: string, lat: number, lng: number): void
     }
   }
 
@@ -553,6 +575,23 @@ export function installCompanionBridge(): void {
         mapCameraHandlers?.recenter()
       } catch {
         // Idem.
+      }
+    },
+    voiceFindPlace(query: string) {
+      const reply = (place: { name: string; label: string; lat: number; lng: number } | null) =>
+        channel()?.postMessage(JSON.stringify({ type: 'voice_place', query, found: place !== null, ...place }))
+      if (typeof query !== 'string' || !query.trim() || !voiceDestinationHandlers) { reply(null); return }
+      // Réponse toujours envoyée, même sur erreur : l'appli attend un verdict pour
+      // annoncer « je n'ai pas trouvé » au lieu de rester muette.
+      voiceDestinationHandlers.find(query.trim()).then(reply, () => reply(null))
+    },
+    voiceNavigateTo(name: string, lat: number, lng: number) {
+      try {
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          voiceDestinationHandlers?.navigate(String(name ?? ''), lat, lng)
+        }
+      } catch {
+        // Pas de page prête : rien à lancer.
       }
     },
   }

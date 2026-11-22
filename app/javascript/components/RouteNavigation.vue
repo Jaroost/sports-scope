@@ -43,7 +43,9 @@ import {
   companionPois, companionResupply, registerPoiHandlers,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
   registerMapStyleHandlers, registerMapCameraHandlers, dataSaverActive,
+  registerVoiceDestinationHandlers,
 } from '../companionBridge'
+import { usePlaceSearch, placeShortName } from '../composables/usePlaceSearch'
 import { companionStore } from '../stores/companionStore'
 import { userPreferences, persistNavigationStyle, sportPreferences, setActiveSport, isLoggedIn, routeProfileForSport } from '../userPreferences'
 import type { Sport } from '../userPreferences'
@@ -752,6 +754,30 @@ const {
   persistSession: () => persistSession(),
   hideControls: () => hideControls(),
 })
+
+// ─── Destination dictée (appli compagnon) ──────────────────────────────────────
+// « Itinéraire vers X » : l'appli confie le lieu transcrit, on le cherche avec la même
+// recherche que la barre de lieu (instance à part : ses résultats n'ouvrent pas la liste
+// de NavPlaceSearch), puis, une fois confirmé à voix haute, on lance le même trajet que
+// « Naviguer ici » (navigateTo). Voir companionBridge.ts, `voiceFindPlace`.
+const voiceSearch = usePlaceSearch()
+registerVoiceDestinationHandlers({
+  find: async (query) => {
+    await voiceSearch.searchPlaces(query)
+    const best = voiceSearch.searchResults.value[0]
+    voiceSearch.clearSearch()
+    if (!best) return null
+    const lat = parseFloat(best.lat), lng = parseFloat(best.lon)
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return null
+    return { name: placeShortName(best), label: best.display_name, lat, lng }
+  },
+  navigate: (name, lat, lng) => {
+    // Une composition de lieu en cours se ferme : le trajet dicté la remplace.
+    if (placeNavActive.value) cancelPlaceNav()
+    navigateTo(name, [lng, lat])
+  },
+})
+onBeforeUnmount(() => registerVoiceDestinationHandlers(null))
 
 // Réglages de navigation du sport de la séance : aspect du tracé, indicateurs de direction,
 // distances et cadences des annonces de virage. Réglés PAR SPORT dans le profil — un virage

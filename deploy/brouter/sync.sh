@@ -14,6 +14,10 @@
 # une requête en cours garde son descripteur sur l'ancien inode. Aucun
 # redémarrage de BRouter n'est nécessaire après une synchro.
 #
+#   sync.sh overlay   n'applique que les profils maison (+ patchs), sans rien télécharger :
+#                     c'est ce que lance bin/deploy pour que un .brf modifié soit pris en
+#                     compte tout de suite, sans attendre la prochaine synchro.
+#
 set -uo pipefail
 
 BASE_URL=${BROUTER_BASE_URL:-https://brouter.de/brouter}
@@ -163,6 +167,12 @@ apply_patches() {
   [ "$n" -gt 0 ] && log "patch : correctMisplacedViaPoints activé sur $n profil(s)"
   return 0
 }
+
+if [ "${1:-}" = overlay ]; then
+  apply_overlay
+  apply_patches
+  exit 0
+fi
 
 log "démarrage (source $BASE_URL)"
 sync_segments

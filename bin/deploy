@@ -61,6 +61,12 @@ docker tag "$REGISTRY/sports-scope:$SHA" "$REGISTRY/sports-scope:latest"
 
 export IMAGE_TAG=$SHA POI_SYNC_IMAGE_TAG=$POI_TAG BROUTER_IMAGE_TAG=$BROUTER_VERSION
 docker compose -f deploy/docker-compose.prod.yml --env-file "$ENV_FILE" up -d --remove-orphans
+# Les profils BRouter maison (deploy/brouter/profiles/) sont montés depuis le checkout, mais
+# brouter-sync ne les copie vers le volume qu'à sa synchro hebdomadaire : on l'y pousse
+# maintenant (copie seule, rien n'est téléchargé, pas de redémarrage du moteur).
+docker compose -f deploy/docker-compose.prod.yml --env-file "$ENV_FILE" \
+  exec -T brouter-sync bash /sync.sh overlay \
+  || echo "Avertissement : profils BRouter non appliqués (brouter-sync indisponible ?) — ils le seront à la prochaine synchro." >&2
 docker image prune -f >/dev/null
 echo "Déployé : $SHA"
 REMOTE

@@ -1810,6 +1810,8 @@ en:
   profile:
     home_order:
       title: "Home page"
+      move_up: "Move up"
+      move_down: "Move down"
       help: "Drag the blocks to choose their order on the home page. Whether they show is set with the navigation bar switches."
       actions: "Actions (refresh, resume)"
       chain: "Chain waxing"

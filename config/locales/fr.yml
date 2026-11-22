@@ -1810,6 +1810,8 @@ fr:
   profile:
     home_order:
       title: "Page d'accueil"
+      move_up: "Monter"
+      move_down: "Descendre"
       help: "Glissez les blocs pour choisir leur ordre sur la page d'accueil. Leur affichage se règle avec les interrupteurs de la barre de navigation."
       actions: "Actions (rafraîchir, reprendre)"
       chain: "Cirage de chaîne"

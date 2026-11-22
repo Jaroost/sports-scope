@@ -209,6 +209,15 @@ const { dragIndex: dragHomeIndex, overIndex: dragOverHomeIndex, onDown: onHomeSo
     arr.splice(to, 0, moved)
   })
 
+// Alternative au glisser-déposer (surtout utile au doigt) : monte/descend d'un cran.
+function moveHomeBlock(i: number, delta: -1 | 1) {
+  const arr = prefs.display.home_order
+  const j = i + delta
+  if (j < 0 || j >= arr.length) return
+  const [moved] = arr.splice(i, 1)
+  arr.splice(j, 0, moved)
+}
+
 // ─── Recherche de lieux : pays privilégiés (ordre = priorité) ───────────────
 // Liste réordonnable par glisser-déposer ; chaque pays peut être retiré, et on
 // peut en ajouter depuis le sélecteur (pays absents de la liste, triés par nom).
@@ -542,6 +551,24 @@ function placePreviewMarker(coords: [number, number]) {
             ></i>
             <i class="fa-solid navbar-item-icon" :class="HOME_BLOCK_ICONS[key] ?? 'fa-circle'" aria-hidden="true"></i>
             <span class="navbar-item-label">{{ t(`profile.home_order.${key}`) }}</span>
+            <div class="btn-group btn-group-sm ms-auto">
+              <button
+                type="button"
+                class="btn btn-outline-secondary"
+                :disabled="i === 0"
+                :title="t('profile.home_order.move_up')"
+                :aria-label="t('profile.home_order.move_up')"
+                @click="moveHomeBlock(i, -1)"
+              ><i class="fa-solid fa-arrow-up" aria-hidden="true"></i></button>
+              <button
+                type="button"
+                class="btn btn-outline-secondary"
+                :disabled="i === prefs.display.home_order.length - 1"
+                :title="t('profile.home_order.move_down')"
+                :aria-label="t('profile.home_order.move_down')"
+                @click="moveHomeBlock(i, 1)"
+              ><i class="fa-solid fa-arrow-down" aria-hidden="true"></i></button>
+            </div>
           </li>
         </ul>
       </div>
@@ -1348,6 +1375,7 @@ function placePreviewMarker(coords: [number, number]) {
   transition: border-color 0.15s, background-color 0.15s, opacity 0.15s;
 }
 
+.country-item { user-select: none; -webkit-user-select: none; }
 .country-item.dragging { opacity: 0.45; }
 .country-item.dragover { border-color: var(--bs-primary); background: var(--bs-primary-bg-subtle); }
 
@@ -1391,6 +1419,8 @@ function placePreviewMarker(coords: [number, number]) {
   border-radius: 0.4rem;
   background: var(--bs-body-bg);
   transition: border-color 0.15s, background-color 0.15s, opacity 0.15s;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .navbar-item.dragging { opacity: 0.45; }

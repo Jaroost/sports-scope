@@ -36,6 +36,16 @@ const groupedStyles = computed(() =>
 // Le profil édite l'objet complet des préférences (cf. User::DEFAULT_PREFERENCES). Il
 // reprend donc le schéma du front, augmenté de la navbar — la seule section que les
 // autres consommateurs n'ont pas à lire.
+// Seuils athlète : même schéma que `User::DEFAULT_PREFERENCES["athlete"]`. Le serveur
+// les assainit (bornes, tri des pesées, datation des seuils manuels).
+interface AthleteForm {
+  ftp_manual: number | string | null
+  lthr_manual: number | string | null
+  weights: { date: string; kg: number | string }[]
+  // Poids unique d'avant l'historique des pesées (cf. FtpEstimator.weight_kg).
+  weight_kg?: number | string | null
+}
+
 interface Preferences extends UserPreferences {
   navbar: {
     // `visible` : présent dans la barre de navigation ; `home` : présent comme bouton
@@ -45,7 +55,7 @@ interface Preferences extends UserPreferences {
 }
 
 const props = defineProps<{
-  preferences: Preferences
+  preferences: Preferences & { athlete?: Partial<AthleteForm> }
   defaults: Preferences
   // Sections à afficher (clés : navbar, poi, map, search, navigation, display, sport,
   // climb). Omis ⇒ profil complet. Permet à ProfileDialog de n'exposer que les réglages
@@ -154,6 +164,7 @@ const TABS = [
   { key: 'general', icon: 'fa-sliders', sections: ['navbar', 'display'] },
   { key: 'map', icon: 'fa-map', sections: ['poi', 'map', 'search'] },
   { key: 'sport', icon: 'fa-person-biking', sections: ['navigation', 'climb', 'sport'] },
+  { key: 'athlete', icon: 'fa-heart-pulse', sections: ['athlete'] },
   { key: 'routing', icon: 'fa-route', sections: ['routing'] },
   { key: 'privacy', icon: 'fa-user-shield', sections: ['privacy'] },
 ]
@@ -163,6 +174,92 @@ const visibleTabs = computed(() => TABS.filter((tab) => tab.sections.some(showSe
 const activeTab = ref(TABS[0].key)
 const currentTab = computed(() => (visibleTabs.value.some((tab) => tab.key === activeTab.value) ? activeTab.value : visibleTabs.value[0]?.key))
 const inTab = (section: string): boolean => TABS.find((tab) => tab.sections.includes(section))?.key === currentTab.value
+
+// ─── Athlète : FTP, seuil FC, pesées ────────────────────────────────────────
+// Enregistré à part (PATCH /api/athlete, comme FtpPanel et LthrPanel) et non avec les
+// préférences : ces valeurs s'éditent aussi sur la page Performances, et renvoyer ici
+// l'état chargé à l'ouverture du profil y écraserait ce qui a été saisi entre-temps.
+const todayIso = () => new Date().toISOString().slice(0, 10)
+// Un compte d'avant l'historique n'a qu'un `weight_kg` : la page Seuils l'utilise pour
+// les W/kg et le propose comme première pesée. Le profil fait pareil, sinon les deux
+// écrans montreraient des données différentes ; la pesée est datée d'aujourd'hui, à
+// corriger avant d'enregistrer si besoin.
+function initialWeights(a: Partial<AthleteForm> | undefined): AthleteForm['weights'] {
+  const known = a?.weights ?? []
+  if (known.length) return known.map((w) => ({ date: w.date, kg: w.kg }))
+  return a?.weight_kg != null ? [{ date: todayIso(), kg: a.weight_kg }] : []
+}
+const athleteForm = reactive<AthleteForm>({
+  ftp_manual: props.preferences.athlete?.ftp_manual ?? null,
+  lthr_manual: props.preferences.athlete?.lthr_manual ?? null,
+  weights: initialWeights(props.preferences.athlete),
+})
+const athleteSaving = ref(false)
+const athleteSaved = ref(false)
+const athleteError = ref<string | null>(null)
+let athleteSavedTimer: ReturnType<typeof setTimeout> | undefined
+function addWeight() { athleteForm.weights.push({ date: todayIso(), kg: '' }) }
+function removeWeight(i: number) { athleteForm.weights.splice(i, 1) }
+
+// Estimations automatiques, affichées sous les champs manuels : sans elles, un champ
+// vide ne dit pas sur quelle valeur le calcul retombe. Mêmes endpoints que les panneaux
+// FTP / seuil FC de la page Performances (payload mis en cache côté serveur) ; best-effort,
+// une erreur masque simplement l'indication.
+const autoFtp = ref<number | null>(null)
+const autoLthr = ref<number | null>(null)
+async function loadAutoThresholds() {
+  const get = async (url: string) => {
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+      return res.ok ? await res.json() : null
+    } catch { return null }
+  }
+  const [ftp, lthr] = await Promise.all([get('/api/performance/ftp'), get('/api/performance/lthr')])
+  autoFtp.value = ftp?.auto?.watts ?? null
+  autoLthr.value = lthr?.auto?.bpm ?? null
+}
+onMounted(() => { if (showSection('athlete')) loadAutoThresholds() })
+
+async function saveAthlete() {
+  athleteSaving.value = true
+  athleteError.value = null
+  try {
+    // Chaîne vide = « effacer » (repli sur l'auto) côté serveur. On force en chaîne :
+    // v-model sur <input type="number"> peut fournir un number (pas de .trim() dessus).
+    const body = {
+      athlete: {
+        ftp_manual: String(athleteForm.ftp_manual ?? '').trim(),
+        lthr_manual: String(athleteForm.lthr_manual ?? '').trim(),
+        weights: athleteForm.weights
+          .filter((w) => w.date && String(w.kg ?? '').trim() !== '')
+          .map((w) => ({ date: w.date, kg: String(w.kg).trim() })),
+      },
+    }
+    const res = await fetch('/api/athlete', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-Token': csrfToken(),
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const { athlete } = await res.json()
+    // On se réaligne sur les valeurs assainies (tri, bornes, une pesée par jour).
+    athleteForm.ftp_manual = athlete.ftp_manual ?? null
+    athleteForm.lthr_manual = athlete.lthr_manual ?? null
+    athleteForm.weights = (athlete.weights ?? []).map((w: { date: string; kg: number }) => ({ date: w.date, kg: w.kg }))
+    athleteSaved.value = true
+    if (athleteSavedTimer) clearTimeout(athleteSavedTimer)
+    athleteSavedTimer = setTimeout(() => { athleteSaved.value = false }, 2500)
+  } catch (e) {
+    athleteError.value = (e as Error).message || 'error'
+  } finally {
+    athleteSaving.value = false
+  }
+}
 
 // ─── Barre de navigation : ordre et visibilité des menus ────────────────────
 // Liste réordonnable par glisser-déposer ; chaque menu peut être masqué via son
@@ -265,12 +362,14 @@ async function save() {
         'X-CSRF-Token': csrfToken(),
       },
       credentials: 'same-origin',
-      body: JSON.stringify({ preferences: prefs }),
+      // Sans `athlete` : le serveur garde alors les seuils déjà stockés (cf. saveAthlete).
+      body: JSON.stringify({ preferences: { ...prefs, athlete: undefined } }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const payload = await res.json()
     // On réaligne sur les valeurs assainies renvoyées par le serveur (clamps).
-    Object.assign(prefs, payload.preferences)
+    const { athlete: _athlete, ...assainies } = payload.preferences
+    Object.assign(prefs, assainies)
     saved.value = true
     emit('saved')
     if (savedTimer) clearTimeout(savedTimer)
@@ -1092,6 +1191,65 @@ function placePreviewMarker(coords: [number, number]) {
         <div class="form-check form-switch">
           <input id="disp-elev" v-model="prefs.display.show_elevation_chart" class="form-check-input" type="checkbox">
           <label class="form-check-label" for="disp-elev">{{ t('profile.display.show_elevation_chart') }}</label>
+        </div>
+      </div>
+    </section>
+
+    <!-- Athlète : FTP, seuil FC et pesées -->
+    <section v-if="showSection('athlete')" v-show="inTab('athlete')" class="card mb-3 shadow-sm">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="fa-solid fa-heart-pulse text-primary" aria-hidden="true"></i>
+        <h2 class="h5 mb-0">{{ t('profile.athlete.title') }}</h2>
+      </div>
+      <div class="card-body">
+        <p class="text-muted small">{{ t('profile.athlete.help') }}</p>
+        <div class="row g-3 mb-3">
+          <div class="col-12 col-sm-6">
+            <label for="athlete-ftp" class="form-label">{{ t('profile.athlete.ftp') }}</label>
+            <div class="input-group">
+              <input id="athlete-ftp" v-model="athleteForm.ftp_manual" type="number" class="form-control" min="50" max="600" step="1" :placeholder="t('profile.athlete.auto')">
+              <span class="input-group-text">W</span>
+            </div>
+            <div class="form-text">
+              {{ t('profile.athlete.ftp_hint') }}
+              <strong v-if="autoFtp != null">{{ t('profile.athlete.auto_value', { value: `${Math.round(autoFtp)} W` }) }}</strong>
+              <span v-else>{{ t('profile.athlete.auto_none') }}</span>
+            </div>
+          </div>
+          <div class="col-12 col-sm-6">
+            <label for="athlete-lthr" class="form-label">{{ t('profile.athlete.lthr') }}</label>
+            <div class="input-group">
+              <input id="athlete-lthr" v-model="athleteForm.lthr_manual" type="number" class="form-control" min="100" max="220" step="1" :placeholder="t('profile.athlete.auto')">
+              <span class="input-group-text">bpm</span>
+            </div>
+            <div class="form-text">
+              {{ t('profile.athlete.lthr_hint') }}
+              <strong v-if="autoLthr != null">{{ t('profile.athlete.auto_value', { value: `${Math.round(autoLthr)} bpm` }) }}</strong>
+              <span v-else>{{ t('profile.athlete.auto_none') }}</span>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="h6 text-muted text-uppercase small fw-semibold mb-2">{{ t('profile.athlete.weights') }}</h3>
+        <p v-if="!athleteForm.weights.length" class="text-muted small mb-2">{{ t('profile.athlete.weights_none') }}</p>
+        <div v-for="(w, i) in athleteForm.weights" :key="i" class="input-group mb-1 athlete-weight-row">
+          <input v-model="w.date" type="date" class="form-control" :aria-label="t('profile.athlete.weight_date')">
+          <input v-model="w.kg" type="number" class="form-control" min="30" max="250" step="0.1" :aria-label="t('profile.athlete.weight_kg')">
+          <span class="input-group-text">kg</span>
+          <button type="button" class="btn btn-outline-secondary" :title="t('profile.athlete.weight_remove')" @click="removeWeight(i)">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
+        <button type="button" class="btn btn-sm btn-link px-0" @click="addWeight">
+          <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('profile.athlete.weight_add') }}
+        </button>
+        <div class="form-text">{{ t('profile.athlete.weights_hint') }}</div>
+        <div class="d-flex align-items-center gap-3 mt-3">
+          <button type="button" class="btn btn-primary" :disabled="athleteSaving" @click="saveAthlete">
+            <span v-if="athleteSaving" class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>{{ t('profile.athlete.save') }}
+          </button>
+          <span v-if="athleteSaved" class="text-success small"><i class="fa-solid fa-check me-1" aria-hidden="true"></i>{{ t('profile.athlete.saved') }}</span>
+          <span v-if="athleteError" class="text-danger small">{{ athleteError }}</span>
         </div>
       </div>
     </section>

@@ -34,6 +34,7 @@ interface FtpSummary {
   auto: AutoEstimate | null
   manual: { watts: number | null; at: string | null }
   weight_kg: number | null
+  weights?: { date: string; kg: number }[]
   history: { date: string; watts: number; method: string; contributors?: Contributor[] }[]
 }
 
@@ -54,7 +55,11 @@ const data = ref<FtpSummary | null>(null)
 const editing = ref(false)
 // v-model sur <input type="number"> peut y déposer un number ; on tolère les deux.
 const ftpInput = ref<string | number>('')
-const weightInput = ref<string | number>('')
+// Pesées en cours d'édition ; `kg` peut être un number (v-model sur input number) ou ''.
+const weightRows = ref<{ date: string; kg: string | number }[]>([])
+const today = () => new Date().toISOString().slice(0, 10)
+function addWeightRow() { weightRows.value.push({ date: today(), kg: '' }) }
+function removeWeightRow(i: number) { weightRows.value.splice(i, 1) }
 
 async function fetchData() {
   loading.value = true
@@ -81,7 +86,11 @@ onMounted(fetchData)
 
 function startEdit() {
   ftpInput.value = data.value?.manual.watts != null ? String(data.value.manual.watts) : ''
-  weightInput.value = data.value?.weight_kg != null ? String(data.value.weight_kg) : ''
+  const known = data.value?.weights ?? []
+  // Poids unique d'avant l'historique : proposé comme première pesée, à dater.
+  weightRows.value = known.length
+    ? known.map((w) => ({ date: w.date, kg: w.kg }))
+    : data.value?.weight_kg != null ? [{ date: today(), kg: data.value.weight_kg }] : []
   editing.value = true
 }
 
@@ -93,7 +102,9 @@ async function save() {
         // Chaîne vide = « effacer » (repli sur l'auto) côté serveur. On force en chaîne :
         // v-model sur <input type="number"> peut fournir un number (pas de .trim() dessus).
         ftp_manual: String(ftpInput.value ?? '').trim(),
-        weight_kg: String(weightInput.value ?? '').trim(),
+        weights: weightRows.value
+          .filter((w) => w.date && String(w.kg ?? '').trim() !== '')
+          .map((w) => ({ date: w.date, kg: String(w.kg).trim() })),
       },
     }
     const res = await fetch('/api/athlete', {
@@ -334,10 +345,18 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="mb-2">
                   <label class="form-label small mb-1">{{ t('performance.ftp.weight_label') }}</label>
-                  <div class="input-group input-group-sm">
-                    <input v-model="weightInput" type="number" class="form-control" min="30" max="250" step="0.1" />
+                  <div v-for="(w, i) in weightRows" :key="i" class="input-group input-group-sm mb-1">
+                    <input v-model="w.date" type="date" class="form-control" />
+                    <input v-model="w.kg" type="number" class="form-control" min="30" max="250" step="0.1" />
                     <span class="input-group-text">kg</span>
+                    <button type="button" class="btn btn-outline-secondary" :title="t('performance.ftp.weight_remove')" @click="removeWeightRow(i)">
+                      <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                    </button>
                   </div>
+                  <button type="button" class="btn btn-sm btn-link px-0" @click="addWeightRow">
+                    <i class="fa-solid fa-plus me-1" aria-hidden="true"></i>{{ t('performance.ftp.weight_add') }}
+                  </button>
+                  <div class="form-text">{{ t('performance.ftp.weight_hint') }}</div>
                 </div>
                 <div class="d-flex gap-2">
                   <button type="button" class="btn btn-sm btn-primary" :disabled="saving" @click="save">

@@ -272,16 +272,44 @@ class ProfilesController < ApplicationController
     existing = user.preferences.is_a?(Hash) ? (user.preferences["athlete"] || {}) : {}
 
     ftp = raw.key?(:ftp_manual) ? clamp_int_or_nil(raw[:ftp_manual], FTP_MANUAL_RANGE) : clamp_int_or_nil(existing["ftp_manual"], FTP_MANUAL_RANGE)
-    weight = raw.key?(:weight_kg) ? clamp_float_or_nil(raw[:weight_kg], WEIGHT_RANGE) : clamp_float_or_nil(existing["weight_kg"], WEIGHT_RANGE)
+    # Historique des pesées `[{date, kg}]` (trié, une pesée par jour). `weight_kg` en est
+    # le dernier poids — gardé pour les lecteurs qui n'ont besoin que de la valeur courante.
+    # Absent du payload : préservé tel quel (un poids unique d'avant l'historique reste valable).
+    if raw.key?(:weights)
+      weights = sanitize_weights(raw[:weights])
+      weight = weights.last&.dig("kg")
+    else
+      weights = sanitize_weights(existing["weights"])
+      weight = weights.any? ? weights.last["kg"] : clamp_float_or_nil(existing["weight_kg"], WEIGHT_RANGE)
+    end
     lthr = raw.key?(:lthr_manual) ? clamp_int_or_nil(raw[:lthr_manual], LTHR_MANUAL_RANGE) : clamp_int_or_nil(existing["lthr_manual"], LTHR_MANUAL_RANGE)
 
     {
       "ftp_manual" => ftp,
       "ftp_manual_at" => manual_at(raw, existing, :ftp_manual, ftp, "ftp_manual", "ftp_manual_at"),
       "weight_kg" => weight,
+      "weights" => weights,
       "lthr_manual" => lthr,
       "lthr_manual_at" => manual_at(raw, existing, :lthr_manual, lthr, "lthr_manual", "lthr_manual_at"),
     }
+  end
+
+  MAX_WEIGHTS = 1000
+
+  # Pesées valides, une par date (la dernière saisie l'emporte), triées par date.
+  def sanitize_weights(list)
+    list = list.values if list.respond_to?(:values) && !list.is_a?(Array)
+    by_date = {}
+    Array(list).first(MAX_WEIGHTS).each do |entry|
+      entry = entry.respond_to?(:to_unsafe_h) ? entry.to_unsafe_h : entry
+      next unless entry.is_a?(Hash)
+
+      entry = entry.with_indifferent_access
+      date = iso_date(entry[:date])
+      kg = clamp_float_or_nil(entry[:kg], WEIGHT_RANGE)
+      by_date[date] = { "date" => date, "kg" => kg } if date && kg
+    end
+    by_date.values.sort_by { |w| w["date"] }
   end
 
   # Date de saisie d'un seuil manuel : (re)datée au jour du changement de valeur,

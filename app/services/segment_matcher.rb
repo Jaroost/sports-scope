@@ -181,6 +181,31 @@ class SegmentMatcher
     segment
   end
 
+  # Portions que l'activité partage avec `other`, dans le MÊME sens (une comparaison à
+  # contresens n'a pas de sens : montée vs descente), de la plus longue à la plus courte.
+  # Deux portions qui se recouvrent de moitié ou plus — côté A ou côté B — sont la même
+  # route vue deux fois : seule la plus longue est gardée. Sert la comparaison de deux
+  # sorties (`ActivityComparison`). Renvoie `[{ a_start:, a_end:, b_start:, b_end: }]`
+  # en indices de CELLULES d'empreinte, au plus `limit`.
+  def alignments_with(other, limit: 6)
+    other_fp = other.track_cells.presence
+    return [] if a_cells.length < 2 || other_fp.nil?
+
+    row = { source: 'other', external_id: other.id.to_s, name: other.name,
+            started_at: other.started_at, fingerprint: other_fp, own: false }
+    kept = []
+    efforts_against(row).reject(&:reverse)
+                        .sort_by { |e| -span_metres(a_dists, e.a_start, e.a_end) }
+                        .each do |e|
+      next if kept.any? { |k| mostly_inside?(e.a_start, e.a_end, k.a_start, k.a_end) ||
+                              mostly_inside?(e.b_start, e.b_end, k.b_start, k.b_end) }
+
+      kept << e
+      break if kept.length >= limit
+    end
+    kept.map { |e| { a_start: e.a_start, a_end: e.a_end, b_start: e.b_start, b_end: e.b_end } }
+  end
+
   # Ordre d'affichage. Le podium d'abord (or, argent, bronze) : c'est l'information
   # qu'on cherche en ouvrant l'onglet. Puis les segments que l'utilisateur a lui-même
   # baptisés — il les a nommés, il veut les suivre —, puis le reste. Le tri précède le
@@ -378,6 +403,14 @@ class SegmentMatcher
   def dedupe_efforts(efforts)
     efforts.group_by { |e| [e[:source], e[:external_id], e[:reverse]] }
            .map { |_, group| group.min_by { |e| e[:duration_s] } }
+  end
+
+  # Vrai si [s1, e1] est couvert à moitié ou plus par [s2, e2] (indices de cellules).
+  def mostly_inside?(s1, e1, s2, e2)
+    s1, e1 = [s1, e1].minmax
+    s2, e2 = [s2, e2].minmax
+    overlap = [e1, e2].min - [s1, s2].max
+    overlap.positive? && overlap.to_f / [e1 - s1, 1].max >= 0.5
   end
 
   def span_metres(dists, from, to)

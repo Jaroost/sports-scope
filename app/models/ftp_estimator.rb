@@ -28,8 +28,8 @@ module FtpEstimator
 
   CACHE_TTL = 12.hours
   # À incrémenter quand la FORME du payload change : sans ça, les entrées déjà en
-  # cache (12 h) resserviraient sans les nouveaux champs. v2 = ajout de `contributors`.
-  CACHE_VERSION = 'v2'
+  # cache (12 h) resserviraient sans les nouveaux champs. v2 = ajout de `contributors`, v3 = `weights`.
+  CACHE_VERSION = 'v3'
 
   # Payload complet consommé par la carte FTP du front. Mis en cache, clé versionnée
   # par les activités ET les seuils athlète (FTP manuelle/poids) → invalidé dès
@@ -60,6 +60,7 @@ module FtpEstimator
       auto: auto,
       manual: { watts: manual, at: manual_at(user) },
       weight_kg: weight,
+      weights: weight_history(user),
       history: history(acts)
     }
   end
@@ -247,8 +248,27 @@ module FtpEstimator
     athlete(user)['ftp_manual_at']
   end
 
-  def weight_kg(user)
-    numeric(athlete(user)['weight_kg'])
+  # Poids de l'athlète : le dernier connu, ou — avec `on:` — celui de la pesée la plus
+  # récente à cette date (la toute première si la date la précède). Un poids unique
+  # d'avant l'historique (`weight_kg` sans `weights`) vaut pour toutes les dates.
+  def weight_kg(user, on: nil)
+    history = weight_history(user)
+    return numeric(athlete(user)['weight_kg']) if history.empty?
+    return history.last[:kg] unless on
+
+    day = on.to_date.iso8601
+    (history.reverse_each.find { |w| w[:date] <= day } || history.first)[:kg]
+  end
+
+  # Pesées valides `[{date: 'YYYY-MM-DD', kg:}]`, triées par date.
+  def weight_history(user)
+    Array(athlete(user)['weights']).filter_map do |w|
+      next unless w.is_a?(Hash)
+
+      kg = numeric(w['kg'])
+      date = w['date'].to_s
+      { date: date, kg: kg } if kg&.positive? && date.match?(/\A\d{4}-\d{2}-\d{2}\z/)
+    end.sort_by { |w| w[:date] }
   end
 
   def athlete(user)

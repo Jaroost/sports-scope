@@ -208,6 +208,9 @@ class User < ApplicationRecord
       "ftp_manual" => nil,
       "ftp_manual_at" => nil,
       "weight_kg" => nil,
+      # Pesées datées `[{"date" => "2026-03-01", "kg" => 72.5}]` : les W/kg d'une sortie
+      # se calculent avec le poids connu à sa date. `weight_kg` en est le dernier.
+      "weights" => [],
       # Seuil de fréquence cardiaque (LTHR, bpm) : ancre du hrTSS pour les sorties sans
       # puissance. Estimé automatiquement (cf. TrainingLoad) mais surchargé si renseigné.
       "lthr_manual" => nil,

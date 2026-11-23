@@ -34,6 +34,7 @@ import ActivityZones from './ActivityZones.vue'
 import ActivityStreamExclusions from './ActivityStreamExclusions.vue'
 import ActivitySegments from './ActivitySegments.vue'
 import SegmentCompare from './SegmentCompare.vue'
+import ActivitySimilar from './ActivitySimilar.vue'
 import StravaUploadButton from './StravaUploadButton.vue'
 
 const props = defineProps({
@@ -756,6 +757,14 @@ onMounted(async () => {
         :activity-id="props.activityId"
         :source="props.source"
         :active="effectiveTab === 'zones'"
+      />
+
+      <!-- Sorties au tracé voisin, avec accès à la comparaison côte à côte. -->
+      <ActivitySimilar
+        v-if="effectiveTab === 'segments'"
+        :activity-id="props.activityId"
+        :source="props.source"
+        :active="effectiveTab === 'segments'"
       />
 
       <!-- Comparaison d'un tronçon choisi à la main : même sélection partagée, mais

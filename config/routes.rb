@@ -6,6 +6,7 @@ Rails.application.routes.draw do
     get "/performance", to: "pages#performance", as: :performance
     get "/activities/:id", to: "activities#show", as: :activity, constraints: { id: /\d+/ }
     get "/imported_activities/:id", to: "activities#show_imported", as: :imported_activity, constraints: { id: /\d+/ }
+    get "/compare", to: "activity_comparisons#show", as: :compare_activities
     get "/routes", to: "pages#routes_index", as: :routes_index
     get "/friends", to: "pages#friends", as: :friends
     get "/friends/invite/:token", to: "friends#invite", as: :friend_invite
@@ -116,6 +117,10 @@ Rails.application.routes.draw do
   # Comparaison d'un tronçon choisi à la main (poignées A/B, col, split) : mêmes
   # chronos et même classement qu'un segment découvert, sur une plage arbitraire.
   get "/strava/activities/:id/segments/range", to: "strava#segment_range", constraints: { id: /\d+/ }
+
+  # Comparaison de deux sorties (cf. ActivityComparisonsController)
+  get "/api/activity_comparison", to: "activity_comparisons#data", as: :api_activity_comparison
+  get "/api/activity_comparison/similar", to: "activity_comparisons#similar", as: :api_activity_comparison_similar
 
   # Analyse de performance (records / cumuls / courbe de puissance — JSON pour Vue)
   get "/api/performance", to: "performance#show", as: :api_performance

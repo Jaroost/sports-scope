@@ -1,0 +1,14 @@
+<% content_for :title, t("compare.title") %>
+
+<div class="mb-3">
+  <%= link_to dashboard_path, class: "btn btn-link p-0 d-inline-flex align-items-center gap-1" do %>
+    <i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+    <span><%= t("strava.back_to_dashboard") %></span>
+  <% end %>
+</div>
+
+<% if @a && @b %>
+  <div data-vue-component="ActivityCompare" data-vue-props='<%= { a: "#{@a.source}:#{@a.id}", b: "#{@b.source}:#{@b.id}" }.to_json %>'></div>
+<% else %>
+  <div class="alert alert-warning"><%= t("compare.invalid") %></div>
+<% end %>

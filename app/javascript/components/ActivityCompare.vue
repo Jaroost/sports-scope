@@ -137,6 +137,7 @@ async function load(keepPage = false) {
   if (!keepPage) loading.value = true
   error.value = false
   destroyAll()
+  selection.value = null
   try {
     const res = await fetch(`/api/activity_comparison?a=${encodeURIComponent(refA.value)}&b=${encodeURIComponent(refB.value)}&stretch=${stretch.value}`,
       { headers: { Accept: 'application/json' } })
@@ -175,6 +176,12 @@ function swap() {
 const finalGap = computed(() => {
   const d = data.value?.common?.delta_s
   if (!d) return null
+  const sel = selection.value
+  if (sel) {
+    // Sur une sélection : écart gagné ou perdu entre ses deux bornes.
+    const lo = d[sel.from], hi = d[sel.to]
+    return lo != null && hi != null ? hi - lo : null
+  }
   for (let i = d.length - 1; i >= 0; i--) if (d[i] != null) return d[i] as number
   return null
 })
@@ -320,13 +327,56 @@ function maxRows(a: { max_heartrate: number | null; max_watts: number | null; ma
   ]
 }
 
+// ── Sélection d'une portion du tronçon (glisser sur un graphique) ──────────
+// Bornes = indices dans les séries rééchantillonnées (`common.x`). Les chiffres de la
+// portion sont recalculés ici à partir de ces mêmes séries.
+const selection = ref<{ from: number; to: number } | null>(null)
+
+function sliceStats(side: CommonSide, from: number, to: number, distance: number): Stats {
+  const nums = (v: (number | null)[] | null) => (v ?? []).slice(from, to + 1).filter((x): x is number => typeof x === 'number')
+  const mean = (v: number[]) => (v.length ? Math.round((v.reduce((s, x) => s + x, 0) / v.length) * 10) / 10 : null)
+  const peak = (v: number[]) => (v.length ? Math.round(Math.max(...v)) : null)
+  const duration = (side.time_s[to] ?? 0) - (side.time_s[from] ?? 0)
+  let gain: number | null = null
+  const alts = nums(side.altitude)
+  if (alts.length) {
+    gain = 0
+    let ref: number | null = null
+    for (const v of alts) {
+      if (ref == null) { ref = v; continue }
+      if (v - ref >= 1) { gain += v - ref; ref = v } else if (v - ref <= -1) ref = v
+    }
+    gain = Math.round(gain)
+  }
+  const hr = nums(side.heartrate), pw = nums(side.power), cd = nums(side.cadence)
+  return {
+    duration_s: Math.round(duration), average_speed: duration > 0 ? distance / duration : null, elevation_gain_m: gain,
+    average_heartrate: mean(hr), average_watts: mean(pw), average_cadence: mean(cd),
+    max_heartrate: peak(hr), max_watts: peak(pw), max_cadence: peak(cd),
+  }
+}
+
+const commonView = computed(() => {
+  const c = data.value!.common!
+  const sel = selection.value
+  if (!sel) return { a: c.a.stats, b: c.b.stats, distA: c.distance_m, distB: c.distance_b_m }
+  const distA = c.x[sel.to] - c.x[sel.from]
+  const distB = c.distance_m > 0 ? (distA / c.distance_m) * c.distance_b_m : 0
+  return { a: sliceStats(c.a, sel.from, sel.to, distA), b: sliceStats(c.b, sel.from, sel.to, distB), distA, distB }
+})
+const commonTitle = computed(() => {
+  const sel = selection.value
+  return sel ? t('compare.stats_selection', { km: (commonView.value.distA / 1000).toFixed(2) }) : t('compare.stats_common')
+})
+
 const commonRows = computed<Row[]>(() => {
   const c = data.value?.common
   if (!c) return []
-  const a = c.a.stats, b = c.b.stats
+  const a = commonView.value.a, b = commonView.value.b
+  const distA = commonView.value.distA, distB = commonView.value.distB
   const sa = data.value!.a, sb = data.value!.b
   return [
-    { label: t('compare.stat.distance'), a: formatKm(c.distance_m), b: formatKm(c.distance_b_m), diff: diffNum(c.distance_m / 1000, c.distance_b_m / 1000, 2, ' km') },
+    { label: t('compare.stat.distance'), a: formatKm(distA), b: formatKm(distB), diff: diffNum(distA / 1000, distB / 1000, 2, ' km') },
     { label: t('compare.stat.duration'), a: formatChrono(a.duration_s), b: formatChrono(b.duration_s), diff: diffTime(a.duration_s, b.duration_s), better: 'lower' as const, delta: b.duration_s - a.duration_s },
     { label: t(run.value ? 'compare.stat.pace' : 'compare.stat.speed'), a: speedText(a.average_speed), b: speedText(b.average_speed), diff: diffSpeed(a.average_speed, b.average_speed), better: 'higher' as const, delta: (b.average_speed ?? 0) - (a.average_speed ?? 0) },
     { label: t('compare.stat.elevation'), a: num(a.elevation_gain_m, 0, ' m'), b: num(b.elevation_gain_m, 0, ' m'), diff: diffNum(a.elevation_gain_m, b.elevation_gain_m, 0, ' m') },
@@ -422,9 +472,53 @@ function ftpLines(key: ChannelKey, xMax: number) {
   })
 }
 
+// Rectangle de la sélection, dessiné par-dessus chaque graphique.
+const selectionPlugin = {
+  id: 'compareSelection',
+  afterDatasetsDraw(chart: any) {
+    const sel = selection.value
+    const pts = chart.data.datasets[0]?.data
+    if (!sel || !pts?.[sel.from] || !pts?.[sel.to]) return
+    const { ctx, chartArea, scales } = chart
+    const x0 = scales.x.getPixelForValue(pts[sel.from].x)
+    const x1 = scales.x.getPixelForValue(pts[sel.to].x)
+    ctx.save()
+    ctx.fillStyle = 'rgba(255,193,7,.22)'
+    ctx.strokeStyle = 'rgba(255,193,7,.9)'
+    ctx.lineWidth = 1
+    ctx.fillRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top)
+    ctx.strokeRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top)
+    ctx.restore()
+  },
+}
+
+// Glisser = sélectionner ; un clic sans mouvement efface. L'index sous le curseur vient
+// du survol (`hoverIndex`), commun à tous les graphiques.
+let dragStart: number | null = null
+let dragMoved = false
+const bound = new WeakSet<HTMLCanvasElement>()
+function bindDrag(el: HTMLCanvasElement) {
+  if (bound.has(el)) return
+  bound.add(el)
+  el.style.userSelect = 'none'
+  el.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || hoverIndex.value == null) return
+    dragStart = hoverIndex.value
+    dragMoved = false
+  })
+}
+function endDrag() {
+  if (dragStart == null) return
+  if (!dragMoved || (selection.value && selection.value.to - selection.value.from < 2)) selection.value = null
+  dragStart = null
+}
+function clearSelection() { selection.value = null }
+
 async function renderCharts() {
   const c = data.value?.common
   if (!c) return
+  if (gapCanvas.value) bindDrag(gapCanvas.value)
+  Object.values(canvases).forEach((el) => el && bindDrag(el))
   const { Chart, registerables } = await import('chart.js')
   Chart.register(...registerables)
   const timeMode = xAxis.value === 'time'
@@ -466,6 +560,7 @@ async function renderCharts() {
     const gapData = pts(c.delta_s, xsA)
     charts.push(new Chart(gapCanvas.value, {
       type: 'line',
+      plugins: [selectionPlugin],
       data: {
         datasets: [{
           label: t('compare.gap_title'), data: gapData, borderColor: GOOD, borderWidth: 1.5, pointRadius: 0,
@@ -488,6 +583,7 @@ async function renderCharts() {
     const reverse = key === 'speed' && run.value
     charts.push(new Chart(el, {
       type: 'line',
+      plugins: [selectionPlugin],
       data: {
         datasets: [
           line(`A · ${label}`, channelValues(c.a, key, data.value?.a.weight_kg ?? null), COLOR_A, xsA, key === 'altitude' ? { fill: 'origin', backgroundColor: 'rgba(13,110,253,.10)' } : {}),
@@ -506,6 +602,10 @@ async function renderCharts() {
 }
 
 watch(hoverIndex, (i) => {
+  if (dragStart != null && i != null && i !== dragStart) {
+    dragMoved = true
+    selection.value = { from: Math.min(dragStart, i), to: Math.max(dragStart, i) }
+  }
   // Les autres graphiques suivent le survol, et les repères se déplacent sur la carte.
   const c = data.value?.common
   charts.forEach((chart) => {
@@ -520,6 +620,31 @@ watch(hoverIndex, (i) => {
   const frac = c.x.length > 1 ? i / (c.x.length - 1) : 0
   placeMarker(markerA, c.a_track, frac)
   placeMarker(markerB, c.b_track, frac)
+})
+
+// Sélection : les graphiques redessinent leur rectangle, la carte surligne le tracé.
+function sliceTrack(track: [number, number][], from: number, to: number, n: number): [number, number][] {
+  if (track.length < 2 || n < 2) return []
+  const lo = Math.round((from / (n - 1)) * (track.length - 1))
+  const hi = Math.round((to / (n - 1)) * (track.length - 1))
+  return track.slice(lo, hi + 1)
+}
+function updateSelectionMap() {
+  const c = data.value?.common
+  if (!mapInstance) return
+  const sel = selection.value
+  const feat = (coords: [number, number][]) => ({
+    type: 'Feature' as const, properties: {}, geometry: { type: 'LineString' as const, coordinates: coords.length > 1 ? coords : [] },
+  })
+  const n = c?.x.length ?? 0
+  for (const [id, track] of [['cmp-sel-b', c?.b_track], ['cmp-sel-a', c?.a_track]] as const) {
+    const src = mapInstance.getSource(id)
+    if (src) src.setData(feat(sel && track ? sliceTrack(track, sel.from, sel.to, n) : []))
+  }
+}
+watch(selection, () => {
+  charts.forEach((chart) => chart.update('none'))
+  updateSelectionMap()
 })
 
 function placeMarker(marker: any, track: [number, number][], frac: number) {
@@ -604,11 +729,16 @@ function addTrackLayers(d: Comparison) {
     // B dessous, plus large : là où les deux tracés se superposent, les deux restent lisibles.
     addLine('cmp-b', d.common.b_track, COLOR_B, 6, 0.85)
     addLine('cmp-a', d.common.a_track, COLOR_A, 3, 0.95)
+    // Portion sélectionnée sur les graphiques : trait plus épais, avec un halo jaune.
+    addLine('cmp-sel-b', [], '#ffc107', 10, 0.9)
+    addLine('cmp-sel-a', [], '#ffc107', 10, 0.9)
+    mapInstance.moveLayer('cmp-b'); mapInstance.moveLayer('cmp-a')
+    updateSelectionMap()
   }
 }
 
-onMounted(load)
-onBeforeUnmount(destroyAll)
+onMounted(() => { window.addEventListener('mouseup', endDrag); load() })
+onBeforeUnmount(() => { window.removeEventListener('mouseup', endDrag); destroyAll() })
 
 function activityUrl(s: Side): string {
   return s.source === 'imported' ? `/imported_activities/${s.id}` : `/activities/${s.id}`
@@ -703,6 +833,7 @@ function activityUrl(s: Side): string {
               <span class="range-chip"><i class="fa-solid fa-route" aria-hidden="true"></i><strong>{{ t('compare.common_length', { km: (data.common.distance_m / 1000).toFixed(1) }) }}</strong></span>
             </div>
             <p class="small text-body-secondary mb-2">{{ t('compare.delta_hint', { a: labelA, b: labelB }) }}</p>
+            <p class="small text-body-secondary mb-2">{{ t('compare.select_hint') }}</p>
             <div class="compare-chart"><canvas ref="gapCanvas"></canvas></div>
           </div>
         </div>
@@ -781,7 +912,10 @@ function activityUrl(s: Side): string {
                 <tr v-for="r in weatherRows" :key="`m-${r.label}`">
                   <td>{{ r.label }}</td><td>{{ r.a }}</td><td>{{ r.b }}</td><td class="text-body-secondary">{{ r.diff }}</td>
                 </tr>
-                <tr class="table-light"><th colspan="4" class="small text-uppercase">{{ t('compare.stats_common') }}</th></tr>
+                <tr class="table-light"><th colspan="4" class="small text-uppercase">
+                  {{ commonTitle }}
+                  <button v-if="selection" type="button" class="btn btn-sm btn-outline-secondary py-0 ms-2 text-uppercase" @click="clearSelection">{{ t('compare.clear_selection') }}</button>
+                </th></tr>
                 <tr v-for="r in commonRows" :key="`c-${r.label}`">
                   <td>{{ r.label }}</td><td>{{ r.a }}</td><td>{{ r.b }}</td><td class="fw-semibold" :style="{ color: diffColor(r) }"><span v-if="!diffColor(r)" class="text-body-secondary">{{ r.diff }}</span><template v-else>{{ r.diff }}</template></td>
                 </tr>

@@ -445,9 +445,10 @@ async function renderCharts() {
     animation: false as const,
     spanGaps: false,
     interaction: { mode: 'index' as const, intersect: false },
-    onHover: (_e: unknown, _els: unknown, chart: any) => {
-      const active = chart.tooltip?.getActiveElements?.()
-      hoverIndex.value = active?.length ? active[0].index : null
+    // `els` = éléments sous le curseur pour CE survol (le tooltip, lui, n'est mis à jour
+    // qu'après onHover : le lire ici donnait l'index du mouvement précédent).
+    onHover: (_e: unknown, els: { index: number }[]) => {
+      hoverIndex.value = els?.length ? els[0].index : null
     },
     plugins: { legend: { display: false } },
     scales: {

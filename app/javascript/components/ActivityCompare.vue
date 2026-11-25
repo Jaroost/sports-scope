@@ -506,6 +506,60 @@ function bindDrag(el: HTMLCanvasElement) {
     dragStart = hoverIndex.value
     dragMoved = false
   })
+
+  // Tactile, comme les analyses d'activité : un doigt qui glisse à l'horizontale
+  // sélectionne ; un geste vertical rend la main au défilement de la page ; un tap efface.
+  const TAP_TOL = 8
+  let touch: { id: number; x: number; y: number; start: number; mode: 'pending' | 'select' } | null = null
+  const chartOf = () => charts.find((c) => c.canvas === el)
+  const indexAt = (clientX: number): number | null => {
+    const chart = chartOf()
+    const pts = chart?.data.datasets[0]?.data
+    if (!chart || !pts?.length) return null
+    const area = chart.chartArea
+    const px = Math.max(area.left, Math.min(area.right, clientX - el.getBoundingClientRect().left))
+    const v = chart.scales.x.getValueForPixel(px)
+    if (v == null) return null
+    let lo = 0, hi = pts.length - 1
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (pts[mid].x < v) lo = mid + 1; else hi = mid }
+    if (lo > 0 && Math.abs(pts[lo - 1].x - v) <= Math.abs(pts[lo].x - v)) lo--
+    return lo
+  }
+  const find = (list: TouchList) => (touch ? Array.from(list).find((t) => t.identifier === touch!.id) : undefined)
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { touch = null; return }
+    const tt = e.touches[0]
+    const start = indexAt(tt.clientX)
+    touch = start == null ? null : { id: tt.identifier, x: tt.clientX, y: tt.clientY, start, mode: 'pending' }
+  }, { passive: true })
+  el.addEventListener('touchmove', (e) => {
+    const tt = find(e.touches)
+    if (!touch || !tt) return
+    if (touch.mode === 'pending') {
+      const dx = Math.abs(tt.clientX - touch.x), dy = Math.abs(tt.clientY - touch.y)
+      if (dx <= TAP_TOL && dy <= TAP_TOL) return
+      if (dx <= dy) { touch = null; return } // plutôt vertical : c'est le défilement
+      touch.mode = 'select'
+    }
+    e.preventDefault()
+    const i = indexAt(tt.clientX)
+    if (i == null) return
+    hoverIndex.value = i
+    selection.value = i === touch.start ? selection.value : { from: Math.min(touch.start, i), to: Math.max(touch.start, i) }
+  }, { passive: false })
+  const finish = (e: TouchEvent) => {
+    if (!touch || find(e.touches)) return
+    const wasSelecting = touch.mode === 'select'
+    touch = null
+    hoverIndex.value = null
+    if (!wasSelecting) {
+      // Tap sans glisser : efface, et évite le clic souris émulé (infobulle collée).
+      if (e.cancelable) e.preventDefault()
+      selection.value = null
+    } else if (selection.value && selection.value.to - selection.value.from < 2) selection.value = null
+  }
+  el.addEventListener('touchend', finish, { passive: false })
+  el.addEventListener('touchcancel', () => { touch = null; hoverIndex.value = null }, { passive: true })
 }
 function endDrag() {
   if (dragStart == null) return
@@ -539,6 +593,7 @@ async function renderCharts() {
     animation: false as const,
     spanGaps: false,
     interaction: { mode: 'index' as const, intersect: false },
+    events: ['mousemove', 'mouseout'],
     // `els` = éléments sous le curseur pour CE survol (le tooltip, lui, n'est mis à jour
     // qu'après onHover : le lire ici donnait l'index du mouvement précédent).
     onHover: (_e: unknown, els: { index: number }[]) => {
@@ -938,6 +993,7 @@ function activityUrl(s: Side): string {
 .compare-table td.compare-name { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .compare-table th, .compare-table td { padding-left: 0.9rem; padding-right: 0.9rem; white-space: nowrap; }
 .compare-chart { position: relative; height: 200px; }
+.compare-chart canvas { touch-action: pan-y; }
 .compare-chart-sm { height: 170px; }
 @media (max-width: 575.98px) { .compare-chart { height: 170px; } }
 .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }

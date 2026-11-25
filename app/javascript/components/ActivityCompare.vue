@@ -245,7 +245,7 @@ function wkg(watts: number | null | undefined, weight: number | null | undefined
 }
 function wkgRow(label: string, wa: number | null | undefined, wb: number | null | undefined, weightA: number | null | undefined, weightB: number | null | undefined): Row {
   const x = wkg(wa, weightA), y = wkg(wb, weightB)
-  return { label, a: num(x, 2, ' W/kg'), b: num(y, 2, ' W/kg'), diff: diffNum(x, y, 2, ' W/kg') }
+  return { label, a: num(x, 2, ' W/kg'), b: num(y, 2, ' W/kg'), diff: diffNum(x, y, 2, ' W/kg'), better: 'higher', delta: (y ?? 0) - (x ?? 0) }
 }
 
 // ── Météo au départ de chaque sortie (best-effort, même proxy que le détail d'activité).
@@ -321,9 +321,9 @@ const dateRow = computed(() => {
 function maxRows(a: { max_heartrate: number | null; max_watts: number | null; max_cadence: number | null },
                  b: { max_heartrate: number | null; max_watts: number | null; max_cadence: number | null }): Row[] {
   return [
-    { label: t('compare.stat.max_power'), a: num(a.max_watts, 0, ' W'), b: num(b.max_watts, 0, ' W'), diff: diffNum(a.max_watts, b.max_watts, 0, ' W') },
-    { label: t('compare.stat.max_heartrate'), a: num(a.max_heartrate, 0, ' bpm'), b: num(b.max_heartrate, 0, ' bpm'), diff: diffNum(a.max_heartrate, b.max_heartrate, 0) },
-    { label: t('compare.stat.max_cadence'), a: num(a.max_cadence, 0), b: num(b.max_cadence, 0), diff: diffNum(a.max_cadence, b.max_cadence, 0) },
+    { label: t('compare.stat.max_power'), a: num(a.max_watts, 0, ' W'), b: num(b.max_watts, 0, ' W'), diff: diffNum(a.max_watts, b.max_watts, 0, ' W'), better: 'higher', delta: (b.max_watts ?? 0) - (a.max_watts ?? 0) },
+    { label: t('compare.stat.max_heartrate'), a: num(a.max_heartrate, 0, ' bpm'), b: num(b.max_heartrate, 0, ' bpm'), diff: diffNum(a.max_heartrate, b.max_heartrate, 0), better: 'lower', delta: (b.max_heartrate ?? 0) - (a.max_heartrate ?? 0) },
+    { label: t('compare.stat.max_cadence'), a: num(a.max_cadence, 0), b: num(b.max_cadence, 0), diff: diffNum(a.max_cadence, b.max_cadence, 0), better: 'higher', delta: (b.max_cadence ?? 0) - (a.max_cadence ?? 0) },
   ]
 }
 
@@ -376,16 +376,16 @@ const commonRows = computed<Row[]>(() => {
   const distA = commonView.value.distA, distB = commonView.value.distB
   const sa = data.value!.a, sb = data.value!.b
   return [
-    { label: t('compare.stat.distance'), a: formatKm(distA), b: formatKm(distB), diff: diffNum(distA / 1000, distB / 1000, 2, ' km') },
+    { label: t('compare.stat.distance'), a: formatKm(distA), b: formatKm(distB), diff: diffNum(distA / 1000, distB / 1000, 2, ' km'), better: 'higher' as const, delta: (distB ?? 0) - (distA ?? 0) },
     { label: t('compare.stat.duration'), a: formatChrono(a.duration_s), b: formatChrono(b.duration_s), diff: diffTime(a.duration_s, b.duration_s), better: 'lower' as const, delta: b.duration_s - a.duration_s },
     { label: t(run.value ? 'compare.stat.pace' : 'compare.stat.speed'), a: speedText(a.average_speed), b: speedText(b.average_speed), diff: diffSpeed(a.average_speed, b.average_speed), better: 'higher' as const, delta: (b.average_speed ?? 0) - (a.average_speed ?? 0) },
-    { label: t('compare.stat.elevation'), a: num(a.elevation_gain_m, 0, ' m'), b: num(b.elevation_gain_m, 0, ' m'), diff: diffNum(a.elevation_gain_m, b.elevation_gain_m, 0, ' m') },
+    { label: t('compare.stat.elevation'), a: num(a.elevation_gain_m, 0, ' m'), b: num(b.elevation_gain_m, 0, ' m'), diff: diffNum(a.elevation_gain_m, b.elevation_gain_m, 0, ' m'), better: 'higher' as const, delta: (b.elevation_gain_m ?? 0) - (a.elevation_gain_m ?? 0) },
     { label: t('compare.stat.heartrate'), a: num(a.average_heartrate, 0, ' bpm'), b: num(b.average_heartrate, 0, ' bpm'), diff: diffNum(a.average_heartrate, b.average_heartrate, 0), better: 'lower' as const, delta: (b.average_heartrate ?? 0) - (a.average_heartrate ?? 0) },
-    { label: t('compare.stat.power'), a: num(a.average_watts, 0, ' W'), b: num(b.average_watts, 0, ' W'), diff: diffNum(a.average_watts, b.average_watts, 0, ' W') },
+    { label: t('compare.stat.power'), a: num(a.average_watts, 0, ' W'), b: num(b.average_watts, 0, ' W'), diff: diffNum(a.average_watts, b.average_watts, 0, ' W'), better: 'higher' as const, delta: (b.average_watts ?? 0) - (a.average_watts ?? 0) },
     wkgRow(t('compare.stat.power_wkg'), a.average_watts, b.average_watts, sa.weight_kg, sb.weight_kg),
-    { label: t('compare.stat.ftp'), a: num(sa.ftp, 0, ' W'), b: num(sb.ftp, 0, ' W'), diff: diffNum(sa.ftp, sb.ftp, 0, ' W') },
+    { label: t('compare.stat.ftp'), a: num(sa.ftp, 0, ' W'), b: num(sb.ftp, 0, ' W'), diff: diffNum(sa.ftp, sb.ftp, 0, ' W'), better: 'higher' as const, delta: (sb.ftp ?? 0) - (sa.ftp ?? 0) },
     wkgRow(t('compare.stat.ftp_wkg'), sa.ftp, sb.ftp, sa.weight_kg, sb.weight_kg),
-    { label: t('compare.stat.cadence'), a: num(a.average_cadence, 0), b: num(b.average_cadence, 0), diff: diffNum(a.average_cadence, b.average_cadence, 0) },
+    { label: t('compare.stat.cadence'), a: num(a.average_cadence, 0), b: num(b.average_cadence, 0), diff: diffNum(a.average_cadence, b.average_cadence, 0), better: 'higher' as const, delta: (b.average_cadence ?? 0) - (a.average_cadence ?? 0) },
     ...maxRows(a, b),
   ].filter((r) => r.a !== '–' || r.b !== '–')
 })
@@ -394,14 +394,14 @@ const wholeRows = computed<Row[]>(() => {
   if (!data.value) return []
   const a = data.value.a, b = data.value.b
   return [
-    { label: t('compare.stat.distance'), a: formatKm(a.distance_m), b: formatKm(b.distance_m), diff: diffNum((a.distance_m ?? 0) / 1000, (b.distance_m ?? 0) / 1000, 2, ' km') },
+    { label: t('compare.stat.distance'), a: formatKm(a.distance_m), b: formatKm(b.distance_m), diff: diffNum((a.distance_m ?? 0) / 1000, (b.distance_m ?? 0) / 1000, 2, ' km'), better: 'higher' as const, delta: (b.distance_m ?? 0) - (a.distance_m ?? 0) },
     { label: t('compare.stat.moving_time'), a: formatChrono(a.moving_time_s), b: formatChrono(b.moving_time_s), diff: diffTime(a.moving_time_s, b.moving_time_s), better: 'lower' as const, delta: (b.moving_time_s ?? 0) - (a.moving_time_s ?? 0) },
     { label: t(run.value ? 'compare.stat.pace' : 'compare.stat.speed'), a: speedText(a.average_speed), b: speedText(b.average_speed), diff: diffSpeed(a.average_speed, b.average_speed), better: 'higher' as const, delta: (b.average_speed ?? 0) - (a.average_speed ?? 0) },
-    { label: t('compare.stat.elevation'), a: num(a.elevation_gain_m, 0, ' m'), b: num(b.elevation_gain_m, 0, ' m'), diff: diffNum(a.elevation_gain_m, b.elevation_gain_m, 0, ' m') },
+    { label: t('compare.stat.elevation'), a: num(a.elevation_gain_m, 0, ' m'), b: num(b.elevation_gain_m, 0, ' m'), diff: diffNum(a.elevation_gain_m, b.elevation_gain_m, 0, ' m'), better: 'higher' as const, delta: (b.elevation_gain_m ?? 0) - (a.elevation_gain_m ?? 0) },
     { label: t('compare.stat.heartrate'), a: num(a.average_heartrate, 0, ' bpm'), b: num(b.average_heartrate, 0, ' bpm'), diff: diffNum(a.average_heartrate, b.average_heartrate, 0), better: 'lower' as const, delta: (b.average_heartrate ?? 0) - (a.average_heartrate ?? 0) },
-    { label: t('compare.stat.power'), a: num(a.average_watts, 0, ' W'), b: num(b.average_watts, 0, ' W'), diff: diffNum(a.average_watts, b.average_watts, 0, ' W') },
-    { label: t('compare.stat.normalized_power'), a: num(a.normalized_power, 0, ' W'), b: num(b.normalized_power, 0, ' W'), diff: diffNum(a.normalized_power, b.normalized_power, 0, ' W') },
-    { label: t('compare.stat.ftp'), a: num(a.ftp, 0, ' W'), b: num(b.ftp, 0, ' W'), diff: diffNum(a.ftp, b.ftp, 0, ' W') },
+    { label: t('compare.stat.power'), a: num(a.average_watts, 0, ' W'), b: num(b.average_watts, 0, ' W'), diff: diffNum(a.average_watts, b.average_watts, 0, ' W'), better: 'higher' as const, delta: (b.average_watts ?? 0) - (a.average_watts ?? 0) },
+    { label: t('compare.stat.normalized_power'), a: num(a.normalized_power, 0, ' W'), b: num(b.normalized_power, 0, ' W'), diff: diffNum(a.normalized_power, b.normalized_power, 0, ' W'), better: 'higher' as const, delta: (b.normalized_power ?? 0) - (a.normalized_power ?? 0) },
+    { label: t('compare.stat.ftp'), a: num(a.ftp, 0, ' W'), b: num(b.ftp, 0, ' W'), diff: diffNum(a.ftp, b.ftp, 0, ' W'), better: 'higher' as const, delta: (b.ftp ?? 0) - (a.ftp ?? 0) },
     wkgRow(t('compare.stat.ftp_wkg'), a.ftp, b.ftp, a.weight_kg, b.weight_kg),
     wkgRow(t('compare.stat.power_wkg'), a.average_watts, b.average_watts, a.weight_kg, b.weight_kg),
     ...maxRows(a, b),
@@ -599,7 +599,9 @@ async function renderCharts() {
     animation: false as const,
     spanGaps: false,
     interaction: { mode: 'index' as const, intersect: false },
-    events: ['mousemove', 'mouseout'],
+    // Aucun événement natif : survol souris ET doigt passent par `hoverIndex`, qui pose
+    // l'infobulle sur tous les graphiques d'un coup (sinon seul le survolé l'affichait).
+    events: [] as string[],
     plugins: { legend: { display: false } },
     scales: {
       x: { type: 'linear' as const, min: 0, max: xMax, title: { display: false }, ticks: xTicks, grid: { color: grid } },

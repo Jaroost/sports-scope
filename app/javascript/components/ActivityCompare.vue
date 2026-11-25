@@ -501,12 +501,6 @@ function bindDrag(el: HTMLCanvasElement) {
   if (bound.has(el)) return
   bound.add(el)
   el.style.userSelect = 'none'
-  el.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || hoverIndex.value == null) return
-    dragStart = hoverIndex.value
-    dragMoved = false
-  })
-
   // Tactile, comme les analyses d'activité : un doigt qui glisse à l'horizontale
   // sélectionne ; un geste vertical rend la main au défilement de la page ; un tap efface.
   const TAP_TOL = 8
@@ -525,6 +519,18 @@ function bindDrag(el: HTMLCanvasElement) {
     if (lo > 0 && Math.abs(pts[lo - 1].x - v) <= Math.abs(pts[lo].x - v)) lo--
     return lo
   }
+  // Souris : l'index vient de la position du curseur sur l'axe, pas des éléments « survolés »
+  // par Chart.js (qui écartent les points sans valeur — une courbe sans FC ne donnait rien).
+  el.addEventListener('mousemove', (e) => { hoverIndex.value = indexAt(e.clientX) })
+  el.addEventListener('mouseleave', () => { if (dragStart == null) hoverIndex.value = null })
+  el.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return
+    const i = indexAt(e.clientX)
+    if (i == null) return
+    hoverIndex.value = i
+    dragStart = i
+    dragMoved = false
+  })
   const find = (list: TouchList) => (touch ? Array.from(list).find((t) => t.identifier === touch!.id) : undefined)
   el.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) { touch = null; return }
@@ -594,11 +600,6 @@ async function renderCharts() {
     spanGaps: false,
     interaction: { mode: 'index' as const, intersect: false },
     events: ['mousemove', 'mouseout'],
-    // `els` = éléments sous le curseur pour CE survol (le tooltip, lui, n'est mis à jour
-    // qu'après onHover : le lire ici donnait l'index du mouvement précédent).
-    onHover: (_e: unknown, els: { index: number }[]) => {
-      hoverIndex.value = els?.length ? els[0].index : null
-    },
     plugins: { legend: { display: false } },
     scales: {
       x: { type: 'linear' as const, min: 0, max: xMax, title: { display: false }, ticks: xTicks, grid: { color: grid } },
@@ -663,18 +664,27 @@ watch(hoverIndex, (i) => {
   }
   // Les autres graphiques suivent le survol, et les repères se déplacent sur la carte.
   const c = data.value?.common
+  if (c && mapInstance && markerA && markerB) {
+    if (i == null) { markerA.getElement().style.display = 'none'; markerB.getElement().style.display = 'none' }
+    else {
+      const frac = c.x.length > 1 ? i / (c.x.length - 1) : 0
+      placeMarker(markerA, c.a_track, frac)
+      placeMarker(markerB, c.b_track, frac)
+    }
+  }
+  // Les graphiques suivent le survol (hors courbes plus courtes, ex. les lignes de FTP).
   charts.forEach((chart) => {
-    if (i == null) { chart.tooltip?.setActiveElements([], {}); chart.setActiveElements([]); chart.update('none'); return }
-    const active = chart.data.datasets.map((_: unknown, d: number) => ({ datasetIndex: d, index: i }))
-    chart.setActiveElements(active)
-    chart.tooltip?.setActiveElements(active, { x: 0, y: 0 })
-    chart.update('none')
+    try {
+      if (i == null) { chart.tooltip?.setActiveElements([], {}); chart.setActiveElements([]); chart.update('none'); return }
+      const active = chart.data.datasets
+        .map((ds: any, d: number) => ({ datasetIndex: d, index: i, n: ds.data.length }))
+        .filter((e: any) => e.n > i && chart.data.datasets[e.datasetIndex].data[i]?.y != null)
+        .map(({ datasetIndex, index }: any) => ({ datasetIndex, index }))
+      chart.setActiveElements(active)
+      chart.tooltip?.setActiveElements(active, { x: 0, y: 0 })
+      chart.update('none')
+    } catch { /* un graphique en cours de reconstruction : sans conséquence */ }
   })
-  if (!c || !mapInstance || !markerA || !markerB) return
-  if (i == null) { markerA.getElement().style.display = 'none'; markerB.getElement().style.display = 'none'; return }
-  const frac = c.x.length > 1 ? i / (c.x.length - 1) : 0
-  placeMarker(markerA, c.a_track, frac)
-  placeMarker(markerB, c.b_track, frac)
 })
 
 // Sélection : les graphiques redessinent leur rectangle, la carte surligne le tracé.
@@ -694,7 +704,7 @@ function updateSelectionMap() {
   const n = c?.x.length ?? 0
   for (const [id, track] of [['cmp-sel-b', c?.b_track], ['cmp-sel-a', c?.a_track]] as const) {
     const src = mapInstance.getSource(id)
-    if (src) src.setData(feat(sel && track ? sliceTrack(track, sel.from, sel.to, n) : []))
+    if (src) src.setData(feat(sel && track ? sliceTrack(track, sel.from, sel.to, n).map((p) => [p[0], p[1]] as [number, number]) : []))
   }
 }
 watch(selection, () => {

@@ -18,6 +18,10 @@ en:
     login: "Sign in"
     logout: "Sign out"
     language: "Language"
+    theme: "Theme"
+    theme_light: "Light"
+    theme_dark: "Dark"
+    theme_auto: "Automatic (system)"
   performance:
     title: "Performance analysis"
     intro: "Your records and totals across all activities (Strava and imported files)."

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeChart } from '../chartTheme'
 // Comparaison de deux sorties qui suivent le même chemin. Le serveur
 // (`ActivityComparison`) aligne les tracés sur leur portion commune et renvoie les séries
 // déjà rééchantillonnées sur la distance de A : ce composant ne fait que les dessiner.
@@ -580,6 +581,7 @@ async function renderCharts() {
   if (gapCanvas.value) bindDrag(gapCanvas.value)
   Object.values(canvases).forEach((el) => el && bindDrag(el))
   const { Chart, registerables } = await import('chart.js')
+  themeChart(Chart)
   Chart.register(...registerables)
   const timeMode = xAxis.value === 'time'
   const labels = c.x.map((x) => +(x / 1000).toFixed(2))
@@ -1015,17 +1017,17 @@ function activityUrl(s: Side): string {
   border-radius: 999px; background: rgba(108, 117, 125, 0.1); color: #495057;
   font-variant-numeric: tabular-nums;
 }
-.range-chip strong { font-weight: 600; color: #212529; }
+.range-chip strong { font-weight: 600; color: var(--bs-body-color); }
 .legend-pill {
   display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.05rem 0.45rem;
-  border-radius: 999px; background: rgba(0, 0, 0, 0.03); border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 999px; background: rgba(0, 0, 0, 0.03); border: 1px solid var(--bs-border-color-translucent);
   color: #495057; font-size: 0.72rem; line-height: 1.5; user-select: none;
 }
 .legend-icon { font-size: 0.85rem; line-height: 1; flex-shrink: 0; }
 .chart-group { border-radius: 0.5rem; padding: 0.5rem; position: relative; }
 .chart-group-header {
   padding: 0.35rem 0.5rem; margin-bottom: 0.4rem; border-radius: 0.4rem;
-  background: rgba(108, 117, 125, 0.04); border: 1px solid rgba(0, 0, 0, 0.05);
+  background: rgba(108, 117, 125, 0.04); border: 1px solid var(--bs-border-color-translucent);
 }
 @media (min-width: 768px) {
   .card-header :deep(.map-dropdown-btn > button) { width: 12rem; justify-content: space-between; }

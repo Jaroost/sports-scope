@@ -315,8 +315,8 @@ onBeforeUnmount(() => {
   gap: 0.3rem;
   padding: 0.16rem 0.5rem;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  color: #212529;
+  background: rgba(var(--bs-body-bg-rgb), 0.92);
+  color: var(--bs-body-color);
   font-size: 0.7rem;
   font-weight: 600;
   box-shadow: 0 3px 8px -3px rgba(0, 0, 0, 0.35);
@@ -327,7 +327,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.28rem;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(var(--bs-body-bg-rgb), 0.96);
   padding: 0.16rem 0.45rem 0.16rem 0.38rem;
   border-radius: 12px;
   font-size: 0.68rem;
@@ -351,5 +351,5 @@ onBeforeUnmount(() => {
   box-shadow: 0 6px 14px -3px rgba(0, 0, 0, 0.45);
 }
 .shared-route-marker i { font-size: 0.7rem; }
-.shared-route-marker-label { color: #212529; }
+.shared-route-marker-label { color: var(--bs-body-color); }
 </style>

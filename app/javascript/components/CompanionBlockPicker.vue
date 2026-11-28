@@ -1637,7 +1637,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   padding: 1rem;
 }
 .cbpk-dialog {
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   border-radius: 0.75rem;
   width: min(1100px, 96vw);
   max-height: 92vh;
@@ -1661,7 +1661,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   background: transparent;
   font-size: 1.5rem;
   line-height: 1;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   cursor: pointer;
   padding: 0 0.25rem;
 }
@@ -1856,7 +1856,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   white-space: nowrap;
 }
 .cbpk-configure-btn--open {
-  background: var(--bs-secondary-bg, #e9ecef);
+  background: var(--bs-secondary-bg);
   border-color: var(--bs-secondary-color, #6c757d);
 }
 
@@ -1906,7 +1906,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   font-size: 0.78rem;
   padding: 0.1rem 0.4rem;
   border-radius: 0.3rem;
-  background: var(--bs-secondary-bg, #e9ecef);
+  background: var(--bs-secondary-bg);
   white-space: nowrap;
 }
 /* Une annotation de coin se distingue des jetons classiques (icône/étiquette/

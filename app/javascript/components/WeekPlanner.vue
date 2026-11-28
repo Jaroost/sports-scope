@@ -895,7 +895,7 @@ async function moveToDay(iso: string) {
   align-items: center;
   gap: 0.15rem;
   margin-left: 0.3rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
   font-weight: 500;
 }
 /* Plan accompli : la carte passe d'orange (à faire) à vert (fait), bien marqué. */
@@ -1017,7 +1017,7 @@ async function moveToDay(iso: string) {
   width: 100%;
   max-width: 460px;
   max-height: calc(100dvh - 2rem);
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   border-radius: 0.5rem;
   overflow: hidden;
 }
@@ -1027,7 +1027,7 @@ async function moveToDay(iso: string) {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 .planner-detail-body {
   flex: 1 1 auto;
@@ -1134,7 +1134,7 @@ async function moveToDay(iso: string) {
   width: 100%;
   max-width: 420px;
   max-height: calc(100dvh - 2rem);
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   border-radius: 0.5rem;
   overflow: hidden;
 }
@@ -1144,7 +1144,7 @@ async function moveToDay(iso: string) {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 .move-body {
   padding: 1rem;

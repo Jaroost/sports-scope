@@ -18,6 +18,10 @@ fr:
     login: "Se connecter"
     logout: "Se déconnecter"
     language: "Langue"
+    theme: "Thème"
+    theme_light: "Clair"
+    theme_dark: "Sombre"
+    theme_auto: "Automatique (système)"
   performance:
     title: "Analyse des performances"
     intro: "Vos records et cumuls, toutes activités confondues (Strava et fichiers importés)."

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeChart } from '../chartTheme'
 import { ref, onMounted, onBeforeUnmount, computed, watch, nextTick } from 'vue'
 import { t } from '../i18n'
 import { ACTION_STYLE, ZONE_VERDICT_COLOR } from '../composables/useTrainingPlan'
@@ -564,6 +565,7 @@ async function renderChart() {
   if (chart) { chart.destroy(); chart = null }
   if (!hasPeakPower.value || !chartCanvas.value) return
   const { Chart, registerables } = await import('chart.js')
+  themeChart(Chart)
   Chart.register(...registerables)
 
   const entries = peakEntries.value

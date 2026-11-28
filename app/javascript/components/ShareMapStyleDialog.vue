@@ -123,7 +123,7 @@ async function save() {
 .modal-dialog-sharestyle {
   width: 100%;
   max-width: 440px;
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   border-radius: 0.75rem;
   overflow: hidden;
 }
@@ -132,7 +132,7 @@ async function save() {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 1.25rem 0.75rem;
-  border-bottom: 1px solid var(--bs-border-color, #e5e7eb);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 .modal-body-sharestyle { padding: 1.25rem; }
 
@@ -149,7 +149,7 @@ async function save() {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
 }
 .share-style-group:first-child { margin-top: 0; }
 .share-style-item {
@@ -158,17 +158,17 @@ async function save() {
   gap: 0.5rem;
   min-width: 0;
   padding: 0.5rem 0.6rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--bs-border-color);
   border-radius: 0.5rem;
-  background: #fff;
-  color: #1f2937;
+  background: var(--bs-body-bg);
+  color: var(--bs-body-color);
   font-size: 0.9rem;
   text-align: left;
 }
-.share-style-item:hover { background: #f3f4f6; }
+.share-style-item:hover { background: var(--bs-secondary-bg); }
 .share-style-item.active {
   border-color: #f0ad4e;
-  background: #fff8e6;
+  background: var(--bs-warning-bg-subtle);
   font-weight: 600;
 }
 .share-style-item > i { width: 1.1rem; text-align: center; }

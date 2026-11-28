@@ -140,7 +140,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   max-height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   border-radius: 0.75rem;
   overflow: hidden;
 }
@@ -149,7 +149,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   align-items: center;
   justify-content: space-between;
   padding: 0.85rem 1.25rem;
-  border-bottom: 1px solid var(--bs-border-color, #e5e7eb);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 .tp-preview-body {
   overflow: auto;
@@ -159,7 +159,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
 }
 .tp-preview-tile {
   display: inline-flex;

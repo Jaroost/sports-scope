@@ -62,7 +62,7 @@ function flagMessage(f: QualityFlag): string {
   margin-top: 0.15rem;
 }
 .quality-list li { cursor: help; }
-.quality-list li.quality-warning { color: #b45309; font-weight: 600; }
+.quality-list li.quality-warning { color: var(--bs-warning-text-emphasis); font-weight: 600; }
 
 @media (prefers-color-scheme: dark) {
   .activity-quality { background: rgba(253, 126, 20, 0.12); }

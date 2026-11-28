@@ -1675,7 +1675,7 @@ function placePreviewMarker(coords: [number, number]) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(var(--bs-body-bg-rgb), 0.7);
   font-weight: 500;
   z-index: 1;
 }
@@ -1685,7 +1685,7 @@ function placePreviewMarker(coords: [number, number]) {
   left: 0.5rem;
   bottom: 0.5rem;
   z-index: 1;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(var(--bs-body-bg-rgb), 0.92);
   border-radius: 0.5rem;
   padding: 0.25rem 0.6rem;
   font-size: 0.75rem;

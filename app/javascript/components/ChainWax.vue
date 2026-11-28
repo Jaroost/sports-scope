@@ -832,7 +832,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .chain-row + .chain-row {
-  border-top: 1px solid var(--bs-border-color, #dee2e6);
+  border-top: 1px solid var(--bs-border-color);
   padding-top: 0.75rem;
 }
 .progress {
@@ -843,7 +843,7 @@ onBeforeUnmount(() => {
 }
 .discarded-row {
   padding: 0.5rem 0;
-  border-top: 1px solid var(--bs-border-color, #dee2e6);
+  border-top: 1px solid var(--bs-border-color);
 }
 .notes-text {
   white-space: pre-wrap;

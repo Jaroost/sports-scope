@@ -128,7 +128,7 @@ onBeforeUnmount(() => document.removeEventListener('mousedown', onDocumentMoused
   top: calc(100% + 0.35rem);
   left: 0;
   z-index: 2200;
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   border: 1px solid var(--bs-border-color);
   border-radius: 0.6rem;
   padding: 0.6rem;

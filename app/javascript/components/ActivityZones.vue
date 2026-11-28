@@ -306,7 +306,7 @@ const advices = computed(() => {
   opacity: 0.45;
 }
 .zone-legend-recent {
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
   font-size: 0.72rem;
 }
 /* Barre de référence (fenêtre glissante) : plus fine et estompée pour rester

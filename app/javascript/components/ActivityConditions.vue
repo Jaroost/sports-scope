@@ -194,10 +194,10 @@ function fmt1(v: number | null | undefined): string {
   line-height: 1.3;
 }
 .cond-pill > i { color: #fc4c02; }
-.cond-gear > i { color: #6c757d; }
-.cond-device > i { color: #6c757d; }
+.cond-gear > i { color: var(--bs-secondary-color); }
+.cond-device > i { color: var(--bs-secondary-color); }
 .cond-val { font-weight: 600; font-variant-numeric: tabular-nums; }
-.cond-sub { color: #6c757d; font-size: 0.78rem; }
+.cond-sub { color: var(--bs-secondary-color); font-size: 0.78rem; }
 .cond-sep {
   width: 1px;
   align-self: stretch;
@@ -209,7 +209,7 @@ function fmt1(v: number | null | undefined): string {
 
 @media (prefers-color-scheme: dark) {
   .cond-pill { background: rgba(255, 255, 255, 0.08); }
-  .cond-sub { color: #adb5bd; }
+  .cond-sub { color: var(--bs-secondary-color); }
   .cond-sep { background: rgba(255, 255, 255, 0.18); }
 }
 </style>

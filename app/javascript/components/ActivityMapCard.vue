@@ -1603,13 +1603,13 @@ onBeforeUnmount(() => {
   right: 0;
   bottom: 0;
   z-index: 1020;
-  background: #fff;
+  background: var(--bs-body-bg);
   box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.2);
 }
 .min-width-0 { min-width: 0; }
 .activity-times {
   font-size: 0.82rem;
-  color: #495057;
+  color: var(--bs-secondary-color);
   font-variant-numeric: tabular-nums;
 }
 /* Sport (sport_type Strava) — neutre, pour ne pas concurrencer les pastilles
@@ -1686,8 +1686,8 @@ onBeforeUnmount(() => {
   }
 }
 .map-ctrl-btn {
-  background: #ffffff;
-  border-color: rgba(0, 0, 0, 0.08);
+  background: var(--bs-body-bg);
+  border-color: var(--bs-border-color-translucent);
   width: 34px;
   padding: 0;
   display: flex;
@@ -1711,7 +1711,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.22rem;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(var(--bs-body-bg-rgb), 0.96);
   padding: 0.1rem 0.35rem 0.1rem 0.32rem;
   border-radius: 12px;
   font-size: 0.66rem;
@@ -1735,7 +1735,7 @@ onBeforeUnmount(() => {
    nearby markers so it's never hidden. */
 .activity-climb-marker-active { z-index: 2; }
 .activity-climb-marker i { font-size: 0.74rem; }
-.activity-climb-marker .activity-climb-marker-stats { color: #212529; }
+.activity-climb-marker .activity-climb-marker-stats { color: var(--bs-body-color); }
 .activity-climb-marker .activity-climb-marker-cat {
   background: currentColor;
   color: #fff !important;
@@ -1748,19 +1748,19 @@ onBeforeUnmount(() => {
 }
 .activity-climb-marker .activity-climb-marker-cat::first-letter { text-transform: uppercase; }
 
-.climb-cat-HC    { color: #111827; }
-.climb-cat-1     { color: #b91c1c; }
+.climb-cat-HC    { color: var(--bs-body-color); }
+.climb-cat-1     { color: var(--bs-danger-text-emphasis); }
 .climb-cat-2     { color: #ea580c; }
 .climb-cat-3     { color: #ca8a04; }
 .climb-cat-4     { color: #16a34a; }
-.climb-cat-uncat { color: #6c757d; }
+.climb-cat-uncat { color: var(--bs-secondary-color); }
 
 /* Hover cursor that follows the route. */
 .route-cursor {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--bs-body-bg);
   border: 3px solid #fc4c02;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.75), 0 2px 8px rgba(0, 0, 0, 0.4);
   pointer-events: none;

@@ -304,7 +304,7 @@ function choose(id: number) {
   width: 100%;
   max-width: 560px;
   max-height: calc(100dvh - 2rem);
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   border-radius: 0.5rem;
   overflow: hidden;
 }
@@ -314,11 +314,11 @@ function choose(id: number) {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 .modal-filters-picker {
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 /* Corps défilant : la liste peut être longue, le header/filtres/footer restent fixes. */
 .modal-body-picker {
@@ -332,7 +332,7 @@ function choose(id: number) {
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--bs-border-color, #dee2e6);
+  border-top: 1px solid var(--bs-border-color);
 }
 
 .min-width-0 {

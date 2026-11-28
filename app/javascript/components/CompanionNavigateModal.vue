@@ -185,7 +185,7 @@ defineExpose({ open })
 .modal-dialog-companion-nav {
   width: 100%;
   max-width: 420px;
-  background: var(--bs-body-bg, #fff);
+  background: var(--bs-body-bg);
   border-radius: 0.5rem;
   overflow: hidden;
 }
@@ -195,7 +195,7 @@ defineExpose({ open })
   align-items: center;
   justify-content: space-between;
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--bs-border-color, #dee2e6);
+  border-bottom: 1px solid var(--bs-border-color);
 }
 
 .modal-body-companion-nav {
@@ -204,7 +204,7 @@ defineExpose({ open })
 
 .modal-footer-companion-nav {
   padding: 0.75rem 1rem;
-  border-top: 1px solid var(--bs-border-color, #dee2e6);
+  border-top: 1px solid var(--bs-border-color);
 }
 
 .modal-enter-active,

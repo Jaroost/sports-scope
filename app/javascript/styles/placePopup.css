@@ -19,7 +19,7 @@
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--bs-body-bg);
   border: 2px solid currentColor;
   box-shadow: 0 3px 8px -2px rgba(0, 0, 0, 0.4);
   cursor: pointer;
@@ -77,13 +77,13 @@
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.2rem 0.65rem;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  border-bottom: 1px solid var(--bs-border-color-translucent);
   margin-bottom: 2px;
 }
 .place-popup-name {
   font-size: 0.78rem;
   font-weight: 600;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   max-width: 14rem;
 }
 .place-popup-close {
@@ -112,7 +112,7 @@
   border-radius: 7px;
   font-size: 0.8rem;
   font-weight: 500;
-  color: #212529;
+  color: var(--bs-body-color);
   text-decoration: none;
 }
 .place-popup-link i { width: 14px; text-align: center; flex-shrink: 0; }
@@ -129,7 +129,7 @@
 }
 .place-popup-address {
   font-size: 0.72rem;
-  color: #9ca3af;
+  color: var(--bs-secondary-color);
   padding: 0 0.65rem 0.3rem;
   max-width: 14rem;
 }
@@ -138,7 +138,7 @@
   align-items: center;
   gap: 0.4rem;
   font-size: 0.72rem;
-  color: #9ca3af;
+  color: var(--bs-secondary-color);
   padding: 0 0.65rem 0.3rem;
   max-width: 14rem;
 }

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeChart } from '../chartTheme'
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { Tooltip } from 'bootstrap'
 import { t } from '../i18n'
@@ -1045,6 +1046,7 @@ async function renderCharts() {
   if (groups.length === 0) return
 
   const { Chart, registerables } = await import('chart.js')
+  themeChart(Chart)
   Chart.register(...registerables, dragSelectPlugin, gradeFillPlugin, zoneBandsPlugin, pauseBandPlugin, excludedBandPlugin, lapMarkPlugin)
 
   destroyCharts()
@@ -2840,7 +2842,7 @@ onBeforeUnmount(() => {
      fixe passerait dessous. Fallback 3.5rem avant la première mesure. */
   top: var(--navbar-h, 3.5rem);
   z-index: 5;
-  background: #ffffff;
+  background: var(--bs-body-bg);
   backdrop-filter: saturate(140%);
   border-bottom: 1px solid rgba(252, 76, 2, 0.22);
   box-shadow: 0 6px 14px -10px rgba(0, 0, 0, 0.18);
@@ -2877,8 +2879,8 @@ onBeforeUnmount(() => {
     max-height: 70vh;
     overflow-y: auto;
     padding: 0.75rem;
-    background: #ffffff;
-    border: 1px solid rgba(0, 0, 0, 0.12);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color-translucent);
     border-radius: 0.6rem;
     box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.4);
   }
@@ -2911,7 +2913,7 @@ onBeforeUnmount(() => {
 }
 .range-chip strong {
   font-weight: 600;
-  color: #212529;
+  color: var(--bs-body-color);
 }
 .range-chip-success {
   background: rgba(25, 135, 84, 0.12);
@@ -2922,7 +2924,7 @@ onBeforeUnmount(() => {
   background: rgba(220, 53, 69, 0.12);
   color: #b02a37;
 }
-.range-chip-danger strong { color: #842029; }
+.range-chip-danger strong { color: var(--bs-danger-text-emphasis); }
 
 .preset-select {
   width: auto;
@@ -2936,7 +2938,7 @@ onBeforeUnmount(() => {
   gap: 0.35rem;
   padding: 0.25rem 0.55rem 0.25rem 0.6rem;
   background: rgba(0, 0, 0, 0.02);
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--bs-border-color-translucent);
   border-radius: 0.5rem;
   position: relative;
 }
@@ -2949,10 +2951,10 @@ onBeforeUnmount(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #6c757d;
+  color: var(--bs-secondary-color);
   user-select: none;
   padding-right: 0.15rem;
-  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  border-right: 1px solid var(--bs-border-color-translucent);
   margin-right: 0.25rem;
   line-height: 1.6;
 }
@@ -3017,7 +3019,7 @@ onBeforeUnmount(() => {
   padding: 0.05rem 0.45rem;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--bs-border-color-translucent);
   color: #495057;
   font-size: 0.72rem;
   cursor: pointer;
@@ -3035,7 +3037,7 @@ onBeforeUnmount(() => {
   line-height: 1;
   flex-shrink: 0;
 }
-.legend-pill.hidden .legend-icon { color: #adb5bd !important; }
+.legend-pill.hidden .legend-icon { color: var(--bs-secondary-color) !important; }
 .legend-pill-static {
   cursor: default;
   background: rgba(0, 0, 0, 0.02);
@@ -3057,7 +3059,7 @@ onBeforeUnmount(() => {
   padding: 0.15rem 0.65rem;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.03);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--bs-border-color-translucent);
   color: #495057;
   font-size: 0.72rem;
   cursor: pointer;
@@ -3101,7 +3103,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 0.3rem;
   font-size: 0.72rem;
-  color: #6c757d;
+  color: var(--bs-secondary-color);
   user-select: none;
   padding-left: 0.15rem;
 }
@@ -3144,7 +3146,7 @@ onBeforeUnmount(() => {
 .chart-zone-merge {
   background: linear-gradient(to right, rgba(13, 110, 253, 0.22), rgba(13, 110, 253, 0.06));
   color: #0a58ca;
-  border-right: 2px dashed rgba(0, 0, 0, 0.15);
+  border-right: 2px dashed var(--bs-border-color-translucent);
 }
 .chart-zone-copy {
   background: linear-gradient(to left, rgba(25, 135, 84, 0.22), rgba(25, 135, 84, 0.06));
@@ -3161,7 +3163,7 @@ onBeforeUnmount(() => {
   background: linear-gradient(to left, rgba(25, 135, 84, 0.65), rgba(25, 135, 84, 0.35));
 }
 .chart-zone span {
-  background: rgba(255, 255, 255, 0.85);
+  background: rgba(var(--bs-body-bg-rgb), 0.85);
   padding: 0.4rem 0.9rem;
   border-radius: 999px;
   box-shadow: 0 4px 12px -4px rgba(0, 0, 0, 0.3);
@@ -3177,7 +3179,7 @@ onBeforeUnmount(() => {
   margin-bottom: 0.4rem;
   border-radius: 0.4rem;
   background: rgba(108, 117, 125, 0.04);
-  border: 1px solid rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--bs-border-color-translucent);
   transition: background-color 0.12s, border-color 0.12s;
   user-select: none;
   /* Le header est une poignée de drag (réordonnancement) : on neutralise le
@@ -3190,7 +3192,7 @@ onBeforeUnmount(() => {
 }
 .chart-group.dragging .chart-group-header { cursor: grabbing; }
 .drag-handle {
-  color: #adb5bd;
+  color: var(--bs-secondary-color);
   font-size: 0.95rem;
   pointer-events: none;
 }
@@ -3284,7 +3286,7 @@ onBeforeUnmount(() => {
   padding: 0;
   cursor: pointer;
 }
-.chart-group-zones-pick .chart-zone-merge { border-right: 2px dashed rgba(0, 0, 0, 0.15); }
+.chart-group-zones-pick .chart-zone-merge { border-right: 2px dashed var(--bs-border-color-translucent); }
 .chart-group-zones-pick .chart-zone:active span {
   background: rgba(0, 0, 0, 0.25);
   color: #fff;

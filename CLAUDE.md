@@ -64,6 +64,26 @@ t('routes.ma_nouvelle_cle')
 - Initializer : `config/initializers/i18n-js.rb` — régénère les JSON au démarrage dans tous les environnements (dev, test, prod)
 - En prod, les JSON sont générés lors du boot avant le build Vite (`assets:precompile` déclenche un boot Rails)
 
+## Mode sombre
+
+Mode de couleurs natif de Bootstrap 5.3 : `data-bs-theme` sur `<html>`. Choix clair /
+sombre / auto dans le menu utilisateur (un bouton clair ↔ sombre si déconnecté), gardé
+dans le **cookie `theme`** (réglage d'appareil, pas de compte) et rendu par Rails
+(`ApplicationHelper#rendered_bs_theme`) — « auto » est tranché par le script en tête du
+layout, puis suivi par `theme.ts`. Les pages de navigation plein écran (`hide_navbar`)
+restent claires (`data-theme-locked`).
+
+- **Dans les styles, pas de couleur neutre en dur** : `var(--bs-body-bg)`,
+  `--bs-tertiary-bg`, `--bs-secondary-bg`, `--bs-body-color`, `--bs-secondary-color`,
+  `--bs-border-color(-translucent)`, `rgba(var(--bs-body-bg-rgb), a)` pour un panneau
+  translucide, `--bs-<variant>-bg-subtle` / `-text-emphasis` pour les encarts teintés.
+- Ce que Bootstrap laisse clair en sombre (`bg-white`, `bg-light`, `btn-light`,
+  `table-light`, contrôles MapLibre) est rattrapé dans `application.scss`.
+- Chart.js : appeler `themeChart(Chart)` (`chartTheme.ts`) juste après
+  `await import('chart.js')` ; ne pas fixer la couleur des grilles / graduations.
+- Exclus volontairement : composants `Nav*` / `RouteNavigation.vue` (page verrouillée
+  en clair) et `CompanionBlockPreview.vue` (fac-similé de l'appli).
+
 ## Routes API
 
 Les routes JSON consommées par Vue :

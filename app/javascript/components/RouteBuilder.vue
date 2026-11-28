@@ -3170,7 +3170,7 @@ onBeforeUnmount(() => {
 }
 .mobile-sheet-panel {
   width: 100%;
-  background: #fff;
+  background: var(--bs-body-bg);
   border-radius: 1rem 1rem 0 0;
   box-shadow: 0 -4px 24px rgba(0,0,0,0.18);
   display: flex;
@@ -3219,7 +3219,7 @@ onBeforeUnmount(() => {
   justify-content: center;
 }
 .modal-dialog-custom {
-  background: #fff;
+  background: var(--bs-body-bg);
   border-radius: 0.75rem;
   width: min(440px, 96vw);
   overflow: hidden;
@@ -3229,7 +3229,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 1rem 1.25rem 0.75rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--bs-border-color);
 }
 .modal-body-custom { padding: 1.25rem; }
 
@@ -3250,7 +3250,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
 }
 .actions-modal-group:first-child { margin-top: 0; }
 .actions-modal-item {
@@ -3262,13 +3262,13 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 0.5rem;
   background: transparent;
-  color: #1f2937;
+  color: var(--bs-body-color);
   font-size: 0.95rem;
   text-align: left;
   text-decoration: none;
 }
 .actions-modal-item:hover:not(:disabled),
-.actions-modal-item:active:not(:disabled) { background: #f3f4f6; }
+.actions-modal-item:active:not(:disabled) { background: var(--bs-secondary-bg); }
 .actions-modal-item:disabled { opacity: 0.5; }
 .actions-modal-item > i { width: 1.25rem; text-align: center; }
 
@@ -3309,20 +3309,20 @@ onBeforeUnmount(() => {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 .map-notice--warning {
-  background: #fff8e6;
+  background: var(--bs-warning-bg-subtle);
   border-color: #ffe08a;
-  color: #664d03;
+  color: var(--bs-warning-text-emphasis);
 }
 .map-notice--danger {
-  background: #fef2f2;
+  background: var(--bs-danger-bg-subtle);
   border-color: #fca5a5;
   color: #7f1d1d;
 }
 /* Panneau des demi-tours assumés, sans crochet actif : rappel neutre, pas une alerte. */
 .map-notice--muted {
-  background: #f3f4f6;
-  border-color: #d1d5db;
-  color: #374151;
+  background: var(--bs-secondary-bg);
+  border-color: var(--bs-border-color);
+  color: var(--bs-body-color);
 }
 .map-notice-header {
   display: flex;
@@ -3346,13 +3346,13 @@ onBeforeUnmount(() => {
   padding: 0.25rem 0.6rem;
   border: 1px solid currentColor;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(var(--bs-body-bg-rgb), 0.7);
   color: inherit;
   font-size: 0.8rem;
   cursor: pointer;
   transition: background 0.12s;
 }
-.map-notice-chip:hover { background: #fff; }
+.map-notice-chip:hover { background: var(--bs-body-bg); }
 /* Puce d'action icône seule (coche « ok ici » / croix « demi-tour ko ») : carrée,
    sans le padding horizontal d'une puce à texte. */
 .map-notice-chip--icon {
@@ -3362,9 +3362,9 @@ onBeforeUnmount(() => {
 /* Puce déjà cadrée : l'utilisateur est allé voir ce point, on le distingue de ceux
    qu'il reste à inspecter quand il rouvre l'alerte. */
 .map-notice-chip.is-visited {
-  background: #d1e7dd;
+  background: var(--bs-success-bg-subtle);
   border-color: #a3cfbb;
-  color: #0f5132;
+  color: var(--bs-success-text-emphasis);
 }
 .map-notice-chip.is-visited:hover { background: #c5e1d3; }
 /* Action groupée « tout ramener sur le tracé » : puce pleine pour la détacher des puces
@@ -3391,19 +3391,19 @@ onBeforeUnmount(() => {
 }
 .map-notice-chip-pair > .map-notice-chip:hover { position: relative; z-index: 1; }
 .map-notice-chip--uturn {
-  background: #d1e7dd;
+  background: var(--bs-success-bg-subtle);
   border-color: #a3cfbb;
-  color: #0f5132;
+  color: var(--bs-success-text-emphasis);
 }
 .map-notice-chip--uturn:hover { background: #b9dcc9; }
 /* Demi-tour assumé : puce cochée en gris (le verdict tient), doublée d'une puce rouge
    « demi-tour ko » qui le renvoie dans les crochets actifs. */
 .map-notice-chip.is-accepted {
-  background: #e9ecef;
-  border-color: #ced4da;
-  color: #495057;
+  background: var(--bs-secondary-bg);
+  border-color: var(--bs-border-color);
+  color: var(--bs-secondary-color);
 }
-.map-notice-chip.is-accepted:hover { background: #dee2e6; }
+.map-notice-chip.is-accepted:hover { background: var(--bs-secondary-bg); }
 .map-notice-chip--reflag {
   background: #dc2626;
   border-color: #dc2626;
@@ -3453,28 +3453,28 @@ onBeforeUnmount(() => {
   padding: 0.3rem 0.7rem;
   border: 1px solid #fca5a5;
   border-radius: 999px;
-  background: #fef2f2;
+  background: var(--bs-danger-bg-subtle);
   color: #7f1d1d;
   font-size: 0.8rem;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   transition: background 0.12s;
 }
-.map-notice-pill:hover { background: #fee2e2; }
+.map-notice-pill:hover { background: var(--bs-danger-bg-subtle); }
 /* Pastille qui ne cache qu'un rappel de demi-tours assumés : gris neutre, pas le rouge
    d'une alerte à corriger. */
 .map-notice-pill--muted {
-  border-color: #d1d5db;
-  background: #f3f4f6;
-  color: #374151;
+  border-color: var(--bs-border-color);
+  background: var(--bs-secondary-bg);
+  color: var(--bs-body-color);
 }
-.map-notice-pill--muted:hover { background: #e5e7eb; }
+.map-notice-pill--muted:hover { background: var(--bs-secondary-bg); }
 /* Pastille « demi-tour ok ici » : teinte d'acceptation (comme la puce --uturn de l'alerte),
    pas le rouge d'un rappel d'anomalie. */
 .map-notice-pill--uturn {
   border-color: #a3cfbb;
-  background: #d1e7dd;
-  color: #0f5132;
+  background: var(--bs-success-bg-subtle);
+  color: var(--bs-success-text-emphasis);
 }
 .map-notice-pill--uturn:hover { background: #b9dcc9; }
 

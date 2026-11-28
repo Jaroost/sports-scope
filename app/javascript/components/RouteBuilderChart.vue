@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeChart } from '../chartTheme'
 import { ref, computed, watch, nextTick, useTemplateRef } from 'vue'
 import { t } from '../i18n'
 import { routeStore } from '../stores/routeStore'
@@ -278,6 +279,7 @@ const selectionRectPlugin = {
 async function render() {
   if (!routeStore.hasGeometry.value) return
   const { Chart, registerables } = await import('chart.js')
+  themeChart(Chart)
   Chart.register(...registerables)
   if (!chartEl.value) await nextTick()
   if (!chartEl.value) return
@@ -333,7 +335,7 @@ async function render() {
             maxTicksLimit: 20,
             font: { size: 10 },
           },
-          grid: { color: 'rgba(0,0,0,0.07)', lineWidth: 1 },
+          grid: { lineWidth: 1 },
         },
       },
       plugins: {
@@ -1054,7 +1056,7 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
 .speed-input {
   width: 2.6rem;
   border: 1px solid rgba(13, 110, 253, 0.25);
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(var(--bs-body-bg-rgb), 0.6);
   color: inherit;
   border-radius: 4px;
   padding: 0 0.25rem;
@@ -1073,7 +1075,7 @@ defineExpose({ render, destroy, update, resize, resetZoom, clearSelection, zoomT
   justify-content: center;
   gap: 0.5rem;
   font-size: 0.82rem;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   padding: 1rem;
 }
 </style>

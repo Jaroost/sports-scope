@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeChart } from '../chartTheme'
 // Progression sur UN segment : un point par passage, la date en x, le chrono en y.
 // Les deux sens sont deux séries distinctes (couleur ET forme de point) : une montée
 // et sa descente n'ont rien de comparable, les mélanger sur une même courbe donnerait
@@ -73,6 +74,7 @@ async function render() {
   if (chart) { chart.destroy(); chart = null }
   if (!canvas.value || !hasEnoughData.value) return
   const { Chart, registerables } = await import('chart.js')
+  themeChart(Chart)
   Chart.register(...registerables)
 
   const ctx = canvas.value.getContext('2d')
@@ -163,7 +165,7 @@ async function render() {
         y: {
           title: { display: true, text: t('strava.segments.chart_y') },
           ticks: { callback: (v: number) => formatChrono(v) },
-          grid: { color: 'rgba(0,0,0,0.06)' },
+          grid: {},
         },
       },
     },

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeChart } from '../chartTheme'
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { t } from '../i18n'
 import type { Point } from '../composables/useTrainingPlan'
@@ -22,7 +23,7 @@ const emit = defineEmits<{ hover: [index: number | null] }>()
 const META: Record<Metric, { color: string; dash: boolean; labelKey: string; zeroBased: boolean }> = {
   ctl: { color: '#0d6efd', dash: false, labelKey: 'performance.load.ctl_label', zeroBased: true },
   atl: { color: '#fd7e14', dash: true, labelKey: 'performance.load.atl_label', zeroBased: true },
-  tsb: { color: '#343a40', dash: false, labelKey: 'performance.load.tsb_label', zeroBased: false },
+  tsb: { color: '#6c757d', dash: false, labelKey: 'performance.load.tsb_label', zeroBased: false },
   acwr: { color: '#20c997', dash: false, labelKey: 'performance.load.acwr_label', zeroBased: false },
 }
 
@@ -111,6 +112,7 @@ async function render() {
   if (chart) { chart.destroy(); chart = null }
   if (!canvas.value || props.points.length < 2) return
   const { Chart, registerables } = await import('chart.js')
+  themeChart(Chart)
   Chart.register(...registerables)
 
   const meta = META[props.metric]

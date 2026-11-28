@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeChart } from '../chartTheme'
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { t } from '../i18n'
 import { formatPowerDuration, type CurvePoint, type CurveSeries } from '../activityHelpers'
@@ -54,6 +55,7 @@ async function render() {
   if (chart) { chart.destroy(); chart = null }
   if (!hasData.value || !canvas.value) return
   const { Chart, registerables } = await import('chart.js')
+  themeChart(Chart)
   Chart.register(...registerables)
 
   const ctx = canvas.value.getContext('2d')

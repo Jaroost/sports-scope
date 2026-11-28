@@ -6,6 +6,7 @@ import { setupI18n } from '../i18n'
 import { installCompanionBridge, revealCompanionLinks } from '../companionBridge'
 import { mountVueIslands } from '../mountVueIslands'
 import { installAddressCopyButtons } from '../routeSummaryCopyAddress'
+import { installThemeSwitcher } from '../theme'
 
 const i18nReady = setupI18n()
 
@@ -13,6 +14,9 @@ const i18nReady = setupI18n()
 // navigation dans un WebView et y pousse ses capteurs BLE. Installé avant tout
 // montage : l'appli peut publier un état dès le chargement de la page.
 installCompanionBridge()
+
+// Clair / sombre : menu de l'utilisateur + suivi du réglage système en « auto ».
+installThemeSwitcher()
 
 // PWA : enregistre le service worker en production (HTTPS requis ; localhost OK).
 // Désactivé en dev pour ne pas interférer avec le HMR de Vite.

@@ -378,7 +378,7 @@ const routeLoad = computed(() => {
 .stat-pill-time .speed-input {
   width: 2.6rem;
   border: 1px solid rgba(13, 110, 253, 0.25);
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(var(--bs-body-bg-rgb), 0.6);
   color: inherit;
   border-radius: 4px;
   padding: 0 0.25rem;
@@ -460,25 +460,25 @@ const routeLoad = computed(() => {
   gap: 0.5rem;
   width: 100%;
   padding: 0.3rem 0.6rem;
-  border: 1px solid rgba(0,0,0,0.1);
+  border: 1px solid var(--bs-border-color-translucent);
   border-radius: 0.5rem;
-  background: #f9fafb;
+  background: var(--bs-tertiary-bg);
   cursor: pointer;
   text-align: left;
   font-size: 0.8rem;
   transition: background 0.1s, border-color 0.1s;
 }
-.climb-pill:hover { background: #f0fdf4; border-color: #16a34a; }
+.climb-pill:hover { background: var(--bs-success-bg-subtle); border-color: #16a34a; }
 .climb-pill-cat { font-weight: 700; font-size: 0.72rem; min-width: 1.5rem; text-align: center; flex-shrink: 0; }
-.climb-pill-stats { display: flex; flex-direction: column; line-height: 1.25; color: #374151; flex: 1; min-width: 0; }
+.climb-pill-stats { display: flex; flex-direction: column; line-height: 1.25; color: var(--bs-body-color); flex: 1; min-width: 0; }
 .climb-pill-name { font-weight: 600; color: #14532d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.climb-pill-name-default { font-weight: 500; font-style: italic; color: #6b7280; }
-.climb-pill-grade { color: #6b7280; font-size: 0.73rem; }
+.climb-pill-name-default { font-weight: 500; font-style: italic; color: var(--bs-secondary-color); }
+.climb-pill-grade { color: var(--bs-secondary-color); font-size: 0.73rem; }
 .climb-pill-rename {
   flex-shrink: 0;
   border: none;
   background: transparent;
-  color: #9ca3af;
+  color: var(--bs-secondary-color);
   padding: 0.2rem;
   border-radius: 0.3rem;
   font-size: 0.72rem;
@@ -495,12 +495,12 @@ const routeLoad = computed(() => {
 }
 .climb-name-editor input:focus { outline: none; border-color: #16a34a; box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.15); }
 
-.climb-cat-HC    { color: #111827; }
-.climb-cat-1     { color: #b91c1c; }
+.climb-cat-HC    { color: var(--bs-body-color); }
+.climb-cat-1     { color: var(--bs-danger-text-emphasis); }
 .climb-cat-2     { color: #ea580c; }
 .climb-cat-3     { color: #ca8a04; }
 .climb-cat-4     { color: #16a34a; }
-.climb-cat-uncat { color: #6c757d; }
+.climb-cat-uncat { color: var(--bs-secondary-color); }
 
 .places-section-toggle {
   display: flex;
@@ -525,16 +525,16 @@ const routeLoad = computed(() => {
   gap: 0.5rem;
   width: 100%;
   padding: 0.3rem 0.6rem;
-  border: 1px solid rgba(0,0,0,0.08);
+  border: 1px solid var(--bs-border-color-translucent);
   border-radius: 0.5rem;
-  background: #f9fafb;
+  background: var(--bs-tertiary-bg);
   font-size: 0.8rem;
 }
-.place-pill:hover { background: #eff6ff; border-color: rgba(13,110,253,0.25); }
-.place-pill-dist { flex-shrink: 0; font-weight: 600; font-variant-numeric: tabular-nums; color: #6b7280; min-width: 2.5rem; text-align: right; }
-.place-pill-name { color: #1f2937; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.place-pill-icon { font-size: 0.65rem; color: #6b7280; flex-shrink: 0; }
-.place-pill-route-dist { flex-shrink: 0; font-size: 0.72rem; color: #9ca3af; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.place-pill:hover { background: var(--bs-primary-bg-subtle); border-color: rgba(13,110,253,0.25); }
+.place-pill-dist { flex-shrink: 0; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--bs-secondary-color); min-width: 2.5rem; text-align: right; }
+.place-pill-name { color: var(--bs-body-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.place-pill-icon { font-size: 0.65rem; color: var(--bs-secondary-color); flex-shrink: 0; }
+.place-pill-route-dist { flex-shrink: 0; font-size: 0.72rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .places-filter-bar { display: flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.6rem 0.35rem; }
 .places-filter-btn {
@@ -542,15 +542,15 @@ const routeLoad = computed(() => {
   align-items: center;
   gap: 0.3rem;
   padding: 0.18rem 0.5rem;
-  border: 1px solid rgba(0,0,0,0.15);
+  border: 1px solid var(--bs-border-color-translucent);
   border-radius: 999px;
-  background: #f3f4f6;
-  color: #9ca3af;
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
   font-size: 0.68rem;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .places-filter-btn.active { background: rgba(13, 110, 253, 0.1); border-color: rgba(13, 110, 253, 0.35); color: #0d6efd; }
-.places-loading { font-size: 0.78rem; color: #9ca3af; display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0.4rem; }
+.places-loading { font-size: 0.78rem; color: var(--bs-secondary-color); display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0.4rem; }
 .places-error { font-size: 0.75rem; color: #dc3545; padding: 0.1rem 0.6rem 0.3rem; }
 </style>

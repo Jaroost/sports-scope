@@ -584,19 +584,19 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .part-group + .part-group {
-  border-top: 1px dashed var(--bs-border-color, #dee2e6);
+  border-top: 1px dashed var(--bs-border-color);
   padding-top: 1rem;
   margin-top: 0.5rem;
 }
 .part-card {
-  background-color: var(--bs-tertiary-bg, #f8f9fa);
+  background-color: var(--bs-tertiary-bg);
 }
 .progress {
   height: 1.25rem;
 }
 .discarded-row {
   padding: 0.5rem 0;
-  border-top: 1px solid var(--bs-border-color, #dee2e6);
+  border-top: 1px solid var(--bs-border-color);
 }
 .min-width-0 {
   min-width: 0;

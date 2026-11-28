@@ -557,7 +557,7 @@ onBeforeUnmount(() => {
   padding: 1rem;
 }
 .raltd-dialog {
-  background: #fff;
+  background: var(--bs-body-bg);
   border-radius: 0.75rem;
   width: min(1280px, 96vw);
   height: min(860px, 92vh);
@@ -570,7 +570,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 0.85rem 1.1rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--bs-border-color);
   flex: none;
 }
 .raltd-title { font-weight: 600; }
@@ -589,11 +589,11 @@ onBeforeUnmount(() => {
   background: transparent;
   font-size: 1.5rem;
   line-height: 1;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   cursor: pointer;
   padding: 0 0.25rem;
 }
-.raltd-close:hover { color: #111827; }
+.raltd-close:hover { color: var(--bs-body-color); }
 .raltd-body {
   display: flex;
   flex-direction: column;
@@ -612,9 +612,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(var(--bs-body-bg-rgb), 0.82);
   font-size: 0.95rem;
-  color: #374151;
+  color: var(--bs-body-color);
   z-index: 1;
 }
 .raltd-legend {
@@ -624,8 +624,8 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 0.75rem;
   padding: 0.7rem 1rem 0.9rem;
-  border-top: 1px solid #e5e7eb;
-  background: #f9fafb;
+  border-top: 1px solid var(--bs-border-color);
+  background: var(--bs-tertiary-bg);
 }
 .raltd-legend-main { flex: 1; min-width: 0; }
 .raltd-widen { flex: none; white-space: nowrap; }
@@ -639,13 +639,13 @@ onBeforeUnmount(() => {
 .raltd-widen-note {
   flex: none;
   font-size: 0.8rem;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   padding-bottom: 0.35rem;
 }
 .raltd-hint {
   display: block;
   font-size: 0.8rem;
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   margin-bottom: 0.5rem;
 }
 .raltd-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
@@ -653,12 +653,12 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  border: 1px solid #d1d5db;
-  background: #fff;
+  border: 1px solid var(--bs-border-color);
+  background: var(--bs-body-bg);
   border-radius: 999px;
   padding: 0.3rem 0.7rem;
   font-size: 0.85rem;
-  color: #111827;
+  color: var(--bs-body-color);
   cursor: pointer;
   transition: border-color 0.12s, box-shadow 0.12s, opacity 0.12s;
 }
@@ -676,11 +676,11 @@ onBeforeUnmount(() => {
 /* Pente moyenne : valeur absolue (pas un écart) — en retrait pour ne pas la confondre
    avec les deux écarts qui la précèdent. */
 .raltd-chip-grade {
-  color: #6b7280;
+  color: var(--bs-secondary-color);
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
   padding-left: 0.35rem;
-  border-left: 1px solid #e5e7eb;
+  border-left: 1px solid var(--bs-border-color);
 }
 .raltd-swatch {
   width: 14px;
@@ -692,7 +692,7 @@ onBeforeUnmount(() => {
   background: repeating-linear-gradient(90deg, #64748b 0 4px, transparent 4px 7px);
 }
 .raltd-pos { color: #16a34a; }
-.raltd-neg { color: #6b7280; }
+.raltd-neg { color: var(--bs-secondary-color); }
 
 /* Bouton d'action, à l'intérieur de la pastille sélectionnée : il déborde du padding de
    la pastille pour en occuper le bord droit sans la faire grossir en hauteur. */

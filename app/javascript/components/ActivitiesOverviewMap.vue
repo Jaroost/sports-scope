@@ -298,7 +298,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
   pointer-events: none;
 }
 </style>
@@ -307,7 +307,7 @@ onBeforeUnmount(() => {
      depuis RoutesOverviewMap car ce composant peut être monté seul (accueil). -->
 <style>
 .routes-popup .routes-popup-meta {
-  color: #6c757d;
+  color: var(--bs-secondary-color);
   font-size: 0.82rem;
   font-variant-numeric: tabular-nums;
   margin-bottom: 0.5rem;

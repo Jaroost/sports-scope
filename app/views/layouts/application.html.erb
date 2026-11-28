@@ -1,6 +1,16 @@
 <!DOCTYPE html>
-<html lang="<%= I18n.locale %>">
+<html lang="<%= I18n.locale %>" data-theme-pref="<%= theme_preference %>"<% if rendered_bs_theme %> data-bs-theme="<%= rendered_bs_theme %>"<% end %><% if content_for?(:hide_navbar) %> data-theme-locked<% end %>>
   <head>
+    <%# Thème « auto » : tranché avant le premier rendu pour éviter un flash clair.
+        theme.ts reprend ensuite la main (bascule du menu, changement côté système). %>
+    <script>
+      (function () {
+        var d = document.documentElement
+        if (d.hasAttribute('data-bs-theme')) return
+        var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+        d.setAttribute('data-bs-theme', dark ? 'dark' : 'light')
+      })()
+    </script>
     <title><%= content_for(:title) || t("app.title") %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
     <meta name="i18n-locale" content="<%= I18n.locale %>">
@@ -88,6 +98,16 @@
                     <% end %>
                   </li>
                   <li><hr class="dropdown-divider"></li>
+                  <li><h6 class="dropdown-header"><%= t("nav.theme") %></h6></li>
+                  <% [["light", "fa-sun"], ["dark", "fa-moon"], ["auto", "fa-circle-half-stroke"]].each do |value, icon| %>
+                    <li>
+                      <button type="button" class="dropdown-item d-flex align-items-center justify-content-between" data-theme-choice="<%= value %>">
+                        <span><i class="fa-solid <%= icon %> me-2" aria-hidden="true"></i><%= t("nav.theme_#{value}") %></span>
+                        <i class="fa-solid fa-check theme-choice-check" aria-hidden="true"></i>
+                      </button>
+                    </li>
+                  <% end %>
+                  <li><hr class="dropdown-divider"></li>
                   <li>
                     <%= link_to profile_path, class: "dropdown-item" do %>
                       <i class="fa-solid fa-sliders me-2" aria-hidden="true"></i><%= t("nav.profile") %>
@@ -113,6 +133,11 @@
                 </ul>
               </li>
             <% else %>
+              <li class="nav-item">
+                <button type="button" class="nav-link" data-theme-cycle title="<%= t("nav.theme") %>" aria-label="<%= t("nav.theme") %>">
+                  <i class="fa-solid fa-circle-half-stroke" aria-hidden="true"></i>
+                </button>
+              </li>
               <li class="nav-item">
                 <%= link_to "EN", url_for(locale: :en), class: "nav-link #{'active fw-semibold' if I18n.locale == :en}" %>
               </li>

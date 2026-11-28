@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { themeChart } from '../chartTheme'
 import { ref, onMounted, onBeforeUnmount, computed, watch, watchEffect, nextTick } from 'vue'
 import { t } from '../i18n'
 import { csrfToken } from '../csrf'
@@ -205,6 +206,7 @@ async function renderChart() {
   if (chart) { chart.destroy(); chart = null }
   if (!hasHistory.value || !chartCanvas.value) return
   const { Chart, registerables } = await import('chart.js')
+  themeChart(Chart)
   Chart.register(...registerables)
 
   const hist = data.value!.history

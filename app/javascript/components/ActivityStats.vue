@@ -1394,12 +1394,12 @@ watch(
 </template>
 
 <style scoped>
-.climb-cat-HC    { color: #111827; }
-.climb-cat-1     { color: #b91c1c; }
+.climb-cat-HC    { color: var(--bs-body-color); }
+.climb-cat-1     { color: var(--bs-danger-text-emphasis); }
 .climb-cat-2     { color: #ea580c; }
 .climb-cat-3     { color: #ca8a04; }
 .climb-cat-4     { color: #16a34a; }
-.climb-cat-uncat { color: #6c757d; }
+.climb-cat-uncat { color: var(--bs-secondary-color); }
 
 /* Inline category badge — paints its background from `currentColor` (set by
    the .climb-cat-* class) so each category gets its bucket colour. */
@@ -1424,7 +1424,7 @@ watch(
   padding: 0.35rem 0.5rem;
   margin-bottom: 0.35rem;
   border-radius: 0.4rem;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--bs-border-color-translucent);
   background: rgba(108, 117, 125, 0.04);
 }
 .stats-layout-row.picked {
@@ -1448,7 +1448,7 @@ watch(
   font-size: 0.875rem;
 }
 .stats-pick-slot:active { background: rgba(13, 110, 253, 0.25); }
-.stats-section + .stats-section { border-top: 1px dashed rgba(0, 0, 0, 0.08); padding-top: 0.75rem; }
+.stats-section + .stats-section { border-top: 1px dashed var(--bs-border-color-translucent); padding-top: 0.75rem; }
 
 /* Seuils de la sortie : une carte par estimation (FTP, seuil FC, W/kg). */
 .threshold-grid {
@@ -1469,16 +1469,16 @@ watch(
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 .threshold-value {
   font-size: 1.15rem;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
 }
-.threshold-unit { font-size: 0.75rem; font-weight: 600; margin-left: 0.15rem; color: var(--bs-secondary-color, #6c757d); }
-.threshold-sub { font-size: 0.8rem; font-weight: 500; color: var(--bs-secondary-color, #6c757d); }
-.threshold-method { font-size: 0.75rem; color: var(--bs-secondary-color, #6c757d); }
+.threshold-unit { font-size: 0.75rem; font-weight: 600; margin-left: 0.15rem; color: var(--bs-secondary-color); }
+.threshold-sub { font-size: 0.8rem; font-weight: 500; color: var(--bs-secondary-color); }
+.threshold-method { font-size: 0.75rem; color: var(--bs-secondary-color); }
 .threshold-delta { font-size: 0.75rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Meilleurs efforts : médaille + rang + taille du groupe sur une ligne. */
@@ -1518,10 +1518,10 @@ watch(
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 .segment-item strong { font-variant-numeric: tabular-nums; font-size: 0.95rem; }
-.segment-unit { font-size: 0.75rem; font-weight: 600; color: var(--bs-secondary-color, #6c757d); }
+.segment-unit { font-size: 0.75rem; font-weight: 600; color: var(--bs-secondary-color); }
 .segment-np { font-size: 0.75rem; font-weight: 500; margin-left: 0.15rem; }
 .split-partial { font-size: 0.72rem; margin-left: 0.3rem; }
 
@@ -1530,9 +1530,9 @@ watch(
 .metric-card {
   height: 100%;
   padding: 0.6rem 0.75rem;
-  border: 1px solid var(--bs-border-color, rgba(0, 0, 0, 0.1));
+  border: 1px solid var(--bs-border-color, var(--bs-border-color-translucent));
   border-radius: 0.5rem;
-  background: var(--bs-tertiary-bg, #f8f9fa);
+  background: var(--bs-tertiary-bg);
 }
 .metric-head {
   display: flex;
@@ -1543,7 +1543,7 @@ watch(
 .metric-label {
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 .metric-badge {
   margin-left: auto;
@@ -1556,8 +1556,8 @@ watch(
   white-space: nowrap;
 }
 .metric-badge-neutral {
-  background: var(--bs-secondary-bg, #e9ecef);
-  color: var(--bs-secondary-color, #495057);
+  background: var(--bs-secondary-bg);
+  color: var(--bs-secondary-color);
   font-variant-numeric: tabular-nums;
 }
 .metric-value {
@@ -1569,7 +1569,7 @@ watch(
 .metric-unit {
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 .metric-calc {
   display: flex;
@@ -1577,7 +1577,7 @@ watch(
   gap: 0.35rem;
   margin-top: 0.25rem;
   font-size: 0.72rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 .metric-calc i { font-size: 0.66rem; opacity: 0.7; }
 
@@ -1591,7 +1591,7 @@ watch(
   align-items: center;
   gap: 0.3rem;
   font-size: 0.72rem;
-  color: var(--bs-secondary-color, #6c757d);
+  color: var(--bs-secondary-color);
 }
 .metric-details > summary::-webkit-details-marker { display: none; }
 .metric-details > summary::before {
@@ -1604,9 +1604,9 @@ watch(
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6c757d;
+  color: var(--bs-secondary-color);
   font-weight: 600;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid var(--bs-border-color-translucent);
 }
 .stats-table td {
   font-variant-numeric: tabular-nums;
@@ -1620,7 +1620,7 @@ watch(
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #fff;
+  background: var(--bs-body-bg);
 }
 
 /* Clickable rows mirror selection state on the map + chart. The hover/active

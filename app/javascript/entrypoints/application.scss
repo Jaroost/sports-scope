@@ -9,9 +9,84 @@ body {
   // Hauteur réelle de la navbar `fixed-top`, mesurée par trackNavbar() (application.ts).
   // Fallback 4rem avant le premier calcul / sur page sans navbar.
   padding-top: var(--navbar-h, 4rem);
-  background: linear-gradient(180deg, rgba(252, 76, 2, 0.04), transparent 360px), #f8f9fb;
+  background: linear-gradient(180deg, rgba(252, 76, 2, 0.04), transparent 360px), var(--ss-page-bg);
   min-height: 100vh;
 }
+
+// ── Mode sombre ────────────────────────────────────────────────────────────────
+// Bootstrap 5.3 bascule ses variables sous `data-bs-theme="dark"` (cf. theme.ts).
+// Les styles des composants s'appuient sur ces variables ; ce bloc ne couvre que ce
+// que Bootstrap laisse clair en sombre : utilitaires « light / white » et contrôles
+// MapLibre, qui écrivent leurs couleurs en dur.
+:root,
+[data-bs-theme="light"] {
+  --ss-page-bg: #f8f9fb;
+  color-scheme: light;
+}
+
+[data-bs-theme="dark"] {
+  --ss-page-bg: #16191c;
+  color-scheme: dark;
+
+  .bg-white { background-color: var(--bs-body-bg) !important; }
+  .bg-light { background-color: var(--bs-tertiary-bg) !important; }
+  .text-bg-light {
+    color: var(--bs-body-color) !important;
+    background-color: var(--bs-tertiary-bg) !important;
+  }
+  .table-light {
+    --bs-table-color: var(--bs-body-color);
+    --bs-table-bg: var(--bs-tertiary-bg);
+    --bs-table-border-color: var(--bs-border-color);
+    color: var(--bs-body-color);
+  }
+  .btn-light {
+    --bs-btn-color: var(--bs-body-color);
+    --bs-btn-bg: var(--bs-tertiary-bg);
+    --bs-btn-border-color: var(--bs-border-color);
+    --bs-btn-hover-color: var(--bs-emphasis-color);
+    --bs-btn-hover-bg: var(--bs-secondary-bg);
+    --bs-btn-hover-border-color: var(--bs-border-color);
+    --bs-btn-active-color: var(--bs-emphasis-color);
+    --bs-btn-active-bg: var(--bs-secondary-bg);
+    --bs-btn-active-border-color: var(--bs-border-color);
+    --bs-btn-disabled-color: var(--bs-secondary-color);
+    --bs-btn-disabled-bg: var(--bs-tertiary-bg);
+    --bs-btn-disabled-border-color: var(--bs-border-color);
+  }
+
+  // Contrôles et bulles MapLibre : fond sombre, pictogrammes (SVG noirs) inversés.
+  .maplibregl-ctrl-group {
+    background: var(--bs-tertiary-bg);
+    button + button { border-top-color: var(--bs-border-color); }
+    button:not(:disabled):hover { background-color: var(--bs-secondary-bg); }
+    .maplibregl-ctrl-icon { filter: invert(1) hue-rotate(180deg); }
+  }
+  .maplibregl-ctrl-attrib,
+  .maplibregl-ctrl-scale {
+    background-color: rgba(var(--bs-body-bg-rgb), 0.75);
+    color: var(--bs-body-color);
+    a { color: var(--bs-body-color); }
+  }
+  .maplibregl-ctrl-scale { border-color: var(--bs-body-color); }
+  .maplibregl-ctrl-attrib-button { filter: invert(1); }
+  .maplibregl-popup-content {
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
+  }
+  .maplibregl-popup-close-button { color: var(--bs-body-color); }
+  .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--bs-body-bg); }
+  .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--bs-body-bg); }
+  .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--bs-body-bg); }
+  .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--bs-body-bg); }
+}
+
+// Choix du thème dans le menu utilisateur : coche sur l'option active seulement.
+[data-theme-choice]:not(.active) .theme-choice-check { visibility: hidden; }
 
 // Navbar « icônes seules » : ajoutée par trackNavbar() quand les libellés feraient
 // wrapper la barre sur deux lignes. Ne s'applique qu'en mode horizontal étendu (≥ md) —
@@ -171,7 +246,7 @@ li:nth-child(even) > .activity-row,
 .stat-card-clickable {
   cursor: pointer;
 
-  &:hover { border-color: rgba(0, 0, 0, 0.25); }
+  &:hover { border-color: var(--bs-secondary-color); }
   &:focus-visible { outline: 2px solid #e5007d; outline-offset: 2px; }
 }
 
@@ -181,8 +256,8 @@ li:nth-child(even) > .activity-row,
 }
 
 .stat-card {
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--bs-body-bg);
+  border: 1px solid var(--bs-border-color-translucent);
   border-radius: 0.6rem;
   padding: 0.75rem 0.9rem;
   height: 100%;
@@ -205,7 +280,7 @@ li:nth-child(even) > .activity-row,
 
   .stat-label {
     font-size: 0.75rem;
-    color: #6c757d;
+    color: var(--bs-secondary-color);
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
@@ -221,7 +296,7 @@ li:nth-child(even) > .activity-row,
   width: 1.1rem;
   text-align: center;
   margin-right: 0.3rem;
-  color: #6c757d;
+  color: var(--bs-secondary-color);
 }
 
 // Pill rendered next to an activity date on the dashboard — quick "how long

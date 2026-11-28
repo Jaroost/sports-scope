@@ -3482,9 +3482,33 @@ function recenter() {
 // GPS and turn detection keep running via onPosition() — sounds still fire.
 // Tapping the black overlay (or pressing the button again) resumes everything.
 
+// Recentrage automatique activé (`map_controls.auto_recenter_s`) et carte décalée : on
+// la recentre au moment d'entrer en veille plutôt qu'au réveil — on rallume l'écran
+// pour se situer, il doit montrer la position tout de suite, sans attendre le prochain
+// tour du minuteur. En `jumpTo` et non par `recenter()` : son `easeTo` relance la
+// boucle d'animation à la fin du glissé, en pleine veille. Pas en édition ni pendant la
+// pose d'un point d'étape (la veille peut venir d'un bouton de l'appli) : la vue
+// décalée y a un rôle, comme pour le minuteur.
+function recenterForSleep() {
+  if (!map || !mapControls.value.autoRecenterS || following.value) return
+  if (editMode.value || placeNavActive.value) return
+  clearAutoRecenter()
+  stopPoiBrowse()
+  closeCoordPopup()
+  following.value = true
+  cameraUnlocked.value = false
+  camZoom.value = savedZoom.value
+  if (!lastPos) return
+  displayBearing = currentBearing
+  const opts = followOptions(anchorPos ?? lastPos)
+  opts.zoom = savedZoom.value
+  map.jumpTo(opts)
+}
+
 function toggleScreenOff() {
   screenOff.value = !screenOff.value
   if (screenOff.value) {
+    recenterForSleep()
     stopAnimation()
   } else {
     if (located) startAnimation()

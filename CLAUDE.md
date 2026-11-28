@@ -494,7 +494,10 @@ un navigateur ordinaire ne le voit jamais.
   sont tombés sur rien (pas de bulle ouverte ou refermée) ; 400 ms / 48 px.
 - **Recentrage** : minuteur réarmé à la fin de chaque geste manuel
   (`armAutoRecenter`), reporté tant qu'une édition, un point d'étape, un parcours de
-  POI, une bulle de coordonnées ou le tiroir sont ouverts.
+  POI, une bulle de coordonnées ou le tiroir sont ouverts. L'entrée en veille recentre
+  aussitôt une carte décalée (`recenterForSleep`, en `jumpTo` : l'`easeTo` de `recenter()`
+  relancerait la boucle d'animation en pleine veille), pour que le réveil montre la
+  position. Sauf en édition ou pendant la pose d'un point d'étape.
 
 ### Sets de commandes (télécommande, Di2)
 

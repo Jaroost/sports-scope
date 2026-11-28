@@ -443,6 +443,27 @@ ailleurs. Une alerte referme d'ailleurs la page (`_setMenuPage(null)` dans
 `_decideReturn`) **avant** que la politique ne décide : elle juge sur `currentPage`,
 et un bilan ouvert par-dessus la carte se serait lu « il y est déjà, rien à faire ».
 
+### La carte dans une case de grille
+
+Un bloc `map` (`BLOCKS["map"]`, sans mode) pose la carte dans une case d'une page
+`grid` du défilement, à côté d'autres composants — alternative à la page `map`
+plein écran. **Au plus une carte par profil, page ou case confondues** (première
+dans l'ordre du document gagne : `sanitize_pages` + `place_cells(allow_map:)`,
+`RidePreset._pages` côté Dart) ; jamais dans une liste ni une page de tours ; une
+grille qui la porte ne va ni derrière le menu ni sous l'économie de données.
+`pageHostsMap` (TS) / `RidePageSpec.hostsMap` (Dart) remplacent `kind === 'map'`
+partout où l'on cherche « la page de la carte ».
+
+Le WebView reste unique et monté au fond de la pile : la case est un **trou**
+(`lib/ride/widgets/map_hole.dart`, dépôt voisin). `MapHoleFrame` peint le fond de
+la page sauf sur la case, `MapHole` mesure la case par rapport au cadre de la page
+et la remonte à la coquille, qui **redimensionne** le WebView sur ce rectangle
+(`_webPositioned`), laisse passer les touches du trou (`MapHoleHitThrough`),
+pousse des zones obstruées nulles, retire boussole et bandes de bord, et pose un
+voile noir sur le reste de la page pendant la veille (tap = `requestWake`). Le
+rectangle est gardé quand le `PageView` démonte la page, pour ne pas
+redimensionner le WebView à chaque aller-retour.
+
 ### Commandes de la carte (zoom, déplacement, recentrer)
 
 Sept jetons (`CompanionSettings::MAP_COMMANDS` : `map_zoom_in`, `map_zoom_out`,

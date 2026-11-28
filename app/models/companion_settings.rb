@@ -307,6 +307,13 @@ module CompanionSettings
     # ne rien vérifier au-delà du mode générique — pas de mesure ni de source
     # à valider, comme `radar`/`recording`.
     "clock" => %w[hm hms],
+    # La carte de navigation dans une case de grille, à côté d'autres
+    # composants — l'alternative à la page `map` plein écran. L'appli n'y
+    # dessine rien : la case est un trou dans la page, et le WebView unique,
+    # peint au fond de la pile, est recadré dessous (`MapBlock`, `map_hole.dart`
+    # côté Dart). Au plus une carte par profil, page `map` comprise, et
+    # seulement dans une page `grid` (`sanitize_pages`, `place_cells`).
+    "map" => [],
     "empty" => []
   }.freeze
 
@@ -1041,8 +1048,12 @@ module CompanionSettings
     key
   end
 
-  # Au plus une carte, où qu'elle soit : deux cartes voudraient dire deux
-  # identités pour un seul WebView, alors que l'instance MapLibre est unique.
+  # Au plus une carte, où qu'elle soit — page `map` ou case `map` d'une
+  # grille, la première dans l'ordre du document gagne : deux cartes
+  # voudraient dire deux identités pour un seul WebView, alors que l'instance
+  # MapLibre est unique. Une grille qui arrive après perd sa case carte
+  # (`allow_map: false`), et disparaît s'il ne lui reste rien — même règle
+  # que `RidePreset._pages` côté Dart.
   #
   # Et **de quoi joindre ce qui est rangé derrière le menu** : voir
   # `keep_one_swipeable`.
@@ -1072,7 +1083,10 @@ module CompanionSettings
         # referme. La ranger derrière le menu ne voudrait rien dire.
         { "kind" => "map", "key" => page_key(page, "Carte", key_seen),
           "hide_workout_badge" => hide_workout_badge_flag(page) }.compact
-      when "grid" then sanitize_grid(page, key_seen)
+      when "grid"
+        grid = sanitize_grid(page, key_seen, allow_map: !map_seen)
+        map_seen ||= grid_hosts_map?(grid)
+        grid
       when "list" then sanitize_list(page, key_seen)
       when "laps" then sanitize_laps(page, key_seen)
       end
@@ -1191,10 +1205,14 @@ module CompanionSettings
     end
   end
 
-  def sanitize_grid(page, key_seen)
+  def grid_hosts_map?(grid)
+    grid.present? && grid["cells"].any? { |cell| cell["block"]["kind"] == "map" }
+  end
+
+  def sanitize_grid(page, key_seen, allow_map: false)
     rows = clamp_side(page["rows"])
     cols = clamp_side(page["cols"])
-    cells = place_cells(page["cells"], rows, cols)
+    cells = place_cells(page["cells"], rows, cols, allow_map: allow_map)
 
     # Une grille sans une seule cellule plaçable n'est pas une page vide, c'est une
     # page qui n'a rien à dire : la retirer vaut mieux que de faire défiler le
@@ -1202,7 +1220,11 @@ module CompanionSettings
     return nil if cells.empty?
 
     dividers = sanitize_dividers(page["dividers"], rows, cols)
-    menu = menu_flag(page)
+    # Une grille qui porte la carte suit les règles de la page `map` : jamais
+    # derrière le menu, jamais retirée par l'économie de données — le WebView
+    # est peint pour toute la sortie, pas une page qu'on ouvre et referme.
+    hosts_map = cells.any? { |cell| cell["block"]["kind"] == "map" }
+    menu = menu_flag(page) unless hosts_map
     condition = menu && sanitize_menu_condition(page)
     lap_name = condition == "lap_named" && sanitize_menu_condition_lap_name(page)
     title = page["title"].to_s.presence || "Mesures"
@@ -1214,7 +1236,7 @@ module CompanionSettings
       "menu_auto_open" => (condition && page["menu_auto_open"] == true) || nil,
       "icon" => sanitize_page_icon(page), "leave_button" => leave_button_flag(page),
       "hide_workout_badge" => hide_workout_badge_flag(page),
-      "hide_on_data_saver" => hide_on_data_saver_flag(page) }.compact
+      "hide_on_data_saver" => (hide_on_data_saver_flag(page) unless hosts_map) }.compact
   end
 
   # Les séparateurs qui tiennent dans la grille : une ligne (`"h"`) ou une colonne
@@ -1248,7 +1270,10 @@ module CompanionSettings
   # ce qu'on y avait posé), une origine hors grille est **rejetée** (on ne devine
   # pas où l'utilisateur voulait la mettre), et sur un recouvrement **la première
   # posée gagne** — l'ordre du document, donc celui que l'éditeur affiche.
-  def place_cells(raw, rows, cols)
+  #
+  # Une case `map` n'est gardée que si `allow_map` (grille de page, et pas
+  # encore de carte dans le profil) et qu'une seule fois.
+  def place_cells(raw, rows, cols, allow_map: false)
     return [] unless raw.is_a?(Array)
 
     taken = []
@@ -1257,6 +1282,11 @@ module CompanionSettings
 
       block = sanitize_block(cell["block"])
       next nil if block.nil?
+      if block["kind"] == "map"
+        next nil unless allow_map
+
+        allow_map = false
+      end
 
       row = cell["row"].to_i
       col = cell["col"].to_i
@@ -1332,7 +1362,9 @@ module CompanionSettings
       next nil unless entry.is_a?(Hash)
 
       block = sanitize_block(entry)
-      next nil if block.nil?
+      # Une page qui défile déplacerait la case sous un WebView qui, lui, ne
+      # défile pas : la carte n'existe qu'en grille.
+      next nil if block.nil? || block["kind"] == "map"
       next block unless cols > 1
 
       if entry["full_width"] == true
@@ -1621,6 +1653,9 @@ module CompanionSettings
       block["interval_min"] =
         interval.is_a?(Numeric) ? interval.round.clamp(FUELING_INTERVAL_MIN_RANGE) : DEFAULT_FUELING_INTERVAL_MIN
     end
+
+    # La case carte n'a pas de surface à teinter : c'est un trou dans la page.
+    return block if kind == "map"
 
     color = sanitize_hex_color(raw["color"])
     block["color"] = color if color

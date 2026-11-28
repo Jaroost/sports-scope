@@ -66,6 +66,12 @@ const props = defineProps<{
   // silencieusement (`LapListBody._block`, dépôt voisin) : composer une
   // horloge qui n'aura jamais d'effet serait la seule surprise ici.
   pageKind?: string
+  // La carte (`map`) se propose-t-elle ? Seulement pour une case de grille du
+  // défilement, et tant que le profil n'a pas déjà sa carte (ou que c'est elle
+  // qu'on modifie) : l'assainisseur retirerait toute autre carte
+  // (`sanitize_pages`, `place_cells`), et l'éditeur ne compose pas ce qu'il
+  // jettera.
+  mapAllowed?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -688,6 +694,7 @@ const groups = computed(() => {
     // `primaryMetricChoices`, `blockFor`) — jamais une entrée à part ici,
     // sinon les deux chemins la proposeraient chacun la sienne.
     .filter((kind) => kind !== 'clock')
+    .filter((kind) => kind !== 'map' || props.mapAllowed)
     .forEach((kind) => {
       const groupKind = GROUPED_KINDS[kind] || kind
       if (!tilesByGroup.has(groupKind)) {

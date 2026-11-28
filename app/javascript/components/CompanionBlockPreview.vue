@@ -1137,6 +1137,23 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
       </div>
     </template>
 
+    <!-- Carte -----------------------------------------------------------------
+         La carte de navigation posée dans une case. L'appli n'y dessine rien :
+         la case est un trou dans la page, et le WebView de la carte (le même
+         que la page carte plein écran) est recadré dessous. Fac-similé : un
+         fond de carte, un tracé et la flèche de position. -->
+    <template v-else-if="block.kind === 'map'">
+      <div class="cbp-map">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <path d="M-5 70 Q 30 55 45 62 T 105 40" fill="none" stroke="#ffffff" stroke-width="5" />
+          <path d="M20 -5 Q 28 40 22 105" fill="none" stroke="#ffffff" stroke-width="3" />
+          <path d="M50 110 Q 48 70 55 50 T 70 -5" fill="none" stroke="#2f7cf6" stroke-width="4"
+                stroke-linecap="round" />
+        </svg>
+        <i class="fa-solid fa-location-arrow cbp-map-arrow" aria-hidden="true"></i>
+      </div>
+    </template>
+
     <!-- Revenir à l'accueil --------------------------------------------------
          Quitte la sortie, même geste que « Revenir à l'accueil » dans le menu
          ⋮ — celui-ci reste toujours là, ce bouton n'en est qu'un raccourci de
@@ -1863,6 +1880,28 @@ const backgroundChartLineColor = computed(() => props.block.background_chart_lin
   flex-direction: column;
 }
 
+.cbp-map {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: 1em;
+  overflow: hidden;
+  background: #e8e4d8;
+}
+.cbp-map svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.cbp-map-arrow {
+  position: absolute;
+  left: 50%;
+  top: 55%;
+  transform: translate(-50%, -50%) rotate(-45deg);
+  color: #2f7cf6;
+  font-size: 1.4em;
+}
 .cbp-card {
   position: relative;
   background: #1f2226;

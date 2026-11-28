@@ -11,7 +11,7 @@ import { routeProfileForSport, SPORTS } from '../userPreferences'
 import type { Sport } from '../userPreferences'
 import CompanionThresholdEditor from './CompanionThresholdEditor.vue'
 import {
-  bandThresholdsEligible, canHideBehindMenu, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR,
+  bandThresholdsEligible, canHideBehindMenu, pageHostsMap, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR,
   DEFAULT_METRIC_LAYOUT, DEFAULT_TRAVELED_PATH_COLOR, fitCells,
   fitDividers, fitListBlocks, gaugeThresholdColor, gridSideOf, gutterRect, isGridLayout, listSegments,
   maxSpan, metricDropdownLabel, metricSample, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
@@ -200,7 +200,8 @@ const error = ref<string | null>(null)
 let savedTimer: ReturnType<typeof setTimeout> | null = null
 
 const preset = computed(() => presets[current.value])
-const hasMap = computed(() => preset.value.pages.some((page) => page.kind === 'map'))
+// Page carte ou case carte d'une grille : il n'en faut qu'une (`pageHostsMap`).
+const hasMap = computed(() => preset.value.pages.some(pageHostsMap))
 
 // L'icône que l'appli affiche faute de choix explicite dans le sélecteur de
 // départ (`preset_picker.dart`, `main.dart` du dépôt voisin : carte si le
@@ -663,6 +664,9 @@ function removePage(index: number) {
 function duplicatePage(index: number) {
   const copy = structuredClone(toRaw(preset.value.pages[index])) as Page
   delete copy.key
+  // La carte ne se duplique pas : la copie perdrait sa case au premier
+  // « Enregistrer » (une seule carte par profil, `sanitize_pages`).
+  if (copy.cells) copy.cells = copy.cells.filter((cell) => cell.block.kind !== 'map')
   preset.value.pages.splice(index + 1, 0, copy)
   openPage.value = index + 1
   selected.value = null
@@ -674,7 +678,7 @@ function duplicatePage(index: number) {
 // jamais, et la dernière page du défilement non plus (sinon le profil d'origine
 // n'aurait plus rien à glisser — voir `canHideBehindMenu`).
 function canMovePageToPreset(page: Page): boolean {
-  return presets.length > 1 && page.kind !== 'map'
+  return presets.length > 1 && !pageHostsMap(page)
     && (page.menu || canHideBehindMenu(page, preset.value.pages))
 }
 
@@ -2118,7 +2122,7 @@ async function save() {
               <!-- Seulement pour une page déjà rangée derrière le menu : la
                    condition qui l'en fait ressortir toute seule pendant la
                    sortie, et si on bascule dessus quand elle devient vraie. -->
-              <div class="mb-2 form-check">
+              <div v-if="!pageHostsMap(page)" class="mb-2 form-check">
                 <input :id="`hide-on-data-saver-${index}`" type="checkbox" class="form-check-input"
                        :checked="!!page.hide_on_data_saver" @change="toggleHideOnDataSaver(page)">
                 <label class="form-check-label small" :for="`hide-on-data-saver-${index}`">
@@ -2156,7 +2160,7 @@ async function save() {
 
             <!-- Page de tours ou non : même contenu, même disposition, seul le
                  genre change — voir `setPageLaps`. -->
-            <div v-if="page.kind !== 'map'" class="mb-2">
+            <div v-if="!pageHostsMap(page)" class="mb-2">
               <div class="form-check form-switch">
                 <input type="checkbox" class="form-check-input" role="switch"
                        :id="`page-laps-${index}`" :checked="page.kind === 'laps'"
@@ -3430,6 +3434,7 @@ async function save() {
     <CompanionBlockPicker v-if="picker" :block="pickerBlock" :catalog="catalog"
                           :cell="pickerCell" :known-series="lapSeries" :metric-layouts="metricLayouts"
                           :page-kind="picker.page.kind"
+                          :map-allowed="picker.page.kind === 'grid' && !picker.page.menu && (!hasMap || pickerBlock?.kind === 'map')"
                           @choose="applyPick" @close="picker = null" @save-layout="onSaveLayout" />
 
     <datalist id="companion-series-list">

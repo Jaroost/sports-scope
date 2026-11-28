@@ -745,7 +745,7 @@ export interface Catalog {
 // serveur le repêcherait (`keep_one_swipeable`), mais l'éditeur aurait entre-temps
 // montré une composition qui n'existe pas.
 export function canHideBehindMenu(page: Page, pages: Page[]): boolean {
-  if (page.kind === 'map') return false
+  if (pageHostsMap(page)) return false
   // La ramener dans le défilement est toujours permis : c'est le sens qui ne
   // peut rien vider.
   if (page.menu) return true
@@ -753,6 +753,14 @@ export function canHideBehindMenu(page: Page, pages: Page[]): boolean {
   return pages.some(
     (other) => other !== page && !other.menu && other.kind !== 'map',
   )
+}
+
+// Cette page porte-t-elle la carte — page carte plein écran, ou grille dont une
+// case est la carte (`map`) ? Au plus une par profil (`sanitize_pages`), et une
+// telle page ne se range ni derrière le menu ni sous l'économie de données.
+export function pageHostsMap(page: Page): boolean {
+  if (page.kind === 'map') return true
+  return page.kind === 'grid' && !!page.cells?.some((cell) => cell.block.kind === 'map')
 }
 
 // Cette page se compose-t-elle en grille — `rows`/`cols`/`cells` — plutôt
@@ -957,6 +965,9 @@ export function blockFor(
   }
   // Contrairement à `metric`/`source`, valent pour n'importe quel genre : le
   // réglage se fait une fois dans la dialogue, pas par groupe.
+  // Sauf la carte : sa case est un trou dans la page, sans surface à teinter
+  // (l'assainisseur retirerait ces clés).
+  if (choice.kind === 'map') return block
   if (params.color) block.color = params.color
   if (params.textColor) block.text_color = params.textColor
   return block

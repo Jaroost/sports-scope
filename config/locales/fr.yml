@@ -1381,6 +1381,7 @@ fr:
     group_pois: "Points d'intérêt"
     group_edit: "Modifier"
     recenter: "Recentrer"
+    recenter_in: "· %{s} s"
     offline_title: "Carte hors-ligne (swisstopo)"
     offline_download: "Télécharger"
     offline_estimate: "≈ %{mb} Mo · %{tiles} tuiles"

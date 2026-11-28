@@ -1381,6 +1381,7 @@ en:
     group_pois: "Points of interest"
     group_edit: "Edit"
     recenter: "Recenter"
+    recenter_in: "· %{s}s"
     offline_title: "Offline map (swisstopo)"
     offline_download: "Download"
     offline_estimate: "≈ %{mb} MB · %{tiles} tiles"

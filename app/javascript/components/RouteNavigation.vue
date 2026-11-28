@@ -3431,15 +3431,30 @@ function applyPanMode() {
 watch(() => mapControls.value.pan, applyPanMode)
 
 let autoRecenterTimer: number | null = null
+// Compte à rebours affiché dans la pastille « Recentrer » : le cycliste voit que la
+// carte va revenir d'elle-même, et dans combien de temps. Il disparaît pendant qu'on
+// touche la carte (le minuteur est annulé au début du geste) et repart à la fin.
+// Rafraîchi chaque seconde seulement tant qu'un minuteur court.
+const autoRecenterLeftS = ref<number | null>(null)
+let autoRecenterDeadline = 0
+let autoRecenterTick: number | null = null
+function refreshAutoRecenterLeft() {
+  autoRecenterLeftS.value = Math.max(1, Math.ceil((autoRecenterDeadline - performance.now()) / 1000))
+}
 function clearAutoRecenter() {
   if (autoRecenterTimer != null) { clearTimeout(autoRecenterTimer); autoRecenterTimer = null }
+  if (autoRecenterTick != null) { clearInterval(autoRecenterTick); autoRecenterTick = null }
+  autoRecenterLeftS.value = null
 }
 function armAutoRecenter() {
   clearAutoRecenter()
   const delay = mapControls.value.autoRecenterS
   if (!delay || following.value) return
+  autoRecenterDeadline = performance.now() + delay * 1000
+  refreshAutoRecenterLeft()
+  autoRecenterTick = window.setInterval(refreshAutoRecenterLeft, 1000)
   autoRecenterTimer = window.setTimeout(() => {
-    autoRecenterTimer = null
+    clearAutoRecenter()
     // Pas pendant ce qui donne un rôle à la vue décalée : édition, point d'étape à
     // poser, parcours des POI, bulle de coordonnées, veille. On réessaie plus tard
     // plutôt que d'abandonner : le cycliste qui referme sa bulle retrouve le suivi.
@@ -3857,6 +3872,7 @@ function onScreenOffTap() {
       @click="recenter"
     >
       <i class="fa-solid fa-location-arrow me-1" aria-hidden="true"></i>{{ t('routes.recenter') }}
+      <span v-if="autoRecenterLeftS != null" class="nav-recenter-countdown">{{ t('routes.recenter_in', { s: autoRecenterLeftS }) }}</span>
     </button>
 
     <!-- Bouton flottant « enregistrer le zoom » : même gabarit que « recentrer », côté
@@ -4233,6 +4249,13 @@ function onScreenOffTap() {
   transition: bottom 0.28s ease;
   border-radius: 999px; font-weight: 700;
   font-size: 1.35rem; padding: 0.85rem 1.8rem;
+}
+
+/* Secondes avant le recentrage automatique : chiffres à chasse fixe, sinon la pastille
+   change de largeur à chaque seconde et tremble sous les yeux. */
+.nav-recenter-countdown {
+  margin-left: 0.4rem; font-weight: 600; opacity: 0.75;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Bouton enregistrer le zoom : symétrique de « recentrer », posé à droite avec le

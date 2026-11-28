@@ -407,7 +407,13 @@ module CompanionSettings
   # `next_button_set` passe au set de commandes suivant (`Preset#button_sets`,
   # voir `MAX_BUTTON_SETS`) : la case prend l'icône et la couleur du set en
   # cours côté appli (`ButtonSetControl`), sauf couleur de fond réglée.
-  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause toggle_torch next_button_set] + MAP_COMMANDS + MEDIA_COMMANDS).freeze
+  #
+  # `voice_command` ouvre le micro pour une commande dite (`VoiceCommand`,
+  # `lib/ride/voice_command.dart` côté appli) : naviguer vers un lieu, afficher
+  # une page par son titre, veille, page suivante/précédente, marquer un tour.
+  # Même jeton pour une touche et une case ; un second appui pendant l'échange
+  # l'annule.
+  BAND_ACTIONS = (%w[sleep toggle_workout leave_ride route toggle_pause toggle_torch next_button_set voice_command] + MAP_COMMANDS + MEDIA_COMMANDS).freeze
 
   # Ce que peut jouer un bloc `bell`. `bell` en tête : une sonnette classique,
   # le repli d'un document qui ne connaît pas encore `horn`/`booster`. `horn`
@@ -507,7 +513,7 @@ module CompanionSettings
   # décide lequel des deux gestes il pose (`TogglePauseAction`, `ride_preset.dart`).
   BUTTON_ACTIONS = (
     %w[next_page previous_page] + BELL_SOUNDS +
-    %w[start_lap sleep wake toggle_sleep toggle_pause toggle_torch next_button_set] + MAP_COMMANDS + MEDIA_COMMANDS
+    %w[start_lap sleep wake toggle_sleep toggle_pause toggle_torch next_button_set voice_command] + MAP_COMMANDS + MEDIA_COMMANDS
   ).freeze
 
   # Les sets de commandes d'un profil : chacun est un jeu complet de réactions

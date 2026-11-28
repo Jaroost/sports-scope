@@ -539,6 +539,18 @@ toast annonce le set choisi (`ButtonSetToast`) ; le set en cours n'est pas persi
   touche (pas seulement le set en cours), sinon changer de set en roulant ne
   captait plus rien.
 
+### Commande vocale
+
+Le jeton `voice_command`, dans **les deux** catalogues (`BUTTON_ACTIONS`, `BAND_ACTIONS`),
+ouvre le micro pour une phrase libre (`VoiceCommandAction` / `BandAction.voiceCommand`,
+`RideShellPage._voiceCommand`, dépôt voisin). Le texte est réduit à une commande par
+`parseVoiceCommand` (`lib/ride/voice_command.dart`) : naviguer vers un lieu (amorce
+**exigée**, « navigue vers… », puis la même recherche et confirmation que « Aller à… »
+du menu), afficher une page par son titre (un titre dit seul suffit), veille, page
+suivante / précédente, marquer un tour (série `default`). Pas de mot d'éveil : un micro
+ouvert en continu coûterait de la batterie et serait mis en échec par le vent. Un second
+appui pendant l'échange l'annule.
+
 ### Colonnes d'une page qui défile
 
 Une page `list` — ou une page `laps` en liste défilante, la même disposition

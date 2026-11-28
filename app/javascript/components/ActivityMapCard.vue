@@ -22,8 +22,9 @@ import {
 // d'itinéraire restent cohérentes.
 import {
   simplifyIndices, nudgeIndicesOffTurns, buildGradedSegments, GRADE_BUCKETS,
-  buildOffsetDisplayLine, haversine,
+  buildOffsetDisplayLine, haversine, bearingAlongRoute,
 } from '../routeHelpers'
+import { buildCoordPopupContent, attachLongPress } from '../mapCoordPopup'
 import type { LngLat, Climb } from '../routeHelpers'
 import { sportPreferences, userPreferences, routeProfileForSport, turnAnomalyDiameterForSport, mapStyleChain, persistAutoSwitch } from '../userPreferences'
 import { repairAgainstTrack } from '../routeRepair'
@@ -1072,11 +1073,49 @@ function installMapHoverTooltip() {
   })
   mapInstance.on('mouseout', () => { hideMapTooltip(); hideRouteCursor() })
   mapInstance.on('click', (e) => {
-    if (isDragging) return
+    if (isDragging || suppressNextMapClick) return
     const hit = nearestRouteIndexFromEvent(e, 25)
     if (!hit) return
     emit('select-segment', hit.idx, hit.idx)
   })
+  // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View /
+  // OpenStreetMap, la même que dans le créateur et la navigation (mapCoordPopup).
+  mapInstance.on('contextmenu', (e) => {
+    e.preventDefault?.()
+    showCoordPopup(e.lngLat.lng, e.lngLat.lat, nearestRouteIndexFromEvent(e, 25) != null)
+  })
+  // Appui long (mobile) : même tooltip. Le clic synthétique du relâchement ne doit pas
+  // sélectionner le point du tracé sous le doigt (suppressNextMapClick).
+  detachLongPress = attachLongPress(mapInstance.getCanvas(), (clientX, clientY) => {
+    if (!mapInstance) return
+    const rect = mapInstance.getContainer().getBoundingClientRect()
+    const point = { x: clientX - rect.left, y: clientY - rect.top }
+    const lngLat = mapInstance.unproject([point.x, point.y])
+    showCoordPopup(lngLat.lng, lngLat.lat, nearestRouteIndexFromEvent({ lngLat, point }, 25) != null)
+    suppressNextMapClick = true
+    setTimeout(() => { suppressNextMapClick = false }, 500)
+  })
+}
+
+let coordPopup: any = null
+let detachLongPress: (() => void) | null = null
+let suppressNextMapClick = false
+
+function closeCoordPopup() {
+  if (coordPopup) { coordPopup.remove(); coordPopup = null }
+}
+
+// Lecture seule : coordonnées copiables et liens carto, jamais d'ajout au tracé. Un point
+// cliqué sur le tracé oriente Street View dans le sens de la sortie.
+function showCoordPopup(lng: number, lat: number, onRoute: boolean) {
+  if (!_maplibregl || !mapInstance) return
+  closeCoordPopup()
+  const heading = onRoute ? bearingAlongRoute(routeCoords.value as any, lng, lat) : undefined
+  coordPopup = new _maplibregl.Popup({ offset: 18, closeButton: false, closeOnClick: true, className: 'place-popup-container' })
+    .setLngLat([lng, lat])
+    .setDOMContent(buildCoordPopupContent(lng, lat, closeCoordPopup, undefined, heading))
+    .addTo(mapInstance)
+  coordPopup.on('close', () => { coordPopup = null })
 }
 
 // ─── Coloration + 3D + expand ────────────────────────────────────────────
@@ -1365,6 +1404,8 @@ onBeforeUnmount(() => {
   photoMarkers.length = 0
   if (hoverMarker) { hoverMarker.remove(); hoverMarker = null }
   if (selectionFitTimer) { clearTimeout(selectionFitTimer); selectionFitTimer = null }
+  if (detachLongPress) { detachLongPress(); detachLongPress = null }
+  closeCoordPopup()
   if (mapInstance) { mapInstance.remove(); mapInstance = null }
 })
 </script>

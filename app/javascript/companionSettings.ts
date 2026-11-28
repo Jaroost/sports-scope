@@ -611,6 +611,9 @@ export interface Preset {
   climb?: Record<string, boolean>
   // Boussole verrouillée au départ + sport/profil de routage — `sanitize_navigation` (Rails).
   navigation?: { compass_locked?: boolean; routing_sport?: string; routing_profile?: string }
+  // Gestes de la carte de navigation dans l'appli (gants d'hiver) — `sanitize_map_controls`
+  // (Rails), `MapControlsSettings` (Dart). Seul ce qui s'écarte du défaut est écrit.
+  map_controls?: MapControls
   // Pastille de tronçon (haut d'écran) et popup de changement de tronçon —
   // même forme que `climb`.
   workout?: Record<string, boolean | string>
@@ -627,6 +630,17 @@ export interface Preset {
   // sets, `buttons` est le miroir du premier (rempli par le serveur).
   button_sets?: ButtonSet[]
   reminders?: Reminder[]
+}
+
+// Gestes de la carte de navigation. Défauts (= clé absente) : deux doigts, appui
+// long, pas de recentrage — le comportement d'avant ce réglage.
+export type MapPanMode = 'two_fingers' | 'one_finger'
+export type MapSleepGesture = 'hold' | 'double_tap' | 'both'
+export const MAP_AUTO_RECENTER_S = [0, 10, 15, 30, 60] as const
+export interface MapControls {
+  pan?: MapPanMode
+  sleep?: MapSleepGesture
+  auto_recenter_s?: number
 }
 
 // Une disposition de bloc `metric` enregistrée pour être réutilisée sur une

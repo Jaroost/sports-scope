@@ -996,6 +996,7 @@ module CompanionSettings
       "battery" => sanitize_battery(raw["battery"]),
       "climb" => sanitize_climb(raw["climb"]),
       "navigation" => sanitize_navigation(raw["navigation"]),
+      "map_controls" => sanitize_map_controls(raw["map_controls"]),
       "workout" => sanitize_workout(raw["workout"]),
       "laps" => sanitize_lap_toast(raw["laps"]),
       "lighting" => sanitize_lighting(raw["lighting"]),
@@ -2173,6 +2174,29 @@ module CompanionSettings
       out["routing_sport"] = sport
       out["routing_profile"] = spec
     end
+    out.presence
+  end
+
+  # Les gestes de la carte de navigation dans l'appli (déplacement, veille,
+  # recentrage automatique) — pensé pour les gants d'hiver, où deux doigts et
+  # un appui long tenu passent mal. Rejoué au WebView par le pont
+  # (`setMapControls`, companionBridge.ts) ; le site dans un navigateur ne le
+  # voit jamais. Même règle que `sanitize_navigation` : on n'écrit que ce qui
+  # s'écarte du défaut, et le défaut est le comportement d'avant ce réglage
+  # (deux doigts, appui long, pas de recentrage) — un document ou une appli
+  # plus anciens ne changent donc rien.
+  MAP_PAN_MODES = %w[two_fingers one_finger].freeze
+  MAP_SLEEP_GESTURES = %w[hold double_tap both].freeze
+  MAP_AUTO_RECENTER_S = [0, 10, 15, 30, 60].freeze
+
+  def sanitize_map_controls(raw)
+    return nil unless raw.is_a?(Hash)
+
+    out = {}
+    out["pan"] = raw["pan"] if MAP_PAN_MODES.include?(raw["pan"]) && raw["pan"] != MAP_PAN_MODES.first
+    out["sleep"] = raw["sleep"] if MAP_SLEEP_GESTURES.include?(raw["sleep"]) && raw["sleep"] != MAP_SLEEP_GESTURES.first
+    delay = raw["auto_recenter_s"]
+    out["auto_recenter_s"] = delay if delay.is_a?(Integer) && MAP_AUTO_RECENTER_S.include?(delay) && delay.positive?
     out.presence
   end
 

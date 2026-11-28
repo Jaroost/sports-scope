@@ -14,7 +14,13 @@ import type { SleepPress } from '../composables/useSleepHold'
 const props = defineProps<{
   press: SleepPress | null
   hint: boolean
+  // Le geste de veille réglé dans le profil de sortie de l'appli (`map_controls.sleep`) :
+  // le rappel doit nommer celui qui marche. Absent (hors appli) = appui long.
+  gesture?: 'hold' | 'double_tap' | 'both'
 }>()
+
+const hintKey = computed(() => (props.gesture === 'double_tap' ? 'routes.sleep_double_tap_hint'
+  : props.gesture === 'both' ? 'routes.sleep_both_hint' : 'routes.sleep_hold_hint'))
 
 // Rayon 45 sur une boîte de 100 : circonférence = 2πr, le dash de départ de l'arc.
 const ARC_LEN = 2 * Math.PI * 45
@@ -59,7 +65,7 @@ const pillStyle = computed(() => {
   <Transition name="nav-sleep-pill">
     <div v-if="press || hint" class="nav-sleep-pill" :style="pillStyle" role="status">
       <span class="nav-sleep-pill-title">
-        {{ press ? t('routes.sleep_hold_title') : t('routes.sleep_hold_hint') }}
+        {{ press ? t('routes.sleep_hold_title') : t(hintKey) }}
       </span>
       <span class="nav-sleep-pill-text">{{ t('routes.sleep_hold_explain') }}</span>
     </div>

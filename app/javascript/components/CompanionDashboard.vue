@@ -14,12 +14,12 @@ import {
   bandThresholdsEligible, canHideBehindMenu, pageHostsMap, canMoveCell, climbLapSeries, DEFAULT_DIVIDER_COLOR,
   DEFAULT_METRIC_LAYOUT, DEFAULT_TRAVELED_PATH_COLOR, fitCells,
   fitDividers, fitListBlocks, gaugeThresholdColor, gridSideOf, gutterRect, isGridLayout, listSegments,
-  maxSpan, metricDropdownLabel, metricSample, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
+  MAP_AUTO_RECENTER_S, maxSpan, metricDropdownLabel, metricSample, NATURAL_LINE_SIZE, occupancy, phoneCell, previewScale, PHONE_GRID,
   swapCells,
   type Band, type BandMarkLapSlot, type BandSlotValue, type Block, type Buttons, type ButtonChannel, type ButtonSet,
   type Catalog,
   type Cell,
-  type CellSize, type Divider, type CompanionDocument, type MetricLayout, type MetricLayoutPreset, type Notch,
+  type CellSize, type Divider, type CompanionDocument, type MapControls, type MetricLayout, type MetricLayoutPreset, type Notch,
   type Page, type Preset, type Reminder, type Viewport,
 } from '../companionSettings'
 
@@ -101,7 +101,7 @@ const showPresetConfig = ref(false)
 // remis à `false` au changement de profil (`select`).
 const SECTIONS = [
   'pages', 'notch', 'bands', 'sensors', 'buttons', 'radar', 'battery',
-  'navigation', 'climb', 'workout', 'laps', 'reminders', 'traveled_path',
+  'navigation', 'map_controls', 'climb', 'workout', 'laps', 'reminders', 'traveled_path',
 ] as const
 const openSections = reactive<Record<string, boolean>>(
   Object.fromEntries(SECTIONS.map((name) => [name, false])),
@@ -123,6 +123,7 @@ const SECTION_ICONS: Record<string, string> = {
   radar: 'fa-solid fa-car-rear',
   battery: 'fa-solid fa-battery-half',
   navigation: 'fa-solid fa-compass',
+  map_controls: 'fa-solid fa-mitten',
   climb: 'fa-solid fa-mountain',
   workout: 'fa-solid fa-dumbbell',
   laps: 'fa-solid fa-stopwatch',
@@ -1377,6 +1378,15 @@ function setNavRoutingOn(on: boolean) {
 }
 function setNavSport(sport: Sport) {
   setNavigation({ routing_sport: sport, routing_profile: catalogDefaultForSport(sport) })
+}
+
+// Gestes de la carte : même règle que `setNavigation`, seul l'écart au défaut est
+// écrit (deux doigts, appui long, 0 s) — revenir au défaut efface la clé.
+const MAP_CONTROL_DEFAULTS: Record<string, unknown> = { pan: 'two_fingers', sleep: 'hold', auto_recenter_s: 0 }
+function setMapControls(key: keyof MapControls, value: string | number) {
+  const next: Record<string, unknown> = { ...(preset.value.map_controls || {}), [key]: value }
+  for (const k of Object.keys(next)) if (next[k] === MAP_CONTROL_DEFAULTS[k]) delete next[k]
+  preset.value.map_controls = Object.keys(next).length > 0 ? next as MapControls : undefined
 }
 
 function setClimb(key: string, value: boolean) {
@@ -3168,6 +3178,54 @@ async function save() {
                                     @update:model-value="setNavigation({ routing_profile: $event })" />
             </div>
           </template>
+        </div>
+
+        </div>
+
+        <h2 class="h6 mb-0">
+          <button type="button" class="cdb-sec-head" :aria-expanded="openSections.map_controls"
+                  @click="toggleSection('map_controls')">
+            <i class="fa-solid fa-chevron-right cdb-sec-caret"
+               :class="{ 'cdb-sec-caret--open': openSections.map_controls }" aria-hidden="true"></i>
+            <i class="cdb-sec-icon" :class="SECTION_ICONS.map_controls" aria-hidden="true"></i>
+            {{ t('companion.settings.map_controls_title') }}
+          </button>
+        </h2>
+        <div v-if="openSections.map_controls" class="cdb-sec-body">
+        <p class="text-body-secondary small">{{ t('companion.settings.map_controls_help') }}</p>
+        <div class="row g-2 align-items-start mb-4">
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
+            <label class="form-label small mb-1" for="map-controls-pan">{{ t('companion.settings.map_controls_pan') }}</label>
+            <select id="map-controls-pan" class="form-select form-select-sm"
+                    :value="preset.map_controls?.pan || 'two_fingers'"
+                    @change="setMapControls('pan', ($event.target as HTMLSelectElement).value)">
+              <option value="two_fingers">{{ t('companion.settings.map_controls_pan_two_fingers') }}</option>
+              <option value="one_finger">{{ t('companion.settings.map_controls_pan_one_finger') }}</option>
+            </select>
+            <div class="form-text">{{ t('companion.settings.map_controls_pan_help') }}</div>
+          </div>
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
+            <label class="form-label small mb-1" for="map-controls-sleep">{{ t('companion.settings.map_controls_sleep') }}</label>
+            <select id="map-controls-sleep" class="form-select form-select-sm"
+                    :value="preset.map_controls?.sleep || 'hold'"
+                    @change="setMapControls('sleep', ($event.target as HTMLSelectElement).value)">
+              <option value="hold">{{ t('companion.settings.map_controls_sleep_hold') }}</option>
+              <option value="double_tap">{{ t('companion.settings.map_controls_sleep_double_tap') }}</option>
+              <option value="both">{{ t('companion.settings.map_controls_sleep_both') }}</option>
+            </select>
+            <div class="form-text">{{ t('companion.settings.map_controls_sleep_help') }}</div>
+          </div>
+          <div class="col-12 col-sm-6 col-md-6 col-lg-4">
+            <label class="form-label small mb-1" for="map-controls-recenter">{{ t('companion.settings.map_controls_recenter') }}</label>
+            <select id="map-controls-recenter" class="form-select form-select-sm"
+                    :value="preset.map_controls?.auto_recenter_s ?? 0"
+                    @change="setMapControls('auto_recenter_s', Number(($event.target as HTMLSelectElement).value))">
+              <option v-for="s in MAP_AUTO_RECENTER_S" :key="s" :value="s">
+                {{ s === 0 ? t('companion.settings.map_controls_recenter_off') : t('companion.settings.map_controls_recenter_after', { s }) }}
+              </option>
+            </select>
+            <div class="form-text">{{ t('companion.settings.map_controls_recenter_help') }}</div>
+          </div>
         </div>
 
         </div>

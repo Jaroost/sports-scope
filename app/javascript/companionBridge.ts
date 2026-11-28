@@ -298,6 +298,27 @@ export const dataSaverActive = ref(false)
 // d'avant. Lu par useFreeClimbProfile à chaque fix.
 export const freeClimbProfileEnabled = ref(true)
 
+// ─── Gestes de la carte : réglage venu du profil de sortie ──────────────────
+//
+// `map_controls` (CompanionSettings, `sanitize_map_controls`). Rejoué par l'appli
+// à chaque `ready`. Les défauts sont le comportement d'avant ce réglage (deux
+// doigts, appui long, pas de recentrage) : hors appli, rien ne change.
+export type MapPanMode = 'two_fingers' | 'one_finger'
+export type MapSleepGesture = 'hold' | 'double_tap' | 'both'
+export interface MapControlsState { pan: MapPanMode; sleep: MapSleepGesture; autoRecenterS: number }
+export const mapControls = ref<MapControlsState>({ pan: 'two_fingers', sleep: 'hold', autoRecenterS: 0 })
+
+function parseMapControls(raw: unknown): MapControlsState {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const delay = Number(r.auto_recenter_s)
+  return {
+    pan: r.pan === 'one_finger' ? 'one_finger' : 'two_fingers',
+    sleep: r.sleep === 'double_tap' || r.sleep === 'both' ? r.sleep : 'hold',
+    // Borné : une valeur absurde ne doit pas recentrer en boucle sous le doigt.
+    autoRecenterS: Number.isFinite(delay) && delay >= 5 ? Math.min(delay, 600) : 0,
+  }
+}
+
 // ─── Profil de routage imposé par le profil de sortie ────────────────────────
 //
 // `navigation.routing_sport` / `routing_profile` (CompanionSettings). Rejoué par
@@ -486,6 +507,7 @@ export function installCompanionBridge(): void {
       setMapStyle(id: string): void
       setDataSaver(active: boolean): void
       setFreeClimbProfile(enabled: boolean): void
+      setMapControls(raw: unknown): void
       setNavigationRouting(sport: string, profile: string): void
       zoomMap(delta: number): void
       panMap(fx: number, fy: number): void
@@ -565,6 +587,11 @@ export function installCompanionBridge(): void {
     // Seul `false` coupe : toute autre valeur garde le comportement par défaut.
     setFreeClimbProfile(enabled: boolean) {
       freeClimbProfileEnabled.value = enabled !== false
+    },
+    // Objet `map_controls` du profil tel quel : chaque champ inexploitable retombe
+    // sur son défaut, jamais d'exception vers l'appli.
+    setMapControls(raw: unknown) {
+      mapControls.value = parseMapControls(raw)
     },
     setNavigationRouting(sport: string, profile: string) {
       navigationRouting.value = sport && profile ? { sport, profile } : null

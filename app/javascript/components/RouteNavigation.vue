@@ -25,7 +25,7 @@ import type {
   TurnHint, ClimbInfo, ClimbProfile, ArrivalState, ReachedTurn, TurnAlertState,
 } from '../navHelpers'
 import { unlockAudio, playManeuverBurst, playOffRoute, playPoi, playArrival } from '../navAudio'
-import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival } from '../navHaptics'
+import { vibrateManeuver, vibrateApproach, vibrateOffRoute, vibratePoi, vibrateArrival, vibrateSleep } from '../navHaptics'
 import { categoryForType } from '../poiCategories'
 import CompanionSensors from './CompanionSensors.vue'
 import NavTurnBanner from './NavTurnBanner.vue'
@@ -43,7 +43,7 @@ import {
   companionPois, companionResupply, registerPoiHandlers,
   inCompanionApp, registerOfflineMapsHandlers, pushOfflineMapsState, registerSleepHandlers,
   registerMapStyleHandlers, registerMapCameraHandlers, dataSaverActive,
-  registerVoiceDestinationHandlers, navigationRouting,
+  registerVoiceDestinationHandlers, navigationRouting, mapControls,
 } from '../companionBridge'
 import { usePlaceSearch, placeShortName } from '../composables/usePlaceSearch'
 import { nearestPoiIntent, findNearestPoi, spokenDistance } from '../nearestPoi'
@@ -459,10 +459,10 @@ const {
   onHoldUp: onSleepUp,
   cancelHold: cancelSleepHold,
   showHint: showSleepHint,
+  hideHint: hideSleepHint,
   attach: attachSleepHold,
 } = useSleepHold({
-  canHold: () => !screenOff.value && !editMode.value && !placeNavActive.value
-    && !poiBrowseActive.value && !controlsVisible.value,
+  canHold: () => mapControls.value.sleep !== 'double_tap' && canSleepByGesture(),
   onComplete: () => {
     // Le doigt est encore posé : le clic de compatibilité qui suivra le relâchement
     // tomberait sur la carte (bulle, point d'étape, rappel du geste). Même garde que
@@ -475,8 +475,37 @@ const {
 
 // Tap là où, avant, l'écran s'endormait : on rappelle le geste plutôt que de ne rien
 // faire. C'est le seul instant où l'on sait que quelqu'un cherchait la veille.
-function onSleepZoneTap() {
-  if (screenOff.value) { toggleScreenOffManual(); return }
+//
+// Veille au double tap (`map_controls.sleep`, profil de sortie de l'appli — pensé pour
+// les gants, où un appui tenu passe mal) : deux de ces taps « qui ne tombent sur rien »
+// rapprochés. Compter ici, et non sur des pointerup bruts, règle d'office le cas du
+// premier tap qui ouvrait une bulle ou en refermait une : il n'arrive pas jusqu'ici, et
+// le double tap ne peut donc pas endormir l'écran par-dessus ce qu'on vient d'ouvrir.
+// Pas de conflit avec le zoom au double tap de MapLibre, coupé au tactile.
+const SLEEP_DOUBLE_TAP_MS = 400
+// Large : un gant ne retombe pas au pixel près, et sur un vélo qui roule encore moins.
+const SLEEP_DOUBLE_TAP_PX = 48
+let lastSleepTap: { t: number; x: number | null; y: number | null } | null = null
+function canSleepByGesture() {
+  return !screenOff.value && !editMode.value && !placeNavActive.value
+    && !poiBrowseActive.value && !controlsVisible.value
+}
+function onSleepZoneTap(point?: { x: number; y: number }) {
+  if (screenOff.value) { lastSleepTap = null; toggleScreenOffManual(); return }
+  if (mapControls.value.sleep !== 'hold' && canSleepByGesture()) {
+    const now = performance.now()
+    const prev = lastSleepTap
+    const near = !prev || prev.x == null || !point
+      || Math.hypot(point.x - prev.x, point.y - (prev.y as number)) <= SLEEP_DOUBLE_TAP_PX
+    if (prev && now - prev.t <= SLEEP_DOUBLE_TAP_MS && near) {
+      lastSleepTap = null
+      hideSleepHint()
+      vibrateSleep()
+      toggleScreenOffManual()
+      return
+    }
+    lastSleepTap = { t: now, x: point?.x ?? null, y: point?.y ?? null }
+  }
   showSleepHint()
 }
 
@@ -1272,6 +1301,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', refreshContainerH)
   if (detachCoordTap) { detachCoordTap(); detachCoordTap = null }
   if (detachSleepHold) { detachSleepHold(); detachSleepHold = null }
+  clearAutoRecenter()
   closeCoordPopup()
   closeTurnPopup()
   destroyEditOverlays()
@@ -1907,6 +1937,16 @@ async function initMap() {
   // bouton recentrer apparaît et rétablira le zoom du profil. Les zooms
   // programmatiques de la boucle (jumpTo) n'ont pas d'originalEvent → ignorés.
   map.on('zoomstart', onManualMove)
+  // Recentrage automatique (`map_controls.auto_recenter_s`) : réarmé à la fin de chaque
+  // geste manuel, annulé au début du suivant — c'est le temps *sans toucher* la carte
+  // qui compte, pas le temps depuis le premier déplacement.
+  for (const ev of ['dragstart', 'zoomstart', 'rotatestart']) {
+    map.on(ev, (e: any) => { if (e.originalEvent) clearAutoRecenter() })
+  }
+  for (const ev of ['dragend', 'zoomend', 'rotateend']) {
+    map.on(ev, (e: any) => { if (e.originalEvent) armAutoRecenter() })
+  }
+  applyPanMode()
   // Garde camZoom (et donc le curseur du panneau caméra) aligné sur un pinch
   // manuel. Pas d'arrondi : la boucle réapplique camZoom à chaque frame, donc une
   // valeur arrondie ferait « sauter » le zoom au pas de 0,5 pendant le pinch.
@@ -1958,8 +1998,10 @@ async function initMap() {
     if (turnPopup) { closeTurnPopup(); return }
     // Tap sur une pastille de virage : tooltip « franchi / pas encore ».
     if (handleTurnTap(e.point)) return
-    // Le tap n'a rien trouvé à faire : c'est là que l'écran s'endormait. On dit comment.
-    onSleepZoneTap()
+    // Le tap n'a rien trouvé à faire : c'est là que l'écran s'endormait. On dit comment
+    // (ou, au double tap, on endort — cf. onSleepZoneTap).
+    const oe = e.originalEvent as MouseEvent | undefined
+    onSleepZoneTap(oe ? { x: oe.clientX, y: oe.clientY } : undefined)
   })
   // Clic droit (ordinateur) n'importe où : tooltip coordonnées / Google Maps / Street View.
   map.on('contextmenu', (e: any) => {
@@ -3377,7 +3419,40 @@ function updateLocationMarker(coords: LngLat) {
   }
 }
 
+// ─── Contrôle de la carte réglé par le profil de sortie (map_controls) ─────────
+// Déplacement à un doigt : on coupe les gestes coopératifs de MapLibre. Au tactile
+// seulement — à la souris, ils n'ont jamais été actifs. Basculé en séance : l'appli
+// rejoue le réglage à chaque `ready`, après la création de la carte ou avant.
+function applyPanMode() {
+  if (!map) return
+  if (TWO_FINGER_PAN && mapControls.value.pan !== 'one_finger') map.cooperativeGestures.enable()
+  else map.cooperativeGestures.disable()
+}
+watch(() => mapControls.value.pan, applyPanMode)
+
+let autoRecenterTimer: number | null = null
+function clearAutoRecenter() {
+  if (autoRecenterTimer != null) { clearTimeout(autoRecenterTimer); autoRecenterTimer = null }
+}
+function armAutoRecenter() {
+  clearAutoRecenter()
+  const delay = mapControls.value.autoRecenterS
+  if (!delay || following.value) return
+  autoRecenterTimer = window.setTimeout(() => {
+    autoRecenterTimer = null
+    // Pas pendant ce qui donne un rôle à la vue décalée : édition, point d'étape à
+    // poser, parcours des POI, bulle de coordonnées, veille. On réessaie plus tard
+    // plutôt que d'abandonner : le cycliste qui referme sa bulle retrouve le suivi.
+    if (following.value) return
+    if (screenOff.value || editMode.value || placeNavActive.value || poiBrowseActive.value
+      || coordPopup || controlsVisible.value) { armAutoRecenter(); return }
+    recenter()
+  }, delay * 1000)
+}
+watch(() => mapControls.value.autoRecenterS, () => { if (!following.value) armAutoRecenter() })
+
 function recenter() {
+  clearAutoRecenter()
   // Revenir au suivi clôt le parcours des POI (le popup et le bandeau de parcours).
   stopPoiBrowse()
   following.value = true
@@ -3495,7 +3570,7 @@ function onScreenOffTap() {
 
     <!-- Anneau de progression de l'appui long (sous le doigt) et explication de ce que la
          veille coupe — et de ce qu'elle ne coupe pas. Voir useSleepHold / NavSleepHold. -->
-    <NavSleepHold :press="sleepPress" :hint="sleepHint" />
+    <NavSleepHold :press="sleepPress" :hint="sleepHint" :gesture="mapControls.sleep" />
 
     <!-- Panneau de commandes : feuille qui glisse depuis le BAS au swipe vers le haut.
          Regroupe TOUS les boutons (retour, profil, style de carte, son, caméra,

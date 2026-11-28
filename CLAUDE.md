@@ -476,6 +476,26 @@ le pont (`zoomMap` / `panMap` / `recenterMap`, `companionBridge.ts`) puis
 n'a pas d'`originalEvent` : le handler détache lui-même la caméra (`following=false`)
 et, pour le zoom, met aussi `camZoom` à jour — sinon la boucle de suivi l'annulerait.
 
+### Contrôle de la carte (gants d'hiver)
+
+`map_controls` (`sanitize_map_controls`, `MapControlsSettings` côté Dart, section
+« Contrôle de la carte » de l'éditeur) règle trois gestes de la carte de navigation :
+`pan` (`two_fingers` | `one_finger`), `sleep` (`hold` | `double_tap` | `both`),
+`auto_recenter_s` (0, 10, 15, 30, 60). **Absent = comportement d'avant** (deux doigts,
+appui long, pas de recentrage), et seuls les écarts au défaut sont écrits. L'appli le
+rejoue à chaque `ready` (`setMapControls`, `companionBridge.ts` → ref `mapControls`) ;
+un navigateur ordinaire ne le voit jamais.
+
+- **Un doigt** : `map.cooperativeGestures.disable()` côté site ; côté appli
+  `MapSwipeZone` se retire (le glissé du milieu appartient à la carte) et les bandes
+  `MapEdgeHandle` passent de 22 à 44 pt — seul chemin tactile vers la page d'à côté.
+  Les touches `next_page`/`previous_page` restent l'alternative sans toucher l'écran.
+- **Double tap** : compté dans `onSleepZoneTap`, donc seulement sur des taps qui ne
+  sont tombés sur rien (pas de bulle ouverte ou refermée) ; 400 ms / 48 px.
+- **Recentrage** : minuteur réarmé à la fin de chaque geste manuel
+  (`armAutoRecenter`), reporté tant qu'une édition, un point d'étape, un parcours de
+  POI, une bulle de coordonnées ou le tiroir sont ouverts.
+
 ### Sets de commandes (télécommande, Di2)
 
 Un profil peut porter plusieurs jeux de réactions aux touches : `button_sets`
